@@ -75,6 +75,8 @@ function dependencies(options: {
   ) => void>;
   conversationPath?: string;
   checkpointCount?: Mock<() => number>;
+  providerTerminalResumeActive?: boolean;
+  providerTerminalResumeAcquire?: boolean;
 }): TurnInteractionCommandDependencies {
   const provider = {
     id: "codex",
@@ -147,6 +149,12 @@ function dependencies(options: {
       assertTurnSkillsCurrent:
         options.assertTurnSkillsCurrent ?? vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["workflows"],
+    providerTerminalResumes: {
+      isActive: vi.fn(() => options.providerTerminalResumeActive ?? false),
+      acquire: vi.fn(() => options.providerTerminalResumeAcquire
+        ?? !(options.providerTerminalResumeActive ?? false)),
+      release: vi.fn(),
+    } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
     providerInfo: () => [provider],
     broadcast: vi.fn(),
     broadcastSnapshot: vi.fn(),
@@ -171,6 +179,43 @@ describe("message attachment ownership transfer", () => {
       messageCommand(),
     )).rejects.toThrow("reserved for its locked Duo comparison");
     expect(queue).toHaveBeenCalledOnce();
+  });
+
+  it("does not start a concurrent app turn while the chat is resumed in a terminal", async () => {
+    const queue = vi.fn();
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+      providerTerminalResumeActive: true,
+    });
+    const handler = createTurnInteractionCommandHandler(handlerDependencies);
+
+    await expect(handler({} as never, messageCommand())).rejects.toThrow(
+      "End the resumed provider terminal",
+    );
+    expect(queue).not.toHaveBeenCalled();
+    expect(
+      handlerDependencies.attachmentResolver!.resolvePayloads,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the terminal reservation after asynchronous turn preparation", async () => {
+    const queue = vi.fn();
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+      providerTerminalResumeActive: false,
+      providerTerminalResumeAcquire: false,
+    });
+    const handler = createTurnInteractionCommandHandler(handlerDependencies);
+
+    await expect(handler({} as never, messageCommand())).rejects.toThrow(
+      "End the resumed provider terminal",
+    );
+    expect(queue).not.toHaveBeenCalled();
+    expect(
+      handlerDependencies.providerTerminalResumes.acquire,
+    ).toHaveBeenCalledWith(conversationId);
   });
 
   it("aborts attachment resolution at the aggregate deadline", async () => {

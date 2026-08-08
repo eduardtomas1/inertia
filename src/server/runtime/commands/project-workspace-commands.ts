@@ -1,12 +1,18 @@
-import type WebSocket from "ws";
+import WebSocket from "ws";
 
 import type { ServerEvent } from "../../../shared/contracts";
+import {
+  hasNativeProviderTerminalSession,
+  isProviderTerminalSessionId,
+} from "../../../shared/provider-terminal-resume";
 import { restoreCheckpoint } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import { inspectProjectIdentity } from "../../project-identity";
 import { requireRuntimeDirectory } from "../../runtime-commands";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { TerminalManager } from "../../terminal";
+import { PROVIDER_INFO, type ProviderManager } from "../../providers";
+import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
 import type { SecureFileAuthorityRegistry } from "../secure-file-authorities";
 import {
@@ -16,6 +22,7 @@ import {
   writeWorkspaceTextFile,
 } from "../../workspace";
 import type { WorkspaceRunController } from "../workspace-run-controller";
+import type { TurnController } from "../turns/turn-controller";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -24,6 +31,9 @@ import {
 export interface ProjectWorkspaceCommandDependencies {
   store: RuntimeStore;
   workspaceRuns: WorkspaceRunController<WebSocket>;
+  turns: TurnController;
+  providers: ProviderManager;
+  providerTerminalResumes: ProviderTerminalResumeRegistry;
   terminals: TerminalManager;
   secureFiles: RuntimeSecureFileBroker;
   secureFileAuthorities: SecureFileAuthorityRegistry;
@@ -49,6 +59,7 @@ export function createProjectWorkspaceCommandHandler(
     "project.action.run",
     "checkpoint.revert",
     "terminal.create",
+    "terminal.provider.resume",
     "terminal.input",
     "terminal.resize",
     "terminal.close",
@@ -93,6 +104,14 @@ export function createProjectWorkspaceCommandHandler(
             && error.message.includes("Cancel the active Duo launch")
           ) throw new RuntimeRequestError(error.message);
           throw error;
+        }
+        if (dependencies.store.shellSnapshot().conversations.some((conversation) => (
+          conversation.projectId === command.payload.projectId
+          && dependencies.providerTerminalResumes.isActive(conversation.id)
+        ))) {
+          throw new RuntimeRequestError(
+            "End resumed provider terminals for this project before removing it.",
+          );
         }
         const removedConversationIds = dependencies.store.shellSnapshot()
           .conversations
@@ -328,6 +347,93 @@ export function createProjectWorkspaceCommandHandler(
           requestId: command.requestId,
           terminalId,
         });
+        return "handled";
+      }
+      case "terminal.provider.resume": {
+        const conversation = dependencies.store.conversation(
+          command.payload.conversationId,
+        );
+        if (conversation.projectId !== command.payload.projectId) {
+          throw new RuntimeRequestError(
+            "The conversation does not belong to this project.",
+          );
+        }
+        if (!conversation.providerSessionId) {
+          throw new RuntimeRequestError(
+            "No resumable provider CLI session is stored for this chat. It may be new or the saved session may be stale.",
+          );
+        }
+        if (!isProviderTerminalSessionId(conversation.providerSessionId)) {
+          throw new RuntimeRequestError(
+            "The saved provider session identifier is invalid or stale.",
+          );
+        }
+        if (!hasNativeProviderTerminalSession(conversation)) {
+          throw new RuntimeRequestError(
+            "This chat does not use the provider's native CLI session store, so Inertia cannot resume it truthfully in a terminal.",
+          );
+        }
+        if (
+          dependencies.providers.isRunning(conversation.id)
+          || dependencies.turns.isActive(conversation.id)
+          || dependencies.store.hasActiveWorkspaceRunForConversation(conversation.id)
+          || dependencies.providerTerminalResumes.isActive(conversation.id)
+        ) {
+          throw new RuntimeRequestError(
+            "Stop the active provider session for this chat before resuming it in another terminal.",
+          );
+        }
+        const cwd = dependencies.workspacePath(
+          command.payload.projectId,
+          conversation.id,
+        );
+        if (!dependencies.providerTerminalResumes.acquire(conversation.id)) {
+          throw new RuntimeRequestError(
+            "Stop the active provider session for this chat before resuming it in another terminal.",
+          );
+        }
+        try {
+          const launch = await dependencies.providers.terminalResumeLaunch(
+            conversation.providerId,
+            conversation.providerSessionId,
+            cwd,
+          );
+          if (
+            socket.readyState !== WebSocket.OPEN
+            || dependencies.providers.isRunning(conversation.id)
+            || dependencies.turns.isActive(conversation.id)
+            || dependencies.store.hasActiveWorkspaceRunForConversation(conversation.id)
+          ) {
+            throw new RuntimeRequestError(
+              socket.readyState !== WebSocket.OPEN
+                ? "The terminal connection closed before the provider session could start."
+                : "Stop the active provider session for this chat before resuming it in another terminal.",
+            );
+          }
+          const terminalId = dependencies.terminals.createProcess(
+            socket,
+            cwd,
+            launch.executable,
+            launch.args,
+            launch.env,
+            command.payload.cols,
+            command.payload.rows,
+            () => dependencies.providerTerminalResumes.release(conversation.id),
+          );
+          dependencies.send(socket, {
+            type: "terminal.created",
+            requestId: command.requestId,
+            terminalId,
+            providerResume: {
+              providerId: conversation.providerId,
+              providerLabel: PROVIDER_INFO[conversation.providerId].name,
+              sessionId: conversation.providerSessionId,
+            },
+          });
+        } catch (error) {
+          dependencies.providerTerminalResumes.release(conversation.id);
+          throw error;
+        }
         return "handled";
       }
       case "terminal.input":

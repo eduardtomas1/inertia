@@ -7378,6 +7378,60 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   height: 29px;
 }
 
+.terminal-resume-status {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px 7px 13px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface-strong) 88%, var(--accent) 12%);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.terminal-resume-status > svg {
+  color: var(--accent);
+}
+
+.terminal-resume-status > span,
+.terminal-resume-status > span > span {
+  min-width: 0;
+}
+
+.terminal-resume-status > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 6px;
+}
+
+.terminal-resume-status code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 10px;
+  user-select: text;
+}
+
+.terminal-resume-status small {
+  width: 100%;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.terminal-resume-status.is-unavailable > svg {
+  color: var(--text-muted);
+}
+
+.terminal-resume-status .secondary-button {
+  min-height: 27px;
+  padding: 0 9px;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
 .terminal-stage {
   position: relative;
   min-height: 0;

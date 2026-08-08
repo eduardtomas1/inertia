@@ -191,6 +191,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "terminal.close": shortMutation,
   "terminal.create": shortMutation,
   "terminal.input": shortMutation,
+  "terminal.provider.resume": {
+    timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS,
+    timeoutDelivery: "ambiguous",
+  },
   "terminal.resize": shortMutation,
   "workspace.entries": workspaceEntryRead,
   "workspace.file.read": workspaceFileRead,

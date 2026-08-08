@@ -28,6 +28,7 @@ import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
+import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -72,6 +73,7 @@ export interface ConversationCommandDependencies {
   providers: ProviderManager;
   backendProfileController: BackendProfileController;
   workspaceRuns: WorkspaceRunController<WebSocket>;
+  providerTerminalResumes: ProviderTerminalResumeRegistry;
   runtimeSync: RuntimeSyncHub<WebSocket>;
   deletedConversationIds: Set<string>;
   dataDirectory: string;
@@ -451,6 +453,11 @@ export function createConversationCommandHandler(
         return "mutation";
       }
       case "conversation.archive":
+        if (dependencies.providerTerminalResumes.isActive(command.payload.conversationId)) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before archiving this thread.",
+          );
+        }
         if (
           dependencies.store.hasActiveWorkspaceRunForConversation(
             command.payload.conversationId,
@@ -473,6 +480,11 @@ export function createConversationCommandHandler(
         );
         return "mutation";
       case "conversation.settle":
+        if (dependencies.providerTerminalResumes.isActive(command.payload.conversationId)) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before settling this thread.",
+          );
+        }
         if (
           dependencies.store.hasActiveWorkspaceRunForConversation(
             command.payload.conversationId,
@@ -497,6 +509,11 @@ export function createConversationCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
+        if (dependencies.providerTerminalResumes.isActive(conversation.id)) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before deleting this thread.",
+          );
+        }
         if (
           dependencies.store.hasActiveWorkspaceRunForConversation(
             conversation.id,

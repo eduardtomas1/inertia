@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { Columns2, Maximize2, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
-import type { ClientCommand, ServerEvent, ThemePreference } from "@shared/contracts";
+import { Columns2, Maximize2, MessagesSquare, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
+import type {
+  ClientCommand,
+  ProviderTerminalResumeAvailability,
+  ProviderTerminalResumeDescriptor,
+  ServerEvent,
+  ThemePreference,
+} from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { usePersistedSize } from "../hooks/usePersistedSize";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
@@ -21,6 +27,7 @@ type TerminalPanelProps = {
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   actionId?: string | null;
   onActionStarted?: () => void;
+  providerResume?: ProviderTerminalResumeAvailability | null;
   onClose: () => void;
   visible?: boolean;
 };
@@ -57,6 +64,7 @@ function TerminalSession({
   subscribe,
   actionId,
   onActionStarted,
+  providerResume,
   onClose,
   visible = true,
 }: TerminalPanelProps): React.JSX.Element {
@@ -65,17 +73,31 @@ function TerminalSession({
   const fitRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const managedActionTerminalRef = useRef(false);
+  const resumedProviderRef = useRef<ProviderTerminalResumeDescriptor | null>(null);
   const actionInFlightRef = useRef<string | null>(null);
   const ownerRef = useRef(`${projectId}:${conversationId ?? ""}`);
   const pendingOutputRef = useRef(new Map<string, string>());
+  const resumeAttemptRef = useRef(0);
+  const mountedRef = useRef(false);
   const initialOptionsRef = useRef({ fontSize, theme });
   const lastSizeRef = useRef({ cols: 0, rows: 0 });
   const [instanceReady, setInstanceReady] = useState(false);
   const [sessionKey, setSessionKey] = useState(0);
   const [sessionState, setSessionState] = useState<"starting" | "ready" | "closed" | "error">("starting");
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumeInFlight, setResumeInFlight] = useState(false);
+  const [activeResume, setActiveResume] = useState<ProviderTerminalResumeDescriptor | null>(null);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   ownerRef.current = `${projectId}:${conversationId ?? ""}`;
+  const resumeDescriptionId = useId();
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -192,18 +214,34 @@ function TerminalSession({
       }
     }
     if (event.type === "terminal.exit" && event.terminalId === terminalIdRef.current) {
+      const resumedProvider = resumedProviderRef.current;
       terminalRef.current?.writeln(`\r\n\x1b[2mProcess exited with code ${event.exitCode}.\x1b[0m`);
       terminalIdRef.current = null;
       managedActionTerminalRef.current = false;
+      resumedProviderRef.current = null;
+      setActiveResume(null);
       setTerminalId(null);
-      setSessionState("closed");
+      if (resumedProvider && event.exitCode !== 0) {
+        setSessionError(
+          `${resumedProvider.providerLabel} could not resume session ${resumedProvider.sessionId}. The saved session may be stale or unavailable; review the provider output above.`,
+        );
+        setSessionState("error");
+      } else {
+        setSessionError(resumedProvider
+          ? `${resumedProvider.providerLabel} session ${resumedProvider.sessionId} ended.`
+          : null);
+        setSessionState("closed");
+      }
     }
   }), [subscribe]);
 
   useEffect(() => {
+    resumeAttemptRef.current += 1;
     if (!instanceReady || status !== "online") {
       terminalIdRef.current = null;
       managedActionTerminalRef.current = false;
+      resumedProviderRef.current = null;
+      setActiveResume(null);
       setTerminalId(null);
       if (status === "offline") setSessionState("error");
       return;
@@ -215,6 +253,9 @@ function TerminalSession({
     const pendingOutput = pendingOutputRef.current;
     setSessionState("starting");
     setSessionError(null);
+    setResumeError(null);
+    setResumeInFlight(false);
+    setActiveResume(null);
     pendingOutput.clear();
     terminal?.clear();
     terminal?.writeln(`\x1b[2mStarting a local terminal for ${projectName}…\x1b[0m`);
@@ -239,6 +280,8 @@ function TerminalSession({
         }
         terminalIdRef.current = event.terminalId;
         managedActionTerminalRef.current = false;
+        resumedProviderRef.current = null;
+        setActiveResume(null);
         setTerminalId(event.terminalId);
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
         pendingOutput.clear();
@@ -253,11 +296,13 @@ function TerminalSession({
       });
 
     return () => {
+      resumeAttemptRef.current += 1;
       cancelled = true;
       const terminalId = terminalIdRef.current;
       const managedActionTerminal = managedActionTerminalRef.current;
       terminalIdRef.current = null;
       managedActionTerminalRef.current = false;
+      resumedProviderRef.current = null;
       setTerminalId(null);
       pendingOutput.clear();
       // Project actions are runtime-managed so checks and preview services can
@@ -274,6 +319,7 @@ function TerminalSession({
     if (
       !actionId
       || actionInFlightRef.current === actionIdentity
+      || resumeInFlight
       || sessionState !== "ready"
       || status !== "online"
     ) return;
@@ -303,6 +349,8 @@ function TerminalSession({
         const previousWasManagedAction = managedActionTerminalRef.current;
         terminalIdRef.current = event.terminalId;
         managedActionTerminalRef.current = true;
+        resumedProviderRef.current = null;
+        setActiveResume(null);
         setTerminalId(event.terminalId);
         if (previousId && !previousWasManagedAction) {
           void sendCommand(command({ type: "terminal.close", payload: { terminalId: previousId } })).catch(() => undefined);
@@ -327,7 +375,97 @@ function TerminalSession({
         actionInFlightRef.current = null;
         onActionStarted?.();
       });
-  }, [actionId, conversationId, onActionStarted, projectId, sendCommand, sessionState, status]);
+  }, [actionId, conversationId, onActionStarted, projectId, resumeInFlight, sendCommand, sessionState, status]);
+
+  const resumeProviderSession = () => {
+    if (
+      providerResume?.kind !== "available"
+      || !conversationId
+      || resumeInFlight
+      || sessionState !== "ready"
+      || status !== "online"
+    ) return;
+    const resume = providerResume.resume;
+    const size = {
+      cols: Math.max(20, terminalRef.current?.cols ?? lastSizeRef.current.cols ?? 80),
+      rows: Math.max(4, terminalRef.current?.rows ?? lastSizeRef.current.rows ?? 24),
+    };
+    const previousId = terminalIdRef.current;
+    const previousWasManagedAction = managedActionTerminalRef.current;
+    const attempt = resumeAttemptRef.current + 1;
+    resumeAttemptRef.current = attempt;
+    setResumeInFlight(true);
+    setResumeError(null);
+    terminalRef.current?.writeln(
+      `\r\n\x1b[2mResuming ${resume.providerLabel} session ${resume.sessionId}…\x1b[0m`,
+    );
+    void sendCommand(command({
+      type: "terminal.provider.resume",
+      payload: {
+        projectId,
+        conversationId,
+        ...size,
+      },
+    }))
+      .then((event) => {
+        if (event.type !== "terminal.created") {
+          throw new Error("The provider terminal returned an unexpected response.");
+        }
+        if (!event.providerResume) {
+          void sendCommand(command({
+            type: "terminal.close",
+            payload: { terminalId: event.terminalId },
+          })).catch(() => undefined);
+          throw new Error("The provider terminal omitted its authoritative session identity.");
+        }
+        if (!mountedRef.current || attempt !== resumeAttemptRef.current) {
+          void sendCommand(command({
+            type: "terminal.close",
+            payload: { terminalId: event.terminalId },
+          })).catch(() => undefined);
+          return;
+        }
+        const authoritativeResume = event.providerResume;
+        terminalIdRef.current = event.terminalId;
+        managedActionTerminalRef.current = false;
+        resumedProviderRef.current = authoritativeResume;
+        setActiveResume(authoritativeResume);
+        setTerminalId(event.terminalId);
+        if (previousId && !previousWasManagedAction) {
+          void sendCommand(command({
+            type: "terminal.close",
+            payload: { terminalId: previousId },
+          })).catch(() => undefined);
+        }
+        const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
+        pendingOutputRef.current.clear();
+        terminalRef.current?.clear();
+        terminalRef.current?.writeln(
+          `\x1b[2mResuming ${authoritativeResume.providerLabel} session ${authoritativeResume.sessionId} in ${projectName}…\x1b[0m`,
+        );
+        if (bufferedOutput) terminalRef.current?.write(bufferedOutput);
+        setSessionState("ready");
+      })
+      .catch((error) => {
+        if (!mountedRef.current || attempt !== resumeAttemptRef.current) return;
+        const message = error instanceof Error
+          ? error.message
+          : `${resume.providerLabel} could not resume this session.`;
+        setResumeError(message);
+        terminalRef.current?.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
+      })
+      .finally(() => {
+        if (mountedRef.current && attempt === resumeAttemptRef.current) {
+          setResumeInFlight(false);
+        }
+      });
+  };
+
+  const restartTerminal = () => {
+    resumeAttemptRef.current += 1;
+    setResumeInFlight(false);
+    setSessionKey((value) => value + 1);
+  };
 
   const fitTerminal = () => {
     try {
@@ -348,12 +486,58 @@ function TerminalSession({
         </div>
         <div className="terminal-actions">
           <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={15} /></IconButton>
-          <IconButton label="Restart terminal" onClick={() => setSessionKey((value) => value + 1)} disabled={status !== "online"}>
+          <IconButton label="Restart terminal" onClick={restartTerminal} disabled={status !== "online" || resumeInFlight}>
             <RotateCcw size={15} />
           </IconButton>
           <IconButton label="Close terminal" onClick={onClose}><X size={16} /></IconButton>
         </div>
       </div>
+      {providerResume && (() => {
+        const displayedResume = activeResume ?? providerResume.resume;
+        return (
+        <div
+          className={`terminal-resume-status is-${providerResume.kind}`}
+          role={resumeError ? "alert" : "status"}
+        >
+          <MessagesSquare size={14} />
+          <span id={resumeDescriptionId}>
+            {displayedResume ? (
+              <>
+                <span>{displayedResume.providerLabel} session</span>
+                <code title={displayedResume.sessionId}>
+                  {displayedResume.sessionId}
+                </code>
+              </>
+            ) : (
+              <span>{providerResume.reason}</span>
+            )}
+            {providerResume.resume && providerResume.kind === "unavailable" && (
+              <small>{providerResume.reason}</small>
+            )}
+            {activeResume && (
+              <small>
+                End this terminal session before sending another message in Inertia.
+              </small>
+            )}
+            {resumeError && <small>{resumeError}</small>}
+          </span>
+          {providerResume.kind === "available" && (
+            <button
+              type="button"
+              className="secondary-button"
+              aria-label={activeResume
+                ? `${activeResume.providerLabel} session is resumed in ${projectName}`
+                : `Resume ${providerResume.resume.providerLabel} session in ${projectName}`}
+              aria-describedby={resumeDescriptionId}
+              disabled={Boolean(activeResume) || resumeInFlight || sessionState !== "ready" || status !== "online"}
+              onClick={resumeProviderSession}
+            >
+              {activeResume ? "Resumed" : resumeInFlight ? "Resuming…" : "Resume chat"}
+            </button>
+          )}
+        </div>
+        );
+      })()}
       <div className="terminal-stage">
         <div className="terminal-mount" ref={containerRef} />
         {sessionState !== "ready" && (
@@ -365,7 +549,7 @@ function TerminalSession({
                 <TerminalSquare size={19} />
                 <span>{status !== "online" ? "Terminal will return when the local service reconnects." : sessionError ?? "Terminal session ended."}</span>
                 {status === "online" && (
-                  <button type="button" className="secondary-button" onClick={() => setSessionKey((value) => value + 1)}>Start again</button>
+                  <button type="button" className="secondary-button" onClick={restartTerminal}>Start again</button>
                 )}
               </>
             )}

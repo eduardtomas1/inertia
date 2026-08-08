@@ -39,6 +39,7 @@ import { PROVIDER_IDS, ProviderManager, type ProviderDetection } from "./provide
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
 import { ProviderMaintenanceController } from "./provider/maintenance-controller";
 import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilities";
+import { ProviderTerminalResumeRegistry } from "./provider/terminal-resume";
 import { TerminalManager } from "./terminal";
 import { runRuntimeShutdownPhases } from "./runtime-shutdown";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
@@ -305,6 +306,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
+  const providerTerminalResumes = new ProviderTerminalResumeRegistry();
   const metadataCache = new ProviderMetadataCache({
     persistence: {
       load: () => store.loadProviderMetadata(),
@@ -682,6 +684,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         providers,
         backendProfileController,
         workspaceRuns,
+        providerTerminalResumes,
         runtimeSync,
         deletedConversationIds,
         dataDirectory,
@@ -704,6 +707,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         enableProviders,
         attachmentResolver,
         workflows: agentWorkflows,
+        providerTerminalResumes,
         providerInfo: () => providerInfo,
         broadcast,
         broadcastSnapshot,
@@ -754,6 +758,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createProjectWorkspaceCommandHandler({
         store,
         workspaceRuns,
+        turns,
+        providers,
+        providerTerminalResumes,
         terminals,
         secureFiles,
         secureFileAuthorities,

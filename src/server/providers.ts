@@ -1,6 +1,10 @@
 import type { AgentApprovalDecision } from "./provider/interactions";
 import { officiallyAllowsModelSwitchWithinSession } from "../shared/continuation-policy";
 import {
+  CURSOR_ACP_TERMINAL_RESUME_VERIFIED_VERSION,
+  cursorVersionHasVerifiedAcpTerminalResume,
+} from "../shared/provider-terminal-resume";
+import {
   backendProbeMatchesProfile,
   backendCompatibilityProbeResultSchema,
   type BackendCompatibilityProbeResult,
@@ -60,6 +64,10 @@ import {
 } from "./provider/metadata";
 import { readClaudeAgentSdkSkills } from "./provider/claude-agent-sdk-harness";
 import { providerProcessInvocation, providerPtyArguments } from "./provider/process";
+import {
+  providerTerminalResumeLaunch,
+  type ProviderTerminalResumeLaunch,
+} from "./provider/terminal-resume";
 
 export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider, detectProviders };
 export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
@@ -340,6 +348,61 @@ export class ProviderManager {
       args: providerPtyArguments(invocation),
       env: childEnvironment,
     };
+  }
+
+  async terminalResumeLaunch(
+    providerId: ProviderId,
+    sessionId: string,
+    cwd: string,
+  ): Promise<ProviderTerminalResumeLaunch> {
+    const detection = await this.detect(providerId, {
+      cwd,
+      refreshEnvironment: true,
+    });
+    if (!detection.executable) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        `${PROVIDER_INFO[providerId].name} CLI is not installed.`,
+      );
+    }
+    if (
+      providerId === "cursor"
+      && !cursorVersionHasVerifiedAcpTerminalResume(detection.version)
+    ) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        `This Cursor build is not verified to share ACP and terminal resume IDs. Verified build: ${CURSOR_ACP_TERMINAL_RESUME_VERIFIED_VERSION}.`,
+      );
+    }
+    if (!detection.canRun) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        detection.statusMessage
+          ? `${PROVIDER_INFO[providerId].name} cannot resume this session: ${detection.statusMessage}.`
+          : `${PROVIDER_INFO[providerId].name} is not ready to resume this session.`,
+      );
+    }
+    const environment = await providerEnvironment();
+    this.processEnvironment = environment.env;
+    const childEnvironment = providerChildEnvironment(
+      providerId,
+      environment.env,
+    );
+    try {
+      return providerTerminalResumeLaunch(
+        detection.executable,
+        providerId,
+        sessionId,
+        childEnvironment,
+      );
+    } catch (error) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        error instanceof Error
+          ? error.message
+          : "The saved provider session ID is invalid or stale.",
+      );
+    }
   }
 
   cachedMetadata(providerId: ProviderId): ProviderMetadata {

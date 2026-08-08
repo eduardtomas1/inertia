@@ -5,6 +5,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useReducer,
   useRef,
 } from "react";
@@ -59,6 +60,10 @@ import {
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
 import { Composer } from "./Composer";
+import {
+  ChatGoalControl,
+  type ChatGoalControlProps,
+} from "./ChatGoalControl";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 
@@ -89,6 +94,7 @@ type ChatWorkspaceProps = {
   selectedSkillIds: readonly string[];
   skillsLoading: boolean;
   skillsError: string | null;
+  goal?: ChatGoalControlProps | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   providers: ProviderInfo[];
@@ -172,6 +178,7 @@ export function ChatWorkspace({
   selectedSkillIds,
   skillsLoading,
   skillsError,
+  goal,
   approvals,
   inputRequests,
   providers,
@@ -238,6 +245,45 @@ export function ChatWorkspace({
   const composerRegionRef = useRef<HTMLDivElement>(null);
   const followCorrectionFrameRef = useRef<number | null>(null);
   const readerIntentReleaseTimerRef = useRef<number | null>(null);
+  const goalRef = useRef(goal);
+  goalRef.current = goal;
+  const retryGoal = useCallback<ChatGoalControlProps["onRetry"]>(
+    () => goalRef.current?.onRetry() ?? Promise.resolve(),
+    [],
+  );
+  const setChatGoal = useCallback<ChatGoalControlProps["onSetGoal"]>(
+    (input) => goalRef.current?.onSetGoal(input) ?? Promise.resolve(),
+    [],
+  );
+  const clearChatGoal = useCallback<ChatGoalControlProps["onClearGoal"]>(
+    (source) => goalRef.current?.onClearGoal(source) ?? Promise.resolve(),
+    [],
+  );
+  const hasGoalControl = Boolean(goal);
+  const goalWorkflow = goal?.workflow ?? null;
+  const goalLoading = goal?.loading ?? false;
+  const goalBusy = goal?.busy ?? false;
+  const goalError = goal?.error ?? null;
+  const goalControl = useMemo(() => hasGoalControl ? (
+    <ChatGoalControl
+      workflow={goalWorkflow}
+      loading={goalLoading}
+      busy={goalBusy}
+      error={goalError}
+      onRetry={retryGoal}
+      onSetGoal={setChatGoal}
+      onClearGoal={clearChatGoal}
+    />
+  ) : null, [
+    clearChatGoal,
+    goalBusy,
+    goalError,
+    goalLoading,
+    goalWorkflow,
+    hasGoalControl,
+    retryGoal,
+    setChatGoal,
+  ]);
   const conversationId = conversation?.id ?? null;
   const [navigation, dispatchNavigation] = useReducer(
     transcriptNavigationReducer,
@@ -583,6 +629,7 @@ export function ChatWorkspace({
           selectedSkillIds={selectedSkillIds}
           skillsLoading={skillsLoading}
           skillsError={skillsError}
+          goalControl={goalControl}
           promptContext={promptContext}
           disabled={!conversation}
           sending={sending}

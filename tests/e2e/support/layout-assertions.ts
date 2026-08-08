@@ -21,13 +21,16 @@ export async function expectComposerEndsAtDock(composer: Locator): Promise<void>
   const layout = await composer.evaluate((dock) => {
     const shell = dock.parentElement;
     const region = shell?.parentElement;
+    const shellChildren = [...(shell?.children ?? [])];
+    const preDockChildren = shellChildren.slice(0, -1);
     const dockBounds = dock.getBoundingClientRect();
     const shellBounds = shell?.getBoundingClientRect();
     const shellStyle = shell ? getComputedStyle(shell) : null;
     return {
-      directDockOnly: shell?.children.length === 1
-        && shell.firstElementChild === dock
-        && shell.lastElementChild === dock,
+      dockEndsShell: shell?.lastElementChild === dock,
+      preDockGoalOnly: preDockChildren.length <= 1
+        && preDockChildren.every((element) =>
+          element.classList.contains("chat-goal-control")),
       directShellOnly: region?.children.length === 1
         && region.firstElementChild === shell
         && region.lastElementChild === shell,
@@ -39,7 +42,8 @@ export async function expectComposerEndsAtDock(composer: Locator): Promise<void>
     };
   });
 
-  expect(layout.directDockOnly).toBe(true);
+  expect(layout.dockEndsShell).toBe(true);
+  expect(layout.preDockGoalOnly).toBe(true);
   expect(layout.directShellOnly).toBe(true);
   expect(layout.bottomPadding).toBeGreaterThanOrEqual(8);
   expect(layout.bottomPadding).toBeLessThanOrEqual(14);

@@ -31,6 +31,22 @@ test.beforeAll(async () => {
           `\`\`\`ts\nconst pane = "${pane}";\n\`\`\``,
           "assistant",
         );
+        const timestamp = new Date().toISOString();
+        store.upsertAgentGoal({
+          conversationId: conversation.id,
+          source: "inertia-local",
+          providerSessionId: null,
+          objective: pane === "primary"
+            ? "Primary chat objective"
+            : "Secondary chat objective",
+          status: "active",
+          tokenBudget: null,
+          tokensUsed: null,
+          timeUsedSeconds: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          synchronizedAt: null,
+        });
       }
       store.close();
     },
@@ -54,8 +70,10 @@ async function openPaneTool(
     }).click();
   }
   await tools.getByRole("tab", {
-    name: tab === "Changes" ? /Changes/u : tab,
-    exact: tab !== "Changes",
+    name: tab === "Changes"
+      ? /Changes/u
+      : tab === "Goal" ? /^Goal/u : tab,
+    exact: tab !== "Changes" && tab !== "Goal",
   }).click();
   return tools;
 }
@@ -117,6 +135,59 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
       .map(([id]) => id);
   });
   expect(duplicateIds).toEqual([]);
+
+  const primaryGoalTrigger = primary.getByRole("button", {
+    name: "Local objective, active: Primary chat objective",
+  });
+  const secondaryGoalTrigger = secondary.getByRole("button", {
+    name: "Local objective, active: Secondary chat objective",
+  });
+  await expect(primaryGoalTrigger).toBeVisible();
+  await expect(secondaryGoalTrigger).toBeVisible();
+  await expect(primary.getByRole("complementary", {
+    name: "Workspace tools",
+  })).not.toBeVisible();
+  await expect(secondary.getByRole("complementary", {
+    name: "Workspace tools",
+  })).not.toBeVisible();
+
+  await primaryGoalTrigger.click();
+  const primaryGoalDialog = primary.getByRole("dialog", {
+    name: "Local objective",
+  });
+  await expect(primaryGoalDialog).toContainText("Primary chat objective");
+  await expect(primaryGoalDialog).toContainText(
+    "Saved in Inertia only; it is not shared with the provider.",
+  );
+  await expect(secondary.getByRole("dialog", {
+    name: "Local objective",
+  })).toHaveCount(0);
+  await expect(primary.getByRole("complementary", {
+    name: "Workspace tools",
+  })).not.toBeVisible();
+  const chatGoalScreenshot = testInfo.outputPath(
+    "cross-project-split-chat-goal.png",
+  );
+  await page.screenshot({
+    animations: "disabled",
+    path: chatGoalScreenshot,
+  });
+  await testInfo.attach("cross-project-split-chat-goal", {
+    path: chatGoalScreenshot,
+    contentType: "image/png",
+  });
+  await primaryGoalDialog.getByRole("button", { name: "Complete" }).click();
+  await expect(primary.getByRole("button", {
+    name: "Local objective, complete: Primary chat objective",
+  })).toBeVisible();
+  await expect(secondaryGoalTrigger).toHaveAccessibleName(
+    "Local objective, active: Secondary chat objective",
+  );
+  await page.keyboard.press("Escape");
+  await expect(primaryGoalDialog).toHaveCount(0);
+  await expect(primary.getByRole("button", {
+    name: "Local objective, complete: Primary chat objective",
+  })).toBeFocused();
 
   const primaryMessage = primary.getByRole("textbox", { name: "Message" });
   const secondaryMessage = secondary.getByRole("textbox", { name: "Message" });

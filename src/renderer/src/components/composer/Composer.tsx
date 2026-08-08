@@ -78,6 +78,7 @@ export const Composer = memo(function Composer({
   skillsLoading,
   skillsError,
   promptContext,
+  goalControl,
   onSend,
   onListSkills,
   onToggleSkill,
@@ -913,6 +914,7 @@ export const Composer = memo(function Composer({
 
   return (
     <div className="composer-shell">
+      {goalControl}
       <section
         ref={composerRef}
         className={clsx("composer", menu && "has-open-menu")}

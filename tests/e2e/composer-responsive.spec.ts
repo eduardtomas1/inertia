@@ -205,7 +205,12 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         backdropFilter: computed.backdropFilter,
         webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
         backgroundColor: computed.backgroundColor,
-        shellChildren: element.parentElement?.children.length ?? 0,
+        shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
+          child === element
+            ? "dock"
+            : child.classList.contains("chat-goal-control")
+              ? "goal"
+              : "unexpected"),
         readinessOutside: document.querySelectorAll(
           ".composer-shell > .provider-readiness",
         ).length,
@@ -238,7 +243,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
     expect(wideGeometry.backgroundColor).not.toMatch(/rgba\([^)]*,\s*0(?:\.0+)?\)/u);
-    expect(wideGeometry.shellChildren).toBe(1);
+    expect(wideGeometry.shellOrder).toEqual(["goal", "dock"]);
     expect(wideGeometry.readinessOutside).toBe(0);
     expect(wideGeometry.permanentFooter).toBe(0);
     expect(wideGeometry.detachedUsage).toBe(0);

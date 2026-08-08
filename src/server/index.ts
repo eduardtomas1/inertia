@@ -118,6 +118,7 @@ import {
 } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { PrivateConnectRuntimeGateway } from "./private-connect/runtime-gateway";
+import { queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
 import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
 import {
   privateConnectPromptSafetyForHarness,
@@ -880,38 +881,18 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     transcriptCache: privateConnectTranscriptCache,
     privateConnectPromptSafety: (conversation) =>
       privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId),
-    queuePrompt: (conversationId, content) => {
-      let queued: ReturnType<TurnController["queue"]> | null = null;
-      try {
-        queued = turns.queue({
-          conversationId,
-          content,
-          attachments: [],
-          activateConversation: false,
-          skills: [],
-          rendererOwnerId: null,
-        });
+    queuePrompt: (conversationId, content) => queuePrivateConnectPrompt({
+      authority: providerTerminalResumes,
+      turns,
+      isolatedRuns,
+      onQueued: (queuedConversationId) => {
         broadcast({
           type: "conversation.detail.invalidated",
-          conversationId,
+          conversationId: queuedConversationId,
         });
         broadcastSnapshot();
-        if (!turns.start(queued.turn.id)) {
-          throw new Error("The remote turn could not start.");
-        }
-        return { turnId: queued.turn.id };
-      } catch (error) {
-        if (queued) {
-          turns.failBeforeStart(
-            conversationId,
-            error instanceof Error
-              ? error.message
-              : "The remote turn could not start.",
-          );
-        }
-        throw error;
-      }
-    },
+      },
+    }, conversationId, content),
     respondToInput: (conversationId, inputRequestId, answers) => {
       const pending = pendingInputs.get(inputRequestId);
       if (!pending || pending.conversationId !== conversationId || pending.questions.some((question) => question.isSecret)) return false;

@@ -78,6 +78,14 @@ export function createIsolatedReviewCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
+        if (
+          dependencies.turns.isActive(conversation.id)
+          || dependencies.isolatedRuns.has(conversation.id)
+        ) {
+          throw new RuntimeRequestError(
+            "Wait for the current agent or review turn to finish first.",
+          );
+        }
         const provider = dependencies.providerInfo().find(
           ({ id }) => id === conversation.providerId,
         );

@@ -44,6 +44,10 @@ const command = {
     ignoreWhitespace: false,
   },
 };
+const askCommand = {
+  ...command,
+  type: "review.selection.ask" as const,
+};
 
 function deferred<Value>(): {
   promise: Promise<Value>;
@@ -103,6 +107,22 @@ describe("isolated review revision authority", () => {
     expect(reviewSupport.selectedReviewContext).not.toHaveBeenCalled();
     expect(reviewSupport.captureRequiredCheckpoint).not.toHaveBeenCalled();
     expect(queue).not.toHaveBeenCalled();
+  });
+
+  it("rejects selection Ask while the conversation turn is active", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    const { dependencies } = fixture(authority);
+    vi.mocked(dependencies.turns.isActive).mockReturnValue(true);
+
+    await expect(createIsolatedReviewCommandHandler(dependencies)(
+      {} as WebSocket,
+      askCommand,
+    )).rejects.toThrow("Wait for the current agent");
+
+    expect(reviewSupport.selectedReviewContext).not.toHaveBeenCalled();
   });
 
   it("holds conversation ownership from diff read through turn start", async () => {

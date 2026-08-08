@@ -11,6 +11,7 @@ import {
   BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
   DUO_CANCEL_REQUEST_TIMEOUT_MS,
   DUO_DISPATCH_REQUEST_TIMEOUT_MS,
+  GIT_MUTATION_REQUEST_TIMEOUT_MS,
   GIT_READ_REQUEST_TIMEOUT_MS,
   MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
   MESSAGE_SEND_REQUEST_TIMEOUT_MS,
@@ -433,6 +434,57 @@ describe("useInertiaConnection", () => {
       type: "request.ok",
       requestId: probeRequestId,
     });
+  });
+
+  it("rehydrates after an ambiguously timed-out branch switch settles late", async () => {
+    const getRuntimeConnection = vi.fn(async () => ({
+      websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+    }));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getRuntimeConnection },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0]!;
+    vi.useFakeTimers();
+
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    let timeoutError: unknown;
+    void hook.result.current.sendCommand(clientCommandSchema.parse({
+      type: "git.branch.switch",
+      requestId,
+      payload: {
+        projectId: "22222222-2222-4222-8222-222222222222",
+        conversationId: "33333333-3333-4333-8333-333333333333",
+        name: "feature/settled-late",
+      },
+    })).catch((error: unknown) => {
+      timeoutError = error;
+    });
+
+    await vi.advanceTimersByTimeAsync(GIT_MUTATION_REQUEST_TIMEOUT_MS);
+    expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
+    expect(socket.close).not.toHaveBeenCalled();
+
+    socket.dispatchEvent(new MessageEvent("message", {
+      data: JSON.stringify({
+        type: "request.result",
+        requestId,
+        result: {
+          kind: "git.action",
+          message: "Switched to feature/settled-late.",
+        },
+      }),
+    }));
+
+    expect(socket.close).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getRuntimeConnection).toHaveBeenCalledTimes(2);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[1]?.url)
+      .toBe("ws://127.0.0.1:12345/runtime/test");
   });
 
   it.each([

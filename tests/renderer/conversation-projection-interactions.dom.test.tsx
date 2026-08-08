@@ -713,6 +713,115 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.streamingReasoning).toBe(reasoningDelta);
   });
 
+  it("keeps streaming text when fresh hydration replays the current plan", async () => {
+    const source = createEventSource();
+    const baselinePlan: AgentPlan = {
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      explanation: "Keep the active plan visible.",
+      steps: [{ step: "Reconnect safely", status: "inProgress" }],
+    };
+    let detailLoads = 0;
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type !== "conversation.detail.load") {
+        return { type: "request.ok", requestId: crypto.randomUUID() };
+      }
+      detailLoads += 1;
+      if (detailLoads > 1) throw new Error("Detail refresh failed.");
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "conversation.detail",
+          conversationId: primaryId,
+          state: "ready",
+          detail: {
+            conversation: conversation(primaryId),
+            agentTurns: [],
+            turnGitArtifacts: [],
+            messages: [],
+            activities: [],
+            subagents: [],
+            reasonings: [],
+            usage: [],
+            plans: [baselinePlan],
+            goals: [],
+            checkpoints: [],
+            reviewSummaries: [],
+            reviewStates: [],
+            reviewNotes: [],
+          },
+        },
+      };
+    });
+    const onOpenPlan = vi.fn();
+    const hook = renderHook(
+      ({ status }: { status: "online" | "offline" }) =>
+        useConversationProjection({
+          snapshot,
+          status,
+          request,
+          subscribe: source.subscribe,
+          enabled: true,
+          autoOpenPlan: true,
+          onOpenPlan,
+          onTerminal: vi.fn(),
+        }),
+      { initialProps: { status: "online" as "online" | "offline" } },
+    );
+    await waitFor(() => expect(hook.result.current.detailState?.state)
+      .toBe("ready"));
+
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: baselinePlan.runId,
+      turnId: baselinePlan.turnId!,
+      text: "Visible through plan hydration.",
+    });
+    hook.rerender({ status: "offline" });
+    source.emit({
+      type: "server.welcome",
+      protocolVersion: 1,
+      snapshot,
+      sync: {
+        runtimeGeneration: "runtime-after-reconnect",
+        latestSequence: 8,
+      },
+    });
+    source.emit({ type: "agent.plan.updated", plan: { ...baselinePlan } });
+    source.emit({
+      type: "runtime.sync.completed",
+      sync: {
+        runtimeGeneration: "runtime-after-reconnect",
+        latestSequence: 8,
+      },
+    });
+
+    expect(hook.result.current.streamingText)
+      .toBe("Visible through plan hydration.");
+    expect(onOpenPlan).not.toHaveBeenCalled();
+
+    hook.rerender({ status: "online" });
+    await waitFor(() => expect(detailLoads).toBe(2));
+    expect(hook.result.current.detailState?.state).toBe("ready");
+    expect(hook.result.current.streamingText)
+      .toBe("Visible through plan hydration.");
+
+    source.emit({
+      type: "agent.plan.updated",
+      plan: {
+        ...baselinePlan,
+        explanation: "This plan really changed after synchronization.",
+      },
+    });
+    expect(hook.result.current.streamingText).toBe("");
+    expect(onOpenPlan).toHaveBeenCalledWith(primaryId);
+  });
+
   it("keeps the last ready thread visible when a refresh request times out", async () => {
     const source = createEventSource();
     let detailLoads = 0;

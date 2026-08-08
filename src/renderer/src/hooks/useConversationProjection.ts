@@ -31,6 +31,7 @@ const MAX_STREAMING_CHARACTERS = 500_000;
 
 interface FreshHydrationBaseline {
   conversationId: string;
+  syncCompleted: boolean;
   streamingTextDelta: string | null;
   streamingReasoningDelta: string | null;
   liveMessages: ChatMessage[];
@@ -38,10 +39,23 @@ interface FreshHydrationBaseline {
   liveActivities: AgentActivity[];
   liveSubagents: SubagentTrace[];
   nativePlan: AgentPlan | null;
+  effectivePlan: AgentPlan | null;
   approvals: Map<string, AgentApprovalRequest>;
   inputs: Map<string, AgentInputRequest>;
   hydratedApprovals: Set<string>;
   hydratedInputs: Set<string>;
+}
+
+function sameAgentPlan(
+  left: AgentPlan | null,
+  right: AgentPlan,
+): boolean {
+  return left !== null
+    && left.conversationId === right.conversationId
+    && left.runId === right.runId
+    && left.turnId === right.turnId
+    && left.explanation === right.explanation
+    && JSON.stringify(left.steps) === JSON.stringify(right.steps);
 }
 
 function interactionKey(value: {
@@ -457,6 +471,7 @@ export function useConversationProjection({
       if (remainsMounted && activeConversation) {
         freshHydrationRef.current = {
           conversationId: activeConversation.id,
+          syncCompleted: false,
           streamingTextDelta: null,
           streamingReasoningDelta: null,
           liveMessages: liveMessagesRef.current[activeConversation.id] ?? [],
@@ -466,6 +481,11 @@ export function useConversationProjection({
           liveSubagents:
             liveSubagentsRef.current[activeConversation.id] ?? [],
           nativePlan: nativePlansRef.current[activeConversation.id] ?? null,
+          effectivePlan:
+            nativePlansRef.current[activeConversation.id]
+            ?? (currentDetail?.state === "ready"
+              ? currentDetail.detail.plans.at(-1) ?? null
+              : null),
           approvals: new Map(
             pendingApprovalsRef.current.map((request) => [
               interactionKey(request),
@@ -499,6 +519,7 @@ export function useConversationProjection({
     if (event.type === "runtime.sync.completed") {
       const hydration = freshHydrationRef.current;
       if (hydration) {
+        hydration.syncCompleted = true;
         setPendingApprovals((current) => current.filter((request) => {
           const key = interactionKey(request);
           return !hydration.approvals.has(key)
@@ -612,13 +633,21 @@ export function useConversationProjection({
     }
     if (event.type === "agent.plan.updated") {
       if (event.plan.conversationId !== activeConversation?.id) return;
+      const hydration = freshHydrationRef.current;
+      const replayedHydrationPlan = Boolean(
+        hydration
+        && !hydration.syncCompleted
+        && hydration.conversationId === event.plan.conversationId
+        && sameAgentPlan(hydration.effectivePlan, event.plan),
+      );
       setNativePlans((current) => ({
         ...current,
         [event.plan.conversationId]: event.plan,
       }));
       if (event.plan.conversationId === activeConversation?.id) {
-        if (freshHydrationRef.current) {
-          freshHydrationRef.current.streamingTextDelta = "";
+        if (replayedHydrationPlan) return;
+        if (hydration) {
+          hydration.streamingTextDelta = "";
         }
         setStreamingText("");
         if (autoOpenPlanRef.current) {

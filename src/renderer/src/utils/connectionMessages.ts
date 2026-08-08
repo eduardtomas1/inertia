@@ -28,7 +28,10 @@ export interface PendingConnectionRequest {
   resolve: (event: ServerEvent) => void;
   reject: (error: Error) => void;
   timeout: number;
+  timedOut?: boolean;
 }
+
+export type PendingConnectionSettlement = "settled" | "late" | null;
 
 function isServerEvent(value: unknown): value is ServerEvent {
   return Boolean(
@@ -81,23 +84,24 @@ export function settlePendingConnectionRequest(
   event: ServerEvent,
   pendingRequests: Map<string, PendingConnectionRequest>,
   clearPendingTimeout: (timeout: number) => void,
-): boolean {
+): PendingConnectionSettlement {
   if (
     event.type !== "request.error"
     && event.type !== "request.ok"
     && event.type !== "request.result"
     && event.type !== "terminal.created"
   ) {
-    return false;
+    return null;
   }
   const pending = pendingRequests.get(event.requestId);
-  if (!pending) return false;
+  if (!pending) return null;
   clearPendingTimeout(pending.timeout);
   pendingRequests.delete(event.requestId);
+  if (pending.timedOut) return "late";
   if (event.type === "request.error") {
     pending.reject(new RuntimeCommandError(event.message, "rejected"));
   } else {
     pending.resolve(event);
   }
-  return true;
+  return "settled";
 }

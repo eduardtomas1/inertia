@@ -56,7 +56,9 @@ export function useInertiaConnection(): InertiaConnection {
   const rejectPending = useCallback((message: string) => {
     for (const pending of pendingRef.current.values()) {
       window.clearTimeout(pending.timeout);
-      pending.reject(new RuntimeCommandError(message, "ambiguous"));
+      if (!pending.timedOut) {
+        pending.reject(new RuntimeCommandError(message, "ambiguous"));
+      }
     }
     pendingRef.current.clear();
   }, []);
@@ -197,11 +199,19 @@ export function useInertiaConnection(): InertiaConnection {
                   : current);
               }
 
-              settlePendingConnectionRequest(
+              const settlement = settlePendingConnectionRequest(
                 event,
                 pendingRef.current,
                 window.clearTimeout,
               );
+              if (settlement === "late") {
+                // The caller deadline remains truthful, but a mutation that
+                // settles afterward may have changed request-driven state
+                // that has no runtime event (for example, the current Git
+                // branch). Rehydrate only after that ambiguity is confirmed;
+                // an ordinary timeout alone is not a transport failure.
+                requireAuthoritativeRefresh();
+              }
 
               notifyConnectionListeners(event, listenersRef.current);
             },
@@ -290,10 +300,16 @@ export function useInertiaConnection(): InertiaConnection {
     return new Promise((resolve, reject) => {
       const policy = runtimeCommandPolicy(command.type);
       const timeout = window.setTimeout(() => {
-        pendingRef.current.delete(command.requestId);
+        const pending = pendingRef.current.get(command.requestId);
+        if (!pending) return;
+        if (policy.timeoutDelivery === "ambiguous") {
+          pending.timedOut = true;
+        } else {
+          pendingRef.current.delete(command.requestId);
+        }
         // A command deadline is not evidence that the shared transport failed.
-        // Keep projecting late authoritative mutations on this socket; actual
-        // close/error events remain responsible for transport supervision.
+        // Keep the socket alive; an ambiguously delivered command remains
+        // registered so its eventual settlement can trigger reconciliation.
         reject(new RuntimeCommandError(
           "The request took too long to complete.",
           policy.timeoutDelivery,

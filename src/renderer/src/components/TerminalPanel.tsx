@@ -32,6 +32,11 @@ type TerminalPanelProps = {
   visible?: boolean;
 };
 
+type TerminalSessionProps = TerminalPanelProps & {
+  resumeBlockedBySibling: boolean;
+  onProviderResumeStarted: (terminalId: string) => void;
+};
+
 type CommandWithoutId = ClientCommand extends infer Command
   ? Command extends { requestId: string }
     ? Omit<Command, "requestId">
@@ -65,9 +70,11 @@ function TerminalSession({
   actionId,
   onActionStarted,
   providerResume,
+  resumeBlockedBySibling,
+  onProviderResumeStarted,
   onClose,
   visible = true,
-}: TerminalPanelProps): React.JSX.Element {
+}: TerminalSessionProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -381,6 +388,7 @@ function TerminalSession({
     if (
       providerResume?.kind !== "available"
       || !conversationId
+      || resumeBlockedBySibling
       || resumeInFlight
       || sessionState !== "ready"
       || status !== "online"
@@ -430,6 +438,7 @@ function TerminalSession({
         terminalIdRef.current = event.terminalId;
         managedActionTerminalRef.current = false;
         resumedProviderRef.current = authoritativeResume;
+        onProviderResumeStarted(event.terminalId);
         setActiveResume(authoritativeResume);
         setTerminalId(event.terminalId);
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
@@ -514,6 +523,11 @@ function TerminalSession({
                 End this terminal session before sending another message in Inertia.
               </small>
             )}
+            {resumeBlockedBySibling && (
+              <small>
+                This provider session is already resumed in another terminal tab.
+              </small>
+            )}
             {resumeError && <small>{resumeError}</small>}
           </span>
           {providerResume.kind === "available" && (
@@ -522,12 +536,18 @@ function TerminalSession({
               className="secondary-button"
               aria-label={activeResume
                 ? `${activeResume.providerLabel} session is resumed in ${projectName}`
+                : resumeBlockedBySibling
+                  ? `${providerResume.resume.providerLabel} session is resumed in another ${projectName} terminal`
                 : `Resume ${providerResume.resume.providerLabel} session in ${projectName}`}
               aria-describedby={resumeDescriptionId}
-              disabled={Boolean(activeResume) || resumeInFlight || sessionState !== "ready" || status !== "online"}
+              disabled={Boolean(activeResume) || resumeBlockedBySibling || resumeInFlight || sessionState !== "ready" || status !== "online"}
               onClick={resumeProviderSession}
             >
-              {activeResume ? "Resumed" : resumeInFlight ? "Resuming…" : "Resume chat"}
+              {activeResume
+                ? "Resumed"
+                : resumeBlockedBySibling
+                  ? "Resumed elsewhere"
+                  : resumeInFlight ? "Resuming…" : "Resume chat"}
             </button>
           )}
         </div>
@@ -558,15 +578,35 @@ function TerminalSession({
 type TerminalTab = { id: string; label: string };
 
 export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
+  const subscribe = props.subscribe;
   const [tabs, setTabs] = useState<TerminalTab[]>([{ id: crypto.randomUUID(), label: "Terminal 1" }]);
   const [activeId, setActiveId] = useState(() => tabs[0].id);
   const [split, setSplit] = useState(false);
   const [persistedSplitPercent, setPersistedSplitPercent] = usePersistedSize("inertia:layout:terminal-split-percent:v1", 50, { min: 25, max: 75 });
   const [splitPercent, setSplitPercent] = useState(persistedSplitPercent);
   const [splitOrientation, setSplitOrientation] = useState<"horizontal" | "vertical">("vertical");
+  const [resumedTerminal, setResumedTerminal] = useState<{
+    tabId: string;
+    terminalId: string;
+  } | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setSplitPercent(persistedSplitPercent), [persistedSplitPercent]);
+
+  useEffect(() => setResumedTerminal(null), [
+    props.conversationId,
+    props.projectId,
+  ]);
+
+  useEffect(() => {
+    if (props.status !== "online") setResumedTerminal(null);
+  }, [props.status]);
+
+  useEffect(() => subscribe((event) => {
+    if (event.type !== "terminal.exit") return;
+    setResumedTerminal((current) =>
+      current?.terminalId === event.terminalId ? null : current);
+  }), [subscribe]);
 
   useEffect(() => {
     if (!props.visible || tabs.length > 0) return;
@@ -632,7 +672,7 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
         {tabs.map((tab) => {
           const visible = tab.id === activeId || (split && tab.id === secondaryId);
           const placement = tab.id === activeId ? "is-primary" : tab.id === secondaryId ? "is-secondary" : "";
-          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} onClose={() => closeTerminal(tab.id)} /></div>;
+          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} resumeBlockedBySibling={resumedTerminal !== null && resumedTerminal.tabId !== tab.id} onProviderResumeStarted={(terminalId) => setResumedTerminal({ tabId: tab.id, terminalId })} onClose={() => closeTerminal(tab.id)} /></div>;
         })}
         {split && secondaryId && (
           <PaneResizeHandle

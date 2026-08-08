@@ -346,7 +346,7 @@ describe("TerminalPanel focus lifecycle", () => {
 
   it("explains a nonzero provider exit as a possibly stale saved session", async () => {
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    let listener: ((event: ServerEvent) => void) | undefined;
+    const listeners = new Set<(event: ServerEvent) => void>();
     let created = 0;
     const sendCommand = vi.fn(async (command: ClientCommand): Promise<ServerEvent> => {
       if (command.type === "terminal.create") {
@@ -387,8 +387,8 @@ describe("TerminalPanel focus lifecycle", () => {
         }}
         sendCommand={sendCommand}
         subscribe={(next) => {
-          listener = next;
-          return () => undefined;
+          listeners.add(next);
+          return () => listeners.delete(next);
         }}
         onClose={() => undefined}
       />,
@@ -401,17 +401,107 @@ describe("TerminalPanel focus lifecycle", () => {
     fireEvent.click(resume);
     await waitFor(() => expect(created).toBe(1));
     await act(async () => {
-      listener?.({
-        type: "terminal.exit",
-        terminalId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-        exitCode: 1,
-      });
+      for (const listener of listeners) {
+        listener({
+          type: "terminal.exit",
+          terminalId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          exitCode: 1,
+        });
+      }
     });
 
     expect(await screen.findByText(
       `Claude could not resume session ${sessionId}. The saved session may be stale or unavailable; review the provider output above.`,
     )).toBeVisible();
     expect(screen.getByRole("button", { name: "Start again" })).toBeVisible();
+  });
+
+  it("shares resumed-session ownership across sibling terminal tabs", async () => {
+    const listeners = new Set<(event: ServerEvent) => void>();
+    let created = 0;
+    const resumedTerminalId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        created += 1;
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: `${created}0000000-0000-4000-8000-000000000000`,
+        };
+      }
+      if (sent.type === "terminal.provider.resume") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: resumedTerminalId,
+          providerResume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          },
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    render(
+      <TerminalPanel
+        projectId="11111111-1111-4111-8111-111111111111"
+        conversationId="22222222-2222-4222-8222-222222222222"
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        visible
+        providerResume={{
+          kind: "available",
+          resume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          },
+          reason: null,
+        }}
+        sendCommand={sendCommand}
+        subscribe={(listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        }}
+        onClose={() => undefined}
+      />,
+    );
+
+    const resume = await screen.findByRole("button", {
+      name: "Resume Claude session in Inertia",
+    });
+    await waitFor(() => expect(resume).toBeEnabled());
+    fireEvent.click(resume);
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Claude session is resumed in Inertia",
+    })).toBeDisabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
+    const siblingResume = await screen.findByRole("button", {
+      name: "Claude session is resumed in another Inertia terminal",
+    });
+    expect(siblingResume).toBeDisabled();
+    expect(siblingResume).toHaveTextContent("Resumed elsewhere");
+    fireEvent.click(siblingResume);
+    expect(sendCommand.mock.calls.filter(
+      ([sent]) => sent.type === "terminal.provider.resume",
+    )).toHaveLength(1);
+
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({
+          type: "terminal.exit",
+          terminalId: resumedTerminalId,
+          exitCode: 0,
+        });
+      }
+    });
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Resume Claude session in Inertia",
+    })).toBeEnabled());
   });
 
   it("does not attach a delayed project action to a newly selected chat", async () => {

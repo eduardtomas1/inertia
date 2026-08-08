@@ -61,7 +61,8 @@ test("opens the command palette and manages a thread", async () => {
   await expect(settingsOption).toHaveAttribute("aria-selected", "true");
   if (process.platform === "win32") await settingsOption.click();
   else await search.press("Enter");
-  await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "General", exact: true }))
+    .toHaveAttribute("aria-current", "page");
   await page.getByRole("button", { name: "Go to workspace" }).click();
   expect(rendererErrors).toEqual([]);
 });

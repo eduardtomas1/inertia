@@ -616,6 +616,9 @@ function SidebarView({
                         type="button"
                         className="project-select"
                         data-sidebar-nav
+                        aria-current={isActive && view === "workspace"
+                          ? "page"
+                          : undefined}
                         onClick={() => { onSelectProject(project); onViewChange("workspace"); onClose(); }}
                       >
                         <Folder className="project-icon" size={15} />
@@ -623,7 +626,11 @@ function SidebarView({
                           <span className="project-name">{project.name}</span>
                           {group.projects.length > 1 && <span className="project-scope">{project.repositoryRelativePath === "." ? "Repository root" : project.repositoryRelativePath}</span>}
                         </span>
-                        <span className={clsx("project-status", `status-${project.status}`)} title={project.status} />
+                        <span
+                          className={clsx("project-status", `status-${project.status}`)}
+                          aria-label={`Project status: ${project.status}`}
+                          title={project.status}
+                        />
                       </button>
                       <span className="project-row-actions">
                         <IconButton
@@ -676,9 +683,17 @@ function SidebarView({
                                       && "is-split",
                                   )}
                                   data-sidebar-nav
+                                  aria-current={snapshot?.activeConversationId === conversation.id
+                                    && view === "workspace"
+                                    ? "page"
+                                    : undefined}
                                   onClick={() => activateConversation(conversation)}
                                 >
-                                  <span className={clsx("thread-status-dot", `is-${thread.status}`)} title={statusLabels[thread.status]} />
+                                  <span
+                                    className={clsx("thread-status-dot", `is-${thread.status}`)}
+                                    aria-label={`Chat status: ${statusLabels[thread.status]}`}
+                                    title={statusLabels[thread.status]}
+                                  />
                                   <span className="conversation-title">{conversation.title}</span>
                                   {splitConversationId === conversation.id && (
                                     <Columns2

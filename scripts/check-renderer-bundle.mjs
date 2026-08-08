@@ -7,6 +7,7 @@ const kibibyte = 1024;
 const budgets = {
   entryJavaScript: 700 * kibibyte,
   entryCss: 330 * kibibyte,
+  settingsJavaScript: 50 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
   coreJavaScript: 1_900 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
@@ -39,6 +40,9 @@ const assetNames = await readdir(assetDirectory);
 const transcriptJavaScript = assetNames.find(
   (name) => /^ResponseTimeline-.*\.js$/u.test(name),
 );
+const settingsJavaScript = assetNames.find(
+  (name) => /^SettingsView-.*\.js$/u.test(name),
+);
 const deferredPdfJavaScript = assetNames.find(
   (name) => /^pdf-.*\.js$/u.test(name),
 );
@@ -48,6 +52,11 @@ const deferredPdfWorker = assetNames.find(
 if (!transcriptJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred transcript chunk.",
+  );
+}
+if (!settingsJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred settings shell.",
   );
 }
 if (!deferredPdfJavaScript || !deferredPdfWorker) {
@@ -60,6 +69,9 @@ const entryJavaScriptBytes = await assetBytes(entryJavaScript);
 const entryCssBytes = await assetBytes(entryCss);
 const transcriptJavaScriptBytes = await assetBytes(
   `assets/${transcriptJavaScript}`,
+);
+const settingsJavaScriptBytes = await assetBytes(
+  `assets/${settingsJavaScript}`,
 );
 const deferredPdfJavaScriptBytes = await assetBytes(
   `assets/${deferredPdfJavaScript}`,
@@ -81,6 +93,7 @@ const coreJavaScriptBytes =
 const measurements = {
   entryJavaScript: entryJavaScriptBytes,
   entryCss: entryCssBytes,
+  settingsJavaScript: settingsJavaScriptBytes,
   transcriptJavaScript: transcriptJavaScriptBytes,
   coreJavaScript: coreJavaScriptBytes,
   deferredPdfJavaScript: deferredPdfJavaScriptBytes,

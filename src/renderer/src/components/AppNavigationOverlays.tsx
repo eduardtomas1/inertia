@@ -4,19 +4,11 @@ import type {
   Project,
   WorkspaceRun,
 } from "@shared/contracts";
-import { lazy, Suspense } from "react";
-
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { loadActivityCenter, loadCommandPalette } from "./lazySurfaceLoaders";
 import { LoadingMark } from "./ui";
-
-const ActivityCenter = lazy(async () => ({
-  default: (await loadActivityCenter()).ActivityCenter,
-}));
-const CommandPalette = lazy(async () => ({
-  default: (await loadCommandPalette()).CommandPalette,
-}));
 
 function ActivityLoadingShell(): React.JSX.Element {
   return (
@@ -90,10 +82,12 @@ export function AppNavigationOverlays({
   useNativePreviewSuspension(activityOpen || paletteOpen);
   const projects = snapshot?.projects ?? [];
   const conversations = snapshot?.conversations ?? [];
+  const ActivityCenter = useLoadedSurface(loadActivityCenter, activityOpen);
+  const CommandPalette = useLoadedSurface(loadCommandPalette, paletteOpen);
   return (
     <>
       {activityOpen && (
-        <Suspense fallback={<ActivityLoadingShell />}>
+        ActivityCenter ? (
           <ActivityCenter
             open
             runs={snapshot?.runs ?? []}
@@ -117,10 +111,10 @@ export function AppNavigationOverlays({
             onAcknowledge={acknowledgeActivity}
             onDismiss={dismissActivity}
           />
-        </Suspense>
+        ) : <ActivityLoadingShell />
       )}
       {paletteOpen && (
-        <Suspense fallback={<PaletteLoadingShell />}>
+        CommandPalette ? (
           <CommandPalette
             open
             projects={projects}
@@ -138,7 +132,7 @@ export function AppNavigationOverlays({
             onAddProject={() => void importProject()}
             onOpenSettings={openSettings}
           />
-        </Suspense>
+        ) : <PaletteLoadingShell />
       )}
     </>
   );

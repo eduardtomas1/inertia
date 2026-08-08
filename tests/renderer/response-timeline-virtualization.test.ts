@@ -708,7 +708,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(timeline[0]?.id).toBe("turn-000");
     expect(timeline.at(-1)?.id).toBe("turn-599");
     expect(shouldVirtualizeTimeline(timeline.length)).toBe(true);
-    expect(buildTimelineMinimapMarkers(responseTurns(timeline))).toHaveLength(48);
+    expect(buildTimelineMinimapMarkers(responseTurns(timeline))).toHaveLength(12);
     expect(estimates.every((estimate) => Number.isInteger(estimate) && estimate >= 190)).toBe(true);
     expect(estimates.reduce((total, estimate) => total + estimate, 0)).toBeLessThan(count * 430);
 

@@ -1207,7 +1207,7 @@ describe("authoritative response timeline", () => {
       }), turn.id);
     });
     const markers = buildTimelineMinimapMarkers(turns);
-    expect(markers).toHaveLength(48);
+    expect(markers).toHaveLength(12);
     expect(markers[0]).toMatchObject({
       index: 0,
       id: "turn-000",

@@ -341,8 +341,11 @@ describe("Quiet Ledger transcript accessibility", () => {
       /transform:\s*scale\((?<horizontal>\d+(?:\.\d+)?),\s*(?<vertical>\d+(?:\.\d+)?)\)/u,
     );
 
-    expect(buttonRule).toContain("width: 6px");
-    expect(buttonRule).toContain("height: 3px");
+    expect(buttonRule).toContain("width: 24px");
+    expect(buttonRule).toContain("height: 24px");
+    expect(styles).toMatch(
+      /\.timeline-minimap button::before\s*\{[^}]*width:\s*6px;[^}]*height:\s*3px;/su,
+    );
     expect(Number(scale?.groups?.horizontal)).toBeGreaterThanOrEqual(2.5);
     expect(Number(scale?.groups?.vertical)).toBeGreaterThanOrEqual(1.8);
   });

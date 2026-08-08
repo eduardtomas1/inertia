@@ -100,22 +100,19 @@ describe("Settings external section targets", () => {
       onClearBackendDefault: vi.fn(async () => undefined),
     };
     const view = render(<SettingsView {...props} />);
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Providers",
-    );
+    expect(screen.getByRole("button", { name: "Providers" }))
+      .toHaveAttribute("aria-current", "page");
 
     fireEvent.click(screen.getByRole("button", { name: "General" }));
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "General",
-    );
+    expect(screen.getByRole("button", { name: "General" }))
+      .toHaveAttribute("aria-current", "page");
     view.rerender(<SettingsView {...props} disabled />);
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "General",
-    );
+    expect(screen.getByRole("button", { name: "General" }))
+      .toHaveAttribute("aria-current", "page");
 
     const connectionsTarget = { section: "connections" as const };
     view.rerender(<SettingsView {...props} target={connectionsTarget} />);
-    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
+    expect(await screen.findByRole("heading", { level: 3 })).toHaveTextContent(
       "Inertia Private Connect",
     );
     const phoneAccess = await screen.findByLabelText("Phone access");
@@ -145,15 +142,14 @@ describe("Settings external section targets", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "General" }));
     view.rerender(<SettingsView {...props} target={connectionsTarget} disabled />);
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "General",
-    );
+    expect(screen.getByRole("button", { name: "General" }))
+      .toHaveAttribute("aria-current", "page");
 
     view.rerender(<SettingsView
       {...props}
       target={{ section: "connections" }}
     />);
-    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
+    expect(await screen.findByRole("heading", { level: 3 })).toHaveTextContent(
       "Inertia Private Connect",
     );
 

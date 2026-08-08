@@ -205,7 +205,8 @@ test("keeps the macOS brand in the native titlebar row and navigates it home", a
   }
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "General", exact: true }))
+    .toHaveAttribute("aria-current", "page");
   await brand.click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   expect(rendererErrors).toEqual([]);

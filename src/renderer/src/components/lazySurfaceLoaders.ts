@@ -1,30 +1,30 @@
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
+import { createSurfaceLoader } from "../utils/surfaceLoader";
 
-function once<T>(load: () => Promise<T>): () => Promise<T> {
-  let promise: Promise<T> | null = null;
-  return () => {
-    promise ??= load();
-    return promise;
-  };
-}
-
-export const loadActivityCenter = once(() => import("./ActivityCenter"));
-export const loadCommandPalette = once(() => import("./CommandPalette"));
-export const loadCommitDialog = once(() => import("./CommitDialog"));
-export const loadFilesPanel = once(() => import("./FilesPanel"));
-export const loadGoalPanel = once(() => import("./GoalPanel"));
-export const loadHistoricalDiffPanel = once(() => import("./HistoricalDiffPanel"));
-export const loadMultiSpawnDialog = once(() => import("./MultiSpawnDialog"));
-export const loadPlanPanel = once(() => import("./PlanPanel"));
-export const loadPreviewPanel = once(() => import("./PreviewPanel"));
-export const loadProviderAuthDialog = once(() => import("./ProviderAuthDialog"));
-export const loadSettingsView = once(() => import("./SettingsView"));
-export const loadTerminalPanel = once(() => import("./TerminalPanel"));
-export const loadWorkspaceChangesPanel = once(() => import("./WorkspaceChangesPanel"));
+export const loadActivityCenter = createSurfaceLoader(async () => ({
+  default: (await import("./ActivityCenter")).ActivityCenter,
+}));
+export const loadCommandPalette = createSurfaceLoader(async () => ({
+  default: (await import("./CommandPalette")).CommandPalette,
+}));
+export const loadCommitDialog = createSurfaceLoader(() => import("./CommitDialog"));
+export const loadFilesPanel = createSurfaceLoader(() => import("./FilesPanel"));
+export const loadGoalPanel = createSurfaceLoader(() => import("./GoalPanel"));
+export const loadHistoricalDiffPanel = createSurfaceLoader(() => import("./HistoricalDiffPanel"));
+export const loadMultiSpawnDialog = createSurfaceLoader(() => import("./MultiSpawnDialog"));
+export const loadPlanPanel = createSurfaceLoader(() => import("./PlanPanel"));
+export const loadPreviewPanel = createSurfaceLoader(() => import("./PreviewPanel"));
+export const loadProviderAuthDialog = createSurfaceLoader(() => import("./ProviderAuthDialog"));
+export const loadSettingsView = createSurfaceLoader(async () => ({
+  default: (await import("./SettingsView")).SettingsView,
+}));
+export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPanel"));
+export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));
 
 const frequentSurfaceLoads = [
   loadActivityCenter,
   loadCommandPalette,
+  loadSettingsView,
 ] as const;
 
 export function prefetchFrequentSurfaces(): void {
@@ -65,9 +65,9 @@ export function scheduleFrequentSurfacePrefetch(): () => void {
     });
   }
   // Chromium may keep requestIdleCallback pending during startup observers or
-  // animation work. The same bounded timer guarantees the two tiny overlay
-  // chunks are prefetched without extending this to heavyweight workspace
-  // tools.
+  // animation work. The same bounded timer guarantees the frequent overlays
+  // and lightweight settings shell are ready without pulling in heavyweight
+  // settings sections or workspace tools.
   timeoutHandle = window.setTimeout(run, 750);
   return () => {
     finished = true;

@@ -215,6 +215,10 @@ export function createWorkspaceSceneModel({
     persistedConversation,
     draftConversation,
   );
+  const currentWorkflow = workflow.state?.conversationId
+    === persistedConversation?.id
+    ? workflow.state
+    : null;
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
@@ -247,6 +251,35 @@ export function createWorkspaceSceneModel({
       : null;
   const canGuideParent = (trace: SubagentTrace): boolean =>
     canFollowUpSubagentTrace(trace, projection.turns);
+  const setGoal = async (input: {
+    source: AgentGoalSource;
+    objective?: string;
+    status: AgentGoalStatus;
+    tokenBudget?: number | null;
+  }): Promise<void> => {
+    try {
+      await actions.setGoal(input);
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "The goal could not be updated.",
+      );
+      throw error;
+    }
+  };
+  const clearGoal = async (source: AgentGoalSource): Promise<void> => {
+    try {
+      await actions.clearGoal(source);
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "The goal could not be cleared.",
+      );
+      throw error;
+    }
+  };
 
   return {
     view,
@@ -328,11 +361,21 @@ export function createWorkspaceSceneModel({
       streamingText: projection.streamingText,
       streamingReasoning: projection.streamingReasoning,
       usage: projection.usage,
-      skills: workflow.state?.skills ?? [],
-      skillsCapability: workflow.state?.skillsCapability ?? null,
+      skills: currentWorkflow?.skills ?? [],
+      skillsCapability: currentWorkflow?.skillsCapability ?? null,
       selectedSkillIds: workflow.selectedSkillIds,
       skillsLoading: workflow.loading,
       skillsError: workflow.error,
+      goal: persistedConversation ? {
+        workflow: currentWorkflow,
+        loading: workflow.loading,
+        busy: workflow.loading
+          || busyAction?.startsWith("agent.goal") === true,
+        error: workflow.error,
+        onRetry: () => workflow.refresh(true),
+        onSetGoal: setGoal,
+        onClearGoal: clearGoal,
+      } : null,
       approvals: projection.pendingApprovals,
       inputRequests: projection.pendingInputs,
       providers: connection.snapshot?.providers ?? [],
@@ -434,7 +477,7 @@ export function createWorkspaceSceneModel({
         onTabChange: setActiveTool,
         badges: {
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
-          goal: (workflow.state?.goals.some(({ status }) =>
+          goal: (currentWorkflow?.goals.some(({ status }) =>
             status !== "complete") ? 1 : 0)
             + projection.subagents.filter(isLiveSubagentTrace).length,
           plan: planSteps.length,
@@ -535,7 +578,7 @@ export function createWorkspaceSceneModel({
       },
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,
       goal: {
-        workflow: workflow.state,
+        workflow: currentWorkflow,
         error: workflow.error,
         plan: latestPlan,
         subagents: projection.subagents,
@@ -544,24 +587,9 @@ export function createWorkspaceSceneModel({
         busy: workflow.loading
           || busyAction?.startsWith("agent.goal") === true,
         onRetry: () => workflow.refresh(true),
-        onSetGoal: async (input) => {
-          try {
-            await actions.setGoal(input);
-          } catch (error) {
-            setActionError(
-              error instanceof Error
-                ? error.message
-                : "The goal could not be updated.",
-            );
-            throw error;
-          }
-        },
+        onSetGoal: setGoal,
         onClearGoal: (goal) => {
-          void actions.clearGoal(goal.source).catch((error) => setActionError(
-            error instanceof Error
-              ? error.message
-              : "The goal could not be cleared.",
-          ));
+          void clearGoal(goal.source).catch(() => undefined);
         },
         onToggleSkill: (skill) => actions.toggleSkill(skill),
         onRefreshSkills: () => {

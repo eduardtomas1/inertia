@@ -15,6 +15,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { ReactNode } from "react";
 
 export interface ComposerProps {
   conversation: Conversation;
@@ -35,6 +36,7 @@ export interface ComposerProps {
   skillsLoading: boolean;
   skillsError: string | null;
   promptContext?: string | null;
+  goalControl?: ReactNode;
   onSend: (
     message: string,
     attachments: ChatAttachment[],

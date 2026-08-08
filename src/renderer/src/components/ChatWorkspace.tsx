@@ -59,6 +59,10 @@ import {
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
 import { Composer } from "./Composer";
+import {
+  ChatGoalControl,
+  type ChatGoalControlProps,
+} from "./ChatGoalControl";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 
@@ -89,6 +93,7 @@ type ChatWorkspaceProps = {
   selectedSkillIds: readonly string[];
   skillsLoading: boolean;
   skillsError: string | null;
+  goal?: ChatGoalControlProps | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   providers: ProviderInfo[];
@@ -172,6 +177,7 @@ export function ChatWorkspace({
   selectedSkillIds,
   skillsLoading,
   skillsError,
+  goal,
   approvals,
   inputRequests,
   providers,
@@ -583,6 +589,7 @@ export function ChatWorkspace({
           selectedSkillIds={selectedSkillIds}
           skillsLoading={skillsLoading}
           skillsError={skillsError}
+          goalControl={goal ? <ChatGoalControl {...goal} /> : null}
           promptContext={promptContext}
           disabled={!conversation}
           sending={sending}

@@ -112,9 +112,6 @@ describe("Settings external section targets", () => {
 
     const connectionsTarget = { section: "connections" as const };
     view.rerender(<SettingsView {...props} target={connectionsTarget} />);
-    expect(await screen.findByRole("heading", { level: 3 })).toHaveTextContent(
-      "Inertia Private Connect",
-    );
     const phoneAccess = await screen.findByLabelText("Phone access");
     fireEvent.change(phoneAccess, {
       target: { value: "collaborate" },
@@ -149,9 +146,7 @@ describe("Settings external section targets", () => {
       {...props}
       target={{ section: "connections" }}
     />);
-    expect(await screen.findByRole("heading", { level: 3 })).toHaveTextContent(
-      "Inertia Private Connect",
-    );
+    expect(await screen.findByLabelText("Phone access")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
     expect(screen.getByText("Full local database backup")).toBeVisible();

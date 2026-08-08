@@ -26,6 +26,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
 - Start from a compact Environment summary of the current branch, changes, active work, delegated agents, and attached context, while keeping the full workspace tools one click away.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
+- Continue an eligible native Codex, Claude, Cursor, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle.
 - Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
 - Recover local history from validated rotating SQLite backups, or use explicit native-dialog export and import flows when manual recovery is required.
 - Open the optional Inertia Private Connect PWA through your private Tailscale network without exposing files, terminals, approvals, Git, provider settings, or Full Access to the browser.
@@ -85,6 +86,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 
 - The Activity Center brings agents, checks, services, and source-control work together with the actions each run can actually support.
 - Native previews, terminals, files, and Git reviews stay scoped to their owning chat when two different projects share the split workspace.
+- App turns, native provider terminals, project actions, reviews, and Git operations share canonical checkout authority, so independent entry points cannot silently edit the same worktree at once.
 - Activity-first navigation surfaces work that is running, waiting for approval or input, completed in the background, unread, failed, or settled.
 - Related checkouts and worktrees can group by their real Git identity, while repository folders remain clearly labeled and independently controllable.
 - Move between branches, use isolated worktrees for parallel threads, open detected service previews, and return to the exact terminal or folder behind a run.
@@ -146,13 +148,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.26
+### Version 0.0.27
 
-This release makes model and provider selection authoritative from the chooser through execution. Provider-default routes stay explicit, incompatible changes open the right replacement chat without losing eligible draft text, backend-profile edits no longer invalidate routes unnecessarily, and split or Duo work keeps each pane's exact route identity.
+This release keeps each chat attached to its exact workspace and visible state. Branch, Git, review, project-action, and terminal work resolve through the owning chat; reconnects preserve mounted transcripts, drafts, attachments, skills, files, panes, plans, and scroll position instead of making the workspace appear to reload.
 
-Provider lifecycles are safer too: Claude Stop cannot leave an accepted follow-up queued, Cursor and OpenCode launch Windows npm shims through the hardened process boundary, OpenCode hides disconnected routes, stalled runtime startup cleanup is bounded, and shutdown begins without waiting on Private Connect initialization. Stable Markdown controls and a properly focus-trapped command palette round out the desktop fixes.
+Goals now have a direct per-chat control, frequent surfaces open sooner with measured bundle and interaction budgets, and Duo can optionally lock both source chats while a separately configured third model compares their bounded visible results. Eligible native Codex, Claude, Cursor, and OpenCode sessions can continue in the owning integrated terminal without guessing session identities, falling back to a fresh run, or sharing checkout authority with another agent or workspace operation.
 
-Download [Inertia v0.0.26](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.26):
+Download [Inertia v0.0.27](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.27):
 
 | Platform | Download |
 | --- | --- |

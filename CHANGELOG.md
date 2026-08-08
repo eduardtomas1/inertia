@@ -4,6 +4,29 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.27 — 2026-08-08
+
+### Chats keep their exact workspace and visible state
+
+- Branch, Git, review, project-action, terminal, and file work now resolves through the owning chat and its exact worktree. Draft selection and replacement failures preserve eligible text instead of activating a partial destination, while native-preview shortcuts forward only the exact allowed commands.
+- Reconnect hydration keeps the mounted conversation detail, live deltas, drafts, attachments, queued skills, file and Git state, pane ownership, plans, and transcript position until authoritative replacements arrive. An ambiguous mutation timeout no longer recycles an otherwise healthy socket, and Git invalidations remain durable across reconnects.
+- Ordinary sends, Private Connect prompts, review questions and revisions, Duo judges, native provider terminals, project actions, source-control operations, sibling chats, and provider cleanup now share canonical checkout authority. Reverse-order races fail closed before a second provider or destructive workspace operation can join the same worktree.
+
+### Duo, goals, and native continuation become first-class
+
+- Duo can optionally lock both source chats and dispatch a separately configured third-model judge after both first turns settle. The judge receives only a bounded brief, attributed visible assistant output, and terminal status—never source sessions, hidden reasoning, tools, attachments, credentials, or permissions—and interrupted judgments require an explicit retry or cancellation.
+- Each chat exposes its real Codex-native goal or Inertia-local objective directly from the conversation header, with source, hierarchy, status, and supported actions preserved instead of hiding goal work inside a secondary panel.
+- Eligible native Codex, Claude, Cursor, and OpenCode sessions can continue in the owning integrated terminal through server-verified session identity and direct shell-free argv. Inertia refuses stale, custom, missing, active, or unverified identities rather than using a picker, `--last`, a fresh-session fallback, or emulation; Windows batch shims, terminal replacement, process-tree shutdown, split-pane ownership, and the four-terminal cap remain bounded.
+
+### Frequent surfaces open sooner and read more clearly
+
+- Activity, command palette, Settings, and other frequent deferred surfaces preload on bounded idle or intent paths. The Settings chunk remains under its 50 KiB budget, while measured first opens fall from roughly 290–303 ms to low single-digit milliseconds in the representative fixture.
+- Settings use calmer neutral surfaces with stronger hierarchy, terminal status and conversation-minimap targets remain readable, and reduced-motion and keyboard behavior keep the same accessibility contract.
+
+### Release confidence
+
+- Architecture and lint checks, four TypeScript projects, 2,330 unit and integration tests, 222 portable provider contracts, 46 Electron scenarios, Windows Codex portability, production audit, exact-head review, and green Linux, macOS, and Windows performance, packaging, fuse, signature, and smoke gates protect the release.
+
 ## 0.0.26 — 2026-08-08
 
 ### Model routes stay authoritative from chooser to execution

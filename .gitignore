@@ -43,6 +43,9 @@ electron-builder.env
 
 # Logs and package manager noise
 *.log
+*.cpuprofile
+*.heapprofile
+*.heapsnapshot
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

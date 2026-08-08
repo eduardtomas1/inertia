@@ -26,6 +26,7 @@ interface WorkspaceGitOptions {
   refreshVersion: number;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  subscribe: (listener: (event: ServerEvent) => void) => () => void;
   setActionError: (message: string | null) => void;
 }
 
@@ -46,6 +47,7 @@ export function useWorkspaceGit({
   refreshVersion,
   request,
   run,
+  subscribe,
   setActionError,
   enabled,
   loadStatusOnMount,
@@ -321,6 +323,40 @@ export function useWorkspaceGit({
     setActionError,
   ]);
 
+  useEffect(() => subscribe((event) => {
+    if (
+      event.type !== "workspace.git.invalidated"
+      || !enabled
+      || !online
+      || !project?.id
+      || event.projectId !== project.id
+      || event.conversationId !== (conversation?.id ?? null)
+    ) return;
+    setLoading(true);
+    void loadGit({
+      authoritative: true,
+      scope: loadWorkspaceOnMount ? "workspace" : "status",
+    }).then(() => {
+      loadBranches();
+    }).catch((error) => {
+      setActionError(
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Git changes could not be reconciled.",
+      );
+    }).finally(() => setLoading(false));
+  }), [
+    conversation?.id,
+    enabled,
+    loadBranches,
+    loadGit,
+    loadWorkspaceOnMount,
+    online,
+    project?.id,
+    setActionError,
+    subscribe,
+  ]);
+
   const mutateBranch = useCallback((
     type: "git.branch.create" | "git.branch.switch",
     name: string,
@@ -333,13 +369,8 @@ export function useWorkspaceGit({
         conversationId: conversation?.id,
         name,
       },
-    } as CommandWithoutId).then(() =>
-      Promise.all([
-        loadGit({ authoritative: true }),
-        Promise.resolve(loadBranches()),
-      ])
-    ).catch(() => undefined);
-  }, [conversation?.id, loadBranches, loadGit, project, run]);
+    } as CommandWithoutId).catch(() => undefined);
+  }, [conversation?.id, project, run]);
 
   const commit = useCallback(async (
     message: string,
@@ -368,8 +399,7 @@ export function useWorkspaceGit({
         },
       });
     }
-    await loadGit({ authoritative: true });
-  }, [conversation?.id, loadGit, project, run]);
+  }, [conversation?.id, project, run]);
 
   return {
     gitStatus,

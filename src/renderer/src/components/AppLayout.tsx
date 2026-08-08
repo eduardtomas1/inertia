@@ -447,7 +447,7 @@ export function AppLayout({
                   projectId: project.id,
                   conversationId: conversation?.id,
                 },
-              }).then(() => actions.loadGit()).catch(() => undefined);
+              }).catch(() => undefined);
             }}
           />
 

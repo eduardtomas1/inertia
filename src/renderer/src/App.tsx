@@ -355,6 +355,7 @@ export default function App(): React.JSX.Element {
       refreshVersion: gitRefreshVersion,
       request,
       run,
+      subscribe: connection.subscribe,
       setActionError,
       setActiveTool: sceneSetActiveTool,
       loadGitStatusOnMount: !workspaceToolsUnavailable,

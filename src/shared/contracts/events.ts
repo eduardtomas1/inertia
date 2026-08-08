@@ -70,6 +70,12 @@ export type RuntimeMutationEvent =
       conversation: ConversationShell;
       runs: WorkspaceRun[];
     }
+  | {
+      type: "workspace.git.invalidated";
+      requestId: string;
+      projectId: string;
+      conversationId: string | null;
+    }
   | { type: "conversation.detail.invalidated"; conversationId: string }
   | { type: "conversation.message.persisted"; message: ChatMessage }
   | { type: "provider.maintenance.updated"; providers: ProviderMaintenanceStatus[] }

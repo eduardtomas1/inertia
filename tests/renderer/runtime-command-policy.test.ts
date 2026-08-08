@@ -16,6 +16,7 @@ import {
   WORKSPACE_GIT_REFRESH_REQUEST_TIMEOUT_MS,
 } from "../../src/shared/runtime-command-timeouts";
 import {
+  publishesWorkspaceGitCompletion,
   RUNTIME_COMMAND_POLICIES,
   runtimeCommandPolicy,
 } from "../../src/renderer/src/utils/runtimeCommandPolicy";
@@ -103,6 +104,13 @@ describe("runtime command delivery policy", () => {
     expect(Object.values(RUNTIME_COMMAND_POLICIES).every(
       ({ timeoutDelivery }) => timeoutDelivery === "rejected" || timeoutDelivery === "ambiguous",
     )).toBe(true);
+  });
+
+  it("identifies mutations with durable Git completion publication", () => {
+    expect(publishesWorkspaceGitCompletion("git.branch.switch")).toBe(true);
+    expect(publishesWorkspaceGitCompletion("git.selection.undo")).toBe(true);
+    expect(publishesWorkspaceGitCompletion("git.selection.inspect")).toBe(false);
+    expect(publishesWorkspaceGitCompletion("checkpoint.revert")).toBe(false);
   });
 
   it("keeps renderer deadlines beyond authoritative aggregate server bounds", () => {

@@ -11,7 +11,6 @@ import {
   BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
   DUO_CANCEL_REQUEST_TIMEOUT_MS,
   DUO_DISPATCH_REQUEST_TIMEOUT_MS,
-  GIT_MUTATION_REQUEST_TIMEOUT_MS,
   GIT_READ_REQUEST_TIMEOUT_MS,
   MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
   MESSAGE_SEND_REQUEST_TIMEOUT_MS,
@@ -451,59 +450,50 @@ describe("useInertiaConnection", () => {
     vi.useFakeTimers();
 
     const requestId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "22222222-2222-4222-8222-222222222222";
     let timeoutError: unknown;
     void hook.result.current.sendCommand(clientCommandSchema.parse({
-      type: "git.branch.switch",
+      type: "terminal.input",
       requestId,
       payload: {
-        projectId: "22222222-2222-4222-8222-222222222222",
-        conversationId: "33333333-3333-4333-8333-333333333333",
-        name: "feature/settled-late",
+        terminalId,
+        data: "first",
       },
     })).catch((error: unknown) => {
       timeoutError = error;
     });
 
-    await vi.advanceTimersByTimeAsync(GIT_MUTATION_REQUEST_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
     expect(socket.close).not.toHaveBeenCalled();
 
     const secondRequestId = "44444444-4444-4444-8444-444444444444";
     const secondMutation = hook.result.current.sendCommand(
       clientCommandSchema.parse({
-        type: "git.branch.switch",
+        type: "terminal.input",
         requestId: secondRequestId,
         payload: {
-          projectId: "22222222-2222-4222-8222-222222222222",
-          conversationId: "33333333-3333-4333-8333-333333333333",
-          name: "feature/still-running",
+          terminalId,
+          data: "second",
         },
       }),
     );
     socket.dispatchEvent(new MessageEvent("message", {
       data: JSON.stringify({
-        type: "request.result",
+        type: "request.ok",
         requestId,
-        result: {
-          kind: "git.action",
-          message: "Switched to feature/settled-late.",
-        },
       }),
     }));
 
     expect(socket.close).not.toHaveBeenCalled();
     socket.dispatchEvent(new MessageEvent("message", {
       data: JSON.stringify({
-        type: "request.result",
+        type: "request.ok",
         requestId: secondRequestId,
-        result: {
-          kind: "git.action",
-          message: "Switched to feature/still-running.",
-        },
       }),
     }));
     await expect(secondMutation).resolves.toMatchObject({
-      type: "request.result",
+      type: "request.ok",
       requestId: secondRequestId,
     });
     expect(socket.close).toHaveBeenCalledTimes(1);

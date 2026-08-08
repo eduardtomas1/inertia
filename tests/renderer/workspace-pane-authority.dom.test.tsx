@@ -84,6 +84,9 @@ function result(
   };
 }
 
+const noopSubscribe = (_listener: (event: ServerEvent) => void) =>
+  () => undefined;
+
 const alpha = project("11111111-1111-4111-8111-111111111111", "Alpha");
 const beta = project("22222222-2222-4222-8222-222222222222", "Beta");
 const alphaChat = conversation(
@@ -498,6 +501,7 @@ describe("workspace pane authority", () => {
       refreshVersion: 0,
       request,
       run,
+      subscribe: noopSubscribe,
       setActionError,
     }), {
       initialProps: { project: alpha, conversation: alphaChat },
@@ -600,6 +604,7 @@ describe("workspace pane authority", () => {
       refreshVersion: 0,
       request,
       run,
+      subscribe: noopSubscribe,
       setActionError,
     }));
 
@@ -663,6 +668,7 @@ describe("workspace pane authority", () => {
       refreshVersion: 0,
       request,
       run,
+      subscribe: noopSubscribe,
       setActionError,
     }));
 
@@ -741,6 +747,7 @@ describe("workspace pane authority", () => {
         refreshVersion: 0,
         request,
         run,
+        subscribe: noopSubscribe,
         setActionError,
       }),
       { initialProps: { online: true } },
@@ -806,6 +813,7 @@ describe("workspace pane authority", () => {
       refreshVersion: 0,
       request,
       run,
+      subscribe: noopSubscribe,
       setActionError,
     }));
 
@@ -868,6 +876,7 @@ describe("workspace pane authority", () => {
         refreshVersion: 0,
         request: deferred.request,
         run,
+        subscribe: noopSubscribe,
         setActionError,
       }),
       { initialProps: { loadOnMount: true } },
@@ -919,6 +928,7 @@ describe("workspace pane authority", () => {
         refreshVersion: 0,
         request: deferred.request,
         run,
+        subscribe: noopSubscribe,
         setActionError,
       }),
       { initialProps: { workspaceOpen: true } },
@@ -968,6 +978,7 @@ describe("workspace pane authority", () => {
       refreshVersion: 0,
       request: deferred.request,
       run,
+      subscribe: noopSubscribe,
       setActionError,
     }));
 
@@ -1078,7 +1089,6 @@ describe("workspace pane authority", () => {
       return Promise.reject(new Error("Unexpected command"));
     });
     const setGitDiff = vi.fn();
-    const loadGit = vi.fn(async () => undefined);
     const hook = renderHook((owner: {
       project: Project | null;
       conversation: Conversation | null;
@@ -1091,7 +1101,6 @@ describe("workspace pane authority", () => {
       request: vi.fn(),
       run,
       setGitDiff,
-      loadGit,
     }), {
       initialProps: { project: alpha, conversation: alphaChat },
     });
@@ -1119,7 +1128,6 @@ describe("workspace pane authority", () => {
 
     expect(hook.result.current.lastDiffReversal).toBeNull();
     expect(setGitDiff).not.toHaveBeenCalled();
-    expect(loadGit).not.toHaveBeenCalled();
 
     hook.rerender({ project: alpha, conversation: alphaChat });
     expect(hook.result.current.lastDiffReversal).toEqual(operation);
@@ -1150,7 +1158,6 @@ describe("workspace pane authority", () => {
       await undo;
     });
     expect(setGitDiff).not.toHaveBeenCalled();
-    expect(loadGit).not.toHaveBeenCalled();
 
     hook.rerender({ project: alpha, conversation: alphaChat });
     expect(hook.result.current.lastDiffReversal).toBeNull();

@@ -20,7 +20,10 @@ import {
   type PendingConnectionRequest,
 } from "../utils/connectionMessages";
 import { applyConversationShellEvent } from "../utils/runtimeSnapshotProjection";
-import { runtimeCommandPolicy } from "../utils/runtimeCommandPolicy";
+import {
+  publishesWorkspaceGitCompletion,
+  runtimeCommandPolicy,
+} from "../utils/runtimeCommandPolicy";
 import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
 import { markTestStreamingStage } from "../utils/testStreamingTrace";
 
@@ -200,6 +203,11 @@ export function useInertiaConnection(): InertiaConnection {
                   : current);
               }
 
+              if (event.type === "workspace.git.invalidated") {
+                const pending = pendingRef.current.get(event.requestId);
+                if (pending) pending.authoritativePublicationReceived = true;
+              }
+
               const settlement = settlePendingConnectionRequest(
                 event,
                 pendingRef.current,
@@ -331,6 +339,9 @@ export function useInertiaConnection(): InertiaConnection {
         reject,
         timeout,
         timeoutDelivery: policy.timeoutDelivery,
+        awaitsWorkspaceGitPublication: publishesWorkspaceGitCompletion(
+          command.type,
+        ),
       });
       try {
         socket.send(serialized);

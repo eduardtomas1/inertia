@@ -71,6 +71,7 @@ export function useDraftConversation({
   snapshot,
   settings,
   run,
+  runNavigationCommand,
   sendMessage,
   persistedConversationId,
   updatePersistedConversation,
@@ -78,6 +79,10 @@ export function useDraftConversation({
   snapshot: AppSnapshot | null;
   settings: AppSettings;
   run: (
+    key: string,
+    command: CommandWithoutId,
+  ) => Promise<ServerEvent>;
+  runNavigationCommand?: (
     key: string,
     command: CommandWithoutId,
   ) => Promise<ServerEvent>;
@@ -132,7 +137,7 @@ export function useDraftConversation({
   const importProject = async (): Promise<boolean> => {
     const path = await window.inertia.selectDirectory();
     if (!path) return false;
-    const event = await run("project.create", {
+    const event = await (runNavigationCommand ?? run)("project.create", {
       type: "project.create",
       payload: { name: projectNameFromPath(path), path },
     });

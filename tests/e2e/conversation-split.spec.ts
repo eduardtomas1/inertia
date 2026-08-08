@@ -136,14 +136,14 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   });
   expect(duplicateIds).toEqual([]);
 
-  const primaryGoalTrigger = primary.getByRole("button", {
-    name: "Local objective, active: Primary chat objective",
-  });
-  const secondaryGoalTrigger = secondary.getByRole("button", {
-    name: "Local objective, active: Secondary chat objective",
-  });
-  await expect(primaryGoalTrigger).toBeVisible();
-  await expect(secondaryGoalTrigger).toBeVisible();
+  const primaryMessage = primary.getByRole("textbox", { name: "Message" });
+  const secondaryMessage = secondary.getByRole("textbox", { name: "Message" });
+  await expect(primary.getByRole("button", {
+    name: /Local objective/u,
+  })).toHaveCount(0);
+  await expect(secondary.getByRole("button", {
+    name: /Local objective/u,
+  })).toHaveCount(0);
   await expect(primary.getByRole("complementary", {
     name: "Workspace tools",
   })).not.toBeVisible();
@@ -151,7 +151,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     name: "Workspace tools",
   })).not.toBeVisible();
 
-  await primaryGoalTrigger.click();
+  await primaryMessage.fill("/goal");
+  await primary.getByRole("option", { name: /^\/goal/u }).click();
   const primaryGoalDialog = primary.getByRole("dialog", {
     name: "Local objective",
   });
@@ -177,20 +178,15 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     contentType: "image/png",
   });
   await primaryGoalDialog.getByRole("button", { name: "Complete" }).click();
-  await expect(primary.getByRole("button", {
-    name: "Local objective, complete: Primary chat objective",
-  })).toBeVisible();
-  await expect(secondaryGoalTrigger).toHaveAccessibleName(
-    "Local objective, active: Secondary chat objective",
-  );
+  await expect(primaryGoalDialog.getByText("Complete", { exact: true }))
+    .toBeVisible();
+  await expect(secondary.getByRole("dialog", {
+    name: "Local objective",
+  })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(primaryGoalDialog).toHaveCount(0);
-  await expect(primary.getByRole("button", {
-    name: "Local objective, complete: Primary chat objective",
-  })).toBeFocused();
+  await expect(primaryMessage).toBeFocused();
 
-  const primaryMessage = primary.getByRole("textbox", { name: "Message" });
-  const secondaryMessage = secondary.getByRole("textbox", { name: "Message" });
   await primaryMessage.fill("Draft owned by Inertia");
   await secondaryMessage.fill("Draft owned by Companion");
   await expect(primaryMessage).toHaveValue("Draft owned by Inertia");

@@ -6,7 +6,6 @@ import {
 } from "react";
 import {
   Check,
-  ChevronDown,
   CirclePause,
   Flag,
   Play,
@@ -15,15 +14,12 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import clsx from "clsx";
-
 import type {
   AgentGoal,
   AgentGoalSource,
   AgentGoalStatus,
   AgentWorkflowState,
 } from "@shared/contracts";
-import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { IconButton } from "./ui";
 
@@ -42,6 +38,13 @@ export interface ChatGoalControlProps {
   onRetry: () => Promise<void>;
   onSetGoal: (input: GoalInput) => Promise<void>;
   onClearGoal: (source: AgentGoalSource) => Promise<void>;
+}
+
+export interface ChatGoalPopoverProps extends ChatGoalControlProps {
+  open: boolean;
+  onDismiss: (
+    reason: "action" | "escape" | "outside" | "owner-change",
+  ) => void;
 }
 
 function statusLabel(status: AgentGoalStatus): string {
@@ -98,40 +101,53 @@ export function ChatGoalControl({
   onRetry,
   onSetGoal,
   onClearGoal,
-}: ChatGoalControlProps): React.JSX.Element {
-  const {
-    menu,
-    toggleMenu,
-    dismissMenu,
-    setMenuTrigger,
-    setMenuPopover,
-  } = useDismissibleMenu<"goal">();
+  open,
+  onDismiss,
+}: ChatGoalPopoverProps): React.JSX.Element | null {
   const inputId = useId();
   const headingId = useId();
-  const popoverId = useId();
+  const popoverRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const firstActionRef = useRef<HTMLButtonElement>(null);
   const [objective, setObjective] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const open = menu === "goal";
   const source = workflow?.goalCapability.kind ?? null;
   const goal = workflow ? currentRouteGoal(workflow) : null;
   const separateGoalCount = workflow?.goals.filter(({ source: goalSource }) =>
     goalSource !== source).length ?? 0;
   const label = source ? routeLabel(source) : "Goal";
   const stateLabel = goal ? statusLabel(goal.status) : null;
-  const triggerLabel = goal
-    ? `${label}, ${stateLabel!.toLocaleLowerCase()}: ${goal.objective}`
-    : workflow
-      ? source === "codex-native" ? "Set Codex goal" : "Add local objective"
-      : loading ? "Loading goal" : "Goal unavailable";
+  const ownerKey = `${workflow?.conversationId ?? ""}:${source ?? ""}`;
+  const ownerKeyRef = useRef(ownerKey);
 
   useNativePreviewSuspension(open);
 
   useEffect(() => {
+    if (ownerKeyRef.current === ownerKey) return;
+    ownerKeyRef.current = ownerKey;
     setObjective("");
-    dismissMenu("context-change");
-  }, [dismissMenu, source, workflow?.conversationId]);
+    if (open) onDismiss("owner-change");
+  }, [onDismiss, open, ownerKey]);
+
+  useEffect(() => {
+    if (!open) return;
+    const dismissOutside = (event: PointerEvent): void => {
+      if (!popoverRef.current?.contains(event.target as Node)) {
+        onDismiss("outside");
+      }
+    };
+    const dismissOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onDismiss("escape");
+    };
+    document.addEventListener("pointerdown", dismissOutside, true);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside, true);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [onDismiss, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -154,7 +170,7 @@ export function ChatGoalControl({
         tokenBudget: null,
       });
       setObjective("");
-      dismissMenu("selection");
+      onDismiss("action");
     } catch {
       // The workspace error surface owns the public failure message. Keep the
       // disclosure and draft in place so the user can retry.
@@ -180,7 +196,7 @@ export function ChatGoalControl({
     setSubmitting(true);
     try {
       await onClearGoal(source);
-      dismissMenu("selection");
+      onDismiss("action");
     } catch {
       // The workspace error surface owns the public failure message.
     } finally {
@@ -188,49 +204,21 @@ export function ChatGoalControl({
     }
   };
 
+  if (!open) return null;
+
   return (
     <div
-      className="chat-goal-control"
+      className="chat-goal-control is-command-surface"
       data-goal-source={source ?? "unavailable"}
       data-goal-status={goal?.status ?? "empty"}
     >
-      <button
-        ref={(node) => setMenuTrigger("goal", node)}
-        type="button"
-        className={clsx(
-          "chat-goal-trigger",
-          goal && "has-goal",
-          open && "is-open",
-        )}
-        aria-label={triggerLabel}
-        aria-haspopup="dialog"
-        aria-controls={popoverId}
-        aria-expanded={open}
-        onClick={() => toggleMenu("goal")}
+      <div
+        ref={popoverRef}
+        className="chat-goal-popover"
+        role="dialog"
+        aria-labelledby={headingId}
+        aria-busy={busy || submitting}
       >
-        <Flag size={13} aria-hidden="true" />
-        <span className="chat-goal-trigger-state">
-          <strong>{goal ? label : triggerLabel}</strong>
-          {stateLabel && <small>{stateLabel}</small>}
-        </span>
-        {goal && (
-          <span className="chat-goal-trigger-objective" aria-hidden="true">
-            {goal.objective}
-          </span>
-        )}
-        {loading && <span className="chat-goal-loading" role="status">Syncing…</span>}
-        <ChevronDown size={12} aria-hidden="true" />
-      </button>
-
-      {open && (
-        <div
-          ref={(node) => setMenuPopover("goal", node)}
-          id={popoverId}
-          className="chat-goal-popover"
-          role="dialog"
-          aria-labelledby={headingId}
-          aria-busy={busy || submitting}
-        >
           <header>
             <span>
               <Flag size={15} aria-hidden="true" />
@@ -241,7 +229,7 @@ export function ChatGoalControl({
             </span>
             <IconButton
               label="Close goal controls"
-              onClick={() => dismissMenu("escape")}
+              onClick={() => onDismiss("action")}
             >
               <X size={14} />
             </IconButton>
@@ -353,8 +341,7 @@ export function ChatGoalControl({
               {separateGoalCount === 1 ? "One separately tracked goal" : `${separateGoalCount} separately tracked goals`} remains visible in the Goal workspace tool; it is not treated as this route&apos;s current {label.toLocaleLowerCase()}.
             </p>
           )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

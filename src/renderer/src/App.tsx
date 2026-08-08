@@ -21,6 +21,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
+import { useAsyncOperationQueue } from "./hooks/useConversationSelectionQueue";
 import {
   agentWorkflowRouteIdentity,
   agentWorkflowTargetConversation,
@@ -80,6 +81,24 @@ function useDocumentActive(): boolean {
     };
   }, []);
   return active;
+}
+
+export function commandMayChangeWorkspaceAuthority(
+  command: CommandWithoutId,
+): boolean {
+  switch (command.type) {
+    case "project.create":
+    case "project.select":
+    case "project.remove":
+    case "conversation.select":
+    case "conversation.archive":
+    case "conversation.delete":
+      return true;
+    case "conversation.create":
+      return command.payload.activate !== false;
+    default:
+      return false;
+  }
 }
 
 export default function App(): React.JSX.Element {
@@ -307,11 +326,53 @@ export default function App(): React.JSX.Element {
     setBusyAction,
     setActionError,
   });
+  const enqueueWorkspaceAuthority = useAsyncOperationQueue();
+  const selectionCommandQueue = useCallback((
+    key: string,
+    command: CommandWithoutId,
+  ) => enqueueWorkspaceAuthority(() => run(key, command)), [
+    enqueueWorkspaceAuthority,
+    run,
+  ]);
+  const runUserCommand = useCallback((
+    key: string,
+    command: CommandWithoutId,
+  ) => {
+    if (!commandMayChangeWorkspaceAuthority(command)) {
+      return run(key, command);
+    }
+    conversationSelectionGenerationRef.current += 1;
+    return selectionCommandQueue(key, command);
+  }, [run, selectionCommandQueue]);
+  const sendMessageWithWorkspaceAuthority = useCallback((
+    ...args: Parameters<typeof sendMessageToConversation>
+  ): ReturnType<typeof sendMessageToConversation> => {
+    const activate = args[5] !== false;
+    if (!activate) return sendMessageToConversation(...args);
+    conversationSelectionGenerationRef.current += 1;
+    return enqueueWorkspaceAuthority(
+      () => sendMessageToConversation(...args),
+    );
+  }, [enqueueWorkspaceAuthority, sendMessageToConversation]);
+  const selectConversationCommand = useCallback((
+    key: string,
+    conversationId: string,
+  ) => selectionCommandQueue(key, {
+    type: "conversation.select",
+    payload: { conversationId },
+  }), [selectionCommandQueue]);
+  const navigateToView = useCallback((nextView: "workspace" | "settings") => {
+    if (nextView === "settings") {
+      conversationSelectionGenerationRef.current += 1;
+    }
+    setView(nextView);
+  }, []);
   const draftConversation = useDraftConversation({
     snapshot: connection.snapshot,
     settings,
     run,
-    sendMessage: sendMessageToConversation,
+    runNavigationCommand: runUserCommand,
+    sendMessage: sendMessageWithWorkspaceAuthority,
     persistedConversationId: conversation?.id ?? null,
     updatePersistedConversation: updateConversationById,
   });
@@ -333,6 +394,11 @@ export default function App(): React.JSX.Element {
     snapshot: connection.snapshot,
     settings,
     run,
+    request,
+    selectConversationCommand,
+    workspaceVisible: view === "workspace",
+    splitConversationId,
+    conversationSelectionGenerationRef,
     splitSelectionTransitionsRef,
     updateSplitConversationId,
     showWorkspace: () => setView("workspace"),
@@ -384,6 +450,8 @@ export default function App(): React.JSX.Element {
     gitStatus,
     branches,
     structuredDiff,
+    structuredDiffParsing,
+    structuredDiffError,
     reviewStates,
     loadGit,
     loadBranches,
@@ -467,7 +535,8 @@ export default function App(): React.JSX.Element {
   };
   const selectProject = (nextProject: Project) => {
     if (nextProject.id === project?.id) return;
-    void run("project.select", {
+    conversationSelectionGenerationRef.current += 1;
+    void selectionCommandQueue("project.select", {
       type: "project.select",
       payload: { projectId: nextProject.id },
     }).then(() => updateSplitConversationId(null)).catch(() => undefined);
@@ -496,10 +565,10 @@ export default function App(): React.JSX.Element {
       conversationSelectionGenerationRef.current + 1;
     conversationSelectionGenerationRef.current = selectionGeneration;
     splitSelectionTransitionsRef.current += 1;
-    void run("conversation.select", {
-      type: "conversation.select",
-      payload: { conversationId: nextConversation.id },
-    }).then(() => {
+    void selectConversationCommand(
+      "conversation.select",
+      nextConversation.id,
+    ).then(() => {
       if (
         selectionGeneration === conversationSelectionGenerationRef.current
       ) {
@@ -513,7 +582,7 @@ export default function App(): React.JSX.Element {
     });
   }, [
     conversation,
-    run,
+    selectConversationCommand,
     splitConversation,
     updateSplitConversationId,
   ]);
@@ -578,16 +647,21 @@ export default function App(): React.JSX.Element {
       targetProject.id,
       location,
     );
-    const select = targetProject.id === project?.id ? Promise.resolve() : run("project.select", { type: "project.select", payload: { projectId: targetProject.id } });
-    void select
-      .then(() => run("conversation.create", {
-        type: "conversation.create",
-        payload,
-      }))
+    const creationGeneration =
+      conversationSelectionGenerationRef.current + 1;
+    conversationSelectionGenerationRef.current = creationGeneration;
+    void selectionCommandQueue("conversation.create", {
+      type: "conversation.create",
+      payload,
+    })
       .then(() => {
         discardDraftConversation();
-        setView("workspace");
-        setSidebarOpen(false);
+        if (
+          creationGeneration === conversationSelectionGenerationRef.current
+        ) {
+          setView("workspace");
+          setSidebarOpen(false);
+        }
       })
       .catch(() => undefined);
   };
@@ -605,6 +679,9 @@ export default function App(): React.JSX.Element {
   ): Promise<void> => {
     if (draftConversation.chooseModel(selection)) return;
     if (!project) throw new Error("Select a project before creating a chat.");
+    const selectionGeneration =
+      conversationSelectionGenerationRef.current + 1;
+    conversationSelectionGenerationRef.current = selectionGeneration;
     const event = await run("conversation.create", {
       type: "conversation.create",
       payload: {
@@ -619,10 +696,16 @@ export default function App(): React.JSX.Element {
       event.type !== "request.result"
       || event.result.kind !== "conversation.created"
     ) throw new Error("The new chat could not be identified.");
-    await run("conversation.select", {
-      type: "conversation.select",
-      payload: { conversationId: event.result.conversationId },
-    });
+    if (
+      selectionGeneration !== conversationSelectionGenerationRef.current
+    ) return;
+    await selectConversationCommand(
+      "conversation.select",
+      event.result.conversationId,
+    );
+    if (
+      selectionGeneration !== conversationSelectionGenerationRef.current
+    ) return;
     if (options?.prefillText) {
       const conversationId = event.result.conversationId;
       window.requestAnimationFrame(() => requestComposerPrefill({
@@ -698,16 +781,16 @@ export default function App(): React.JSX.Element {
   const closeProviderAuth = useCallback(() => setAuthProviderId(null), []);
   const openProviderSetup = useCallback((_providerId: ProviderId) => {
     setSettingsTarget({ section: "providers" });
-    setView("settings");
-  }, []);
+    navigateToView("settings");
+  }, [navigateToView]);
   const openBackendSetup = useCallback((profileId: string) => {
     setSettingsTarget({ section: "backends", profileId });
-    setView("settings");
-  }, []);
+    navigateToView("settings");
+  }, [navigateToView]);
   const openConnectionsSettings = useCallback(() => {
     setSettingsTarget({ section: "connections" });
-    setView("settings");
-  }, []);
+    navigateToView("settings");
+  }, [navigateToView]);
 
   useEffect(() => {
     if (view === "workspace" && settingsTarget) setSettingsTarget(null);
@@ -913,7 +996,7 @@ export default function App(): React.JSX.Element {
       providerQuotaNotices={providerQuotaNotices}
       workspaceLayout={workspaceLayout}
       view={view}
-      setView={setView}
+      setView={navigateToView}
       busyAction={busyAction}
       visibleError={visibleError}
       setActionError={setActionError}
@@ -936,6 +1019,8 @@ export default function App(): React.JSX.Element {
       projectActions={projectActions}
       reviewStates={reviewStates}
       structuredDiff={structuredDiff}
+      structuredDiffParsing={structuredDiffParsing}
+      structuredDiffError={structuredDiffError}
       multiSpawn={multiSpawn}
       scene={visibleWorkspaceScene}
       providerAuth={{
@@ -948,7 +1033,7 @@ export default function App(): React.JSX.Element {
         onClose: closeProviderAuth,
       }}
       actions={{
-        run,
+        run: runUserCommand,
         importProject,
         selectProject,
         selectConversation,

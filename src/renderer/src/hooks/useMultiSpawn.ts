@@ -150,6 +150,11 @@ export function useMultiSpawn({
   snapshot,
   settings,
   run,
+  request,
+  selectConversationCommand,
+  workspaceVisible = true,
+  splitConversationId = null,
+  conversationSelectionGenerationRef,
   splitSelectionTransitionsRef,
   updateSplitConversationId,
   showWorkspace,
@@ -164,6 +169,14 @@ export function useMultiSpawn({
     key: string,
     command: CommandWithoutId,
   ) => Promise<ServerEvent>;
+  request: (command: CommandWithoutId) => Promise<ServerEvent>;
+  selectConversationCommand?: (
+    key: string,
+    conversationId: string,
+  ) => Promise<ServerEvent>;
+  workspaceVisible?: boolean;
+  splitConversationId?: string | null;
+  conversationSelectionGenerationRef?: MutableRefObject<number>;
   splitSelectionTransitionsRef: MutableRefObject<number>;
   updateSplitConversationId: (conversationId: string | null) => void;
   showWorkspace: () => void;
@@ -192,6 +205,18 @@ export function useMultiSpawn({
   const activeLaunchIdRef = useRef<string | null>(null);
   const cancelRequestedRef = useRef(false);
   const operationGenerationRef = useRef(0);
+  const splitConversationIdRef = useRef(splitConversationId);
+  const workspaceVisibleRef = useRef(workspaceVisible);
+  const watchedComparisonRef = useRef<{
+    launchId: string;
+    primaryConversationId: string;
+    secondaryConversationId: string;
+    seenPair: boolean;
+    navigationGeneration: number;
+  } | null>(null);
+  const comparisonOpenedRef = useRef<string | null>(null);
+  splitConversationIdRef.current = splitConversationId;
+  workspaceVisibleRef.current = workspaceVisible;
 
   const setRecoveryStatus = useCallback((
     status: DuoStatusResult | null,
@@ -199,6 +224,16 @@ export function useMultiSpawn({
     recoveryStatusRef.current = status;
     setRecoveryStatusState(status);
   }, []);
+
+  const selectConversation = useCallback((
+    key: string,
+    conversationId: string,
+  ): Promise<ServerEvent> => selectConversationCommand
+    ? selectConversationCommand(key, conversationId)
+    : run(key, {
+        type: "conversation.select",
+        payload: { conversationId },
+      }), [run, selectConversationCommand]);
 
   useEffect(() => () => {
     operationGenerationRef.current += 1;
@@ -211,10 +246,7 @@ export function useMultiSpawn({
   ): Promise<boolean> => {
     splitSelectionTransitionsRef.current += 1;
     try {
-      await run("multi-spawn:select", {
-        type: "conversation.select",
-        payload: { conversationId: primaryConversationId },
-      });
+      await selectConversation("multi-spawn:select", primaryConversationId);
       if (!isCurrent()) return false;
       updateSplitConversationId(secondaryConversationId);
       showWorkspace();
@@ -230,7 +262,7 @@ export function useMultiSpawn({
     }
   }, [
     closeSidebar,
-    run,
+    selectConversation,
     showWorkspace,
     splitSelectionTransitionsRef,
     updateSplitConversationId,
@@ -248,6 +280,153 @@ export function useMultiSpawn({
     }
     return event.result;
   }, [run]);
+
+  const queryLaunchStatusInBackground = useCallback(async (
+    launchId: string,
+  ): Promise<DuoStatusResult> => {
+    const event = resultEvent(await request({
+      type: "duo.status",
+      payload: { launchId },
+    }));
+    if (event.result.kind !== "duo.status") {
+      throw new Error("The local service returned an unexpected duo status.");
+    }
+    return event.result;
+  }, [request]);
+
+  useEffect(() => {
+    const comparisonState = recoveryStatus?.comparison?.state;
+    if (
+      !recoveryStatus
+      || (
+        comparisonState !== "waiting"
+        && comparisonState !== "dispatching"
+        && comparisonState !== "running"
+      )
+    ) return;
+    let cancelled = false;
+    let timer: number | null = null;
+    const poll = (): void => {
+      void queryLaunchStatusInBackground(recoveryStatus.launchId).then((status) => {
+        if (cancelled) return;
+        setRecoveryGuidance(identifiedRecoveryGuidance(status));
+        setRecoveryStatus(status);
+        if (!launchRetainsRecoveryIdentity(status)) {
+          clearPendingMultiSpawnLaunchId(window.localStorage);
+        }
+        const message = launchStatusMessage(status);
+        if (message) setActionError(message);
+      }).catch(() => {
+        if (cancelled) return;
+        // A transient read must not replace authoritative launch state. Retry
+        // slowly while this exact comparison remains live.
+        timer = window.setTimeout(poll, 1_250);
+      });
+    };
+    timer = window.setTimeout(poll, 750);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [
+    queryLaunchStatusInBackground,
+    recoveryStatus,
+    setActionError,
+    setRecoveryStatus,
+  ]);
+
+  useEffect(() => {
+    const watched = watchedComparisonRef.current;
+    if (!watched || recoveryStatus?.launchId !== watched.launchId) return;
+    if (!workspaceVisible) {
+      watchedComparisonRef.current = null;
+      return;
+    }
+    if (
+      conversationSelectionGenerationRef
+      && conversationSelectionGenerationRef.current
+        !== watched.navigationGeneration
+    ) {
+      watchedComparisonRef.current = null;
+      return;
+    }
+    const stillViewingPair = snapshot?.activeConversationId
+      === watched.primaryConversationId
+      && splitConversationId === watched.secondaryConversationId;
+    if (!watched.seenPair) {
+      if (stillViewingPair) watched.seenPair = true;
+      else return;
+    }
+    if (!stillViewingPair) {
+      watchedComparisonRef.current = null;
+      return;
+    }
+    const comparison = recoveryStatus.comparison;
+    if (
+      comparison?.state !== "completed"
+      || !comparison.conversationId
+      || comparisonOpenedRef.current === watched.launchId
+    ) return;
+    comparisonOpenedRef.current = watched.launchId;
+    watchedComparisonRef.current = null;
+    splitSelectionTransitionsRef.current += 1;
+    void selectConversation(
+      "multi-spawn:comparison:select",
+      comparison.conversationId,
+    ).then(() => {
+      if (!workspaceVisibleRef.current) {
+        return selectConversation(
+          "multi-spawn:comparison:restore",
+          watched.primaryConversationId,
+        ).then(() => undefined).catch(() => undefined);
+      }
+      const navigationStillCurrent =
+        !conversationSelectionGenerationRef
+        || conversationSelectionGenerationRef.current
+          === watched.navigationGeneration;
+      if (
+        splitConversationIdRef.current !== watched.secondaryConversationId
+      ) {
+        if (!navigationStillCurrent) return;
+        return selectConversation(
+          "multi-spawn:comparison:restore",
+          watched.primaryConversationId,
+        ).then(() => undefined).catch(() => undefined);
+      }
+      if (
+        !navigationStillCurrent
+      ) {
+        return;
+      }
+      updateSplitConversationId(null);
+      showWorkspace();
+      closeSidebar();
+      focusWorkspace();
+    }).catch((caught) => {
+      comparisonOpenedRef.current = null;
+      setActionError(
+        `The comparison finished, but its chat could not be opened. ${errorMessage(caught)}`,
+      );
+    }).finally(() => {
+      splitSelectionTransitionsRef.current = Math.max(
+        0,
+        splitSelectionTransitionsRef.current - 1,
+      );
+    });
+  }, [
+    closeSidebar,
+    conversationSelectionGenerationRef,
+    focusWorkspace,
+    recoveryStatus,
+    selectConversation,
+    setActionError,
+    showWorkspace,
+    snapshot?.activeConversationId,
+    splitConversationId,
+    splitSelectionTransitionsRef,
+    updateSplitConversationId,
+    workspaceVisible,
+  ]);
 
   const reconcilePendingLaunch = useCallback(async (
     launchId: string,
@@ -522,6 +701,16 @@ export function useMultiSpawn({
         isCurrent,
       );
       if (!activated || !isCurrent()) return;
+      watchedComparisonRef.current = draft.comparison.enabled
+        ? {
+            launchId,
+            primaryConversationId: sides[0].conversationId,
+            secondaryConversationId: sides[1].conversationId,
+            seenPair: false,
+            navigationGeneration:
+              conversationSelectionGenerationRef?.current ?? 0,
+          }
+        : null;
       setOpen(false);
       focusWorkspace();
 
@@ -624,6 +813,7 @@ export function useMultiSpawn({
     }
   }, [
     activatePreparedConversations,
+    conversationSelectionGenerationRef,
     discardDraftConversation,
     focusWorkspace,
     run,

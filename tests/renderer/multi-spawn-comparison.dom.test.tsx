@@ -125,8 +125,12 @@ describe("Duo third-model comparison dialog", () => {
       name: "Compare with a third model",
     }));
     expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(3);
+    const sharingDetails = screen.getByText("What is shared with the judge?")
+      .closest("details");
+    expect(sharingDetails).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("What is shared with the judge?"));
     expect(screen.getByText(/up to 5,500 characters/u)).toBeVisible();
-    expect(screen.getByText(/no source session, source reasoning, source tool history/u))
+    expect(screen.getByText(/no source session, reasoning, tool history/u))
       .toBeVisible();
     fireEvent.change(screen.getByLabelText("Comparison chat project"), {
       target: { value: secondProjectId },

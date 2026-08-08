@@ -56,8 +56,17 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     .selectOption("full");
   await expect(dialog.getByText("Judge route", { exact: true }))
     .toBeVisible();
-  await expect(dialog.getByText("What the lock sends", { exact: true }))
+  const sharingDisclosure = dialog.getByText(
+    "What is shared with the judge?",
+    { exact: true },
+  );
+  await expect(sharingDisclosure)
     .toBeVisible();
+  await expect(dialog.getByText(/It sends no source session/u))
+    .not.toBeVisible();
+  await sharingDisclosure.click();
+  await expect(dialog.getByText(/It sends no source session/u)).toBeVisible();
+  await sharingDisclosure.click();
   await expect(dialog.getByText("Judge can edit a source checkout", { exact: true }))
     .toBeVisible();
 
@@ -81,7 +90,7 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     document.documentElement.dataset.theme = "dark";
     document.documentElement.style.colorScheme = "dark";
   });
-  await dialog.getByText("What the lock sends", { exact: true })
+  await sharingDisclosure
     .scrollIntoViewIfNeeded();
   await expect(dialog.getByRole("button", { name: "Launch duo" }))
     .toBeVisible();

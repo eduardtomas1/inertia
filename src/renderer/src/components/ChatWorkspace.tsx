@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Code2,
   FolderPlus,
+  MessageCircleQuestion,
   MessageSquarePlus,
   ShieldCheck,
   TerminalSquare,
@@ -52,6 +53,7 @@ import type {
 } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { shouldFollowTimeline } from "../utils/responseTimeline";
+import { revealAgentInputRequest } from "../utils/agentInputNavigation";
 import {
   initialTranscriptNavigation,
   isTranscriptReaderNavigationKey,
@@ -60,10 +62,7 @@ import {
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
 import { Composer } from "./Composer";
-import {
-  ChatGoalControl,
-  type ChatGoalControlProps,
-} from "./ChatGoalControl";
+import type { ChatGoalControlProps } from "./ChatGoalControl";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 
@@ -145,6 +144,7 @@ type ChatWorkspaceProps = {
   onUpdateProvider: () => Promise<void>;
   onCancelProviderUpdate: (operationId: string) => Promise<void>;
   onOpenProviderUpdateInstructions: (url: string) => void;
+  onOpenResume: () => void;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onStop: () => Promise<void>;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
@@ -221,6 +221,7 @@ export function ChatWorkspace({
   onUpdateProvider,
   onCancelProviderUpdate,
   onOpenProviderUpdateInstructions,
+  onOpenResume,
   onUsageDisplayModeChange,
   onStop,
   onFollowUpSubagent,
@@ -264,17 +265,15 @@ export function ChatWorkspace({
   const goalLoading = goal?.loading ?? false;
   const goalBusy = goal?.busy ?? false;
   const goalError = goal?.error ?? null;
-  const goalControl = useMemo(() => hasGoalControl ? (
-    <ChatGoalControl
-      workflow={goalWorkflow}
-      loading={goalLoading}
-      busy={goalBusy}
-      error={goalError}
-      onRetry={retryGoal}
-      onSetGoal={setChatGoal}
-      onClearGoal={clearChatGoal}
-    />
-  ) : null, [
+  const goalControl = useMemo<ChatGoalControlProps | null>(() => hasGoalControl ? ({
+    workflow: goalWorkflow,
+    loading: goalLoading,
+    busy: goalBusy,
+    error: goalError,
+    onRetry: retryGoal,
+    onSetGoal: setChatGoal,
+    onClearGoal: clearChatGoal,
+  }) : null, [
     clearChatGoal,
     goalBusy,
     goalError,
@@ -297,6 +296,7 @@ export function ChatWorkspace({
   navigationRef.current = activeNavigation;
   const readerIntentRef = useRef(false);
   const showJump = activeNavigation.mode === "reading-history";
+  const pendingInputRequest = inputRequests.at(-1) ?? null;
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
   const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${subagents.length}:${subagents.at(-1)?.updatedAt ?? ""}:${plans.length}:${checkpoints.length}:${turnGitArtifacts.length}:${turnGitArtifacts.at(-1)?.status ?? ""}:${turnGitArtifacts.at(-1)?.capturedAt ?? ""}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
 
@@ -356,6 +356,22 @@ export function ChatWorkspace({
     });
     performScrollToLatest(behavior);
   }, [clearReaderIntent, conversationId, performScrollToLatest]);
+
+  const revealPendingInput = useCallback((): void => {
+    if (!pendingInputRequest) return;
+    let remainingFrames = 4;
+    const reveal = (): boolean => {
+      if (revealAgentInputRequest(pendingInputRequest.id)) return true;
+      remainingFrames -= 1;
+      if (remainingFrames > 0) {
+        window.requestAnimationFrame(() => reveal());
+      }
+      return false;
+    };
+    reveal();
+    scrollToLatest("auto");
+    window.requestAnimationFrame(() => reveal());
+  }, [pendingInputRequest, scrollToLatest]);
 
   useLayoutEffect(() => {
     clearReaderIntent();
@@ -607,6 +623,28 @@ export function ChatWorkspace({
       {showJump && <div className="timeline-follow-controls"><button type="button" onClick={() => scrollToLatest("auto")}><ArrowDown size={14} />Jump to latest</button></div>}
 
       <div ref={composerRegionRef} className="composer-region">
+        {pendingInputRequest && (
+          <div
+            className="pending-input-notice"
+            role="status"
+            aria-live="polite"
+          >
+            <MessageCircleQuestion size={14} aria-hidden="true" />
+            <span>
+              <strong>Agent needs your answer</strong>
+              <small>{pendingInputRequest.questions.length === 1
+                ? "1 question is waiting"
+                : `${pendingInputRequest.questions.length} questions are waiting`}</small>
+            </span>
+            <button
+              type="button"
+              aria-controls={`agent-input-request-${pendingInputRequest.id}`}
+              onClick={revealPendingInput}
+            >
+              Answer
+            </button>
+          </div>
+        )}
         <ProviderMaintenanceNotice
           providerLabel={providers.find(({ id }) =>
             id === conversation.providerId)?.label ?? conversation.providerId}
@@ -629,7 +667,7 @@ export function ChatWorkspace({
           selectedSkillIds={selectedSkillIds}
           skillsLoading={skillsLoading}
           skillsError={skillsError}
-          goalControl={goalControl}
+          goal={goalControl}
           promptContext={promptContext}
           disabled={!conversation}
           sending={sending}
@@ -653,6 +691,7 @@ export function ChatWorkspace({
           onOpenProviderSetup={onOpenProviderSetup}
           onOpenBackendSetup={onOpenBackendSetup}
           onProbeBackendProfile={onProbeBackendProfile}
+          onOpenResume={onOpenResume}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           onStop={onStop}
           onClearPromptContext={onClearPromptContext}

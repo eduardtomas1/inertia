@@ -103,6 +103,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
 
   return (
     <section
+      id={`agent-input-request-${request.id}`}
       className="agent-request-card agent-input-card is-question"
       role="region"
       aria-busy={busy}

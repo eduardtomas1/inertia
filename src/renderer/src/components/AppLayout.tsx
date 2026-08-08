@@ -111,7 +111,7 @@ interface AppLayoutProps {
   providerQuotaNotices: ProviderQuotaNoticeController;
   workspaceLayout: WorkspaceLayout;
   view: "workspace" | "settings";
-  setView: Dispatch<SetStateAction<"workspace" | "settings">>;
+  setView: (view: "workspace" | "settings") => void;
   busyAction: string | null;
   visibleError: string | null;
   setActionError: Dispatch<SetStateAction<string | null>>;
@@ -134,6 +134,8 @@ interface AppLayoutProps {
   projectActions: ProjectAction[];
   reviewStates: CommitDialogProps["reviewStates"];
   structuredDiff: CommitDialogProps["diff"];
+  structuredDiffParsing: CommitDialogProps["diffParsing"];
+  structuredDiffError: CommitDialogProps["diffError"];
   multiSpawn: MultiSpawnController;
   scene: WorkspaceSceneProps;
   providerAuth: Parameters<typeof AppStatusOverlays>[0]["providerAuth"];
@@ -172,6 +174,8 @@ export function AppLayout({
   projectActions,
   reviewStates,
   structuredDiff,
+  structuredDiffParsing,
+  structuredDiffError,
   multiSpawn,
   scene,
   providerAuth,
@@ -474,6 +478,8 @@ export function AppLayout({
             status={gitStatus}
             reviewStates={reviewStates}
             diff={structuredDiff}
+            diffParsing={structuredDiffParsing}
+            diffError={structuredDiffError}
             busy={busyAction === "git.commit" || busyAction === "git.push"}
             onClose={() => setCommitDialogOpen(false)}
             onCommit={async (...args) => {

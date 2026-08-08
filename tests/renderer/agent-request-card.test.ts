@@ -179,6 +179,7 @@ describe("agent input answers", () => {
     expect(html).toContain(`aria-describedby="input-${input.id}-description"`);
     expect(html).toContain('data-agent-request-kind="input"');
     expect(html).toContain('data-agent-request-state="question"');
+    expect(html).toContain(`id="agent-input-request-${input.id}"`);
     expect(html).toContain('aria-busy="false"');
     expect(html).toContain("<fieldset");
     expect(html).toContain('type="radio"');

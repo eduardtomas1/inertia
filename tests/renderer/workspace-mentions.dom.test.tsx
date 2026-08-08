@@ -200,6 +200,7 @@ describe("useWorkspaceMentions", () => {
           onRefreshProvider={() => undefined}
           onOpenProviderSetup={() => undefined}
           onOpenBackendSetup={() => undefined}
+          onOpenResume={() => undefined}
           onProbeBackendProfile={async () => undefined}
           onUsageDisplayModeChange={() => undefined}
           onStop={async () => undefined}

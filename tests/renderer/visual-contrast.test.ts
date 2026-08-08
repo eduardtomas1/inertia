@@ -229,10 +229,13 @@ describe("visual contrast system", () => {
       /\.model-source-rail-item\.is-selected\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
     );
     expect(css).toMatch(
-      /\.project-row\.is-active\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
+      /\.project-row\.is-active \.project-name,\s*\.project-row\.is-active \.project-icon\s*\{[^}]*color:\s*var\(--accent-strong\);/su,
     );
     expect(css).toMatch(
-      /\.conversation-row\.is-active\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
+      /\.project-row\.is-active \.project-name\s*\{[^}]*font-weight:\s*680;/su,
+    );
+    expect(css).toMatch(
+      /\.conversation-row\.is-active\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--surface-hover\) 72%, transparent\);/su,
     );
   });
 

@@ -10,8 +10,8 @@ import type {
   Project,
   ServerEvent,
 } from "@shared/contracts";
-import { parseUnifiedDiff } from "@shared/diff-review";
 import type { DiffSelection } from "../../components/ChangesPanel";
+import { useParsedUnifiedDiff } from "../useParsedUnifiedDiff";
 import {
   resultEvent,
   type CommandWithoutId,
@@ -73,10 +73,11 @@ export function useWorkspaceReview({
   authorityRef.current = authority;
   const lastDiffReversal = diffReversalsByAuthority.get(authority) ?? null;
 
-  const structuredDiff = useMemo(
-    () => parseUnifiedDiff(gitDiff?.patch ?? ""),
-    [gitDiff?.patch],
-  );
+  const {
+    structured: structuredDiff,
+    parsing: structuredDiffParsing,
+    error: structuredDiffError,
+  } = useParsedUnifiedDiff(gitDiff?.patch ?? "", gitDiff);
 
   useEffect(() => {
     setSelectionReviewAnswer((current) => (
@@ -360,7 +361,14 @@ export function useWorkspaceReview({
   ]);
 
   const generateReviewSummary = useCallback(async () => {
-    if (!project || !conversation || structuredDiff.files.length === 0) return;
+    if (!project || !conversation) return;
+    if (structuredDiffParsing) {
+      throw new Error("The complete diff is still being prepared.");
+    }
+    if (structuredDiffError) {
+      throw new Error(structuredDiffError);
+    }
+    if (structuredDiff.files.length === 0) return;
     await run("review.summary.generate", {
       type: "review.summary.generate",
       payload: {
@@ -370,7 +378,15 @@ export function useWorkspaceReview({
         ignoreWhitespace,
       },
     });
-  }, [conversation, ignoreWhitespace, project, run, structuredDiff]);
+  }, [
+    conversation,
+    ignoreWhitespace,
+    project,
+    run,
+    structuredDiff,
+    structuredDiffError,
+    structuredDiffParsing,
+  ]);
 
   const cancelReviewSummary = useCallback(async () => {
     if (!conversation) return;
@@ -387,6 +403,8 @@ export function useWorkspaceReview({
     selectionReviewAnswer,
     setSelectionReviewAnswer,
     structuredDiff,
+    structuredDiffParsing,
+    structuredDiffError,
     reviewSummary,
     reviewStates,
     reviewNotes,

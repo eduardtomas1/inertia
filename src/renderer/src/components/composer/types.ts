@@ -15,7 +15,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
-import type { ReactNode } from "react";
+import type { ChatGoalControlProps } from "../ChatGoalControl";
 
 export interface ComposerProps {
   conversation: Conversation;
@@ -36,7 +36,7 @@ export interface ComposerProps {
   skillsLoading: boolean;
   skillsError: string | null;
   promptContext?: string | null;
-  goalControl?: ReactNode;
+  goal?: ChatGoalControlProps | null;
   onSend: (
     message: string,
     attachments: ChatAttachment[],
@@ -72,6 +72,7 @@ export interface ComposerProps {
   onOpenBackendSetup: (profileId: string) => void;
   onProbeBackendProfile: (profileId: string, modelId: string) => Promise<void>;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
+  onOpenResume: () => void;
   onStop: () => Promise<void>;
   onClearPromptContext?: () => void;
 }

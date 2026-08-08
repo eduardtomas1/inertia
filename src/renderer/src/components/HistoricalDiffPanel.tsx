@@ -5,7 +5,7 @@ import type {
   DiffFile,
   TurnGitDiffSnapshot,
 } from "@shared/contracts";
-import { parseUnifiedDiff } from "@shared/diff-review";
+import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 
 export interface HistoricalDiffPanelProps {
   diff: TurnGitDiffSnapshot;
@@ -54,7 +54,7 @@ export function HistoricalDiffPanel({
   onOpenFile,
   onShowCurrentChanges,
 }: HistoricalDiffPanelProps): React.JSX.Element {
-  const structured = parseUnifiedDiff(diff.patch);
+  const { structured, parsing, error } = useParsedUnifiedDiff(diff.patch, diff);
   const selectedFile = selectedPath
     ? structured.files.find(({ path }) => path === selectedPath) ?? null
     : structured.files[0] ?? null;
@@ -86,7 +86,15 @@ export function HistoricalDiffPanel({
         </div>
       )}
 
-      {diff.files.length === 0 ? (
+      {error ? (
+        <div className="panel-empty changes-empty" role="alert">
+          <GitCompareArrows size={22} />
+          <h3>Historical diff unavailable</h3>
+          <p>{error}</p>
+        </div>
+      ) : parsing ? (
+        <div className="panel-loading"><span>Parsing historical diff…</span></div>
+      ) : diff.files.length === 0 ? (
         <div className="panel-empty changes-empty">
           <GitCompareArrows size={22} />
           <h3>No files changed by this turn</h3>

@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   runtimeConversationReference,
+  terminalResumeDirectory,
   visibleWorkspaceConversation,
+  workspaceDirectoryIdentity,
 } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import {
   draftWorkspaceToolsUnavailableReason,
@@ -35,6 +37,26 @@ describe("runtime conversation references", () => {
     expect(runtimeConversationReference(conversation)).toEqual({
       conversationId: conversation.id,
     });
+  });
+
+  it("matches provider-resume directories across Windows path spelling", () => {
+    expect(workspaceDirectoryIdentity("C:\\Work\\Project\\")).toBe(
+      workspaceDirectoryIdentity("c:/work/project"),
+    );
+    expect(workspaceDirectoryIdentity("/Work/Project")).not.toBe(
+      workspaceDirectoryIdentity("/work/project"),
+    );
+  });
+
+  it("uses the visible draft project directory for provider resume choices", () => {
+    expect(terminalResumeDirectory(
+      { worktreePath: null },
+      { normalizedPath: "/workspace/inertia" },
+    )).toBe("/workspace/inertia");
+    expect(terminalResumeDirectory(
+      { worktreePath: "/workspace/inertia/.worktrees/draft" },
+      { normalizedPath: "/workspace/inertia" },
+    )).toBe("/workspace/inertia/.worktrees/draft");
   });
 
   it("keeps a reconciling draft visible over its empty runtime shell", () => {
@@ -102,10 +124,59 @@ describe("runtime conversation references", () => {
     );
     const discard = createConversation.indexOf("discardDraftConversation()");
     const createRequest = createConversation.indexOf(
-      'run("conversation.create"',
+      'selectionCommandQueue("conversation.create"',
     );
 
     expect(createRequest).toBeGreaterThan(-1);
     expect(discard).toBeGreaterThan(createRequest);
+  });
+
+  it("cancels judge handoff before route-created chat selection", () => {
+    const routeCreation = appSource.slice(
+      appSource.indexOf("const createConversationForSelection ="),
+      appSource.indexOf("const respondToApproval ="),
+    );
+    const generationAdvance = routeCreation.indexOf(
+      "conversationSelectionGenerationRef.current = selectionGeneration",
+    );
+    const createRequest = routeCreation.indexOf(
+      'run("conversation.create"',
+    );
+    const selectionRequest = routeCreation.indexOf(
+      "await selectConversationCommand(",
+    );
+
+    expect(generationAdvance).toBeGreaterThan(-1);
+    expect(createRequest).toBeGreaterThan(generationAdvance);
+    expect(selectionRequest).toBeGreaterThan(createRequest);
+    expect(routeCreation.match(
+      /selectionGeneration !== conversationSelectionGenerationRef\.current/g,
+    )).toHaveLength(2);
+  });
+
+  it("routes every user command that can replace active workspace authority", () => {
+    const authorityCommands = appSource.slice(
+      appSource.indexOf("export function commandMayChangeWorkspaceAuthority"),
+      appSource.indexOf("export default function App"),
+    );
+    for (const commandType of [
+      "project.create",
+      "project.select",
+      "project.remove",
+      "conversation.select",
+      "conversation.create",
+      "conversation.archive",
+      "conversation.delete",
+    ]) {
+      expect(authorityCommands).toContain(`case "${commandType}"`);
+    }
+    expect(appSource).toContain("runNavigationCommand: runUserCommand");
+    expect(appSource).toContain("run: runUserCommand,");
+    expect(appSource).toContain(
+      "sendMessage: sendMessageWithWorkspaceAuthority",
+    );
+    expect(appSource).toContain(
+      "conversationSelectionGenerationRef.current += 1;",
+    );
   });
 });

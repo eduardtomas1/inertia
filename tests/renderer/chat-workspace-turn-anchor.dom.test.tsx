@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatWorkspace } from "../../src/renderer/src/components/ChatWorkspace";
 import type {
   AgentWorkflowState,
+  AgentInputRequest,
   ChatMessage,
   Conversation,
   Project,
@@ -43,8 +44,21 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
 });
 
 vi.mock("../../src/renderer/src/components/ResponseTimeline", () => ({
-  ResponseTimeline: ({ turnAnchorId }: { turnAnchorId: string | null }) => (
-    <div data-testid="turn-anchor-projection">{turnAnchorId ?? "none"}</div>
+  ResponseTimeline: ({
+    turnAnchorId,
+    inputRequests,
+  }: {
+    turnAnchorId: string | null;
+    inputRequests: AgentInputRequest[];
+  }) => (
+    <>
+      <div data-testid="turn-anchor-projection">{turnAnchorId ?? "none"}</div>
+      {inputRequests.map((request) => (
+        <section id={`agent-input-request-${request.id}`} key={request.id}>
+          <input aria-label={request.questions[0]?.question} />
+        </section>
+      ))}
+    </>
   ),
 }));
 
@@ -154,6 +168,7 @@ function workspaceProps(
     onRefreshProvider: () => undefined,
     onOpenProviderSetup: () => undefined,
     onOpenBackendSetup: () => undefined,
+    onOpenResume: () => undefined,
     onProbeBackendProfile: async () => undefined,
     onRefreshProviderMaintenance: async () => undefined,
     onUpdateProvider: async () => undefined,
@@ -174,6 +189,37 @@ afterEach(() => {
 });
 
 describe("draft turn anchoring", () => {
+  it("keeps a pending provider question actionable beside the composer", async () => {
+    const request: AgentInputRequest = {
+      id: "question-1",
+      providerId: "codex",
+      conversationId: "conversation-1",
+      runId: "run-1",
+      turnId: "turn-1",
+      questions: [{
+        id: "scope",
+        header: "Scope",
+        question: "Which module should change?",
+        isOther: false,
+        isSecret: false,
+        allowMultiple: false,
+        options: [],
+      }],
+      autoResolutionMs: null,
+    };
+    HTMLElement.prototype.scrollTo = vi.fn();
+    render(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-1"), async () => null)}
+        inputRequests={[request]}
+      />,
+    );
+
+    expect(screen.getByText("Agent needs your answer")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Answer" }))
+      .toHaveAttribute("aria-controls", "agent-input-request-question-1");
+  });
+
   it("projects the accepted turn after the draft becomes server-owned", async () => {
     const draft = conversation("draft-conversation");
     const persisted = conversation("conversation-1");

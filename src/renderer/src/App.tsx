@@ -317,7 +317,6 @@ export default function App(): React.JSX.Element {
   });
   const sendMessage = draftConversation.sendFromComposer;
   const updateConversation = draftConversation.updateConversation;
-  const clearDraftConversation = draftConversation.clear;
   const discardDraftConversation = draftConversation.discard;
   const workflowConversation = agentWorkflowTargetConversation(
     conversation,
@@ -467,7 +466,6 @@ export default function App(): React.JSX.Element {
   };
   const selectProject = (nextProject: Project) => {
     if (nextProject.id === project?.id) return;
-    clearDraftConversation();
     void run("project.select", {
       type: "project.select",
       payload: { projectId: nextProject.id },
@@ -487,7 +485,6 @@ export default function App(): React.JSX.Element {
       }, 0);
       return;
     }
-    clearDraftConversation();
     const nextSplitConversationId = splitConversationAfterPrimaryChange(
       conversation,
       nextConversation,
@@ -515,7 +512,6 @@ export default function App(): React.JSX.Element {
     });
   }, [
     conversation,
-    clearDraftConversation,
     run,
     splitConversation,
     updateSplitConversationId,
@@ -574,7 +570,6 @@ export default function App(): React.JSX.Element {
     location: NewConversationLocation = { kind: "defaults" },
   ) => {
     if (!targetProject) return;
-    discardDraftConversation();
     if (!connection.snapshot) return;
     const payload = defaultConversationPayloadForProject(
       connection.snapshot,
@@ -588,7 +583,11 @@ export default function App(): React.JSX.Element {
         type: "conversation.create",
         payload,
       }))
-      .then(() => { setView("workspace"); setSidebarOpen(false); })
+      .then(() => {
+        discardDraftConversation();
+        setView("workspace");
+        setSidebarOpen(false);
+      })
       .catch(() => undefined);
   };
   useGlobalShortcuts({

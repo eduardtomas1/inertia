@@ -477,7 +477,10 @@ export function createSourceControlCommandHandler(
       case "git.branches": {
         const deadlineAt = Date.now() + GIT_READ_OPERATION_TIMEOUT_MS;
         const branches = await listBranches(
-          dependencies.workspacePath(command.payload.projectId),
+          dependencies.workspacePath(
+            command.payload.projectId,
+            command.payload.conversationId,
+          ),
           { deadlineAt },
         );
         dependencies.send(socket, {
@@ -498,12 +501,16 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.branch.create": {
+        const path = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
         const result = await dependencies.workspaceRuns.trackSourceControl(
           "Create branch",
           command.payload.projectId,
-          undefined,
+          command.payload.conversationId,
           async () => await createBranch(
-            dependencies.workspacePath(command.payload.projectId),
+            path,
             command.payload.name,
           ),
         );
@@ -519,12 +526,16 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.branch.switch": {
+        const path = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
         const result = await dependencies.workspaceRuns.trackSourceControl(
           "Switch branch",
           command.payload.projectId,
-          undefined,
+          command.payload.conversationId,
           async () => await switchBranch(
-            dependencies.workspacePath(command.payload.projectId),
+            path,
             command.payload.name,
           ),
         );
@@ -592,17 +603,16 @@ export function createSourceControlCommandHandler(
         dependencies.broadcastSnapshot();
         return "handled";
       }
-      case "git.pull":
+      case "git.pull": {
+        const path = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
         await dependencies.workspaceRuns.trackSourceControl(
           "Pull changes",
           command.payload.projectId,
           command.payload.conversationId,
-          async () => await pullRepository(
-            dependencies.workspacePath(
-              command.payload.projectId,
-              command.payload.conversationId,
-            ),
-          ),
+          async () => await pullRepository(path),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -613,6 +623,7 @@ export function createSourceControlCommandHandler(
           },
         });
         return "handled";
+      }
       case "git.commit": {
         const path = dependencies.workspacePath(
           command.payload.projectId,
@@ -654,17 +665,16 @@ export function createSourceControlCommandHandler(
         dependencies.broadcastSnapshot();
         return "handled";
       }
-      case "git.push":
+      case "git.push": {
+        const path = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
         await dependencies.workspaceRuns.trackSourceControl(
           "Push branch",
           command.payload.projectId,
           command.payload.conversationId,
-          async () => await pushCurrentBranch(
-            dependencies.workspacePath(
-              command.payload.projectId,
-              command.payload.conversationId,
-            ),
-          ),
+          async () => await pushCurrentBranch(path),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -675,17 +685,17 @@ export function createSourceControlCommandHandler(
           },
         });
         return "handled";
+      }
       case "git.pr.open": {
+        const path = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
         const url = await dependencies.workspaceRuns.trackSourceControl(
           "Prepare pull request",
           command.payload.projectId,
           command.payload.conversationId,
-          async () => await getPullRequestCreateUrl(
-            dependencies.workspacePath(
-              command.payload.projectId,
-              command.payload.conversationId,
-            ),
-          ),
+          async () => await getPullRequestCreateUrl(path),
         );
         dependencies.send(socket, {
           type: "request.result",

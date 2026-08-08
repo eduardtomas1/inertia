@@ -32,6 +32,32 @@ describe("workspace Git command contracts", () => {
     });
   });
 
+  it("keeps branch operations scoped to the selected chat checkout", () => {
+    for (const command of [
+      {
+        type: "git.branches",
+        requestId,
+        payload: { projectId, conversationId },
+      },
+      {
+        type: "git.branch.create",
+        requestId,
+        payload: {
+          projectId,
+          conversationId,
+          name: "feature/chat-checkout",
+        },
+      },
+      {
+        type: "git.branch.switch",
+        requestId,
+        payload: { projectId, conversationId, name: "main" },
+      },
+    ]) {
+      expect(clientCommandSchema.parse(command)).toMatchObject(command);
+    }
+  });
+
   it("requires repository identity for workspace diffs and allows it on read-only review questions", () => {
     expect(clientCommandSchema.safeParse({
       type: "git.workspace.diff",

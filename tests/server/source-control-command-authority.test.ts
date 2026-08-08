@@ -1,0 +1,49 @@
+import type WebSocket from "ws";
+import { describe, expect, it, vi } from "vitest";
+
+import { createSourceControlCommandHandler } from "../../src/server/runtime/commands/source-control-commands";
+import type { SourceControlCommandDependencies } from "../../src/server/runtime/commands/source-control-commands";
+import { clientCommandSchema } from "../../src/shared/contracts";
+
+const projectId = "11111111-1111-4111-8111-111111111111";
+const conversationId = "22222222-2222-4222-8222-222222222222";
+
+describe("source-control command authority", () => {
+  it.each([
+    ["git.branch.create", { name: "feature/scoped" }],
+    ["git.branch.switch", { name: "main" }],
+    ["git.pull", {}],
+    ["git.commit", { message: "Scoped commit", paths: ["README.md"] }],
+    ["git.push", {}],
+    ["git.pr.open", {}],
+  ] as const)("validates chat ownership before tracking %s", async (
+    type,
+    extra,
+  ) => {
+    const authorityError = new Error("The thread does not belong to this project.");
+    const workspacePath = vi.fn(() => {
+      throw authorityError;
+    });
+    const trackSourceControl = vi.fn(async (
+      _label: string,
+      _projectId: string,
+      _conversationId: string | undefined,
+      action: () => Promise<unknown>,
+    ) => await action());
+    const handler = createSourceControlCommandHandler({
+      workspacePath,
+      workspaceRuns: { trackSourceControl },
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type,
+      requestId: crypto.randomUUID(),
+      payload: { projectId, conversationId, ...extra },
+    });
+
+    await expect(handler({} as WebSocket, command)).rejects.toBe(
+      authorityError,
+    );
+    expect(workspacePath).toHaveBeenCalledWith(projectId, conversationId);
+    expect(trackSourceControl).not.toHaveBeenCalled();
+  });
+});

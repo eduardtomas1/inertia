@@ -220,7 +220,7 @@ export const gitCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("git.branches"),
-      payload: z.object({ projectId: z.string().uuid() }).strict(),
+      payload: z.object(projectWithOptionalConversation).strict(),
     })
     .strict(),
   z
@@ -228,7 +228,7 @@ export const gitCommandSchemas = [
       ...requestBase,
       type: z.literal("git.branch.create"),
       payload: z.object({
-        projectId: z.string().uuid(),
+        ...projectWithOptionalConversation,
         name: z.string().trim().min(1).max(255),
       }).strict(),
     })
@@ -238,7 +238,7 @@ export const gitCommandSchemas = [
       ...requestBase,
       type: z.literal("git.branch.switch"),
       payload: z.object({
-        projectId: z.string().uuid(),
+        ...projectWithOptionalConversation,
         name: z.string().trim().min(1).max(255),
       }).strict(),
     })

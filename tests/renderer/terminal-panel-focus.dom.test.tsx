@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TerminalPanel } from "../../src/renderer/src/components/TerminalPanel";
-import type { ServerEvent } from "../../src/shared/contracts";
+import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
 
 const terminalState = vi.hoisted(() => ({
   textarea: null as HTMLTextAreaElement | null,
@@ -144,5 +144,84 @@ describe("TerminalPanel focus lifecycle", () => {
     });
 
     expect(paletteSearch).toHaveFocus();
+  });
+
+  it("does not attach a delayed project action to a newly selected chat", async () => {
+    let settleOldAction: ((event: ServerEvent) => void) | undefined;
+    const sendCommand = vi.fn((command: ClientCommand): Promise<ServerEvent> => {
+      if (command.type === "terminal.create") {
+        const owner = command.payload.projectId === "project-1"
+          ? "alpha"
+          : "beta";
+        return Promise.resolve({
+          type: "terminal.created",
+          requestId: command.requestId,
+          terminalId: `terminal-${owner}`,
+        });
+      }
+      if (command.type === "project.action.run") {
+        return new Promise((resolve) => {
+          settleOldAction = resolve;
+        });
+      }
+      return Promise.resolve({
+        type: "request.ok",
+        requestId: command.requestId,
+      });
+    });
+    const onActionStarted = vi.fn();
+    const view = render(
+      <TerminalPanel
+        projectId="project-1"
+        conversationId="conversation-1"
+        projectName="Alpha"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        actionId="dev"
+        onActionStarted={onActionStarted}
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(sendCommand.mock.calls.some(
+        ([command]) => command.type === "project.action.run",
+      )).toBe(true);
+    });
+    view.rerender(
+      <TerminalPanel
+        projectId="project-2"
+        conversationId="conversation-2"
+        projectName="Beta"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        actionId={null}
+        onActionStarted={onActionStarted}
+        onClose={() => undefined}
+      />,
+    );
+    await waitFor(() => {
+      expect(document.querySelector(".terminal-panel"))
+        .toHaveAttribute("data-terminal-id", "terminal-beta");
+    });
+
+    await act(async () => {
+      settleOldAction?.({
+        type: "terminal.created",
+        requestId: "old-action-request",
+        terminalId: "terminal-old-action",
+      });
+      await Promise.resolve();
+    });
+
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", "terminal-beta");
+    expect(onActionStarted).not.toHaveBeenCalled();
   });
 });

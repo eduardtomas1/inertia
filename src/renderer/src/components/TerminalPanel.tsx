@@ -66,6 +66,7 @@ function TerminalSession({
   const terminalIdRef = useRef<string | null>(null);
   const managedActionTerminalRef = useRef(false);
   const actionInFlightRef = useRef<string | null>(null);
+  const ownerRef = useRef(`${projectId}:${conversationId ?? ""}`);
   const pendingOutputRef = useRef(new Map<string, string>());
   const initialOptionsRef = useRef({ fontSize, theme });
   const lastSizeRef = useRef({ cols: 0, rows: 0 });
@@ -74,6 +75,7 @@ function TerminalSession({
   const [sessionState, setSessionState] = useState<"starting" | "ready" | "closed" | "error">("starting");
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [terminalId, setTerminalId] = useState<string | null>(null);
+  ownerRef.current = `${projectId}:${conversationId ?? ""}`;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -267,8 +269,19 @@ function TerminalSession({
   }, [conversationId, instanceReady, projectId, projectName, sendCommand, sessionKey, status]);
 
   useEffect(() => {
-    if (!actionId || actionInFlightRef.current === actionId || sessionState !== "ready" || status !== "online") return;
-    actionInFlightRef.current = actionId;
+    const owner = `${projectId}:${conversationId ?? ""}`;
+    const actionIdentity = `${owner}:${actionId ?? ""}`;
+    if (
+      !actionId
+      || actionInFlightRef.current === actionIdentity
+      || sessionState !== "ready"
+      || status !== "online"
+    ) return;
+    actionInFlightRef.current = actionIdentity;
+    const ownsResponse = (): boolean => (
+      ownerRef.current === owner
+      && actionInFlightRef.current === actionIdentity
+    );
     const size = {
       cols: Math.max(20, terminalRef.current?.cols ?? lastSizeRef.current.cols ?? 80),
       rows: Math.max(4, terminalRef.current?.rows ?? lastSizeRef.current.rows ?? 24),
@@ -279,6 +292,13 @@ function TerminalSession({
     void sendCommand(command({ type: "project.action.run", payload: { projectId, conversationId, actionId, ...size } }))
       .then((event) => {
         if (event.type !== "terminal.created") throw new Error("The action terminal returned an unexpected response.");
+        if (!ownsResponse()) {
+          if (actionInFlightRef.current === actionIdentity) {
+            actionInFlightRef.current = null;
+          }
+          pendingOutputRef.current.delete(event.terminalId);
+          return;
+        }
         const previousId = terminalIdRef.current;
         const previousWasManagedAction = managedActionTerminalRef.current;
         terminalIdRef.current = event.terminalId;
@@ -296,6 +316,12 @@ function TerminalSession({
         onActionStarted?.();
       })
       .catch((error) => {
+        if (!ownsResponse()) {
+          if (actionInFlightRef.current === actionIdentity) {
+            actionInFlightRef.current = null;
+          }
+          return;
+        }
         setSessionError(error instanceof Error ? error.message : "The project action could not be started.");
         setSessionState("error");
         actionInFlightRef.current = null;

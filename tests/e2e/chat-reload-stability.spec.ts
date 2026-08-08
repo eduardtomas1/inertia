@@ -36,6 +36,10 @@ test.beforeAll(async () => {
             conversation.id,
             `${pane} reconnect row ${index.toString().padStart(2, "0")} — keep this transcript mounted while the runtime restarts.`,
             index % 2 === 0 ? "user" : "assistant",
+            [],
+            null,
+            undefined,
+            { activateConversation: false },
           );
         }
       }

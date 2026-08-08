@@ -62,6 +62,8 @@ type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 type ActivityActions = ReturnType<typeof useActivityActions>;
 
+const ignoreLatestContentVisibility = (): void => undefined;
+
 export interface SplitWorkspaceSceneController {
   scene: WorkspaceSceneProps["splitScene"];
   activityActions: ActivityActions;
@@ -226,6 +228,7 @@ export function useSplitWorkspaceScene({
     refreshVersion: gitRefreshVersion,
     request,
     run,
+    subscribe: connection.subscribe,
     setActionError,
     setActiveTool: layout.setActiveTool,
     loadGitStatusOnMount: Boolean(splitConversation && splitProject),
@@ -408,7 +411,7 @@ export function useSplitWorkspaceScene({
       : null,
     actions: sceneActions,
     setActionError,
-    setLatestContentVisible: () => undefined,
+    setLatestContentVisible: ignoreLatestContentVisibility,
   }), [
     activityActions,
     appUpdate,

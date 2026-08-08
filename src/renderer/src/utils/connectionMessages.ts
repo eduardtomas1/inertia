@@ -28,7 +28,18 @@ export interface PendingConnectionRequest {
   resolve: (event: ServerEvent) => void;
   reject: (error: Error) => void;
   timeout: number;
+  timedOut?: boolean;
+  authoritativePublicationReceived?: boolean;
+  awaitsWorkspaceGitPublication?: boolean;
+  timeoutDelivery: Exclude<RuntimeCommandDelivery, "not-sent">;
 }
+
+export type PendingConnectionSettlement =
+  | "settled"
+  | "late"
+  | "late-awaiting-publication"
+  | "late-published"
+  | null;
 
 function isServerEvent(value: unknown): value is ServerEvent {
   return Boolean(
@@ -81,23 +92,30 @@ export function settlePendingConnectionRequest(
   event: ServerEvent,
   pendingRequests: Map<string, PendingConnectionRequest>,
   clearPendingTimeout: (timeout: number) => void,
-): boolean {
+): PendingConnectionSettlement {
   if (
     event.type !== "request.error"
     && event.type !== "request.ok"
     && event.type !== "request.result"
     && event.type !== "terminal.created"
   ) {
-    return false;
+    return null;
   }
   const pending = pendingRequests.get(event.requestId);
-  if (!pending) return false;
+  if (!pending) return null;
   clearPendingTimeout(pending.timeout);
   pendingRequests.delete(event.requestId);
+  if (pending.timedOut) {
+    if (pending.authoritativePublicationReceived) return "late-published";
+    if (pending.awaitsWorkspaceGitPublication) {
+      return "late-awaiting-publication";
+    }
+    return "late";
+  }
   if (event.type === "request.error") {
     pending.reject(new RuntimeCommandError(event.message, "rejected"));
   } else {
     pending.resolve(event);
   }
-  return true;
+  return "settled";
 }

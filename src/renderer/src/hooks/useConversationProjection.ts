@@ -27,6 +27,60 @@ import { markTestStreamingStage } from "../utils/testStreamingTrace";
 const EMPTY_REASONINGS: AgentReasoning[] = [];
 const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
 const EMPTY_GIT_ARTIFACTS: TurnGitArtifact[] = [];
+const MAX_STREAMING_CHARACTERS = 500_000;
+
+interface FreshHydrationBaseline {
+  conversationId: string;
+  syncCompleted: boolean;
+  streamingTextDelta: string | null;
+  streamingReasoningDelta: string | null;
+  liveMessages: ChatMessage[];
+  liveUsage: ThreadUsageSnapshot | null;
+  liveActivities: AgentActivity[];
+  liveSubagents: SubagentTrace[];
+  nativePlan: AgentPlan | null;
+  effectivePlan: AgentPlan | null;
+  approvals: Map<string, AgentApprovalRequest>;
+  inputs: Map<string, AgentInputRequest>;
+  hydratedApprovals: Set<string>;
+  hydratedInputs: Set<string>;
+}
+
+function sameAgentPlan(
+  left: AgentPlan | null,
+  right: AgentPlan,
+): boolean {
+  return left !== null
+    && left.conversationId === right.conversationId
+    && left.runId === right.runId
+    && left.turnId === right.turnId
+    && left.explanation === right.explanation
+    && JSON.stringify(left.steps) === JSON.stringify(right.steps);
+}
+
+function interactionKey(value: {
+  conversationId: string;
+  id: string;
+}): string {
+  return `${value.conversationId}\0${value.id}`;
+}
+
+function withoutHydratedBaseline<T extends { id: string }>(
+  current: Record<string, T[]>,
+  conversationId: string,
+  baseline: readonly T[],
+): Record<string, T[]> {
+  const existing = current[conversationId];
+  if (!existing || baseline.length === 0) return current;
+  const baselineRecords = new Map(baseline.map((value) => [value.id, value]));
+  const remaining = existing.filter((value) =>
+    baselineRecords.get(value.id) !== value);
+  if (remaining.length === existing.length) return current;
+  const next = { ...current };
+  if (remaining.length > 0) next[conversationId] = remaining;
+  else delete next[conversationId];
+  return next;
+}
 
 function compareCreatedRecords(
   left: { createdAt: string; id: string },
@@ -97,13 +151,30 @@ export function useConversationProjection({
     useState<Record<string, AgentPlan>>({});
   const requestGenerationRef = useRef(0);
   const terminalRefreshPendingRef = useRef(false);
+  const freshHydrationRef = useRef<FreshHydrationBaseline | null>(null);
   const snapshotRef = useRef(snapshot);
   const conversationRef = useRef<ConversationShell | null>(null);
+  const detailStateRef = useRef(detailState);
+  const liveMessagesRef = useRef(liveMessages);
+  const liveUsageRef = useRef(liveUsage);
+  const liveActivitiesRef = useRef(liveActivities);
+  const liveSubagentsRef = useRef(liveSubagents);
+  const pendingApprovalsRef = useRef(pendingApprovals);
+  const pendingInputsRef = useRef(pendingInputs);
+  const nativePlansRef = useRef(nativePlans);
   const enabledRef = useRef(enabled);
   const autoOpenPlanRef = useRef(autoOpenPlan);
   const terminalCallbackRef = useRef(onTerminal);
   const openPlanCallbackRef = useRef(onOpenPlan);
   snapshotRef.current = snapshot;
+  detailStateRef.current = detailState;
+  liveMessagesRef.current = liveMessages;
+  liveUsageRef.current = liveUsage;
+  liveActivitiesRef.current = liveActivities;
+  liveSubagentsRef.current = liveSubagents;
+  pendingApprovalsRef.current = pendingApprovals;
+  pendingInputsRef.current = pendingInputs;
+  nativePlansRef.current = nativePlans;
   enabledRef.current = enabled;
   autoOpenPlanRef.current = autoOpenPlan;
   terminalCallbackRef.current = onTerminal;
@@ -125,6 +196,7 @@ export function useConversationProjection({
   conversationRef.current = conversation;
   useEffect(() => {
     if (enabled) return;
+    freshHydrationRef.current = null;
     terminalRefreshPendingRef.current = false;
     setStreamingText("");
     setStreamingReasoning("");
@@ -214,6 +286,48 @@ export function useConversationProjection({
           result,
           shell,
         ));
+      const hydration = freshHydrationRef.current;
+      if (
+        result.state === "ready"
+        && hydration?.conversationId === conversationId
+      ) {
+        freshHydrationRef.current = null;
+        setStreamingText(hydration.streamingTextDelta ?? "");
+        setStreamingReasoning(hydration.streamingReasoningDelta ?? "");
+        setLiveMessages((current) => withoutHydratedBaseline(
+          current,
+          conversationId,
+          hydration.liveMessages,
+        ));
+        setLiveActivities((current) => withoutHydratedBaseline(
+          current,
+          conversationId,
+          hydration.liveActivities,
+        ));
+        setLiveSubagents((current) => withoutHydratedBaseline(
+          current,
+          conversationId,
+          hydration.liveSubagents,
+        ));
+        setLiveUsage((current) => {
+          if (
+            hydration.liveUsage === null
+            || current[conversationId] !== hydration.liveUsage
+          ) return current;
+          const next = { ...current };
+          delete next[conversationId];
+          return next;
+        });
+        setNativePlans((current) => {
+          if (
+            hydration.nativePlan === null
+            || current[conversationId] !== hydration.nativePlan
+          ) return current;
+          const next = { ...current };
+          delete next[conversationId];
+          return next;
+        });
+      }
       if (
         result.state === "ready"
         && terminalRefreshPendingRef.current
@@ -340,16 +454,83 @@ export function useConversationProjection({
     if (event.type === "server.welcome") {
       requestGenerationRef.current += 1;
       terminalRefreshPendingRef.current = false;
-      setDetailState(null);
-      setStreamingText("");
-      setStreamingReasoning("");
-      setLiveMessages({});
-      setLiveUsage({});
-      setLiveActivities({});
-      setLiveSubagents({});
-      setPendingApprovals([]);
-      setPendingInputs([]);
-      setNativePlans({});
+      const currentDetail = detailStateRef.current;
+      const remainsMounted = Boolean(
+        projectionEnabled
+        && activeConversation
+        && currentDetail?.state === "ready"
+        && currentDetail.conversationId === activeConversation.id
+        && event.snapshot.conversations.some(
+          ({ id }) => id === activeConversation.id,
+        )
+        && (
+          subscriptionOwner === "secondary"
+          || event.snapshot.activeConversationId === activeConversation.id
+        )
+      );
+      if (remainsMounted && activeConversation) {
+        freshHydrationRef.current = {
+          conversationId: activeConversation.id,
+          syncCompleted: false,
+          streamingTextDelta: null,
+          streamingReasoningDelta: null,
+          liveMessages: liveMessagesRef.current[activeConversation.id] ?? [],
+          liveUsage: liveUsageRef.current[activeConversation.id] ?? null,
+          liveActivities:
+            liveActivitiesRef.current[activeConversation.id] ?? [],
+          liveSubagents:
+            liveSubagentsRef.current[activeConversation.id] ?? [],
+          nativePlan: nativePlansRef.current[activeConversation.id] ?? null,
+          effectivePlan:
+            nativePlansRef.current[activeConversation.id]
+            ?? (currentDetail?.state === "ready"
+              ? currentDetail.detail.plans.at(-1) ?? null
+              : null),
+          approvals: new Map(
+            pendingApprovalsRef.current.map((request) => [
+              interactionKey(request),
+              request,
+            ]),
+          ),
+          inputs: new Map(
+            pendingInputsRef.current.map((request) => [
+              interactionKey(request),
+              request,
+            ]),
+          ),
+          hydratedApprovals: new Set(),
+          hydratedInputs: new Set(),
+        };
+      } else {
+        freshHydrationRef.current = null;
+        setDetailState(null);
+        setStreamingText("");
+        setStreamingReasoning("");
+        setLiveMessages({});
+        setLiveUsage({});
+        setLiveActivities({});
+        setLiveSubagents({});
+        setPendingApprovals([]);
+        setPendingInputs([]);
+        setNativePlans({});
+      }
+      return;
+    }
+    if (event.type === "runtime.sync.completed") {
+      const hydration = freshHydrationRef.current;
+      if (hydration) {
+        hydration.syncCompleted = true;
+        setPendingApprovals((current) => current.filter((request) => {
+          const key = interactionKey(request);
+          return !hydration.approvals.has(key)
+            || hydration.hydratedApprovals.has(key);
+        }));
+        setPendingInputs((current) => current.filter((request) => {
+          const key = interactionKey(request);
+          return !hydration.inputs.has(key)
+            || hydration.hydratedInputs.has(key);
+        }));
+      }
       return;
     }
     if (event.type === "conversation.detail.invalidated") {
@@ -362,6 +543,9 @@ export function useConversationProjection({
       return;
     }
     if (event.type === "agent.approval.requested") {
+      freshHydrationRef.current?.hydratedApprovals.add(
+        interactionKey(event.request),
+      );
       setPendingApprovals((current) => [
         ...current.filter(({ id, conversationId }) =>
           id !== event.request.id
@@ -372,6 +556,9 @@ export function useConversationProjection({
         projectionEnabled
         && event.request.conversationId === activeConversation?.id
       ) {
+        if (freshHydrationRef.current) {
+          freshHydrationRef.current.streamingTextDelta = "";
+        }
         setStreamingText("");
       }
       return;
@@ -384,6 +571,9 @@ export function useConversationProjection({
       return;
     }
     if (event.type === "agent.input.requested") {
+      freshHydrationRef.current?.hydratedInputs.add(
+        interactionKey(event.request),
+      );
       setPendingInputs((current) => [
         ...current.filter(({ id, conversationId }) =>
           id !== event.request.id
@@ -394,6 +584,9 @@ export function useConversationProjection({
         projectionEnabled
         && event.request.conversationId === activeConversation?.id
       ) {
+        if (freshHydrationRef.current) {
+          freshHydrationRef.current.streamingTextDelta = "";
+        }
         setStreamingText("");
       }
       return;
@@ -432,16 +625,30 @@ export function useConversationProjection({
           ],
         };
       });
+      if (freshHydrationRef.current) {
+        freshHydrationRef.current.streamingTextDelta = "";
+      }
       setStreamingText("");
       return;
     }
     if (event.type === "agent.plan.updated") {
       if (event.plan.conversationId !== activeConversation?.id) return;
+      const hydration = freshHydrationRef.current;
+      const replayedHydrationPlan = Boolean(
+        hydration
+        && !hydration.syncCompleted
+        && hydration.conversationId === event.plan.conversationId
+        && sameAgentPlan(hydration.effectivePlan, event.plan),
+      );
       setNativePlans((current) => ({
         ...current,
         [event.plan.conversationId]: event.plan,
       }));
       if (event.plan.conversationId === activeConversation?.id) {
+        if (replayedHydrationPlan) return;
+        if (hydration) {
+          hydration.streamingTextDelta = "";
+        }
         setStreamingText("");
         if (autoOpenPlanRef.current) {
           openPlanCallbackRef.current(event.plan.conversationId);
@@ -459,6 +666,9 @@ export function useConversationProjection({
     }
     if (event.type === "agent.activity") {
       if (event.activity.conversationId !== activeConversation?.id) return;
+      if (freshHydrationRef.current) {
+        freshHydrationRef.current.streamingTextDelta = "";
+      }
       setStreamingText("");
       setLiveActivities((current) => {
         const existing = current[event.activity.conversationId] ?? [];
@@ -495,25 +705,42 @@ export function useConversationProjection({
     }
     if (event.type === "agent.started") {
       terminalRefreshPendingRef.current = false;
+      if (freshHydrationRef.current) {
+        freshHydrationRef.current.streamingTextDelta = "";
+        freshHydrationRef.current.streamingReasoningDelta = "";
+      }
       setStreamingText("");
       setStreamingReasoning("");
     }
     if (event.type === "agent.text") {
+      const hydration = freshHydrationRef.current;
+      if (hydration) {
+        hydration.streamingTextDelta = `${
+          hydration.streamingTextDelta ?? ""
+        }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
+      }
       setStreamingText((current) =>
-        `${current}${event.text}`.slice(-500_000));
+        `${current}${event.text}`.slice(-MAX_STREAMING_CHARACTERS));
       markTestStreamingStage("renderer-projection-updated");
     }
     if (event.type === "agent.reasoning") {
+      const hydration = freshHydrationRef.current;
+      if (hydration) {
+        hydration.streamingReasoningDelta = `${
+          hydration.streamingReasoningDelta ?? ""
+        }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
+      }
       setStreamingReasoning((current) =>
-        `${current}${event.text}`.slice(-500_000));
+        `${current}${event.text}`.slice(-MAX_STREAMING_CHARACTERS));
     }
     if (event.type === "agent.completed" || event.type === "agent.failed") {
       terminalRefreshPendingRef.current = true;
       terminalCallbackRef.current();
     }
-  }), [subscribe]);
+  }), [subscribe, subscriptionOwner]);
 
   useEffect(() => {
+    freshHydrationRef.current = null;
     terminalRefreshPendingRef.current = false;
     setStreamingText("");
     setStreamingReasoning("");

@@ -96,12 +96,18 @@ function conversationDetail(conversation: Pick<Conversation, "providerId" | "tit
  */
 export class WorkspaceRunController<Owner> {
   private readonly managedActions = new Map<string, { terminalId: string }>();
+  private readonly sourceControlInFlight = new Map<string, number>();
 
   constructor(
     private readonly store: WorkspaceRunStore,
     private readonly terminals: WorkspaceActionTerminalManager<Owner>,
     private readonly broadcastSnapshot: () => void,
     private readonly isClosed: () => boolean,
+    private readonly broadcastGitInvalidated: (
+      requestId: string,
+      projectId: string,
+      conversationId: string | null,
+    ) => void,
   ) {}
 
   async listActions(cwd: string): Promise<WorkspaceAction[]> {
@@ -243,8 +249,10 @@ export class WorkspaceRunController<Owner> {
     label: string,
     projectId: string,
     conversationId: string | undefined,
+    requestId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
+    const invalidationScope = `${projectId}:${conversationId ?? ""}`;
     const detail = conversationId
       ? conversationDetail(this.store.conversation(conversationId))
       : "Started from the workspace";
@@ -257,19 +265,34 @@ export class WorkspaceRunController<Owner> {
       status: "running",
       port: null,
     });
+    this.sourceControlInFlight.set(
+      invalidationScope,
+      (this.sourceControlInFlight.get(invalidationScope) ?? 0) + 1,
+    );
     this.broadcastSnapshot();
     try {
       const result = await operation();
       this.store.updateWorkspaceRun(activity.id, { status: "succeeded" });
-      this.broadcastSnapshot();
       return result;
     } catch (error) {
       this.store.updateWorkspaceRun(activity.id, {
         status: "failed",
         detail: publicRuntimeError(error),
       });
-      this.broadcastSnapshot();
       throw error;
+    } finally {
+      this.broadcastSnapshot();
+      const remaining = (this.sourceControlInFlight.get(invalidationScope) ?? 1) - 1;
+      if (remaining > 0) {
+        this.sourceControlInFlight.set(invalidationScope, remaining);
+      } else {
+        this.sourceControlInFlight.delete(invalidationScope);
+        this.broadcastGitInvalidated(
+          requestId,
+          projectId,
+          conversationId ?? null,
+        );
+      }
     }
   }
 }

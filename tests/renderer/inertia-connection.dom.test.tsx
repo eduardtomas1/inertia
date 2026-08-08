@@ -366,9 +366,8 @@ describe("useInertiaConnection", () => {
 
     await vi.advanceTimersByTimeAsync(timeoutMs - 15_000);
     expect(runtimeCommandDelivery(timeoutError)).toBe(delivery);
-    expect(socket.close).toHaveBeenCalledTimes(
-      delivery === "ambiguous" ? 1 : 0,
-    );
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
   it("keeps message delivery pending through the server preparation deadline", async () => {
@@ -415,7 +414,94 @@ describe("useInertiaConnection", () => {
         - MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
     );
     expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    const probeRequestId = "44444444-4444-4444-8444-444444444444";
+    const probe = hook.result.current.sendCommand(clientCommandSchema.parse({
+      type: "app.refresh",
+      requestId: probeRequestId,
+    }));
+    expect(socket.send).toHaveBeenCalledTimes(2);
+    socket.dispatchEvent(new MessageEvent("message", {
+      data: JSON.stringify({
+        type: "request.ok",
+        requestId: probeRequestId,
+      }),
+    }));
+    await expect(probe).resolves.toMatchObject({
+      type: "request.ok",
+      requestId: probeRequestId,
+    });
+  });
+
+  it("rehydrates after all in-flight mutations settle past an ambiguous timeout", async () => {
+    const getRuntimeConnection = vi.fn(async () => ({
+      websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+    }));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getRuntimeConnection },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0]!;
+    vi.useFakeTimers();
+
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "22222222-2222-4222-8222-222222222222";
+    let timeoutError: unknown;
+    void hook.result.current.sendCommand(clientCommandSchema.parse({
+      type: "terminal.input",
+      requestId,
+      payload: {
+        terminalId,
+        data: "first",
+      },
+    })).catch((error: unknown) => {
+      timeoutError = error;
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
+    expect(socket.close).not.toHaveBeenCalled();
+
+    const secondRequestId = "44444444-4444-4444-8444-444444444444";
+    const secondMutation = hook.result.current.sendCommand(
+      clientCommandSchema.parse({
+        type: "terminal.input",
+        requestId: secondRequestId,
+        payload: {
+          terminalId,
+          data: "second",
+        },
+      }),
+    );
+    socket.dispatchEvent(new MessageEvent("message", {
+      data: JSON.stringify({
+        type: "request.ok",
+        requestId,
+      }),
+    }));
+
+    expect(socket.close).not.toHaveBeenCalled();
+    socket.dispatchEvent(new MessageEvent("message", {
+      data: JSON.stringify({
+        type: "request.ok",
+        requestId: secondRequestId,
+      }),
+    }));
+    await expect(secondMutation).resolves.toMatchObject({
+      type: "request.ok",
+      requestId: secondRequestId,
+    });
     expect(socket.close).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getRuntimeConnection).toHaveBeenCalledTimes(2);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[1]?.url)
+      .toBe("ws://127.0.0.1:12345/runtime/test");
   });
 
   it.each([

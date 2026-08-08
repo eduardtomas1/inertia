@@ -26,6 +26,7 @@ interface WorkspaceToolsOptions {
   refreshVersion: number;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  subscribe: (listener: (event: ServerEvent) => void) => () => void;
   setActionError: (message: string | null) => void;
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
 }
@@ -58,6 +59,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     refreshVersion: options.refreshVersion,
     request: options.request,
     run: options.run,
+    subscribe: options.subscribe,
     setActionError: options.setActionError,
     enabled,
     loadStatusOnMount: options.loadGitStatusOnMount ?? true,
@@ -82,7 +84,6 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     request: options.request,
     run: options.run,
     setGitDiff: git.setGitDiff,
-    loadGit: git.loadGit,
   });
   const selectWorkspaceFile = files.selectWorkspaceFile;
   const requestWorkspaceEntries = files.requestWorkspaceEntries;

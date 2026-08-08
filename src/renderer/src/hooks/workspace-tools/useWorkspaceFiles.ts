@@ -148,18 +148,28 @@ export function useWorkspaceFiles({
     setFilePreviewError(null);
     setFilesLoading(false);
     setFilePreviewLoading(false);
-    if (!enabled || !project?.id || !online) return;
-    void loadActions();
   }, [
     conversation?.id,
     enabled,
-    loadActions,
-    online,
     project?.id,
   ]);
 
   useEffect(() => {
-    if (!enabled || !project?.id || !online || !loadOnMount) return;
+    fileListRequestGenerationRef.current += 1;
+    filePreviewRequestGenerationRef.current += 1;
+    actionsRequestGenerationRef.current += 1;
+    setFilesLoading(false);
+    setFilePreviewLoading(false);
+    if (!enabled || !project?.id || !online) return;
+    void loadActions();
+  }, [enabled, loadActions, online, project?.id]);
+
+  useEffect(() => {
+    if (!online) {
+      automaticallyLoadedAuthorityRef.current = null;
+      return;
+    }
+    if (!enabled || !project?.id || !loadOnMount) return;
     const authority = `${project.id}\0${conversation?.id ?? ""}`;
     if (automaticallyLoadedAuthorityRef.current === authority) return;
     automaticallyLoadedAuthorityRef.current = authority;

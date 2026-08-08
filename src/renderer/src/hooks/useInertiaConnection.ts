@@ -20,7 +20,10 @@ import {
   type PendingConnectionRequest,
 } from "../utils/connectionMessages";
 import { applyConversationShellEvent } from "../utils/runtimeSnapshotProjection";
-import { runtimeCommandPolicy } from "../utils/runtimeCommandPolicy";
+import {
+  publishesWorkspaceGitCompletion,
+  runtimeCommandPolicy,
+} from "../utils/runtimeCommandPolicy";
 import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
 import { markTestStreamingStage } from "../utils/testStreamingTrace";
 
@@ -56,7 +59,9 @@ export function useInertiaConnection(): InertiaConnection {
   const rejectPending = useCallback((message: string) => {
     for (const pending of pendingRef.current.values()) {
       window.clearTimeout(pending.timeout);
-      pending.reject(new RuntimeCommandError(message, "ambiguous"));
+      if (!pending.timedOut) {
+        pending.reject(new RuntimeCommandError(message, "ambiguous"));
+      }
     }
     pendingRef.current.clear();
   }, []);
@@ -113,6 +118,7 @@ export function useInertiaConnection(): InertiaConnection {
           resumeCursor,
           detailSubscriptionsRef.current.conversationIds(),
         ));
+        let mutationReconciliationPending = false;
         socketRef.current = socket;
 
         socket.addEventListener("open", () => {
@@ -197,11 +203,33 @@ export function useInertiaConnection(): InertiaConnection {
                   : current);
               }
 
-              settlePendingConnectionRequest(
+              if (event.type === "workspace.git.invalidated") {
+                const pending = pendingRef.current.get(event.requestId);
+                if (pending) pending.authoritativePublicationReceived = true;
+              }
+
+              const settlement = settlePendingConnectionRequest(
                 event,
                 pendingRef.current,
                 window.clearTimeout,
               );
+              if (settlement === "late") {
+                // The caller deadline remains truthful, but a mutation that
+                // settles afterward may have changed request-driven state
+                // that has no runtime event (for example, the current Git
+                // branch). Rehydrate only after that ambiguity is confirmed;
+                // an ordinary timeout alone is not a transport failure.
+                mutationReconciliationPending = true;
+              }
+              if (
+                mutationReconciliationPending
+                && ![...pendingRef.current.values()].some(
+                  ({ timeoutDelivery }) => timeoutDelivery === "ambiguous",
+                )
+              ) {
+                mutationReconciliationPending = false;
+                requireAuthoritativeRefresh();
+              }
 
               notifyConnectionListeners(event, listenersRef.current);
             },
@@ -290,21 +318,31 @@ export function useInertiaConnection(): InertiaConnection {
     return new Promise((resolve, reject) => {
       const policy = runtimeCommandPolicy(command.type);
       const timeout = window.setTimeout(() => {
-        pendingRef.current.delete(command.requestId);
-        if (policy.timeoutDelivery === "ambiguous" && socketRef.current === socket) {
-          // Delivery is now ambiguous. Drop the resumable cursor and reconnect
-          // so the next authoritative snapshot can prove whether the command
-          // changed state instead of leaving callers waiting indefinitely.
-          projectionRef.current.reset();
-          if (socket.readyState === WebSocket.OPEN) socket.close();
+        const pending = pendingRef.current.get(command.requestId);
+        if (!pending) return;
+        if (policy.timeoutDelivery === "ambiguous") {
+          pending.timedOut = true;
+        } else {
+          pendingRef.current.delete(command.requestId);
         }
+        // A command deadline is not evidence that the shared transport failed.
+        // Keep the socket alive; an ambiguously delivered command remains
+        // registered so its eventual settlement can trigger reconciliation.
         reject(new RuntimeCommandError(
           "The request took too long to complete.",
           policy.timeoutDelivery,
         ));
       }, policy.timeoutMs);
 
-      pendingRef.current.set(command.requestId, { resolve, reject, timeout });
+      pendingRef.current.set(command.requestId, {
+        resolve,
+        reject,
+        timeout,
+        timeoutDelivery: policy.timeoutDelivery,
+        awaitsWorkspaceGitPublication: publishesWorkspaceGitCompletion(
+          command.type,
+        ),
+      });
       try {
         socket.send(serialized);
       } catch (sendError) {

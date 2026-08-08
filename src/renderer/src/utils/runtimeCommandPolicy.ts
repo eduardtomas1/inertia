@@ -207,3 +207,21 @@ export function runtimeCommandPolicy(
 ): RuntimeCommandPolicy {
   return RUNTIME_COMMAND_POLICIES[type];
 }
+
+const WORKSPACE_GIT_COMPLETION_PUBLICATIONS = new Set<ClientCommand["type"]>([
+  "git.branch.create",
+  "git.branch.switch",
+  "git.commit",
+  "git.pr.open",
+  "git.pull",
+  "git.push",
+  "git.selection.revert",
+  "git.selection.undo",
+  "git.worktree.create",
+]);
+
+export function publishesWorkspaceGitCompletion(
+  type: ClientCommand["type"],
+): boolean {
+  return WORKSPACE_GIT_COMPLETION_PUBLICATIONS.has(type);
+}

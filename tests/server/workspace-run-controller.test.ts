@@ -86,11 +86,13 @@ async function fixture() {
   const conversation = store.createConversation(project.id, "Focused work");
   const terminals = new FakeTerminals();
   const broadcastSnapshot = vi.fn();
+  const broadcastGitInvalidated = vi.fn();
   const controller = new WorkspaceRunController(
     store,
     terminals,
     broadcastSnapshot,
     () => false,
+    broadcastGitInvalidated,
   );
   return {
     root,
@@ -100,6 +102,7 @@ async function fixture() {
     conversation,
     terminals,
     broadcastSnapshot,
+    broadcastGitInvalidated,
     controller,
   };
 }
@@ -236,12 +239,14 @@ describe("workspace run controller", () => {
         "Commit changes",
         runtime.project.id,
         runtime.conversation.id,
+        "11111111-1111-4111-8111-111111111111",
         async () => "commit-id",
       )).resolves.toBe("commit-id");
       await expect(runtime.controller.trackSourceControl(
         "Push branch",
         runtime.project.id,
         undefined,
+        "22222222-2222-4222-8222-222222222222",
         async () => {
           throw new Error("remote unavailable");
         },
@@ -257,6 +262,61 @@ describe("workspace run controller", () => {
         status: "failed",
       });
       expect(runtime.broadcastSnapshot).toHaveBeenCalledTimes(4);
+      expect(runtime.broadcastGitInvalidated.mock.calls).toEqual([
+        [
+          "11111111-1111-4111-8111-111111111111",
+          runtime.project.id,
+          runtime.conversation.id,
+        ],
+        [
+          "22222222-2222-4222-8222-222222222222",
+          runtime.project.id,
+          null,
+        ],
+      ]);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("publishes one authoritative invalidation after overlapping Git mutations settle", async () => {
+    const runtime = await fixture();
+    try {
+      let finishFirst!: () => void;
+      let finishSecond!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      });
+      const secondGate = new Promise<void>((resolve) => {
+        finishSecond = resolve;
+      });
+      const first = runtime.controller.trackSourceControl(
+        "Switch first branch",
+        runtime.project.id,
+        runtime.conversation.id,
+        "33333333-3333-4333-8333-333333333333",
+        async () => await firstGate,
+      );
+      const second = runtime.controller.trackSourceControl(
+        "Switch final branch",
+        runtime.project.id,
+        runtime.conversation.id,
+        "44444444-4444-4444-8444-444444444444",
+        async () => await secondGate,
+      );
+
+      finishFirst();
+      await first;
+      expect(runtime.broadcastGitInvalidated).not.toHaveBeenCalled();
+
+      finishSecond();
+      await second;
+      expect(runtime.broadcastGitInvalidated).toHaveBeenCalledTimes(1);
+      expect(runtime.broadcastGitInvalidated).toHaveBeenCalledWith(
+        "44444444-4444-4444-8444-444444444444",
+        runtime.project.id,
+        runtime.conversation.id,
+      );
     } finally {
       runtime.store.close();
     }

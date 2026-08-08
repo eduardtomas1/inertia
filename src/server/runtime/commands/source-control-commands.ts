@@ -509,6 +509,7 @@ export function createSourceControlCommandHandler(
           "Create branch",
           command.payload.projectId,
           command.payload.conversationId,
+          command.requestId,
           async () => await createBranch(
             path,
             command.payload.name,
@@ -534,6 +535,7 @@ export function createSourceControlCommandHandler(
           "Switch branch",
           command.payload.projectId,
           command.payload.conversationId,
+          command.requestId,
           async () => await switchBranch(
             path,
             command.payload.name,
@@ -577,6 +579,7 @@ export function createSourceControlCommandHandler(
           "Create worktree",
           command.payload.projectId,
           command.payload.conversationId,
+          command.requestId,
           async () => await createWorktree(
             dependencies.store.projectPath(command.payload.projectId),
             target,
@@ -612,6 +615,7 @@ export function createSourceControlCommandHandler(
           "Pull changes",
           command.payload.projectId,
           command.payload.conversationId,
+          command.requestId,
           async () => await pullRepository(path),
         );
         dependencies.send(socket, {
@@ -633,6 +637,7 @@ export function createSourceControlCommandHandler(
           "Commit changes",
           command.payload.projectId,
           command.payload.conversationId,
+          command.requestId,
           async () => await commitChanges(
             path,
             command.payload.message,
@@ -674,6 +679,7 @@ export function createSourceControlCommandHandler(
           "Push branch",
           command.payload.projectId,
           command.payload.conversationId,
+          command.requestId,
           async () => await pushCurrentBranch(path),
         );
         dependencies.send(socket, {
@@ -695,6 +701,7 @@ export function createSourceControlCommandHandler(
           "Prepare pull request",
           command.payload.projectId,
           command.payload.conversationId,
+          command.requestId,
           async () => await getPullRequestCreateUrl(path),
         );
         dependencies.send(socket, {

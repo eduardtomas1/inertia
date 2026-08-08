@@ -274,6 +274,55 @@ describe("runtime sync hub", () => {
     });
   });
 
+  it("replays a Git completion published after the original socket disconnects", () => {
+    const runtime = fixture();
+    runtime.hub.connect("original", { kind: "none" }, {
+      snapshot,
+      approvals: [],
+      inputs: [],
+      plans: [],
+    });
+    runtime.hub.disconnect("original");
+
+    runtime.hub.broadcast({
+      type: "workspace.git.invalidated",
+      requestId: "55555555-5555-4555-8555-555555555555",
+      projectId: "66666666-6666-4666-8666-666666666666",
+      conversationId: CONVERSATION_A,
+    });
+    runtime.hub.connect("replacement", {
+      kind: "resume",
+      runtimeGeneration: GENERATION,
+      afterSequence: 0,
+      conversationIds: [],
+    }, {
+      snapshot,
+      approvals: [],
+      inputs: [],
+      plans: [],
+    });
+
+    expect(runtime.events.get("replacement")).toMatchObject([
+      {
+        type: "runtime.resumed",
+        sync: { latestSequence: 1 },
+      },
+      {
+        type: "runtime.event",
+        sync: { latestSequence: 1 },
+        scope: { kind: "shell" },
+        event: {
+          type: "workspace.git.invalidated",
+          requestId: "55555555-5555-4555-8555-555555555555",
+        },
+      },
+      {
+        type: "runtime.sync.completed",
+        sync: { latestSequence: 1 },
+      },
+    ]);
+  });
+
   it("removes a closed secondary pane before subscribing its replacement", () => {
     const runtime = fixture();
     runtime.hub.connect("split", {

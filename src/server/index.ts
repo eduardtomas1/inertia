@@ -437,6 +437,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     terminals,
     broadcastSnapshot,
     () => closed,
+    (requestId, projectId, conversationId) => broadcast({
+      type: "workspace.git.invalidated",
+      requestId,
+      projectId,
+      conversationId,
+    }),
   );
   isolatedRuns = new IsolatedRunController(
     store,

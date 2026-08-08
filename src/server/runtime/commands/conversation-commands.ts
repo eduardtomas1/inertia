@@ -239,6 +239,7 @@ export function createConversationCommandHandler(
               "Create worktree",
               command.payload.projectId,
               conversation.id,
+              command.requestId,
               async () => await createWorktree(
                 repositoryPath,
                 target,

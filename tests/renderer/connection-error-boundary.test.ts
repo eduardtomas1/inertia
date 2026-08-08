@@ -9,6 +9,7 @@ import {
   runtimeCommandDelivery,
   settlePendingConnectionRequest,
   UNREADABLE_RUNTIME_RESPONSE,
+  type PendingConnectionRequest,
 } from "../../src/renderer/src/utils/connectionMessages";
 
 const runtimeActionsSource = readFileSync(
@@ -39,6 +40,7 @@ describe("renderer error visibility boundary", () => {
         commandError = error;
       },
       timeout: 42,
+      timeoutDelivery: "rejected",
     });
     const receive = (data: unknown): void => {
       try {
@@ -84,6 +86,27 @@ describe("renderer error visibility boundary", () => {
 
     expect(deliver).toThrow(projectionError);
     expect(unreadable).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes late Git results awaiting or preceded by durable publication", () => {
+    const settle = (authoritativePublicationReceived: boolean) => {
+      const pending = new Map<string, PendingConnectionRequest>([["late", {
+        resolve: () => undefined,
+        reject: () => undefined,
+        timeout: 42,
+        timedOut: true,
+        authoritativePublicationReceived,
+        awaitsWorkspaceGitPublication: true,
+        timeoutDelivery: "ambiguous",
+      }]]);
+      return settlePendingConnectionRequest({
+        type: "request.ok",
+        requestId: "late",
+      }, pending, () => undefined);
+    };
+
+    expect(settle(false)).toBe("late-awaiting-publication");
+    expect(settle(true)).toBe("late-published");
   });
 
   it("keeps file hydration local while surfacing an initial Git refresh failure", () => {

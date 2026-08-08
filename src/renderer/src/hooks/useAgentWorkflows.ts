@@ -87,10 +87,18 @@ export function useAgentWorkflows({
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const generationRef = useRef(0);
   const activeConversationId = enabled ? conversationId : null;
+  const activeConversationIdRef = useRef(activeConversationId);
+  const statusRef = useRef(status);
+  const lifecycleRef = useRef<{
+    identity: string | null | undefined;
+    status: ConnectionStatus | undefined;
+  }>({ identity: undefined, status: undefined });
+  activeConversationIdRef.current = activeConversationId;
+  statusRef.current = status;
 
   const load = useCallback(async (providerRefresh = false): Promise<void> => {
-    const targetId = activeConversationId;
-    if (!targetId || status !== "online") return;
+    const targetId = activeConversationIdRef.current;
+    if (!targetId || statusRef.current !== "online") return;
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     setLoading(true);
@@ -124,13 +132,23 @@ export function useAgentWorkflows({
     } finally {
       if (generation === generationRef.current) setLoading(false);
     }
-  }, [activeConversationId, request, status]);
+  }, [request]);
 
   useEffect(() => {
+    const identity = activeConversationId
+      ? `${activeConversationId}\0${routeIdentity ?? ""}`
+      : null;
+    const identityChanged = lifecycleRef.current.identity !== identity;
+    const statusChanged = lifecycleRef.current.status !== status;
+    lifecycleRef.current = { identity, status };
+    if (!identityChanged && !statusChanged) return;
     generationRef.current += 1;
-    setState(null);
-    setError(null);
-    setSelectedSkillIds([]);
+    setLoading(false);
+    if (identityChanged) {
+      setState(null);
+      setError(null);
+      setSelectedSkillIds([]);
+    }
     if (activeConversationId && status === "online") {
       void load(true);
     }
@@ -139,9 +157,10 @@ export function useAgentWorkflows({
   useEffect(() => subscribe((event) => {
     if (event.type === "server.welcome") {
       generationRef.current += 1;
-      setState(null);
-      setSelectedSkillIds([]);
-      if (activeConversationId && status === "online") {
+      if (
+        activeConversationIdRef.current
+        && statusRef.current === "online"
+      ) {
         void load(true);
       }
       return;
@@ -175,7 +194,7 @@ export function useAgentWorkflows({
           : current.goalRefreshWarning,
       } : current);
     }
-  }), [activeConversationId, load, status, subscribe]);
+  }), [activeConversationId, load, subscribe]);
 
   const setGoal = useCallback(async (input: {
     source: AgentGoalSource;

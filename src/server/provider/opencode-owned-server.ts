@@ -7,9 +7,23 @@ import {
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import { CappedProviderBuffer } from "./io";
+import { providerProcessInvocation } from "./process";
 
 const START_TIMEOUT_MS = 10_000;
 const MAX_ERROR_CHARS = 1024 * 1024;
+
+export function openCodeServerProcessInvocation(
+  executable: string,
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+) {
+  return providerProcessInvocation(
+    executable,
+    ["serve", "--hostname=127.0.0.1", "--port=0"],
+    environment,
+    platform,
+  );
+}
 
 export async function startOwnedOpenCodeServer(
   executable: string,
@@ -19,13 +33,13 @@ export async function startOwnedOpenCodeServer(
   terminateOwnedProcessTree: ProcessTreeTerminator,
   signal?: AbortSignal,
 ): Promise<{ child: ChildProcessWithoutNullStreams; url: string }> {
-  const child = spawn(executable, [
-    "serve", "--hostname=127.0.0.1", "--port=0",
-  ], {
+  const invocation = openCodeServerProcessInvocation(executable, environment);
+  const child = spawn(invocation.command, invocation.args, {
     cwd,
     env: environment,
     detached: process.platform !== "win32",
     shell: false,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
   });

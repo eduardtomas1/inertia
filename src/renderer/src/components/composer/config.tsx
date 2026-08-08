@@ -49,6 +49,7 @@ export function composerHarnessLabel(harnessId: string): string {
 
 export function routeRepairLabel(action: ComposerRouteRepair): string {
   if (action === "add-key") return "Add key";
+  if (action === "configure") return "Open setup";
   return action[0].toUpperCase() + action.slice(1);
 }
 

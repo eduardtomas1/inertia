@@ -269,6 +269,7 @@ let events;
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
 const session = { id: sessionID, slug: "fake", projectID: "project", directory: ${JSON.stringify(root)}, title: "Fake", version: "1.18.4", model: { id: "model-a", providerID: "fake", variant: "high" }, time: { created: Date.now(), updated: Date.now() } };
 const model = { id: "model-a", providerID: "fake", api: { id: "fake", url: "http://fake", npm: "fake" }, name: "Model A", capabilities: { temperature: true, reasoning: true, attachment: true, toolcall: true, input: { text: true, audio: false, image: true, video: false, pdf: false }, output: { text: true, audio: false, image: false, video: false, pdf: false }, interleaved: true }, cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: 200000, output: 32000 }, status: "active", options: {}, headers: {}, release_date: "2026-01-01", variants: { high: {} } };
+const disconnectedModel = { ...model, id: "model-b", providerID: "offline", name: "Offline Model" };
 const json = (res, value, status = 200) => { res.writeHead(status, { "content-type": "application/json" }); res.end(status === 204 ? undefined : JSON.stringify(value)); };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
@@ -278,7 +279,7 @@ const server = http.createServer((req, res) => {
     const parsed = body ? JSON.parse(body) : undefined;
     captured.push({ method: req.method, path: url.pathname, body: parsed }); save();
     if (req.method === "GET" && url.pathname === "/global/health") return json(res, { healthy: true, version: "1.18.4" });
-    if (req.method === "GET" && url.pathname === "/provider") return json(res, { all: [{ id: "fake", name: "Fake", source: "config", env: [], options: {}, models: { "model-a": model } }], default: { fake: "model-a" }, connected: ["fake"] });
+    if (req.method === "GET" && url.pathname === "/provider") return json(res, { all: [{ id: "fake", name: "Fake", source: "config", env: [], options: {}, models: { "model-a": model } }, { id: "offline", name: "Offline", source: "config", env: [], options: {}, models: { "model-b": disconnectedModel } }], default: { fake: "model-a", offline: "model-b" }, connected: ["fake"] });
     if (req.method === "GET" && url.pathname === "/agent") return json(res, [{ name: "plan", mode: "primary", permission: [], options: {} }]);
     if (req.method === "POST" && url.pathname === "/session") return json(res, session);
     if (req.method === "GET" && url.pathname === "/session/" + sessionID) return json(res, session);
@@ -319,6 +320,7 @@ server.listen(port, "127.0.0.1", () => {
       isDefault: true,
       inputModalities: ["text", "image"],
       reasoningOptions: [expect.objectContaining({ value: "high" })],
+      defaultReasoningEffort: "",
     })]);
     const manager = new ProviderManager(
       { commands: { opencode: command } },

@@ -24,6 +24,17 @@ export class ClaudePromptChannel implements AsyncIterable<SDKUserMessage> {
     if (this.closed) return;
     this.closed = true;
     if (this.queued.length > 0) return;
+    this.finishWaiters();
+  }
+
+  /** Stop semantics discard input that was accepted but not yet consumed. */
+  cancel(): void {
+    this.closed = true;
+    this.queued.length = 0;
+    this.finishWaiters();
+  }
+
+  private finishWaiters(): void {
     for (const waiter of this.waiters.splice(0)) {
       waiter({ done: true, value: undefined });
     }
@@ -35,9 +46,7 @@ export class ClaudePromptChannel implements AsyncIterable<SDKUserMessage> {
         const queued = this.queued.shift();
         if (queued) {
           if (this.closed && this.queued.length === 0) {
-            for (const waiter of this.waiters.splice(0)) {
-              waiter({ done: true, value: undefined });
-            }
+            this.finishWaiters();
           }
           return { done: false, value: queued };
         }

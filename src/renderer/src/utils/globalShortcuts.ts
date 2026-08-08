@@ -51,10 +51,14 @@ export function installGlobalShortcuts(
       ownedKeyUps.delete(key);
       return;
     }
-    if (
-      actions.current.suspended
-      && ["b", "j", "k", "n"].includes(key)
-    ) {
+    const shortcutKey = ["b", "j", "k", "n"].includes(key);
+    const ownerDocument = typeof Node !== "undefined" && event.target instanceof Node
+      ? event.target.ownerDocument
+      : typeof document !== "undefined" ? document : null;
+    const modalOpen = Boolean(ownerDocument?.querySelector(
+      '[role="dialog"][aria-modal="true"]',
+    ));
+    if (shortcutKey && (actions.current.suspended || modalOpen)) {
       event.preventDefault();
       event.stopPropagation();
       ownedKeyUps.add(key);

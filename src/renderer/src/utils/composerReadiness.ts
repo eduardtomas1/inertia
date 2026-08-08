@@ -9,6 +9,7 @@ export type ComposerRouteRepair =
   | "install"
   | "connect"
   | "add-key"
+  | "configure"
   | "probe"
   | "refresh";
 
@@ -177,7 +178,7 @@ function externalReadiness(
       "Disabled",
       `${backend} is disabled`,
       "Enable this profile in Model Backends, then probe it if required.",
-      "probe",
+      "configure",
     );
   }
 

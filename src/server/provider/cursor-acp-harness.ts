@@ -39,6 +39,7 @@ import type {
 } from "./interactions";
 import { providerActivityDetailSections } from "./activity-detail";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
+import { providerProcessInvocation } from "./process";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -49,6 +50,19 @@ const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 20;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
+
+export function cursorAcpProcessInvocation(
+  executable: string,
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+) {
+  return providerProcessInvocation(
+    executable,
+    ["acp"],
+    environment,
+    platform,
+  );
+}
 
 export const CURSOR_ACP_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -196,11 +210,16 @@ function startCursorRun(
 
   emitter.status("starting");
   try {
-    child = spawn(options.executable, ["acp"], {
+    const invocation = cursorAcpProcessInvocation(
+      options.executable,
+      options.environment,
+    );
+    child = spawn(invocation.command, invocation.args, {
       cwd: options.input.cwd,
       env: options.environment,
       detached: process.platform !== "win32",
       shell: false,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -265,8 +284,16 @@ function startCursorRun(
       configOptions = created.configOptions;
     }
     if (!sessionId) throw new Error("Cursor ACP did not return a session ID.");
-    emitCursorMetadata(configOptions ?? [], supportsImages, emitter.rich);
-    await configureCursorSession(context, sessionId, modes, configOptions ?? [], options.input.interactionMode, options.input.model, options.input.reasoningEffort);
+    const configuredOptions = await configureCursorSession(
+      context,
+      sessionId,
+      modes,
+      configOptions ?? [],
+      options.input.interactionMode,
+      options.input.model,
+      options.input.reasoningEffort,
+    );
+    emitCursorMetadata(configuredOptions, supportsImages, emitter.rich);
     const prompt = await cursorPrompt(options.input.prompt, options.input.imagePaths ?? [], initialized);
     emitter.status("running");
     const response = await context.request(acp.methods.agent.session.prompt, { sessionId, prompt });
@@ -525,27 +552,32 @@ async function configureCursorSession(
   interactionMode: "build" | "plan",
   model?: string,
   effort?: string,
-): Promise<void> {
+): Promise<SessionConfigOption[]> {
+  let authoritativeConfigOptions = configOptions;
   const wantedMode = interactionMode === "plan" ? /plan|architect/iu : /build|agent|code/iu;
   const nativeMode = modes?.availableModes.find((mode) => wantedMode.test(`${mode.id} ${mode.name}`));
-  const configMode = findCursorAdvertisedConfigValue(configOptions, "mode", interactionMode === "plan" ? "plan" : "build", wantedMode);
+  const configMode = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "mode", interactionMode === "plan" ? "plan" : "build", wantedMode);
   if (nativeMode && modes?.currentModeId !== nativeMode.id) {
     await context.request(acp.methods.agent.session.setMode, { sessionId, modeId: nativeMode.id });
   } else if (!nativeMode && configMode) {
-    await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: configMode.id, value: configMode.value });
+    const response = await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: configMode.id, value: configMode.value });
+    authoritativeConfigOptions = response.configOptions;
   } else if (interactionMode === "plan" && !nativeMode) {
     throw new Error("This Cursor ACP server does not advertise a plan mode.");
   }
   if (model) {
-    const selected = findCursorAdvertisedConfigValue(configOptions, "model", model);
+    const selected = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "model", model);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected model '${model}'.`);
-    await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value });
+    const response = await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value });
+    authoritativeConfigOptions = response.configOptions;
   }
   if (effort) {
-    const selected = findCursorAdvertisedConfigValue(configOptions, "thought_level", effort);
+    const selected = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "thought_level", effort);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected reasoning effort '${effort}'.`);
-    await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value });
+    const response = await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value });
+    authoritativeConfigOptions = response.configOptions;
   }
+  return authoritativeConfigOptions;
 }
 
 export function findCursorAdvertisedConfigValue(

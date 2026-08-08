@@ -1405,6 +1405,27 @@ describe("RuntimeSupervisor", () => {
     expect(children).toHaveLength(2);
   });
 
+  it("forces a startup-failed child to exit when its own cleanup stalls", async () => {
+    const { children, forceKill, supervisor } = createHarness({
+      shutdownGraceMs: 100,
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({
+      type: "runtime.startup-failed",
+      message: "Startup cleanup is stalled.",
+    });
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(forceKill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
+
+    children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(children).toHaveLength(2);
+  });
+
   it("rotates the capability URL after an unexpected crash without duplicating a live child", () => {
     const { children, supervisor } = createHarness();
     supervisor.start();

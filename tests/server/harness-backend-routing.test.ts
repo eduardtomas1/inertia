@@ -214,11 +214,13 @@ describe("ProviderManager harness backend routing", () => {
       id: "anthropic",
       models: { claude: model },
     }] as never;
-    expect(resolveOpenCodeModel("anthropic/claude", providers)).toBe(model);
-    expect(() => resolveOpenCodeModel("claude", providers))
+    expect(resolveOpenCodeModel("anthropic/claude", providers, ["anthropic"])).toBe(model);
+    expect(() => resolveOpenCodeModel("claude", providers, ["anthropic"]))
       .toThrow("native provider/model catalog");
-    expect(() => resolveOpenCodeModel("other/claude", providers))
+    expect(() => resolveOpenCodeModel("other/claude", providers, ["anthropic"]))
       .toThrow("does not advertise");
+    expect(() => resolveOpenCodeModel("anthropic/claude", providers, []))
+      .toThrow("connected provider");
   });
 
   it("exposes Cursor model selection only from explicit ACP config options", () => {

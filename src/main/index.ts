@@ -61,6 +61,7 @@ import {
   hardenDesktopSession,
 } from "./preview-broker.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { stopRuntimeAndPrivateConnect } from "./runtime-shutdown-coordination.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
@@ -1046,21 +1047,26 @@ if (!hasSingleInstanceLock) {
     void (async () => {
       const privateConnectHostToStop = privateConnectHost;
       privateConnectHost = null;
-      await privateConnectHostToStop?.shutdown().catch(() => undefined);
-      let runtimeExitConfirmed = supervisorToStop === null;
-      if (supervisorToStop) {
-        runtimeExitConfirmed = await supervisorToStop.stop().catch((error: unknown) => {
-          runtimeDiagnostics?.record("runtime.failure", {
-            phase: "stopping",
-            message: error instanceof Error ? error.message : "The local runtime could not stop cleanly.",
+      const runtimeExitConfirmed = await stopRuntimeAndPrivateConnect(
+        async () => {
+          if (!supervisorToStop) return true;
+          const confirmed = await supervisorToStop.stop().catch((error: unknown) => {
+            runtimeDiagnostics?.record("runtime.failure", {
+              phase: "stopping",
+              message: error instanceof Error ? error.message : "The local runtime could not stop cleanly.",
+            });
+            console.error("Failed to stop the local runtime", error);
+            return false;
           });
-          console.error("Failed to stop the local runtime", error);
-          return false;
-        });
-        if (runtimeExitConfirmed && runtimeSupervisor === supervisorToStop) {
-          runtimeSupervisor = null;
-        }
-      }
+          if (confirmed && runtimeSupervisor === supervisorToStop) {
+            runtimeSupervisor = null;
+          }
+          return confirmed;
+        },
+        async () => {
+          await privateConnectHostToStop?.shutdown().catch(() => undefined);
+        },
+      );
       if (runtimeExitConfirmed) {
         await disposeImportedAttachments().catch((error: unknown) => {
           console.error("Failed to remove temporary attachments", error);

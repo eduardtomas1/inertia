@@ -676,6 +676,14 @@ export class RuntimeSupervisor {
       record.acceptingReady = false;
       this.lastError = event.message;
       this.clearTimerValue("startupTimer");
+      // The worker normally exits after reporting startup failure, but its
+      // partial cleanup can itself stall. Preserve a bounded grace window so
+      // one wedged generation cannot leave the supervisor starting forever.
+      this.startupTimer = this.setTimer(() => {
+        this.startupTimer = null;
+        if (this.current !== record || record.ready) return;
+        this.forceTerminate(record.child);
+      }, this.shutdownGraceMs);
       this.clearCredentialRequests(record);
       this.clearSecureFileRequests(record);
       this.attachmentRequests.clear(record);

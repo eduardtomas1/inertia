@@ -217,7 +217,16 @@ describe("exact composer route state", () => {
       selection: { ...base, backendConfigurationRevision: 3 },
       providers: [provider()],
       profiles: [profile],
-    }).readiness).toMatchObject({ badge: "Route changed" });
+    }).readiness).toMatchObject({ badge: "Route changed", action: null });
+    expect(resolveComposerRouteState({
+      conversationProviderId: "codex",
+      selection: {
+        ...nativeModelSelection({ providerId: "codex", modelId: "gpt-current" }),
+        backendConfigurationRevision: 99,
+      },
+      providers: [provider()],
+      profiles: [],
+    }).readiness).toMatchObject({ badge: "Route changed", action: null });
     expect(resolveComposerRouteState({
       conversationProviderId: "codex",
       selection: { ...base, reasoningEffort: "unsupported" },

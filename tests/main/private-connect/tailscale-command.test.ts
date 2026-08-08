@@ -1,6 +1,9 @@
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, relative } from "node:path";
+import { PassThrough } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
@@ -69,6 +72,27 @@ describe("Private Connect Tailscale command boundary", () => {
     expect(result.stdout).toBe("ok");
     await expect(runTailscaleCommand(process.execPath, ["-e", "process.stderr.write('not running'); process.exit(1)"], { timeoutMs: 2_000 })).rejects.toMatchObject({ classification: "not-running" });
     await expect(runTailscaleCommand(process.execPath, Array.from({ length: 13 }, () => "x"))).rejects.toThrow("out of bounds");
+  });
+
+  it("waits for stdio close before returning complete command output", async () => {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const child = Object.assign(new EventEmitter(), { stdout, stderr }) as unknown as ChildProcess;
+    const resultPromise = runTailscaleCommand("tailscale", ["status"], {
+      timeoutMs: 2_000,
+      spawnProcess: () => child,
+    });
+    stdout.write("status-");
+    child.emit("exit", 0, null);
+    let settled = false;
+    void resultPromise.finally(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    stdout.write("complete");
+    child.emit("close", 0, null);
+
+    await expect(resultPromise).resolves.toMatchObject({ stdout: "status-complete", code: 0 });
   });
 
   it("uses a stable locale and confirms detached process-tree termination on timeout", async () => {

@@ -166,4 +166,64 @@ describe("global shortcut DOM integration", () => {
     expect(setPaletteOpen).not.toHaveBeenCalled();
     expect(setSidebarCollapsed).not.toHaveBeenCalled();
   });
+
+  it("does not run background shortcuts from inside the command palette", () => {
+    const createConversation = vi.fn();
+    const setActiveTool = vi.fn();
+    const setPaletteOpen = vi.fn();
+    const setSidebarCollapsed = vi.fn();
+
+    function PaletteHarness(): React.JSX.Element {
+      useGlobalShortcuts({
+        createConversation,
+        mobileNavigation: false,
+        suspended: false,
+        setActiveTool,
+        setPaletteOpen,
+        setSidebarCollapsed,
+        setSidebarOpen: vi.fn(),
+      });
+      return (
+        <CommandPalette
+          open
+          projects={[]}
+          conversations={[]}
+          onClose={vi.fn()}
+          onSelectProject={vi.fn()}
+          onSelectConversation={vi.fn()}
+          onNewThread={vi.fn()}
+          onAddProject={vi.fn()}
+          onOpenSettings={vi.fn()}
+        />
+      );
+    }
+
+    render(<PaletteHarness />);
+    const search = screen.getByRole("combobox", {
+      name: "Search commands, projects, and threads",
+    });
+    for (const key of ["b", "j", "k", "n"]) {
+      const event = new KeyboardEvent("keydown", {
+        key,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      search.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+    const escapedFocusEvent = new KeyboardEvent("keydown", {
+      key: "n",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.dispatchEvent(escapedFocusEvent);
+    expect(escapedFocusEvent.defaultPrevented).toBe(true);
+
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(setActiveTool).not.toHaveBeenCalled();
+    expect(setPaletteOpen).not.toHaveBeenCalled();
+    expect(setSidebarCollapsed).not.toHaveBeenCalled();
+  });
 });

@@ -1,8 +1,12 @@
+import { useCallback } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMultiSpawn } from "../../src/renderer/src/hooks/useMultiSpawn";
-import { useConversationSelectionQueue } from "../../src/renderer/src/hooks/useConversationSelectionQueue";
+import {
+  useConversationSelectionQueue,
+  useRuntimeCommandQueue,
+} from "../../src/renderer/src/hooks/useConversationSelectionQueue";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import type { MultiSpawnDraft } from "../../src/renderer/src/utils/multiSpawn";
 import type { AppSnapshot, Project, ServerEvent } from "../../src/shared/contracts";
@@ -330,6 +334,173 @@ describe("Duo comparison navigation", () => {
     expect(activeConversationId).toBe(userConversationId);
     expect(updateSplitConversationId).not.toHaveBeenCalledWith(null);
     expect(focusWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the source chat after split-only navigation during judge selection", async () => {
+    let currentSnapshot = snapshot;
+    let splitConversationId: string | null = null;
+    const generation = { current: 5 };
+    let finishJudgeSelection: (() => void) | null = null;
+    let activeConversationId: string | null = conversationIds[0];
+    const baseRuntime = runtime();
+    const run = vi.fn(async (
+      key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (
+        command.type === "conversation.select"
+        && command.payload.conversationId === comparisonConversationId
+      ) {
+        await new Promise<void>((resolve) => {
+          finishJudgeSelection = resolve;
+        });
+      }
+      const event = await baseRuntime(key, command);
+      if (command.type === "conversation.select") {
+        activeConversationId = command.payload.conversationId;
+      }
+      return event;
+    });
+    const updateSplitConversationId = vi.fn((next: string | null) => {
+      splitConversationId = next;
+    });
+    const focusWorkspace = vi.fn();
+    const hook = renderHook(() => {
+      const selectConversationCommand = useConversationSelectionQueue(run);
+      return useMultiSpawn({
+        snapshot: currentSnapshot,
+        settings,
+        run,
+        request: (command) => run("multi-spawn:background", command),
+        selectConversationCommand,
+        splitConversationId,
+        conversationSelectionGenerationRef: generation,
+        splitSelectionTransitionsRef: { current: 0 },
+        updateSplitConversationId,
+        showWorkspace: vi.fn(),
+        closeSidebar: vi.fn(),
+        focusWorkspace,
+        discardDraftConversation: vi.fn(),
+        setActionError: vi.fn(),
+      });
+    });
+
+    await act(async () => hook.result.current.submit(draft()));
+    currentSnapshot = { ...snapshot, activeConversationId: conversationIds[0] };
+    hook.rerender();
+    await waitFor(() => expect(finishJudgeSelection).not.toBeNull());
+
+    splitConversationId = null;
+    hook.rerender();
+    await act(async () => finishJudgeSelection?.());
+
+    await waitFor(() => expect(activeConversationId).toBe(conversationIds[0]));
+    expect(vi.mocked(run).mock.calls
+      .filter(([, command]) => command.type === "conversation.select")
+      .map(([, command]) => command.type === "conversation.select"
+        ? command.payload.conversationId
+        : null))
+      .toEqual([
+        conversationIds[0],
+        comparisonConversationId,
+        conversationIds[0],
+      ]);
+    expect(updateSplitConversationId).not.toHaveBeenCalledWith(null);
+    expect(focusWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("queues activating chat creation after a pending judge handoff", async () => {
+    let currentSnapshot = snapshot;
+    let splitConversationId: string | null = null;
+    const generation = { current: 9 };
+    const createdConversationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let finishJudgeSelection: (() => void) | null = null;
+    let activeConversationId: string | null = conversationIds[0];
+    const baseRuntime = runtime();
+    const run = vi.fn(async (
+      key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (
+        command.type === "conversation.select"
+        && command.payload.conversationId === comparisonConversationId
+      ) {
+        await new Promise<void>((resolve) => {
+          finishJudgeSelection = resolve;
+        });
+      }
+      const event = await baseRuntime(key, command);
+      if (command.type === "conversation.select") {
+        activeConversationId = command.payload.conversationId;
+      } else if (command.type === "conversation.create") {
+        activeConversationId = createdConversationId;
+      }
+      return event;
+    });
+    const updateSplitConversationId = vi.fn((next: string | null) => {
+      splitConversationId = next;
+    });
+    const hook = renderHook(() => {
+      const commandQueue = useRuntimeCommandQueue(run);
+      const selectConversationCommand = useCallback((
+        key: string,
+        conversationId: string,
+      ) => commandQueue(key, {
+        type: "conversation.select",
+        payload: { conversationId },
+      }), [commandQueue]);
+      return {
+        commandQueue,
+        multiSpawn: useMultiSpawn({
+          snapshot: currentSnapshot,
+          settings,
+          run,
+          request: (command) => run("multi-spawn:background", command),
+          selectConversationCommand,
+          splitConversationId,
+          conversationSelectionGenerationRef: generation,
+          splitSelectionTransitionsRef: { current: 0 },
+          updateSplitConversationId,
+          showWorkspace: vi.fn(),
+          closeSidebar: vi.fn(),
+          focusWorkspace: vi.fn(),
+          discardDraftConversation: vi.fn(),
+          setActionError: vi.fn(),
+        }),
+      };
+    });
+
+    await act(async () => hook.result.current.multiSpawn.submit(draft()));
+    currentSnapshot = { ...snapshot, activeConversationId: conversationIds[0] };
+    hook.rerender();
+    await waitFor(() => expect(finishJudgeSelection).not.toBeNull());
+
+    generation.current += 1;
+    const creation = hook.result.current.commandQueue("conversation.create", {
+      type: "conversation.create",
+      payload: {
+        projectId: projectIds[0],
+        title: "New chat",
+      },
+    });
+    await act(async () => finishJudgeSelection?.());
+    await act(async () => creation);
+
+    expect(activeConversationId).toBe(createdConversationId);
+    expect(vi.mocked(run).mock.calls
+      .filter(([, command]) => (
+        command.type === "conversation.select"
+        || command.type === "conversation.create"
+      ))
+      .map(([, command]) => command.type === "conversation.select"
+        ? command.payload.conversationId
+        : "conversation.create"))
+      .toEqual([
+        conversationIds[0],
+        comparisonConversationId,
+        "conversation.create",
+      ]);
+    expect(updateSplitConversationId).not.toHaveBeenCalledWith(null);
   });
 
   it("restores the source chat when Settings opens during judge selection", async () => {

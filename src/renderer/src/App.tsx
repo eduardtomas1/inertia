@@ -601,16 +601,21 @@ export default function App(): React.JSX.Element {
       targetProject.id,
       location,
     );
-    const select = targetProject.id === project?.id ? Promise.resolve() : run("project.select", { type: "project.select", payload: { projectId: targetProject.id } });
-    void select
-      .then(() => run("conversation.create", {
-        type: "conversation.create",
-        payload,
-      }))
+    const creationGeneration =
+      conversationSelectionGenerationRef.current + 1;
+    conversationSelectionGenerationRef.current = creationGeneration;
+    void selectionCommandQueue("conversation.create", {
+      type: "conversation.create",
+      payload,
+    })
       .then(() => {
         discardDraftConversation();
-        setView("workspace");
-        setSidebarOpen(false);
+        if (
+          creationGeneration === conversationSelectionGenerationRef.current
+        ) {
+          setView("workspace");
+          setSidebarOpen(false);
+        }
       })
       .catch(() => undefined);
   };

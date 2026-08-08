@@ -375,19 +375,26 @@ export function useMultiSpawn({
       comparison.conversationId,
     ).then(() => {
       if (!workspaceVisibleRef.current) {
-        void selectConversation(
+        return selectConversation(
           "multi-spawn:comparison:restore",
           watched.primaryConversationId,
-        ).catch(() => undefined);
-        return;
+        ).then(() => undefined).catch(() => undefined);
       }
+      const navigationStillCurrent =
+        !conversationSelectionGenerationRef
+        || conversationSelectionGenerationRef.current
+          === watched.navigationGeneration;
       if (
         splitConversationIdRef.current !== watched.secondaryConversationId
-        || (
-          conversationSelectionGenerationRef
-          && conversationSelectionGenerationRef.current
-            !== watched.navigationGeneration
-        )
+      ) {
+        if (!navigationStillCurrent) return;
+        return selectConversation(
+          "multi-spawn:comparison:restore",
+          watched.primaryConversationId,
+        ).then(() => undefined).catch(() => undefined);
+      }
+      if (
+        !navigationStillCurrent
       ) {
         return;
       }

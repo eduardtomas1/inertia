@@ -124,7 +124,7 @@ describe("runtime conversation references", () => {
     );
     const discard = createConversation.indexOf("discardDraftConversation()");
     const createRequest = createConversation.indexOf(
-      'run("conversation.create"',
+      'selectionCommandQueue("conversation.create"',
     );
 
     expect(createRequest).toBeGreaterThan(-1);

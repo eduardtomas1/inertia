@@ -331,4 +331,80 @@ describe("Duo comparison navigation", () => {
     expect(updateSplitConversationId).not.toHaveBeenCalledWith(null);
     expect(focusWorkspace).toHaveBeenCalledTimes(1);
   });
+
+  it("restores the source chat when Settings opens during judge selection", async () => {
+    let currentSnapshot = snapshot;
+    let splitConversationId: string | null = null;
+    let workspaceVisible = true;
+    const generation = { current: 7 };
+    let finishJudgeSelection: (() => void) | null = null;
+    let activeConversationId: string | null = conversationIds[0];
+    const baseRuntime = runtime();
+    const run = vi.fn(async (
+      key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (
+        command.type === "conversation.select"
+        && command.payload.conversationId === comparisonConversationId
+      ) {
+        await new Promise<void>((resolve) => {
+          finishJudgeSelection = resolve;
+        });
+      }
+      const event = await baseRuntime(key, command);
+      if (command.type === "conversation.select") {
+        activeConversationId = command.payload.conversationId;
+      }
+      return event;
+    });
+    const updateSplitConversationId = vi.fn((next: string | null) => {
+      splitConversationId = next;
+    });
+    const focusWorkspace = vi.fn();
+    const hook = renderHook(() => {
+      const selectConversationCommand = useConversationSelectionQueue(run);
+      return useMultiSpawn({
+        snapshot: currentSnapshot,
+        settings,
+        run,
+        request: (command) => run("multi-spawn:background", command),
+        selectConversationCommand,
+        workspaceVisible,
+        splitConversationId,
+        conversationSelectionGenerationRef: generation,
+        splitSelectionTransitionsRef: { current: 0 },
+        updateSplitConversationId,
+        showWorkspace: vi.fn(),
+        closeSidebar: vi.fn(),
+        focusWorkspace,
+        discardDraftConversation: vi.fn(),
+        setActionError: vi.fn(),
+      });
+    });
+
+    await act(async () => hook.result.current.submit(draft()));
+    currentSnapshot = { ...snapshot, activeConversationId: conversationIds[0] };
+    hook.rerender();
+    await waitFor(() => expect(finishJudgeSelection).not.toBeNull());
+
+    workspaceVisible = false;
+    generation.current += 1;
+    hook.rerender();
+    await act(async () => finishJudgeSelection?.());
+
+    await waitFor(() => expect(activeConversationId).toBe(conversationIds[0]));
+    expect(vi.mocked(run).mock.calls
+      .filter(([, command]) => command.type === "conversation.select")
+      .map(([, command]) => command.type === "conversation.select"
+        ? command.payload.conversationId
+        : null))
+      .toEqual([
+        conversationIds[0],
+        comparisonConversationId,
+        conversationIds[0],
+      ]);
+    expect(updateSplitConversationId).not.toHaveBeenCalledWith(null);
+    expect(focusWorkspace).toHaveBeenCalledTimes(1);
+  });
 });

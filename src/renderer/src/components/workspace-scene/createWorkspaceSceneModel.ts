@@ -56,6 +56,17 @@ export function workspaceDirectoryIdentity(path: string): string {
     ? normalized.toLocaleLowerCase("en-US")
     : normalized;
 }
+
+export function terminalResumeDirectory(
+  conversation: Pick<Conversation, "worktreePath"> | null,
+  project: Pick<Project, "normalizedPath"> | null,
+): string | null {
+  if (!conversation || !project) return null;
+  return workspaceDirectoryIdentity(
+    conversation.worktreePath ?? project.normalizedPath,
+  );
+}
+
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type ConversationProjection = ReturnType<typeof useConversationProjection>;
 type WorkspaceLayout = ReturnType<typeof useWorkspaceLayout>;
@@ -233,11 +244,7 @@ export function createWorkspaceSceneModel({
   const snapshotProjects = connection.snapshot?.projects ?? [];
   const snapshotConversations = connection.snapshot?.conversations ?? [];
   const projectById = new Map(snapshotProjects.map((entry) => [entry.id, entry]));
-  const activeDirectory = persistedConversation && project
-    ? workspaceDirectoryIdentity(
-        persistedConversation.worktreePath ?? project.normalizedPath,
-      )
-    : null;
+  const activeDirectory = terminalResumeDirectory(conversation, project);
   const terminalResumeOptions = activeDirectory
     ? [...snapshotConversations]
         .sort((left, right) => {

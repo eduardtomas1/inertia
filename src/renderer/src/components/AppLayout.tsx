@@ -111,7 +111,7 @@ interface AppLayoutProps {
   providerQuotaNotices: ProviderQuotaNoticeController;
   workspaceLayout: WorkspaceLayout;
   view: "workspace" | "settings";
-  setView: Dispatch<SetStateAction<"workspace" | "settings">>;
+  setView: (view: "workspace" | "settings") => void;
   busyAction: string | null;
   visibleError: string | null;
   setActionError: Dispatch<SetStateAction<string | null>>;

@@ -21,7 +21,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
-import { useConversationSelectionQueue } from "./hooks/useConversationSelectionQueue";
+import { useRuntimeCommandQueue } from "./hooks/useConversationSelectionQueue";
 import {
   agentWorkflowRouteIdentity,
   agentWorkflowTargetConversation,
@@ -308,7 +308,20 @@ export default function App(): React.JSX.Element {
     setBusyAction,
     setActionError,
   });
-  const selectConversationCommand = useConversationSelectionQueue(run);
+  const selectionCommandQueue = useRuntimeCommandQueue(run);
+  const selectConversationCommand = useCallback((
+    key: string,
+    conversationId: string,
+  ) => selectionCommandQueue(key, {
+    type: "conversation.select",
+    payload: { conversationId },
+  }), [selectionCommandQueue]);
+  const navigateToView = useCallback((nextView: "workspace" | "settings") => {
+    if (nextView === "settings") {
+      conversationSelectionGenerationRef.current += 1;
+    }
+    setView(nextView);
+  }, []);
   const draftConversation = useDraftConversation({
     snapshot: connection.snapshot,
     settings,
@@ -337,6 +350,7 @@ export default function App(): React.JSX.Element {
     run,
     request,
     selectConversationCommand,
+    workspaceVisible: view === "workspace",
     splitConversationId,
     conversationSelectionGenerationRef,
     splitSelectionTransitionsRef,
@@ -475,7 +489,8 @@ export default function App(): React.JSX.Element {
   };
   const selectProject = (nextProject: Project) => {
     if (nextProject.id === project?.id) return;
-    void run("project.select", {
+    conversationSelectionGenerationRef.current += 1;
+    void selectionCommandQueue("project.select", {
       type: "project.select",
       payload: { projectId: nextProject.id },
     }).then(() => updateSplitConversationId(null)).catch(() => undefined);
@@ -706,16 +721,16 @@ export default function App(): React.JSX.Element {
   const closeProviderAuth = useCallback(() => setAuthProviderId(null), []);
   const openProviderSetup = useCallback((_providerId: ProviderId) => {
     setSettingsTarget({ section: "providers" });
-    setView("settings");
-  }, []);
+    navigateToView("settings");
+  }, [navigateToView]);
   const openBackendSetup = useCallback((profileId: string) => {
     setSettingsTarget({ section: "backends", profileId });
-    setView("settings");
-  }, []);
+    navigateToView("settings");
+  }, [navigateToView]);
   const openConnectionsSettings = useCallback(() => {
     setSettingsTarget({ section: "connections" });
-    setView("settings");
-  }, []);
+    navigateToView("settings");
+  }, [navigateToView]);
 
   useEffect(() => {
     if (view === "workspace" && settingsTarget) setSettingsTarget(null);
@@ -921,7 +936,7 @@ export default function App(): React.JSX.Element {
       providerQuotaNotices={providerQuotaNotices}
       workspaceLayout={workspaceLayout}
       view={view}
-      setView={setView}
+      setView={navigateToView}
       busyAction={busyAction}
       visibleError={visibleError}
       setActionError={setActionError}

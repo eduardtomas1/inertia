@@ -8,22 +8,29 @@ type RuntimeRunner = (
   command: CommandWithoutId,
 ) => Promise<ServerEvent>;
 
-export function useConversationSelectionQueue(
+export function useRuntimeCommandQueue(
   run: RuntimeRunner,
-): (key: string, conversationId: string) => Promise<ServerEvent> {
+): RuntimeRunner {
   const runRef = useRef(run);
   const tailRef = useRef<Promise<void>>(Promise.resolve());
   runRef.current = run;
 
-  return useCallback((key: string, conversationId: string) => {
-    const selection = tailRef.current.then(() => runRef.current(key, {
-      type: "conversation.select",
-      payload: { conversationId },
-    }));
-    tailRef.current = selection.then(
+  return useCallback((key: string, command: CommandWithoutId) => {
+    const operation = tailRef.current.then(() => runRef.current(key, command));
+    tailRef.current = operation.then(
       () => undefined,
       () => undefined,
     );
-    return selection;
+    return operation;
   }, []);
+}
+
+export function useConversationSelectionQueue(
+  run: RuntimeRunner,
+): (key: string, conversationId: string) => Promise<ServerEvent> {
+  const queue = useRuntimeCommandQueue(run);
+  return useCallback((key: string, conversationId: string) => queue(key, {
+    type: "conversation.select",
+    payload: { conversationId },
+  }), [queue]);
 }

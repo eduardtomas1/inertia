@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   runtimeConversationReference,
+  terminalResumeDirectory,
   visibleWorkspaceConversation,
   workspaceDirectoryIdentity,
 } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
@@ -45,6 +46,17 @@ describe("runtime conversation references", () => {
     expect(workspaceDirectoryIdentity("/Work/Project")).not.toBe(
       workspaceDirectoryIdentity("/work/project"),
     );
+  });
+
+  it("uses the visible draft project directory for provider resume choices", () => {
+    expect(terminalResumeDirectory(
+      { worktreePath: null },
+      { normalizedPath: "/workspace/inertia" },
+    )).toBe("/workspace/inertia");
+    expect(terminalResumeDirectory(
+      { worktreePath: "/workspace/inertia/.worktrees/draft" },
+      { normalizedPath: "/workspace/inertia" },
+    )).toBe("/workspace/inertia/.worktrees/draft");
   });
 
   it("keeps a reconciling draft visible over its empty runtime shell", () => {

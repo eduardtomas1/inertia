@@ -152,6 +152,7 @@ export function useMultiSpawn({
   run,
   request,
   selectConversationCommand,
+  workspaceVisible = true,
   splitConversationId = null,
   conversationSelectionGenerationRef,
   splitSelectionTransitionsRef,
@@ -173,6 +174,7 @@ export function useMultiSpawn({
     key: string,
     conversationId: string,
   ) => Promise<ServerEvent>;
+  workspaceVisible?: boolean;
   splitConversationId?: string | null;
   conversationSelectionGenerationRef?: MutableRefObject<number>;
   splitSelectionTransitionsRef: MutableRefObject<number>;
@@ -204,6 +206,7 @@ export function useMultiSpawn({
   const cancelRequestedRef = useRef(false);
   const operationGenerationRef = useRef(0);
   const splitConversationIdRef = useRef(splitConversationId);
+  const workspaceVisibleRef = useRef(workspaceVisible);
   const watchedComparisonRef = useRef<{
     launchId: string;
     primaryConversationId: string;
@@ -213,6 +216,7 @@ export function useMultiSpawn({
   } | null>(null);
   const comparisonOpenedRef = useRef<string | null>(null);
   splitConversationIdRef.current = splitConversationId;
+  workspaceVisibleRef.current = workspaceVisible;
 
   const setRecoveryStatus = useCallback((
     status: DuoStatusResult | null,
@@ -334,6 +338,10 @@ export function useMultiSpawn({
   useEffect(() => {
     const watched = watchedComparisonRef.current;
     if (!watched || recoveryStatus?.launchId !== watched.launchId) return;
+    if (!workspaceVisible) {
+      watchedComparisonRef.current = null;
+      return;
+    }
     if (
       conversationSelectionGenerationRef
       && conversationSelectionGenerationRef.current
@@ -366,6 +374,13 @@ export function useMultiSpawn({
       "multi-spawn:comparison:select",
       comparison.conversationId,
     ).then(() => {
+      if (!workspaceVisibleRef.current) {
+        void selectConversation(
+          "multi-spawn:comparison:restore",
+          watched.primaryConversationId,
+        ).catch(() => undefined);
+        return;
+      }
       if (
         splitConversationIdRef.current !== watched.secondaryConversationId
         || (
@@ -403,6 +418,7 @@ export function useMultiSpawn({
     splitConversationId,
     splitSelectionTransitionsRef,
     updateSplitConversationId,
+    workspaceVisible,
   ]);
 
   const reconcilePendingLaunch = useCallback(async (

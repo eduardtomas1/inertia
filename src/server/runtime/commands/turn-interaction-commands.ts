@@ -72,15 +72,6 @@ export function createTurnInteractionCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
-        try {
-          dependencies.store.assertDuoComparisonTurnAllowed(conversation.id);
-        } catch (error) {
-          throw new RuntimeRequestError(
-            error instanceof Error
-              ? error.message
-              : "That judge chat is reserved for a Duo comparison.",
-          );
-        }
         if (dependencies.turns.isActive(conversation.id)) {
           if (
             command.payload.attachments.length > 0

@@ -647,6 +647,7 @@ export class DuoLaunchCoordinator {
     try {
       const queued = this.turns.queue({
         conversationId: comparison.conversationId,
+        authorizedDuoComparisonLaunchId: launchId,
         content: prompt,
         attachments: [],
         activateConversation: false,

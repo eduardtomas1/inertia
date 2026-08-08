@@ -417,6 +417,10 @@ describe("Duo third-model comparison", () => {
     expect(() => runtime.store.assertDuoComparisonTurnAllowed(
       prepared.comparison!.conversationId,
     )).toThrow(/reserved/u);
+    expect(() => runtime.controller.queue({
+      conversationId: prepared.comparison!.conversationId,
+      content: "Unrelated turn from an alternate entry path",
+    })).toThrow(/reserved/u);
 
     runtime.provider.throwOnRun = null;
     await expect(launches.retryComparison(prepared.launchId)).resolves

@@ -529,8 +529,8 @@ export class RuntimeStore {
     this.pairedLaunchRepository.assertProjectDeletionAllowed(projectId);
   }
 
-  assertDuoComparisonTurnAllowed(conversationId: string): void {
-    this.pairedLaunchRepository.assertComparisonTurnAllowed(conversationId);
+  assertDuoComparisonTurnAllowed(conversationId: string, authorizedLaunchId?: string): void {
+    this.pairedLaunchRepository.assertComparisonTurnAllowed(conversationId, authorizedLaunchId);
   }
 
   pairedLaunchForTurn(turnId: string) { return this.pairedLaunchRepository.launchForTurn(turnId); }

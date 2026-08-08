@@ -137,6 +137,8 @@ export interface TurnControllerHooks {
 
 export interface QueueTurnRequest {
   conversationId: string;
+  /** Server-only authorization for the exact locked Duo judge dispatch. */
+  authorizedDuoComparisonLaunchId?: string;
   content: string;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];

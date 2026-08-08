@@ -362,7 +362,10 @@ export class PairedLaunchRepository {
     }
   }
 
-  assertComparisonTurnAllowed(conversationId: string): void {
+  assertComparisonTurnAllowed(
+    conversationId: string,
+    authorizedLaunchId?: string,
+  ): void {
     const blocked = this.database.prepare(`
       SELECT 1
       FROM paired_launches
@@ -370,8 +373,9 @@ export class PairedLaunchRepository {
         AND comparison_state IN (
           'waiting', 'dispatching', 'running', 'failed', 'interrupted'
         )
+        AND (? IS NULL OR id <> ? OR comparison_state <> 'dispatching')
       LIMIT 1
-    `).get(conversationId);
+    `).get(conversationId, authorizedLaunchId ?? null, authorizedLaunchId ?? null);
     if (blocked) {
       throw new Error(
         "This judge chat is reserved for its locked Duo comparison. Retry or cancel the comparison before sending other work.",

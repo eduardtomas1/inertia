@@ -102,16 +102,24 @@ describe("Settings external section targets", () => {
     const view = render(<SettingsView {...props} />);
     expect(screen.getByRole("button", { name: "Providers" }))
       .toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 2, name: "Providers" }))
+      .toHaveClass("visually-hidden");
 
     fireEvent.click(screen.getByRole("button", { name: "General" }));
     expect(screen.getByRole("button", { name: "General" }))
       .toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 2, name: "General" }))
+      .toHaveClass("visually-hidden");
     view.rerender(<SettingsView {...props} disabled />);
     expect(screen.getByRole("button", { name: "General" }))
       .toHaveAttribute("aria-current", "page");
 
     const connectionsTarget = { section: "connections" as const };
     view.rerender(<SettingsView {...props} target={connectionsTarget} />);
+    expect(screen.getByRole("heading", {
+      level: 2,
+      name: "Connections & devices",
+    })).toHaveClass("visually-hidden");
     const phoneAccess = await screen.findByLabelText("Phone access");
     fireEvent.change(phoneAccess, {
       target: { value: "collaborate" },

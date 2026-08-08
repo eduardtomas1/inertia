@@ -295,6 +295,9 @@ export function SettingsView({
         "settings-content",
         section === "backends" && "is-backends",
       )}>
+        <h2 className="visually-hidden">
+          {sections.find((item) => item.id === section)?.label ?? "Settings"}
+        </h2>
         {section === "general" && (
           <div className="settings-toolbar">
             <button type="button" className="secondary-button" disabled={disabled} onClick={() => onUpdate(defaultSettings)}><RotateCcw size={14} />Restore defaults</button>

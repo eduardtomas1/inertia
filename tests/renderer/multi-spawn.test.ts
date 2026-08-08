@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearPendingMultiSpawnLaunchId,
+  initialMultiSpawnDraft,
   MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
   MULTI_SPAWN_PRESET_STORAGE_KEY,
   projectsShareLocalCheckout,
@@ -16,11 +17,16 @@ import {
   writeMultiSpawnPreset,
   type MultiSpawnDraft,
 } from "../../src/renderer/src/utils/multiSpawn";
+import { defaultSelectionForProject } from "../../src/renderer/src/utils/defaultConversationSelection";
 import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChooserRoutes";
-import type { Project } from "../../src/shared/contracts";
+import {
+  defaultSettings,
+  type AppSnapshot,
+  type Project,
+} from "../../src/shared/contracts";
 
 const codexSelection = nativeModelSelection({
   providerId: "codex",
@@ -65,6 +71,50 @@ function storage(): Storage {
 }
 
 describe("multi-spawn preset", () => {
+  it("uses project defaults before global defaults and preserves provider default", () => {
+    const globalSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "global-model",
+    });
+    const projectSelection = nativeModelSelection({
+      providerId: "claude",
+      modelId: "project-model",
+    });
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const snapshot = {
+      projects: [],
+      conversations: [],
+      providers: [],
+      backendProfiles: [],
+      backendDefaults: [
+        { scope: "global", projectId: null, selection: globalSelection, updatedAt: "2026-08-01T00:00:00.000Z" },
+        { scope: "project", projectId, selection: projectSelection, updatedAt: "2026-08-01T00:00:00.000Z" },
+      ],
+      runs: [],
+      settings: defaultSettings,
+      activeProjectId: projectId,
+      activeConversationId: null,
+    } satisfies AppSnapshot;
+
+    expect(defaultSelectionForProject(snapshot, defaultSettings, projectId))
+      .toEqual(projectSelection);
+
+    const providerDefaultSnapshot: AppSnapshot = {
+      ...snapshot,
+      backendDefaults: [],
+      settings: { ...defaultSettings, defaultModel: "" },
+    };
+    const duo = initialMultiSpawnDraft({
+      snapshot: providerDefaultSnapshot,
+      settings: providerDefaultSnapshot.settings,
+      activeProjectId: projectId,
+      routesForSelection: () => [],
+      preset: null,
+    });
+    expect(duo.sides.map(({ selection }) => selection.modelId))
+      .toEqual(["provider-default", "provider-default"]);
+  });
+
   it("persists only a bounded launch identity for restart reconciliation", () => {
     const target = storage();
     const launchId = "33333333-3333-4333-8333-333333333333";

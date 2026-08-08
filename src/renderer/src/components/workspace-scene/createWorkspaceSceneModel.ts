@@ -316,6 +316,7 @@ export function createWorkspaceSceneModel({
     chat: {
       project,
       conversation: detail?.conversation ?? conversation,
+      latestTurnSummary: projection.latestTurnSummary,
       turns: projection.turns,
       messages: projection.messages,
       activities: projection.activities,

@@ -600,6 +600,7 @@ export function useConversationProjection({
 
   return {
     conversation,
+    latestTurnSummary: conversation?.latestTurn ?? null,
     detail,
     detailState,
     refreshDetail,

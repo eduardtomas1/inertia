@@ -1,11 +1,13 @@
 import {
   Children,
+  createContext,
   isValidElement,
   memo,
   useEffect,
   useMemo,
   useRef,
   useState,
+  useContext,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -230,19 +232,41 @@ function nodeText(node: ReactNode): string {
   return "";
 }
 
-function useCopiedState(): [boolean, (text: string) => Promise<void>] {
+interface ClipboardControlState {
+  copied: boolean;
+  pending: boolean;
+  error: string | null;
+  copy: (text: string) => Promise<void>;
+}
+
+function useCopiedState(): ClipboardControlState {
   const [copied, setCopied] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
+  const operation = useRef(0);
   useEffect(() => () => {
+    operation.current += 1;
     if (timer.current !== null) window.clearTimeout(timer.current);
   }, []);
   const copy = async (text: string): Promise<void> => {
-    if (!await writeClipboardText(text)) return;
+    const sequence = operation.current + 1;
+    operation.current = sequence;
+    setPending(true);
+    setCopied(false);
+    setError(null);
+    const succeeded = await writeClipboardText(text);
+    if (operation.current !== sequence) return;
+    setPending(false);
+    if (!succeeded) {
+      setError("Couldn't copy. Try again or select the text manually.");
+      return;
+    }
     setCopied(true);
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => setCopied(false), 1_500);
   };
-  return [copied, copy];
+  return { copied, pending, error, copy };
 }
 
 function quoteCsvCell(value: string): string {
@@ -288,14 +312,27 @@ export function tableAsMarkdown(rows: string[][]): string {
 
 function MarkdownTable({ children, ...props }: ComponentProps<"table">): React.JSX.Element {
   const rows = useMemo(() => tableRowsFromNode(children), [children]);
-  const [copied, copy] = useCopiedState();
+  const markdownCopy = useCopiedState();
+  const csvCopy = useCopiedState();
   return (
     <div className="response-table-shell">
       <div className="response-table-toolbar">
         <span><Table2 size={13} />Table</span>
-        <button type="button" onClick={() => void copy(tableAsMarkdown(rows))}>{copied ? <Check size={12} /> : <Copy size={12} />}Markdown</button>
-        <button type="button" onClick={() => void copy(tableAsCsv(rows))}><Copy size={12} />CSV</button>
+        <button type="button" disabled={markdownCopy.pending} onClick={() => void markdownCopy.copy(tableAsMarkdown(rows))}>{markdownCopy.copied ? <Check size={12} /> : <Copy size={12} />}<span>{markdownCopy.pending ? "Copying Markdown" : markdownCopy.copied ? "Copied Markdown" : "Markdown"}</span></button>
+        <button type="button" disabled={csvCopy.pending} onClick={() => void csvCopy.copy(tableAsCsv(rows))}>{csvCopy.copied ? <Check size={12} /> : <Copy size={12} />}<span>{csvCopy.pending ? "Copying CSV" : csvCopy.copied ? "Copied CSV" : "CSV"}</span></button>
       </div>
+      {(markdownCopy.error || csvCopy.error) && (
+        <p className="response-copy-error" role="alert">
+          {markdownCopy.error ?? csvCopy.error}
+        </p>
+      )}
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {markdownCopy.copied
+          ? "Table copied as Markdown."
+          : csvCopy.copied
+            ? "Table copied as CSV."
+            : ""}
+      </span>
       <div className="response-table-scroll"><table {...props}>{children}</table></div>
     </div>
   );
@@ -361,7 +398,7 @@ function CodeBlock({
     ?? element?.props["data-code-meta"];
   const meta = codeMeta(typeof rawMeta === "string" ? rawMeta : language || undefined);
   const [wrap, setWrap] = useState(defaultWrap);
-  const [copied, copy] = useCopiedState();
+  const clipboard = useCopiedState();
   useEffect(() => setWrap(defaultWrap), [defaultWrap]);
   const HeaderIcon = meta.file ? FileCode2 : Code2;
   const fileTarget = meta.file
@@ -390,13 +427,111 @@ function CodeBlock({
           : <span title={meta.file ?? undefined}>{fileLabel}</span>}
         <div>
           <button type="button" aria-pressed={wrap} title={wrap ? "Disable code wrapping" : "Wrap long code lines"} onClick={() => setWrap((value) => !value)}><WrapText size={13} /><span>Wrap</span></button>
-          <button type="button" title="Copy code" onClick={() => void copy(code)}>{copied ? <Check size={13} /> : <Copy size={13} />}<span>{copied ? "Copied" : "Copy"}</span></button>
+          <button type="button" title="Copy code" disabled={clipboard.pending} onClick={() => void clipboard.copy(code)}>{clipboard.copied ? <Check size={13} /> : <Copy size={13} />}<span>{clipboard.pending ? "Copying" : clipboard.copied ? "Copied" : "Copy"}</span></button>
         </div>
       </header>
+      {clipboard.error && (
+        <p className="response-copy-error" role="alert">
+          {clipboard.error}
+        </p>
+      )}
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {clipboard.copied ? "Code copied to clipboard." : ""}
+      </span>
       <pre className={wrap ? "wraps" : undefined}><HighlightedCode code={code} language={language} enabled={!streaming} /></pre>
     </div>
   );
 }
+
+interface MarkdownRenderContextValue {
+  projectRoot: string;
+  projectId: string;
+  conversationId?: string;
+  defaultCodeWrap: boolean;
+  streaming: boolean;
+  onOpenProjectFile?: (path: string) => void;
+}
+
+const MarkdownRenderContext = createContext<MarkdownRenderContextValue | null>(
+  null,
+);
+
+function useMarkdownRenderContext(): MarkdownRenderContextValue {
+  const context = useContext(MarkdownRenderContext);
+  if (!context) throw new Error("Markdown renderer context is unavailable.");
+  return context;
+}
+
+function MarkdownLink({
+  href = "",
+  children,
+  ...props
+}: ComponentProps<"a">): React.JSX.Element {
+  const {
+    projectRoot,
+    projectId,
+    conversationId,
+    onOpenProjectFile,
+  } = useMarkdownRenderContext();
+  const target = resolveResponseLink(projectRoot, href);
+  if (target.kind === "external") {
+    return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
+  }
+  if (target.kind === "project") {
+    return <a {...props} href={href} onClick={(event) => {
+      event.preventDefault();
+      if (onOpenProjectFile && !responseLinkHasDirectoryHint(href)) {
+        onOpenProjectFile(target.relativePath);
+        return;
+      }
+      void window.inertia.openProjectPath({
+        projectId,
+        ...(conversationId ? { conversationId } : {}),
+        relativePath: target.relativePath,
+        action: target.action,
+      }).catch(() => undefined);
+    }}>{children}</a>;
+  }
+  if (target.kind === "anchor") {
+    return <a {...props} href={target.href}>{children}</a>;
+  }
+  return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;
+}
+
+function MarkdownCodeBlock({ children }: ComponentProps<"pre">): React.JSX.Element {
+  const {
+    defaultCodeWrap,
+    streaming,
+    projectRoot,
+    onOpenProjectFile,
+  } = useMarkdownRenderContext();
+  return (
+    <CodeBlock
+      defaultWrap={defaultCodeWrap}
+      streaming={streaming}
+      projectRoot={projectRoot}
+      onOpenProjectFile={onOpenProjectFile}
+    >
+      {children}
+    </CodeBlock>
+  );
+}
+
+function MarkdownDetails({
+  children,
+  ...props
+}: ComponentProps<"details">): React.JSX.Element {
+  return <details {...props} className="response-details">{children}</details>;
+}
+
+const RESPONSE_MARKDOWN_COMPONENTS: NonNullable<
+  ComponentProps<typeof ReactMarkdown>["components"]
+> = {
+  a: MarkdownLink,
+  pre: MarkdownCodeBlock,
+  table: MarkdownTable,
+  details: MarkdownDetails,
+};
 
 export function stabilizeStreamingMarkdown(content: string): string {
   const fences = content.match(/^ {0,3}(?:```|~~~)/gmu) ?? [];
@@ -415,47 +550,13 @@ function ResponseMarkdownComponent({
   onOpenProjectFile,
 }: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
-  const components = useMemo<
-    NonNullable<ComponentProps<typeof ReactMarkdown>["components"]>
-  >(() => ({
-    a: ({ href = "", children, ...props }) => {
-      const target = resolveResponseLink(projectRoot, href);
-      if (target.kind === "external") {
-        return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
-      }
-      if (target.kind === "project") {
-        return <a {...props} href={href} onClick={(event) => {
-          event.preventDefault();
-          if (
-            onOpenProjectFile
-            && !responseLinkHasDirectoryHint(href)
-          ) {
-            onOpenProjectFile(target.relativePath);
-            return;
-          }
-          void window.inertia.openProjectPath({
-            projectId,
-            ...(conversationId ? { conversationId } : {}),
-            relativePath: target.relativePath,
-            action: target.action,
-          }).catch(() => undefined);
-        }}>{children}</a>;
-      }
-      if (target.kind === "anchor") return <a {...props} href={target.href}>{children}</a>;
-      return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;
-    },
-    pre: ({ children }) => (
-      <CodeBlock
-        defaultWrap={defaultCodeWrap}
-        streaming={streaming}
-        projectRoot={projectRoot}
-        onOpenProjectFile={onOpenProjectFile}
-      >
-        {children}
-      </CodeBlock>
-    ),
-    table: MarkdownTable,
-    details: ({ children, ...props }) => <details {...props} className="response-details">{children}</details>,
+  const renderContext = useMemo<MarkdownRenderContextValue>(() => ({
+    projectRoot,
+    projectId,
+    conversationId,
+    defaultCodeWrap,
+    streaming,
+    onOpenProjectFile,
   }), [
     conversationId,
     defaultCodeWrap,
@@ -465,15 +566,17 @@ function ResponseMarkdownComponent({
     streaming,
   ]);
   return (
-    <div className={`response-markdown${streaming ? " is-streaming" : ""}`}>
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={REHYPE_PLUGINS}
-        components={components}
-      >
-        {renderedContent}
-      </ReactMarkdown>
-    </div>
+    <MarkdownRenderContext.Provider value={renderContext}>
+      <div className={`response-markdown${streaming ? " is-streaming" : ""}`}>
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={REHYPE_PLUGINS}
+          components={RESPONSE_MARKDOWN_COMPONENTS}
+        >
+          {renderedContent}
+        </ReactMarkdown>
+      </div>
+    </MarkdownRenderContext.Provider>
   );
 }
 

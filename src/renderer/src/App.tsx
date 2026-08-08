@@ -43,6 +43,7 @@ import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { activityRunSummary } from "./utils/activityCenter";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
+import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
@@ -574,22 +575,13 @@ export default function App(): React.JSX.Element {
   ) => {
     if (!targetProject) return;
     discardDraftConversation();
-    const backendDefault = connection.snapshot?.backendDefaults?.find(
-      ({ scope, projectId }) =>
-        scope === "project" && projectId === targetProject.id,
-    ) ?? connection.snapshot?.backendDefaults?.find(({ scope }) =>
-      scope === "global");
-    const defaultPayload = buildNewConversationPayload(
-      targetProject.id,
+    if (!connection.snapshot) return;
+    const payload = defaultConversationPayloadForProject(
+      connection.snapshot,
       settings,
+      targetProject.id,
       location,
     );
-    const payload = backendDefault
-      ? withNewConversationModelSelection(
-        defaultPayload,
-        backendDefault.selection,
-      )
-      : defaultPayload;
     const select = targetProject.id === project?.id ? Promise.resolve() : run("project.select", { type: "project.select", payload: { projectId: targetProject.id } });
     void select
       .then(() => run("conversation.create", {
@@ -609,16 +601,35 @@ export default function App(): React.JSX.Element {
   });
   const createConversationForSelection = async (
     selection: ModelSelection,
+    options?: { prefillText?: string },
   ): Promise<void> => {
     if (draftConversation.chooseModel(selection)) return;
     if (!project) throw new Error("Select a project before creating a chat.");
-    await run("conversation.create", {
+    const event = await run("conversation.create", {
       type: "conversation.create",
-      payload: withNewConversationModelSelection(
-        buildNewConversationPayload(project.id, settings),
-        selection,
-      ),
+      payload: {
+        ...withNewConversationModelSelection(
+          buildNewConversationPayload(project.id, settings),
+          selection,
+        ),
+        activate: false,
+      },
     });
+    if (
+      event.type !== "request.result"
+      || event.result.kind !== "conversation.created"
+    ) throw new Error("The new chat could not be identified.");
+    await run("conversation.select", {
+      type: "conversation.select",
+      payload: { conversationId: event.result.conversationId },
+    });
+    if (options?.prefillText) {
+      const conversationId = event.result.conversationId;
+      window.requestAnimationFrame(() => requestComposerPrefill({
+        conversationId,
+        text: options.prefillText!,
+      }));
+    }
     setView("workspace");
     setSidebarOpen(false);
   };

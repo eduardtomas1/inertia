@@ -8,6 +8,7 @@ export interface RouteChangeConfirmationProps {
   creating: boolean;
   cancelRef: RefObject<HTMLButtonElement | null>;
   canCreate: boolean;
+  blockedReason?: string | null;
   onDismiss: () => void;
   onCreate: () => void;
 }
@@ -17,6 +18,7 @@ export function RouteChangeConfirmation({
   creating,
   cancelRef,
   canCreate,
+  blockedReason = null,
   onDismiss,
   onCreate,
 }: RouteChangeConfirmationProps): React.JSX.Element {
@@ -42,6 +44,7 @@ export function RouteChangeConfirmation({
           Open a new chat for {pendingRoute.label}?
         </strong>
         <small id="route-confirmation-reason">{pendingRoute.reason}</small>
+        {blockedReason && <small role="alert">{blockedReason}</small>}
       </span>
       <button
         ref={cancelRef}

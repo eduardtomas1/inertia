@@ -41,8 +41,8 @@ describe("response Markdown", () => {
     ].join("\n"));
     expect(html).toContain("<h1>Result</h1>");
     expect(html).toContain('type="checkbox"');
-    expect(html).toContain("Markdown</button>");
-    expect(html).toContain("CSV</button>");
+    expect(html).toContain("<span>Markdown</span>");
+    expect(html).toContain("<span>CSV</span>");
     expect(html).toContain("Copy</span>");
     expect(html).toContain("Wrap</span>");
     expect(html).toContain("src/app.ts");

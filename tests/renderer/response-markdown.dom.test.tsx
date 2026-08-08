@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ResponseMarkdown } from "../../src/renderer/src/components/ResponseMarkdown";
@@ -96,6 +96,114 @@ describe("ResponseMarkdown project files", () => {
     expect(screen.getByRole("button", { name: "Wrap" })).toHaveAttribute(
       "aria-pressed",
       "true",
+    );
+  });
+
+  it("preserves each code control across changing parent callbacks", async () => {
+    const copyText = vi.fn(async () => true);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { copyText },
+    });
+    const content = [
+      "```ts",
+      "const first = true;",
+      "```",
+      "",
+      "```json",
+      "{\"second\":true}",
+      "```",
+    ].join("\n");
+    const props = {
+      content,
+      projectRoot: "/workspace",
+      projectId: "11111111-1111-4111-8111-111111111111",
+      defaultCodeWrap: false,
+    } as const;
+    const view = render(
+      <ResponseMarkdown {...props} onOpenProjectFile={() => undefined} />,
+    );
+    const wrapButtons = screen.getAllByRole("button", { name: "Wrap" });
+    const copyButtons = screen.getAllByRole("button", { name: "Copy" });
+    fireEvent.click(wrapButtons[0]!);
+    fireEvent.click(copyButtons[1]!);
+    await waitFor(() => expect(copyButtons[1]).toHaveTextContent("Copied"));
+
+    view.rerender(
+      <ResponseMarkdown {...props} onOpenProjectFile={() => undefined} />,
+    );
+
+    expect(screen.getAllByRole("button", { name: "Wrap" })[0])
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("button", { name: "Copy" })[0])
+      .toHaveTextContent("Copy");
+    expect(screen.getAllByRole("button", { name: "Copied" })[0])
+      .toHaveTextContent("Copied");
+    expect(copyText).toHaveBeenCalledWith('{"second":true}');
+  });
+
+  it("reports Markdown and CSV table copies independently", async () => {
+    const copyText = vi.fn(async () => true);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { copyText },
+    });
+    render(
+      <ResponseMarkdown
+        content={"| Name | Value |\n| --- | --- |\n| route | exact |"}
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Markdown" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Copied Markdown",
+    })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "CSV" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "CSV" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Copied CSV",
+    })).toBeInTheDocument());
+    expect(copyText).toHaveBeenNthCalledWith(
+      1,
+      "| Name | Value |\n| --- | --- |\n| route | exact |",
+    );
+    expect(copyText).toHaveBeenNthCalledWith(
+      2,
+      "Name,Value\nroute,exact",
+    );
+  });
+
+  it("reports a failed copy locally and clears it after a successful retry", async () => {
+    const copyText = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { copyText },
+    });
+    render(
+      <ResponseMarkdown
+        content={"```ts\nconst retry = true;\n```"}
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't copy. Try again or select the text manually.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Copied",
+    })).toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Code copied to clipboard.",
     );
   });
 

@@ -5,6 +5,7 @@ import type {
   ModelSelection,
 } from "@shared/contracts";
 import {
+  officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
   type ContinuationChangeKind,
   type ContinuationReasonCode,
@@ -61,18 +62,6 @@ export type ModelRouteTransition =
     });
 
 /**
- * Only verified route evidence may authorize an in-session model switch.
- * Custom/probed routes remain usable, but their model changes start a new
- * conversation unless the authoritative compatibility contract is upgraded.
- */
-function officiallyAllowsModelSwitch(
-  compatibility: TransitionCompatibility,
-): boolean {
-  return compatibility.state === "verified"
-    && compatibility.allowsModelSwitchWithinSession;
-}
-
-/**
  * Plans a chooser route change without accepting or returning a provider
  * session identifier. The shared continuation policy remains authoritative.
  */
@@ -91,7 +80,7 @@ export function resolveModelRouteTransition(
     nextModelId: candidate.selection.modelId,
     hasProviderSession: context.hasProviderSession,
     hasTurns: context.latestTurn !== null,
-    allowsModelSwitchWithinSession: officiallyAllowsModelSwitch(
+    allowsModelSwitchWithinSession: officiallyAllowsModelSwitchWithinSession(
       candidate.compatibility,
     ),
   });

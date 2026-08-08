@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   backendProfileUsesCredential,
+  modelSelectionForBackendProfile,
   modelBackendProfileDraftSchema,
   modelBackendProfileUpdateSchema,
   persistedModelBackendProfileSchema,
@@ -16,6 +17,7 @@ import {
 import {
   nativeBackendProfile,
   nativeHarnessId,
+  nativeModelSelection,
   modelSelectionSchema,
   type ModelSelection,
 } from "../../../shared/model-routing";
@@ -49,6 +51,31 @@ export {
   type BackendCredentialBroker,
   type BackendProfileControllerOptions,
 } from "./backend-profile-types";
+
+function backendExecutionSemantics(
+  profile: StoredModelBackendProfile["profile"],
+): string {
+  return JSON.stringify({
+    harnessId: profile.harnessId,
+    protocol: profile.protocol,
+    authenticationMode: profile.authenticationMode,
+    preset: profile.preset,
+    baseUrl: profile.baseUrl,
+    allowInsecureLocalhost: profile.allowInsecureLocalhost,
+    models: profile.models,
+    routing: profile.routing,
+    capabilityHints: profile.capabilityHints,
+  });
+}
+
+function backendPersistedState(
+  profile: StoredModelBackendProfile["profile"],
+): string {
+  return JSON.stringify({
+    ...profile,
+    updatedAt: null,
+  });
+}
 
 export class BackendProfileController {
   private readonly store: RuntimeStore;
@@ -188,30 +215,29 @@ export class BackendProfileController {
           update.allowInsecureLocalhost
             ?? stored.profile.allowInsecureLocalhost,
         );
-    const executionChanged = [
-      "harnessId",
-      "protocol",
-      "authenticationMode",
-      "baseUrl",
-      "allowInsecureLocalhost",
-      "models",
-      "routing",
-      "capabilityHints",
-    ].some((key) => Object.hasOwn(update, key));
-    const candidate = persistedModelBackendProfileSchema.parse({
+    const merged = persistedModelBackendProfileSchema.parse({
       ...stored.profile,
       ...update,
       baseUrl,
       endpointIdentity: baseUrl === stored.profile.baseUrl
         ? stored.profile.endpointIdentity
         : endpointIdentity(baseUrl!),
+      configurationRevision: stored.profile.configurationRevision,
+      enabled: update.enabled ?? stored.profile.enabled,
+      updatedAt: stored.profile.updatedAt,
+    });
+    const executionChanged = backendExecutionSemantics(merged)
+      !== backendExecutionSemantics(stored.profile);
+    const candidate = persistedModelBackendProfileSchema.parse({
+      ...merged,
       configurationRevision: stored.profile.configurationRevision
         + (executionChanged ? 1 : 0),
-      enabled: executionChanged
-        ? false
-        : update.enabled ?? stored.profile.enabled,
+      enabled: executionChanged ? false : merged.enabled,
       updatedAt: now,
     });
+    if (backendPersistedState(candidate) === backendPersistedState(stored.profile)) {
+      return this.runtime.detailView(stored);
+    }
     if (candidate.enabled && !stored.profile.enabled) {
       const compatibility = this.runtime.compatibility(
         candidate,
@@ -342,58 +368,151 @@ export class BackendProfileController {
       && selection.backendProfileId !== "builtin:opencode";
   }
 
-  validateSelection(selectionInput: ModelSelection): ModelSelection {
+  private validateReasoningEffort(
+    modelLabel: string,
+    reasoningOptions: readonly { value: string }[],
+    submitted: string | null,
+  ): string | null {
+    if (submitted === null) return null;
+    if (submitted.trim() !== submitted || submitted.length === 0) {
+      throw new BackendProfileControllerError(
+        "Choose a valid reasoning level or use the provider default.",
+      );
+    }
+    if (reasoningOptions.length === 0) {
+      throw new BackendProfileControllerError(
+        `${modelLabel} does not expose reasoning choices.`,
+      );
+    }
+    if (!reasoningOptions.some(({ value }) => value === submitted)) {
+      throw new BackendProfileControllerError(
+        `Reasoning level '${submitted}' is not supported by ${modelLabel}.`,
+      );
+    }
+    return submitted;
+  }
+
+  private rejectUnsupportedProviderOptions(
+    selection: ModelSelection,
+  ): void {
+    if (Object.keys(selection.providerOptions).length === 0) return;
+    throw new BackendProfileControllerError(
+      "The selected model does not support provider options.",
+    );
+  }
+
+  validateSelection(
+    selectionInput: ModelSelection,
+    options: { allowUnavailableNativeCatalog?: boolean } = {},
+  ): ModelSelection {
+    const submitted = modelSelectionSchema.parse(selectionInput);
     const nativeProvider = PROVIDER_IDS.find((providerId) =>
-      nativeBackendProfile(providerId).id === selectionInput.backendProfileId);
+      nativeBackendProfile(providerId).id === submitted.backendProfileId);
     if (nativeProvider) {
       const backend = nativeBackendProfile(nativeProvider);
       const harnessId = nativeHarnessId(nativeProvider);
       if (
-        selectionInput.harnessId !== harnessId
-        || selectionInput.backendConfigurationRevision
+        submitted.harnessId !== harnessId
+        || submitted.backendConfigurationRevision
           !== backend.configurationRevision
       ) {
         throw new BackendProfileControllerError(
           "The native model selection does not match its harness backend.",
         );
       }
-      const catalog = this.runtime.provider(nativeProvider)?.models ?? [];
+      const provider = this.runtime.provider(nativeProvider);
+      const catalog = provider?.models ?? [];
+      const catalogFreshness = provider?.metadataState.models.freshness
+        ?? "unavailable";
+      const selectedModel = submitted.modelId === "provider-default"
+        ? catalog.find(({ isDefault }) => isDefault) ?? catalog[0]
+        : catalog.find(({ id }) => id === submitted.modelId);
       if (
-        catalog.length > 0
-        && selectionInput.modelId !== "provider-default"
-        && !catalog.some(({ id }) => id === selectionInput.modelId)
+        submitted.modelId !== "provider-default"
+        && catalogFreshness !== "fresh"
+        && !options.allowUnavailableNativeCatalog
+      ) {
+        throw new BackendProfileControllerError(
+          "Refresh provider models before using this exact route.",
+        );
+      }
+      if (
+        submitted.modelId !== "provider-default"
+        && catalogFreshness === "fresh"
+        && !selectedModel
       ) {
         throw new BackendProfileControllerError(
           "That model is no longer offered by the native harness.",
         );
       }
-      return modelSelectionSchema.parse({
-        ...selectionInput,
-        harnessId,
-        backendProfileId: backend.id,
-        backendProfileDisplayName: backend.displayName,
-        backendConfigurationRevision: backend.configurationRevision,
+      this.rejectUnsupportedProviderOptions(submitted);
+      const reasoningEffort = (
+        options.allowUnavailableNativeCatalog
+        && catalogFreshness !== "fresh"
+        && !selectedModel
+      )
+        ? submitted.reasoningEffort
+        : this.validateReasoningEffort(
+            selectedModel?.label ?? (
+              submitted.modelId === "provider-default"
+                ? "Provider default"
+                : submitted.modelId
+            ),
+            selectedModel?.reasoningOptions ?? [],
+            submitted.reasoningEffort,
+          );
+      return nativeModelSelection({
+        providerId: nativeProvider,
+        modelId: submitted.modelId,
+        alias: submitted.modelId === "provider-default"
+          ? null
+          : selectedModel && selectedModel.label !== selectedModel.id
+            ? selectedModel.label
+            : null,
+        reasoningEffort,
       });
     }
-    const record = this.recordForSelection(selectionInput);
-    const selection = modelSelectionSchema.parse(selectionInput);
+    const record = this.recordForSelection(submitted);
     if (
-      selection.harnessId !== record.profile.harnessId
-      || selection.backendProfileDisplayName !== record.profile.displayName
-      || selection.backendConfigurationRevision
+      submitted.harnessId !== record.profile.harnessId
+      || submitted.backendConfigurationRevision
         !== record.profile.configurationRevision
-      || !record.profile.models.some(({ id }) => id === selection.modelId)
     ) {
       throw new BackendProfileControllerError(
         "The model selection does not match the current backend profile.",
       );
     }
+    const model = record.profile.models.find(({ id }) =>
+      id === submitted.modelId);
+    if (!model) {
+      throw new BackendProfileControllerError(
+        "The selected model is no longer configured on this backend profile.",
+      );
+    }
+    this.rejectUnsupportedProviderOptions(submitted);
+    const reasoningEffort = this.validateReasoningEffort(
+      model.displayName,
+      model.reasoningOptions,
+      submitted.reasoningEffort,
+    );
     if (record.profile.preset === "kimi-code") {
       const full = this.runtime.claudeProfile(record.profile.id);
       if (!full) throw new BackendProfileControllerError("The Kimi backend is unavailable.");
-      return validateKimiClaudeModelSelection(full, selection);
+      return validateKimiClaudeModelSelection(full, {
+        ...submitted,
+        backendProfileDisplayName: record.profile.displayName,
+        alias: null,
+        reasoningEffort,
+        contextWindowOverride: model.contextWindowTokens,
+        providerOptions: {},
+        capabilities: model.capabilities,
+      });
     }
-    return selection;
+    return modelSelectionForBackendProfile(
+      record.profile,
+      model.id,
+      reasoningEffort,
+    );
   }
 
   async readiness(

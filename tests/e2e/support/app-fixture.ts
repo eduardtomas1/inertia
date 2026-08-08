@@ -46,6 +46,7 @@ export interface AppFixture {
 interface AppFixtureOptions {
   name: string;
   initialState: "empty" | "conversation";
+  windowDisplay?: "primary";
   initialNewThreadMode?: "local" | "worktree";
   seedAssistantCodeBlock?: boolean;
   seedSecondProject?: boolean;
@@ -373,6 +374,14 @@ export async function createAppFixture(
     },
   });
   const page = await electronApp.firstWindow();
+  if (options.windowDisplay === "primary") {
+    await electronApp.evaluate(
+      ({ BrowserWindow, screen }) => {
+        const origin = screen.getPrimaryDisplay().workArea;
+        BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
+      },
+    );
+  }
   page.on("console", (message) => {
     if (message.type() === "error") rendererErrors.push(message.text());
   });

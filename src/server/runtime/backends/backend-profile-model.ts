@@ -76,22 +76,25 @@ export function endpointIdentity(baseUrl: string): string {
 function nativeModelDefinitions(
   provider: ProviderInfo | undefined,
 ): BackendModelDefinition[] {
-  if (!provider || provider.models.length === 0) {
-    return [{
-      id: "provider-default",
-      displayName: "Provider default",
-      contextWindowTokens: null,
-      reasoningOptions: [],
-      capabilities: [],
-    }];
-  }
-  return provider.models.map((model) => ({
+  const currentDefault = provider?.models.find(({ isDefault }) => isDefault)
+    ?? provider?.models[0];
+  return [{
+    id: "provider-default",
+    displayName: "Provider default",
+    contextWindowTokens: null,
+    reasoningOptions: currentDefault?.reasoningOptions.map((option) => ({
+      ...option,
+    })) ?? [],
+    capabilities: [],
+  }, ...(provider?.models ?? [])
+    .filter(({ id }) => id !== "provider-default")
+    .map((model) => ({
     id: model.id,
     displayName: model.label,
     contextWindowTokens: null,
     reasoningOptions: model.reasoningOptions.map((option) => ({ ...option })),
     capabilities: [],
-  }));
+    }))];
 }
 
 export function nativeProfile(
@@ -110,9 +113,7 @@ export function nativeProfile(
     models,
     routing: {
       mode: "simple",
-      primaryModelId: models.find(({ id }) =>
-        provider?.models.find((candidate) =>
-          candidate.id === id && candidate.isDefault))?.id ?? models[0]!.id,
+      primaryModelId: "provider-default",
     },
     capabilityHints: [],
     createdAt: BUILT_IN_TIMESTAMP,

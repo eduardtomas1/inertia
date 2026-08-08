@@ -421,7 +421,7 @@ describe("Kimi through Claude runtime lifecycle", () => {
         && event.requestId === invalidLegacyRequestId,
     );
     expect(invalidLegacy.message).toBe(
-      "Kimi model and effort changes require a verified Kimi model selection.",
+      "External backend model and reasoning changes require a verified model selection.",
     );
 
     const invalidSelectionRequestId = randomUUID();
@@ -441,6 +441,29 @@ describe("Kimi through Claude runtime lifecycle", () => {
     expect(invalidSelection.message).not.toContain(SECRET_VALUE);
     expect((await detail(client.socket, client.events, conversation.id)).conversation.modelSelection)
       .toEqual(selection);
+
+    const reasoningSelection = { ...selection, reasoningEffort: "low" };
+    const reasoningRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.update",
+      requestId: reasoningRequestId,
+      payload: {
+        conversationId: conversation.id,
+        modelSelection: reasoningSelection,
+      },
+    });
+    await requestOk(client.events, reasoningRequestId);
+    const reasoningSnapshot = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.conversations.some((candidate) =>
+          candidate.id === conversation.id
+          && candidate.modelSelection.reasoningEffort === "low"),
+    );
+    expect(reasoningSnapshot.snapshot.conversations.find(({ id }) =>
+      id === conversation.id)?.modelSelection).toEqual({
+      ...reasoningSelection,
+    });
 
     const messageRequestId = randomUUID();
     send(client.socket, {
@@ -486,7 +509,7 @@ describe("Kimi through Claude runtime lifecycle", () => {
 
     expect(captures).toHaveLength(1);
     const launch = captures[0]!;
-    expect(launch.input.modelSelection).toEqual(selection);
+    expect(launch.input.modelSelection).toEqual(reasoningSelection);
     expect(launch.input.model).toBe("k3[1m]");
     expect(launch.input.sessionId).toBeUndefined();
     expect(launch.environment).toMatchObject({
@@ -498,7 +521,7 @@ describe("Kimi through Claude runtime lifecycle", () => {
       ANTHROPIC_DEFAULT_SONNET_MODEL: "k3[1m]",
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "k3[1m]",
       CLAUDE_CODE_SUBAGENT_MODEL: "k3[1m]",
-      CLAUDE_CODE_EFFORT_LEVEL: "max",
+      CLAUDE_CODE_EFFORT_LEVEL: "low",
       CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "1",
       CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1048576",
       CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576",
@@ -515,7 +538,7 @@ describe("Kimi through Claude runtime lifecycle", () => {
     );
     expect(completedDetail.agentTurns).toHaveLength(1);
     const turn = completedDetail.agentTurns[0]!;
-    expect(turn.modelSelection).toEqual(selection);
+    expect(turn.modelSelection).toEqual(reasoningSelection);
     expect(turn.providerSessionBefore).toBeNull();
     expect(turn.providerSessionAfter).toBe("kimi-session-1");
     expect(turn.continuationIdentity).toMatchObject({
@@ -565,8 +588,9 @@ describe("Kimi through Claude runtime lifecycle", () => {
     const reloadedConversation = reloadedWelcome.snapshot.conversations.find(
       ({ id }) => id === conversation.id,
     )!;
-    expect(reloadedConversation.modelSelection).toEqual(selection);
-    expect(reloadedConversation.latestTurn?.modelSelection).toEqual(selection);
+    expect(reloadedConversation.modelSelection).toEqual(reasoningSelection);
+    expect(reloadedConversation.latestTurn?.modelSelection)
+      .toEqual(reasoningSelection);
     expect(modelSelectionIdentityLabel(reloadedConversation.latestTurn!.modelSelection))
       .toBe("Claude harness · Kimi · K3");
     const reloadedDetail = await detail(
@@ -574,7 +598,8 @@ describe("Kimi through Claude runtime lifecycle", () => {
       reloadedClient.events,
       conversation.id,
     );
-    expect(reloadedDetail.agentTurns[0]?.modelSelection).toEqual(selection);
+    expect(reloadedDetail.agentTurns[0]?.modelSelection)
+      .toEqual(reasoningSelection);
     expect(JSON.stringify(reloadedWelcome.snapshot)).not.toContain(SECRET_VALUE);
     expect(JSON.stringify(reloadedDetail)).not.toContain(SECRET_VALUE);
   });

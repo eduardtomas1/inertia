@@ -7,7 +7,10 @@ import {
   type Conversation,
   type ServerEvent,
 } from "../../../shared/contracts";
-import { resolveContinuationDecision } from "../../../shared/continuation-policy";
+import {
+  officiallyAllowsModelSwitchWithinSession,
+  resolveContinuationDecision,
+} from "../../../shared/continuation-policy";
 import {
   nativeModelSelection,
   type ModelSelection,
@@ -96,6 +99,33 @@ export function createConversationCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "conversation.create": {
+        const settings = dependencies.store.shellSnapshot().settings;
+        const requestedSelection = command.payload.modelSelection
+          ?? nativeModelSelection({
+            providerId: command.payload.providerId ?? settings.defaultProvider,
+            modelId: command.payload.model
+              || settings.defaultModel
+              || "provider-default",
+            alias: command.payload.model || settings.defaultModel || null,
+            reasoningEffort: command.payload.reasoningEffort
+              || settings.defaultReasoningEffort
+              || null,
+          });
+        const canonicalCreationSelection =
+          dependencies.backendProfileController.validateSelection(
+            requestedSelection,
+            { allowUnavailableNativeCatalog: true },
+          );
+        const canonicalCreationProviderId = dependencies.providers
+          .resolveModelRoute(canonicalCreationSelection).providerId;
+        if (
+          command.payload.providerId !== undefined
+          && command.payload.providerId !== canonicalCreationProviderId
+        ) {
+          throw new RuntimeRequestError(
+            "The selected provider does not match the verified model route.",
+          );
+        }
         const finishCreation = (
           conversationId: string,
         ): "handled" | "mutation" => {
@@ -108,11 +138,6 @@ export function createConversationCommandHandler(
           });
           return "handled";
         };
-        if (command.payload.modelSelection) {
-          const selection = dependencies.backendProfileController
-            .validateSelection(command.payload.modelSelection);
-          dependencies.providers.resolveModelRoute(selection);
-        }
         const repositoryPath = dependencies.store.projectPath(
           command.payload.projectId,
         );
@@ -152,6 +177,8 @@ export function createConversationCommandHandler(
             command.payload.title,
             {
               ...command.payload,
+              providerId: canonicalCreationProviderId,
+              modelSelection: canonicalCreationSelection,
               branch: status.branch,
               worktreePath: status.root,
             },
@@ -185,6 +212,8 @@ export function createConversationCommandHandler(
           command.payload.title,
           {
             ...command.payload,
+            providerId: canonicalCreationProviderId,
+            modelSelection: canonicalCreationSelection,
             branch: projectStatus?.branch ?? null,
             worktreePath: null,
           },
@@ -319,14 +348,17 @@ export function createConversationCommandHandler(
           )
         ) {
           throw new RuntimeRequestError(
-            "Kimi model and effort changes require a verified Kimi model selection.",
+            "External backend model and reasoning changes require a verified model selection.",
           );
         }
         const changesSelection = (
           update.providerId !== undefined
           || update.modelSelection !== undefined
           || update.model !== undefined
+          || update.reasoningEffort !== undefined
         );
+        let canonicalSelection: ModelSelection | null = null;
+        let canonicalProviderId: Conversation["providerId"] | null = null;
         if (changesSelection) {
           const selection = dependencies.backendProfileController
             .validateSelection(
@@ -336,6 +368,16 @@ export function createConversationCommandHandler(
               ),
             );
           const route = dependencies.providers.resolveModelRoute(selection);
+          if (
+            update.providerId !== undefined
+            && update.providerId !== route.providerId
+          ) {
+            throw new RuntimeRequestError(
+              "The selected provider does not match the verified model route.",
+            );
+          }
+          canonicalSelection = selection;
+          canonicalProviderId = route.providerId;
           const latestTurn = dependencies.store
             .latestAgentTurnForConversation(conversationId);
           const decision = resolveContinuationDecision({
@@ -353,7 +395,7 @@ export function createConversationCommandHandler(
             hasProviderSession: current.providerSessionId !== null,
             hasTurns: latestTurn !== null,
             allowsModelSwitchWithinSession:
-              route.compatibility.allowsModelSwitchWithinSession,
+              officiallyAllowsModelSwitchWithinSession(route.compatibility),
           });
           if (decision.action === "new-conversation-required") {
             throw new RuntimeRequestError(decision.reason);
@@ -377,7 +419,21 @@ export function createConversationCommandHandler(
             "Stop the active run or review before changing its agent configuration.",
           );
         }
-        dependencies.store.updateConversation(conversationId, update);
+        const canonicalUpdate = canonicalSelection && canonicalProviderId
+          ? {
+              ...update,
+              providerId: canonicalProviderId,
+              modelSelection: canonicalSelection,
+            }
+          : update;
+        if (canonicalSelection) {
+          delete canonicalUpdate.model;
+          delete canonicalUpdate.reasoningEffort;
+        }
+        dependencies.store.updateConversation(
+          conversationId,
+          canonicalUpdate,
+        );
         return "mutation";
       }
       case "conversation.archive":

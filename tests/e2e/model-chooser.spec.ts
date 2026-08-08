@@ -29,7 +29,11 @@ let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
 let resizeWindow!: AppFixture["resizeWindow"];
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "model-chooser", initialState: "conversation" });
+  app = await createAppFixture({
+    name: "model-chooser",
+    initialState: "conversation",
+    windowDisplay: "primary",
+  });
   electronApp = app.electronApp;
   page = app.page;
   testDirectory = app.testDirectory;
@@ -439,9 +443,15 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     modelId: "gpt-5.6-sol",
     reasoningEffort: "xhigh",
   });
+  await expect(modelTrigger).toHaveAccessibleName(
+    /Current selection: Codex .* Model Sol \(gpt-5\.6-sol\) .* Reasoning xhigh/u,
+  );
 
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
+  await expect(modelResults.locator(
+    ".model-chooser-row.is-active .model-chooser-row-option",
+  )).toContainText("Sol");
   await searchModels.fill("Codex Beta");
   const codexBeta = modelOptions.filter({
     hasText: /^Codex Beta/u,
@@ -474,6 +484,9 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     modelId: "codex-beta",
     conversationCount: conversationCountBefore,
   });
+  await expect(modelTrigger).toHaveAccessibleName(
+    /Current selection: Codex .* Model Codex Beta \(codex-beta\)/u,
+  );
 
   const chooseKimi = async (): Promise<void> => {
     await modelTrigger.click();
@@ -569,6 +582,9 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     conversationCount: conversationCountBefore + 1,
   });
   await expect(routeConfirmation).toHaveCount(0);
+  await expect(modelTrigger).toHaveAccessibleName(
+    /Current selection: Claude .* Kimi .* Model K3 \(k3\)/u,
+  );
 
   const catalogStore = new RuntimeStore(databasePath, workspaceDirectory);
   for (let profileIndex = 0; profileIndex < 5; profileIndex += 1) {

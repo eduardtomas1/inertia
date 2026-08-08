@@ -1,5 +1,7 @@
 import { expect, test, type Locator } from "@playwright/test";
+import { join } from "node:path";
 
+import { RuntimeStore } from "../../src/server/database";
 import {
   createAppFixture,
   type AppFixture,
@@ -12,7 +14,26 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "conversation-split",
     initialState: "conversation",
+    windowDisplay: "primary",
     seedSecondProject: true,
+    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+      const store = new RuntimeStore(
+        join(testDirectory, "data", "inertia.sqlite"),
+        workspaceDirectory,
+        { recoverInterruptedRuns: false },
+      );
+      for (const conversation of store.snapshot().conversations) {
+        const pane = conversation.title.endsWith("companion")
+          ? "secondary"
+          : "primary";
+        store.createMessage(
+          conversation.id,
+          `\`\`\`ts\nconst pane = "${pane}";\n\`\`\``,
+          "assistant",
+        );
+      }
+      store.close();
+    },
   });
   page = app.page;
 });
@@ -73,6 +94,19 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(primary).toBeVisible();
   await expect(secondary).toBeVisible();
   await expect(page.getByRole("main")).toHaveCount(1);
+  const primaryCode = primary.locator(".response-code-block");
+  const secondaryCode = secondary.locator(".response-code-block");
+  await expect(primaryCode).toHaveCount(1);
+  await expect(secondaryCode).toHaveCount(1);
+  const primaryWrap = primaryCode.getByRole("button", { name: "Wrap" });
+  await primaryWrap.click();
+  await expect(primaryCode.locator("pre")).toHaveClass(/wraps/u);
+  await expect(secondaryCode.locator("pre")).not.toHaveClass(/wraps/u);
+  await app.electronApp.evaluate(({ clipboard }) =>
+    clipboard.writeText("split-clipboard-sentinel"));
+  await secondaryCode.locator('button[title="Copy code"]').click();
+  await expect.poll(() => app.electronApp.evaluate(({ clipboard }) =>
+    clipboard.readText())).toBe('const pane = "secondary";');
   const duplicateIds = await page.locator("[id]").evaluateAll((elements) => {
     const counts = new Map<string, number>();
     for (const element of elements) {
@@ -439,6 +473,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   )).toBe(true);
 
   await app.resizeWindow(760, 820);
+  await expect.poll(() => page.evaluate(() =>
+    window.matchMedia("(max-width: 860px)").matches)).toBe(true);
   await expect(page.getByRole("separator", {
     name: "Resize split chats",
   })).toHaveAttribute("aria-orientation", "horizontal");

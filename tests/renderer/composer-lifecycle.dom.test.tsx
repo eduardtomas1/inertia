@@ -14,7 +14,10 @@ import type {
   ProviderInfo,
   ServerEvent,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import {
+  continuationIdentityForSelection,
+  nativeModelSelection,
+} from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import {
   DRAFT_PERSISTENCE_DELAY_MS,
@@ -62,11 +65,11 @@ function conversation(id: string): Conversation {
     modelSelection: nativeModelSelection({
       providerId: "codex",
       modelId: "provider-default",
-      reasoningEffort: "medium",
+      reasoningEffort: null,
     }),
     continuationIdentity: null,
     model: "",
-    reasoningEffort: "medium",
+    reasoningEffort: "",
     interactionMode: "build",
     accessMode: "supervised",
     status: "idle",
@@ -154,6 +157,161 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("submits reasoning as a complete selection and keeps the control open on failure", async () => {
+    const current = conversation("09090909-0909-4909-8909-090909090909");
+    current.modelSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-route",
+      alias: "GPT Route",
+      reasoningEffort: "medium",
+    });
+    current.model = "gpt-route";
+    current.reasoningEffort = "medium";
+    const reasoningProvider: ProviderInfo = {
+      ...provider,
+      models: [{
+        id: "gpt-route",
+        label: "GPT Route",
+        description: "A model with authoritative reasoning choices",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [
+          { value: "medium", label: "Medium", description: "Balanced" },
+          { value: "high", label: "High", description: "Deep" },
+        ],
+        defaultReasoningEffort: "medium",
+      }],
+    };
+    const update = deferred<void>();
+    const onUpdateConversation = vi.fn(() => update.promise);
+    render(<Composer {...composerProps(current, {
+      providers: [reasoningProvider],
+      onUpdateConversation,
+    })} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Choose reasoning level. Current level: Medium.",
+    }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /High/u }));
+
+    expect(onUpdateConversation).toHaveBeenCalledExactlyOnceWith({
+      modelSelection: {
+        ...current.modelSelection,
+        reasoningEffort: "high",
+      },
+    });
+    expect(screen.getByRole("menu", { name: "Reasoning level" }))
+      .toBeInTheDocument();
+
+    await act(async () => update.reject(new Error("Reasoning update rejected")));
+    expect(screen.getByRole("menu", { name: "Reasoning level" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Reasoning update rejected",
+    );
+  });
+
+  it("binds new-chat confirmation, transfers text, and supports failure retry", async () => {
+    const current = conversation("route-source");
+    current.modelSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "codex-route",
+      alias: "Codex Route",
+      reasoningEffort: "high",
+    });
+    current.model = "codex-route";
+    current.reasoningEffort = "high";
+    current.continuationIdentity = continuationIdentityForSelection(
+      current.modelSelection,
+    );
+    current.providerSessionId = "codex-session";
+    const catalogState = {
+      freshness: "fresh" as const,
+      provenance: "provider" as const,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      lastAttemptedAt: "2026-08-01T00:00:00.000Z",
+      refreshing: false,
+    };
+    const codexProvider: ProviderInfo = {
+      ...provider,
+      models: [{
+        id: "codex-route",
+        label: "Codex Route",
+        description: "Current route",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [{ value: "high", label: "High", description: "" }],
+        defaultReasoningEffort: "high",
+      }],
+      metadataState: { models: catalogState, rateLimits: catalogState },
+    };
+    const claudeProvider: ProviderInfo = {
+      ...codexProvider,
+      id: "claude",
+      label: "Claude",
+      models: [{
+        ...codexProvider.models[0]!,
+        id: "claude-route",
+        label: "Claude Route",
+        description: "Destination route",
+      }],
+    };
+    const onCreateConversationForSelection = vi.fn()
+      .mockRejectedValueOnce(new Error("Creation failed safely."))
+      .mockResolvedValueOnce(undefined);
+    render(<Composer {...composerProps(current, {
+      providers: [codexProvider, claudeProvider],
+      latestTurnSummary: {
+        id: "turn-source",
+        runId: "run-source",
+        status: "completed",
+        providerId: "codex",
+        harnessId: current.modelSelection.harnessId,
+        backendProfileId: current.modelSelection.backendProfileId,
+        modelSelection: current.modelSelection,
+        continuationIdentity: current.continuationIdentity,
+        model: current.modelSelection.modelId,
+        reasoningEffort: "high",
+        requestedAt: current.createdAt,
+        startedAt: current.createdAt,
+        completedAt: current.updatedAt,
+        terminalReason: null,
+        updatedAt: current.updatedAt,
+      },
+      onCreateConversationForSelection,
+    })} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Carry this exact text." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Claude, 2 models" }));
+    const claudeRoute = screen.getByTitle("Claude Route").closest("button");
+    if (!claudeRoute) throw new Error("Expected the Claude route action.");
+    fireEvent.click(claudeRoute);
+
+    const confirmation = screen.getByRole("alertdialog");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" }))
+      .toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(confirmation).toHaveTextContent(
+      "Creation failed safely.",
+    ));
+    expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Carry this exact text.");
+
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(onCreateConversationForSelection)
+      .toHaveBeenCalledTimes(2));
+    expect(onCreateConversationForSelection.mock.calls[1]?.[0]).toMatchObject({
+      modelId: "claude-route",
+    });
+    expect(onCreateConversationForSelection.mock.calls[1]?.[1]).toEqual({
+      prefillText: "Carry this exact text.",
+    });
+    await waitFor(() => expect(screen.queryByRole("alertdialog"))
+      .not.toBeInTheDocument());
+  });
+
   it("makes the leading draft durable, bounds trailing loss, and flushes ownership boundaries", async () => {
     vi.useFakeTimers();
     const first = conversation("10101010-1010-4010-8010-101010101010");

@@ -322,6 +322,13 @@ describe("trusted overlay native preview suspension", () => {
           }),
           label: "GPT-5.6",
           reason: "The active session cannot switch models.",
+          sourceConversationId: "conversation-1",
+          sourceProjectId: "project-1",
+          sourceSelectionKey: "source-selection",
+          sourceContinuationKey: "source-continuation",
+          sourceLatestTurnId: "turn-1",
+          sourceLatestTurnKey: "latest-turn",
+          destinationRevision: 1,
         }}
         creating={false}
         cancelRef={createRef<HTMLButtonElement>()}

@@ -290,7 +290,10 @@ export function useSplitWorkspaceScene({
   ]);
   const sceneActions = useStableActions({
     ...actions,
-    createConversationForSelection: async (selection: ModelSelection) => {
+    createConversationForSelection: async (
+      selection: ModelSelection,
+      options?: { prefillText?: string },
+    ) => {
       if (!splitProject) {
         throw new Error("The split project is no longer available.");
       }
@@ -308,6 +311,13 @@ export function useSplitWorkspaceScene({
         throw new Error("The new split chat could not be identified.");
       }
       onSecondaryConversationCreated(event.result.conversationId);
+      if (options?.prefillText) {
+        const conversationId = event.result.conversationId;
+        window.requestAnimationFrame(() => requestComposerPrefill({
+          conversationId,
+          text: options.prefillText!,
+        }));
+      }
     },
     sendMessage: async (
       content: string,

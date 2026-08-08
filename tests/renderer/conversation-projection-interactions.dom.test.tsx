@@ -452,6 +452,8 @@ describe("useConversationProjection pending interactions", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(hook.result.current.detailState?.state).toBe("ready");
+    expect(hook.result.current.latestTurnSummary)
+      .toEqual(refreshedSnapshot.conversations[0]?.latestTurn);
     expect(hook.result.current.messages).toBe(messagesBeforeRefresh);
     expect(hook.result.current.plans).toBe(plansBeforeRefresh);
     expect(request.mock.calls.filter(([command]) =>

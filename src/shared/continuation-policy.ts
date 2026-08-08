@@ -1,4 +1,24 @@
-import type { ContinuationIdentity } from "./model-routing";
+import type {
+  ContinuationIdentity,
+  HarnessBackendCompatibility,
+} from "./model-routing";
+
+type ModelSwitchCompatibility = Pick<
+  HarnessBackendCompatibility,
+  "state" | "allowsModelSwitchWithinSession"
+>;
+
+/**
+ * In-session model flexibility is an official capability only when the
+ * compatibility itself is verified. A raw flag from partial, user-declared,
+ * unknown, or unavailable evidence can never widen continuation authority.
+ */
+export function officiallyAllowsModelSwitchWithinSession(
+  compatibility: ModelSwitchCompatibility,
+): boolean {
+  return compatibility.state === "verified"
+    && compatibility.allowsModelSwitchWithinSession === true;
+}
 
 export const CONTINUATION_CHANGE_KINDS = [
   "none",

@@ -33,7 +33,7 @@ export interface ComposerSettingsProps {
   disabled: boolean;
   running: boolean;
   menuController: ComposerMenuController;
-  onUpdateReasoningEffort: (reasoningEffort: string) => void;
+  onUpdateReasoningEffort: (reasoningEffort: string) => Promise<void>;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -41,7 +41,6 @@ export interface ComposerSettingsProps {
     >>,
   ) => Promise<void>;
   conversationUpdatePending: boolean;
-  conversationUpdateError: string | null;
 }
 
 export function ComposerSettings({
@@ -55,7 +54,6 @@ export function ComposerSettings({
   onUpdateReasoningEffort,
   onUpdateConversation,
   conversationUpdatePending,
-  conversationUpdateError,
 }: ComposerSettingsProps): React.JSX.Element {
   const {
     menu,
@@ -127,9 +125,12 @@ export function ComposerSettings({
                   role="menuitemradio"
                   aria-checked={selectedReasoning === option.value}
                   key={option.value}
+                  disabled={conversationUpdatePending}
                   onClick={() => {
-                    onUpdateReasoningEffort(option.value);
-                    dismissMenu("selection");
+                    void onUpdateReasoningEffort(option.value).then(
+                      () => dismissMenu("selection"),
+                      () => undefined,
+                    );
                   }}
                 >
                   <span>
@@ -214,11 +215,6 @@ export function ComposerSettings({
                 )}
               </button>
             ))}
-            {conversationUpdateError && (
-              <p className="composer-control-error" role="alert">
-                {conversationUpdateError}
-              </p>
-            )}
           </div>
         )}
       </div>

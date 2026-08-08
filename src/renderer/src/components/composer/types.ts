@@ -4,6 +4,7 @@ import type {
   AgentTurn,
   ChatAttachment,
   Conversation,
+  ConversationLatestTurnSummary,
   ModelBackendProfileView,
   ModelSelection,
   ProjectAction,
@@ -24,6 +25,7 @@ export interface ComposerProps {
   running: boolean;
   backendProfiles?: ModelBackendProfileView[];
   latestTurn?: AgentTurn | null;
+  latestTurnSummary?: ConversationLatestTurnSummary | null;
   mentionResults: WorkspaceEntry[];
   usage: ThreadUsageSnapshot | null;
   usageDisplayMode: UsageDisplayMode;
@@ -53,7 +55,10 @@ export interface ComposerProps {
       | "accessMode"
     >>,
   ) => Promise<void>;
-  onCreateConversationForSelection?: (selection: ModelSelection) => Promise<void>;
+  onCreateConversationForSelection?: (
+    selection: ModelSelection,
+    options?: { prefillText?: string },
+  ) => Promise<void>;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onReleaseAttachment: (id: string) => Promise<void>;
@@ -83,4 +88,11 @@ export interface PendingModelRoute {
   selection: ModelSelection;
   label: string;
   reason: string;
+  sourceConversationId: string;
+  sourceProjectId: string;
+  sourceSelectionKey: string;
+  sourceContinuationKey: string;
+  sourceLatestTurnId: string | null;
+  sourceLatestTurnKey: string;
+  destinationRevision: number;
 }

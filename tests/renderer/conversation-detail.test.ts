@@ -129,6 +129,80 @@ function result(
 }
 
 describe("conversation detail projection", () => {
+  it("replaces the complete conversation route from the authoritative shell", () => {
+    const loadedSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-5",
+      reasoningEffort: "high",
+    });
+    const shellSelection = {
+      ...nativeModelSelection({
+        providerId: "claude",
+        modelId: "claude-sonnet-4-5",
+        reasoningEffort: "medium",
+      }),
+      backendConfigurationRevision: 3,
+    };
+    const loadedConversation: Conversation = {
+      ...conversation,
+      providerId: "codex",
+      modelSelection: loadedSelection,
+      continuationIdentity: continuationIdentityForSelection(
+        loadedSelection,
+        "codex-endpoint",
+      ),
+      model: loadedSelection.modelId,
+      reasoningEffort: "high",
+      providerSessionId: "codex-session",
+      updatedAt: "2026-07-25T10:00:00.000Z",
+    };
+    const authoritativeShell: ConversationShell = {
+      ...shell,
+      providerId: "claude",
+      modelSelection: shellSelection,
+      continuationIdentity: continuationIdentityForSelection(
+        shellSelection,
+        "claude-endpoint",
+        true,
+      ),
+      model: shellSelection.modelId,
+      reasoningEffort: "medium",
+      providerSessionId: null,
+      updatedAt: "2026-07-25T11:00:00.000Z",
+    };
+    const loadedDetail: ConversationDetail = {
+      ...detail,
+      conversation: loadedConversation,
+    };
+    const detailBefore = structuredClone(loadedDetail);
+    const shellBefore = structuredClone(authoritativeShell);
+
+    const merged = mergeConversationShell(loadedDetail, authoritativeShell);
+    const expectedConversation = { ...authoritativeShell } as Record<string, unknown>;
+    delete expectedConversation.latestTurn;
+    delete expectedConversation.pendingApproval;
+    delete expectedConversation.pendingInput;
+
+    expect(merged.conversation).toEqual(expectedConversation);
+    expect(merged.conversation.modelSelection).toBe(shellSelection);
+    expect(merged.conversation.continuationIdentity)
+      .toBe(authoritativeShell.continuationIdentity);
+    expect(merged.messages).toBe(loadedDetail.messages);
+    expect(merged.activities).toBe(loadedDetail.activities);
+    expect(merged.subagents).toBe(loadedDetail.subagents);
+    expect(merged.reasonings).toBe(loadedDetail.reasonings);
+    expect(merged.plans).toBe(loadedDetail.plans);
+    expect(merged.goals).toBe(loadedDetail.goals);
+    expect(merged.checkpoints).toBe(loadedDetail.checkpoints);
+    expect(merged.usage).toBe(loadedDetail.usage);
+    expect(merged.reviewSummaries).toBe(loadedDetail.reviewSummaries);
+    expect(merged.reviewStates).toBe(loadedDetail.reviewStates);
+    expect(merged.reviewNotes).toBe(loadedDetail.reviewNotes);
+    expect(merged.turnGitArtifacts).toBe(loadedDetail.turnGitArtifacts);
+    expect(loadedDetail).toEqual(detailBefore);
+    expect(authoritativeShell).toEqual(shellBefore);
+  });
+
   it("keeps shell metadata authoritative without replacing heavy detail", () => {
     const merged = mergeConversationShell(detail, shell);
     expect(merged.conversation).toMatchObject({

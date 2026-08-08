@@ -10,7 +10,12 @@ import {
   type ModelBackendProfileDraft,
   type PersistedModelBackendProfile,
 } from "../../src/shared/backend-profile-settings";
-import { continuationIdentityForSelection } from "../../src/shared/model-routing";
+import {
+  continuationIdentityForSelection,
+  MODEL_CAPABILITY_IDS,
+  nativeModelSelection,
+} from "../../src/shared/model-routing";
+import type { ProviderInfo } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
 import {
   BackendProfileController,
@@ -96,6 +101,83 @@ function persistedCredentialProfile(): PersistedModelBackendProfile {
   });
 }
 
+function nativeProvider(): ProviderInfo {
+  return {
+    id: "codex",
+    label: "Codex",
+    command: "codex",
+    available: true,
+    version: "1.0.0",
+    executable: "/opt/bin/codex",
+    installState: "installed",
+    authState: "authenticated",
+    canRun: true,
+    statusMessage: "Connected",
+    models: [{
+      id: "gpt-authoritative",
+      label: "GPT Authoritative",
+      description: "Authoritative native catalog model",
+      isDefault: true,
+      inputModalities: ["text"],
+      reasoningOptions: [{
+        value: "high",
+        label: "High",
+        description: "Deep reasoning",
+      }],
+      defaultReasoningEffort: "high",
+    }],
+    rateLimits: [],
+    metadataState: {
+      models: {
+        freshness: "fresh",
+        provenance: "provider",
+        updatedAt: "2026-08-01T08:00:00.000Z",
+        lastAttemptedAt: "2026-08-01T08:00:00.000Z",
+        refreshing: false,
+      },
+      rateLimits: {
+        freshness: "unavailable",
+        provenance: null,
+        updatedAt: null,
+        lastAttemptedAt: null,
+        refreshing: false,
+      },
+    },
+  };
+}
+
+function compatibleProbe(
+  profile: PersistedModelBackendProfile,
+) {
+  const checkedAt = "2026-08-01T09:00:00.000Z";
+  return {
+    profileId: profile.id,
+    backendConfigurationRevision: profile.configurationRevision,
+    endpointIdentity: profile.endpointIdentity,
+    protocol: profile.protocol,
+    modelId: profile.models[0]!.id,
+    compatibility: "protocol-compatible" as const,
+    protocolVerified: true,
+    modelVerified: true,
+    capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
+      id,
+      state: "verified" as const,
+      provenance: "probe" as const,
+      detail: null,
+      checkedAt,
+    })),
+    contextWindow: {
+      tokens: 200_000,
+      state: "verified" as const,
+      provenance: "probe" as const,
+      detail: null,
+      checkedAt,
+    },
+    failure: null,
+    checkedAt,
+  };
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) =>
@@ -104,6 +186,159 @@ afterEach(async () => {
 });
 
 describe("model backend profile controller", () => {
+  it("canonicalizes native model metadata and rejects unsupported reasoning", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    controller.profiles([nativeProvider()]);
+    const submitted = {
+      ...nativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-authoritative",
+        reasoningEffort: "high",
+      }),
+      alias: "Forged alias",
+      contextWindowOverride: 99_000_000,
+      capabilities: [{
+        id: "images" as const,
+        state: "verified" as const,
+        provenance: "user" as const,
+        detail: "Forged renderer capability",
+      }],
+    };
+
+    expect(controller.validateSelection(submitted)).toEqual({
+      ...nativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-authoritative",
+        alias: "GPT Authoritative",
+        reasoningEffort: "high",
+      }),
+      alias: "GPT Authoritative",
+    });
+    expect(() => controller.validateSelection({
+      ...submitted,
+      reasoningEffort: "unsupported",
+    })).toThrow("not supported");
+    runtimeStore.close();
+  });
+
+  it("distinguishes stale native catalogs from fresh model removal", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    const concrete = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-authoritative",
+      reasoningEffort: "high",
+    });
+    const stale = nativeProvider();
+    stale.metadataState.models.freshness = "stale";
+    controller.profiles([stale]);
+
+    expect(() => controller.validateSelection(concrete))
+      .toThrow("Refresh provider models");
+    expect(controller.validateSelection(concrete, {
+      allowUnavailableNativeCatalog: true,
+    })).toMatchObject({
+      modelId: "gpt-authoritative",
+      alias: "GPT Authoritative",
+      reasoningEffort: "high",
+    });
+    expect(controller.validateSelection(nativeModelSelection({
+      providerId: "codex",
+      modelId: "provider-default",
+    })).modelId).toBe("provider-default");
+
+    const freshWithoutModel = nativeProvider();
+    freshWithoutModel.models = [];
+    controller.profiles([freshWithoutModel]);
+    expect(() => controller.validateSelection(concrete))
+      .toThrow("no longer offered");
+    runtimeStore.close();
+  });
+
+  it("keeps historical display labels valid while canonicalizing external metadata", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    const created = await controller.createProfile(draft({
+      models: [{
+        id: "primary-model",
+        displayName: "Authoritative model",
+        contextWindowTokens: 200_000,
+        reasoningOptions: [{
+          value: "high",
+          label: "High",
+          description: "Deep reasoning",
+        }],
+        capabilities: [{
+          id: "reasoning",
+          state: "user-declared",
+          provenance: "user",
+          detail: "Configured by the user",
+        }],
+      }],
+      routing: { mode: "simple", primaryModelId: "primary-model" },
+    }));
+    const beforeRename = runtimeStore.modelBackendProfile(created.id).profile;
+    const historical = modelSelectionForBackendProfile(
+      beforeRename,
+      "primary-model",
+      "high",
+    );
+    await controller.updateProfile(created.id, {
+      displayName: "Renamed team gateway",
+    });
+
+    const canonical = controller.validateSelection({
+      ...historical,
+      alias: "Forged alias",
+      contextWindowOverride: 99_000_000,
+      capabilities: [{
+        id: "images",
+        state: "verified",
+        provenance: "user",
+        detail: "Forged renderer capability",
+      }],
+    });
+    expect(canonical).toMatchObject({
+      backendProfileId: created.id,
+      backendProfileDisplayName: "Renamed team gateway",
+      backendConfigurationRevision: historical.backendConfigurationRevision,
+      modelId: "primary-model",
+      alias: "Authoritative model",
+      reasoningEffort: "high",
+      contextWindowOverride: 200_000,
+      capabilities: [{
+        id: "reasoning",
+        state: "user-declared",
+        provenance: "user",
+        detail: "Configured by the user",
+      }],
+      providerOptions: {},
+    });
+    runtimeStore.close();
+  });
+
+  it("rejects unsupported external reasoning and provider options", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    const created = await controller.createProfile(draft());
+    const profile = runtimeStore.modelBackendProfile(created.id).profile;
+    const selection = modelSelectionForBackendProfile(
+      profile,
+      "primary-model",
+    );
+
+    expect(() => controller.validateSelection({
+      ...selection,
+      reasoningEffort: "renderer-invented",
+    })).toThrow("does not expose reasoning choices");
+    expect(() => controller.validateSelection({
+      ...selection,
+      providerOptions: { temperature: 2 },
+    })).toThrow("does not support provider options");
+    runtimeStore.close();
+  });
+
   it("keeps full endpoint URLs in scoped details rather than shell profiles", async () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });
@@ -129,19 +364,36 @@ describe("model backend profile controller", () => {
       null,
       modelSelectionForBackendProfile(enabled, "primary-model"),
     );
+    runtimeStore.recordModelBackendProbe(
+      created.id,
+      compatibleProbe(enabled),
+    );
 
     const renamed = await controller.updateProfile(created.id, {
       displayName: "Renamed team gateway",
     });
     expect(renamed.configurationRevision).toBe(1);
     expect(renamed.enabled).toBe(true);
+    expect(runtimeStore.modelBackendProfile(created.id).latestProbe)
+      .not.toBeNull();
+    expect(runtimeStore.listModelBackendDefaults()).toHaveLength(1);
+
+    const unchanged = await controller.updateProfile(created.id, {
+      models: renamed.models,
+    });
+    expect(unchanged.configurationRevision).toBe(1);
+    expect(unchanged.enabled).toBe(true);
+    expect(runtimeStore.modelBackendProfile(created.id).latestProbe)
+      .not.toBeNull();
     expect(runtimeStore.listModelBackendDefaults()).toHaveLength(1);
 
     const changed = await controller.updateProfile(created.id, {
-      models: renamed.models,
+      baseUrl: "https://replacement.example.test/v1/",
     });
     expect(changed.configurationRevision).toBe(2);
     expect(changed.enabled).toBe(false);
+    expect(changed.baseUrl).toBe("https://replacement.example.test/v1");
+    expect(runtimeStore.modelBackendProfile(created.id).latestProbe).toBeNull();
     expect(runtimeStore.listModelBackendDefaults()).toEqual([]);
     runtimeStore.close();
   });

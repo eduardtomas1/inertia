@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ModelBackendProfileDraft } from "../../src/shared/contracts";
 import {
+  backendProfileSemanticUpdate,
   backendProfileIsReady,
   setBackendDraftAdvancedRouting,
   updateBackendDraftModel,
@@ -48,6 +49,26 @@ function draft(): ModelBackendProfileDraft {
 }
 
 describe("model backend editor routing", () => {
+  it("emits no update for an unchanged form and only the renamed label for a rename", () => {
+    const current = draft();
+    expect(backendProfileSemanticUpdate(current, structuredClone(current)))
+      .toEqual({});
+    expect(backendProfileSemanticUpdate(current, {
+      ...structuredClone(current),
+      displayName: "Renamed gateway",
+    })).toEqual({ displayName: "Renamed gateway" });
+  });
+
+  it("emits only the execution field that changed", () => {
+    const current = draft();
+    const next = structuredClone(current);
+    next.models[0]!.contextWindowTokens = 300_000;
+
+    expect(backendProfileSemanticUpdate(current, next)).toEqual({
+      models: next.models,
+    });
+  });
+
   it("shows readiness only with usable auth and a tested usable connection", () => {
     const base = {
       enabled: true,

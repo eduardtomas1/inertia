@@ -9,21 +9,14 @@ import {
 import clsx from "clsx";
 import type {
   ChatAttachment,
-  ModelSelection,
 } from "@shared/contracts";
 import { MAX_CHAT_ATTACHMENTS } from "@shared/contracts";
-import {
-  isKimiThroughClaudeSelection,
-  KIMI_CLAUDE_REASONING_OPTIONS,
-  kimiCodingModelDisplayName,
-  modelSelectionIdentityLabel,
-} from "../../../../shared/claude-backend-profiles";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import {
   legacyProviderIdForHarness,
 } from "../../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
-import { composerRouteReadiness } from "../../utils/composerReadiness";
+import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import {
   buildComposerModelRoutes,
   selectedModelSearchRoute,
@@ -52,7 +45,7 @@ import {
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
-import type { ComposerProps } from "./types";
+import type { ComposerProps, PendingModelRoute } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
 import {
@@ -75,6 +68,7 @@ export const Composer = memo(function Composer({
   running,
   backendProfiles = [],
   latestTurn = null,
+  latestTurnSummary = null,
   mentionResults,
   usage,
   usageDisplayMode,
@@ -139,12 +133,9 @@ export const Composer = memo(function Composer({
   ]));
   const releaseAttachmentRef = useRef(onReleaseAttachment);
   const [fileReferences, setFileReferences] = useState<string[]>([]);
-  const [pendingRoute, setPendingRoute] = useState<{
-    selection: ModelSelection;
-    label: string;
-    reason: string;
-  } | null>(null);
+  const [pendingRoute, setPendingRoute] = useState<PendingModelRoute | null>(null);
   const [creatingRouteConversation, setCreatingRouteConversation] = useState(false);
+  const [routeCreationError, setRouteCreationError] = useState<string | null>(null);
   const [routeRepairing, setRouteRepairing] = useState(false);
   const [conversationUpdatePending, setConversationUpdatePending] = useState(false);
   const [conversationUpdateError, setConversationUpdateError] = useState<string | null>(null);
@@ -347,8 +338,55 @@ export const Composer = memo(function Composer({
 
   useEffect(() => {
     if (!pendingRoute) return;
-    window.requestAnimationFrame(() => routeCancelRef.current?.focus());
+    let settleFrame = 0;
+    const closeFrame = window.requestAnimationFrame(() => {
+      settleFrame = window.requestAnimationFrame(() =>
+        routeCancelRef.current?.focus());
+    });
+    return () => {
+      window.cancelAnimationFrame(closeFrame);
+      if (settleFrame) window.cancelAnimationFrame(settleFrame);
+    };
   }, [pendingRoute]);
+
+  useEffect(() => {
+    if (!pendingRoute) return;
+    const latestTurnAuthority = latestTurnSummary ?? latestTurn;
+    const latestTurnId = latestTurnAuthority?.id ?? null;
+    const latestTurnKey = JSON.stringify(latestTurnAuthority
+      ? {
+          id: latestTurnAuthority.id,
+          modelSelection: latestTurnAuthority.modelSelection,
+          continuationIdentity: latestTurnAuthority.continuationIdentity,
+        }
+      : null);
+    const destinationRevision = backendProfiles.find(({ id }) =>
+      id === pendingRoute.selection.backendProfileId)
+      ?.configurationRevision
+      ?? pendingRoute.selection.backendConfigurationRevision;
+    if (
+      pendingRoute.sourceConversationId !== conversation.id
+      || pendingRoute.sourceProjectId !== conversation.projectId
+      || pendingRoute.sourceSelectionKey !== JSON.stringify(conversation.modelSelection)
+      || pendingRoute.sourceContinuationKey
+        !== JSON.stringify(conversation.continuationIdentity)
+      || pendingRoute.sourceLatestTurnId !== latestTurnId
+      || pendingRoute.sourceLatestTurnKey !== latestTurnKey
+      || pendingRoute.destinationRevision !== destinationRevision
+    ) {
+      setPendingRoute(null);
+      setRouteCreationError(null);
+    }
+  }, [
+    conversation.continuationIdentity,
+    conversation.id,
+    conversation.modelSelection,
+    conversation.projectId,
+    backendProfiles,
+    latestTurn,
+    latestTurnSummary,
+    pendingRoute,
+  ]);
 
   useEffect(() => () => {
     if (submissionReleaseTimerRef.current !== null) window.clearTimeout(submissionReleaseTimerRef.current);
@@ -628,58 +666,37 @@ export const Composer = memo(function Composer({
     addAttachments(selected);
   };
 
-  const selectedProvider = providers.find((provider) => provider.id === conversation.providerId);
-  const selectedBackendProfile = backendProfiles.find(
-    ({ id }) => id === conversation.modelSelection.backendProfileId,
-  );
-  const selectedBackendModel = selectedBackendProfile?.models.find(
-    ({ id }) => id === conversation.modelSelection.modelId,
-  );
-  const kimiSelection = isKimiThroughClaudeSelection(conversation.modelSelection);
-  const selectedModel = selectedBackendModel
-    ? {
-        id: selectedBackendModel.id,
-        label: selectedBackendModel.displayName,
-        description: `${selectedBackendProfile?.displayName ?? "Backend"} model through ${selectedBackendProfile?.harnessId ?? "the selected harness"}`,
-        isDefault: selectedBackendProfile?.routing.primaryModelId === selectedBackendModel.id,
-        inputModalities: ["text"] as const,
-        reasoningOptions: selectedBackendModel.reasoningOptions,
-        defaultReasoningEffort: selectedBackendModel.reasoningOptions.find(({ value }) =>
-          value === conversation.modelSelection.reasoningEffort)?.value
-          ?? selectedBackendModel.reasoningOptions[0]?.value
-          ?? "",
-      }
-    : kimiSelection
-    ? {
-        id: conversation.modelSelection.modelId,
-        label: kimiCodingModelDisplayName(conversation.modelSelection.modelId),
-        description: "Kimi coding model through the Claude harness",
-        isDefault: true,
-        inputModalities: ["text"] as const,
-        reasoningOptions: KIMI_CLAUDE_REASONING_OPTIONS,
-        defaultReasoningEffort: "high",
-      }
-    : selectedProvider?.models.find(({ id }) => id === conversation.model)
-      ?? selectedProvider?.models.find(({ isDefault }) => isDefault)
-      ?? selectedProvider?.models[0];
-  const selectedReasoning = conversation.reasoningEffort || selectedModel?.defaultReasoningEffort || "";
-  const routeReadiness = composerRouteReadiness({
-    provider: selectedProvider,
-    profile: selectedBackendProfile,
+  const routeState = useMemo(() => resolveComposerRouteState({
+    conversationProviderId: conversation.providerId,
     selection: conversation.modelSelection,
-  });
+    providers,
+    profiles: backendProfiles,
+  }), [
+    backendProfiles,
+    conversation.modelSelection,
+    conversation.providerId,
+    providers,
+  ]);
+  const selectedProvider = routeState.provider;
+  const selectedBackendProfile = routeState.profile;
+  const selectedModel = routeState.model;
+  const selectedReasoning = conversation.modelSelection.reasoningEffort
+    ?? selectedModel?.defaultReasoningEffort
+    ?? "";
+  const routeReadiness = routeState.readiness;
   const selectedIdentityLabel = selectedBackendProfile
-    ? `${composerHarnessLabel(selectedBackendProfile.harnessId)} · ${selectedBackendProfile.displayName} · ${selectedBackendModel?.displayName ?? conversation.modelSelection.modelId}`
-    : kimiSelection
-    ? modelSelectionIdentityLabel(conversation.modelSelection)
-    : selectedProvider?.label ?? conversation.providerId;
+    ? `${composerHarnessLabel(selectedBackendProfile.harnessId)} · ${selectedBackendProfile.displayName} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
+    : selectedProvider
+      ? `${selectedProvider.label} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
+      : conversation.modelSelection.backendProfileDisplayName;
   const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached file." : "Please review the selected diff context.")).length;
   const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
   const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext))
     && messageFits
     && routeReadiness.ready
-    && !disabled;
+    && !disabled
+    && !conversationUpdatePending;
   const primaryAction = composerPrimaryActionState({
     sendEligible,
     submitting,
@@ -762,15 +779,15 @@ export const Composer = memo(function Composer({
       }
     }
   };
-  const updateReasoningEffort = (reasoningEffort: string): void => {
-    void updateConversation(kimiSelection
-      ? {
-          modelSelection: {
-            ...conversation.modelSelection,
-            reasoningEffort,
-          },
-        }
-      : { reasoningEffort }).catch(() => undefined);
+  const updateReasoningEffort = async (
+    reasoningEffort: string,
+  ): Promise<void> => {
+    await updateConversation({
+      modelSelection: {
+        ...conversation.modelSelection,
+        reasoningEffort,
+      },
+    });
   };
   const modelRoutes = useMemo(() => buildComposerModelRoutes(
     providers,
@@ -781,33 +798,54 @@ export const Composer = memo(function Composer({
     modelRoutes,
     conversation.modelSelection,
   ), [conversation.modelSelection, modelRoutes]);
-  const chooseModelRoute = (route: ComposerModelRoute): void => {
+  const chooseModelRoute = async (route: ComposerModelRoute): Promise<void> => {
     const transition = resolveModelRouteTransition({
       projectId: conversation.projectId,
       selection: conversation.modelSelection,
       continuationIdentity: conversation.continuationIdentity,
-      latestTurn: latestTurn
+      latestTurn: latestTurnSummary
         ? {
-            selection: latestTurn.modelSelection,
-            continuationIdentity: latestTurn.continuationIdentity,
+            selection: latestTurnSummary.modelSelection,
+            continuationIdentity: latestTurnSummary.continuationIdentity,
           }
+        : latestTurn
+          ? {
+              selection: latestTurn.modelSelection,
+              continuationIdentity: latestTurn.continuationIdentity,
+            }
         : null,
       hasProviderSession: Boolean(conversation.providerSessionId),
     }, route);
     if (transition.kind === "create-new-conversation") {
+      const sourceLatestTurn = latestTurnSummary ?? latestTurn;
+      setRouteCreationError(null);
       setPendingRoute({
         selection: transition.selection,
         label: `${route.backendProfileName} · ${route.displayName}`,
         reason: transition.reason,
+        sourceConversationId: conversation.id,
+        sourceProjectId: conversation.projectId,
+        sourceSelectionKey: JSON.stringify(conversation.modelSelection),
+        sourceContinuationKey: JSON.stringify(conversation.continuationIdentity),
+        sourceLatestTurnId: sourceLatestTurn?.id ?? null,
+        sourceLatestTurnKey: JSON.stringify(sourceLatestTurn
+          ? {
+              id: sourceLatestTurn.id,
+              modelSelection: sourceLatestTurn.modelSelection,
+              continuationIdentity: sourceLatestTurn.continuationIdentity,
+            }
+          : null),
+        destinationRevision:
+          transition.selection.backendConfigurationRevision,
       });
       return;
     }
     const providerId = route.providerId
       ?? legacyProviderIdForHarness(route.selection.harnessId);
-    void updateConversation({
+    await updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: transition.selection,
-    }).catch(() => undefined);
+    });
   };
   const updatePromptStash = (
     update: (current: readonly PromptStashEntry[]) => PromptStashEntry[],
@@ -857,12 +895,21 @@ export const Composer = memo(function Composer({
   };
   const dismissPendingRoute = (): void => {
     setPendingRoute(null);
+    setRouteCreationError(null);
     window.requestAnimationFrame(() => {
       composerRef.current
         ?.querySelector<HTMLButtonElement>(".selected-model-chip")
         ?.focus();
     });
   };
+  const routeCreationBlockedReason = pendingRoute && (
+    attachments.length > 0
+    || Boolean(promptContext)
+    || fileReferences.length > 0
+    || selectedSkillIds.length > 0
+  )
+    ? "Remove attachments, diff context, file references, and selected skills before transferring this text to a new chat."
+    : null;
 
   return (
     <div className="composer-shell">
@@ -894,15 +941,46 @@ export const Composer = memo(function Composer({
           pendingRoute={pendingRoute}
           creatingRouteConversation={creatingRouteConversation}
           routeCancelRef={routeCancelRef}
-          canCreateRouteConversation={Boolean(onCreateConversationForSelection)}
+          canCreateRouteConversation={Boolean(
+            onCreateConversationForSelection && !routeCreationBlockedReason,
+          )}
+          routeCreationBlockedReason={
+            routeCreationBlockedReason ?? routeCreationError
+          }
           onDismissPendingRoute={dismissPendingRoute}
           onCreateRouteConversation={() => {
             if (!onCreateConversationForSelection || !pendingRoute) return;
+            setRouteCreationError(null);
             setCreatingRouteConversation(true);
-            void onCreateConversationForSelection(pendingRoute.selection).then(
-              () => setPendingRoute(null),
-              () => undefined,
-            ).finally(() => setCreatingRouteConversation(false));
+            const sourceConversationId = conversation.id;
+            const sourceEditorRevision = editorRevisionsRef.current.get(
+              sourceConversationId,
+            ) ?? 0;
+            const prefillText = message.trim() ? message : undefined;
+            void onCreateConversationForSelection(
+              pendingRoute.selection,
+              prefillText ? { prefillText } : undefined,
+            ).then(
+              () => {
+                setPendingRoute(null);
+                if (
+                  prefillText
+                  && conversationIdRef.current === sourceConversationId
+                  && (editorRevisionsRef.current.get(sourceConversationId) ?? 0)
+                    === sourceEditorRevision
+                ) updateMessage("");
+              },
+              (error) => {
+                if (!mountedRef.current) return;
+                setRouteCreationError(
+                  error instanceof Error
+                    ? error.message
+                    : "The new chat could not be created.",
+                );
+              },
+            ).finally(() => {
+              if (mountedRef.current) setCreatingRouteConversation(false);
+            });
           }}
           textareaRef={textareaRef}
           message={message}
@@ -922,7 +1000,7 @@ export const Composer = memo(function Composer({
         />
         <ComposerToolbar
           actions={actions}
-          disabled={disabled || conversationUpdatePending}
+          disabled={disabled}
           running={running}
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}

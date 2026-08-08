@@ -3294,6 +3294,22 @@ textarea {
   flex: 0 1 auto;
 }
 
+.composer-route-control-error {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 7px);
+  width: max-content;
+  max-width: min(360px, 70vw);
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--failure-accent) 34%, var(--border));
+  border-radius: var(--radius-small);
+  color: var(--failure-accent);
+  background: var(--surface-strong);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
+}
+
 .composer-setting-family {
   display: flex;
   min-width: 0;
@@ -10833,6 +10849,16 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .response-code-block > header button[aria-pressed="true"] {
   color: var(--text);
   background: var(--surface-hover);
+}
+
+.response-copy-error {
+  margin: 0;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--code-border);
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-size: 8.5px;
+  line-height: 1.4;
 }
 
 .response-code-block pre {

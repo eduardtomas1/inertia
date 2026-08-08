@@ -8,6 +8,7 @@ import {
   type ServerEvent,
 } from "../../src/shared/contracts";
 import { useDraftConversation } from "../../src/renderer/src/hooks/useDraftConversation";
+import { nativeModelSelection } from "../../src/shared/model-routing";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import {
   buildDraftConversation,
@@ -113,6 +114,36 @@ describe("useDraftConversation", () => {
         setItem: vi.fn(),
       } satisfies Storage,
     });
+  });
+
+  it("starts from the project backend default before the global default", () => {
+    const globalSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "global-model",
+    });
+    const projectSelection = nativeModelSelection({
+      providerId: "claude",
+      modelId: "project-model",
+    });
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: {
+        ...snapshot,
+        backendDefaults: [
+          { scope: "global", projectId: null, selection: globalSelection, updatedAt: now },
+          { scope: "project", projectId, selection: projectSelection, updatedAt: now },
+        ],
+      },
+      settings: defaultSettings,
+      run: vi.fn(),
+      sendMessage: vi.fn(),
+      persistedConversationId: null,
+      updatePersistedConversation: vi.fn(),
+    }));
+
+    act(() => hook.result.current.start(projectId));
+
+    expect(hook.result.current.conversation?.modelSelection)
+      .toEqual(projectSelection);
   });
 
   it("keeps a new-project chat local until its first message is sent", async () => {

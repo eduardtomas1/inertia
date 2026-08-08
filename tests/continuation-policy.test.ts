@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
   staleProviderSessionDecision,
 } from "../src/shared/continuation-policy";
@@ -16,6 +17,22 @@ const codex = nativeModelSelection({
 const codexIdentity = continuationIdentityForSelection(codex, null, false);
 
 describe("provider continuation policy", () => {
+  it.each([
+    ["partially-compatible", true, false],
+    ["unknown", true, false],
+    ["user-declared", true, false],
+    ["verified", false, false],
+    ["verified", true, true],
+  ] as const)(
+    "treats %s compatibility with switch=%s as officially allowed=%s",
+    (state, allowsModelSwitchWithinSession, expected) => {
+      expect(officiallyAllowsModelSwitchWithinSession({
+        state,
+        allowsModelSwitchWithinSession,
+      })).toBe(expected);
+    },
+  );
+
   it("starts the first turn without requiring a persisted identity", () => {
     expect(resolveContinuationDecision({
       previousIdentity: null,

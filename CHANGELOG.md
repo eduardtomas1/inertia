@@ -4,6 +4,30 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.28 — 2026-08-09
+
+### Goals and native sessions start from the composer
+
+- `/goal` opens the real per-chat goal workflow directly from the composer, while `/resume` lists every eligible native Codex, Claude, Cursor, or OpenCode session that belongs to the current directory. Draft chats resolve through their visible project or worktree instead of requiring an already persisted conversation.
+- Native-session terminals preserve exact conversation ownership and retry creation only after a definite not-sent result. Ambiguous delivery never creates a duplicate process, and terminal connection recovery remains bounded rather than silently falling back to a fresh provider session.
+- Pending provider questions stay visible beside the active work instead of disappearing into an unreadable activity ledger, and the animated provider-working label now loops without a visible seam.
+
+### Duo finishes the comparison without taking over stale work
+
+- The optional third-model judge is presented in a compact disclosure instead of extending the setup beyond the viewport. Inertia monitors the launched pair in the background, waits for both authoritative terminal states, and opens the completed judge as the primary chat only when the user is still looking at that exact Duo.
+- Settings, split changes, project or conversation navigation, chat creation, and source follow-ups cancel or supersede the automatic handoff deterministically. A queued judge can no longer replace newer user work, and an activating send cannot race the pending selection.
+- Provider questions raised during either source turn remain actionable, while failed, cancelled, or interrupted comparisons retain explicit recovery controls instead of pretending the judge completed.
+
+### Expensive diffs use bounded parallel work
+
+- Ordinary patches still parse synchronously. Unified diffs above 256 KiB move into a lazy, bounded worker pool so pathological reviews can use more than one renderer core without multiplying workers for normal work.
+- Parse-dependent review and reversal actions fail closed while aggregate parsing is pending or failed. Superseded work is aborted, worker failures are bounded, refreshed snapshots retry safely, and the original patch remains available rather than being mistaken for an empty diff.
+- The project sidebar returns to a simpler, quieter hierarchy without the heavy folder overlay or duplicated hover label.
+
+### Release confidence
+
+- Architecture and lint checks, four TypeScript projects, 2,360 unit and integration tests, 222 portable provider contracts, 46 Electron scenarios, production audit, 15 resolved exact-review threads, a clean final exact-head review, and green Linux, macOS, and Windows coverage, performance, packaging, fuse, signature, and smoke gates protect the release.
+
 ## 0.0.27 — 2026-08-08
 
 ### Chats keep their exact workspace and visible state

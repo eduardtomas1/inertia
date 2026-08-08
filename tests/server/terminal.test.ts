@@ -243,6 +243,42 @@ describe("TerminalManager", () => {
     }
   });
 
+  it("publishes a client-close exit only after the process tree is confirmed stopped", async () => {
+    const terminal = fakeTerminal();
+    const frames: string[] = [];
+    let confirmStopped!: (confirmed: boolean) => void;
+    const stopped = new Promise<boolean>((resolve) => {
+      confirmStopped = resolve;
+    });
+    const owner = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: (payload: string) => frames.push(payload),
+    } as unknown as WebSocket;
+    const manager = new TerminalManager({
+      spawnTerminal: vi.fn(() => terminal.pty),
+      terminateProcessTree: async () => await stopped,
+    });
+    const terminalId = manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+    );
+
+    manager.close(owner, terminalId);
+    expect(frames).toEqual([]);
+
+    confirmStopped(true);
+    await waitFor("confirmed client-close exit", () => frames.length === 1);
+    expect(frames.map((frame) => JSON.parse(frame))).toEqual([
+      { type: "terminal.exit", terminalId, exitCode: 130 },
+    ]);
+  });
+
   it("terminates a slow WebSocket and drops its remaining terminal burst", () => {
     const terminal = fakeTerminal();
     const frames: string[] = [];
@@ -594,9 +630,13 @@ describe("TerminalManager", () => {
           80,
           24,
         );
-        await waitFor("the detached terminal child PID", () =>
-          existsSync(pidPath));
-        childPid = Number(readFileSync(pidPath, "utf8"));
+        await waitFor("the detached terminal child PID", () => {
+          if (!existsSync(pidPath)) return false;
+          const observedPid = Number(readFileSync(pidPath, "utf8"));
+          if (!Number.isInteger(observedPid) || observedPid <= 1) return false;
+          childPid = observedPid;
+          return true;
+        });
         expect(childPid).toBeGreaterThan(1);
         expect(processExists(childPid)).toBe(true);
 

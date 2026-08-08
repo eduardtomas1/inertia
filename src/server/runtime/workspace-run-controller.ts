@@ -131,12 +131,9 @@ export class WorkspaceRunController<Owner> {
   }
 
   async startAction(input: StartWorkspaceActionInput<Owner>): Promise<string> {
-    if (
-      input.conversationId
-      && this.store.conversationWork.hasConversation(input.conversationId)
-    ) {
+    if (this.store.conversationWork.hasCheckout(input.cwd)) {
       throw new RuntimeRequestError(
-        "End the resumed provider terminal before starting project actions for this chat.",
+        "End the resumed provider terminal before starting project actions in this workspace.",
       );
     }
     const scripts = await discoverPackageScripts(input.cwd);
@@ -148,12 +145,9 @@ export class WorkspaceRunController<Owner> {
     const conversation = input.conversationId
       ? this.store.conversation(input.conversationId)
       : null;
-    if (
-      input.conversationId
-      && this.store.conversationWork.hasConversation(input.conversationId)
-    ) {
+    if (this.store.conversationWork.hasCheckout(input.cwd)) {
       throw new RuntimeRequestError(
-        "End the resumed provider terminal before starting project actions for this chat.",
+        "End the resumed provider terminal before starting project actions in this workspace.",
       );
     }
     const activity = this.store.createWorkspaceRun({
@@ -268,13 +262,11 @@ export class WorkspaceRunController<Owner> {
     label: string,
     projectId: string,
     conversationId: string | undefined,
+    cwd: string,
     requestId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const terminalOwnsWorkspace = conversationId
-      ? this.store.conversationWork.hasConversation(conversationId)
-      : this.store.conversationWork.hasProject(projectId);
-    if (terminalOwnsWorkspace) {
+    if (this.store.conversationWork.hasCheckout(cwd)) {
       throw new RuntimeRequestError(
         "End the resumed provider terminal before changing this workspace with Git.",
       );

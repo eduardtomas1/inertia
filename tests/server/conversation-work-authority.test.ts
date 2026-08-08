@@ -27,7 +27,7 @@ describe("conversation work authority", () => {
     );
     const workspaces = new Map([
       ["conversation-a", { projectId: "project", checkoutPath: checkout }],
-      ["conversation-b", { projectId: "project", checkoutPath: alias }],
+      ["conversation-b", { projectId: "second-project", checkoutPath: alias }],
     ]);
     const authority = new ConversationWorkAuthority((conversationId) =>
       workspaces.get(conversationId)!);
@@ -35,6 +35,7 @@ describe("conversation work authority", () => {
     expect(authority.reserve("conversation-a")).toBe(true);
     expect(authority.reserve("conversation-b")).toBe(false);
     expect(authority.hasConversation("conversation-b")).toBe(true);
+    expect(authority.hasCheckout(alias)).toBe(true);
 
     authority.release("conversation-a");
     expect(authority.reserve("conversation-b")).toBe(true);

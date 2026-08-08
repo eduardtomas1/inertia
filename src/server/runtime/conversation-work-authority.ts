@@ -74,8 +74,12 @@ export class ConversationWorkAuthority {
   hasConversation(conversationId: string): boolean {
     if (this.workspaceByConversation.has(conversationId)) return true;
     const workspace = this.workspaceForConversation(conversationId);
+    return this.hasCheckout(workspace.checkoutPath);
+  }
+
+  hasCheckout(checkoutPath: string): boolean {
     return this.conversationByCheckout.has(
-      canonicalCheckoutIdentity(workspace.checkoutPath),
+      canonicalCheckoutIdentity(checkoutPath),
     );
   }
 

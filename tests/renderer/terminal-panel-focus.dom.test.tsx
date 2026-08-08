@@ -490,6 +490,15 @@ describe("TerminalPanel focus lifecycle", () => {
       ([sent]) => sent.type === "terminal.provider.resume",
     )).toHaveLength(1);
 
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 1" }));
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.close"
+        && sent.payload.terminalId === resumedTerminalId,
+    )).toBe(true));
+    expect(screen.getByRole("button", {
+      name: "Claude session is resumed in another Inertia terminal",
+    })).toBeDisabled();
+
     await act(async () => {
       for (const listener of listeners) {
         listener({

@@ -374,7 +374,18 @@ export class TerminalManager {
   }
 
   close(owner: WebSocket, terminalId: string): void {
-    void this.trackDisposal(this.ownedSession(owner, terminalId, true));
+    const session = this.ownedSession(owner, terminalId, true);
+    if (session.closing) return;
+    void this.trackDisposal(session).then(
+      () => {
+        send(owner, {
+          type: "terminal.exit",
+          terminalId: session.id,
+          exitCode: 130,
+        });
+      },
+      () => undefined,
+    );
   }
 
   /**

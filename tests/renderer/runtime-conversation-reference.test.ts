@@ -153,4 +153,24 @@ describe("runtime conversation references", () => {
       /selectionGeneration !== conversationSelectionGenerationRef\.current/g,
     )).toHaveLength(2);
   });
+
+  it("routes every user command that can replace active workspace authority", () => {
+    const authorityCommands = appSource.slice(
+      appSource.indexOf("export function commandMayChangeWorkspaceAuthority"),
+      appSource.indexOf("export default function App"),
+    );
+    for (const commandType of [
+      "project.create",
+      "project.select",
+      "project.remove",
+      "conversation.select",
+      "conversation.create",
+      "conversation.archive",
+      "conversation.delete",
+    ]) {
+      expect(authorityCommands).toContain(`case "${commandType}"`);
+    }
+    expect(appSource).toContain("runNavigationCommand: runUserCommand");
+    expect(appSource).toContain("run: runUserCommand,");
+  });
 });

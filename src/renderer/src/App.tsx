@@ -83,6 +83,24 @@ function useDocumentActive(): boolean {
   return active;
 }
 
+export function commandMayChangeWorkspaceAuthority(
+  command: CommandWithoutId,
+): boolean {
+  switch (command.type) {
+    case "project.create":
+    case "project.select":
+    case "project.remove":
+    case "conversation.select":
+    case "conversation.archive":
+    case "conversation.delete":
+      return true;
+    case "conversation.create":
+      return command.payload.activate !== false;
+    default:
+      return false;
+  }
+}
+
 export default function App(): React.JSX.Element {
   const connection = useStableController(useInertiaConnection());
   const sendCommand = connection.sendCommand;
@@ -309,6 +327,16 @@ export default function App(): React.JSX.Element {
     setActionError,
   });
   const selectionCommandQueue = useRuntimeCommandQueue(run);
+  const runUserCommand = useCallback((
+    key: string,
+    command: CommandWithoutId,
+  ) => {
+    if (!commandMayChangeWorkspaceAuthority(command)) {
+      return run(key, command);
+    }
+    conversationSelectionGenerationRef.current += 1;
+    return selectionCommandQueue(key, command);
+  }, [run, selectionCommandQueue]);
   const selectConversationCommand = useCallback((
     key: string,
     conversationId: string,
@@ -326,6 +354,7 @@ export default function App(): React.JSX.Element {
     snapshot: connection.snapshot,
     settings,
     run,
+    runNavigationCommand: runUserCommand,
     sendMessage: sendMessageToConversation,
     persistedConversationId: conversation?.id ?? null,
     updatePersistedConversation: updateConversationById,
@@ -987,7 +1016,7 @@ export default function App(): React.JSX.Element {
         onClose: closeProviderAuth,
       }}
       actions={{
-        run,
+        run: runUserCommand,
         importProject,
         selectProject,
         selectConversation,

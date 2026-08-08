@@ -22,6 +22,26 @@ export const DUO_DISPATCH_STATES = [
 
 export type DuoDispatchState = typeof DUO_DISPATCH_STATES[number];
 
+export const DUO_COMPARISON_STATES = [
+  "waiting",
+  "dispatching",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+] as const;
+
+export type DuoComparisonState = typeof DUO_COMPARISON_STATES[number];
+
+export interface DuoComparisonStatus {
+  state: DuoComparisonState;
+  conversationId: string | null;
+  turnId: string | null;
+  attempt: number;
+  error: string | null;
+}
+
 export interface DuoLaunchSideStatus {
   ordinal: 0 | 1;
   conversationId: string | null;
@@ -56,6 +76,7 @@ export interface DuoLaunchStatus {
   state: DuoLaunchState;
   error: string | null;
   sides: [DuoLaunchSideStatus, DuoLaunchSideStatus];
+  comparison?: DuoComparisonStatus;
   recoveryGuidance?: DuoWorktreeRecoveryGuidance[];
 }
 
@@ -70,6 +91,9 @@ export interface DuoPreparedResult {
   launchId: string;
   state: "prepared";
   sides: [DuoPreparedSide, DuoPreparedSide];
+  comparison?: {
+    conversationId: string;
+  };
 }
 
 export type DuoStatusResult = DuoLaunchStatus & { kind: "duo.status" };

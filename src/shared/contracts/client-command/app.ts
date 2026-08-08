@@ -43,6 +43,14 @@ const duoSideSchema = conversationCreatePayloadSchema.extend({
   activate: z.literal(false).optional(),
 }).strict();
 
+const duoComparisonSchema = conversationCreatePayloadSchema.omit({
+  branch: true,
+  useWorktree: true,
+  worktreePath: true,
+}).extend({
+  activate: z.literal(false).optional(),
+}).strict();
+
 export const appCommandSchemas = [
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
   z
@@ -142,6 +150,7 @@ export const appCommandSchemas = [
         launchId: z.string().uuid(),
         prompt: z.string().trim().min(1).max(20_000),
         sides: z.tuple([duoSideSchema, duoSideSchema]),
+        comparison: duoComparisonSchema.optional(),
       }).strict(),
     })
     .strict(),
@@ -150,7 +159,7 @@ export const appCommandSchemas = [
       ...requestBase,
       type: z.literal("duo.pending"),
       payload: z.object({
-        projectIds: z.array(z.string().uuid()).min(1).max(2),
+        projectIds: z.array(z.string().uuid()).min(1).max(3),
       }).strict(),
     })
     .strict(),
@@ -162,6 +171,8 @@ export const appCommandSchemas = [
         "duo.cancel",
         "duo.status",
         "duo.acknowledge",
+        "duo.comparison.retry",
+        "duo.comparison.cancel",
       ]),
       payload: z.object({ launchId: z.string().uuid() }).strict(),
     })

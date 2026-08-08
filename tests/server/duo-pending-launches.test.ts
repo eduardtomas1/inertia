@@ -193,9 +193,11 @@ describe("pending Duo launch discovery", () => {
       expect(fixture.store.pendingPairedLaunchIds([
         fixture.projectId,
         second.id,
+        third.id,
       ], 16)).toEqual({
         launchIds: [
           launchIds.interrupted,
+          launchIds.third,
           launchIds.second,
           launchIds.cross,
           launchIds.first,

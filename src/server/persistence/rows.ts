@@ -22,6 +22,7 @@ import type {
   TurnGitPatchState,
   WorkspaceRun,
   DuoDispatchState,
+  DuoComparisonState,
   DuoLaunchState,
 } from "../../shared/contracts";
 import type { ModelBackendDefault } from "../../shared/backend-profile-settings";
@@ -104,6 +105,12 @@ export interface PairedLaunchRow {
   status: DuoLaunchState;
   cancel_requested: 0 | 1;
   failure_message: string | null;
+  comparison_state: DuoComparisonState | null;
+  comparison_planned_conversation_id: string | null;
+  comparison_conversation_id: string | null;
+  comparison_turn_id: string | null;
+  comparison_attempt: number;
+  comparison_failure_message: string | null;
   created_at: string;
   updated_at: string;
 }

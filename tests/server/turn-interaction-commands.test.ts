@@ -155,6 +155,24 @@ function dependencies(options: {
 }
 
 describe("message attachment ownership transfer", () => {
+  it("surfaces a judge reservation rejected by the shared turn queue", async () => {
+    const queue = vi.fn(() => {
+      throw new Error(
+        "This judge chat is reserved for its locked Duo comparison.",
+      );
+    });
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+    });
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).rejects.toThrow("reserved for its locked Duo comparison");
+    expect(queue).toHaveBeenCalledOnce();
+  });
+
   it("aborts attachment resolution at the aggregate deadline", async () => {
     vi.useFakeTimers();
     try {

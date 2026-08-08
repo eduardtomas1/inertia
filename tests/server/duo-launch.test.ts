@@ -183,13 +183,13 @@ class PairProvider implements TurnProviderRuntime {
     });
   }
 
-  completeAll(): void {
-    for (const { input, resolve } of this.completions.splice(0)) {
+  completeAll(texts: readonly string[] = []): void {
+    for (const [index, { input, resolve }] of this.completions.splice(0).entries()) {
       resolve({
         providerId: input.providerId,
         conversationId: input.conversationId ?? input.threadId,
         status: "completed",
-        text: "",
+        text: texts[index] ?? "",
         textTruncated: false,
         exitCode: 0,
         signal: null,

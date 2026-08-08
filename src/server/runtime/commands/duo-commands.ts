@@ -29,6 +29,8 @@ export function createDuoCommandHandler(
     "duo.pending",
     "duo.status",
     "duo.acknowledge",
+    "duo.comparison.retry",
+    "duo.comparison.cancel",
   ], async (socket, command) => {
     switch (command.type) {
       case "duo.prepare": {
@@ -89,6 +91,30 @@ export function createDuoCommandHandler(
         return "handled";
       case "duo.acknowledge": {
         const status = dependencies.coordinator.acknowledgeInterrupted(
+          command.payload.launchId,
+        );
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: statusResult(status),
+        });
+        return "handled";
+      }
+      case "duo.comparison.retry": {
+        const status = await dependencies.coordinator.retryComparison(
+          command.payload.launchId,
+        );
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: statusResult(status),
+        });
+        return "handled";
+      }
+      case "duo.comparison.cancel": {
+        const status = dependencies.coordinator.cancelComparison(
           command.payload.launchId,
         );
         dependencies.broadcastSnapshot();

@@ -21,7 +21,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Find models quickly through a searchable provider-aware palette, then save complete harness, backend, model, and reasoning routes as Favorites.
 - See provider-supplied thinking summaries, remaining context, and account usage through one compact context control.
 - Work with streaming conversations, resumable sessions, native plans, agent questions, image and document inputs, cancellation, and supervised approvals whenever the selected provider supports them.
-- Launch a saved Duo from one shared prompt into two independently named chats, each with its own project, model route, reasoning, and access mode.
+- Launch a saved Duo from one shared prompt into two independently named chats, each with its own project, model route, reasoning, and access mode, with an optional independent third-model judgment.
 - Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
 - Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
 - Start from a compact Environment summary of the current branch, changes, active work, delegated agents, and attached context, while keeping the full workspace tools one click away.
@@ -40,6 +40,8 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 The lightning action beside **New chat** opens a focused Duo setup. Give both chats a name, choose their projects and complete provider routes, then send one shared prompt to both. Inertia creates the conversations safely, starts the acknowledged pair together, and opens the results in the split workspace without pretending that their sessions, permissions, tools, or working directories are shared.
 
 Save one bounded default Duo for the combinations you use often. The preset stores only safe route identity and chat names—not prompts, projects, credentials, or provider-specific secrets—and Inertia warns when both agents will edit the same checkout.
+
+When you explicitly enable third-model comparison, Inertia locks the two source chats and their first Duo turns against deletion, waits for both turns to reach authoritative terminal states, then starts a separately configured judge chat. The judge receives only the bounded shared brief, each source status, and attributed visible assistant output—not source sessions, tools, permissions, credentials, attachments, reasoning, or hidden context. Failed or interrupted judgments are never retried silently; you can retry explicitly or cancel the lock.
 
 ![Configure two agent perspectives from one shared prompt](docs/screenshots/inertia-duo.png)
 

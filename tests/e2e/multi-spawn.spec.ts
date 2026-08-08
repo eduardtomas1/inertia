@@ -21,7 +21,7 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test("launches two truthful routes into a cross-project split", async (
+test("launches two truthful routes and locks a bounded third-model judge", async (
   { browserName: _browserName },
   testInfo,
 ) => {
@@ -46,6 +46,20 @@ test("launches two truthful routes into a cross-project split", async (
     .selectOption({ label: "Companion" });
   await dialog.getByRole("combobox", { name: "Chat 2 access" })
     .selectOption("full");
+  await dialog.getByRole("checkbox", { name: "Compare with a third model" })
+    .check();
+  await dialog.getByRole("textbox", { name: "Comparison chat name" })
+    .fill("Independent judge");
+  await dialog.getByRole("combobox", { name: "Comparison chat project" })
+    .selectOption({ label: "Companion" });
+  await dialog.getByRole("combobox", { name: "Comparison chat access" })
+    .selectOption("full");
+  await expect(dialog.getByText("Judge route", { exact: true }))
+    .toBeVisible();
+  await expect(dialog.getByText("What the lock sends", { exact: true }))
+    .toBeVisible();
+  await expect(dialog.getByText("Judge can edit a source checkout", { exact: true }))
+    .toBeVisible();
 
   await page.evaluate(() => {
     document.documentElement.dataset.theme = "light";
@@ -67,6 +81,8 @@ test("launches two truthful routes into a cross-project split", async (
     document.documentElement.dataset.theme = "dark";
     document.documentElement.style.colorScheme = "dark";
   });
+  await dialog.getByText("What the lock sends", { exact: true })
+    .scrollIntoViewIfNeeded();
   await expect(dialog.getByRole("button", { name: "Launch duo" }))
     .toBeVisible();
   await app.expectNoViewportOverflow();
@@ -108,6 +124,10 @@ test("launches two truthful routes into a cross-project split", async (
   await expect(
     sidebar.locator("button.conversation-row")
       .filter({ hasText: "Independent review" }),
+  ).toBeVisible();
+  await expect(
+    sidebar.locator("button.conversation-row")
+      .filter({ hasText: "Independent judge" }),
   ).toBeVisible();
   await app.expectNoViewportOverflow();
 

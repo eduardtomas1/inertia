@@ -496,10 +496,14 @@ export function AppLayout({
             recoveryStatus={multiSpawn.recoveryStatus}
             recheckingRecovery={multiSpawn.recheckingRecovery}
             acknowledgingRecovery={multiSpawn.acknowledgingRecovery}
+            retryingComparison={multiSpawn.retryingComparison}
+            cancellingComparison={multiSpawn.cancellingComparison}
             onClose={multiSpawn.closeDialog}
             onSubmit={multiSpawn.submit}
             onRecheckRecovery={multiSpawn.recheckRecovery}
             onAcknowledgeRecovery={multiSpawn.acknowledgeRecovery}
+            onRetryComparison={multiSpawn.retryComparison}
+            onCancelComparison={multiSpawn.cancelComparison}
             onOpenProviderSetup={actions.openProviderSetup}
             onOpenBackendSetup={actions.openBackendSetup}
           />

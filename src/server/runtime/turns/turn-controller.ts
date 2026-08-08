@@ -244,6 +244,10 @@ export class TurnController {
 
   queue(request: QueueTurnRequest): QueuedTurn {
     if (this.closing) throw new Error("The local runtime is shutting down.");
+    this.store.assertDuoComparisonTurnAllowed(
+      request.conversationId,
+      request.authorizedDuoComparisonLaunchId,
+    );
     if (this.activeByConversation.has(request.conversationId)) {
       throw new Error("This conversation already has an active turn.");
     }
@@ -265,6 +269,7 @@ export class TurnController {
   ): [QueuedTurn, QueuedTurn] {
     if (this.closing) throw new Error("The local runtime is shutting down.");
     for (const request of requests) {
+      this.store.assertDuoComparisonTurnAllowed(request.conversationId);
       if (this.activeByConversation.has(request.conversationId)) {
         throw new Error("A Duo conversation already has an active turn.");
       }

@@ -62,6 +62,8 @@ describe("shared contracts boundary", () => {
       "duo.cancel",
       "duo.status",
       "duo.acknowledge",
+      "duo.comparison.retry",
+      "duo.comparison.cancel",
       "conversation.select",
       "conversation.detail.load",
       "conversation.detail.subscription",
@@ -130,5 +132,24 @@ describe("shared contracts boundary", () => {
       "terminal.close",
     ]);
     expect(new Set(commandTypes).size).toBe(commandTypes.length);
+  });
+
+  it("bounds Duo reconciliation to both sources and one judge project", () => {
+    const projectIds = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333",
+    ];
+    const command = (ids: string[]) => ({
+      type: "duo.pending",
+      requestId: "44444444-4444-4444-8444-444444444444",
+      payload: { projectIds: ids },
+    });
+
+    expect(clientCommandSchema.safeParse(command(projectIds)).success).toBe(true);
+    expect(clientCommandSchema.safeParse(command([
+      ...projectIds,
+      "55555555-5555-4555-8555-555555555555",
+    ])).success).toBe(false);
   });
 });

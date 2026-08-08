@@ -48,8 +48,9 @@ export interface MultiSpawnPresetSide {
 }
 
 export interface MultiSpawnPreset {
-  version: 1;
+  version: 2;
   sides: [MultiSpawnPresetSide, MultiSpawnPresetSide];
+  comparison: MultiSpawnPresetSide | null;
 }
 
 export interface MultiSpawnSideDraft {
@@ -63,6 +64,10 @@ export interface MultiSpawnSideDraft {
 export interface MultiSpawnDraft {
   prompt: string;
   sides: [MultiSpawnSideDraft, MultiSpawnSideDraft];
+  comparison: {
+    enabled: boolean;
+    side: MultiSpawnSideDraft;
+  };
   rememberPreset: boolean;
 }
 
@@ -206,11 +211,22 @@ export function readMultiSpawnPreset(
       version?: unknown;
       sides?: unknown;
     };
-    if (parsed.version !== 1 || !Array.isArray(parsed.sides)) return null;
+    if (
+      (parsed.version !== 1 && parsed.version !== 2)
+      || !Array.isArray(parsed.sides)
+    ) return null;
     const first = presetSide(parsed.sides[0]);
     const second = presetSide(parsed.sides[1]);
     if (!first || !second || parsed.sides.length !== 2) return null;
-    return { version: 1, sides: [first, second] };
+    const comparison = parsed.version === 2
+      ? presetSide((parsed as { comparison?: unknown }).comparison)
+      : null;
+    if (
+      parsed.version === 2
+      && (parsed as { comparison?: unknown }).comparison !== null
+      && !comparison
+    ) return null;
+    return { version: 2, sides: [first, second], comparison };
   } catch {
     return null;
   }
@@ -221,7 +237,7 @@ export function writeMultiSpawnPreset(
   draft: MultiSpawnDraft,
 ): boolean {
   const preset: MultiSpawnPreset = {
-    version: 1,
+    version: 2,
     sides: draft.sides.map((side) => ({
       title: side.title.trim(),
       route: {
@@ -232,6 +248,20 @@ export function writeMultiSpawnPreset(
       },
       accessMode: side.accessMode,
     })) as [MultiSpawnPresetSide, MultiSpawnPresetSide],
+    comparison: draft.comparison.enabled
+      ? {
+          title: draft.comparison.side.title.trim(),
+          route: {
+            harnessId: draft.comparison.side.selection.harnessId,
+            backendProfileId:
+              draft.comparison.side.selection.backendProfileId,
+            modelId: draft.comparison.side.selection.modelId,
+            reasoningEffort:
+              draft.comparison.side.selection.reasoningEffort,
+          },
+          accessMode: draft.comparison.side.accessMode,
+        }
+      : null,
   };
   try {
     storage.setItem(
@@ -362,6 +392,22 @@ export function initialMultiSpawnDraft(input: {
       side(0, "First perspective"),
       side(1, "Second perspective"),
     ],
+    comparison: {
+      enabled: Boolean(input.preset?.comparison),
+      side: {
+        ...side(0, "Duo comparison"),
+        title: input.preset?.comparison?.title ?? "Duo comparison",
+        selection: input.preset?.comparison
+          ? selectionFromPreset(
+              routes,
+              input.preset.comparison.route,
+              resolvedFallback,
+            )
+          : cloneSelection(resolvedFallback),
+        accessMode: input.preset?.comparison?.accessMode ?? "supervised",
+        interactionMode: "plan",
+      },
+    },
     rememberPreset: Boolean(input.preset),
   };
 }
@@ -387,6 +433,22 @@ export function multiSpawnConversationPayload(
   };
 }
 
+export function multiSpawnComparisonPayload(
+  side: MultiSpawnSideDraft,
+  settings: AppSettings,
+): Omit<
+  NewConversationPayload,
+  "branch" | "useWorktree" | "worktreePath"
+> {
+  const {
+    branch: _branch,
+    useWorktree: _useWorktree,
+    worktreePath: _worktreePath,
+    ...payload
+  } = multiSpawnConversationPayload(side, settings);
+  return payload;
+}
+
 export function validateMultiSpawnDraft(
   draft: MultiSpawnDraft,
 ): string | null {
@@ -401,6 +463,16 @@ export function validateMultiSpawnDraft(
       return `Chat ${index + 1} name must be ${MAX_TITLE_LENGTH} characters or fewer.`;
     }
     if (!side.projectId) return `Choose a project for chat ${index + 1}.`;
+  }
+  if (draft.comparison.enabled) {
+    const title = draft.comparison.side.title.trim();
+    if (!title) return "Name the comparison chat.";
+    if (title.length > MAX_TITLE_LENGTH) {
+      return `Comparison chat name must be ${MAX_TITLE_LENGTH} characters or fewer.`;
+    }
+    if (!draft.comparison.side.projectId) {
+      return "Choose a project for the comparison chat.";
+    }
   }
   return null;
 }

@@ -1,5 +1,4 @@
 import Database from "better-sqlite3";
-
 import {
   type AgentActivity,
   type AgentGoal,
@@ -44,6 +43,10 @@ import {
 } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import {
+  createDuoConversationsAtomically,
+  type DuoConversationPlan,
+} from "./persistence/duo-conversation-creation";
+import {
   DatabaseBackupManager,
   type DatabaseBackupResult,
   type DatabaseRecoveryReport,
@@ -69,6 +72,7 @@ import { ProviderMetadataRepository } from "./persistence/provider-metadata-repo
 import { ProjectRepository } from "./persistence/project-repository";
 import {
   PairedLaunchRepository,
+  type PairedLaunchComparisonPlan,
   type PairedLaunchSidePlan,
   type StoredPairedLaunch,
 } from "./persistence/paired-launch-repository";
@@ -417,25 +421,27 @@ export class RuntimeStore {
 
   createPairedConversations(
     launchId: string,
-    sides: readonly [
-      { projectId: string; title: string; options: NewConversationOptions },
-      { projectId: string; title: string; options: NewConversationOptions },
-    ],
+    sides: readonly [DuoConversationPlan, DuoConversationPlan],
     now = new Date().toISOString(),
   ): [Conversation, Conversation] {
-    return this.database.transaction(() => {
-      const conversations = sides.map((side) => this.conversationRepository.create(
-        side.projectId,
-        side.title,
-        { ...side.options, activate: false },
-      )) as [Conversation, Conversation];
-      this.pairedLaunchRepository.attachConversations(
-        launchId,
-        [conversations[0].id, conversations[1].id],
-        now,
-      );
-      return conversations;
-    })();
+    return this.createDuoConversations(launchId, sides, null, now).sides;
+  }
+
+  createDuoConversations(
+    launchId: string,
+    sides: readonly [DuoConversationPlan, DuoConversationPlan],
+    comparison: DuoConversationPlan | null,
+    now = new Date().toISOString(),
+  ) {
+    return createDuoConversationsAtomically(
+      this.database,
+      this.conversationRepository,
+      this.pairedLaunchRepository,
+      launchId,
+      sides,
+      comparison,
+      now,
+    );
   }
 
   selectConversation(conversationId: string): void {
@@ -488,8 +494,14 @@ export class RuntimeStore {
     launchId: string,
     sides: [PairedLaunchSidePlan, PairedLaunchSidePlan],
     now = new Date().toISOString(),
+    comparison: PairedLaunchComparisonPlan | null = null,
   ): StoredPairedLaunch {
-    return this.pairedLaunchRepository.create(launchId, sides, now);
+    return this.pairedLaunchRepository.create(
+      launchId,
+      sides,
+      now,
+      comparison,
+    );
   }
 
   pairedLaunch(launchId: string): StoredPairedLaunch {
@@ -515,6 +527,62 @@ export class RuntimeStore {
 
   assertProjectDeletionAllowed(projectId: string): void {
     this.pairedLaunchRepository.assertProjectDeletionAllowed(projectId);
+  }
+
+  assertDuoComparisonTurnAllowed(conversationId: string, authorizedLaunchId?: string): void {
+    this.pairedLaunchRepository.assertComparisonTurnAllowed(conversationId, authorizedLaunchId);
+  }
+
+  pairedLaunchForTurn(turnId: string) { return this.pairedLaunchRepository.launchForTurn(turnId); }
+
+  pairedLaunchComparisonIds(): string[] { return this.pairedLaunchRepository.comparisonLaunchIds(); }
+  claimPairedLaunchComparison(
+    launchId: string,
+    retry: boolean,
+    now = new Date().toISOString(),
+  ): boolean {
+    return this.pairedLaunchRepository.claimComparison(launchId, retry, now);
+  }
+
+  attachPairedLaunchComparisonTurn(
+    launchId: string,
+    turnId: string,
+    now = new Date().toISOString(),
+  ): void { this.pairedLaunchRepository.attachComparisonTurn(launchId, turnId, now); }
+
+  markPairedLaunchComparisonRunning(
+    launchId: string,
+    turnId: string,
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.markComparisonRunning(launchId, turnId, now);
+  }
+
+  settlePairedLaunchComparisonTurn(
+    launchId: string,
+    turnId: string,
+    status: Parameters<PairedLaunchRepository["settleComparisonTurn"]>[2],
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.settleComparisonTurn(
+      launchId, turnId, status, now,
+    );
+  }
+
+  failPairedLaunchComparison(
+    launchId: string,
+    state: "failed" | "interrupted",
+    message: string,
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.failComparison(launchId, state, message, now);
+  }
+
+  cancelPairedLaunchComparison(
+    launchId: string,
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.cancelComparison(launchId, now);
   }
 
   updatePairedLaunchWorktree(

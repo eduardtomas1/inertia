@@ -949,6 +949,7 @@ describe("atomic Duo schema migration", () => {
     "v39-upgrade",
     "v40-upgrade",
     "v41-upgrade",
+    "v45-upgrade",
   ] as const)(
     "installs active-launch deletion protection for a %s database",
     async (source) => {
@@ -963,6 +964,7 @@ describe("atomic Duo schema migration", () => {
         || source === "v39-upgrade"
         || source === "v40-upgrade"
         || source === "v41-upgrade"
+        || source === "v45-upgrade"
         ? randomUUID()
         : null;
       if (retainedLaunchId) {
@@ -1056,6 +1058,20 @@ describe("atomic Duo schema migration", () => {
           DELETE FROM schema_migrations WHERE version >= 42;
         `);
         previous.close();
+      } else if (source === "v45-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          DROP TRIGGER paired_launches_conversation_delete;
+          DROP TRIGGER paired_launches_project_delete;
+          ALTER TABLE paired_launches DROP COLUMN comparison_failure_message;
+          ALTER TABLE paired_launches DROP COLUMN comparison_attempt;
+          ALTER TABLE paired_launches DROP COLUMN comparison_turn_id;
+          ALTER TABLE paired_launches DROP COLUMN comparison_conversation_id;
+          ALTER TABLE paired_launches DROP COLUMN comparison_planned_conversation_id;
+          ALTER TABLE paired_launches DROP COLUMN comparison_state;
+          DELETE FROM schema_migrations WHERE version >= 46;
+        `);
+        previous.close();
       }
 
       const migrated = new RuntimeStore(databasePath, workspacePath, {
@@ -1125,6 +1141,8 @@ describe("atomic Duo schema migration", () => {
       ]);
       for (const trigger of triggers) {
         expect(trigger.sql).toMatch(/Cancel the active Duo launch/u);
+        expect(trigger.sql).toMatch(/locked comparison/u);
+        expect(trigger.sql).toMatch(/comparison_state/u);
         expect(trigger.sql).toMatch(/recovery-required/u);
         expect(trigger.sql).toMatch(/interrupted/u);
         expect(trigger.sql).toMatch(/live_turn\.status NOT IN/u);
@@ -1185,6 +1203,27 @@ describe("atomic Duo schema migration", () => {
         expect.objectContaining({ name: "cleanup_observed_path", dflt_value: null }),
         expect.objectContaining({ name: "cleanup_observed_branch", dflt_value: null }),
         expect.objectContaining({ name: "cleanup_observed_head", dflt_value: null }),
+      ]));
+      expect((inspection.prepare(
+        "PRAGMA table_info(paired_launches)",
+      ).all() as Array<{ dflt_value: string | null; name: string }>).filter(
+        ({ name }) => name.startsWith("comparison_"),
+      )).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "comparison_state", dflt_value: null }),
+        expect.objectContaining({
+          name: "comparison_planned_conversation_id",
+          dflt_value: null,
+        }),
+        expect.objectContaining({
+          name: "comparison_conversation_id",
+          dflt_value: null,
+        }),
+        expect.objectContaining({ name: "comparison_turn_id", dflt_value: null }),
+        expect.objectContaining({ name: "comparison_attempt", dflt_value: "0" }),
+        expect.objectContaining({
+          name: "comparison_failure_message",
+          dflt_value: null,
+        }),
       ]));
       expect(inspection.pragma("foreign_key_check")).toEqual([]);
       inspection.close();

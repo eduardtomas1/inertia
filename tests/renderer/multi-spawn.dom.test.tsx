@@ -36,8 +36,10 @@ import { nativeModelSelection } from "../../src/shared/model-routing";
 
 const firstProjectId = "11111111-1111-4111-8111-111111111111";
 const secondProjectId = "22222222-2222-4222-8222-222222222222";
+const thirdProjectId = "88888888-8888-4888-8888-888888888888";
 const firstConversationId = "33333333-3333-4333-8333-333333333333";
 const secondConversationId = "44444444-4444-4444-8444-444444444444";
+const comparisonConversationId = "77777777-7777-4777-8777-777777777777";
 const firstTurnId = "55555555-5555-4555-8555-555555555555";
 const secondTurnId = "66666666-6666-4666-8666-666666666666";
 const now = "2026-07-29T14:00:00.000Z";
@@ -259,6 +261,16 @@ function multiSpawnDraft(): MultiSpawnDraft {
         interactionMode: "build",
       },
     ],
+    comparison: {
+      enabled: false,
+      side: {
+        projectId: firstProjectId,
+        title: "Duo comparison",
+        selection,
+        accessMode: "supervised",
+        interactionMode: "plan",
+      },
+    },
   };
 }
 
@@ -913,6 +925,7 @@ describe("multi-spawn", () => {
         expect(command.payload.projectIds).toEqual([
           firstProjectId,
           secondProjectId,
+          thirdProjectId,
         ]);
         return pendingLaunchesEvent();
       }
@@ -928,6 +941,7 @@ describe("multi-spawn", () => {
               { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
               { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
             ],
+            comparison: { conversationId: comparisonConversationId },
           },
         };
       }
@@ -944,6 +958,13 @@ describe("multi-spawn", () => {
               { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "started" },
               { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "started" },
             ],
+            comparison: {
+              state: "waiting",
+              conversationId: comparisonConversationId,
+              turnId: null,
+              attempt: 0,
+              error: null,
+            },
           },
         };
       }
@@ -968,6 +989,8 @@ describe("multi-spawn", () => {
       setActionError: vi.fn(),
     }));
     const draft = multiSpawnDraft();
+    draft.comparison.enabled = true;
+    draft.comparison.side.projectId = thirdProjectId;
 
     await act(async () => hook.result.current.submit(draft));
 
@@ -1008,8 +1031,24 @@ describe("multi-spawn", () => {
             },
           },
         ],
+        comparison: {
+          projectId: thirdProjectId,
+          title: "Duo comparison",
+          accessMode: "supervised",
+          interactionMode: "plan",
+          modelSelection: {
+            modelId: "gpt-5.6-sol",
+            reasoningEffort: "high",
+          },
+        },
       },
     });
+    expect((prepare as Extract<CommandWithoutId, {
+      type: "duo.prepare";
+    }>).payload.comparison).not.toHaveProperty("useWorktree");
+    expect((prepare as Extract<CommandWithoutId, {
+      type: "duo.prepare";
+    }>).payload.comparison).not.toHaveProperty("worktreePath");
     expect(focusWorkspace).toHaveBeenCalledTimes(1);
     expect(window.localStorage.getItem(
       MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
@@ -1933,7 +1972,7 @@ describe("multi-spawn", () => {
     },
   );
 
-  it("reconciles every bounded durable blocker instead of selecting one", async () => {
+  it("blocks a new Duo for every discovered comparison lock", async () => {
     const launchIds = [
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -1943,47 +1982,37 @@ describe("multi-spawn", () => {
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
       if (command.type === "duo.pending") {
-        expect(command.payload.projectIds).toEqual([firstProjectId]);
+        expect(command.payload.projectIds).toEqual([
+          firstProjectId,
+          secondProjectId,
+        ]);
         return pendingLaunchesEvent(launchIds);
       }
-      if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+      if (command.type !== "duo.status") {
         throw new Error(`Unexpected command: ${command.type}`);
       }
       const launchId = command.payload.launchId;
       expect(launchIds).toContain(launchId);
       const ordinal = launchIds.indexOf(launchId) as 0 | 1;
-      const plannedPath = `/workspace/retained duo ${ordinal + 1}`;
       return {
         type: "request.result",
         requestId: crypto.randomUUID(),
         result: {
           kind: "duo.status",
           launchId,
-          state: "recovery-required",
-          error: `Recovery ${ordinal + 1} remains required.`,
+          state: "running",
+          error: null,
           sides: [
-            { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
-            { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+            { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "started" },
+            { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "started" },
           ],
-          recoveryGuidance: [{
-            kind: "git-worktree",
-            ordinal,
-            topology: "owned",
-            repositoryPath: "/workspace/repository",
-            plannedPath,
-            observedPath: plannedPath,
-            worktreeId: `worktree-${ordinal + 1}`,
-            generatedBranch: `inertia/launch-${ordinal + 1}`,
-            expectedHead: `${ordinal + 1}`.repeat(40),
-            observedBranch: `inertia/launch-${ordinal + 1}`,
-            observedHead: `${ordinal + 1}`.repeat(40),
-            actions: [{
-              label: "Remove retained linked worktree",
-              cwd: "/workspace/repository",
-              executable: "git",
-              args: ["worktree", "remove", "--", plannedPath],
-            }],
-          }],
+          comparison: {
+            state: "failed",
+            conversationId: comparisonConversationId,
+            turnId: crypto.randomUUID(),
+            attempt: ordinal + 1,
+            error: `Judge ${ordinal + 1} remains locked.`,
+          },
         },
       };
     });
@@ -2000,27 +2029,19 @@ describe("multi-spawn", () => {
       setActionError: vi.fn(),
     }));
 
-    act(() => hook.result.current.openDialog());
-    await waitFor(() => expect(run).toHaveBeenCalledTimes(5));
+    await act(async () => hook.result.current.submit(multiSpawnDraft()));
 
     expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
       "duo.pending",
       "duo.status",
-      "duo.cancel",
       "duo.status",
-      "duo.cancel",
     ]);
     expect(hook.result.current.error).toContain(
       "2 previous duo launches still need recovery.",
     );
-    expect(hook.result.current.recoveryGuidance.map(
-      ({ plannedPath }) => plannedPath,
-    )).toEqual([
-      "/workspace/retained duo 1",
-      "/workspace/retained duo 2",
-    ]);
-    expect(hook.result.current.recoveryGuidance.map(({ launchId }) => launchId))
-      .toEqual(launchIds);
+    expect(hook.result.current.error).toContain("Judge 1 remains locked.");
+    expect(hook.result.current.error).toContain("Judge 2 remains locked.");
+    expect(hook.result.current.recoveryGuidance).toEqual([]);
     expect(run.mock.calls.some(([, command]) =>
       command.type === "duo.prepare" || command.type === "duo.dispatch"))
       .toBe(false);

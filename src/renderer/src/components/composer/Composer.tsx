@@ -45,6 +45,7 @@ import {
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
+import { ChatGoalControl } from "../ChatGoalControl";
 import type { ComposerProps, PendingModelRoute } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
@@ -78,7 +79,7 @@ export const Composer = memo(function Composer({
   skillsLoading,
   skillsError,
   promptContext,
-  goalControl,
+  goal,
   onSend,
   onListSkills,
   onToggleSkill,
@@ -96,6 +97,7 @@ export const Composer = memo(function Composer({
   onOpenBackendSetup,
   onProbeBackendProfile,
   onUsageDisplayModeChange,
+  onOpenResume,
   onStop,
   onClearPromptContext,
 }: ComposerProps): React.JSX.Element {
@@ -140,6 +142,7 @@ export const Composer = memo(function Composer({
   const [routeRepairing, setRouteRepairing] = useState(false);
   const [conversationUpdatePending, setConversationUpdatePending] = useState(false);
   const [conversationUpdateError, setConversationUpdateError] = useState<string | null>(null);
+  const [commandSurface, setCommandSurface] = useState<"goal" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
@@ -149,6 +152,10 @@ export const Composer = memo(function Composer({
   const routeCancelRef = useRef<HTMLButtonElement>(null);
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
+  const dismissCommandSurface = useCallback(() => {
+    setCommandSurface(null);
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
 
   conversationIdRef.current = conversation.id;
 
@@ -914,7 +921,13 @@ export const Composer = memo(function Composer({
 
   return (
     <div className="composer-shell">
-      {goalControl}
+      {goal && (
+        <ChatGoalControl
+          {...goal}
+          open={commandSurface === "goal"}
+          onDismiss={dismissCommandSurface}
+        />
+      )}
       <section
         ref={composerRef}
         className={clsx("composer", menu && "has-open-menu")}
@@ -998,6 +1011,15 @@ export const Composer = memo(function Composer({
           mentionResults={mentionResults}
           onAddFileReference={addFileReference}
           slashMatch={slashMatch}
+          goalAvailable={Boolean(goal)}
+          onOpenGoal={() => {
+            updateMessage("");
+            setCommandSurface("goal");
+          }}
+          onOpenResume={() => {
+            updateMessage("");
+            onOpenResume();
+          }}
           onUpdateConversation={updateConversation}
         />
         <ComposerToolbar

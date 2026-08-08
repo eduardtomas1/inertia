@@ -243,7 +243,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
     expect(wideGeometry.backgroundColor).not.toMatch(/rgba\([^)]*,\s*0(?:\.0+)?\)/u);
-    expect(wideGeometry.shellOrder).toEqual(["goal", "dock"]);
+    expect(wideGeometry.shellOrder).toEqual(["dock"]);
     expect(wideGeometry.readinessOutside).toBe(0);
     expect(wideGeometry.permanentFooter).toBe(0);
     expect(wideGeometry.detachedUsage).toBe(0);

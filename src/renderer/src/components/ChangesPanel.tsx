@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Sparkles, Square, StickyNote, Trash2, WandSparkles, X } from "lucide-react";
 import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
-import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, parseUnifiedDiff, selectedLineFingerprint } from "@shared/diff-review";
+import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, selectedLineFingerprint } from "@shared/diff-review";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 import { IconButton, LoadingMark } from "./ui";
 import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
 
@@ -165,7 +166,12 @@ export function ChangesPanel({
   const persistentReview = capabilities?.persistentReview ?? true;
   const agentRevision = capabilities?.agentRevision ?? true;
   const selectiveRevert = capabilities?.selectiveRevert ?? true;
-  const structured = useMemo(() => parseUnifiedDiff(diff?.patch ?? ""), [diff?.patch]);
+  const {
+    structured,
+    parsing: diffParsing,
+    error: diffParsingError,
+  } = useParsedUnifiedDiff(diff?.patch ?? "");
+  const diffBusy = loading || diffParsing;
   const selectedFile = selectedPath
     ? structured.files.find((file) => file.path === selectedPath) ?? null
     : structured.files[0] ?? null;
@@ -322,7 +328,7 @@ export function ChangesPanel({
   };
 
   return (
-    <section className="changes-panel" aria-label="Workspace changes" aria-busy={loading}>
+    <section className="changes-panel" aria-label="Workspace changes" aria-busy={diffBusy}>
       <header className="panel-toolbar">
         <div className="panel-heading">
           <GitCompareArrows size={17} aria-hidden="true" />
@@ -342,12 +348,12 @@ export function ChangesPanel({
                 const action = summaryLoading ? onCancelSummary?.() : onGenerateSummary();
                 if (action) void action.catch(() => undefined);
               }}
-              disabled={loading || (summaryLoading && !onCancelSummary)}
+              disabled={diffBusy || (summaryLoading && !onCancelSummary)}
             >
               {summaryLoading ? <><LoadingMark label="Summarizing changes" /><Square size={10} /></> : <Sparkles size={15} />}
             </IconButton>
           )}
-          {onRefresh && <IconButton label="Refresh changes" onClick={onRefresh} disabled={loading}>{loading ? <LoadingMark label="Refreshing changes" /> : <RefreshCw size={15} />}</IconButton>}
+          {onRefresh && <IconButton label="Refresh changes" onClick={onRefresh} disabled={diffBusy}>{diffBusy ? <LoadingMark label="Refreshing changes" /> : <RefreshCw size={15} />}</IconButton>}
         </div>
       </header>
 
@@ -389,7 +395,7 @@ export function ChangesPanel({
           </nav>}
 
           <div className="changes-diff" aria-label={selectedFile ? `Diff for ${selectedFile.path}` : "Unified diff"}>
-            {loading && !diff ? <div className="panel-loading"><LoadingMark label="Loading diff" /><span>Loading diff…</span></div> : selectedFile ? (
+            {diffParsingError ? <div className="panel-empty changes-empty" role="alert"><h3>Diff unavailable</h3><p>{diffParsingError}</p></div> : diffBusy && (!diff || diffParsing) ? <div className="panel-loading"><LoadingMark label="Loading diff" /><span>Loading diff…</span></div> : selectedFile ? (
               <div className={clsx("diff-code", wrapLines && "wraps")} role="region" aria-label={`Diff content for ${selectedFile.path}`} tabIndex={0} onKeyDown={(event) => {
                 if (event.metaKey || event.ctrlKey || event.altKey || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) return;
                 if (event.key.toLowerCase() === "n") { event.preventDefault(); navigateHunk(1); }

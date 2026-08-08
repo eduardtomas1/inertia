@@ -144,6 +144,7 @@ function composerProps(
     onRefreshProvider: () => undefined,
     onOpenProviderSetup: () => undefined,
     onOpenBackendSetup: () => undefined,
+    onOpenResume: () => undefined,
     onProbeBackendProfile: async () => undefined,
     onUsageDisplayModeChange: () => undefined,
     onStop: async () => undefined,
@@ -157,6 +158,43 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("opens goal and folder resume flows directly from slash commands", () => {
+    const current = conversation("08080808-0808-4808-8808-080808080808");
+    const onOpenResume = vi.fn();
+    render(<Composer {...composerProps(current, {
+      running: true,
+      onOpenResume,
+      goal: {
+        workflow: null,
+        loading: false,
+        busy: false,
+        error: "Goal state is unavailable in this fixture.",
+        onRetry: async () => undefined,
+        onSetGoal: async () => undefined,
+        onClearGoal: async () => undefined,
+      },
+    })} />);
+
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/" } });
+    expect(screen.getByRole("listbox", { name: "Composer commands" }))
+      .toHaveTextContent("/goal");
+    expect(screen.getByRole("listbox", { name: "Composer commands" }))
+      .toHaveTextContent("/resume");
+    expect(screen.getByRole("option", { name: /\/plan/u })).toBeDisabled();
+    expect(screen.getByRole("option", { name: /\/build/u })).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: "/resume" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpenResume).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue("");
+
+    fireEvent.change(input, { target: { value: "/goal" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("dialog", { name: "Goal" })).toBeVisible();
+    expect(input).toHaveValue("");
+  });
+
   it("submits reasoning as a complete selection and keeps the control open on failure", async () => {
     const current = conversation("09090909-0909-4909-8909-090909090909");
     current.modelSelection = nativeModelSelection({

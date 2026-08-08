@@ -49,6 +49,13 @@ import type {
 } from "../../utils/transcriptNavigation";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
+
+export function workspaceDirectoryIdentity(path: string): string {
+  const normalized = path.replaceAll("\\", "/").replace(/\/+$/u, "");
+  return /^[a-z]:\//iu.test(normalized) || normalized.startsWith("//")
+    ? normalized.toLocaleLowerCase("en-US")
+    : normalized;
+}
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type ConversationProjection = ReturnType<typeof useConversationProjection>;
 type WorkspaceLayout = ReturnType<typeof useWorkspaceLayout>;
@@ -223,14 +230,42 @@ export function createWorkspaceSceneModel({
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
-  const terminalResume = persistedConversation
-    ? providerTerminalResumeAvailability(
-        persistedConversation,
-        connection.snapshot?.providers.find(
-          ({ id }) => id === persistedConversation.providerId,
-        ),
+  const snapshotProjects = connection.snapshot?.projects ?? [];
+  const snapshotConversations = connection.snapshot?.conversations ?? [];
+  const projectById = new Map(snapshotProjects.map((entry) => [entry.id, entry]));
+  const activeDirectory = persistedConversation && project
+    ? workspaceDirectoryIdentity(
+        persistedConversation.worktreePath ?? project.normalizedPath,
       )
     : null;
+  const terminalResumeOptions = activeDirectory
+    ? [...snapshotConversations]
+        .sort((left, right) => {
+          if (left.id === persistedConversation?.id) return -1;
+          if (right.id === persistedConversation?.id) return 1;
+          return right.updatedAt.localeCompare(left.updatedAt);
+        })
+        .flatMap((candidate) => {
+          const candidateProject = projectById.get(candidate.projectId);
+          if (!candidateProject) return [];
+          const candidateDirectory = workspaceDirectoryIdentity(
+            candidate.worktreePath ?? candidateProject.normalizedPath,
+          );
+          if (candidateDirectory !== activeDirectory) return [];
+          return [{
+            projectId: candidateProject.id,
+            projectName: candidateProject.name,
+            conversationId: candidate.id,
+            conversationTitle: candidate.title,
+            availability: providerTerminalResumeAvailability(
+              candidate,
+              connection.snapshot?.providers.find(
+                ({ id }) => id === candidate.providerId,
+              ),
+            ),
+          }];
+        })
+    : [];
   const {
     activeTool,
     setActiveTool,
@@ -423,6 +458,7 @@ export function createWorkspaceSceneModel({
       onRefreshProvider: actions.refreshProvider,
       onOpenProviderSetup: actions.openProviderSetup,
       onOpenBackendSetup: actions.openBackendSetup,
+      onOpenResume: () => setActiveTool("terminal"),
       onProbeBackendProfile: async (profileId, modelId) => {
         await backendProfileActions.probeBackendProfile(profileId, modelId);
       },
@@ -581,7 +617,7 @@ export function createWorkspaceSceneModel({
         theme: settings.theme,
         sendCommand: connection.sendCommand,
         subscribe: connection.subscribe,
-        providerResume: terminalResume,
+        providerResumes: terminalResumeOptions,
         actionId: activityActions.pendingActionId,
         onActionStarted: activityActions.clearPendingAction,
         onClose: () => setActiveTool(null),

@@ -82,6 +82,13 @@ function props(
   };
 }
 
+function openProps(onDismiss = vi.fn()): {
+  open: true;
+  onDismiss: () => void;
+} {
+  return { open: true, onDismiss };
+}
+
 const nativeCapability = {
   kind: "codex-native",
   available: true,
@@ -101,13 +108,10 @@ describe("ChatGoalControl", () => {
     render(
       <ChatGoalControl
         {...props(workflow(localCapability), { onSetGoal })}
+        {...openProps()}
       />,
     );
 
-    const trigger = screen.getByRole("button", {
-      name: "Add local objective",
-    });
-    await user.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "Local objective" });
     const objective = within(dialog).getByRole("textbox", {
       name: "Objective",
@@ -129,8 +133,6 @@ describe("ChatGoalControl", () => {
       status: "active",
       tokenBudget: null,
     });
-    await waitFor(() => expect(dialog).not.toBeInTheDocument());
-    await waitFor(() => expect(trigger).toHaveFocus());
   });
 
   it("shows and mutates the native goal without promoting local tracking", async () => {
@@ -139,19 +141,17 @@ describe("ChatGoalControl", () => {
     const local = goal("inertia-local", "Private reminder for later");
     const onSetGoal = vi.fn(async () => undefined);
     const onClearGoal = vi.fn(async () => undefined);
+    const onDismiss = vi.fn();
     render(
       <ChatGoalControl
         {...props(workflow(nativeCapability, [native, local]), {
           onSetGoal,
           onClearGoal,
         })}
+        {...openProps(onDismiss)}
       />,
     );
 
-    const trigger = screen.getByRole("button", {
-      name: "Codex goal, active: Ship the review-clean change",
-    });
-    await user.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "Codex goal" });
     expect(within(dialog).getByRole("region", { name: "Current goal" }))
       .toHaveTextContent("Ship the review-clean change");
@@ -171,7 +171,7 @@ describe("ChatGoalControl", () => {
       name: "Clear Codex goal",
     }));
     expect(onClearGoal).toHaveBeenCalledWith("codex-native");
-    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(onDismiss).toHaveBeenCalled();
   });
 
   it("reports an empty native goal when only a local objective is stored", () => {
@@ -180,10 +180,10 @@ describe("ChatGoalControl", () => {
         {...props(workflow(nativeCapability, [
           goal("inertia-local", "Do not present this as provider-owned"),
         ]))}
+        {...openProps()}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Set Codex goal" }));
     const dialog = screen.getByRole("dialog", { name: "Codex goal" });
     expect(within(dialog).getByRole("form", { name: "Create Codex goal" }))
       .toBeInTheDocument();
@@ -191,9 +191,11 @@ describe("ChatGoalControl", () => {
     expect(dialog).toHaveTextContent("One separately tracked goal");
   });
 
-  it("restores focus on Escape and keeps split actions with their pane owner", async () => {
+  it("dismisses on Escape and keeps split actions with their pane owner", async () => {
     const primarySetGoal = vi.fn(async () => undefined);
     const secondarySetGoal = vi.fn(async () => undefined);
+    const dismissPrimary = vi.fn();
+    const dismissSecondary = vi.fn();
     render(
       <>
         <section aria-label="Primary chat">
@@ -201,6 +203,7 @@ describe("ChatGoalControl", () => {
             {...props(workflow(nativeCapability, [
               goal("codex-native", "Primary objective"),
             ], "primary"), { onSetGoal: primarySetGoal })}
+            {...openProps(dismissPrimary)}
           />
         </section>
         <section aria-label="Second chat">
@@ -211,27 +214,14 @@ describe("ChatGoalControl", () => {
                 conversationId: "secondary",
               },
             ], "secondary"), { onSetGoal: secondarySetGoal })}
+            open={false}
+            onDismiss={dismissSecondary}
           />
         </section>
       </>,
     );
 
     const primary = screen.getByRole("region", { name: "Primary chat" });
-    const trigger = within(primary).getByRole("button", {
-      name: "Codex goal, active: Primary objective",
-    });
-    const secondaryTrigger = within(screen.getByRole("region", {
-      name: "Second chat",
-    })).getByRole("button", {
-      name: "Local objective, active: Secondary objective",
-    });
-    expect(trigger).toHaveAttribute("aria-controls");
-    expect(secondaryTrigger).toHaveAttribute("aria-controls");
-    expect(trigger.getAttribute("aria-controls"))
-      .not.toBe(secondaryTrigger.getAttribute("aria-controls"));
-    fireEvent.click(trigger);
-    expect(document.getElementById(trigger.getAttribute("aria-controls")!))
-      .toBe(screen.getByRole("dialog", { name: "Codex goal" }));
     fireEvent.click(within(primary).getByRole("button", { name: "Pause" }));
 
     await waitFor(() => expect(primarySetGoal).toHaveBeenCalledWith({
@@ -240,9 +230,29 @@ describe("ChatGoalControl", () => {
     }));
     expect(secondarySetGoal).not.toHaveBeenCalled();
     fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(trigger).toHaveFocus());
-    expect(screen.queryByRole("dialog", { name: "Codex goal" }))
-      .not.toBeInTheDocument();
+    await waitFor(() => expect(dismissPrimary).toHaveBeenCalled());
+    expect(dismissSecondary).not.toHaveBeenCalled();
+  });
+
+  it("does not dismiss a closed surface when background ownership refreshes", () => {
+    const onDismiss = vi.fn();
+    const { rerender } = render(
+      <ChatGoalControl
+        {...props(workflow(nativeCapability, [], "primary"))}
+        open={false}
+        onDismiss={onDismiss}
+      />,
+    );
+
+    rerender(
+      <ChatGoalControl
+        {...props(workflow(localCapability, [], "secondary"))}
+        open={false}
+        onDismiss={onDismiss}
+      />,
+    );
+
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 
   it("keeps the retry path accessible when workflow loading fails", async () => {
@@ -253,10 +263,10 @@ describe("ChatGoalControl", () => {
           error: "The workflow request failed.",
           onRetry,
         })}
+        {...openProps()}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Goal unavailable" }));
     const dialog = screen.getByRole("dialog", { name: "Goal" });
     expect(within(dialog).getByRole("alert"))
       .toHaveTextContent("The workflow request failed.");

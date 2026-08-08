@@ -10,8 +10,8 @@ import type {
   Project,
   ServerEvent,
 } from "@shared/contracts";
-import { parseUnifiedDiff } from "@shared/diff-review";
 import type { DiffSelection } from "../../components/ChangesPanel";
+import { useParsedUnifiedDiff } from "../useParsedUnifiedDiff";
 import {
   resultEvent,
   type CommandWithoutId,
@@ -73,9 +73,8 @@ export function useWorkspaceReview({
   authorityRef.current = authority;
   const lastDiffReversal = diffReversalsByAuthority.get(authority) ?? null;
 
-  const structuredDiff = useMemo(
-    () => parseUnifiedDiff(gitDiff?.patch ?? ""),
-    [gitDiff?.patch],
+  const { structured: structuredDiff } = useParsedUnifiedDiff(
+    gitDiff?.patch ?? "",
   );
 
   useEffect(() => {

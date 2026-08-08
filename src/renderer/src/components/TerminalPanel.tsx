@@ -12,6 +12,7 @@ import type {
 } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { usePersistedSize } from "../hooks/usePersistedSize";
+import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { IconButton, LoadingMark } from "./ui";
@@ -28,9 +29,18 @@ type TerminalPanelProps = {
   actionId?: string | null;
   onActionStarted?: () => void;
   providerResume?: ProviderTerminalResumeAvailability | null;
+  providerResumes?: readonly ProviderTerminalResumeOption[];
   onClose: () => void;
   visible?: boolean;
 };
+
+export interface ProviderTerminalResumeOption {
+  projectId: string;
+  projectName: string;
+  conversationId: string;
+  conversationTitle: string;
+  availability: ProviderTerminalResumeAvailability;
+}
 
 type TerminalSessionProps = TerminalPanelProps & {
   resumeBlockedBySibling: boolean;
@@ -47,6 +57,12 @@ const command = (value: CommandWithoutId): ClientCommand => ({
   ...value,
   requestId: crypto.randomUUID(),
 }) as ClientCommand;
+
+const TERMINAL_CREATE_RETRY_DELAYS_MS = [400, 900] as const;
+
+function waitForTerminalRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, delayMs));
+}
 
 function terminalTheme(_theme: ThemePreference): { background: string; foreground: string; cursor: string; selectionBackground: string } {
   const styles = window.getComputedStyle(document.documentElement);
@@ -70,6 +86,7 @@ function TerminalSession({
   actionId,
   onActionStarted,
   providerResume,
+  providerResumes,
   resumeBlockedBySibling,
   onProviderResumeStarted,
   onClose,
@@ -95,6 +112,25 @@ function TerminalSession({
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumeInFlight, setResumeInFlight] = useState(false);
   const [activeResume, setActiveResume] = useState<ProviderTerminalResumeDescriptor | null>(null);
+  const resumeOptions = useMemo<readonly ProviderTerminalResumeOption[]>(() => {
+    if (providerResumes && providerResumes.length > 0) return providerResumes;
+    if (!providerResume || !conversationId) return [];
+    return [{
+      projectId,
+      projectName,
+      conversationId,
+      conversationTitle: "Current chat",
+      availability: providerResume,
+    }];
+  }, [conversationId, projectId, projectName, providerResume, providerResumes]);
+  const [selectedResumeConversationId, setSelectedResumeConversationId] = useState(
+    conversationId ?? "",
+  );
+  const selectedResumeOption = resumeOptions.find(
+    ({ conversationId: candidateId }) => candidateId === selectedResumeConversationId,
+  ) ?? resumeOptions.find(({ availability }) => availability.kind === "available")
+    ?? resumeOptions[0]
+    ?? null;
   const [terminalId, setTerminalId] = useState<string | null>(null);
   ownerRef.current = `${projectId}:${conversationId ?? ""}`;
   const resumeDescriptionId = useId();
@@ -105,6 +141,15 @@ function TerminalSession({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (
+      selectedResumeOption
+      && selectedResumeOption.conversationId !== selectedResumeConversationId
+    ) {
+      setSelectedResumeConversationId(selectedResumeOption.conversationId);
+    }
+  }, [selectedResumeConversationId, selectedResumeOption]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -278,29 +323,48 @@ function TerminalSession({
     };
     lastSizeRef.current = size;
 
-    void sendCommand(command({ type: "terminal.create", payload: { projectId, conversationId, ...size } }))
-      .then((event) => {
-        if (event.type !== "terminal.created") throw new Error("The terminal service returned an unexpected response.");
-        if (cancelled) {
-          void sendCommand(command({ type: "terminal.close", payload: { terminalId: event.terminalId } })).catch(() => undefined);
+    const createTerminal = async (): Promise<void> => {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const event = await sendCommand(command({
+            type: "terminal.create",
+            payload: { projectId, conversationId, ...size },
+          }));
+          if (event.type !== "terminal.created") {
+            throw new Error("The terminal service returned an unexpected response.");
+          }
+          if (cancelled) {
+            void sendCommand(command({
+              type: "terminal.close",
+              payload: { terminalId: event.terminalId },
+            })).catch(() => undefined);
+            return;
+          }
+          terminalIdRef.current = event.terminalId;
+          managedActionTerminalRef.current = false;
+          resumedProviderRef.current = null;
+          setActiveResume(null);
+          setTerminalId(event.terminalId);
+          const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
+          pendingOutput.clear();
+          setSessionState("ready");
+          terminal?.clear();
+          if (bufferedOutput) terminal?.write(bufferedOutput);
           return;
+        } catch (terminalError) {
+          if (cancelled) return;
+          const retryDelay = TERMINAL_CREATE_RETRY_DELAYS_MS[attempt];
+          if (retryDelay === undefined || runtimeCommandDelivery(terminalError) !== "not-sent") {
+            setSessionState("error");
+            setSessionError(terminalError instanceof Error ? terminalError.message : "The terminal could not be started.");
+            return;
+          }
+          terminal?.writeln(`\r\n\x1b[2mConnection interrupted. Retrying terminal (${attempt + 2}/3)…\x1b[0m`);
+          await waitForTerminalRetry(retryDelay);
         }
-        terminalIdRef.current = event.terminalId;
-        managedActionTerminalRef.current = false;
-        resumedProviderRef.current = null;
-        setActiveResume(null);
-        setTerminalId(event.terminalId);
-        const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
-        pendingOutput.clear();
-        setSessionState("ready");
-        terminal?.clear();
-        if (bufferedOutput) terminal?.write(bufferedOutput);
-      })
-      .catch((terminalError) => {
-        if (cancelled) return;
-        setSessionState("error");
-        setSessionError(terminalError instanceof Error ? terminalError.message : "The terminal could not be started.");
-      });
+      }
+    };
+    void createTerminal();
 
     return () => {
       resumeAttemptRef.current += 1;
@@ -386,15 +450,14 @@ function TerminalSession({
 
   const resumeProviderSession = () => {
     if (
-      providerResume?.kind !== "available"
-      || !conversationId
+      selectedResumeOption?.availability.kind !== "available"
       || resumeBlockedBySibling
       || resumeInFlight
       || sessionState !== "ready"
       || status !== "online"
       || !terminalIdRef.current
     ) return;
-    const resume = providerResume.resume;
+    const resume = selectedResumeOption.availability.resume;
     const size = {
       cols: Math.max(20, terminalRef.current?.cols ?? lastSizeRef.current.cols ?? 80),
       rows: Math.max(4, terminalRef.current?.rows ?? lastSizeRef.current.rows ?? 24),
@@ -410,8 +473,8 @@ function TerminalSession({
     void sendCommand(command({
       type: "terminal.provider.resume",
       payload: {
-        projectId,
-        conversationId,
+        projectId: selectedResumeOption.projectId,
+        conversationId: selectedResumeOption.conversationId,
         terminalId: previousId,
         ...size,
       },
@@ -445,7 +508,7 @@ function TerminalSession({
         pendingOutputRef.current.clear();
         terminalRef.current?.clear();
         terminalRef.current?.writeln(
-          `\x1b[2mResuming ${authoritativeResume.providerLabel} session ${authoritativeResume.sessionId} in ${projectName}…\x1b[0m`,
+          `\x1b[2mResuming ${authoritativeResume.providerLabel} session ${authoritativeResume.sessionId} in ${selectedResumeOption.projectName}…\x1b[0m`,
         );
         if (bufferedOutput) terminalRef.current?.write(bufferedOutput);
         setSessionState("ready");
@@ -496,15 +559,35 @@ function TerminalSession({
           <IconButton label="Close terminal" onClick={onClose}><X size={16} /></IconButton>
         </div>
       </div>
-      {providerResume && (() => {
-        const displayedResume = activeResume ?? providerResume.resume;
+      {selectedResumeOption && (() => {
+        const availability = selectedResumeOption.availability;
+        const displayedResume = activeResume ?? availability.resume;
         return (
         <div
-          className={`terminal-resume-status is-${providerResume.kind}`}
+          className={`terminal-resume-status is-${availability.kind}`}
           role={resumeError ? "alert" : "status"}
         >
           <MessagesSquare size={14} />
           <span id={resumeDescriptionId}>
+            <label className="terminal-resume-picker">
+              <span>Resume provider chat</span>
+              <select
+                aria-label="Chat to resume"
+                value={selectedResumeOption.conversationId}
+                disabled={Boolean(activeResume) || resumeInFlight}
+                onChange={(event) => {
+                  setResumeError(null);
+                  setSelectedResumeConversationId(event.currentTarget.value);
+                }}
+              >
+                {resumeOptions.map((option) => (
+                  <option value={option.conversationId} key={option.conversationId}>
+                    {option.conversationTitle} · {option.projectName}
+                    {option.availability.kind === "available" ? "" : " · unavailable"}
+                  </option>
+                ))}
+              </select>
+            </label>
             {displayedResume ? (
               <>
                 <span>{displayedResume.providerLabel} session</span>
@@ -513,10 +596,10 @@ function TerminalSession({
                 </code>
               </>
             ) : (
-              <span>{providerResume.reason}</span>
+              <span>{availability.reason}</span>
             )}
-            {providerResume.resume && providerResume.kind === "unavailable" && (
-              <small>{providerResume.reason}</small>
+            {availability.resume && availability.kind === "unavailable" && (
+              <small>{availability.reason}</small>
             )}
             {activeResume && (
               <small>
@@ -530,15 +613,17 @@ function TerminalSession({
             )}
             {resumeError && <small>{resumeError}</small>}
           </span>
-          {providerResume.kind === "available" && (
+          {availability.kind === "available" && (
             <button
               type="button"
               className="secondary-button"
               aria-label={activeResume
                 ? `${activeResume.providerLabel} session is resumed in ${projectName}`
                 : resumeBlockedBySibling
-                  ? `${providerResume.resume.providerLabel} session is resumed in another ${projectName} terminal`
-                : `Resume ${providerResume.resume.providerLabel} session in ${projectName}`}
+                  ? `${availability.resume.providerLabel} session is resumed in another ${projectName} terminal`
+                : resumeOptions.length === 1
+                  ? `Resume ${availability.resume.providerLabel} session in ${selectedResumeOption.projectName}`
+                  : `Resume ${availability.resume.providerLabel} chat ${selectedResumeOption.conversationTitle} in ${selectedResumeOption.projectName}`}
               aria-describedby={resumeDescriptionId}
               disabled={Boolean(activeResume) || resumeBlockedBySibling || resumeInFlight || sessionState !== "ready" || status !== "online"}
               onClick={resumeProviderSession}

@@ -26,10 +26,13 @@ describe("classic sidebar current-state presentation", () => {
       "aria-label={`Chat status: ${statusLabels[thread.status]}`}",
     );
     expect(styles).toMatch(
-      /\.project-row\.is-active\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
+      /\.project-row\.is-active\s*\{[^}]*background:\s*transparent;/su,
     );
     expect(styles).toMatch(
-      /\.conversation-row\.is-active\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
+      /\.project-row\.is-active \.project-name\s*\{[^}]*font-weight:\s*680;/su,
+    );
+    expect(styles).toMatch(
+      /\.conversation-row\.is-active\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--surface-hover\) 72%, transparent\);/su,
     );
     expect(styles).not.toMatch(/\.project-row\.is-active\s*\{[^}]*box-shadow:/su);
     expect(styles).not.toMatch(/\.conversation-row\.is-active\s*\{[^}]*box-shadow:/su);

@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TerminalPanel } from "../../src/renderer/src/components/TerminalPanel";
+import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import type {
   ClientCommand,
   ProviderTerminalResumeAvailability,
@@ -77,6 +78,79 @@ describe("TerminalPanel focus lifecycle", () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("retries a terminal twice when creation loses the transport before delivery", async () => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type !== "terminal.create") {
+        return { type: "request.ok", requestId: sent.requestId };
+      }
+      attempts += 1;
+      if (attempts < 3) {
+        throw new RuntimeCommandError("The local service is reconnecting.", "not-sent");
+      }
+      return {
+        type: "terminal.created",
+        requestId: sent.requestId,
+        terminalId: "11111111-1111-4111-8111-111111111111",
+      };
+    });
+
+    render(
+      <TerminalPanel
+        projectId="project-1"
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await act(async () => Promise.resolve());
+    expect(attempts).toBe(1);
+    await act(async () => vi.advanceTimersByTimeAsync(400));
+    expect(attempts).toBe(2);
+    await act(async () => vi.advanceTimersByTimeAsync(900));
+    expect(attempts).toBe(3);
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", "11111111-1111-4111-8111-111111111111");
+  });
+
+  it("does not retry an ambiguously delivered terminal creation", async () => {
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        throw new RuntimeCommandError("The request took too long to complete.", "ambiguous");
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+
+    render(
+      <TerminalPanel
+        projectId="project-1"
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText("The request took too long to complete."))
+      .toBeInTheDocument();
+    expect(sendCommand.mock.calls.filter(
+      ([sent]) => sent.type === "terminal.create",
+    )).toHaveLength(1);
   });
 
   it("does not steal focus when the lazy terminal mounts after another control is active", async () => {
@@ -232,6 +306,104 @@ describe("TerminalPanel focus lifecycle", () => {
     expect(JSON.stringify(resumeCommand)).not.toContain("credential");
     expect(await screen.findByText(authoritativeSessionId, { selector: "code" })).toBeVisible();
     expect(screen.queryByText(sessionId, { selector: "code" })).toBeNull();
+  });
+
+  it("can resume any provider chat from the terminal's current directory", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const conversationId = "22222222-2222-4222-8222-222222222222";
+    const otherProjectId = "33333333-3333-4333-8333-333333333333";
+    const otherConversationId = "44444444-4444-4444-8444-444444444444";
+    let created = 0;
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        created += 1;
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: "55555555-5555-4555-8555-555555555555",
+        };
+      }
+      if (sent.type === "terminal.provider.resume") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: "66666666-6666-4666-8666-666666666666",
+          providerResume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: "77777777-7777-4777-8777-777777777777",
+          },
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        conversationId={conversationId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        visible
+        providerResumes={[
+          {
+            projectId,
+            projectName: "Inertia",
+            conversationId,
+            conversationTitle: "Current chat",
+            availability: {
+              kind: "available",
+              resume: {
+                providerId: "claude",
+                providerLabel: "Claude",
+                sessionId: "88888888-8888-4888-8888-888888888888",
+              },
+              reason: null,
+            },
+          },
+          {
+            projectId: otherProjectId,
+            projectName: "Shared checkout",
+            conversationId: otherConversationId,
+            conversationTitle: "Earlier investigation",
+            availability: {
+              kind: "available",
+              resume: {
+                providerId: "claude",
+                providerLabel: "Claude",
+                sessionId: "99999999-9999-4999-8999-999999999999",
+              },
+              reason: null,
+            },
+          },
+        ]}
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    const picker = await screen.findByRole("combobox", { name: "Chat to resume" });
+    expect(picker).toHaveTextContent("Current chat · Inertia");
+    expect(picker).toHaveTextContent("Earlier investigation · Shared checkout");
+    fireEvent.change(picker, { target: { value: otherConversationId } });
+    const resume = await screen.findByRole("button", {
+      name: "Resume Claude chat Earlier investigation in Shared checkout",
+    });
+    await waitFor(() => expect(resume).toBeEnabled());
+    fireEvent.click(resume);
+
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: "terminal.provider.resume",
+      payload: expect.objectContaining({
+        projectId: otherProjectId,
+        conversationId: otherConversationId,
+        terminalId: "55555555-5555-4555-8555-555555555555",
+      }),
+    })));
+    expect(created).toBe(1);
   });
 
   it("explains unsupported or stale sessions without exposing a resume action", async () => {

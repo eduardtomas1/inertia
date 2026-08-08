@@ -5,7 +5,6 @@ import {
   Columns2,
   Folder,
   KeyRound,
-  LockKeyhole,
   Scale,
   ShieldCheck,
   TriangleAlert,
@@ -674,44 +673,19 @@ export function MultiSpawnDialog({
                 },
               })}
             />
-            <span className="multi-spawn-comparison-lock" aria-hidden="true">
-              <LockKeyhole size={16} />
-            </span>
             <span>
               <strong id="multi-spawn-comparison-title">
-                Lock these two results for a third-model comparison
+                Compare both results with a third model
               </strong>
               <small>
-                Pins the two source chats and their first Duo turns. It does
-                not freeze either chat, session, project, or working tree.
+                After both routes finish, a separate judge receives their
+                bounded results and opens as the full-width chat.
               </small>
             </span>
           </label>
 
           {draft.comparison.enabled && (
             <div className="multi-spawn-comparison-body">
-              <div className="multi-spawn-lock-contract" role="note">
-                <span className="multi-spawn-lock-rail" aria-hidden="true">
-                  <span>A</span><span>B</span><LockKeyhole size={13} /><Scale size={14} />
-                </span>
-                <span>
-                  <strong>What the lock sends</strong>
-                  <small>
-                    Inertia waits until both pinned turns are completed,
-                    failed, cancelled, or interrupted. A fresh judge turn then
-                    receives only the shared brief, each terminal status, and
-                    up to 5,500 characters of each attributed assistant result.
-                    It receives no source session, source reasoning, source
-                    tool history, source permissions, credentials, attachments,
-                    or hidden context.
-                  </small>
-                  <small>
-                    The judge uses only the project, route, and access selected
-                    below. Choosing a source project here is explicit; the lock
-                    itself never attaches one.
-                  </small>
-                </span>
-              </div>
               <MultiSpawnSideEditor
                 index={2}
                 side={draft.comparison.side}
@@ -733,6 +707,21 @@ export function MultiSpawnDialog({
                   </span>
                 </div>
               )}
+              <details className="multi-spawn-lock-contract">
+                <summary>What is shared with the judge?</summary>
+                <p>
+                  Inertia waits for both pinned turns, then sends the shared
+                  brief, each terminal status, and up to 5,500 characters of
+                  each attributed assistant result. It sends no source session,
+                  reasoning, tool history, permissions, credentials,
+                  attachments, or hidden context.
+                </p>
+                <p>
+                  The judge uses only the project, route, and access selected
+                  above. The comparison does not freeze either source chat or
+                  working tree.
+                </p>
+              </details>
             </div>
           )}
         </section>

@@ -21,6 +21,15 @@ import type { PendingModelRoute } from "./types";
 
 type RouteReadiness = ReturnType<typeof composerRouteReadiness>;
 
+interface ComposerSlashCommand {
+  id: string;
+  label: string;
+  disabled: boolean;
+  disabledWhileRunning: boolean;
+  action?: () => void;
+  mode?: InteractionMode;
+}
+
 export interface ComposerInputZoneProps {
   routeReadiness: RouteReadiness;
   routeRepairing: boolean;
@@ -51,6 +60,9 @@ export interface ComposerInputZoneProps {
   mentionResults: WorkspaceEntry[];
   onAddFileReference: (path: string) => void;
   slashMatch: RegExpExecArray | null;
+  goalAvailable: boolean;
+  onOpenGoal: () => void;
+  onOpenResume: () => void;
   onUpdateConversation: (
     update: Partial<Pick<Conversation, "interactionMode">>,
   ) => Promise<void>;
@@ -86,8 +98,39 @@ export function ComposerInputZone({
   mentionResults,
   onAddFileReference,
   slashMatch,
+  goalAvailable,
+  onOpenGoal,
+  onOpenResume,
   onUpdateConversation,
 }: ComposerInputZoneProps): React.JSX.Element {
+  const slashCommands: ComposerSlashCommand[] = [
+    { id: "goal", label: "View or set this chat's goal", action: onOpenGoal, disabled: !goalAvailable, disabledWhileRunning: false },
+    { id: "resume", label: "Resume a provider chat from this folder", action: onOpenResume, disabled: false, disabledWhileRunning: false },
+    { id: "plan", label: "Plan mode", mode: "plan", disabled: false, disabledWhileRunning: true },
+    { id: "build", label: "Build mode", mode: "build", disabled: false, disabledWhileRunning: true },
+  ];
+  const matchingSlashCommands = slashMatch
+    ? slashCommands.filter(({ id }) =>
+        id.startsWith(slashMatch[1].toLowerCase()))
+    : [];
+  const selectedSlashCommand = matchingSlashCommands.find(
+    ({ id }) => id === slashMatch?.[1].toLowerCase(),
+  ) ?? (matchingSlashCommands.length === 1 ? matchingSlashCommands[0] : null);
+  const slashCommandDisabled = (item: ComposerSlashCommand): boolean =>
+    disabled || item.disabled || (running && item.disabledWhileRunning);
+  const activateSlashCommand = (item: ComposerSlashCommand): void => {
+    if (slashCommandDisabled(item)) return;
+    if (item.action) {
+      item.action();
+      return;
+    }
+    if (!item.mode) return;
+    void onUpdateConversation({ interactionMode: item.mode }).then(
+      () => onMessageChange(""),
+      () => undefined,
+    );
+  };
+
   return (
     <>
       <div className="composer-input-zone" data-composer-zone="input">
@@ -188,6 +231,16 @@ export function ComposerInputZone({
             }
           }}
           onKeyDown={(event) => {
+            if (
+              matchingSlashCommands.length > 0
+              && shouldSubmitComposerKey(event)
+            ) {
+              event.preventDefault();
+              if (selectedSlashCommand) {
+                activateSlashCommand(selectedSlashCommand);
+              }
+              return;
+            }
             if (shouldSubmitComposerKey(event)) {
               event.preventDefault();
               void onSubmit();
@@ -237,31 +290,20 @@ export function ComposerInputZone({
           ))}
         </div>
       )}
-      {!running && slashMatch && (
+      {slashMatch && (
         <div
           className="composer-suggestion-menu"
           role="listbox"
           aria-label="Composer commands"
         >
-          {([
-            { id: "plan", label: "Plan mode", mode: "plan" as const },
-            { id: "build", label: "Build mode", mode: "build" as const },
-          ]).filter(({ id }) =>
-            id.startsWith(slashMatch[1].toLowerCase())).map((item) => (
+          {matchingSlashCommands.map((item) => (
             <button
               type="button"
               role="option"
               aria-selected="false"
-              disabled={disabled || running}
+              disabled={slashCommandDisabled(item)}
               key={item.id}
-              onClick={() => {
-                void onUpdateConversation({
-                  interactionMode: item.mode as InteractionMode,
-                }).then(
-                  () => onMessageChange(""),
-                  () => undefined,
-                );
-              }}
+              onClick={() => activateSlashCommand(item)}
             >
               <span>/{item.id}</span>
               <small>{item.label}</small>

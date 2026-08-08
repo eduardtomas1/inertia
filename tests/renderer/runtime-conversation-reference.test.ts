@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   runtimeConversationReference,
   visibleWorkspaceConversation,
+  workspaceDirectoryIdentity,
 } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import {
   draftWorkspaceToolsUnavailableReason,
@@ -35,6 +36,15 @@ describe("runtime conversation references", () => {
     expect(runtimeConversationReference(conversation)).toEqual({
       conversationId: conversation.id,
     });
+  });
+
+  it("matches provider-resume directories across Windows path spelling", () => {
+    expect(workspaceDirectoryIdentity("C:\\Work\\Project\\")).toBe(
+      workspaceDirectoryIdentity("c:/work/project"),
+    );
+    expect(workspaceDirectoryIdentity("/Work/Project")).not.toBe(
+      workspaceDirectoryIdentity("/work/project"),
+    );
   });
 
   it("keeps a reconciling draft visible over its empty runtime shell", () => {

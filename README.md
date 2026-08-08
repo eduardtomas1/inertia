@@ -144,13 +144,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.25
+### Version 0.0.26
 
-This release replaces the retired hosted companion stack with **Private Connect**, a Tailscale-only way to monitor selected conversations and collaborate with supervised agents from another device while the desktop remains authoritative.
+This release makes model and provider selection authoritative from the chooser through execution. Provider-default routes stay explicit, incompatible changes open the right replacement chat without losing eligible draft text, backend-profile edits no longer invalidate routes unnecessarily, and split or Duo work keeps each pane's exact route identity.
 
-Private Connect ships inside the desktop app, uses short-lived fragment-only invitations and explicit device grants, and never exposes files, terminals, Git, approvals, secrets, provider settings, Full Access, or arbitrary command execution to the browser. The release also makes provider switching dependable when a native model catalog is empty, routes signed-out providers to their real connection flow, and carries provider questions and free-form answers through the private client without weakening secret-input boundaries.
+Provider lifecycles are safer too: Claude Stop cannot leave an accepted follow-up queued, Cursor and OpenCode launch Windows npm shims through the hardened process boundary, OpenCode hides disconnected routes, stalled runtime startup cleanup is bounded, and shutdown begins without waiting on Private Connect initialization. Stable Markdown controls and a properly focus-trapped command palette round out the desktop fixes.
 
-Download [Inertia v0.0.25](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.25):
+Download [Inertia v0.0.26](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.26):
 
 | Platform | Download |
 | --- | --- |

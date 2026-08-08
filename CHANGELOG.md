@@ -4,6 +4,28 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.26 — 2026-08-08
+
+### Model routes stay authoritative from chooser to execution
+
+- Lightweight conversation updates now replace the complete authoritative route shell without discarding already loaded detail. Provider, backend, model, reasoning, and continuation identity therefore stay synchronized after refreshes, reconnects, split-pane work, and Duo launches.
+- Native provider-default routes remain explicit even when catalogs are empty. Cross-provider and incompatible route changes create the required replacement chat, preserve eligible text drafts, and cannot smuggle stale continuation identity into a new provider session.
+- Backend-profile saves compare canonical execution semantics, so a rename or no-op save does not invalidate active routes. Disabled profiles lead to **Open setup**, while genuinely stale saved routes stop advertising Probe or Refresh actions that cannot repair immutable history.
+- Markdown code Copy/Wrap state and table export controls keep stable component identity across parent rerenders instead of remounting and losing local interaction state.
+
+### Provider and desktop lifecycles fail closed
+
+- Claude Stop discards accepted follow-ups and closes the per-turn SDK query whenever UUID-less queued input could survive interruption, preventing cancelled full-access work from running later.
+- Cursor and OpenCode now launch Windows npm batch shims through the hardened `shell:false` adapter. Cursor also treats every ACP configuration response as authoritative before choosing reasoning and republishes the final option set.
+- OpenCode exposes and accepts models only from providers the SDK reports as connected, keeps variant order separate from provider-default reasoning, and no longer treats a successful `0 credentials` listing as runnable.
+- A runtime that reports startup failure but stalls during cleanup is force-terminated after a bounded grace period. Runtime and Private Connect shutdown begin concurrently, and Tailscale commands wait for stdio closure so trailing diagnostics are not lost.
+- Global shortcuts cannot mutate the workspace behind an open modal. The command palette now traps Tab navigation, takes focus synchronously, and restores the opening control when closed.
+
+### Release confidence
+
+- The provider pass was contrasted read-only with T3Code commit `2c7267ad43a05cf3e30343400c76fd9ac47698e7`, while pinned Claude, OpenCode, and ACP contracts remained authoritative.
+- Architecture and lint checks, four TypeScript projects, 2,237 unit and integration tests, 222 portable provider contracts, focused Electron journeys, production audit, independent exact-head review, and green Linux, macOS, and Windows E2E, performance, packaging, fuse, signature, and smoke gates protect the release.
+
 ## 0.0.25 — 2026-08-05
 
 ### Private Connect replaces the hosted companion stack

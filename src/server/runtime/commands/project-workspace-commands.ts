@@ -314,22 +314,31 @@ export function createProjectWorkspaceCommandHandler(
           dependencies.store.hasActiveWorkspaceRunForConversation(
             command.payload.conversationId,
           )
+          || !dependencies.providerTerminalResumes.acquire(
+            command.payload.conversationId,
+          )
         ) {
           throw new RuntimeRequestError(
-            "Stop the active run or review before restoring a checkpoint.",
+            "Stop active work, reviews, or resumed terminals before restoring a checkpoint.",
           );
         }
-        await restoreCheckpoint(
-          dependencies.store.conversationPath(checkpoint.conversationId),
-          checkpoint.ref,
-          checkpoint.conversationId,
-        );
-        dependencies.send(socket, {
-          type: "request.ok",
-          requestId: command.requestId,
-        });
-        dependencies.broadcastSnapshot();
-        return "handled";
+        try {
+          await restoreCheckpoint(
+            dependencies.store.conversationPath(checkpoint.conversationId),
+            checkpoint.ref,
+            checkpoint.conversationId,
+          );
+          dependencies.send(socket, {
+            type: "request.ok",
+            requestId: command.requestId,
+          });
+          dependencies.broadcastSnapshot();
+          return "handled";
+        } finally {
+          dependencies.providerTerminalResumes.release(
+            command.payload.conversationId,
+          );
+        }
       }
       case "terminal.create": {
         const cwd = dependencies.workspacePath(
@@ -402,7 +411,7 @@ export function createProjectWorkspaceCommandHandler(
             socket.readyState !== WebSocket.OPEN
             || dependencies.providers.isRunning(conversation.id)
             || dependencies.turns.isActive(conversation.id)
-            || dependencies.store.hasActiveWorkspaceRunForConversation(conversation.id)
+            || dependencies.store.hasRecordedActiveWorkspaceRunForConversation(conversation.id)
           ) {
             throw new RuntimeRequestError(
               socket.readyState !== WebSocket.OPEN
@@ -410,8 +419,9 @@ export function createProjectWorkspaceCommandHandler(
                 : "Stop the active provider session for this chat before resuming it in another terminal.",
             );
           }
-          const terminalId = dependencies.terminals.createProcess(
+          const terminalId = await dependencies.terminals.replaceProcess(
             socket,
+            command.payload.terminalId,
             cwd,
             launch.executable,
             launch.args,

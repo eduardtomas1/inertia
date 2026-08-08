@@ -12,8 +12,17 @@ export interface ProviderTerminalResumeLaunch {
   env: NodeJS.ProcessEnv;
 }
 
+export interface ProviderTerminalResumeAuthority {
+  reserve(conversationId: string): boolean;
+  release(conversationId: string): void;
+}
+
 export class ProviderTerminalResumeRegistry {
   private readonly conversationIds = new Set<string>();
+
+  constructor(
+    private readonly authority?: ProviderTerminalResumeAuthority,
+  ) {}
 
   isActive(conversationId: string): boolean {
     return this.conversationIds.has(conversationId);
@@ -21,12 +30,16 @@ export class ProviderTerminalResumeRegistry {
 
   acquire(conversationId: string): boolean {
     if (this.conversationIds.has(conversationId)) return false;
+    if (this.authority && !this.authority.reserve(conversationId)) {
+      return false;
+    }
     this.conversationIds.add(conversationId);
     return true;
   }
 
   release(conversationId: string): void {
-    this.conversationIds.delete(conversationId);
+    if (!this.conversationIds.delete(conversationId)) return;
+    this.authority?.release(conversationId);
   }
 }
 

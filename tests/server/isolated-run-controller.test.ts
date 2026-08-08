@@ -47,6 +47,10 @@ function deferred<Value>(): Deferred<Value> {
 class FakeStore implements IsolatedRunStore {
   readonly runs = new Map<string, WorkspaceRun>();
   readonly updates: Array<{ id: string; update: Record<string, unknown> }> = [];
+  conversationWorkReserved = false;
+  readonly conversationWork = {
+    hasConversation: () => this.conversationWorkReserved,
+  };
 
   createWorkspaceRun(
     input: Parameters<IsolatedRunStore["createWorkspaceRun"]>[0],
@@ -214,6 +218,25 @@ afterEach(async () => {
 });
 
 describe("IsolatedRunController", () => {
+  it("rejects another agent task while a resumed terminal owns the conversation", async () => {
+    const store = new FakeStore();
+    store.conversationWorkReserved = true;
+    const provider = new FakeProvider();
+    const controller = new IsolatedRunController(
+      store,
+      provider,
+      "/private/inertia-data",
+      vi.fn(),
+      { id: ids(), fileSystem: fakeFileSystem() },
+    );
+
+    await expect(controller.run(request({}))).rejects.toThrow(
+      "End the resumed provider terminal",
+    );
+    expect(provider.inputs).toEqual([]);
+    expect(store.runs.size).toBe(0);
+  });
+
   it("uses fresh read-only identities, keeps hidden payload out of WorkspaceRun, and cleans once", async () => {
     const store = new FakeStore();
     const provider = new FakeProvider();

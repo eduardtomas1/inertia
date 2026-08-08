@@ -21,7 +21,10 @@ const SERVICE_OUTPUT_WINDOW = 4_096;
 
 type WorkspaceRunStore = Pick<
   RuntimeStore,
-  "conversation" | "createWorkspaceRun" | "updateWorkspaceRun"
+  | "conversation"
+  | "createWorkspaceRun"
+  | "updateWorkspaceRun"
+  | "conversationWork"
 >;
 
 export interface WorkspaceActionTerminalManager<Owner> {
@@ -128,6 +131,14 @@ export class WorkspaceRunController<Owner> {
   }
 
   async startAction(input: StartWorkspaceActionInput<Owner>): Promise<string> {
+    if (
+      input.conversationId
+      && this.store.conversationWork.hasConversation(input.conversationId)
+    ) {
+      throw new RuntimeRequestError(
+        "End the resumed provider terminal before starting project actions for this chat.",
+      );
+    }
     const scripts = await discoverPackageScripts(input.cwd);
     const action = scripts.scripts.find((script) => script.name === input.actionId);
     if (!action) throw new RuntimeRequestError("That project action is no longer available.");
@@ -137,6 +148,14 @@ export class WorkspaceRunController<Owner> {
     const conversation = input.conversationId
       ? this.store.conversation(input.conversationId)
       : null;
+    if (
+      input.conversationId
+      && this.store.conversationWork.hasConversation(input.conversationId)
+    ) {
+      throw new RuntimeRequestError(
+        "End the resumed provider terminal before starting project actions for this chat.",
+      );
+    }
     const activity = this.store.createWorkspaceRun({
       kind,
       projectId: input.projectId,
@@ -252,6 +271,14 @@ export class WorkspaceRunController<Owner> {
     requestId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
+    const terminalOwnsWorkspace = conversationId
+      ? this.store.conversationWork.hasConversation(conversationId)
+      : this.store.conversationWork.hasProject(projectId);
+    if (terminalOwnsWorkspace) {
+      throw new RuntimeRequestError(
+        "End the resumed provider terminal before changing this workspace with Git.",
+      );
+    }
     const invalidationScope = `${projectId}:${conversationId ?? ""}`;
     const detail = conversationId
       ? conversationDetail(this.store.conversation(conversationId))

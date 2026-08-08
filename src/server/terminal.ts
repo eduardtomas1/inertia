@@ -27,6 +27,7 @@ const TERMINAL_SHUTDOWN_TIMEOUT_MS = process.platform === "win32"
 interface TerminalSession {
   id: string;
   owner: WebSocket;
+  cwd: string;
   pty: IPty;
   dataListener: IDisposable;
   exitListener: IDisposable;
@@ -93,7 +94,9 @@ function send(socket: WebSocket, event: ServerEvent): boolean {
 
 export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
+  private readonly replacementReservations = new Map<string, TerminalSession>();
   private readonly closingSessions = new Set<Promise<void>>();
+  private disposingAll = false;
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
   private readonly outputFlushMs: number;
@@ -155,9 +158,112 @@ export class TerminalManager {
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
   ): string {
-    if (this.sessions.size >= MAX_TERMINALS) throw new TerminalError("The terminal session limit has been reached.");
-    const ownerCount = [...this.sessions.values()].filter((session) => session.owner === owner).length;
-    if (ownerCount >= MAX_TERMINALS_PER_CLIENT) throw new TerminalError("This window already has the maximum number of terminals.");
+    return this.createProcessReplacing(
+      owner,
+      null,
+      cwd,
+      executable,
+      args,
+      env,
+      cols,
+      rows,
+      onExit,
+      onOutput,
+    );
+  }
+
+  async replaceProcess(
+    owner: WebSocket,
+    terminalId: string,
+    cwd: string,
+    executable: string,
+    args: readonly string[] | string,
+    env: NodeJS.ProcessEnv,
+    cols: number,
+    rows: number,
+    onExit?: (exitCode: number) => void,
+    onOutput?: (data: string) => void,
+  ): Promise<string> {
+    const replaced = this.ownedSession(owner, terminalId);
+    if (replaced.cwd !== cwd) {
+      throw new TerminalError(
+        "The terminal does not belong to this project workspace.",
+      );
+    }
+    if (owner.readyState !== WebSocket.OPEN) {
+      throw new TerminalError("The terminal client disconnected.");
+    }
+    this.assertCapacity(owner, replaced);
+    this.replacementReservations.set(replaced.id, replaced);
+    try {
+      await this.trackDisposal(replaced);
+      if (
+        owner.readyState !== WebSocket.OPEN
+        || !send(owner, {
+          type: "terminal.exit",
+          terminalId: replaced.id,
+          exitCode: 130,
+        })
+      ) {
+        throw new TerminalError("The terminal client disconnected.");
+      }
+      return this.createProcessReplacing(
+        owner,
+        replaced,
+        cwd,
+        executable,
+        args,
+        env,
+        cols,
+        rows,
+        onExit,
+        onOutput,
+      );
+    } finally {
+      this.replacementReservations.delete(replaced.id);
+    }
+  }
+
+  private assertCapacity(
+    owner: WebSocket,
+    replaced: TerminalSession | null,
+  ): void {
+    if (this.disposingAll) {
+      throw new TerminalError("The terminal service is stopping.");
+    }
+    const reservedOnly = [...this.replacementReservations.values()].filter(
+      (session) => !this.sessions.has(session.id),
+    );
+    const replacementAllowance = replaced ? 1 : 0;
+    if (
+      this.sessions.size + reservedOnly.length - replacementAllowance
+      >= MAX_TERMINALS
+    ) {
+      throw new TerminalError("The terminal session limit has been reached.");
+    }
+    const ownerCount = [...this.sessions.values(), ...reservedOnly].filter(
+      (session) => session.owner === owner && session !== replaced,
+    ).length;
+    if (ownerCount >= MAX_TERMINALS_PER_CLIENT) {
+      throw new TerminalError(
+        "This window already has the maximum number of terminals.",
+      );
+    }
+  }
+
+  private createProcessReplacing(
+    owner: WebSocket,
+    replaced: TerminalSession | null,
+    cwd: string,
+    executable: string,
+    args: readonly string[] | string,
+    env: NodeJS.ProcessEnv,
+    cols: number,
+    rows: number,
+    onExit?: (exitCode: number) => void,
+    onOutput?: (data: string) => void,
+  ): string {
+    this.assertCapacity(owner, replaced);
 
     const id = randomUUID();
     let pseudoterminal: IPty;
@@ -238,6 +344,7 @@ export class TerminalManager {
     session = {
       id,
       owner,
+      cwd,
       pty: pseudoterminal,
       dataListener,
       exitListener,
@@ -289,6 +396,7 @@ export class TerminalManager {
   }
 
   async disposeAll(): Promise<void> {
+    this.disposingAll = true;
     for (const session of this.sessions.values()) {
       void this.trackDisposal(session);
     }

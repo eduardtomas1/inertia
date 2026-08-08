@@ -141,6 +141,7 @@ describe("client command contract", () => {
       payload: {
         projectId: crypto.randomUUID(),
         conversationId: crypto.randomUUID(),
+        terminalId: crypto.randomUUID(),
         cols: 80,
         rows: 24,
       },

@@ -220,6 +220,11 @@ export function createIsolatedReviewCommandHandler(
           `Before revision · ${context.filePath}`,
           dependencies.publicError,
         );
+        if (dependencies.store.conversationWork.hasConversation(conversation.id)) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before starting another agent task for this chat.",
+          );
+        }
         const queued = dependencies.turns.queue({
           conversationId: conversation.id,
           content: context.visibleContent,

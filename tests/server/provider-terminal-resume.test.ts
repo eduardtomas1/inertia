@@ -14,6 +14,7 @@ import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
 import {
+  ProviderTerminalResumeRegistry,
   providerTerminalResumeArguments,
   providerTerminalResumeLaunch,
   providerTerminalResumeProcessInvocation,
@@ -94,6 +95,21 @@ function readyProvider(providerId: ProviderId): ProviderInfo {
 }
 
 describe("provider terminal resume mapping", () => {
+  it("mirrors acquire and release into the shared conversation-work authority", () => {
+    const authority = {
+      reserve: vi.fn(() => true),
+      release: vi.fn(),
+    };
+    const registry = new ProviderTerminalResumeRegistry(authority);
+
+    expect(registry.acquire("conversation-1")).toBe(true);
+    expect(registry.acquire("conversation-1")).toBe(false);
+    expect(authority.reserve).toHaveBeenCalledOnce();
+    registry.release("conversation-1");
+    registry.release("conversation-1");
+    expect(authority.release).toHaveBeenCalledOnce();
+  });
+
   it("uses exact interactive CLI argv for every native provider", () => {
     expect(providerTerminalResumeArguments("codex", sessionIds.codex)).toEqual([
       "resume",

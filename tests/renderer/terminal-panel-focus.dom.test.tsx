@@ -221,6 +221,7 @@ describe("TerminalPanel focus lifecycle", () => {
       payload: {
         projectId,
         conversationId,
+        terminalId: "10000000-0000-4000-8000-000000000000",
         cols: 80,
         rows: 24,
       },

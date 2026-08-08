@@ -306,7 +306,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
-  const providerTerminalResumes = new ProviderTerminalResumeRegistry();
+  const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
   const metadataCache = new ProviderMetadataCache({
     persistence: {
       load: () => store.loadProviderMetadata(),

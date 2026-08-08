@@ -122,6 +122,40 @@ describe("workspace run controller", () => {
     expect(workspaceServicePort("Listening without a local URL")).toBeNull();
   });
 
+  it("blocks project actions and Git mutations while a terminal owns the conversation", async () => {
+    const runtime = await fixture();
+    try {
+      expect(runtime.store.conversationWork.reserve(runtime.conversation.id)).toBe(true);
+      await expect(runtime.controller.startAction({
+        owner: {},
+        cwd: runtime.workspace,
+        projectId: runtime.project.id,
+        conversationId: runtime.conversation.id,
+        actionId: "check",
+        cols: 80,
+        rows: 24,
+        onStarted: vi.fn(),
+      })).rejects.toThrow("End the resumed provider terminal");
+      await expect(runtime.controller.trackSourceControl(
+        "Commit changes",
+        runtime.project.id,
+        runtime.conversation.id,
+        async () => "commit-id",
+      )).rejects.toThrow("End the resumed provider terminal");
+      await expect(runtime.controller.trackSourceControl(
+        "Switch branch",
+        runtime.project.id,
+        undefined,
+        async () => "main",
+      )).rejects.toThrow("End the resumed provider terminal");
+      expect(runtime.terminals.inputs).toEqual([]);
+      expect(runtime.store.shellSnapshot().runs).toEqual([]);
+    } finally {
+      runtime.store.conversationWork.release(runtime.conversation.id);
+      runtime.store.close();
+    }
+  });
+
   it("owns action discovery, process identity, port updates, and stop transitions", async () => {
     const runtime = await fixture();
     try {

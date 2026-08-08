@@ -384,6 +384,7 @@ function TerminalSession({
       || resumeInFlight
       || sessionState !== "ready"
       || status !== "online"
+      || !terminalIdRef.current
     ) return;
     const resume = providerResume.resume;
     const size = {
@@ -391,7 +392,6 @@ function TerminalSession({
       rows: Math.max(4, terminalRef.current?.rows ?? lastSizeRef.current.rows ?? 24),
     };
     const previousId = terminalIdRef.current;
-    const previousWasManagedAction = managedActionTerminalRef.current;
     const attempt = resumeAttemptRef.current + 1;
     resumeAttemptRef.current = attempt;
     setResumeInFlight(true);
@@ -404,6 +404,7 @@ function TerminalSession({
       payload: {
         projectId,
         conversationId,
+        terminalId: previousId,
         ...size,
       },
     }))
@@ -431,12 +432,6 @@ function TerminalSession({
         resumedProviderRef.current = authoritativeResume;
         setActiveResume(authoritativeResume);
         setTerminalId(event.terminalId);
-        if (previousId && !previousWasManagedAction) {
-          void sendCommand(command({
-            type: "terminal.close",
-            payload: { terminalId: previousId },
-          })).catch(() => undefined);
-        }
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
         pendingOutputRef.current.clear();
         terminalRef.current?.clear();

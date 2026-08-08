@@ -60,6 +60,7 @@ function resumeCommand(overrides: Partial<{
     payload: {
       projectId: overrides.projectId ?? projectId,
       conversationId: overrides.conversationId ?? conversationId,
+      terminalId: "77777777-7777-4777-8777-777777777777",
       cols: 91,
       rows: 31,
     },
@@ -82,8 +83,9 @@ function dependencies(input: {
     args: ["resume", sessionId],
     env: { PATH: "/usr/bin" },
   }));
-  const createProcess = vi.fn((
+  const replaceProcess = vi.fn((
     _owner: never,
+    _terminalId: string,
     _cwd: string,
     _executable: string,
     _args: readonly string[],
@@ -101,6 +103,7 @@ function dependencies(input: {
     store: {
       conversation: vi.fn(() => current),
       hasActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),
+      hasRecordedActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),
     } as unknown as RuntimeStore,
     workspaceRuns: {} as never,
     turns: { isActive: vi.fn(() => input.turnActive ?? false) } as never,
@@ -109,7 +112,7 @@ function dependencies(input: {
       terminalResumeLaunch,
     } as unknown as ProviderManager,
     providerTerminalResumes,
-    terminals: { createProcess } as unknown as TerminalManager,
+    terminals: { replaceProcess } as unknown as TerminalManager,
     secureFiles: {} as never,
     secureFileAuthorities: {} as never,
     workspacePath,
@@ -123,7 +126,7 @@ function dependencies(input: {
     send,
     workspacePath,
     terminalResumeLaunch,
-    createProcess,
+    replaceProcess,
     onExitCallbacks,
     providerTerminalResumes,
   };
@@ -141,8 +144,9 @@ describe("terminal.provider.resume command", () => {
       sessionId,
       "/workspace/.inertia/worktrees/owned",
     );
-    expect(fixture.createProcess).toHaveBeenCalledWith(
+    expect(fixture.replaceProcess).toHaveBeenCalledWith(
       expect.anything(),
+      "77777777-7777-4777-8777-777777777777",
       "/workspace/.inertia/worktrees/owned",
       "/Applications/Codex CLI/codex",
       ["resume", sessionId],
@@ -192,7 +196,7 @@ describe("terminal.provider.resume command", () => {
       const handler = createProjectWorkspaceCommandHandler(fixture.value);
       await expect(handler({ readyState: 1 } as never, resumeCommand())).rejects.toThrow(testCase.message);
       expect(fixture.terminalResumeLaunch).not.toHaveBeenCalled();
-      expect(fixture.createProcess).not.toHaveBeenCalled();
+      expect(fixture.replaceProcess).not.toHaveBeenCalled();
     }
   });
 
@@ -206,7 +210,7 @@ describe("terminal.provider.resume command", () => {
 
     fixture.onExitCallbacks[0]!(0);
     await expect(handler({ readyState: 1 } as never, resumeCommand())).resolves.toBe("handled");
-    expect(fixture.createProcess).toHaveBeenCalledTimes(2);
+    expect(fixture.replaceProcess).toHaveBeenCalledTimes(2);
   });
 
   it("abandons the launch if an app provider turn starts during CLI detection", async () => {
@@ -217,7 +221,7 @@ describe("terminal.provider.resume command", () => {
       "Stop the active provider session",
     );
     expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
-    expect(fixture.createProcess).not.toHaveBeenCalled();
+    expect(fixture.replaceProcess).not.toHaveBeenCalled();
     expect(fixture.providerTerminalResumes.isActive(conversationId)).toBe(false);
   });
 
@@ -243,7 +247,7 @@ describe("terminal.provider.resume command", () => {
     });
 
     await expect(pending).rejects.toThrow("connection closed");
-    expect(fixture.createProcess).not.toHaveBeenCalled();
+    expect(fixture.replaceProcess).not.toHaveBeenCalled();
     expect(fixture.providerTerminalResumes.isActive(conversationId)).toBe(false);
   });
 
@@ -262,7 +266,7 @@ describe("terminal.provider.resume command", () => {
       { readyState: 1 } as never,
       resumeCommand(),
     )).rejects.toThrow("Stop the active provider session");
-    expect(after.createProcess).not.toHaveBeenCalled();
+    expect(after.replaceProcess).not.toHaveBeenCalled();
   });
 
   it("rejects another workspace run that owns the conversation worktree", async () => {
@@ -272,5 +276,28 @@ describe("terminal.provider.resume command", () => {
       resumeCommand(),
     )).rejects.toThrow("Stop the active provider session");
     expect(fixture.terminalResumeLaunch).not.toHaveBeenCalled();
+  });
+
+  it("blocks checkpoint restore while the resumed terminal owns the worktree", async () => {
+    const fixture = dependencies();
+    const checkpointId = "88888888-8888-4888-8888-888888888888";
+    Object.assign(fixture.value.store, {
+      checkpoint: vi.fn(() => ({
+        id: checkpointId,
+        conversationId,
+        ref: "refs/inertia/checkpoints/owned",
+      })),
+    });
+    fixture.providerTerminalResumes.acquire(conversationId);
+
+    await expect(createProjectWorkspaceCommandHandler(fixture.value)(
+      { readyState: 1 } as never,
+      {
+        type: "checkpoint.revert",
+        requestId: "99999999-9999-4999-8999-999999999999",
+        payload: { conversationId, checkpointId },
+      },
+    )).rejects.toThrow("Stop active work, reviews, or resumed terminals");
+    expect(fixture.send).not.toHaveBeenCalled();
   });
 });

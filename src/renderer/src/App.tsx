@@ -386,6 +386,8 @@ export default function App(): React.JSX.Element {
     gitStatus,
     branches,
     structuredDiff,
+    structuredDiffParsing,
+    structuredDiffError,
     reviewStates,
     loadGit,
     loadBranches,
@@ -938,6 +940,8 @@ export default function App(): React.JSX.Element {
       projectActions={projectActions}
       reviewStates={reviewStates}
       structuredDiff={structuredDiff}
+      structuredDiffParsing={structuredDiffParsing}
+      structuredDiffError={structuredDiffError}
       multiSpawn={multiSpawn}
       scene={visibleWorkspaceScene}
       providerAuth={{

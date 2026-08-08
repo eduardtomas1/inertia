@@ -84,7 +84,9 @@ function props(
 
 function openProps(onDismiss = vi.fn()): {
   open: true;
-  onDismiss: () => void;
+  onDismiss: (
+    reason: "action" | "escape" | "outside" | "owner-change",
+  ) => void;
 } {
   return { open: true, onDismiss };
 }
@@ -171,7 +173,7 @@ describe("ChatGoalControl", () => {
       name: "Clear Codex goal",
     }));
     expect(onClearGoal).toHaveBeenCalledWith("codex-native");
-    expect(onDismiss).toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledWith("action");
   });
 
   it("reports an empty native goal when only a local objective is stored", () => {
@@ -230,8 +232,27 @@ describe("ChatGoalControl", () => {
     }));
     expect(secondarySetGoal).not.toHaveBeenCalled();
     fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(dismissPrimary).toHaveBeenCalled());
+    await waitFor(() => expect(dismissPrimary).toHaveBeenCalledWith("escape"));
     expect(dismissSecondary).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes an outside pointer dismissal from focus-restoring actions", () => {
+    const onDismiss = vi.fn();
+    render(
+      <>
+        <ChatGoalControl
+          {...props(workflow(nativeCapability))}
+          {...openProps(onDismiss)}
+        />
+        <button type="button">Another workspace control</button>
+      </>,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Another workspace control",
+    }));
+
+    expect(onDismiss).toHaveBeenCalledWith("outside");
   });
 
   it("does not dismiss a closed surface when background ownership refreshes", () => {

@@ -10,13 +10,15 @@ export type CommitDialogProps = {
   repositoryPath: string;
   status: GitStatusSnapshot | null;
   diff: StructuredDiff;
+  diffParsing: boolean;
+  diffError: string | null;
   reviewStates: DiffReviewState[];
   busy: boolean;
   onClose: () => void;
   onCommit: (message: string, push: boolean, paths: string[]) => Promise<void>;
 };
 
-export function CommitDialog({ open, repositoryPath, status, diff, reviewStates, busy, onClose, onCommit }: CommitDialogProps): React.JSX.Element | null {
+export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, diffError, reviewStates, busy, onClose, onCommit }: CommitDialogProps): React.JSX.Element | null {
   const [message, setMessage] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -44,8 +46,9 @@ export function CommitDialog({ open, repositoryPath, status, diff, reviewStates,
     [diff, repositoryPath, reviewStates, selectedPaths],
   );
   if (!open) return null;
+  const reviewUnavailable = diffParsing || diffError !== null;
   const submit = async (push: boolean) => {
-    if (!message.trim() || busy || selectedPaths.length === 0) return;
+    if (!message.trim() || busy || reviewUnavailable || selectedPaths.length === 0) return;
     try {
       await onCommit(message.trim(), push, selectedPaths);
       setMessage("");
@@ -92,7 +95,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, reviewStates,
               <input
                 type="checkbox"
                 checked={selectedPaths.includes(file.path)}
-                disabled={busy}
+                disabled={busy || reviewUnavailable}
                 onChange={(event) => setSelectedPaths((current) => event.target.checked
                   ? [...new Set([...current, file.path])]
                   : current.filter((path) => path !== file.path))}
@@ -102,11 +105,13 @@ export function CommitDialog({ open, repositoryPath, status, diff, reviewStates,
           ))}
         </div>
         <p className="commit-stage-note">Only checked paths will be staged and committed. Review marks never stage files.</p>
+        {diffParsing && <p className="commit-stage-note" role="status">Preparing the complete diff before commit…</p>}
+        {diffError && <p className="commit-review-warning" role="alert">The complete diff could not be prepared: {diffError}</p>}
         {unreviewedHunks.length > 0 && <p className="commit-review-warning">{unreviewedHunks.length} selected {unreviewedHunks.length === 1 ? "hunk is" : "hunks are"} unreviewed.</p>}
         <label><span>Commit message</span><input ref={inputRef} value={message} maxLength={10_000} placeholder="Describe this change" onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submit(false); }} /></label>
         <footer>
-          <button type="button" className="secondary-button" disabled={!message.trim() || busy || selectedPaths.length === 0} onClick={() => void submit(false)}>{busy ? <LoadingMark label="Committing" /> : <GitCommitHorizontal size={15} />}<span>Commit</span></button>
-          <button type="button" className="primary-button dialog-primary" disabled={!message.trim() || busy || selectedPaths.length === 0} onClick={() => void submit(true)}>{busy ? <LoadingMark label="Committing and pushing" /> : <Upload size={15} />}<span>Commit & push</span></button>
+          <button type="button" className="secondary-button" disabled={!message.trim() || busy || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(false)}>{busy ? <LoadingMark label="Committing" /> : <GitCommitHorizontal size={15} />}<span>Commit</span></button>
+          <button type="button" className="primary-button dialog-primary" disabled={!message.trim() || busy || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(true)}>{busy ? <LoadingMark label="Committing and pushing" /> : <Upload size={15} />}<span>Commit & push</span></button>
         </footer>
       </section>
     </div>

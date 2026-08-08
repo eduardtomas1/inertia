@@ -195,6 +195,39 @@ describe("composer asynchronous ownership", () => {
     expect(input).toHaveValue("");
   });
 
+  it("keeps focus on the clicked workspace control when /goal dismisses outside", async () => {
+    const current = conversation("18181818-1818-4818-8818-181818181818");
+    render(
+      <>
+        <Composer {...composerProps(current, {
+          goal: {
+            workflow: null,
+            loading: false,
+            busy: false,
+            error: "Goal state is unavailable in this fixture.",
+            onRetry: async () => undefined,
+            onSetGoal: async () => undefined,
+            onClearGoal: async () => undefined,
+          },
+        })} />
+        <button type="button">Open another pane</button>
+      </>,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/goal" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("dialog", { name: "Goal" })).toBeVisible();
+
+    const outside = screen.getByRole("button", { name: "Open another pane" });
+    fireEvent.pointerDown(outside);
+    outside.focus();
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Goal" }))
+      .not.toBeInTheDocument());
+    expect(outside).toHaveFocus();
+  });
+
   it("submits reasoning as a complete selection and keeps the control open on failure", async () => {
     const current = conversation("09090909-0909-4909-8909-090909090909");
     current.modelSelection = nativeModelSelection({

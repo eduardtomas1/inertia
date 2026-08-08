@@ -348,7 +348,7 @@ export function ChangesPanel({
                 const action = summaryLoading ? onCancelSummary?.() : onGenerateSummary();
                 if (action) void action.catch(() => undefined);
               }}
-              disabled={diffBusy || (summaryLoading && !onCancelSummary)}
+              disabled={Boolean(diffParsingError) || diffBusy || (summaryLoading && !onCancelSummary)}
             >
               {summaryLoading ? <><LoadingMark label="Summarizing changes" /><Square size={10} /></> : <Sparkles size={15} />}
             </IconButton>

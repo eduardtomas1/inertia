@@ -152,9 +152,13 @@ export const Composer = memo(function Composer({
   const routeCancelRef = useRef<HTMLButtonElement>(null);
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
-  const dismissCommandSurface = useCallback(() => {
+  const dismissCommandSurface = useCallback((
+    reason: "action" | "escape" | "outside" | "owner-change",
+  ) => {
     setCommandSurface(null);
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
+    if (reason === "action" || reason === "escape") {
+      window.requestAnimationFrame(() => textareaRef.current?.focus());
+    }
   }, []);
 
   conversationIdRef.current = conversation.id;

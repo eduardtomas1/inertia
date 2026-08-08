@@ -42,7 +42,9 @@ export interface ChatGoalControlProps {
 
 export interface ChatGoalPopoverProps extends ChatGoalControlProps {
   open: boolean;
-  onDismiss: () => void;
+  onDismiss: (
+    reason: "action" | "escape" | "outside" | "owner-change",
+  ) => void;
 }
 
 function statusLabel(status: AgentGoalStatus): string {
@@ -124,18 +126,20 @@ export function ChatGoalControl({
     if (ownerKeyRef.current === ownerKey) return;
     ownerKeyRef.current = ownerKey;
     setObjective("");
-    if (open) onDismiss();
+    if (open) onDismiss("owner-change");
   }, [onDismiss, open, ownerKey]);
 
   useEffect(() => {
     if (!open) return;
     const dismissOutside = (event: PointerEvent): void => {
-      if (!popoverRef.current?.contains(event.target as Node)) onDismiss();
+      if (!popoverRef.current?.contains(event.target as Node)) {
+        onDismiss("outside");
+      }
     };
     const dismissOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      onDismiss();
+      onDismiss("escape");
     };
     document.addEventListener("pointerdown", dismissOutside, true);
     document.addEventListener("keydown", dismissOnEscape);
@@ -166,7 +170,7 @@ export function ChatGoalControl({
         tokenBudget: null,
       });
       setObjective("");
-      onDismiss();
+      onDismiss("action");
     } catch {
       // The workspace error surface owns the public failure message. Keep the
       // disclosure and draft in place so the user can retry.
@@ -192,7 +196,7 @@ export function ChatGoalControl({
     setSubmitting(true);
     try {
       await onClearGoal(source);
-      onDismiss();
+      onDismiss("action");
     } catch {
       // The workspace error surface owns the public failure message.
     } finally {
@@ -225,7 +229,7 @@ export function ChatGoalControl({
             </span>
             <IconButton
               label="Close goal controls"
-              onClick={onDismiss}
+              onClick={() => onDismiss("action")}
             >
               <X size={14} />
             </IconButton>

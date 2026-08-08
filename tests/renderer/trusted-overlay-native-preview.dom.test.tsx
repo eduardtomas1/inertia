@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -115,6 +115,8 @@ describe("trusted overlay native preview suspension", () => {
         repositoryPath="."
         status={null}
         diff={{ fingerprint: "empty", files: [] }}
+        diffParsing={false}
+        diffError={null}
         reviewStates={[]}
         busy={false}
         onClose={vi.fn()}
@@ -132,6 +134,8 @@ describe("trusted overlay native preview suspension", () => {
         repositoryPath="."
         status={null}
         diff={{ fingerprint: "empty", files: [] }}
+        diffParsing={false}
+        diffError={null}
         reviewStates={[]}
         busy={false}
         onClose={vi.fn()}
@@ -140,6 +144,69 @@ describe("trusted overlay native preview suspension", () => {
     );
     await expectRestored();
 
+  });
+
+  it("blocks commit actions until the complete diff is authoritative", async () => {
+    const onCommit = vi.fn(async () => undefined);
+    const status = {
+      isRepository: true,
+      root: "/workspace/inertia",
+      branch: "main",
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+      hasRemote: false,
+      files: [{
+        path: "src/app.ts",
+        status: "modified",
+        insertions: 1,
+        deletions: 0,
+        untracked: false,
+        staged: false,
+        unstaged: true,
+        indexStatus: " ",
+        worktreeStatus: "M",
+      }],
+      insertions: 1,
+      deletions: 0,
+    };
+    const view = render(
+      <CommitDialog
+        open
+        repositoryPath="."
+        status={status}
+        diff={{ fingerprint: "pending", files: [] }}
+        diffParsing
+        diffError={null}
+        reviewStates={[]}
+        busy={false}
+        onClose={vi.fn()}
+        onCommit={onCommit}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Commit message" }), {
+      target: { value: "Keep review state honest" },
+    });
+    expect(screen.getByRole("status"))
+      .toHaveTextContent("Preparing the complete diff");
+    expect(screen.getByRole("button", { name: "Commit" })).toBeDisabled();
+
+    view.rerender(
+      <CommitDialog
+        open
+        repositoryPath="."
+        status={status}
+        diff={{ fingerprint: "ready", files: [] }}
+        diffParsing={false}
+        diffError={null}
+        reviewStates={[]}
+        busy={false}
+        onClose={vi.fn()}
+        onCommit={onCommit}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Commit" })).toBeEnabled();
   });
 
   it("owns the provider credential dialog lifecycle", async () => {

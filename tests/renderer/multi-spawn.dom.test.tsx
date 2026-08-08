@@ -36,6 +36,7 @@ import { nativeModelSelection } from "../../src/shared/model-routing";
 
 const firstProjectId = "11111111-1111-4111-8111-111111111111";
 const secondProjectId = "22222222-2222-4222-8222-222222222222";
+const thirdProjectId = "88888888-8888-4888-8888-888888888888";
 const firstConversationId = "33333333-3333-4333-8333-333333333333";
 const secondConversationId = "44444444-4444-4444-8444-444444444444";
 const comparisonConversationId = "77777777-7777-4777-8777-777777777777";
@@ -924,6 +925,7 @@ describe("multi-spawn", () => {
         expect(command.payload.projectIds).toEqual([
           firstProjectId,
           secondProjectId,
+          thirdProjectId,
         ]);
         return pendingLaunchesEvent();
       }
@@ -988,6 +990,7 @@ describe("multi-spawn", () => {
     }));
     const draft = multiSpawnDraft();
     draft.comparison.enabled = true;
+    draft.comparison.side.projectId = thirdProjectId;
 
     await act(async () => hook.result.current.submit(draft));
 
@@ -1029,7 +1032,7 @@ describe("multi-spawn", () => {
           },
         ],
         comparison: {
-          projectId: firstProjectId,
+          projectId: thirdProjectId,
           title: "Duo comparison",
           accessMode: "supervised",
           interactionMode: "plan",

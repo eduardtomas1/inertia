@@ -197,7 +197,7 @@ export class PairedLaunchRepository {
     const exactProjectIds = [...new Set(projectIds)];
     if (
       exactProjectIds.length < 1
-      || exactProjectIds.length > 2
+      || exactProjectIds.length > 3
       || !Number.isInteger(limit)
       || limit < 1
       || limit > 32

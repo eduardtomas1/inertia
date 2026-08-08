@@ -449,7 +449,12 @@ export function useMultiSpawn({
     setSubmitting(true);
     setError("Checking these projects for previous duo launches.");
     const reconciliation = await reconcileProjectLaunches(
-      draft.sides.map(({ projectId }) => projectId),
+      [
+        ...draft.sides.map(({ projectId }) => projectId),
+        ...(draft.comparison.enabled
+          ? [draft.comparison.side.projectId]
+          : []),
+      ],
       generation,
     );
     if (!isCurrent() || reconciliation === "stale") return;

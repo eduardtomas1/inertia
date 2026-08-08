@@ -102,6 +102,15 @@ export class ConversationWorkAuthority {
     );
   }
 
+  conversationMatchesCheckout(
+    conversationId: string,
+    checkoutPath: string,
+  ): boolean {
+    const workspace = this.workspaceForConversation(conversationId);
+    return canonicalCheckoutIdentity(workspace.checkoutPath)
+      === canonicalCheckoutIdentity(checkoutPath);
+  }
+
   hasProject(projectId: string): boolean {
     return [...this.workspaceByReservation.values()].some(
       (workspace) => workspace.projectId === projectId,

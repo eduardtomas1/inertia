@@ -36,6 +36,10 @@ describe("conversation work authority", () => {
     expect(authority.reserve("conversation-b")).toBe(false);
     expect(authority.hasConversation("conversation-b")).toBe(true);
     expect(authority.hasCheckout(alias)).toBe(true);
+    expect(authority.conversationMatchesCheckout(
+      "conversation-b",
+      checkout,
+    )).toBe(true);
 
     authority.release("conversation-a");
     expect(authority.reserveCheckout(
@@ -70,6 +74,10 @@ describe("conversation work authority", () => {
 
     expect(authority.reserve("conversation-a")).toBe(true);
     expect(authority.reserve("conversation-b")).toBe(true);
+    expect(authority.conversationMatchesCheckout(
+      "conversation-a",
+      second,
+    )).toBe(false);
     expect(authority.hasProject("project")).toBe(true);
 
     authority.clear();

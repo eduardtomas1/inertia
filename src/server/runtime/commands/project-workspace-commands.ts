@@ -382,9 +382,14 @@ export function createProjectWorkspaceCommandHandler(
             "This chat does not use the provider's native CLI session store, so Inertia cannot resume it truthfully in a terminal.",
           );
         }
+        const cwd = dependencies.workspacePath(
+          command.payload.projectId,
+          conversation.id,
+        );
         if (
           dependencies.providers.isRunning(conversation.id)
           || dependencies.turns.isActive(conversation.id)
+          || dependencies.turns.hasActiveCheckout(cwd)
           || dependencies.store.hasActiveWorkspaceRunForConversation(conversation.id)
           || dependencies.providerTerminalResumes.isActive(conversation.id)
         ) {
@@ -392,10 +397,6 @@ export function createProjectWorkspaceCommandHandler(
             "Stop the active provider session for this chat before resuming it in another terminal.",
           );
         }
-        const cwd = dependencies.workspacePath(
-          command.payload.projectId,
-          conversation.id,
-        );
         if (!dependencies.providerTerminalResumes.acquire(conversation.id)) {
           throw new RuntimeRequestError(
             "Stop the active provider session for this chat before resuming it in another terminal.",
@@ -411,6 +412,7 @@ export function createProjectWorkspaceCommandHandler(
             socket.readyState !== WebSocket.OPEN
             || dependencies.providers.isRunning(conversation.id)
             || dependencies.turns.isActive(conversation.id)
+            || dependencies.turns.hasActiveCheckout(cwd)
             || dependencies.store.hasRecordedActiveWorkspaceRunForConversation(conversation.id)
           ) {
             throw new RuntimeRequestError(

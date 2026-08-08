@@ -72,6 +72,8 @@ function dependencies(input: {
   running?: boolean;
   runningChecks?: boolean[];
   turnActive?: boolean;
+  activeCheckout?: boolean;
+  activeCheckoutChecks?: boolean[];
   workspaceRunActive?: boolean;
 } = {}) {
   const current = input.current ?? conversation();
@@ -99,6 +101,7 @@ function dependencies(input: {
   });
   const providerTerminalResumes = new ProviderTerminalResumeRegistry();
   const runningChecks = [...(input.runningChecks ?? [])];
+  const activeCheckoutChecks = [...(input.activeCheckoutChecks ?? [])];
   const value: ProjectWorkspaceCommandDependencies = {
     store: {
       conversation: vi.fn(() => current),
@@ -106,7 +109,11 @@ function dependencies(input: {
       hasRecordedActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),
     } as unknown as RuntimeStore,
     workspaceRuns: {} as never,
-    turns: { isActive: vi.fn(() => input.turnActive ?? false) } as never,
+    turns: {
+      isActive: vi.fn(() => input.turnActive ?? false),
+      hasActiveCheckout: vi.fn(() =>
+        activeCheckoutChecks.shift() ?? input.activeCheckout ?? false),
+    } as never,
     providers: {
       isRunning: vi.fn(() => runningChecks.shift() ?? input.running ?? false),
       terminalResumeLaunch,
@@ -267,6 +274,24 @@ describe("terminal.provider.resume command", () => {
       resumeCommand(),
     )).rejects.toThrow("Stop the active provider session");
     expect(after.replaceProcess).not.toHaveBeenCalled();
+  });
+
+  it("rejects an agent in a sibling chat sharing the checkout before and after discovery", async () => {
+    const before = dependencies({ activeCheckout: true });
+    await expect(createProjectWorkspaceCommandHandler(before.value)(
+      { readyState: 1 } as never,
+      resumeCommand(),
+    )).rejects.toThrow("Stop the active provider session");
+    expect(before.terminalResumeLaunch).not.toHaveBeenCalled();
+
+    const after = dependencies({ activeCheckoutChecks: [false, true] });
+    await expect(createProjectWorkspaceCommandHandler(after.value)(
+      { readyState: 1 } as never,
+      resumeCommand(),
+    )).rejects.toThrow("Stop the active provider session");
+    expect(after.terminalResumeLaunch).toHaveBeenCalledOnce();
+    expect(after.replaceProcess).not.toHaveBeenCalled();
+    expect(after.providerTerminalResumes.isActive(conversationId)).toBe(false);
   });
 
   it("rejects another workspace run that owns the conversation worktree", async () => {

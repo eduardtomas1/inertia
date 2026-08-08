@@ -43,8 +43,11 @@ export interface ProviderTerminalResumeOption {
 }
 
 type TerminalSessionProps = TerminalPanelProps & {
-  resumeBlockedBySibling: boolean;
-  onProviderResumeStarted: (terminalId: string) => void;
+  siblingResumedConversationIds: ReadonlySet<string>;
+  onProviderResumeStarted: (
+    terminalId: string,
+    conversationId: string,
+  ) => void;
 };
 
 type CommandWithoutId = ClientCommand extends infer Command
@@ -87,7 +90,7 @@ function TerminalSession({
   onActionStarted,
   providerResume,
   providerResumes,
-  resumeBlockedBySibling,
+  siblingResumedConversationIds,
   onProviderResumeStarted,
   onClose,
   visible = true,
@@ -131,6 +134,8 @@ function TerminalSession({
   ) ?? resumeOptions.find(({ availability }) => availability.kind === "available")
     ?? resumeOptions[0]
     ?? null;
+  const resumeBlockedBySibling = selectedResumeOption !== null
+    && siblingResumedConversationIds.has(selectedResumeOption.conversationId);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   ownerRef.current = `${projectId}:${conversationId ?? ""}`;
   const resumeDescriptionId = useId();
@@ -501,7 +506,10 @@ function TerminalSession({
         terminalIdRef.current = event.terminalId;
         managedActionTerminalRef.current = false;
         resumedProviderRef.current = authoritativeResume;
-        onProviderResumeStarted(event.terminalId);
+        onProviderResumeStarted(
+          event.terminalId,
+          selectedResumeOption.conversationId,
+        );
         setActiveResume(authoritativeResume);
         setTerminalId(event.terminalId);
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
@@ -670,27 +678,34 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const [persistedSplitPercent, setPersistedSplitPercent] = usePersistedSize("inertia:layout:terminal-split-percent:v1", 50, { min: 25, max: 75 });
   const [splitPercent, setSplitPercent] = useState(persistedSplitPercent);
   const [splitOrientation, setSplitOrientation] = useState<"horizontal" | "vertical">("vertical");
-  const [resumedTerminal, setResumedTerminal] = useState<{
+  const [resumedTerminals, setResumedTerminals] = useState<ReadonlyMap<string, {
     tabId: string;
     terminalId: string;
-  } | null>(null);
+  }>>(() => new Map());
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setSplitPercent(persistedSplitPercent), [persistedSplitPercent]);
 
-  useEffect(() => setResumedTerminal(null), [
+  useEffect(() => setResumedTerminals(new Map()), [
     props.conversationId,
     props.projectId,
   ]);
 
   useEffect(() => {
-    if (props.status !== "online") setResumedTerminal(null);
+    if (props.status !== "online") setResumedTerminals(new Map());
   }, [props.status]);
 
   useEffect(() => subscribe((event) => {
     if (event.type !== "terminal.exit") return;
-    setResumedTerminal((current) =>
-      current?.terminalId === event.terminalId ? null : current);
+    setResumedTerminals((current) => {
+      const next = new Map(current);
+      for (const [conversationId, resumed] of next) {
+        if (resumed.terminalId === event.terminalId) {
+          next.delete(conversationId);
+        }
+      }
+      return next.size === current.size ? current : next;
+    });
   }), [subscribe]);
 
   useEffect(() => {
@@ -757,7 +772,12 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
         {tabs.map((tab) => {
           const visible = tab.id === activeId || (split && tab.id === secondaryId);
           const placement = tab.id === activeId ? "is-primary" : tab.id === secondaryId ? "is-secondary" : "";
-          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} resumeBlockedBySibling={resumedTerminal !== null && resumedTerminal.tabId !== tab.id} onProviderResumeStarted={(terminalId) => setResumedTerminal({ tabId: tab.id, terminalId })} onClose={() => closeTerminal(tab.id)} /></div>;
+          const siblingResumedConversationIds = new Set(
+            [...resumedTerminals]
+              .filter(([, resumed]) => resumed.tabId !== tab.id)
+              .map(([conversationId]) => conversationId),
+          );
+          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} siblingResumedConversationIds={siblingResumedConversationIds} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
         })}
         {split && secondaryId && (
           <PaneResizeHandle

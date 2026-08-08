@@ -77,7 +77,7 @@ export function useWorkspaceReview({
     structured: structuredDiff,
     parsing: structuredDiffParsing,
     error: structuredDiffError,
-  } = useParsedUnifiedDiff(gitDiff?.patch ?? "");
+  } = useParsedUnifiedDiff(gitDiff?.patch ?? "", gitDiff);
 
   useEffect(() => {
     setSelectionReviewAnswer((current) => (

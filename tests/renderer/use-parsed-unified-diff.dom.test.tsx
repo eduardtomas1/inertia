@@ -54,4 +54,26 @@ describe("useParsedUnifiedDiff", () => {
     expect(hook.result.current.error).toBeNull();
     expect(parseDiffOffMainThread).toHaveBeenCalledTimes(2);
   });
+
+  it("retries a failed large patch when its authoritative snapshot refreshes", async () => {
+    vi.stubGlobal("Worker", class {});
+    const patch = "x".repeat(DIFF_WORKER_THRESHOLD_CHARS + 1);
+    const firstSnapshot = { revision: 1 };
+    const secondSnapshot = { revision: 2 };
+    parseDiffOffMainThread
+      .mockRejectedValueOnce(new Error("The diff worker stopped."))
+      .mockResolvedValueOnce(parseUnifiedDiff(patch));
+    const hook = renderHook(
+      ({ retryToken }) => useParsedUnifiedDiff(patch, retryToken),
+      { initialProps: { retryToken: firstSnapshot } },
+    );
+
+    await waitFor(() => expect(hook.result.current.error)
+      .toBe("The diff worker stopped."));
+    hook.rerender({ retryToken: secondSnapshot });
+
+    await waitFor(() => expect(hook.result.current.parsing).toBe(false));
+    expect(hook.result.current.error).toBeNull();
+    expect(parseDiffOffMainThread).toHaveBeenCalledTimes(2);
+  });
 });

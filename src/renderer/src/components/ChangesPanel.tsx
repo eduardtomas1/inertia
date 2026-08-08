@@ -170,7 +170,7 @@ export function ChangesPanel({
     structured,
     parsing: diffParsing,
     error: diffParsingError,
-  } = useParsedUnifiedDiff(diff?.patch ?? "");
+  } = useParsedUnifiedDiff(diff?.patch ?? "", diff);
   const diffBusy = loading || diffParsing;
   const selectedFile = selectedPath
     ? structured.files.find((file) => file.path === selectedPath) ?? null

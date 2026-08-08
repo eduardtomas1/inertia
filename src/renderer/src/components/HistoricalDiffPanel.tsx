@@ -54,7 +54,7 @@ export function HistoricalDiffPanel({
   onOpenFile,
   onShowCurrentChanges,
 }: HistoricalDiffPanelProps): React.JSX.Element {
-  const { structured, parsing, error } = useParsedUnifiedDiff(diff.patch);
+  const { structured, parsing, error } = useParsedUnifiedDiff(diff.patch, diff);
   const selectedFile = selectedPath
     ? structured.files.find(({ path }) => path === selectedPath) ?? null
     : structured.files[0] ?? null;

@@ -201,9 +201,10 @@ describe("message attachment ownership transfer", () => {
 
   it("rechecks the terminal reservation after asynchronous turn preparation", async () => {
     const queue = vi.fn();
+    const relinquishAll = vi.fn(async () => undefined);
     const handlerDependencies = dependencies({
       queue,
-      relinquishAll: vi.fn(async () => undefined),
+      relinquishAll,
       providerTerminalResumeActive: false,
       providerTerminalResumeAcquire: false,
     });
@@ -216,6 +217,9 @@ describe("message attachment ownership transfer", () => {
     expect(
       handlerDependencies.providerTerminalResumes.acquire,
     ).toHaveBeenCalledWith(conversationId);
+    expect(handlerDependencies.store.conversationPath).not.toHaveBeenCalled();
+    expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
+    expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
   });
 
   it("aborts attachment resolution at the aggregate deadline", async () => {
@@ -435,7 +439,23 @@ describe("message attachment ownership transfer", () => {
     expect(
       vi.mocked(handlerDependencies.workflows.assertTurnSkillsCurrent)
         .mock.invocationCallOrder[0],
-    ).toBeLessThan(queue.mock.invocationCallOrder[0]!);
+    ).toBeLessThan(
+      vi.mocked(handlerDependencies.providerTerminalResumes.acquire)
+        .mock.invocationCallOrder[0]!,
+    );
+    expect(
+      vi.mocked(handlerDependencies.providerTerminalResumes.acquire)
+        .mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(handlerDependencies.store.conversationPath)
+        .mock.invocationCallOrder[0]!,
+    );
+    expect(
+      vi.mocked(handlerDependencies.turns.start).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(handlerDependencies.providerTerminalResumes.release)
+        .mock.invocationCallOrder[0]!,
+    );
     expect(handlerDependencies.broadcast).toHaveBeenCalledWith({
       type: "conversation.detail.invalidated",
       conversationId,

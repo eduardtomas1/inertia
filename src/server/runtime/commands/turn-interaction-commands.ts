@@ -218,6 +218,29 @@ export function createTurnInteractionCommandHandler(
           await relinquishAttachments();
           throw error;
         }
+        let providerTransitionReserved = false;
+        try {
+          assertMessageSendPreparationPending(preparationDeadlineAt);
+          dependencies.workflows.assertTurnSkillsCurrent(
+            conversation.id,
+            resolvedSkills.routeKey,
+          );
+          if (
+            dependencies.enableProviders
+            && !dependencies.providerTerminalResumes.acquire(conversation.id)
+          ) {
+            throw new RuntimeRequestError(
+              "End the resumed provider terminal for this chat before sending another message.",
+            );
+          }
+          providerTransitionReserved = dependencies.enableProviders;
+        } catch (error) {
+          if (providerTransitionReserved) {
+            dependencies.providerTerminalResumes.release(conversation.id);
+          }
+          await relinquishAttachments();
+          throw error;
+        }
         let checkpointId: string | null = null;
         let capturedCheckpoint: {
           repositoryPath: string;
@@ -282,28 +305,17 @@ export function createTurnInteractionCommandHandler(
               // A checkpoint is protective but not a reason to block a run.
             }
             if (messageSendPreparationExpired(preparationDeadlineAt)) {
+              if (providerTransitionReserved) {
+                dependencies.providerTerminalResumes.release(conversation.id);
+                providerTransitionReserved = false;
+              }
               await relinquishAttachments();
               assertMessageSendPreparationPending(preparationDeadlineAt);
             }
           }
         }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
-        let providerTransitionReserved = false;
         try {
-          assertMessageSendPreparationPending(preparationDeadlineAt);
-          dependencies.workflows.assertTurnSkillsCurrent(
-            conversation.id,
-            resolvedSkills.routeKey,
-          );
-          if (
-            dependencies.enableProviders
-            && !dependencies.providerTerminalResumes.acquire(conversation.id)
-          ) {
-            throw new RuntimeRequestError(
-              "End the resumed provider terminal for this chat before sending another message.",
-            );
-          }
-          providerTransitionReserved = dependencies.enableProviders;
           if (pendingCheckpoint) {
             checkpointId = dependencies.store.addCheckpoint({
               conversationId: conversation.id,

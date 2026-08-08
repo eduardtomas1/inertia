@@ -1972,7 +1972,7 @@ describe("multi-spawn", () => {
     },
   );
 
-  it("reconciles every bounded durable blocker instead of selecting one", async () => {
+  it("blocks a new Duo for every discovered comparison lock", async () => {
     const launchIds = [
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -1982,47 +1982,37 @@ describe("multi-spawn", () => {
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
       if (command.type === "duo.pending") {
-        expect(command.payload.projectIds).toEqual([firstProjectId]);
+        expect(command.payload.projectIds).toEqual([
+          firstProjectId,
+          secondProjectId,
+        ]);
         return pendingLaunchesEvent(launchIds);
       }
-      if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+      if (command.type !== "duo.status") {
         throw new Error(`Unexpected command: ${command.type}`);
       }
       const launchId = command.payload.launchId;
       expect(launchIds).toContain(launchId);
       const ordinal = launchIds.indexOf(launchId) as 0 | 1;
-      const plannedPath = `/workspace/retained duo ${ordinal + 1}`;
       return {
         type: "request.result",
         requestId: crypto.randomUUID(),
         result: {
           kind: "duo.status",
           launchId,
-          state: "recovery-required",
-          error: `Recovery ${ordinal + 1} remains required.`,
+          state: "running",
+          error: null,
           sides: [
-            { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
-            { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+            { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "started" },
+            { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "started" },
           ],
-          recoveryGuidance: [{
-            kind: "git-worktree",
-            ordinal,
-            topology: "owned",
-            repositoryPath: "/workspace/repository",
-            plannedPath,
-            observedPath: plannedPath,
-            worktreeId: `worktree-${ordinal + 1}`,
-            generatedBranch: `inertia/launch-${ordinal + 1}`,
-            expectedHead: `${ordinal + 1}`.repeat(40),
-            observedBranch: `inertia/launch-${ordinal + 1}`,
-            observedHead: `${ordinal + 1}`.repeat(40),
-            actions: [{
-              label: "Remove retained linked worktree",
-              cwd: "/workspace/repository",
-              executable: "git",
-              args: ["worktree", "remove", "--", plannedPath],
-            }],
-          }],
+          comparison: {
+            state: "failed",
+            conversationId: comparisonConversationId,
+            turnId: crypto.randomUUID(),
+            attempt: ordinal + 1,
+            error: `Judge ${ordinal + 1} remains locked.`,
+          },
         },
       };
     });
@@ -2039,27 +2029,19 @@ describe("multi-spawn", () => {
       setActionError: vi.fn(),
     }));
 
-    act(() => hook.result.current.openDialog());
-    await waitFor(() => expect(run).toHaveBeenCalledTimes(5));
+    await act(async () => hook.result.current.submit(multiSpawnDraft()));
 
     expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
       "duo.pending",
       "duo.status",
-      "duo.cancel",
       "duo.status",
-      "duo.cancel",
     ]);
     expect(hook.result.current.error).toContain(
       "2 previous duo launches still need recovery.",
     );
-    expect(hook.result.current.recoveryGuidance.map(
-      ({ plannedPath }) => plannedPath,
-    )).toEqual([
-      "/workspace/retained duo 1",
-      "/workspace/retained duo 2",
-    ]);
-    expect(hook.result.current.recoveryGuidance.map(({ launchId }) => launchId))
-      .toEqual(launchIds);
+    expect(hook.result.current.error).toContain("Judge 1 remains locked.");
+    expect(hook.result.current.error).toContain("Judge 2 remains locked.");
+    expect(hook.result.current.recoveryGuidance).toEqual([]);
     expect(run.mock.calls.some(([, command]) =>
       command.type === "duo.prepare" || command.type === "duo.dispatch"))
       .toBe(false);

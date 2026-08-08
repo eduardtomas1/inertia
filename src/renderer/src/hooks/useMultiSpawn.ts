@@ -111,11 +111,17 @@ function launchStatusMessage(status: DuoStatusResult): string | null {
 }
 
 function launchRetainsRecoveryIdentity(status: DuoStatusResult): boolean {
+  const comparisonState = status.comparison?.state;
   return status.state === "preparing"
     || status.state === "prepared"
     || status.state === "dispatching"
     || status.state === "recovery-required"
-    || status.state === "interrupted";
+    || status.state === "interrupted"
+    || comparisonState === "waiting"
+    || comparisonState === "dispatching"
+    || comparisonState === "running"
+    || comparisonState === "failed"
+    || comparisonState === "interrupted";
 }
 
 function identifiedRecoveryGuidance(

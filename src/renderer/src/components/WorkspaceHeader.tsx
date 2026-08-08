@@ -95,7 +95,9 @@ export function WorkspaceHeader({
   useNativePreviewSuspension(menu !== null);
   const environmentAnchorRef = useRef<HTMLDivElement>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
-  const eyebrow = view === "settings" ? "Personalize your workspace" : project?.name && conversation ? project.name : "Inertia";
+  const eyebrow = view === "settings"
+    ? null
+    : project?.name && conversation ? project.name : "Inertia";
   const activityBadgeCount = attentionRunCount || activeRunCount;
   const activityLabel = attentionRunCount > 0
     ? `Open runs, ${attentionRunCount} ${attentionRunCount === 1 ? "item needs" : "items need"} attention`
@@ -136,7 +138,7 @@ export function WorkspaceHeader({
         <IconButton label="Toggle project navigation" className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
           {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </IconButton>
-        <div className="header-title-wrap"><span className="header-eyebrow">{eyebrow}</span><h1>{title}</h1></div>
+        <div className="header-title-wrap">{eyebrow && <span className="header-eyebrow">{eyebrow}</span>}<h1>{title}</h1></div>
       </div>
 
       <div className="header-actions no-drag">

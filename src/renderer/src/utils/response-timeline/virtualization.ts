@@ -28,7 +28,9 @@ export const TIMELINE_VIRTUALIZATION_MIN_ROWS = 14;
 export const TIMELINE_VIRTUALIZATION_MIN_WEIGHTED_ROWS = 10;
 export const TIMELINE_VIRTUALIZATION_MIN_WEIGHT = 10;
 export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
-export const TIMELINE_MINIMAP_MAX_MARKERS = 48;
+// Twelve 24px targets fit the 320px minimap track without relying on the
+// target-spacing exception for pointer accessibility.
+export const TIMELINE_MINIMAP_MAX_MARKERS = 12;
 
 /**
  * Row count alone misses short-but-expensive histories. A turn containing

@@ -51,7 +51,8 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   const terminalPanel = page.locator("aside.terminal-panel").first();
   const terminalFontSize = await terminalPanel.getAttribute("data-terminal-font-size");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "General", exact: true }))
+    .toHaveAttribute("aria-current", "page");
   await page.getByRole("radio", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect.poll(async () => {
@@ -72,8 +73,9 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await page.getByRole("radiogroup", { name: "Response density" }).getByRole("radio", { name: "Comfortable" }).click();
   await page.getByRole("switch", { name: "Wrap code by default" }).click();
   await expect(page.getByRole("switch", { name: "Wrap code by default" })).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("button", { name: "Providers", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
+  const providers = page.getByRole("button", { name: "Providers", exact: true });
+  await providers.click();
+  await expect(providers).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Agent accounts" })).toBeVisible();
   await page.getByRole("button", { name: "Keybindings", exact: true }).click();
   await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
@@ -93,12 +95,9 @@ test("navigates settings, changes theme, and returns to chat", async () => {
 
 test("manages backend profiles across the responsive theme and scale matrix", async ({ browserName: _browserName }, testInfo) => {
   const openBackends = async (): Promise<void> => {
-    await page.getByRole("button", { name: "Model backends", exact: true }).click();
-    await expect(page.getByRole("heading", {
-      name: "Model backends",
-      exact: true,
-      level: 2,
-    })).toBeVisible();
+    const backends = page.getByRole("button", { name: "Model backends", exact: true });
+    await backends.click();
+    await expect(backends).toHaveAttribute("aria-current", "page");
     await expect(page.getByLabel("Model backend profiles")).toBeVisible();
   };
   const setAppearance = async (

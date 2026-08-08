@@ -100,24 +100,26 @@ describe("Settings external section targets", () => {
       onClearBackendDefault: vi.fn(async () => undefined),
     };
     const view = render(<SettingsView {...props} />);
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Providers",
-    );
+    expect(screen.getByRole("button", { name: "Providers" }))
+      .toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 2, name: "Providers" }))
+      .toHaveClass("visually-hidden");
 
     fireEvent.click(screen.getByRole("button", { name: "General" }));
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "General",
-    );
+    expect(screen.getByRole("button", { name: "General" }))
+      .toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 2, name: "General" }))
+      .toHaveClass("visually-hidden");
     view.rerender(<SettingsView {...props} disabled />);
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "General",
-    );
+    expect(screen.getByRole("button", { name: "General" }))
+      .toHaveAttribute("aria-current", "page");
 
     const connectionsTarget = { section: "connections" as const };
     view.rerender(<SettingsView {...props} target={connectionsTarget} />);
-    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
-      "Inertia Private Connect",
-    );
+    expect(screen.getByRole("heading", {
+      level: 2,
+      name: "Connections & devices",
+    })).toHaveClass("visually-hidden");
     const phoneAccess = await screen.findByLabelText("Phone access");
     fireEvent.change(phoneAccess, {
       target: { value: "collaborate" },
@@ -145,17 +147,14 @@ describe("Settings external section targets", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "General" }));
     view.rerender(<SettingsView {...props} target={connectionsTarget} disabled />);
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "General",
-    );
+    expect(screen.getByRole("button", { name: "General" }))
+      .toHaveAttribute("aria-current", "page");
 
     view.rerender(<SettingsView
       {...props}
       target={{ section: "connections" }}
     />);
-    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
-      "Inertia Private Connect",
-    );
+    expect(await screen.findByLabelText("Phone access")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
     expect(screen.getByText("Full local database backup")).toBeVisible();

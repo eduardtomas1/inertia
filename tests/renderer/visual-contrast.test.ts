@@ -228,5 +228,17 @@ describe("visual contrast system", () => {
     expect(css).toMatch(
       /\.model-source-rail-item\.is-selected\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
     );
+    expect(css).toMatch(
+      /\.project-row\.is-active\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
+    );
+    expect(css).toMatch(
+      /\.conversation-row\.is-active\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
+    );
+  });
+
+  it("uses the theme-aware foreground for Runs badges", () => {
+    expect(css).toMatch(
+      /\.activity-count\s*\{[^}]*color:\s*var\(--accent-text\);[^}]*background:\s*var\(--accent\);/su,
+    );
   });
 });

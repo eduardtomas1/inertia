@@ -33,6 +33,9 @@ const CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS = 500;
 const CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS = 500;
 const CI_STREAM_FINAL_PAINT_CATASTROPHIC_MS = 1_500;
 const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
+// These surfaces are loaded during idle time. Their first interaction should
+// therefore be a synchronous render, not React's delayed first lazy handoff.
+const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
 // The scenario deliberately leaves the live edge to verify reader navigation,
 // so paints produced while the response is outside the viewport are excluded.
 // Four distinct visible commits still prove progressive rendering before and
@@ -1286,6 +1289,7 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<{
   activityFirstOpenMs: number;
   activityWarmReopenMs: number;
   commandPaletteFirstOpenMs: number;
+  settingsFirstOpenMs: number;
 }> {
   const activityFirstOpenMs = await rendererInteractionMeasurement(page, {
     triggerSelector: 'button[aria-label^="Open runs"]',
@@ -1299,6 +1303,15 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<{
   });
   await page.getByRole("button", { name: "Close runs" }).click();
 
+  const settingsFirstOpenMs = await rendererInteractionMeasurement(page, {
+    triggerSelector: ".sidebar-footer .sidebar-destination",
+    targetSelector: ".settings-view",
+  });
+  await page.locator("button.sidebar-destination")
+    .filter({ hasText: "Workspace" })
+    .click();
+  await page.locator(".chat-workspace").waitFor();
+
   const commandPaletteFirstOpenMs = await rendererInteractionMeasurement(page, {
     shortcut: "command-palette",
     targetSelector: '.command-palette[role="dialog"]',
@@ -1308,6 +1321,7 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<{
     activityFirstOpenMs,
     activityWarmReopenMs,
     commandPaletteFirstOpenMs,
+    settingsFirstOpenMs,
   };
 }
 
@@ -1692,11 +1706,13 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.firstOpenLatency.coldIntentDialogMs)
       .toBeLessThan(5_000);
     expect(report.scenarios.firstOpenLatency.activityFirstOpenMs)
-      .toBeLessThan(2_000);
+      .toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
     expect(report.scenarios.firstOpenLatency.activityWarmReopenMs)
-      .toBeLessThan(1_000);
+      .toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
     expect(report.scenarios.firstOpenLatency.commandPaletteFirstOpenMs)
-      .toBeLessThan(2_000);
+      .toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
+    expect(report.scenarios.firstOpenLatency.settingsFirstOpenMs)
+      .toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
     expect(["none", "wayland", "x11"]).toContain(report.host.displayServer);
     expect(report.host.displayPresent).toBe(Boolean(process.env.DISPLAY));
     expect(report.host.waylandPresent).toBe(Boolean(process.env.WAYLAND_DISPLAY));

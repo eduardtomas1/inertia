@@ -2,9 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArchiveRestore,
   Bot,
-  BrainCircuit,
   Check,
-  Clock3,
   Copy,
   Database,
   Download,
@@ -13,7 +11,6 @@ import {
   GitCompareArrows,
   Keyboard,
   Laptop,
-  ListCollapse,
   Moon,
   PanelLeft,
   RefreshCw,
@@ -23,7 +20,6 @@ import {
   Sun,
   TerminalSquare,
   Trash2,
-  WrapText,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -47,12 +43,16 @@ import {
 import type { AppUpdateStatus } from "@shared/desktop";
 import { INERTIA_VERSION } from "@shared/version";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
-import { Switch } from "./ui";
-import { ModelBackendsSettings } from "./ModelBackendsSettings";
+import { LoadingMark, Switch } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
-import { ConnectionsAndDevicesSettings } from "./ConnectionsAndDevicesSettings";
+import {
+  loadConnectionsAndDevicesSettings,
+  loadModelBackendsSettings,
+  prefetchSettingsSection,
+} from "./settingsSectionLoaders";
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
 
-type SettingsViewProps = {
+export type SettingsViewProps = {
   target?: {
     section: "providers" | "backends" | "connections";
     profileId?: string;
@@ -129,6 +129,14 @@ const shortcuts = [
   ["Toggle terminal", "⌘ J"],
 ] as const;
 
+function SettingsSectionFallback(): React.JSX.Element {
+  return (
+    <div className="settings-section-loading" aria-busy="true">
+      <LoadingMark label="Loading settings section" />
+    </div>
+  );
+}
+
 export function SettingsView({
   target,
   settings,
@@ -170,6 +178,14 @@ export function SettingsView({
   const [section, setSection] = useState<SettingsSection>(
     target?.section ?? "general",
   );
+  const ModelBackendsSettings = useLoadedSurface(
+    loadModelBackendsSettings,
+    section === "backends",
+  );
+  const ConnectionsAndDevicesSettings = useLoadedSurface(
+    loadConnectionsAndDevicesSettings,
+    section === "connections",
+  );
   const previousTarget = useRef(target);
   useEffect(() => {
     if (target && target !== previousTarget.current) setSection(target.section);
@@ -190,7 +206,6 @@ export function SettingsView({
     ?? defaultProvider?.models.find(({ isDefault }) => isDefault)
     ?? defaultProvider?.models[0];
   const reasoningOptions = defaultModel?.reasoningOptions ?? [];
-  const title = sections.find(({ id }) => id === section)?.label ?? "Settings";
   const archivedByProvider = useMemo(() => new Map(providers.map((provider) => [provider.id, provider.label])), [providers]);
   const revealRuntimeLogs = async (): Promise<void> => {
     if (revealingLogs) return;
@@ -268,24 +283,26 @@ export function SettingsView({
   return (
     <main className="settings-view">
       <aside className="settings-navigation" aria-label="Settings sections">
-        <div className="settings-navigation-heading"><strong>Settings</strong><small>Inertia v{INERTIA_VERSION}</small></div>
         <nav>
           {sections.map((item) => {
             const Icon = item.icon;
-            return <button type="button" className={clsx(section === item.id && "is-active")} aria-current={section === item.id ? "page" : undefined} onClick={() => setSection(item.id)} key={item.id}><Icon size={15} /><span>{item.label}</span>{item.id === "archive" && archived.length > 0 && <small>{archived.length}</small>}</button>;
+            return <button type="button" className={clsx(section === item.id && "is-active")} aria-current={section === item.id ? "page" : undefined} onFocus={() => prefetchSettingsSection(item.id)} onPointerDown={() => prefetchSettingsSection(item.id)} onPointerEnter={() => prefetchSettingsSection(item.id)} onClick={() => setSection(item.id)} key={item.id}><Icon size={15} /><span>{item.label}</span>{item.id === "archive" && archived.length > 0 && <small>{archived.length}</small>}</button>;
           })}
         </nav>
-        <p>Preferences and project history stay on this device.</p>
       </aside>
 
       <div className={clsx(
         "settings-content",
         section === "backends" && "is-backends",
       )}>
-        <div className="settings-heading settings-heading-row">
-          <span><span className="welcome-kicker">Make it yours</span><h2>{title}</h2><p>Keep the workspace calm, capable, and predictable.</p></span>
-          <button type="button" className="secondary-button" disabled={disabled} onClick={() => onUpdate(defaultSettings)}><RotateCcw size={14} />Restore defaults</button>
-        </div>
+        <h2 className="visually-hidden">
+          {sections.find((item) => item.id === section)?.label ?? "Settings"}
+        </h2>
+        {section === "general" && (
+          <div className="settings-toolbar">
+            <button type="button" className="secondary-button" disabled={disabled} onClick={() => onUpdate(defaultSettings)}><RotateCcw size={14} />Restore defaults</button>
+          </div>
+        )}
 
         {section === "general" && (
           <>
@@ -327,11 +344,11 @@ export function SettingsView({
                 </div>
               </div>
               <div className="settings-rows">
-                <SettingSwitch icon={<PanelLeft size={17} />} title="Compact project navigation" detail="Reduce spacing while keeping project names readable." checked={settings.compactSidebar} disabled={disabled} onChange={(compactSidebar) => onUpdate({ compactSidebar })} />
-                <SettingSwitch icon={<Clock3 size={17} />} title="Message timestamps" detail="Show a quiet time label alongside each message." checked={settings.showTimestamps} disabled={disabled} onChange={(showTimestamps) => onUpdate({ showTimestamps })} />
-                <SettingSwitch icon={<BrainCircuit size={17} />} title="Live thinking summaries" detail="Show provider-supplied reasoning summaries as they arrive." checked={settings.showThinking} disabled={disabled} onChange={(showThinking) => onUpdate({ showThinking })} />
-                <SettingSwitch icon={<Bot size={17} />} title="Open plan automatically" detail="Reveal the Plan panel when an agent publishes steps." checked={settings.autoOpenPlan} disabled={disabled} onChange={(autoOpenPlan) => onUpdate({ autoOpenPlan })} />
-                <SettingSwitch icon={<ShieldCheck size={17} />} title="Confirm destructive actions" detail="Ask before deleting threads or restoring checkpoints." checked={settings.confirmDestructiveActions} disabled={disabled} onChange={(confirmDestructiveActions) => onUpdate({ confirmDestructiveActions })} />
+                <SettingSwitch title="Compact project navigation" detail="Reduce spacing while keeping project names readable." checked={settings.compactSidebar} disabled={disabled} onChange={(compactSidebar) => onUpdate({ compactSidebar })} />
+                <SettingSwitch title="Message timestamps" detail="Show a quiet time label alongside each message." checked={settings.showTimestamps} disabled={disabled} onChange={(showTimestamps) => onUpdate({ showTimestamps })} />
+                <SettingSwitch title="Live thinking summaries" detail="Show provider-supplied reasoning summaries as they arrive." checked={settings.showThinking} disabled={disabled} onChange={(showThinking) => onUpdate({ showThinking })} />
+                <SettingSwitch title="Open plan automatically" detail="Reveal the Plan panel when an agent publishes steps." checked={settings.autoOpenPlan} disabled={disabled} onChange={(autoOpenPlan) => onUpdate({ autoOpenPlan })} />
+                <SettingSwitch title="Confirm destructive actions" detail="Ask before deleting threads or restoring checkpoints." checked={settings.confirmDestructiveActions} disabled={disabled} onChange={(confirmDestructiveActions) => onUpdate({ confirmDestructiveActions })} />
               </div>
               <div className="response-density-setting usage-display-setting">
                 <span><strong>Usage and context</strong><small>Choose a full composer card, a restrained summary, or hide provider usage entirely.</small></span>
@@ -350,9 +367,9 @@ export function SettingsView({
                 </div>
               </div>
               <div className="settings-rows">
-                <SettingSwitch icon={<WrapText size={17} />} title="Wrap code by default" detail="Start fenced code blocks wrapped; each block still has its own control." checked={settings.defaultCodeWrap} disabled={disabled} onChange={(defaultCodeWrap) => onUpdate({ defaultCodeWrap })} />
-                <SettingSwitch icon={<ListCollapse size={17} />} title="Collapse completed work logs" detail="Keep final answers visible while condensing successful tool activity." checked={settings.autoCollapseWorkLog} disabled={disabled} onChange={(autoCollapseWorkLog) => onUpdate({ autoCollapseWorkLog })} />
-                <SettingSwitch icon={<FileCode2 size={17} />} title="Changed-file summaries" detail="Show the current workspace file summary below the latest settled turn." checked={settings.showChangedFileSummaries} disabled={disabled} onChange={(showChangedFileSummaries) => onUpdate({ showChangedFileSummaries })} />
+                <SettingSwitch title="Wrap code by default" detail="Start fenced code blocks wrapped; each block still has its own control." checked={settings.defaultCodeWrap} disabled={disabled} onChange={(defaultCodeWrap) => onUpdate({ defaultCodeWrap })} />
+                <SettingSwitch title="Collapse completed work logs" detail="Keep final answers visible while condensing successful tool activity." checked={settings.autoCollapseWorkLog} disabled={disabled} onChange={(autoCollapseWorkLog) => onUpdate({ autoCollapseWorkLog })} />
+                <SettingSwitch title="Changed-file summaries" detail="Show the current workspace file summary below the latest settled turn." checked={settings.showChangedFileSummaries} disabled={disabled} onChange={(showChangedFileSummaries) => onUpdate({ showChangedFileSummaries })} />
               </div>
             </section>
 
@@ -466,34 +483,38 @@ export function SettingsView({
         )}
 
         {section === "backends" && (
-          <ModelBackendsSettings
-            profiles={backendProfiles}
-            initialProfileId={target?.section === "backends"
-              ? target.profileId
-              : undefined}
-            defaults={backendDefaults}
-            projects={projects}
-            disabled={disabled}
-            onLoadDetail={onLoadBackendProfile}
-            onCreate={onCreateBackendProfile}
-            onUpdate={onUpdateBackendProfile}
-            onSetCredential={onSetBackendCredential}
-            onClearCredential={onClearBackendCredential}
-            onProbe={onProbeBackendProfile}
-            onDelete={onDeleteBackendProfile}
-            onSetDefault={onSetBackendDefault}
-            onClearDefault={onClearBackendDefault}
-          />
+          ModelBackendsSettings ? (
+            <ModelBackendsSettings
+              profiles={backendProfiles}
+              initialProfileId={target?.section === "backends"
+                ? target.profileId
+                : undefined}
+              defaults={backendDefaults}
+              projects={projects}
+              disabled={disabled}
+              onLoadDetail={onLoadBackendProfile}
+              onCreate={onCreateBackendProfile}
+              onUpdate={onUpdateBackendProfile}
+              onSetCredential={onSetBackendCredential}
+              onClearCredential={onClearBackendCredential}
+              onProbe={onProbeBackendProfile}
+              onDelete={onDeleteBackendProfile}
+              onSetDefault={onSetBackendDefault}
+              onClearDefault={onClearBackendDefault}
+            />
+          ) : <SettingsSectionFallback />
         )}
 
         {section === "connections" && (
-          <ConnectionsAndDevicesSettings projects={projects} />
+          ConnectionsAndDevicesSettings ? (
+            <ConnectionsAndDevicesSettings projects={projects} />
+          ) : <SettingsSectionFallback />
         )}
 
         {section === "source" && (
           <section className="settings-card" aria-labelledby="source-heading">
             <div className="settings-card-heading"><div><GitCompareArrows size={18} /></div><span><h3 id="source-heading">Changes</h3><p>Keep diffs readable without hiding the work being reviewed.</p></span></div>
-            <div className="settings-rows"><SettingSwitch icon={<GitCompareArrows size={17} />} title="Wrap long diff lines" detail="Keep wide changes readable without horizontal scrolling." checked={settings.wrapDiffs} disabled={disabled} onChange={(wrapDiffs) => onUpdate({ wrapDiffs })} /><SettingSwitch icon={<GitCompareArrows size={17} />} title="Ignore whitespace" detail="Hide whitespace-only changes when supported." checked={settings.ignoreWhitespace} disabled={disabled} onChange={(ignoreWhitespace) => onUpdate({ ignoreWhitespace })} /></div>
+            <div className="settings-rows"><SettingSwitch title="Wrap long diff lines" detail="Keep wide changes readable without horizontal scrolling." checked={settings.wrapDiffs} disabled={disabled} onChange={(wrapDiffs) => onUpdate({ wrapDiffs })} /><SettingSwitch title="Ignore whitespace" detail="Hide whitespace-only changes when supported." checked={settings.ignoreWhitespace} disabled={disabled} onChange={(ignoreWhitespace) => onUpdate({ ignoreWhitespace })} /></div>
             <p className="settings-card-note">Commits, pushes, branches, and worktrees always use the current project repository.</p>
           </section>
         )}
@@ -557,6 +578,6 @@ export function SettingsView({
   );
 }
 
-function SettingSwitch({ icon, title, detail, checked, disabled, onChange }: { icon: React.JSX.Element; title: string; detail: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }): React.JSX.Element {
-  return <div className="setting-row"><span className="setting-row-icon">{icon}</span><span className="setting-copy"><strong>{title}</strong><small>{detail}</small></span><Switch label={title} checked={checked} disabled={disabled} onChange={onChange} /></div>;
+function SettingSwitch({ title, detail, checked, disabled, onChange }: { title: string; detail: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }): React.JSX.Element {
+  return <div className="setting-row"><span className="setting-copy"><strong>{title}</strong><small>{detail}</small></span><Switch label={title} checked={checked} disabled={disabled} onChange={onChange} /></div>;
 }

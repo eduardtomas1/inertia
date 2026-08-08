@@ -16,7 +16,9 @@ describe("lazy surface prefetching", () => {
     const second = loadCommandPalette();
 
     expect(second).toBe(first);
-    await expect(first).resolves.toHaveProperty("CommandPalette");
+    expect(loadCommandPalette.peek()).toBeNull();
+    await expect(first).resolves.toHaveProperty("default");
+    expect(loadCommandPalette.peek()).toHaveProperty("default");
   });
 
   it("waits for an idle workspace window and cancels on cleanup", () => {

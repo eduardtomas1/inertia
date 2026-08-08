@@ -13,8 +13,10 @@ import { ChatWorkspace } from "./ChatWorkspace";
 import { ConversationSplitView } from "./ConversationSplitView";
 import { ConversationDetailState } from "./ConversationDetailState";
 import { PaneResizeHandle } from "./PaneResizeHandle";
+import type { SettingsViewProps } from "./SettingsView";
 import { LoadingMark } from "./ui";
 import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import {
   loadFilesPanel,
   loadGoalPanel,
@@ -40,9 +42,6 @@ const PlanPanel = lazy(async () => ({
 }));
 const PreviewPanel = lazy(async () => ({
   default: (await loadPreviewPanel()).PreviewPanel,
-}));
-const SettingsView = lazy(async () => ({
-  default: (await loadSettingsView()).SettingsView,
 }));
 const TerminalPanel = lazy(async () => ({
   default: (await loadTerminalPanel()).TerminalPanel,
@@ -82,7 +81,7 @@ export interface ConversationPaneScene {
 
 export interface WorkspaceSceneProps {
   view: "workspace" | "settings";
-  settings: ComponentProps<typeof SettingsView>;
+  settings: SettingsViewProps;
   detailState: ComponentProps<typeof ConversationDetailState> | null;
   chat: ComponentProps<typeof ChatWorkspace>;
   splitScene?: {
@@ -192,12 +191,13 @@ function WorkspaceSceneView({
   resizeHandle,
   tools,
 }: WorkspaceSceneProps): JSX.Element {
+  const SettingsView = useLoadedSurface(loadSettingsView, view === "settings");
   return (
     <>
       {view === "settings" ? (
-        <Suspense fallback={<LoadingMark label="Loading settings" />}>
-          <SettingsView {...settings} />
-        </Suspense>
+        SettingsView
+          ? <SettingsView {...settings} />
+          : <LoadingMark label="Loading settings" />
       ) : splitScene ? (
         <ConversationSplitView
           primary={(

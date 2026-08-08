@@ -196,6 +196,7 @@ interface TimelineGutter {
 }
 
 const EMPTY_TIMELINE_GUTTER: TimelineGutter = { available: 0, minimapLeft: 0 };
+const TIMELINE_MINIMAP_WIDTH = 12;
 
 function useTimelineGutter(
   scrollElementRef: RefObject<HTMLDivElement | null> | undefined,
@@ -221,7 +222,9 @@ function useTimelineGutter(
         ?? timelineBounds.left + Math.max(0, (timelineElement.clientWidth - Math.min(760, timelineElement.clientWidth)) / 2);
       const available = Math.max(0, Math.round(rowLeft - scrollBounds.left));
       const minimapLeft = Math.round(
-        scrollBounds.left + Math.max(6, (available - 12) / 2) - timelineBounds.left,
+        scrollBounds.left
+          + Math.max(6, (available - TIMELINE_MINIMAP_WIDTH) / 2)
+          - timelineBounds.left,
       );
       setGutter((current) =>
         current.available === available && current.minimapLeft === minimapLeft

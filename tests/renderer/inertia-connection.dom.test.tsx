@@ -436,7 +436,7 @@ describe("useInertiaConnection", () => {
     });
   });
 
-  it("rehydrates after an ambiguously timed-out branch switch settles late", async () => {
+  it("rehydrates after all in-flight mutations settle past an ambiguous timeout", async () => {
     const getRuntimeConnection = vi.fn(async () => ({
       websocketUrl: "ws://127.0.0.1:12345/runtime/test",
     }));
@@ -468,6 +468,18 @@ describe("useInertiaConnection", () => {
     expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
     expect(socket.close).not.toHaveBeenCalled();
 
+    const secondRequestId = "44444444-4444-4444-8444-444444444444";
+    const secondMutation = hook.result.current.sendCommand(
+      clientCommandSchema.parse({
+        type: "git.branch.switch",
+        requestId: secondRequestId,
+        payload: {
+          projectId: "22222222-2222-4222-8222-222222222222",
+          conversationId: "33333333-3333-4333-8333-333333333333",
+          name: "feature/still-running",
+        },
+      }),
+    );
     socket.dispatchEvent(new MessageEvent("message", {
       data: JSON.stringify({
         type: "request.result",
@@ -479,6 +491,21 @@ describe("useInertiaConnection", () => {
       }),
     }));
 
+    expect(socket.close).not.toHaveBeenCalled();
+    socket.dispatchEvent(new MessageEvent("message", {
+      data: JSON.stringify({
+        type: "request.result",
+        requestId: secondRequestId,
+        result: {
+          kind: "git.action",
+          message: "Switched to feature/still-running.",
+        },
+      }),
+    }));
+    await expect(secondMutation).resolves.toMatchObject({
+      type: "request.result",
+      requestId: secondRequestId,
+    });
     expect(socket.close).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(0);
     expect(getRuntimeConnection).toHaveBeenCalledTimes(2);

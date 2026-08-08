@@ -29,6 +29,7 @@ export interface PendingConnectionRequest {
   reject: (error: Error) => void;
   timeout: number;
   timedOut?: boolean;
+  timeoutDelivery: Exclude<RuntimeCommandDelivery, "not-sent">;
 }
 
 export type PendingConnectionSettlement = "settled" | "late" | null;

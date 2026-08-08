@@ -115,6 +115,7 @@ export function useInertiaConnection(): InertiaConnection {
           resumeCursor,
           detailSubscriptionsRef.current.conversationIds(),
         ));
+        let mutationReconciliationPending = false;
         socketRef.current = socket;
 
         socket.addEventListener("open", () => {
@@ -210,6 +211,15 @@ export function useInertiaConnection(): InertiaConnection {
                 // that has no runtime event (for example, the current Git
                 // branch). Rehydrate only after that ambiguity is confirmed;
                 // an ordinary timeout alone is not a transport failure.
+                mutationReconciliationPending = true;
+              }
+              if (
+                mutationReconciliationPending
+                && ![...pendingRef.current.values()].some(
+                  ({ timeoutDelivery }) => timeoutDelivery === "ambiguous",
+                )
+              ) {
+                mutationReconciliationPending = false;
                 requireAuthoritativeRefresh();
               }
 
@@ -316,7 +326,12 @@ export function useInertiaConnection(): InertiaConnection {
         ));
       }, policy.timeoutMs);
 
-      pendingRef.current.set(command.requestId, { resolve, reject, timeout });
+      pendingRef.current.set(command.requestId, {
+        resolve,
+        reject,
+        timeout,
+        timeoutDelivery: policy.timeoutDelivery,
+      });
       try {
         socket.send(serialized);
       } catch (sendError) {

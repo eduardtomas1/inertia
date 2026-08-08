@@ -39,6 +39,7 @@ describe("renderer error visibility boundary", () => {
         commandError = error;
       },
       timeout: 42,
+      timeoutDelivery: "rejected",
     });
     const receive = (data: unknown): void => {
       try {

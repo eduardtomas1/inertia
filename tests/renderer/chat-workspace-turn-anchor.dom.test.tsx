@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatWorkspace } from "../../src/renderer/src/components/ChatWorkspace";
 import type {
+  AgentWorkflowState,
   ChatMessage,
   Conversation,
   Project,
@@ -18,20 +19,28 @@ vi.mock("../../src/renderer/src/hooks/useNativePreviewSuspension", () => ({
   useNativePreviewSuspension: () => undefined,
 }));
 
-vi.mock("../../src/renderer/src/components/Composer", () => ({
-  Composer: ({
-    onSend,
-  }: {
-    onSend(content: string, attachments: []): Promise<void>;
-  }) => (
-    <button
-      type="button"
-      onClick={() => void onSend("Materialize this draft", [])}
-    >
-      Send materialized draft
-    </button>
-  ),
-}));
+const composerRenderCount = vi.hoisted(() => ({ value: 0 }));
+
+vi.mock("../../src/renderer/src/components/Composer", async () => {
+  const { memo } = await import("react");
+  return {
+    Composer: memo(function MockComposer({
+      onSend,
+    }: {
+      onSend(content: string, attachments: []): Promise<void>;
+    }): React.JSX.Element {
+      composerRenderCount.value += 1;
+      return (
+        <button
+          type="button"
+          onClick={() => void onSend("Materialize this draft", [])}
+        >
+          Send materialized draft
+        </button>
+      );
+    }),
+  };
+});
 
 vi.mock("../../src/renderer/src/components/ResponseTimeline", () => ({
   ResponseTimeline: ({ turnAnchorId }: { turnAnchorId: string | null }) => (
@@ -260,6 +269,70 @@ describe("draft turn anchoring", () => {
 });
 
 describe("transcript following motion", () => {
+  it("keeps goal controls behind the Composer streaming boundary", async () => {
+    const activeConversation = conversation("conversation-goal-boundary");
+    const workflow: AgentWorkflowState = {
+      conversationId: activeConversation.id,
+      goalCapability: {
+        kind: "inertia-local",
+        available: true,
+        label: "Inertia local goal",
+        reason: "This route uses local objective tracking.",
+      },
+      goals: [],
+      skills: [],
+      skillsCapability: {
+        kind: "unavailable",
+        available: false,
+        label: "Skills unavailable",
+        reason: "Not part of this regression.",
+      },
+      goalRefreshWarning: null,
+      skillDiscovery: {
+        truncated: false,
+        warningCount: 0,
+        synchronizedAt: null,
+      },
+      refreshedAt: "2026-08-08T10:00:00.000Z",
+    };
+    const props = workspaceProps(activeConversation, async () => null);
+    composerRenderCount.value = 0;
+    const view = render(
+      <ChatWorkspace
+        {...props}
+        goal={{
+          workflow,
+          loading: false,
+          busy: false,
+          error: null,
+          onRetry: async () => undefined,
+          onSetGoal: async () => undefined,
+          onClearGoal: async () => undefined,
+        }}
+      />,
+    );
+    await screen.findByTestId("turn-anchor-projection");
+    const initialRenderCount = composerRenderCount.value;
+
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        streamingText="partial response"
+        goal={{
+          workflow,
+          loading: false,
+          busy: false,
+          error: null,
+          onRetry: async () => undefined,
+          onSetGoal: async () => undefined,
+          onClearGoal: async () => undefined,
+        }}
+      />,
+    );
+
+    expect(composerRenderCount.value).toBe(initialRenderCount);
+  });
+
   it("uses instant following through settlement and an explicit Jump", async () => {
     const activeConversation = conversation("conversation-follow");
     const scrollTo = vi.fn();

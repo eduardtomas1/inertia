@@ -594,6 +594,125 @@ describe("useConversationProjection pending interactions", () => {
       .toBe(" Visible after reconnect.");
   });
 
+  it("keeps only post-welcome streaming deltas when hydration rolls the buffer", async () => {
+    const source = createEventSource();
+    const saturatedStreamingText = "t".repeat(500_000);
+    const saturatedStreamingReasoning = "r".repeat(500_000);
+    const textDelta = "Text after reconnect.";
+    const reasoningDelta = "Reasoning after reconnect.";
+    let detailLoads = 0;
+    let resolveReconnect: ((event: ServerEvent) => void) | null = null;
+    const detailResult: ServerEvent = {
+      type: "request.result",
+      requestId: crypto.randomUUID(),
+      result: {
+        kind: "conversation.detail",
+        conversationId: primaryId,
+        state: "ready",
+        detail: {
+          conversation: conversation(primaryId),
+          agentTurns: [],
+          turnGitArtifacts: [],
+          messages: [],
+          activities: [],
+          subagents: [],
+          reasonings: [],
+          usage: [],
+          plans: [],
+          goals: [],
+          checkpoints: [],
+          reviewSummaries: [],
+          reviewStates: [],
+          reviewNotes: [],
+        },
+      },
+    };
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type !== "conversation.detail.load") {
+        return Promise.resolve({
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+      }
+      detailLoads += 1;
+      if (detailLoads === 1) return Promise.resolve(detailResult);
+      return new Promise((resolve) => {
+        resolveReconnect = resolve;
+      });
+    });
+    const hook = renderHook(
+      ({ status }: { status: "online" | "offline" }) =>
+        useConversationProjection({
+          snapshot,
+          status,
+          request,
+          subscribe: source.subscribe,
+          enabled: true,
+          autoOpenPlan: false,
+          onOpenPlan: vi.fn(),
+          onTerminal: vi.fn(),
+        }),
+      { initialProps: { status: "online" as "online" | "offline" } },
+    );
+    await waitFor(() => expect(hook.result.current.detailState?.state)
+      .toBe("ready"));
+
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: saturatedStreamingText,
+    });
+    source.emit({
+      type: "agent.reasoning",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: saturatedStreamingReasoning,
+    });
+    hook.rerender({ status: "offline" });
+    source.emit({
+      type: "server.welcome",
+      protocolVersion: 1,
+      snapshot,
+      sync: {
+        runtimeGeneration: "runtime-after-reconnect",
+        latestSequence: 8,
+      },
+    });
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: textDelta,
+    });
+    source.emit({
+      type: "agent.reasoning",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: reasoningDelta,
+    });
+
+    expect(hook.result.current.streamingText).toHaveLength(500_000);
+    expect(hook.result.current.streamingText.endsWith(textDelta)).toBe(true);
+    expect(hook.result.current.streamingReasoning).toHaveLength(500_000);
+    expect(hook.result.current.streamingReasoning.endsWith(reasoningDelta))
+      .toBe(true);
+
+    hook.rerender({ status: "online" });
+    await waitFor(() => expect(detailLoads).toBe(2));
+    await act(async () => {
+      resolveReconnect?.(detailResult);
+      await Promise.resolve();
+    });
+
+    expect(hook.result.current.streamingText).toBe(textDelta);
+    expect(hook.result.current.streamingReasoning).toBe(reasoningDelta);
+  });
+
   it("keeps the last ready thread visible when a refresh request times out", async () => {
     const source = createEventSource();
     let detailLoads = 0;

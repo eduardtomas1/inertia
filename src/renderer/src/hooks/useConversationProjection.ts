@@ -27,11 +27,12 @@ import { markTestStreamingStage } from "../utils/testStreamingTrace";
 const EMPTY_REASONINGS: AgentReasoning[] = [];
 const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
 const EMPTY_GIT_ARTIFACTS: TurnGitArtifact[] = [];
+const MAX_STREAMING_CHARACTERS = 500_000;
 
 interface FreshHydrationBaseline {
   conversationId: string;
-  streamingText: string;
-  streamingReasoning: string;
+  streamingTextDelta: string | null;
+  streamingReasoningDelta: string | null;
   liveMessages: ChatMessage[];
   liveUsage: ThreadUsageSnapshot | null;
   liveActivities: AgentActivity[];
@@ -65,17 +66,6 @@ function withoutHydratedBaseline<T extends { id: string }>(
   if (remaining.length > 0) next[conversationId] = remaining;
   else delete next[conversationId];
   return next;
-}
-
-function withoutHydratedPrefix(
-  current: string,
-  baseline: string,
-): string {
-  if (!baseline) return current;
-  if (current === baseline) return "";
-  return current.startsWith(baseline)
-    ? current.slice(baseline.length)
-    : current;
 }
 
 function compareCreatedRecords(
@@ -151,8 +141,6 @@ export function useConversationProjection({
   const snapshotRef = useRef(snapshot);
   const conversationRef = useRef<ConversationShell | null>(null);
   const detailStateRef = useRef(detailState);
-  const streamingTextRef = useRef(streamingText);
-  const streamingReasoningRef = useRef(streamingReasoning);
   const liveMessagesRef = useRef(liveMessages);
   const liveUsageRef = useRef(liveUsage);
   const liveActivitiesRef = useRef(liveActivities);
@@ -166,8 +154,6 @@ export function useConversationProjection({
   const openPlanCallbackRef = useRef(onOpenPlan);
   snapshotRef.current = snapshot;
   detailStateRef.current = detailState;
-  streamingTextRef.current = streamingText;
-  streamingReasoningRef.current = streamingReasoning;
   liveMessagesRef.current = liveMessages;
   liveUsageRef.current = liveUsage;
   liveActivitiesRef.current = liveActivities;
@@ -292,10 +278,8 @@ export function useConversationProjection({
         && hydration?.conversationId === conversationId
       ) {
         freshHydrationRef.current = null;
-        setStreamingText((current) =>
-          withoutHydratedPrefix(current, hydration.streamingText));
-        setStreamingReasoning((current) =>
-          withoutHydratedPrefix(current, hydration.streamingReasoning));
+        setStreamingText(hydration.streamingTextDelta ?? "");
+        setStreamingReasoning(hydration.streamingReasoningDelta ?? "");
         setLiveMessages((current) => withoutHydratedBaseline(
           current,
           conversationId,
@@ -473,8 +457,8 @@ export function useConversationProjection({
       if (remainsMounted && activeConversation) {
         freshHydrationRef.current = {
           conversationId: activeConversation.id,
-          streamingText: streamingTextRef.current,
-          streamingReasoning: streamingReasoningRef.current,
+          streamingTextDelta: null,
+          streamingReasoningDelta: null,
           liveMessages: liveMessagesRef.current[activeConversation.id] ?? [],
           liveUsage: liveUsageRef.current[activeConversation.id] ?? null,
           liveActivities:
@@ -551,6 +535,9 @@ export function useConversationProjection({
         projectionEnabled
         && event.request.conversationId === activeConversation?.id
       ) {
+        if (freshHydrationRef.current) {
+          freshHydrationRef.current.streamingTextDelta = "";
+        }
         setStreamingText("");
       }
       return;
@@ -576,6 +563,9 @@ export function useConversationProjection({
         projectionEnabled
         && event.request.conversationId === activeConversation?.id
       ) {
+        if (freshHydrationRef.current) {
+          freshHydrationRef.current.streamingTextDelta = "";
+        }
         setStreamingText("");
       }
       return;
@@ -614,6 +604,9 @@ export function useConversationProjection({
           ],
         };
       });
+      if (freshHydrationRef.current) {
+        freshHydrationRef.current.streamingTextDelta = "";
+      }
       setStreamingText("");
       return;
     }
@@ -624,6 +617,9 @@ export function useConversationProjection({
         [event.plan.conversationId]: event.plan,
       }));
       if (event.plan.conversationId === activeConversation?.id) {
+        if (freshHydrationRef.current) {
+          freshHydrationRef.current.streamingTextDelta = "";
+        }
         setStreamingText("");
         if (autoOpenPlanRef.current) {
           openPlanCallbackRef.current(event.plan.conversationId);
@@ -641,6 +637,9 @@ export function useConversationProjection({
     }
     if (event.type === "agent.activity") {
       if (event.activity.conversationId !== activeConversation?.id) return;
+      if (freshHydrationRef.current) {
+        freshHydrationRef.current.streamingTextDelta = "";
+      }
       setStreamingText("");
       setLiveActivities((current) => {
         const existing = current[event.activity.conversationId] ?? [];
@@ -677,17 +676,33 @@ export function useConversationProjection({
     }
     if (event.type === "agent.started") {
       terminalRefreshPendingRef.current = false;
+      if (freshHydrationRef.current) {
+        freshHydrationRef.current.streamingTextDelta = "";
+        freshHydrationRef.current.streamingReasoningDelta = "";
+      }
       setStreamingText("");
       setStreamingReasoning("");
     }
     if (event.type === "agent.text") {
+      const hydration = freshHydrationRef.current;
+      if (hydration) {
+        hydration.streamingTextDelta = `${
+          hydration.streamingTextDelta ?? ""
+        }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
+      }
       setStreamingText((current) =>
-        `${current}${event.text}`.slice(-500_000));
+        `${current}${event.text}`.slice(-MAX_STREAMING_CHARACTERS));
       markTestStreamingStage("renderer-projection-updated");
     }
     if (event.type === "agent.reasoning") {
+      const hydration = freshHydrationRef.current;
+      if (hydration) {
+        hydration.streamingReasoningDelta = `${
+          hydration.streamingReasoningDelta ?? ""
+        }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
+      }
       setStreamingReasoning((current) =>
-        `${current}${event.text}`.slice(-500_000));
+        `${current}${event.text}`.slice(-MAX_STREAMING_CHARACTERS));
     }
     if (event.type === "agent.completed" || event.type === "agent.failed") {
       terminalRefreshPendingRef.current = true;

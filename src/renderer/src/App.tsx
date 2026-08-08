@@ -633,6 +633,9 @@ export default function App(): React.JSX.Element {
   ): Promise<void> => {
     if (draftConversation.chooseModel(selection)) return;
     if (!project) throw new Error("Select a project before creating a chat.");
+    const selectionGeneration =
+      conversationSelectionGenerationRef.current + 1;
+    conversationSelectionGenerationRef.current = selectionGeneration;
     const event = await run("conversation.create", {
       type: "conversation.create",
       payload: {
@@ -647,10 +650,16 @@ export default function App(): React.JSX.Element {
       event.type !== "request.result"
       || event.result.kind !== "conversation.created"
     ) throw new Error("The new chat could not be identified.");
+    if (
+      selectionGeneration !== conversationSelectionGenerationRef.current
+    ) return;
     await selectConversationCommand(
       "conversation.select",
       event.result.conversationId,
     );
+    if (
+      selectionGeneration !== conversationSelectionGenerationRef.current
+    ) return;
     if (options?.prefillText) {
       const conversationId = event.result.conversationId;
       window.requestAnimationFrame(() => requestComposerPrefill({

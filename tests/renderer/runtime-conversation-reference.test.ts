@@ -130,4 +130,27 @@ describe("runtime conversation references", () => {
     expect(createRequest).toBeGreaterThan(-1);
     expect(discard).toBeGreaterThan(createRequest);
   });
+
+  it("cancels judge handoff before route-created chat selection", () => {
+    const routeCreation = appSource.slice(
+      appSource.indexOf("const createConversationForSelection ="),
+      appSource.indexOf("const respondToApproval ="),
+    );
+    const generationAdvance = routeCreation.indexOf(
+      "conversationSelectionGenerationRef.current = selectionGeneration",
+    );
+    const createRequest = routeCreation.indexOf(
+      'run("conversation.create"',
+    );
+    const selectionRequest = routeCreation.indexOf(
+      "await selectConversationCommand(",
+    );
+
+    expect(generationAdvance).toBeGreaterThan(-1);
+    expect(createRequest).toBeGreaterThan(generationAdvance);
+    expect(selectionRequest).toBeGreaterThan(createRequest);
+    expect(routeCreation.match(
+      /selectionGeneration !== conversationSelectionGenerationRef\.current/g,
+    )).toHaveLength(2);
+  });
 });

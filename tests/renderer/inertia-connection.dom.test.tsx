@@ -366,9 +366,8 @@ describe("useInertiaConnection", () => {
 
     await vi.advanceTimersByTimeAsync(timeoutMs - 15_000);
     expect(runtimeCommandDelivery(timeoutError)).toBe(delivery);
-    expect(socket.close).toHaveBeenCalledTimes(
-      delivery === "ambiguous" ? 1 : 0,
-    );
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
   it("keeps message delivery pending through the server preparation deadline", async () => {
@@ -415,7 +414,25 @@ describe("useInertiaConnection", () => {
         - MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
     );
     expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
-    expect(socket.close).toHaveBeenCalledTimes(1);
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    const probeRequestId = "44444444-4444-4444-8444-444444444444";
+    const probe = hook.result.current.sendCommand(clientCommandSchema.parse({
+      type: "app.refresh",
+      requestId: probeRequestId,
+    }));
+    expect(socket.send).toHaveBeenCalledTimes(2);
+    socket.dispatchEvent(new MessageEvent("message", {
+      data: JSON.stringify({
+        type: "request.ok",
+        requestId: probeRequestId,
+      }),
+    }));
+    await expect(probe).resolves.toMatchObject({
+      type: "request.ok",
+      requestId: probeRequestId,
+    });
   });
 
   it.each([

@@ -375,16 +375,19 @@ describe("workspace pane authority", () => {
       return Promise.reject(new Error("Unexpected command"));
     });
     const hook = renderHook(
-      ({ loadOnMount }: { loadOnMount: boolean }) => useWorkspaceFiles({
+      ({ loadOnMount, online }: {
+        loadOnMount: boolean;
+        online: boolean;
+      }) => useWorkspaceFiles({
         project: alpha,
         conversation: alphaChat,
         enabled: true,
         loadOnMount,
-        online: true,
+        online,
         request,
         setActionError: vi.fn(),
       }),
-      { initialProps: { loadOnMount: true } },
+      { initialProps: { loadOnMount: true, online: true } },
     );
 
     await waitFor(() => {
@@ -392,8 +395,8 @@ describe("workspace pane authority", () => {
         ([command]) => command.type === "workspace.entries",
       )).toHaveLength(1);
     });
-    hook.rerender({ loadOnMount: false });
-    hook.rerender({ loadOnMount: true });
+    hook.rerender({ loadOnMount: false, online: true });
+    hook.rerender({ loadOnMount: true, online: true });
     await act(async () => {
       await Promise.resolve();
     });
@@ -401,6 +404,20 @@ describe("workspace pane authority", () => {
     expect(request.mock.calls.filter(
       ([command]) => command.type === "workspace.entries",
     )).toHaveLength(1);
+    expect(hook.result.current.workspaceEntries).toEqual([
+      { path: "src", kind: "directory" },
+    ]);
+
+    hook.rerender({ loadOnMount: true, online: false });
+    expect(hook.result.current.workspaceEntries).toEqual([
+      { path: "src", kind: "directory" },
+    ]);
+    hook.rerender({ loadOnMount: true, online: true });
+    await waitFor(() => {
+      expect(request.mock.calls.filter(
+        ([command]) => command.type === "workspace.entries",
+      )).toHaveLength(2);
+    });
     expect(hook.result.current.workspaceEntries).toEqual([
       { path: "src", kind: "directory" },
     ]);
@@ -676,6 +693,75 @@ describe("workspace pane authority", () => {
         name: "feature/chat-checkout",
       },
     });
+  });
+
+  it("keeps the last Git projection visible while reconnect refreshes it", async () => {
+    let refreshes = 0;
+    let settleReconnect: ((event: ServerEvent) => void) | null = null;
+    const gitStatus = (branch: string): ServerEvent => result({
+      kind: "git.status",
+      status: {
+        isRepository: true,
+        authorityRef: "66666666-6666-4666-8666-666666666666",
+        root: "/alpha",
+        branch,
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        hasRemote: false,
+        files: [],
+        insertions: 0,
+        deletions: 0,
+      },
+    });
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type !== "git.refresh") {
+        return Promise.reject(new Error(`Unexpected ${command.type} command`));
+      }
+      refreshes += 1;
+      if (refreshes === 1) return Promise.resolve(gitStatus("main"));
+      return new Promise((resolve) => {
+        settleReconnect = resolve;
+      });
+    });
+    const run = async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => await request(command);
+    const setActionError = vi.fn();
+    const hook = renderHook(
+      ({ online }: { online: boolean }) => useWorkspaceGit({
+        enabled: true,
+        loadStatusOnMount: true,
+        loadWorkspaceOnMount: false,
+        project: alpha,
+        conversation: alphaChat,
+        online,
+        ignoreWhitespace: false,
+        refreshVersion: 0,
+        request,
+        run,
+        setActionError,
+      }),
+      { initialProps: { online: true } },
+    );
+    await waitFor(() => expect(hook.result.current.gitStatus?.branch)
+      .toBe("main"));
+
+    hook.rerender({ online: false });
+    expect(hook.result.current.gitStatus?.branch).toBe("main");
+    hook.rerender({ online: true });
+    await waitFor(() => expect(refreshes).toBe(2));
+    expect(hook.result.current.gitStatus?.branch).toBe("main");
+    expect(hook.result.current.loading).toBe(true);
+
+    await act(async () => {
+      settleReconnect?.(gitStatus("feature/reconnected"));
+      await Promise.resolve();
+    });
+    expect(hook.result.current.gitStatus?.branch)
+      .toBe("feature/reconnected");
+    expect(hook.result.current.loading).toBe(false);
   });
 
   it("coalesces duplicate Git loads for the same pane authority", async () => {

@@ -62,6 +62,8 @@ type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 type ActivityActions = ReturnType<typeof useActivityActions>;
 
+const ignoreLatestContentVisibility = (): void => undefined;
+
 export interface SplitWorkspaceSceneController {
   scene: WorkspaceSceneProps["splitScene"];
   activityActions: ActivityActions;
@@ -408,7 +410,7 @@ export function useSplitWorkspaceScene({
       : null,
     actions: sceneActions,
     setActionError,
-    setLatestContentVisible: () => undefined,
+    setLatestContentVisible: ignoreLatestContentVisibility,
   }), [
     activityActions,
     appUpdate,

@@ -194,6 +194,16 @@ describe("useAgentWorkflows", () => {
 
   it("refreshes provider-owned goals after a renderer reconnect", async () => {
     let emit!: (event: ServerEvent) => void;
+    const availableSkill = {
+      id: "skill-through-reconnect",
+      conversationId: "conversation-1",
+      name: "review",
+      description: "Review this project.",
+      shortDescription: null,
+      scope: "repo" as const,
+      enabled: true,
+      source: "codex-native" as const,
+    };
     const request = vi.fn(async (
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
@@ -205,11 +215,14 @@ describe("useAgentWorkflows", () => {
         requestId: crypto.randomUUID(),
         result: {
           kind: "agent.workflow",
-          workflow: workflow({
-            kind: "codex-native",
-            available: true,
-            label: "Codex native goal",
-          }, command.payload.conversationId),
+          workflow: {
+            ...workflow({
+              kind: "codex-native",
+              available: true,
+              label: "Codex native goal",
+            }, command.payload.conversationId),
+            skills: [availableSkill],
+          },
         },
       };
     });
@@ -219,7 +232,7 @@ describe("useAgentWorkflows", () => {
       emit = listener;
       return () => undefined;
     });
-    renderHook(() => useAgentWorkflows({
+    const hook = renderHook(() => useAgentWorkflows({
       conversationId: "conversation-1",
       routeIdentity: "codex-app-server\0thread-1",
       status: "online",
@@ -227,10 +240,21 @@ describe("useAgentWorkflows", () => {
       subscribe,
     }));
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    act(() => hook.result.current.toggleSkill(availableSkill));
+    expect(hook.result.current.selectedSkillIds).toEqual([
+      availableSkill.id,
+    ]);
 
     act(() => emit({ type: "server.welcome" } as ServerEvent));
 
+    expect(hook.result.current.selectedSkillIds).toEqual([
+      availableSkill.id,
+    ]);
+
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(hook.result.current.selectedSkillIds).toEqual([
+      availableSkill.id,
+    ]);
     expect(request).toHaveBeenLastCalledWith({
       type: "agent.workflow.load",
       payload: {

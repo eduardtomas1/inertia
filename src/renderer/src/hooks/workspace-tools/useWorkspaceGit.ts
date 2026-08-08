@@ -209,6 +209,11 @@ export function useWorkspaceGit({
     setGitDiff(null);
     setWorkspaceGitStatus(null);
     setBranches([]);
+    setLoading(false);
+  }, [authority, enabled, projectRefreshIdentity]);
+
+  useEffect(() => {
+    requestGenerationRef.current += 1;
     if (
       !enabled
       || (!loadStatusOnMount && !loadWorkspaceOnMount)
@@ -238,7 +243,6 @@ export function useWorkspaceGit({
       cancelled = true;
     };
   }, [
-    conversation?.id,
     enabled,
     loadGit,
     online,

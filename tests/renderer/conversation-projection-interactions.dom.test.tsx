@@ -460,6 +460,140 @@ describe("useConversationProjection pending interactions", () => {
       command.type === "conversation.detail.load")).toHaveLength(1);
   });
 
+  it("keeps the mounted thread visible while fresh hydration races its detail replacement", async () => {
+    const source = createEventSource();
+    const persistedMessage: ChatMessage = {
+      id: "persisted-before-reconnect",
+      conversationId: primaryId,
+      turnId: `${primaryId}-turn`,
+      role: "assistant",
+      content: "Persisted before reconnect.",
+      attachments: [],
+      createdAt: "2026-07-28T12:01:00.000Z",
+    };
+    let detailLoads = 0;
+    let resolveReconnect: ((event: ServerEvent) => void) | null = null;
+    const detailResult = (): ServerEvent => ({
+      type: "request.result",
+      requestId: crypto.randomUUID(),
+      result: {
+        kind: "conversation.detail",
+        conversationId: primaryId,
+        state: "ready",
+        detail: {
+          conversation: conversation(primaryId),
+          agentTurns: [],
+          turnGitArtifacts: [],
+          messages: [persistedMessage],
+          activities: [],
+          subagents: [],
+          reasonings: [],
+          usage: [],
+          plans: [],
+          goals: [],
+          checkpoints: [],
+          reviewSummaries: [],
+          reviewStates: [],
+          reviewNotes: [],
+        },
+      },
+    });
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type !== "conversation.detail.load") {
+        return Promise.resolve({
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+      }
+      detailLoads += 1;
+      if (detailLoads === 1) return Promise.resolve(detailResult());
+      return new Promise((resolve) => {
+        resolveReconnect = resolve;
+      });
+    });
+    const hook = renderHook(
+      ({ status }: { status: "online" | "offline" }) =>
+        useConversationProjection({
+          snapshot,
+          status,
+          request,
+          subscribe: source.subscribe,
+          enabled: true,
+          autoOpenPlan: false,
+          onOpenPlan: vi.fn(),
+          onTerminal: vi.fn(),
+        }),
+      {
+        initialProps: {
+          status: "online" as "online" | "offline",
+        },
+      },
+    );
+    await waitFor(() => expect(hook.result.current.detailState?.state)
+      .toBe("ready"));
+
+    const pendingApproval = approval(primaryId, "approval-through-reconnect");
+    source.emit({
+      type: "agent.approval.requested",
+      request: pendingApproval,
+    });
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: "Visible before reconnect.",
+    });
+    hook.rerender({ status: "offline" });
+    source.emit({
+      type: "server.welcome",
+      protocolVersion: 1,
+      snapshot,
+      sync: {
+        runtimeGeneration: "runtime-after-reconnect",
+        latestSequence: 8,
+      },
+    });
+
+    expect(hook.result.current.detailState?.state).toBe("ready");
+    expect(hook.result.current.messages).toEqual([persistedMessage]);
+    expect(hook.result.current.streamingText)
+      .toBe("Visible before reconnect.");
+    expect(hook.result.current.pendingApprovals).toEqual([pendingApproval]);
+
+    source.emit({
+      type: "agent.approval.requested",
+      request: pendingApproval,
+    });
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: " Visible after reconnect.",
+    });
+    source.emit({
+      type: "runtime.sync.completed",
+      sync: {
+        runtimeGeneration: "runtime-after-reconnect",
+        latestSequence: 8,
+      },
+    });
+    expect(hook.result.current.pendingApprovals).toEqual([pendingApproval]);
+
+    hook.rerender({ status: "online" });
+    await waitFor(() => expect(detailLoads).toBe(2));
+    await act(async () => {
+      resolveReconnect?.(detailResult());
+      await Promise.resolve();
+    });
+
+    expect(hook.result.current.detailState?.state).toBe("ready");
+    expect(hook.result.current.messages).toEqual([persistedMessage]);
+    expect(hook.result.current.streamingText)
+      .toBe(" Visible after reconnect.");
+  });
+
   it("keeps the last ready thread visible when a refresh request times out", async () => {
     const source = createEventSource();
     let detailLoads = 0;

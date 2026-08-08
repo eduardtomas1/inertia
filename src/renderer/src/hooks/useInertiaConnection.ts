@@ -291,13 +291,9 @@ export function useInertiaConnection(): InertiaConnection {
       const policy = runtimeCommandPolicy(command.type);
       const timeout = window.setTimeout(() => {
         pendingRef.current.delete(command.requestId);
-        if (policy.timeoutDelivery === "ambiguous" && socketRef.current === socket) {
-          // Delivery is now ambiguous. Drop the resumable cursor and reconnect
-          // so the next authoritative snapshot can prove whether the command
-          // changed state instead of leaving callers waiting indefinitely.
-          projectionRef.current.reset();
-          if (socket.readyState === WebSocket.OPEN) socket.close();
-        }
+        // A command deadline is not evidence that the shared transport failed.
+        // Keep projecting late authoritative mutations on this socket; actual
+        // close/error events remain responsible for transport supervision.
         reject(new RuntimeCommandError(
           "The request took too long to complete.",
           policy.timeoutDelivery,

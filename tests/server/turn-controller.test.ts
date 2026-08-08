@@ -1343,6 +1343,7 @@ describe("TurnController authoritative lifecycle", () => {
         terminalReason: scenario === "cancel" ? "user-cancelled" : "turn-timeout",
       });
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+      expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(true);
       expect(runtime.attachmentReleases).toEqual([]);
       expect(runtime.provider.stopOwnedCalls).toEqual([{
         conversationId: runtime.conversationId,
@@ -1395,6 +1396,7 @@ describe("TurnController authoritative lifecycle", () => {
       runtime.provider.resolve({ status: "completed", text: "Retry completed." });
       await flushPromises();
       expect(runtime.store.agentTurn(retry.turn.id).status).toBe("completed");
+      expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(false);
       runtime.store.close();
     },
   );

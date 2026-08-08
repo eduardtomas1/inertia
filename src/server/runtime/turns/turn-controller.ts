@@ -173,7 +173,11 @@ export class TurnController {
   }
 
   hasActiveCheckout(checkoutPath: string): boolean {
-    return [...this.activeByConversation.keys()].some((conversationId) =>
+    const conversationIds = new Set([
+      ...this.activeByConversation.keys(),
+      ...this.providerCleanupBarriers.keys(),
+    ]);
+    return [...conversationIds].some((conversationId) =>
       this.store.conversationWork.conversationMatchesCheckout(
         conversationId,
         checkoutPath,

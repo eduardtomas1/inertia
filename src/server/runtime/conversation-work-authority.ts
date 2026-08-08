@@ -10,6 +10,12 @@ export interface ConversationWorkspaceIdentity {
 
 interface ReservedConversationWorkspace extends ConversationWorkspaceIdentity {
   checkoutIdentity: string;
+  kind: "provider" | "workspace";
+}
+
+interface CheckoutReservations {
+  kind: ReservedConversationWorkspace["kind"];
+  reservationIds: Set<string>;
 }
 
 function canonicalCheckoutIdentity(path: string): string {
@@ -32,11 +38,14 @@ function canonicalCheckoutIdentity(path: string): string {
 }
 
 export class ConversationWorkAuthority {
-  private readonly workspaceByConversation = new Map<
+  private readonly workspaceByReservation = new Map<
     string,
     ReservedConversationWorkspace
   >();
-  private readonly conversationByCheckout = new Map<string, string>();
+  private readonly reservationsByCheckout = new Map<
+    string,
+    CheckoutReservations
+  >();
 
   constructor(
     private readonly workspaceForConversation: (
@@ -45,52 +54,91 @@ export class ConversationWorkAuthority {
   ) {}
 
   reserve(conversationId: string): boolean {
-    if (this.workspaceByConversation.has(conversationId)) return false;
     const workspace = this.workspaceForConversation(conversationId);
-    const checkoutIdentity = canonicalCheckoutIdentity(
+    return this.reserveIdentity(
+      conversationId,
+      workspace.projectId,
       workspace.checkoutPath,
+      "provider",
     );
-    if (this.conversationByCheckout.has(checkoutIdentity)) return false;
-    this.workspaceByConversation.set(conversationId, {
-      ...workspace,
-      checkoutIdentity,
-    });
-    this.conversationByCheckout.set(checkoutIdentity, conversationId);
-    return true;
   }
 
-  release(conversationId: string): void {
-    const workspace = this.workspaceByConversation.get(conversationId);
+  reserveCheckout(
+    reservationId: string,
+    projectId: string,
+    checkoutPath: string,
+  ): boolean {
+    return this.reserveIdentity(
+      reservationId,
+      projectId,
+      checkoutPath,
+      "workspace",
+    );
+  }
+
+  release(reservationId: string): void {
+    const workspace = this.workspaceByReservation.get(reservationId);
     if (!workspace) return;
-    this.workspaceByConversation.delete(conversationId);
-    if (
-      this.conversationByCheckout.get(workspace.checkoutIdentity)
-      === conversationId
-    ) {
-      this.conversationByCheckout.delete(workspace.checkoutIdentity);
+    this.workspaceByReservation.delete(reservationId);
+    const checkout = this.reservationsByCheckout.get(
+      workspace.checkoutIdentity,
+    );
+    if (!checkout) return;
+    checkout.reservationIds.delete(reservationId);
+    if (checkout.reservationIds.size === 0) {
+      this.reservationsByCheckout.delete(workspace.checkoutIdentity);
     }
   }
 
   hasConversation(conversationId: string): boolean {
-    if (this.workspaceByConversation.has(conversationId)) return true;
+    if (this.workspaceByReservation.has(conversationId)) return true;
     const workspace = this.workspaceForConversation(conversationId);
     return this.hasCheckout(workspace.checkoutPath);
   }
 
   hasCheckout(checkoutPath: string): boolean {
-    return this.conversationByCheckout.has(
+    return this.reservationsByCheckout.has(
       canonicalCheckoutIdentity(checkoutPath),
     );
   }
 
   hasProject(projectId: string): boolean {
-    return [...this.workspaceByConversation.values()].some(
+    return [...this.workspaceByReservation.values()].some(
       (workspace) => workspace.projectId === projectId,
     );
   }
 
   clear(): void {
-    this.workspaceByConversation.clear();
-    this.conversationByCheckout.clear();
+    this.workspaceByReservation.clear();
+    this.reservationsByCheckout.clear();
+  }
+
+  private reserveIdentity(
+    reservationId: string,
+    projectId: string,
+    checkoutPath: string,
+    kind: ReservedConversationWorkspace["kind"],
+  ): boolean {
+    if (this.workspaceByReservation.has(reservationId)) return false;
+    const checkoutIdentity = canonicalCheckoutIdentity(checkoutPath);
+    const checkout = this.reservationsByCheckout.get(checkoutIdentity);
+    if (checkout && (kind === "provider" || checkout.kind === "provider")) {
+      return false;
+    }
+    this.workspaceByReservation.set(reservationId, {
+      projectId,
+      checkoutPath,
+      checkoutIdentity,
+      kind,
+    });
+    if (checkout) {
+      checkout.reservationIds.add(reservationId);
+    } else {
+      this.reservationsByCheckout.set(checkoutIdentity, {
+        kind,
+        reservationIds: new Set([reservationId]),
+      });
+    }
+    return true;
   }
 }

@@ -173,6 +173,49 @@ describe("workspace run controller", () => {
     }
   });
 
+  it("holds checkout authority while project actions and Git mutations are active", async () => {
+    const runtime = await fixture();
+    try {
+      const sibling = runtime.store.createConversation(
+        runtime.project.id,
+        "Sibling chat in the same checkout",
+      );
+      const terminalId = await runtime.controller.startAction({
+        owner: {},
+        cwd: runtime.workspace,
+        projectId: runtime.project.id,
+        actionId: "check",
+        cols: 80,
+        rows: 24,
+        onStarted: vi.fn(),
+      });
+      expect(runtime.store.conversationWork.reserve(sibling.id)).toBe(false);
+      runtime.terminals.finish(terminalId, 0);
+      expect(runtime.store.conversationWork.reserve(sibling.id)).toBe(true);
+      runtime.store.conversationWork.release(sibling.id);
+
+      let finishGit!: () => void;
+      const gitGate = new Promise<void>((resolve) => {
+        finishGit = resolve;
+      });
+      const gitOperation = runtime.controller.trackSourceControl(
+        "Switch branch",
+        runtime.project.id,
+        undefined,
+        runtime.workspace,
+        "77777777-7777-4777-8777-777777777777",
+        async () => await gitGate,
+      );
+      expect(runtime.store.conversationWork.reserve(sibling.id)).toBe(false);
+      finishGit();
+      await gitOperation;
+      expect(runtime.store.conversationWork.reserve(sibling.id)).toBe(true);
+      runtime.store.conversationWork.release(sibling.id);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
   it("owns action discovery, process identity, port updates, and stop transitions", async () => {
     const runtime = await fixture();
     try {

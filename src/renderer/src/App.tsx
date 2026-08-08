@@ -21,7 +21,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
-import { useRuntimeCommandQueue } from "./hooks/useConversationSelectionQueue";
+import { useAsyncOperationQueue } from "./hooks/useConversationSelectionQueue";
 import {
   agentWorkflowRouteIdentity,
   agentWorkflowTargetConversation,
@@ -326,7 +326,14 @@ export default function App(): React.JSX.Element {
     setBusyAction,
     setActionError,
   });
-  const selectionCommandQueue = useRuntimeCommandQueue(run);
+  const enqueueWorkspaceAuthority = useAsyncOperationQueue();
+  const selectionCommandQueue = useCallback((
+    key: string,
+    command: CommandWithoutId,
+  ) => enqueueWorkspaceAuthority(() => run(key, command)), [
+    enqueueWorkspaceAuthority,
+    run,
+  ]);
   const runUserCommand = useCallback((
     key: string,
     command: CommandWithoutId,
@@ -337,6 +344,16 @@ export default function App(): React.JSX.Element {
     conversationSelectionGenerationRef.current += 1;
     return selectionCommandQueue(key, command);
   }, [run, selectionCommandQueue]);
+  const sendMessageWithWorkspaceAuthority = useCallback((
+    ...args: Parameters<typeof sendMessageToConversation>
+  ): ReturnType<typeof sendMessageToConversation> => {
+    const activate = args[5] !== false;
+    if (!activate) return sendMessageToConversation(...args);
+    conversationSelectionGenerationRef.current += 1;
+    return enqueueWorkspaceAuthority(
+      () => sendMessageToConversation(...args),
+    );
+  }, [enqueueWorkspaceAuthority, sendMessageToConversation]);
   const selectConversationCommand = useCallback((
     key: string,
     conversationId: string,
@@ -355,7 +372,7 @@ export default function App(): React.JSX.Element {
     settings,
     run,
     runNavigationCommand: runUserCommand,
-    sendMessage: sendMessageToConversation,
+    sendMessage: sendMessageWithWorkspaceAuthority,
     persistedConversationId: conversation?.id ?? null,
     updatePersistedConversation: updateConversationById,
   });

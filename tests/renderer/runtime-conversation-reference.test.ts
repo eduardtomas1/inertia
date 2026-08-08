@@ -172,5 +172,11 @@ describe("runtime conversation references", () => {
     }
     expect(appSource).toContain("runNavigationCommand: runUserCommand");
     expect(appSource).toContain("run: runUserCommand,");
+    expect(appSource).toContain(
+      "sendMessage: sendMessageWithWorkspaceAuthority",
+    );
+    expect(appSource).toContain(
+      "conversationSelectionGenerationRef.current += 1;",
+    );
   });
 });

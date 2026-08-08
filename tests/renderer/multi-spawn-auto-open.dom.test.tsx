@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMultiSpawn } from "../../src/renderer/src/hooks/useMultiSpawn";
 import {
+  useAsyncOperationQueue,
   useConversationSelectionQueue,
   useRuntimeCommandQueue,
 } from "../../src/renderer/src/hooks/useConversationSelectionQueue";
@@ -500,6 +501,89 @@ describe("Duo comparison navigation", () => {
         comparisonConversationId,
         "conversation.create",
       ]);
+    expect(updateSplitConversationId).not.toHaveBeenCalledWith(null);
+  });
+
+  it("queues an activating source send after a pending judge handoff", async () => {
+    let currentSnapshot = snapshot;
+    let splitConversationId: string | null = null;
+    const generation = { current: 9 };
+    let finishJudgeSelection: (() => void) | null = null;
+    let activeConversationId: string | null = conversationIds[0];
+    const operations: string[] = [];
+    const baseRuntime = runtime();
+    const run = vi.fn(async (
+      key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (
+        command.type === "conversation.select"
+        && command.payload.conversationId === comparisonConversationId
+      ) {
+        await new Promise<void>((resolve) => {
+          finishJudgeSelection = resolve;
+        });
+      }
+      const event = await baseRuntime(key, command);
+      if (command.type === "conversation.select") {
+        activeConversationId = command.payload.conversationId;
+        operations.push(`select:${command.payload.conversationId}`);
+      }
+      return event;
+    });
+    const updateSplitConversationId = vi.fn((next: string | null) => {
+      splitConversationId = next;
+    });
+    const hook = renderHook(() => {
+      const enqueue = useAsyncOperationQueue();
+      const selectConversationCommand = useCallback((
+        key: string,
+        conversationId: string,
+      ) => enqueue(() => run(key, {
+        type: "conversation.select",
+        payload: { conversationId },
+      })), [enqueue]);
+      return {
+        sendSourceMessage: () => {
+          generation.current += 1;
+          return enqueue(async () => {
+            activeConversationId = conversationIds[0];
+            operations.push(`send:${conversationIds[0]}`);
+          });
+        },
+        multiSpawn: useMultiSpawn({
+          snapshot: currentSnapshot,
+          settings,
+          run,
+          request: (command) => run("multi-spawn:background", command),
+          selectConversationCommand,
+          splitConversationId,
+          conversationSelectionGenerationRef: generation,
+          splitSelectionTransitionsRef: { current: 0 },
+          updateSplitConversationId,
+          showWorkspace: vi.fn(),
+          closeSidebar: vi.fn(),
+          focusWorkspace: vi.fn(),
+          discardDraftConversation: vi.fn(),
+          setActionError: vi.fn(),
+        }),
+      };
+    });
+
+    await act(async () => hook.result.current.multiSpawn.submit(draft()));
+    currentSnapshot = { ...snapshot, activeConversationId: conversationIds[0] };
+    hook.rerender();
+    await waitFor(() => expect(finishJudgeSelection).not.toBeNull());
+
+    const send = hook.result.current.sendSourceMessage();
+    await act(async () => finishJudgeSelection?.());
+    await act(async () => send);
+
+    expect(activeConversationId).toBe(conversationIds[0]);
+    expect(operations.slice(-2)).toEqual([
+      `select:${comparisonConversationId}`,
+      `send:${conversationIds[0]}`,
+    ]);
     expect(updateSplitConversationId).not.toHaveBeenCalledWith(null);
   });
 

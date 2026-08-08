@@ -88,7 +88,10 @@ describe("isolated review revision authority", () => {
   });
 
   it("rejects a resumed terminal before reading the diff or creating a checkpoint", async () => {
-    const authority = new ConversationWorkAuthority(() => projectId);
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
     expect(authority.reserve(conversationId)).toBe(true);
     const { dependencies, queue } = fixture(authority);
 
@@ -103,7 +106,10 @@ describe("isolated review revision authority", () => {
   });
 
   it("holds conversation ownership from diff read through turn start", async () => {
-    const authority = new ConversationWorkAuthority(() => projectId);
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
     const context = deferred<{
       visibleContent: string;
       requestContext: { diffSelections: [] };

@@ -125,12 +125,16 @@ describe("workspace run controller", () => {
   it("blocks project actions and Git mutations while a terminal owns the conversation", async () => {
     const runtime = await fixture();
     try {
+      const sibling = runtime.store.createConversation(
+        runtime.project.id,
+        "Sibling chat in the same checkout",
+      );
       expect(runtime.store.conversationWork.reserve(runtime.conversation.id)).toBe(true);
       await expect(runtime.controller.startAction({
         owner: {},
         cwd: runtime.workspace,
         projectId: runtime.project.id,
-        conversationId: runtime.conversation.id,
+        conversationId: sibling.id,
         actionId: "check",
         cols: 80,
         rows: 24,
@@ -139,13 +143,15 @@ describe("workspace run controller", () => {
       await expect(runtime.controller.trackSourceControl(
         "Commit changes",
         runtime.project.id,
-        runtime.conversation.id,
+        sibling.id,
+        "55555555-5555-4555-8555-555555555555",
         async () => "commit-id",
       )).rejects.toThrow("End the resumed provider terminal");
       await expect(runtime.controller.trackSourceControl(
         "Switch branch",
         runtime.project.id,
         undefined,
+        "66666666-6666-4666-8666-666666666666",
         async () => "main",
       )).rejects.toThrow("End the resumed provider terminal");
       expect(runtime.terminals.inputs).toEqual([]);

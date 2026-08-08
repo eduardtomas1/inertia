@@ -145,7 +145,7 @@ export class RuntimeStore {
   private readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
-  readonly conversationWork = new ConversationWorkAuthority((id) => this.conversation(id).projectId);
+  readonly conversationWork = new ConversationWorkAuthority((id) => ({ projectId: this.conversation(id).projectId, checkoutPath: this.conversationPath(id) }));
 
   constructor(
     databasePath: string,

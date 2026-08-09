@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { activateNotificationConversation } from "../../src/renderer/src/components/AppLayout";
+import {
+  activateNotificationConversation,
+  formatAppShortcutLabel,
+} from "../../src/renderer/src/components/AppLayout";
 import { threadNotificationKind } from "../../src/renderer/src/hooks/useThreadNotifications";
 import type { Conversation } from "../../src/shared/contracts";
 import { parseDesktopNotificationRequest } from "../../src/shared/desktop";
@@ -39,6 +42,12 @@ function conversation(
 }
 
 describe("thread notifications", () => {
+  it("formats remapped shortcut labels for the active platform", () => {
+    expect(formatAppShortcutLabel("darwin", "y")).toBe("⌘Y");
+    expect(formatAppShortcutLabel("win32", "y")).toBe("Ctrl+Y");
+    expect(formatAppShortcutLabel("linux", "y")).toBe("Ctrl+Y");
+  });
+
   it("returns from navigation overlays to the activated workspace thread", () => {
     const thread = conversation("completed");
     const selectConversation = vi.fn();

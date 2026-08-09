@@ -38,6 +38,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
         open={paletteOpen}
         projects={[]}
         conversations={[]}
+        newThreadShortcut="Ctrl+N"
         onClose={() => setPaletteOpen(false)}
         onSelectProject={vi.fn()}
         onSelectConversation={vi.fn()}
@@ -202,6 +203,7 @@ describe("global shortcut DOM integration", () => {
           open
           projects={[]}
           conversations={[]}
+          newThreadShortcut="Ctrl+N"
           onClose={vi.fn()}
           onSelectProject={vi.fn()}
           onSelectConversation={vi.fn()}

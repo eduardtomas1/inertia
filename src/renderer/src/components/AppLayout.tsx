@@ -164,6 +164,13 @@ export function activateNotificationConversation(
   actions.closeActivity();
 }
 
+export function formatAppShortcutLabel(
+  platform: string,
+  key: string,
+): string {
+  return `${platform === "darwin" ? "⌘" : "Ctrl+"}${key.toUpperCase()}`;
+}
+
 export function AppLayout({
   platform,
   documentActive,
@@ -587,6 +594,10 @@ export function AppLayout({
         snapshot={connection.snapshot}
         activityOpen={activityOpen}
         paletteOpen={paletteOpen}
+        newThreadShortcut={formatAppShortcutLabel(
+          platform,
+          settings.keybindings["new-chat"],
+        )}
         setActivityOpen={setActivityOpen}
         setPaletteOpen={setPaletteOpen}
         setWorkspaceView={() => setView("workspace")}

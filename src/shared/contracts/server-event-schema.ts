@@ -3,10 +3,7 @@ import {
   APP_SHORTCUT_KEYS,
   DEFAULT_APP_KEYBINDINGS,
 } from "../keybindings";
-import {
-  MODEL_CAPABILITY_IDS,
-  MODEL_CAPABILITY_STATES,
-} from "../model-routing";
+import { modelSelectionSchema } from "../model-routing";
 import {
   modelBackendProfileDetailSchema,
   modelBackendProfileViewSchema,
@@ -81,44 +78,8 @@ function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean
   return Array.isArray(value) && value.every(validate);
 }
 
-function jsonValue(value: unknown, depth = 0): boolean {
-  if (depth > 20) return false;
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
-    return true;
-  }
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) {
-    return value.every((entry) => jsonValue(entry, depth + 1));
-  }
-  return record(value)
-    && Object.values(value).every((entry) => jsonValue(entry, depth + 1));
-}
-
-function modelCapability(value: unknown): boolean {
-  return recordWithStrings(value, "id", "state", "provenance")
-    && oneOf(value, "id", MODEL_CAPABILITY_IDS)
-    && oneOf(value, "state", MODEL_CAPABILITY_STATES)
-    && oneOf(value, "provenance", [
-      "provider", "harness", "probe", "user", "built-in", "unknown",
-    ])
-    && nullableStringField(value, "detail");
-}
-
 function modelSelection(value: unknown): boolean {
-  return recordWithStrings(
-    value,
-    "harnessId",
-    "backendProfileId",
-    "backendProfileDisplayName",
-    "modelId",
-  )
-    && nullableStringField(value, "alias")
-    && nullableStringField(value, "reasoningEffort")
-    && nullableNumberField(value, "contextWindowOverride")
-    && record(value.providerOptions)
-    && Object.values(value.providerOptions).every((entry) => jsonValue(entry))
-    && arrayOf(value.capabilities, modelCapability)
-    && integerField(value, "backendConfigurationRevision");
+  return modelSelectionSchema.safeParse(value).success;
 }
 
 function continuationIdentity(value: unknown): boolean {

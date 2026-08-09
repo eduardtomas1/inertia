@@ -608,6 +608,26 @@ describe("server event request-result trust boundary", () => {
       answer: { conversationId: "conversation", modelSelection: { ...selection, capabilities: [{}] } },
     },
     {
+      kind: "review.selection.answer",
+      answer: {
+        conversationId: "conversation",
+        modelSelection: {
+          ...selection,
+          providerOptions: { apiKey: "must-not-cross-the-runtime-boundary" },
+        },
+      },
+    },
+    {
+      kind: "review.selection.answer",
+      answer: {
+        conversationId: "conversation",
+        modelSelection: {
+          ...selection,
+          providerOptions: { metadata: "x".repeat(33_000) },
+        },
+      },
+    },
+    {
       kind: "review.summary",
       summary: {
         conversationId: "conversation",

@@ -244,4 +244,16 @@ describe("visual contrast system", () => {
       /\.activity-count\s*\{[^}]*color:\s*var\(--accent-text\);[^}]*background:\s*var\(--accent\);/su,
     );
   });
+
+  it("animates only ultra chat frames and honors reduced motion", () => {
+    const ultraFrame = cssBlock(
+      '.chat-workspace[data-reasoning-effort="ultra"]::after',
+    );
+    expect(ultraFrame).toContain("pointer-events: none");
+    expect(ultraFrame).toContain("animation: ultra-reasoning-frame-flow 6s linear infinite");
+    expect(ultraFrame).toContain("mask-composite: exclude");
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\]::after\s*\{[^}]*animation:\s*none;/u,
+    );
+  });
 });

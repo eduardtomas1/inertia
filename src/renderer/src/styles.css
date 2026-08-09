@@ -2011,6 +2011,47 @@ textarea {
   container-type: size;
 }
 
+.chat-workspace[data-reasoning-effort="ultra"]::after {
+  position: absolute;
+  z-index: 40;
+  inset: 0;
+  padding: 1px;
+  pointer-events: none;
+  content: "";
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, var(--accent) 24%, transparent),
+    var(--accent-strong),
+    #8b5cf6,
+    #22d3ee,
+    var(--accent-strong),
+    color-mix(in srgb, var(--accent) 24%, transparent)
+  );
+  background-size: 260% 100%;
+  opacity: .82;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: ultra-reasoning-frame-flow 6s linear infinite;
+}
+
+@keyframes ultra-reasoning-frame-flow {
+  from { background-position: 130% 50%; }
+  to { background-position: -130% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-workspace[data-reasoning-effort="ultra"]::after {
+    animation: none;
+    background-position: 50% 50%;
+  }
+}
+
 .centered-state,
 .welcome-workspace {
   align-items: center;

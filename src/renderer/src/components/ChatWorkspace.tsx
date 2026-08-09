@@ -237,6 +237,8 @@ export function ChatWorkspace({
     approvals.length > 0 || inputRequests.length > 0,
   );
   const Root = embedded ? "section" : "main";
+  const selectedReasoningEffort = conversation?.modelSelection.reasoningEffort
+    ?.trim().toLowerCase() ?? "";
   const keyboardHelpId = useId();
   const stopTimeline = useCallback(() => {
     void onStop().catch(() => undefined);
@@ -549,7 +551,10 @@ export function ChatWorkspace({
   }
 
   return (
-    <Root className={clsx("chat-workspace", `response-density-${responseDensity}`)}>
+    <Root
+      className={clsx("chat-workspace", `response-density-${responseDensity}`)}
+      data-reasoning-effort={selectedReasoningEffort}
+    >
       <div
         ref={scrollRef}
         className="message-scroll"

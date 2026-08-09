@@ -45,6 +45,7 @@ describe("Git runner locale", () => {
     const environment = gitProcessEnvironment({
       PATH: "/usr/bin:/bin",
       EMAIL: "custom@example.test",
+      GIT_CEILING_DIRECTORIES: "/workspace-boundary",
       HOME: undefined,
       GIT_CONFIG_GLOBAL: undefined,
       GIT_CONFIG_COUNT: "1",
@@ -57,6 +58,7 @@ describe("Git runner locale", () => {
     expect(environment).toEqual({
       PATH: "/usr/bin:/bin",
       EMAIL: "custom@example.test",
+      GIT_CEILING_DIRECTORIES: "/workspace-boundary",
       GIT_TERMINAL_PROMPT: "0",
       GIT_ASKPASS: "",
       LANG: "C",

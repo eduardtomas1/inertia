@@ -1,9 +1,8 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import {
+  modelRouteIdentityCoherent,
   pullRequestCapabilityStateCoherent,
-  runtimeEventScopeMatches,
-  SERVER_EVENT_OPTIONS,
-  snapshotIdentityCollectionsCoherent,
+  runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent,
 } from "./server-event-discriminants";
 import {
   APP_SHORTCUT_KEYS,
@@ -208,8 +207,8 @@ function latestTurn(value: unknown): boolean {
     && nullableStringField(value, "startedAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "terminalReason")
-    && modelSelection(value.modelSelection)
-    && continuationIdentity(value.continuationIdentity);
+    && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
+    && modelRouteIdentityCoherent(value);
 }
 
 function conversation(value: unknown): value is UnknownRecord {
@@ -234,6 +233,7 @@ function conversation(value: unknown): value is UnknownRecord {
     && modelSelection(value.modelSelection)
     && (value.continuationIdentity === null
       || continuationIdentity(value.continuationIdentity))
+    && modelRouteIdentityCoherent(value)
     && (value.attentionKind === null || oneOf(value, "attentionKind", ["approval", "input"]))
     && nullableStringField(value, "branch")
     && nullableStringField(value, "worktreePath")
@@ -879,7 +879,7 @@ function reviewSelectionAnswer(value: unknown): boolean {
     && providerId(value, "providerId")
     && optionalStringField(value, "repositoryPath")
     && integerField(value, "selectedLineCount")
-    && modelSelection(value.modelSelection);
+    && modelSelection(value.modelSelection) && modelRouteIdentityCoherent(value);
 }
 
 function turnUsage(value: unknown): boolean {
@@ -919,8 +919,8 @@ function agentTurn(value: unknown): boolean {
     && oneOf(value, "interactionMode", SERVER_EVENT_OPTIONS.interactionModes)
     && oneOf(value, "accessMode", SERVER_EVENT_OPTIONS.accessModes)
     && nullableStringField(value, "terminalAssistantMessageId")
-    && modelSelection(value.modelSelection)
-    && continuationIdentity(value.continuationIdentity)
+    && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
+    && modelRouteIdentityCoherent(value)
     && nullableStringField(value, "modelAlias")
     && nullableStringField(value, "providerSessionBefore")
     && nullableStringField(value, "providerSessionAfter")

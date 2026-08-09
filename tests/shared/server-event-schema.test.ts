@@ -12,6 +12,7 @@ const selection = nativeModelSelection({
   modelId: "gpt-test",
   reasoningEffort: "high",
 });
+const claudeSelection = nativeModelSelection({ providerId: "claude", modelId: "claude-test" });
 const nativeBackend = nativeBackendProfile("codex");
 const capability = {
   id: "streaming",
@@ -742,6 +743,11 @@ describe("server event conversation discriminant boundary", () => {
 
   it.each([
     ["providerId", "gemini"],
+    ["modelSelection", claudeSelection],
+    ["continuationIdentity", { ...continuationIdentityForSelection(selection), harnessId: "claude-agent-sdk" }],
+    ["continuationIdentity", { ...continuationIdentityForSelection(selection), backendProfileId: "native:claude" }],
+    ["continuationIdentity", { ...continuationIdentityForSelection(selection), backendConfigurationRevision: 99 }],
+    ["latestTurn", { ...conversationShell.latestTurn, modelSelection: claudeSelection }],
     ["interactionMode", "chat"],
     ["accessMode", "unrestricted"],
     ["status", "sleeping"],
@@ -1121,6 +1127,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     ["subagent status", "subagents", { ...conversationDetail.subagents[0], status: "paused" }],
     ["turn interaction", "agentTurns", { ...conversationDetail.agentTurns[0], interactionMode: "chat" }],
     ["turn access", "agentTurns", { ...conversationDetail.agentTurns[0], accessMode: "unrestricted" }],
+    ["turn route", "agentTurns", { ...conversationDetail.agentTurns[0], modelSelection: claudeSelection }],
     ["attachment MIME", "messages", { ...conversationDetail.messages[0], attachments: [{
       id: "attachment-1", name: "x.exe", path: "/tmp/x.exe", mimeType: "application/x-msdownload", size: 1,
     }] }],

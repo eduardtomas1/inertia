@@ -21,6 +21,7 @@ import type {
   ProviderMaintenanceUpdateAvailability,
   ProviderMaintenanceVersionStatus,
 } from "../provider-maintenance";
+import { legacyProviderIdForHarness, type ModelSelection } from "../model-routing";
 
 function exhaustiveOptions<T extends string>(
   options: Record<T, true>,
@@ -151,6 +152,20 @@ export function pullRequestCapabilityStateCoherent(
   if (reason === "no-branch") return branch === null;
   if (reason === "no-remotes" && !isRepository) return branch === null && !hasRemote;
   return branch !== null && branch.length > 0 && hasRemote === (reason !== "no-remotes");
+}
+
+export function modelRouteIdentityCoherent(value: IdentityRecord): boolean {
+  const selection = value.modelSelection as ModelSelection;
+  const projectedProvider = legacyProviderIdForHarness(selection.harnessId);
+  if (projectedProvider !== null && projectedProvider !== value.providerId) return false;
+  if (value.harnessId !== undefined && value.harnessId !== selection.harnessId) return false;
+  if (value.backendProfileId !== undefined
+    && value.backendProfileId !== selection.backendProfileId) return false;
+  const identity = value.continuationIdentity as IdentityRecord | null | undefined;
+  return identity == null
+    || (identity.harnessId === selection.harnessId
+      && identity.backendProfileId === selection.backendProfileId
+      && identity.backendConfigurationRevision === selection.backendConfigurationRevision);
 }
 
 function mutationConversationId(event: RuntimeMutationEvent): string | null {

@@ -86,6 +86,35 @@ function settingsProps(
 }
 
 describe("Settings composite updates", () => {
+  it("preserves a dirty alias through an equivalent snapshot refresh", () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    const onUpdate = vi.fn(async () => undefined);
+    const props = settingsProps(onUpdate);
+    const view = render(<SettingsView {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    const alias = screen.getAllByLabelText("Name in Inertia")[0]!;
+    alias.focus();
+    expect(alias).toHaveFocus();
+    fireEvent.change(alias, { target: { value: "Unsaved Codex name" } });
+
+    view.rerender(
+      <SettingsView
+        {...props}
+        settings={{
+          ...defaultSettings,
+          providerIdentityLabels: {},
+        }}
+      />,
+    );
+
+    expect(alias).toHaveValue("Unsaved Codex name");
+    expect(alias).toHaveFocus();
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
   it("merges rapid alias and shortcut edits before a snapshot round trip", () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,

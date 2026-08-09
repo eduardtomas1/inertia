@@ -5,6 +5,7 @@ import type {
   RuntimeConnection,
 } from "../shared/desktop.js";
 import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
+import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -37,6 +38,16 @@ const IPC = {
   clearBackendCredential: "inertia:clear-backend-credential",
   getBackendCredentialState: "inertia:get-backend-credential-state",
 } as const;
+
+const threadNotificationActivations = new ThreadNotificationActivationBuffer();
+ipcRenderer.on(
+  IPC.threadNotificationActivated,
+  (_event, conversationId: unknown) => {
+    if (typeof conversationId === "string") {
+      threadNotificationActivations.receive(conversationId);
+    }
+  },
+);
 
 const bridge: DesktopBridge = Object.freeze({
   getRuntimeConnection: () =>
@@ -79,13 +90,8 @@ const bridge: DesktopBridge = Object.freeze({
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
   showThreadNotification: (request: Parameters<DesktopBridge["showThreadNotification"]>[0]) =>
     ipcRenderer.invoke(IPC.showThreadNotification, request) as Promise<boolean>,
-  onThreadNotificationActivated: (listener: (conversationId: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, conversationId: string) => {
-      listener(conversationId);
-    };
-    ipcRenderer.on(IPC.threadNotificationActivated, handler);
-    return () => ipcRenderer.removeListener(IPC.threadNotificationActivated, handler);
-  },
+  onThreadNotificationActivated: (listener: (conversationId: string) => void) =>
+    threadNotificationActivations.subscribe(listener),
   getAppHealth: () =>
     ipcRenderer.invoke(IPC.getAppHealth) as ReturnType<DesktopBridge["getAppHealth"]>,
   clearAppCache: () =>

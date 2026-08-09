@@ -72,6 +72,10 @@ import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
 import {
+  activateThreadNotification,
+  waitForThreadNotificationWindowLoad,
+} from "./thread-notification-activation.js";
+import {
   WINDOW_APPEARANCE_FILENAME,
   isWindowThemePreference,
   readWindowThemePreference,
@@ -129,6 +133,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow: BrowserWindow | null = null;
+let mainWindowCreation: Promise<void> | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let privateConnectHost: PrivateConnectHost | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
@@ -732,12 +737,13 @@ function registerIpcHandlers(): void {
     const [title, body] = copy[request.kind];
     const notification = new Notification({ title, body });
     notification.once("click", () => {
-      mainWindow?.show();
-      mainWindow?.focus();
-      mainWindow?.webContents.send(
-        IPC.threadNotificationActivated,
-        request.conversationId,
-      );
+      void activateThreadNotification(request.conversationId, {
+        channel: IPC.threadNotificationActivated,
+        currentWindow: () => mainWindow,
+        createWindow,
+      }).catch((error: unknown) => {
+        console.error("Failed to activate a thread notification", error);
+      });
     });
     notification.show();
     return true;
@@ -820,7 +826,7 @@ function registerIpcHandlers(): void {
   });
 }
 
-async function createWindow(): Promise<void> {
+async function createMainWindow(): Promise<void> {
   const renderer = rendererLocation();
   trustedRendererUrl = renderer.isUrl
     ? new URL(renderer.target).href
@@ -897,20 +903,31 @@ async function createWindow(): Promise<void> {
   }
 }
 
+function createWindow(): Promise<void> {
+  if (mainWindowCreation) return mainWindowCreation;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return waitForThreadNotificationWindowLoad(mainWindow);
+  }
+  const creation = createMainWindow();
+  mainWindowCreation = creation;
+  const clearCreation = (): void => {
+    if (mainWindowCreation === creation) mainWindowCreation = null;
+  };
+  void creation.then(clearCreation, clearCreation);
+  return creation;
+}
+
 function focusMainWindow(): void {
-  if (!mainWindow) {
-    if (app.isReady()) {
-      void createWindow();
-    }
-    return;
-  }
-
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore();
-  }
-
-  mainWindow.show();
-  mainWindow.focus();
+  if (!app.isReady()) return;
+  void createWindow().then(() => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  }).catch((error: unknown) => {
+    console.error("Failed to focus the Inertia window", error);
+  });
 }
 
 function finishQuitAfterCleanup(): void {

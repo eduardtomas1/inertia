@@ -240,6 +240,7 @@ export function SettingsView({
   const authoritativeProviderIdentityLabelsRef = useRef(
     settings.providerIdentityLabels,
   );
+  const dirtyProviderIdentityLabelsRef = useRef(new Set<ProviderId>());
   const pendingProviderIdentityLabelsRef = useRef<string | null>(null);
   const [keybindingsDraft, setKeybindingsDraft] = useState(
     () => settings.keybindings,
@@ -260,8 +261,16 @@ export function SettingsView({
         !== providerIdentityLabelsFingerprint
     ) return;
     pendingProviderIdentityLabelsRef.current = null;
-    providerIdentityLabelsDraftRef.current = settings.providerIdentityLabels;
-    setProviderIdentityLabelsDraft(settings.providerIdentityLabels);
+    const providerIdentityLabels = {
+      ...settings.providerIdentityLabels,
+    };
+    for (const providerId of dirtyProviderIdentityLabelsRef.current) {
+      const draft = providerIdentityLabelsDraftRef.current[providerId];
+      if (draft !== undefined) providerIdentityLabels[providerId] = draft;
+      else delete providerIdentityLabels[providerId];
+    }
+    providerIdentityLabelsDraftRef.current = providerIdentityLabels;
+    setProviderIdentityLabelsDraft(providerIdentityLabels);
   }, [providerIdentityLabelsFingerprint, settings.providerIdentityLabels]);
   useEffect(() => {
     authoritativeKeybindingsRef.current = settings.keybindings;
@@ -544,6 +553,9 @@ export function SettingsView({
                               };
                               providerIdentityLabelsDraftRef.current =
                                 providerIdentityLabels;
+                              dirtyProviderIdentityLabelsRef.current.add(
+                                provider.id,
+                              );
                               setProviderIdentityLabelsDraft(
                                 providerIdentityLabels,
                               );
@@ -557,6 +569,9 @@ export function SettingsView({
                               else delete providerIdentityLabels[provider.id];
                               providerIdentityLabelsDraftRef.current =
                                 providerIdentityLabels;
+                              dirtyProviderIdentityLabelsRef.current.delete(
+                                provider.id,
+                              );
                               setProviderIdentityLabelsDraft(
                                 providerIdentityLabels,
                               );

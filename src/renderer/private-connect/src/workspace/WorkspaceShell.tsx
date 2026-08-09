@@ -8,6 +8,7 @@ export function WorkspaceShell({
   error,
   prompt,
   busy,
+  offline,
   selectedConversation,
   messagesRef,
   onSelectConversation,
@@ -23,6 +24,7 @@ export function WorkspaceShell({
   error: string | null;
   prompt: string;
   busy: boolean;
+  offline: boolean;
   selectedConversation: string | null;
   messagesRef: React.RefObject<HTMLDivElement | null>;
   onSelectConversation: (conversationId: string) => void;
@@ -40,8 +42,13 @@ export function WorkspaceShell({
           <span className="eyebrow">Inertia Private Connect</span>
           <h1>Your workspace</h1>
         </div>
-        <button type="button" onClick={onSignOut}>Sign out</button>
+        <button type="button" disabled={offline} onClick={onSignOut}>Sign out</button>
       </header>
+      {offline && (
+        <div className="banner" role="status">
+          Offline — showing only data already held in this tab. Conversations and API responses are not stored for offline use.
+        </div>
+      )}
       {error && <div className="banner error">{error}</div>}
       <div className="layout">
         <ProjectList
@@ -54,6 +61,7 @@ export function WorkspaceShell({
           detail={detail}
           prompt={prompt}
           busy={busy}
+          offline={offline}
           messagesRef={messagesRef}
           onScrollIntent={onScrollIntent}
           onPromptChange={onPromptChange}

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import {
   ChevronDown,
   Command,
@@ -40,8 +41,13 @@ import {
 } from "./ComposerSettings";
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { PromptStashEntry } from "../../utils/promptStash";
-import { PromptStashMenu } from "./PromptStashMenu";
-import { ComposerSkillsMenu } from "./ComposerSkillsMenu";
+
+const PromptStashMenu = lazy(async () => ({
+  default: (await import("./PromptStashMenu")).PromptStashMenu,
+}));
+const ComposerSkillsMenu = lazy(async () => ({
+  default: (await import("./ComposerSkillsMenu")).ComposerSkillsMenu,
+}));
 
 export interface ComposerToolbarProps {
   actions: ProjectAction[];
@@ -65,6 +71,10 @@ export interface ComposerToolbarProps {
   onStashPrompt: () => void;
   onRestorePrompt: (entry: PromptStashEntry) => void;
   onRemoveStashedPrompt: (entryId: string) => void;
+  onSetPromptRecurrence: (
+    entryId: string,
+    recurrence: PromptStashEntry["recurrence"],
+  ) => void;
   modelRoutes: ComposerModelRoute[];
   selectedModelRoute: ModelSearchRoute;
   onChooseModelRoute: (route: ComposerModelRoute) => Promise<void>;
@@ -117,6 +127,7 @@ export function ComposerToolbar({
   onStashPrompt,
   onRestorePrompt,
   onRemoveStashedPrompt,
+  onSetPromptRecurrence,
   modelRoutes,
   selectedModelRoute,
   onChooseModelRoute,
@@ -163,29 +174,34 @@ export function ComposerToolbar({
         >
           <Paperclip size={16} />
         </IconButton>
-        <PromptStashMenu
-          entries={promptStash}
-          canStash={canStashPrompt}
-          blockedReason={promptStashBlockedReason}
-          restoreBlockedReason={promptRestoreBlockedReason}
-          menuController={menuController}
-          onStash={onStashPrompt}
-          onRestore={onRestorePrompt}
-          onRemove={onRemoveStashedPrompt}
-        />
-        <ComposerSkillsMenu
-          skills={skills}
-          capability={skillsCapability}
-          selectedSkillIds={selectedSkillIds}
-          loading={skillsLoading}
-          error={skillsError}
-          disabled={disabled}
-          running={running}
-          menuController={menuController}
-          onList={onListSkills}
-          onToggle={onToggleSkill}
-          onClear={onClearSelectedSkills}
-        />
+        <Suspense fallback={null}>
+          <PromptStashMenu
+            entries={promptStash}
+            canStash={canStashPrompt}
+            blockedReason={promptStashBlockedReason}
+            restoreBlockedReason={promptRestoreBlockedReason}
+            menuController={menuController}
+            onStash={onStashPrompt}
+            onRestore={onRestorePrompt}
+            onRemove={onRemoveStashedPrompt}
+            onSetRecurrence={onSetPromptRecurrence}
+          />
+        </Suspense>
+        <Suspense fallback={null}>
+          <ComposerSkillsMenu
+            skills={skills}
+            capability={skillsCapability}
+            selectedSkillIds={selectedSkillIds}
+            loading={skillsLoading}
+            error={skillsError}
+            disabled={disabled}
+            running={running}
+            menuController={menuController}
+            onList={onListSkills}
+            onToggle={onToggleSkill}
+            onClear={onClearSelectedSkills}
+          />
+        </Suspense>
         {actions.length > 0 && (
           <div className="popover-anchor composer-action-control">
             <button

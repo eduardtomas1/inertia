@@ -158,6 +158,12 @@ describe("composer model chooser route projection", () => {
       selectable: true,
     });
     expect(routes[1]?.continuationIdentity.modelIdentity).toBeNull();
+    expect(buildComposerModelRoutes(
+      [provider()],
+      [],
+      current,
+      { codex: "Work Codex" },
+    )[1]?.providerLabel).toBe("Work Codex");
   });
 
   it("keeps Provider default selectable while marking stale concrete catalog routes unavailable", () => {

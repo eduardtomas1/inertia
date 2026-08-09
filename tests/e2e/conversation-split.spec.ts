@@ -55,7 +55,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await app.close();
+  await app?.close();
 });
 
 async function openPaneTool(
@@ -192,22 +192,22 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
 
-  await primary.getByRole("button", { name: "Prompt stash" }).click();
-  await primary.getByRole("menu", { name: "Prompt stash" })
-    .getByRole("menuitem", { name: /Stash current prompt/u })
+  await primary.getByRole("button", { name: "Scratch prompts" }).click();
+  await primary.getByRole("menu", { name: "Scratch prompts" })
+    .getByRole("menuitem", { name: /Save current prompt/u })
     .click();
   await expect(primaryMessage).toHaveValue("");
   const secondaryStash = secondary.getByRole("button", {
-    name: "Prompt stash, 1 saved",
+    name: "Scratch prompts, 1 saved",
   });
   await expect(secondaryStash).toBeVisible();
   await secondaryStash.click();
-  await secondary.getByRole("menu", { name: "Prompt stash" })
+  await secondary.getByRole("menu", { name: "Scratch prompts" })
     .getByRole("menuitem", { name: /^Draft owned by Inertia/u })
     .click();
   await expect(secondaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(primary.getByRole("button", {
-    name: "Prompt stash, 1 saved",
+    name: "Scratch prompts, 1 saved",
   })).toBeVisible();
   await primaryMessage.fill("Draft owned by Inertia");
   await secondaryMessage.fill("Draft owned by Companion");

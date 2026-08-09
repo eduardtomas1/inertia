@@ -142,6 +142,18 @@ npm run dev
 
 Contributors can run the complete local gate with `npm run check`. It covers architecture, lint, type safety, unit and integration tests, and the production bundle.
 
+After a production build, a credential-free headless readiness report is also
+available without starting Electron or opening a listener:
+
+```bash
+npm run --silent status:runtime -- --cwd /path/to/project --pretty
+```
+
+The JSON reports platform and workspace access, installation/protocol checks
+for supported provider CLIs, and detected source-control kinds. It never checks
+provider authentication, exposes executable paths, or claims mutation support
+for detected non-Git systems.
+
 ### Troubleshooting
 
 If something goes wrong, first refresh the affected provider in **Settings → Providers**. For a reproducible app or runtime problem, open **Settings → Runtime diagnostics**, choose **Copy diagnostic report**, review the report once more, and attach it to the [public bug form](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). The built-in report excludes prompts, source content, token values, credentials, and provider capabilities; do not substitute raw logs, databases, or unredacted diagnostic archives.

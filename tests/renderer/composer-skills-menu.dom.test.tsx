@@ -55,6 +55,44 @@ const defaults: Omit<ComposerSkillsMenuProps, "menuController"> = {
 };
 
 describe("ComposerSkillsMenu", () => {
+  it("keeps unavailable skills visible and explains the runtime reason", () => {
+    const reason = "This harness does not expose skills for this route.";
+    render(
+      <Harness
+        {...defaults}
+        capability={{
+          kind: "unavailable",
+          available: false,
+          label: "Skills unavailable",
+          reason,
+        }}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: `Skills unavailable: ${reason}`,
+    });
+    expect(trigger).toHaveAttribute("aria-disabled", "true");
+    expect(trigger).toHaveAttribute("data-readiness", "unavailable");
+    expect(trigger).toHaveAttribute("title", reason);
+    trigger.focus();
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("names the temporary reason when skills are blocked during a turn", () => {
+    render(<Harness {...defaults} running />);
+    const trigger = screen.getByRole("button", {
+      name: /Skills unavailable: Skills can be changed after/u,
+    });
+    expect(trigger).toHaveAttribute("data-readiness", "blocked");
+    expect(trigger).toHaveAttribute(
+      "title",
+      "Skills can be changed after the current turn stops.",
+    );
+  });
+
   it("uses instance-scoped popup relationships in split composers", () => {
     render(
       <>

@@ -339,7 +339,12 @@ export function createConversationCommandHandler(
         });
         return "handled";
       case "conversation.update": {
-        const { conversationId, ...update } = command.payload;
+        const {
+          conversationId,
+          pinned,
+          snoozedUntil,
+          ...update
+        } = command.payload;
         const current = dependencies.store.conversation(conversationId);
         if (
           dependencies.backendProfileController.isExternalSelection(
@@ -447,10 +452,15 @@ export function createConversationCommandHandler(
           delete canonicalUpdate.model;
           delete canonicalUpdate.reasoningEffort;
         }
-        dependencies.store.updateConversation(
-          conversationId,
-          canonicalUpdate,
-        );
+        dependencies.store.updateConversation(conversationId, {
+          ...canonicalUpdate,
+          pinnedAt: pinned === undefined
+            ? current.pinnedAt ?? null
+            : pinned ? new Date().toISOString() : null,
+          snoozedUntil: snoozedUntil === undefined
+            ? current.snoozedUntil ?? null
+            : snoozedUntil,
+        });
         return "mutation";
       }
       case "conversation.archive":

@@ -211,6 +211,29 @@ describe("classic sidebar search", () => {
 
     expect(result.projects.some(({ id }) => id === second.id)).toBe(false);
   });
+
+  it("keeps pinned chats above newer unpinned chats", () => {
+    const pinned = conversation({
+      id: "pinned",
+      projectId: first.id,
+      pinnedAt: "2026-07-23T09:00:00.000Z",
+      updatedAt: "2026-07-23T09:00:00.000Z",
+    });
+    const newer = conversation({
+      id: "newer",
+      projectId: first.id,
+      updatedAt: "2026-07-23T12:00:00.000Z",
+    });
+
+    expect(classicSidebarSearch(
+      [first],
+      [newer, pinned],
+      "",
+    ).conversationsByProject.get(first.id)?.map(({ id }) => id)).toEqual([
+      pinned.id,
+      newer.id,
+    ]);
+  });
 });
 
 describe("work-first chat model", () => {
@@ -273,6 +296,32 @@ describe("work-first chat model", () => {
       { id: "in-progress", threads: ["working"] },
       { id: "recent", threads: ["completed", "idle"] },
     ]);
+  });
+
+  it("keeps actionable work above pins and pins above ordinary recency", () => {
+    const entries = [
+      conversation({
+        id: "newer",
+        projectId: "p",
+        updatedAt: "2026-07-23T12:00:00.000Z",
+      }),
+      conversation({
+        id: "pinned",
+        projectId: "p",
+        pinnedAt: "2026-07-23T09:00:00.000Z",
+        updatedAt: "2026-07-23T09:00:00.000Z",
+      }),
+      conversation({
+        id: "approval",
+        projectId: "p",
+        status: "needs-input",
+        attentionKind: "approval",
+      }),
+    ];
+
+    expect(sortActivityThreads(entries, null).map(({ conversation: entry }) => (
+      entry.id
+    ))).toEqual(["approval", "pinned", "newer"]);
   });
 
   it("tracks unseen completions without marking legacy, active, or visited work unread", () => {

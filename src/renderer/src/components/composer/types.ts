@@ -15,6 +15,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { ChatGoalControlProps } from "../ChatGoalControl";
 
 export interface ComposerProps {
@@ -36,6 +37,8 @@ export interface ComposerProps {
   skillsLoading: boolean;
   skillsError: string | null;
   promptContext?: string | null;
+  previewContextUrl?: string | null;
+  providerIdentityLabels?: ProviderIdentityLabels;
   goal?: ChatGoalControlProps | null;
   onSend: (
     message: string,

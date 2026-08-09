@@ -64,6 +64,8 @@ type SidebarProps = {
   onCreateConversation: (project: Project) => void;
   onOpenMultiSpawn: () => void;
   onRenameConversation: (conversation: Conversation, title: string) => void;
+  onPinConversation: (conversation: Conversation, pinned: boolean) => void;
+  onSnoozeConversation: (conversation: Conversation, until: string | null) => void;
   onArchiveConversation: (conversation: Conversation) => void;
   onSettleConversation: (conversation: Conversation) => void;
   onRestoreConversation: (conversation: Conversation) => void;
@@ -116,6 +118,8 @@ function SidebarView({
   onCreateConversation,
   onOpenMultiSpawn,
   onRenameConversation,
+  onPinConversation,
+  onSnoozeConversation,
   onArchiveConversation,
   onSettleConversation,
   onRestoreConversation,
@@ -138,6 +142,9 @@ function SidebarView({
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [historyVisible, setHistoryVisible] = useState(ACTIVITY_HISTORY_PAGE);
+  const [threadFilter, setThreadFilter] = useState<
+    "all" | "needs-you" | "working" | "unread" | "snoozed"
+  >("all");
   const sidebarRef = useRef<HTMLElement>(null);
   const navigationRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -236,6 +243,7 @@ function SidebarView({
   const activityThreads = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     const visibleProjectIds = new Set(visibleProjects.map(({ id }) => id));
+    const now = Date.now();
     return sortSidebarThreadViews(
       (snapshot?.conversations ?? [])
         .filter((conversation) => (
@@ -244,13 +252,28 @@ function SidebarView({
           || conversation.title.toLocaleLowerCase().includes(needle)
           || projectById.get(conversation.projectId)?.name.toLocaleLowerCase().includes(needle))
         ))
-        .map((conversation) => threadViewsById.get(conversation.id)!),
+        .map((conversation) => threadViewsById.get(conversation.id)!)
+        .filter((thread) => {
+          const snoozed = Boolean(
+            thread.conversation.snoozedUntil
+            && Date.parse(thread.conversation.snoozedUntil) > now,
+          );
+          if (threadFilter === "snoozed") return snoozed;
+          if (snoozed && !thread.needsAttention && thread.status !== "working") {
+            return false;
+          }
+          if (threadFilter === "needs-you") return thread.needsAttention;
+          if (threadFilter === "working") return thread.status === "working";
+          if (threadFilter === "unread") return thread.unread;
+          return true;
+        }),
     );
   }, [
     projectById,
     query,
     snapshot?.conversations,
     threadViewsById,
+    threadFilter,
     visibleProjects,
   ]);
   const { activeThreads, settledThreads, workSections } = useMemo(() => ({
@@ -379,6 +402,23 @@ function SidebarView({
     return (
       <div className="conversation-menu" role="menu">
         <button type="button" role="menuitem" onClick={() => { setRenameDraft(conversation.title); setRenaming(conversation.id); setConversationMenu(null); }}><Pencil size={13} />Rename</button>
+        <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onPinConversation(conversation, !conversation.pinnedAt); }}>
+          <MessageSquare size={13} />{conversation.pinnedAt ? "Unpin" : "Pin"}
+        </button>
+        {conversation.snoozedUntil && Date.parse(conversation.snoozedUntil) > Date.now() ? (
+          <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSnoozeConversation(conversation, null); }}>
+            <History size={13} />Unsnooze
+          </button>
+        ) : (
+          <>
+            <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSnoozeConversation(conversation, new Date(Date.now() + 60 * 60 * 1_000).toISOString()); }}>
+              <History size={13} />Snooze for 1 hour
+            </button>
+            <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSnoozeConversation(conversation, new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()); }}>
+              <History size={13} />Snooze for 1 day
+            </button>
+          </>
+        )}
         {isSplitConversation ? (
           <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onCloseConversationSplit(); }}>
             <Columns2 size={13} />Remove from split view
@@ -466,6 +506,7 @@ function SidebarView({
           >
             <span className="activity-thread-topline">
               <span className="activity-thread-title">{conversation.title}</span>
+              {conversation.pinnedAt && <span className="conversation-pin" aria-label="Pinned thread">•</span>}
               <time dateTime={conversation.updatedAt}>{formatRelativeTime(conversation.updatedAt)}</time>
             </span>
             {variant === "card" && (
@@ -567,6 +608,27 @@ function SidebarView({
           <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder={sidebarMode === "activity" ? "Search work" : "Search projects"} type="search" />
           {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
         </div>
+
+        {sidebarMode === "activity" && (
+          <div className="thread-filter-bar" role="group" aria-label="Filter conversations">
+            {([
+              ["all", "All"],
+              ["needs-you", "Needs you"],
+              ["working", "Running"],
+              ["unread", "Unread"],
+              ["snoozed", "Snoozed"],
+            ] as const).map(([id, label]) => (
+              <button
+                type="button"
+                aria-pressed={threadFilter === id}
+                onClick={() => setThreadFilter(id)}
+                key={id}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {activeRenameProject && (
           <form
@@ -695,6 +757,7 @@ function SidebarView({
                                     title={statusLabels[thread.status]}
                                   />
                                   <span className="conversation-title">{conversation.title}</span>
+                                  {conversation.pinnedAt && <span className="conversation-pin" aria-label="Pinned thread">•</span>}
                                   {splitConversationId === conversation.id && (
                                     <Columns2
                                       className="conversation-split-mark"

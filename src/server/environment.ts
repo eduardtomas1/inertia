@@ -151,6 +151,41 @@ export function providerChildEnvironment(
   return result;
 }
 
+/**
+ * Environment for installation/readiness probes that must not receive provider
+ * credentials. Only the executable path, process-launch essentials, locale,
+ * and temporary-directory settings are retained. Home/config paths, proxies,
+ * certificates, and provider-specific authentication variables are omitted.
+ */
+export function credentialFreeProviderEnvironment(
+  source: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const safeKeys = new Set([
+    "COMSPEC",
+    "LANG",
+    "PATH",
+    "PATHEXT",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TERM",
+    "TMP",
+    "TMPDIR",
+    "TZ",
+    "WINDIR",
+  ]);
+  const result: NodeJS.ProcessEnv = { NO_COLOR: "1" };
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    const normalized = key.toUpperCase();
+    if (
+      safeKeys.has(normalized)
+      || normalized.startsWith("LC_")
+    ) result[key] = value;
+  }
+  return result;
+}
+
 function copyMatchingEnvironment(
   target: NodeJS.ProcessEnv,
   source: NodeJS.ProcessEnv,

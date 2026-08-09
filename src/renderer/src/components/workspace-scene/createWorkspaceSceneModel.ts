@@ -443,6 +443,8 @@ export function createWorkspaceSceneModel({
       autoCollapseWorkLog: settings.autoCollapseWorkLog,
       showChangedFileSummaries: settings.showChangedFileSummaries,
       promptContext: workspaceTools.pendingDiffContext,
+      previewContextUrl: desktopTools.previewUrl || null,
+      providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")
         || detailLoading,
       sending: busyAction === "message.send",

@@ -47,6 +47,7 @@ describe("Settings external section targets", () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
+        getPlatform: () => "darwin",
         getPrivateConnectState: vi.fn(async () => state),
         onPrivateConnectState: vi.fn((listener) => {
           publishPrivateConnectState = listener;

@@ -666,6 +666,7 @@ export default function App(): React.JSX.Element {
       .catch(() => undefined);
   };
   useGlobalShortcuts({
+    keybindings: settings.keybindings,
     createConversation: () => createConversation(),
     mobileNavigation, suspended: multiSpawn.open,
     setActiveTool: sceneSetActiveTool,

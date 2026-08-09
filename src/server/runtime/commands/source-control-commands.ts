@@ -15,6 +15,7 @@ import type { RuntimeStore } from "../../database";
 import {
   commitChanges,
   createBranch,
+  createGitHubPullRequest,
   createWorktree,
   getPullRequestCreateUrl,
   getRepositoryStatus,
@@ -104,6 +105,7 @@ export function createSourceControlCommandHandler(
     "git.commit",
     "git.push",
     "git.pr.open",
+    "git.pr.create",
   ], async (socket, command) => {
     switch (command.type) {
       case "git.refresh": {
@@ -710,6 +712,30 @@ export function createSourceControlCommandHandler(
           path,
           command.requestId,
           async () => await getPullRequestCreateUrl(path),
+        );
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "external.url",
+            url,
+            label: "Open pull request",
+          },
+        });
+        return "handled";
+      }
+      case "git.pr.create": {
+        const path = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
+        const url = await dependencies.workspaceRuns.trackSourceControl(
+          "Create pull request",
+          command.payload.projectId,
+          command.payload.conversationId,
+          path,
+          command.requestId,
+          async () => await createGitHubPullRequest(path, command.payload),
         );
         dependencies.send(socket, {
           type: "request.result",

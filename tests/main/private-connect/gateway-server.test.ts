@@ -73,6 +73,8 @@ function host(): PrivateConnectGatewayHost {
 async function startServer(): Promise<{ server: PrivateConnectGatewayServer; address: { port: number; host: string } }> {
   const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-"));
   writeFileSync(join(root, "index.html"), "<html>ok</html>");
+  writeFileSync(join(root, "manifest.webmanifest"), "{}");
+  writeFileSync(join(root, "service-worker.js"), "self.addEventListener('fetch', () => undefined);");
   const server = new PrivateConnectGatewayServer({ host: host(), staticRoot: root, buildVersion: "0.0.24" });
   servers.push(server);
   return { server, address: await server.start() };
@@ -94,6 +96,13 @@ describe("Private Connect loopback gateway", () => {
     const root = await fetch(`http://${host}/`, { headers: { Host: host } });
     expect(root.status).toBe(200);
     expect(root.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(root.headers.get("content-security-policy")).toContain("worker-src 'self'");
+    const manifest = await fetch(`http://${host}/manifest.webmanifest`, { headers: { Host: host } });
+    expect(manifest.headers.get("content-type")).toContain("application/manifest+json");
+    const worker = await fetch(`http://${host}/service-worker.js`, { headers: { Host: host } });
+    expect(worker.headers.get("content-type")).toContain("text/javascript");
+    expect(worker.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    expect(worker.headers.get("content-security-policy")).not.toContain("default-src 'none'");
     const origin = `https://${host}`;
     const csrf = await fetch(`http://${host}/api/session/csrf`, { headers: { Host: host, Cookie: "__Host-inertia-private-connect=session-token" } });
     expect(await csrf.json()).toEqual({ csrf: session.csrf });

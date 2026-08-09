@@ -129,9 +129,10 @@ export function useInertiaConnection(): InertiaConnection {
         socket.addEventListener("message", (message) => {
           if (disposed || socketRef.current !== socket) return;
 
-          deliverDecodedServerEvent(
+          void deliverDecodedServerEvent(
             message.data,
             (receivedEvent) => {
+              if (disposed || socketRef.current !== socket) return;
               if (
                 receivedEvent.type === "runtime.event"
                 && receivedEvent.event.type === "agent.text"
@@ -233,8 +234,17 @@ export function useInertiaConnection(): InertiaConnection {
 
               notifyConnectionListeners(event, listenersRef.current);
             },
-            () => setError(UNREADABLE_RUNTIME_RESPONSE),
-          );
+            () => {
+              if (!disposed && socketRef.current === socket) {
+                setError(UNREADABLE_RUNTIME_RESPONSE);
+              }
+            },
+          ).catch((error: unknown) => {
+            if (disposed || socketRef.current !== socket) return;
+            console.error(error);
+            setError("Inertia could not apply a response from its local service.");
+            if (socket.readyState === WebSocket.OPEN) socket.close();
+          });
         });
 
         socket.addEventListener("close", () => {

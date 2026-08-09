@@ -7,17 +7,7 @@ import type {
   PrivateConnectPreset,
 } from "./private-connect/scopes";
 import type { PrivateConnectStateView } from "./private-connect/protocol";
-
-export const PRIVATE_CONNECT_IPC = {
-  getState: "inertia:private-connect-state",
-  stateChanged: "inertia:private-connect-state-changed",
-  setEnabled: "inertia:private-connect-set-enabled",
-  createInvitation: "inertia:private-connect-create-invitation",
-  approvePairing: "inertia:private-connect-approve-pairing",
-  denyPairing: "inertia:private-connect-deny-pairing",
-  revokeDevice: "inertia:private-connect-revoke-device",
-  updateDevice: "inertia:private-connect-update-device",
-} as const;
+export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
 
 export interface RuntimeConnection {
   websocketUrl: string;
@@ -91,6 +81,52 @@ export interface OpenProjectPathRequest {
   conversationId?: string;
   relativePath: string;
   action: ProjectPathAction;
+}
+
+export type DesktopNotificationKind =
+  | "completed"
+  | "approval"
+  | "input"
+  | "failed";
+
+export interface DesktopNotificationRequest {
+  conversationId: string;
+  kind: DesktopNotificationKind;
+}
+
+export interface AppProcessHealth {
+  pid: number;
+  cpuPercent: number;
+  memoryBytes: number;
+}
+
+export interface AppHealthSnapshot {
+  sampledAt: string;
+  totalMemoryBytes: number;
+  mainProcess: AppProcessHealth | null;
+  rendererProcess: AppProcessHealth | null;
+  runtimeProcess: AppProcessHealth | null;
+  runtimePhase: "idle" | "starting" | "ready" | "restarting" | "stopping" | "stopped";
+  databaseBytes: number;
+  cacheBytes: number;
+  temporaryAttachmentBytes: number;
+}
+
+export function parseDesktopNotificationRequest(
+  value: unknown,
+): DesktopNotificationRequest | null {
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 2
+    || !keys.every((key) => key === "conversationId" || key === "kind")
+    || typeof value.conversationId !== "string"
+    || !UUID_PATTERN.test(value.conversationId)
+    || !["completed", "approval", "input", "failed"].includes(
+      String(value.kind),
+    )
+  ) return null;
+  return value as unknown as DesktopNotificationRequest;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -266,6 +302,13 @@ export interface DesktopBridge {
   /** Internal file selection stays in the renderer; only scoped OS actions cross this bridge. */
   openProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
   openExternal: (url: string) => Promise<void>;
+  /** Shows a generic privacy-safe notification; prompt and output text are never accepted. */
+  showThreadNotification: (request: DesktopNotificationRequest) => Promise<boolean>;
+  onThreadNotificationActivated: (listener: (conversationId: string) => void) => () => void;
+  /** Samples aggregate local app resource use and fixed Inertia-owned storage paths. */
+  getAppHealth: () => Promise<AppHealthSnapshot>;
+  /** Clears Chromium's recreatable HTTP cache only; user data and provider state are untouched. */
+  clearAppCache: () => Promise<AppHealthSnapshot>;
   previewNavigate: (request: {
     ownerId: string;
     contextId: string;

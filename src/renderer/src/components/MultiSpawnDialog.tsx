@@ -342,7 +342,8 @@ export function MultiSpawnDialog({
     snapshot?.providers ?? [],
     snapshot?.backendProfiles ?? [],
     selection,
-  ), [snapshot?.backendProfiles, snapshot?.providers]);
+    settings.providerIdentityLabels,
+  ), [settings.providerIdentityLabels, snapshot?.backendProfiles, snapshot?.providers]);
 
   useEffect(() => {
     if (!open) {

@@ -10,6 +10,7 @@ export function ConversationPane({
   detail,
   prompt,
   busy,
+  offline,
   messagesRef,
   onScrollIntent,
   onPromptChange,
@@ -21,6 +22,7 @@ export function ConversationPane({
   detail: Detail | null;
   prompt: string;
   busy: boolean;
+  offline: boolean;
   messagesRef: React.RefObject<HTMLDivElement | null>;
   onScrollIntent: (followLatest: boolean) => void;
   onPromptChange: (value: string) => void;
@@ -39,7 +41,7 @@ export function ConversationPane({
               <h2>{detail.conversation.title}</h2>
             </div>
             {scopes.includes("private:stop") && detail.conversation.runId && (
-              <button type="button" onClick={onStopRun}>Stop run</button>
+              <button type="button" disabled={busy || offline} onClick={onStopRun}>Stop run</button>
             )}
           </div>
           <div
@@ -65,7 +67,7 @@ export function ConversationPane({
             <QuestionForm
               key={detail.inputRequestId}
               questions={detail.questions}
-              busy={busy}
+              busy={busy || offline}
               onAnswer={onAnswer}
             />
           )}
@@ -86,9 +88,9 @@ export function ConversationPane({
                 value={prompt}
                 onChange={(event) => onPromptChange(event.target.value)}
                 placeholder="Send a supervised prompt"
-                disabled={busy}
+                disabled={busy || offline}
               />
-              <button type="submit" disabled={busy || !prompt.trim()}>Send</button>
+              <button type="submit" disabled={busy || offline || !prompt.trim()}>Send</button>
             </form>
           )}
         </>

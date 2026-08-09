@@ -21,6 +21,8 @@ import {
   type WorkspaceRun,
 } from "../../shared/contracts";
 import { officiallyAllowsModelSwitchWithinSession } from "../../shared/continuation-policy";
+import { parseProviderIdentityLabels } from "../../shared/provider-identities";
+import { parseAppKeybindings } from "../../shared/keybindings";
 import {
   continuationIdentityForSelection,
   continuationIdentitySchema,
@@ -190,6 +192,8 @@ export function conversationFromRow(row: ConversationRow): Conversation {
     settledAt: row.settled_at,
     completedAt: row.completed_at,
     lastViewedAt: row.last_viewed_at,
+    pinnedAt: row.pinned_at,
+    snoozedUntil: row.snoozed_until,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -243,12 +247,30 @@ export function conversationShellFromRow(
     settledAt: conversation.settledAt,
     completedAt: conversation.completedAt,
     lastViewedAt: conversation.lastViewedAt,
+    pinnedAt: conversation.pinnedAt,
+    snoozedUntil: conversation.snoozedUntil,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     latestTurn: conversationTurnSummary(latestTurn),
     pendingApproval: false,
     pendingInput: false,
   };
+}
+
+function providerIdentityLabelsFromJson(value: string): AppSettings["providerIdentityLabels"] {
+  try {
+    return parseProviderIdentityLabels(JSON.parse(value) as unknown);
+  } catch {
+    return {};
+  }
+}
+
+function keybindingsFromJson(value: string): AppSettings["keybindings"] {
+  try {
+    return parseAppKeybindings(JSON.parse(value) as unknown);
+  } catch {
+    return parseAppKeybindings(null);
+  }
 }
 
 export function settingsFromState(state: StateRow): AppSettings {
@@ -275,6 +297,11 @@ export function settingsFromState(state: StateRow): AppSettings {
     projectGrouping: state.project_grouping,
     autoOpenPlan: state.auto_open_plan === 1,
     confirmDestructiveActions: state.confirm_destructive_actions === 1,
+    desktopNotifications: state.desktop_notifications === 1,
+    providerIdentityLabels: providerIdentityLabelsFromJson(
+      state.provider_identity_labels_json,
+    ),
+    keybindings: keybindingsFromJson(state.keybindings_json),
     defaultReasoningEffort: state.default_reasoning_effort,
     defaultInteractionMode: state.default_interaction_mode,
     codexBinaryPath: state.codex_binary_path,

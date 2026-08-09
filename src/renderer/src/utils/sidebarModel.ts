@@ -31,7 +31,11 @@ export function classicSidebarSearch(
     activeByProject.set(conversation.projectId, current);
   }
   for (const current of activeByProject.values()) {
-    current.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    current.sort((left, right) => (
+      Number(Boolean(right.pinnedAt)) - Number(Boolean(left.pinnedAt))
+      || (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "")
+      || right.updatedAt.localeCompare(left.updatedAt)
+    ));
   }
 
   const visibleProjects: Project[] = [];
@@ -228,6 +232,8 @@ export function sortSidebarThreadViews(
     .sort((a, b) => (
       Number(a.settled) - Number(b.settled)
       || Number(b.needsAttention) - Number(a.needsAttention)
+      || Number(Boolean(b.conversation.pinnedAt))
+        - Number(Boolean(a.conversation.pinnedAt))
       || statusPriority[a.status] - statusPriority[b.status]
       || Number(b.unread) - Number(a.unread)
       || b.conversation.updatedAt.localeCompare(a.conversation.updatedAt)

@@ -4,6 +4,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  credentialFreeProviderEnvironment,
   executableCandidates,
   expandHomePath,
   loginShellEnvironment,
@@ -327,6 +328,37 @@ describe.sequential("provider environment discovery", () => {
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(
       "INERTIA_LOGIN_SHELL_MARKER",
     );
+  });
+
+  it("builds credential-free installation probe environments", () => {
+    const environment = credentialFreeProviderEnvironment({
+      PATH: "/usr/bin:/bin",
+      PATHEXT: ".EXE;.CMD",
+      SYSTEMROOT: "C:\\Windows",
+      LANG: "en_US.UTF-8",
+      LC_MESSAGES: "en_US.UTF-8",
+      HOME: "/private/home",
+      APPDATA: "C:\\private\\appdata",
+      HTTPS_PROXY: "https://user:password@proxy.example",
+      NODE_EXTRA_CA_CERTS: "/private/provider-ca.pem",
+      OPENAI_API_KEY: "openai-secret",
+      ANTHROPIC_API_KEY: "anthropic-secret",
+    });
+
+    expect(environment).toMatchObject({
+      PATH: "/usr/bin:/bin",
+      PATHEXT: ".EXE;.CMD",
+      SYSTEMROOT: "C:\\Windows",
+      LANG: "en_US.UTF-8",
+      LC_MESSAGES: "en_US.UTF-8",
+      NO_COLOR: "1",
+    });
+    expect(environment).not.toHaveProperty("HOME");
+    expect(environment).not.toHaveProperty("APPDATA");
+    expect(environment).not.toHaveProperty("HTTPS_PROXY");
+    expect(environment).not.toHaveProperty("NODE_EXTRA_CA_CERTS");
+    expect(environment).not.toHaveProperty("OPENAI_API_KEY");
+    expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
   });
 
   it("expands Codex's leading home shorthand before a shell-free launch", () => {

@@ -27,6 +27,7 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 const MUTATED_ENVIRONMENT_KEYS = [
   "CODEX_HOME",
   "HOME",
+  "OPENAI_API_KEY",
   "PATH",
   "SHELL",
   "ZDOTDIR",
@@ -237,6 +238,48 @@ process.exit(2);
       version: "2.3.1",
       authState: "authenticated",
       canRun: true,
+    });
+  });
+
+  it("checks installation readiness without probing or forwarding authentication", async () => {
+    const root = temporaryRoot();
+    const executable = join(root, "codex");
+    const probes: string[][] = [];
+    process.env.OPENAI_API_KEY = "must-not-reach-readiness-probe";
+
+    const detection = await detectProvider("codex", {
+      command: "codex",
+      cwd: root,
+      probeAuthentication: false,
+    }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_executable, args, environment) => {
+        probes.push([...args]);
+        expect(environment.env).not.toHaveProperty("OPENAI_API_KEY");
+        expect(environment.env).not.toHaveProperty("HOME");
+        expect(environment.env).not.toHaveProperty("HTTPS_PROXY");
+        return {
+          started: true,
+          timedOut: false,
+          exitCode: 0,
+          output: args[0] === "--version"
+            ? "codex 2.3.1"
+            : "codex app-server - Run the app server",
+        };
+      },
+    });
+
+    expect(probes).toEqual([
+      ["--version"],
+      ["app-server", "--help"],
+    ]);
+    expect(detection).toMatchObject({
+      available: true,
+      version: "2.3.1",
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      statusMessage: "Codex is installed; authentication was not checked",
     });
   });
 

@@ -11,6 +11,11 @@ import type {
   ProviderMaintenanceStatus,
 } from "../provider-maintenance";
 import type { ProviderId } from "../provider";
+import type { ProviderIdentityLabels } from "../provider-identities";
+import {
+  DEFAULT_APP_KEYBINDINGS,
+  type AppKeybindings,
+} from "../keybindings";
 import type { AgentTurnStatus } from "../turn-lifecycle";
 
 export type { ProviderId } from "../provider";
@@ -134,6 +139,11 @@ export interface AppSettings {
   projectGrouping: ProjectGroupingMode;
   autoOpenPlan: boolean;
   confirmDestructiveActions: boolean;
+  desktopNotifications: boolean;
+  /** Local display aliases only; provider authentication remains provider-owned. */
+  providerIdentityLabels: ProviderIdentityLabels;
+  /** App-local Cmd/Ctrl chords; the primary modifier is never remapped. */
+  keybindings: AppKeybindings;
   defaultReasoningEffort: string;
   defaultInteractionMode: InteractionMode;
   /** Empty uses automatic discovery; otherwise an explicitly validated Codex binary or shim. */
@@ -179,6 +189,10 @@ export interface Conversation {
   settledAt: string | null;
   completedAt: string | null;
   lastViewedAt: string | null;
+  /** Optional only for snapshots created before thread organization shipped. */
+  pinnedAt?: string | null;
+  /** Optional only for snapshots created before thread organization shipped. */
+  snoozedUntil?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -268,6 +282,9 @@ export const defaultSettings: AppSettings = {
   projectGrouping: "separate",
   autoOpenPlan: false,
   confirmDestructiveActions: true,
+  desktopNotifications: true,
+  providerIdentityLabels: {},
+  keybindings: DEFAULT_APP_KEYBINDINGS,
   defaultReasoningEffort: "",
   defaultInteractionMode: "build",
   codexBinaryPath: "",

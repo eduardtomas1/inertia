@@ -51,6 +51,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { shouldFollowTimeline } from "../utils/responseTimeline";
 import { revealAgentInputRequest } from "../utils/agentInputNavigation";
@@ -110,6 +111,8 @@ type ChatWorkspaceProps = {
   autoCollapseWorkLog: boolean;
   showChangedFileSummaries: boolean;
   promptContext?: string | null;
+  previewContextUrl?: string | null;
+  providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
   sending: boolean;
   onAddProject: () => void;
@@ -195,6 +198,8 @@ export function ChatWorkspace({
   autoCollapseWorkLog,
   showChangedFileSummaries,
   promptContext,
+  previewContextUrl,
+  providerIdentityLabels,
   loading,
   sending,
   onAddProject,
@@ -674,6 +679,8 @@ export function ChatWorkspace({
           skillsError={skillsError}
           goal={goalControl}
           promptContext={promptContext}
+          previewContextUrl={previewContextUrl}
+          providerIdentityLabels={providerIdentityLabels}
           disabled={!conversation}
           sending={sending}
           running={conversation.status === "running" || conversation.status === "needs-input"}

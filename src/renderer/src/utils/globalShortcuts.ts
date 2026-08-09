@@ -7,6 +7,7 @@ export type WorkspaceShortcutTool =
   | "preview";
 
 export interface GlobalShortcutActions {
+  keybindings: AppKeybindings;
   createConversation: () => void;
   mobileNavigation: boolean;
   suspended: boolean;
@@ -51,36 +52,38 @@ export function installGlobalShortcuts(
       ownedKeyUps.delete(key);
       return;
     }
-    const shortcutKey = ["b", "j", "k", "n"].includes(key);
+    if (event.altKey || event.shiftKey) return;
+    const shortcut = (Object.keys(actions.current.keybindings) as AppShortcutAction[])
+      .find((action) => actions.current.keybindings[action] === key);
     const ownerDocument = typeof Node !== "undefined" && event.target instanceof Node
       ? event.target.ownerDocument
       : typeof document !== "undefined" ? document : null;
     const modalOpen = Boolean(ownerDocument?.querySelector(
       '[role="dialog"][aria-modal="true"]',
     ));
-    if (shortcutKey && (actions.current.suspended || modalOpen)) {
+    if (shortcut && (actions.current.suspended || modalOpen)) {
       event.preventDefault();
       event.stopPropagation();
       ownedKeyUps.add(key);
       return;
     }
-    if (key === "k") {
+    if (shortcut === "search") {
       event.preventDefault();
       event.stopPropagation();
       ownedKeyUps.add(key);
       actions.current.setPaletteOpen(true);
-    } else if (key === "n") {
+    } else if (shortcut === "new-chat") {
       event.preventDefault();
       event.stopPropagation();
       ownedKeyUps.add(key);
       actions.current.createConversation();
-    } else if (key === "j") {
+    } else if (shortcut === "toggle-terminal") {
       event.preventDefault();
       event.stopPropagation();
       ownedKeyUps.add(key);
       actions.current.setActiveTool((tool) =>
         tool === "terminal" ? null : "terminal");
-    } else if (key === "b") {
+    } else if (shortcut === "toggle-sidebar") {
       event.preventDefault();
       event.stopPropagation();
       ownedKeyUps.add(key);
@@ -106,3 +109,7 @@ export function installGlobalShortcuts(
     target.removeEventListener("keyup", handleKeyUp, true);
   };
 }
+import type {
+  AppKeybindings,
+  AppShortcutAction,
+} from "@shared/keybindings";

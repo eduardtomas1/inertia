@@ -3,7 +3,7 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type {
   AppSettings,
   Conversation,
@@ -38,7 +38,6 @@ import {
   type WorkspaceSceneProps,
 } from "./WorkspaceScene";
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
-import { resultEvent } from "../lib/runtimeCommands";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
 import {
   loadCommitDialog,
@@ -51,6 +50,10 @@ const CommitDialog = lazy(async () => ({
 }));
 const MultiSpawnDialog = lazy(async () => ({
   default: (await loadMultiSpawnDialog()).MultiSpawnDialog,
+}));
+const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
+const ThreadNotifications = lazy(async () => ({
+  default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
 }));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -183,6 +186,7 @@ export function AppLayout({
   providerAuth,
   actions,
 }: AppLayoutProps): React.JSX.Element {
+  const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
   const {
     sidebarOpen,
     setSidebarOpen,
@@ -226,6 +230,18 @@ export function AppLayout({
       void actions.run("conversation.update", {
         type: "conversation.update",
         payload: { conversationId: thread.id, title },
+      }).catch(() => undefined);
+    },
+    pinConversation: (thread: Conversation, pinned: boolean) => {
+      void actions.run("conversation.update", {
+        type: "conversation.update",
+        payload: { conversationId: thread.id, pinned },
+      }).catch(() => undefined);
+    },
+    snoozeConversation: (thread: Conversation, snoozedUntil: string | null) => {
+      void actions.run("conversation.update", {
+        type: "conversation.update",
+        payload: { conversationId: thread.id, snoozedUntil },
       }).catch(() => undefined);
     },
     archiveConversation: (thread: Conversation) => {
@@ -320,6 +336,15 @@ export function AppLayout({
       data-document-active={documentActive ? "true" : "false"}
       style={shellStyle}
     >
+      {settings.desktopNotifications && (
+        <Suspense fallback={null}>
+          <ThreadNotifications
+            snapshot={connection.snapshot}
+            documentActive={documentActive}
+            onActivate={actions.selectConversation}
+          />
+        </Suspense>
+      )}
       {(mobileNavigation || !sidebarCollapsed) && (
         <Sidebar
           snapshot={connection.snapshot}
@@ -338,6 +363,8 @@ export function AppLayout({
           onCreateConversation={sidebarActions.createConversation}
           onOpenMultiSpawn={sidebarActions.openMultiSpawn}
           onRenameConversation={sidebarActions.renameConversation}
+          onPinConversation={sidebarActions.pinConversation}
+          onSnoozeConversation={sidebarActions.snoozeConversation}
           onArchiveConversation={sidebarActions.archiveConversation}
           onSettleConversation={sidebarActions.settleConversation}
           onRestoreConversation={sidebarActions.restoreConversation}
@@ -439,17 +466,7 @@ export function AppLayout({
               })}
             onOpenPullRequest={() => {
               if (!project) return;
-              void actions.run("git.pr.open", {
-                type: "git.pr.open",
-                payload: {
-                  projectId: project.id,
-                  conversationId: conversation?.id,
-                },
-              }).then(resultEvent).then((event) => {
-                if (event.result.kind === "external.url") {
-                  return window.inertia.openExternal(event.result.url);
-                }
-              }).catch(() => undefined);
+              setPullRequestDialogOpen(true);
             }}
             onPull={() => {
               if (!project) return;
@@ -494,6 +511,20 @@ export function AppLayout({
               await actions.commit(...args);
               setCommitDialogOpen(false);
             }}
+          />
+        </Suspense>
+      )}
+      {pullRequestDialogOpen && project && (
+        <Suspense fallback={null}>
+          <PullRequestDialog
+            open
+            initialTitle={conversation?.title ?? gitStatus?.branch ?? "Pull request"}
+            busy={busyAction === "git.pr.create" || busyAction === "git.pr.open"}
+            projectId={project.id}
+            conversationId={conversation?.id}
+            forge={gitStatus?.pullRequest?.forge ?? "github"}
+            run={actions.run}
+            onClose={() => setPullRequestDialogOpen(false)}
           />
         </Suspense>
       )}

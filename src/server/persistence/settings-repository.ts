@@ -5,6 +5,8 @@ import {
 import { settingsFromState } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { StateRow } from "./rows";
+import { parseProviderIdentityLabels } from "../../shared/provider-identities";
+import { parseAppKeybindings } from "../../shared/keybindings";
 
 type SettingsPersistenceContext = Pick<PersistenceContext, "database">;
 
@@ -29,7 +31,10 @@ export class SettingsRepository {
         workspace_startup_surface = ?, default_code_wrap = ?,
         auto_collapse_work_log = ?, show_changed_file_summaries = ?,
         sidebar_mode = ?, project_grouping = ?, auto_open_plan = ?,
-        confirm_destructive_actions = ?, default_reasoning_effort = ?,
+        confirm_destructive_actions = ?, desktop_notifications = ?,
+        provider_identity_labels_json = ?,
+        keybindings_json = ?,
+        default_reasoning_effort = ?,
         default_interaction_mode = ?,
         codex_binary_path = ?
       WHERE id = 1
@@ -57,6 +62,9 @@ export class SettingsRepository {
       next.projectGrouping,
       Number(next.autoOpenPlan),
       Number(next.confirmDestructiveActions),
+      Number(next.desktopNotifications),
+      JSON.stringify(parseProviderIdentityLabels(next.providerIdentityLabels)),
+      JSON.stringify(parseAppKeybindings(next.keybindings)),
       next.defaultReasoningEffort,
       next.defaultInteractionMode,
       next.codexBinaryPath,

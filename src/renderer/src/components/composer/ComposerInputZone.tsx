@@ -37,6 +37,9 @@ export interface ComposerInputZoneProps {
   onRunRouteRepair: () => Promise<void>;
   promptContext?: string | null;
   onClearPromptContext?: () => void;
+  previewContextUrl?: string | null;
+  previewContextSelected: boolean;
+  onTogglePreviewContext: () => void;
   attachments: ChatAttachment[];
   onRemoveAttachment: (attachment: ChatAttachment) => void;
   pendingRoute: PendingModelRoute | null;
@@ -75,6 +78,9 @@ export function ComposerInputZone({
   onRunRouteRepair,
   promptContext,
   onClearPromptContext,
+  previewContextUrl,
+  previewContextSelected,
+  onTogglePreviewContext,
   attachments,
   onRemoveAttachment,
   pendingRoute,
@@ -204,6 +210,23 @@ export function ComposerInputZone({
               <X size={12} />
             </button>
           </div>
+        )}
+        {previewContextUrl && (
+          <button
+            type="button"
+            className={clsx(
+              "composer-preview-context",
+              previewContextSelected && "is-selected",
+            )}
+            aria-pressed={previewContextSelected}
+            onClick={onTogglePreviewContext}
+          >
+            <span>
+              <strong>{previewContextSelected ? "Preview attached" : "Attach current preview"}</strong>
+              <small>{previewContextUrl}</small>
+            </span>
+            <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
+          </button>
         )}
         <ComposerAttachmentList
           attachments={attachments}

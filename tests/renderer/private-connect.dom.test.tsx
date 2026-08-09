@@ -40,6 +40,29 @@ afterEach(() => {
 });
 
 describe("Private Connect browser lifecycle", () => {
+  it("shows an explicit shell-only offline state without claiming transcript persistence", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("network unavailable");
+    }));
+    render(<App initialPairingFragment={null} />);
+
+    expect(screen.getByRole("heading", { name: "Your Inertia computer is offline" })).toBeInTheDocument();
+    expect(screen.getByText(/Conversations and API responses are never stored/iu)).toBeInTheDocument();
+  });
+
+  it("opens an authorized conversation from a content-free deep link", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    render(
+      <App
+        initialPairingFragment={null}
+        initialConversationId="33333333-3333-4333-8333-333333333333"
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Conversation" })).toBeInTheDocument());
+  });
+
   it("surfaces a successful response with a malformed projection", async () => {
     validStateProjection = false;
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));

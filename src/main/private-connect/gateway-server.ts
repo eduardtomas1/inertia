@@ -194,6 +194,7 @@ export class PrivateConnectGatewayServer {
     const hostAllowed = this.validHost(requestHost);
     const headers = securityHeaders(
       parsedRequestUrl?.pathname === "/" || parsedRequestUrl?.pathname.endsWith(".html") === true,
+      parsedRequestUrl?.pathname === "/service-worker.js",
       hostAllowed ? requestHost!.toLowerCase() : null,
     );
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
@@ -636,14 +637,20 @@ function normalizeNetworkLabel(value: string | string[] | undefined): string | n
   return sanitizePrivateConnectLabel(candidate, 120);
 }
 
-function securityHeaders(html: boolean, validatedHost: string | null): Record<string, string> {
+function securityHeaders(
+  html: boolean,
+  serviceWorker: boolean,
+  validatedHost: string | null,
+): Record<string, string> {
   const socketSources = validatedHost === null
     ? ""
     : ` wss://${validatedHost} ws://${validatedHost}`;
   return {
     "Content-Security-Policy": html
-      ? `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'${socketSources}; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
-      : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+      ? `default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'${socketSources}; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
+      : serviceWorker
+        ? "default-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'"
+        : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "Cross-Origin-Resource-Policy": "same-origin",
@@ -658,6 +665,7 @@ function contentType(path: string): string {
     case ".js": return "text/javascript; charset=utf-8";
     case ".css": return "text/css; charset=utf-8";
     case ".json": return "application/manifest+json; charset=utf-8";
+    case ".webmanifest": return "application/manifest+json; charset=utf-8";
     case ".svg": return "image/svg+xml";
     case ".png": return "image/png";
     default: return "application/octet-stream";

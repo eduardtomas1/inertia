@@ -26,6 +26,12 @@ consumed when pairing starts. The client removes the fragment before rendering
 or making another request. Create a new link if it expires or is accidentally
 shared.
 
+The browser client can be installed as a PWA. Offline installation caches only
+the app shell, icons, and manifest—not conversations or API responses. An open
+tab can keep already-rendered information in memory during a brief disconnect,
+but remote actions are disabled until the private host reconnects and a cold
+offline launch contains no workspace data.
+
 ## Access levels
 
 - Monitor can read sanitized projects, conversations, bounded transcripts, and

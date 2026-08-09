@@ -19,6 +19,8 @@ export interface PromptStashEntry {
   content: string;
   createdAt: string;
   route: PromptStashRoute;
+  recurrence?: "daily" | "weekly";
+  nextDueAt?: string;
 }
 
 export interface PromptStashStorage {
@@ -77,11 +79,20 @@ function parsedEntry(value: unknown): PromptStashEntry | null {
     || !Number.isFinite(Date.parse(entry.createdAt))
     || !route
   ) return null;
+  const recurrence = entry.recurrence === "daily" || entry.recurrence === "weekly"
+    ? entry.recurrence
+    : undefined;
+  const nextDueAt = recurrence
+    && typeof entry.nextDueAt === "string"
+    && Number.isFinite(Date.parse(entry.nextDueAt))
+    ? entry.nextDueAt
+    : undefined;
   return {
     id: entry.id,
     content: entry.content,
     createdAt: entry.createdAt,
     route,
+    ...(recurrence && nextDueAt ? { recurrence, nextDueAt } : {}),
   };
 }
 
@@ -190,4 +201,35 @@ export function removePromptStashEntry(
   entryId: string,
 ): PromptStashEntry[] {
   return storageBoundedEntries(entries).filter(({ id }) => id !== entryId);
+}
+
+export function setPromptStashRecurrence(
+  entries: readonly PromptStashEntry[],
+  entryId: string,
+  recurrence: PromptStashEntry["recurrence"],
+  now = Date.now(),
+): PromptStashEntry[] {
+  const interval = recurrence === "daily"
+    ? 24 * 60 * 60 * 1_000
+    : recurrence === "weekly" ? 7 * 24 * 60 * 60 * 1_000 : 0;
+  return storageBoundedEntries(entries.map((entry) => entry.id === entryId
+    ? recurrence
+      ? {
+          ...entry,
+          recurrence,
+          nextDueAt: new Date(now + interval).toISOString(),
+        }
+      : (({ recurrence: _recurrence, nextDueAt: _nextDueAt, ...rest }) => rest)(entry)
+    : entry));
+}
+
+export function advanceRecurringPrompt(
+  entries: readonly PromptStashEntry[],
+  entryId: string,
+  now = Date.now(),
+): PromptStashEntry[] {
+  const entry = entries.find(({ id }) => id === entryId);
+  return entry?.recurrence
+    ? setPromptStashRecurrence(entries, entryId, entry.recurrence, now)
+    : removePromptStashEntry(entries, entryId);
 }

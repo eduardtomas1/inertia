@@ -69,6 +69,8 @@ export class ConversationRepository {
       settledAt: null,
       completedAt: null,
       lastViewedAt: now,
+      pinnedAt: null,
+      snoozedUntil: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -79,12 +81,14 @@ export class ConversationRepository {
           id, project_id, title, provider_id, model_selection_json, continuation_identity_json,
           model, reasoning_effort, interaction_mode,
           access_mode, status, attention_kind, branch, worktree_path, provider_session_id,
-          archived_at, settled_at, completed_at, last_viewed_at, created_at, updated_at
+          archived_at, settled_at, completed_at, last_viewed_at, pinned_at, snoozed_until,
+          created_at, updated_at
         ) VALUES (
           @id, @projectId, @title, @providerId, @modelSelectionJson, NULL,
           @model, @reasoningEffort, @interactionMode,
           @accessMode, @status, @attentionKind, @branch, @worktreePath, @providerSessionId,
-          @archivedAt, @settledAt, @completedAt, @lastViewedAt, @createdAt, @updatedAt
+          @archivedAt, @settledAt, @completedAt, @lastViewedAt, @pinnedAt, @snoozedUntil,
+          @createdAt, @updatedAt
         )
       `).run({ ...conversation, modelSelectionJson });
       this.context.touchProject(projectId, now);
@@ -128,7 +132,7 @@ export class ConversationRepository {
 
   update(
     conversationId: string,
-    update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind">>,
+    update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>,
   ): Conversation {
     const current = conversationFromRow(this.context.requireConversation(conversationId));
     const requestedProviderId = update.providerId ?? current.providerId;
@@ -230,6 +234,7 @@ export class ConversationRepository {
         provider_session_id = @providerSessionId, status = @status,
         attention_kind = @attentionKind, settled_at = @settledAt,
         completed_at = @completedAt, last_viewed_at = @lastViewedAt,
+        pinned_at = @pinnedAt, snoozed_until = @snoozedUntil,
         updated_at = @updatedAt
       WHERE id = @id
     `).run({ ...next, modelSelectionJson, continuationIdentityJson });

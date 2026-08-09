@@ -443,6 +443,31 @@ describe("client command contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts only complete, unique app keybindings", () => {
+    const requestId = crypto.randomUUID();
+    expect(clientCommandSchema.safeParse({
+      type: "settings.update",
+      requestId,
+      payload: { keybindings: {
+        search: "u",
+        "new-chat": "y",
+        "toggle-sidebar": "g",
+        "toggle-terminal": "h",
+      } },
+    }).success).toBe(true);
+    for (const keybindings of [
+      { search: "k" },
+      { search: "k", "new-chat": "k", "toggle-sidebar": "b", "toggle-terminal": "j" },
+      { search: "x", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j" },
+    ]) {
+      expect(clientCommandSchema.safeParse({
+        type: "settings.update",
+        requestId,
+        payload: { keybindings },
+      }).success).toBe(false);
+    }
+  });
+
   it("accepts provider authentication terminals at their dimension boundaries", () => {
     for (const [cols, rows] of [[40, 10], [240, 80]] as const) {
       const command = {

@@ -26,6 +26,7 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 
 const MUTATED_ENVIRONMENT_KEYS = [
   "CODEX_HOME",
+  "CODEX_INSTALL_DIR",
   "HOME",
   "OPENAI_API_KEY",
   "PATH",
@@ -246,18 +247,30 @@ process.exit(2);
     const executable = join(root, "codex");
     const probes: string[][] = [];
     process.env.OPENAI_API_KEY = "must-not-reach-readiness-probe";
+    process.env.CODEX_HOME = join(root, "custom-codex-home");
+    process.env.CODEX_INSTALL_DIR = join(root, "custom-codex-install");
 
     const detection = await detectProvider("codex", {
       command: "codex",
       cwd: root,
       probeAuthentication: false,
+      refreshEnvironment: true,
     }, {
-      executableCandidates: async () => [executable],
+      executableCandidates: async (_command, environment) => {
+        expect(environment.env).toMatchObject({
+          CODEX_HOME: process.env.CODEX_HOME,
+          CODEX_INSTALL_DIR: process.env.CODEX_INSTALL_DIR,
+        });
+        expect(environment.env).not.toHaveProperty("OPENAI_API_KEY");
+        return [executable];
+      },
       probeProcess: async (_executable, args, environment) => {
         probes.push([...args]);
         expect(environment.env).not.toHaveProperty("OPENAI_API_KEY");
         expect(environment.env).not.toHaveProperty("HOME");
         expect(environment.env).not.toHaveProperty("HTTPS_PROXY");
+        expect(environment.env).not.toHaveProperty("CODEX_HOME");
+        expect(environment.env).not.toHaveProperty("CODEX_INSTALL_DIR");
         return {
           started: true,
           timedOut: false,

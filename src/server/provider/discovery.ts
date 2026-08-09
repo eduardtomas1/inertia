@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import {
   credentialFreeProviderEnvironment,
+  environmentValue,
   executableCandidates,
   providerChildEnvironment,
   providerEnvironment,
@@ -218,6 +219,25 @@ export async function detectProvider(
       : credentialFreeProviderEnvironment(discoveredEnvironment.env),
     pathEntries: discoveredEnvironment.pathEntries,
   };
+  const candidateEnvironment: ProviderEnvironment = !probeAuthentication
+    && providerId === "codex"
+    ? {
+        env: {
+          ...environment.env,
+          ...Object.fromEntries(
+            ["CODEX_HOME", "CODEX_INSTALL_DIR"].flatMap((name) => {
+              const value = environmentValue(
+                discoveredEnvironment.env,
+                name,
+                process.platform,
+              );
+              return value ? [[name, value]] : [];
+            }),
+          ),
+        },
+        pathEntries: environment.pathEntries,
+      }
+    : environment;
   const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
     ? [command, "cursor-agent"]
     : [command];
@@ -225,9 +245,13 @@ export async function detectProvider(
     && process.platform === "win32"
     && command.toLocaleLowerCase("en-US") === PROVIDER_INFO.codex.command
     && dependencies.executableCandidates === undefined
-    ? await windowsCodexExecutableCandidates(environment, cwd)
+    ? await windowsCodexExecutableCandidates(candidateEnvironment, cwd)
     : [...new Set((await Promise.all(candidateCommands.map(
-      async (candidate) => await resolveCandidates(candidate, environment, cwd),
+      async (candidate) => await resolveCandidates(
+        candidate,
+        candidateEnvironment,
+        cwd,
+      ),
     ))).flat())];
   if (candidates.length === 0) {
     return {

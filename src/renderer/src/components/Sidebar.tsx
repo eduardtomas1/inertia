@@ -18,6 +18,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   Pencil,
+  Pin,
   Search,
   Settings,
   SquarePen,
@@ -32,6 +33,7 @@ import { formatRelativeTime } from "../lib/format";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { useSnoozeClock } from "../hooks/useSnoozeClock";
 import {
   buildLogicalProjectGroups,
   classicSidebarSearch,
@@ -46,6 +48,7 @@ import { IconButton, LoadingMark } from "./ui";
 import { loadMultiSpawnDialog, loadSettingsView } from "./lazySurfaceLoaders";
 
 const ACTIVITY_HISTORY_PAGE = 10;
+const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
 
 type SidebarProps = {
   snapshot: AppSnapshot | null;
@@ -145,6 +148,8 @@ function SidebarView({
   const [threadFilter, setThreadFilter] = useState<
     "all" | "needs-you" | "working" | "unread" | "snoozed"
   >("all");
+  const conversations = snapshot?.conversations ?? EMPTY_CONVERSATIONS;
+  const snoozeNow = useSnoozeClock(conversations);
   const sidebarRef = useRef<HTMLElement>(null);
   const navigationRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -213,10 +218,11 @@ function SidebarView({
   const classicSearch = useMemo(
     () => classicSidebarSearch(
       snapshot?.projects ?? [],
-      snapshot?.conversations ?? [],
+      conversations,
       query,
+      snoozeNow,
     ),
-    [query, snapshot?.conversations, snapshot?.projects],
+    [conversations, query, snapshot?.projects, snoozeNow],
   );
   const visibleProjects = classicSearch.projects;
 
@@ -242,21 +248,18 @@ function SidebarView({
   );
   const activityThreads = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
-    const visibleProjectIds = new Set(visibleProjects.map(({ id }) => id));
-    const now = Date.now();
     return sortSidebarThreadViews(
-      (snapshot?.conversations ?? [])
+      conversations
         .filter((conversation) => (
-        visibleProjectIds.has(conversation.projectId)
-        && (!needle
+        !needle
           || conversation.title.toLocaleLowerCase().includes(needle)
-          || projectById.get(conversation.projectId)?.name.toLocaleLowerCase().includes(needle))
+          || projectById.get(conversation.projectId)?.name.toLocaleLowerCase().includes(needle)
         ))
         .map((conversation) => threadViewsById.get(conversation.id)!)
         .filter((thread) => {
           const snoozed = Boolean(
             thread.conversation.snoozedUntil
-            && Date.parse(thread.conversation.snoozedUntil) > now,
+            && Date.parse(thread.conversation.snoozedUntil) > snoozeNow,
           );
           if (threadFilter === "snoozed") return snoozed;
           if (snoozed && !thread.needsAttention && thread.status !== "working") {
@@ -271,10 +274,10 @@ function SidebarView({
   }, [
     projectById,
     query,
-    snapshot?.conversations,
+    conversations,
+    snoozeNow,
     threadViewsById,
     threadFilter,
-    visibleProjects,
   ]);
   const { activeThreads, settledThreads, workSections } = useMemo(() => ({
     activeThreads: activityThreads.filter(
@@ -506,7 +509,7 @@ function SidebarView({
           >
             <span className="activity-thread-topline">
               <span className="activity-thread-title">{conversation.title}</span>
-              {conversation.pinnedAt && <span className="conversation-pin" aria-label="Pinned thread">•</span>}
+              {conversation.pinnedAt && <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />}
               <time dateTime={conversation.updatedAt}>{formatRelativeTime(conversation.updatedAt)}</time>
             </span>
             {variant === "card" && (
@@ -757,7 +760,7 @@ function SidebarView({
                                     title={statusLabels[thread.status]}
                                   />
                                   <span className="conversation-title">{conversation.title}</span>
-                                  {conversation.pinnedAt && <span className="conversation-pin" aria-label="Pinned thread">•</span>}
+                                  {conversation.pinnedAt && <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />}
                                   {splitConversationId === conversation.id && (
                                     <Columns2
                                       className="conversation-split-mark"

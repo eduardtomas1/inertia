@@ -3,6 +3,17 @@ import {
   APP_SHORTCUT_KEYS,
   DEFAULT_APP_KEYBINDINGS,
 } from "../keybindings";
+import {
+  MODEL_CAPABILITY_IDS,
+  MODEL_CAPABILITY_STATES,
+} from "../model-routing";
+import { AGENT_TURN_STATUSES } from "../turn-lifecycle";
+import { AGENT_GOAL_STATUSES } from "./agent-workflows";
+import {
+  DUO_COMPARISON_STATES,
+  DUO_DISPATCH_STATES,
+  DUO_LAUNCH_STATES,
+} from "./duo";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -38,8 +49,24 @@ function nullableNumberField(value: UnknownRecord, key: string): boolean {
   return value[key] === null || numberField(value, key);
 }
 
+function optionalStringField(value: UnknownRecord, key: string): boolean {
+  return value[key] === undefined || stringField(value, key);
+}
+
+function optionalNullableStringField(value: UnknownRecord, key: string): boolean {
+  return value[key] === undefined || nullableStringField(value, key);
+}
+
+function optionalBooleanField(value: UnknownRecord, key: string): boolean {
+  return value[key] === undefined || booleanField(value, key);
+}
+
 function oneOf(value: UnknownRecord, key: string, options: readonly string[]): boolean {
   return typeof value[key] === "string" && options.includes(value[key] as string);
+}
+
+function providerId(value: UnknownRecord, key: string): boolean {
+  return oneOf(value, key, ["codex", "claude", "cursor", "opencode"]);
 }
 
 function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownRecord {
@@ -48,6 +75,29 @@ function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownR
 
 function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean {
   return Array.isArray(value) && value.every(validate);
+}
+
+function jsonValue(value: unknown, depth = 0): boolean {
+  if (depth > 20) return false;
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) {
+    return value.every((entry) => jsonValue(entry, depth + 1));
+  }
+  return record(value)
+    && Object.values(value).every((entry) => jsonValue(entry, depth + 1));
+}
+
+function modelCapability(value: unknown): boolean {
+  return recordWithStrings(value, "id", "state", "provenance")
+    && oneOf(value, "id", MODEL_CAPABILITY_IDS)
+    && oneOf(value, "state", MODEL_CAPABILITY_STATES)
+    && oneOf(value, "provenance", [
+      "provider", "harness", "probe", "user", "built-in", "unknown",
+    ])
+    && nullableStringField(value, "detail");
 }
 
 function modelSelection(value: unknown): boolean {
@@ -62,7 +112,8 @@ function modelSelection(value: unknown): boolean {
     && nullableStringField(value, "reasoningEffort")
     && nullableNumberField(value, "contextWindowOverride")
     && record(value.providerOptions)
-    && Array.isArray(value.capabilities)
+    && Object.values(value.providerOptions).every((entry) => jsonValue(entry))
+    && arrayOf(value.capabilities, modelCapability)
     && integerField(value, "backendConfigurationRevision");
 }
 
@@ -472,6 +523,8 @@ function agentGoal(value: unknown): boolean {
     "createdAt",
     "updatedAt",
   )
+    && oneOf(value, "source", ["codex-native", "inertia-local"])
+    && oneOf(value, "status", AGENT_GOAL_STATUSES)
     && nullableStringField(value, "providerSessionId")
     && nullableNumberField(value, "tokenBudget")
     && nullableNumberField(value, "tokensUsed")
@@ -529,6 +582,418 @@ function agentWorkflow(value: unknown): boolean {
     && workflowSkillsCapability(value.skillsCapability)
     && nullableStringField(value, "goalRefreshWarning")
     && skillDiscovery(value.skillDiscovery);
+}
+
+function gitBranch(value: unknown): boolean {
+  return recordWithStrings(value, "name")
+    && booleanField(value, "current")
+    && booleanField(value, "remote")
+    && nullableStringField(value, "worktreePath");
+}
+
+function workspaceEntry(value: unknown): boolean {
+  return recordWithStrings(value, "path")
+    && oneOf(value, "kind", ["file", "directory"]);
+}
+
+function workspaceEntriesPage(value: UnknownRecord): boolean {
+  return stringField(value, "directory")
+    && arrayOf(value.entries, workspaceEntry)
+    && booleanField(value, "truncated");
+}
+
+function workspaceFile(value: unknown): boolean {
+  return recordWithStrings(
+    value,
+    "path",
+    "content",
+    "language",
+    "contentDigest",
+    "modifiedAt",
+  )
+    && booleanField(value, "truncated")
+    && optionalStringField(value, "authorityRef");
+}
+
+function projectAction(value: unknown): boolean {
+  return recordWithStrings(value, "id", "label", "command")
+    && booleanField(value, "preview");
+}
+
+function duoPreparedSide(value: unknown): boolean {
+  return recordWithStrings(value, "conversationId", "turnId")
+    && (value.ordinal === 0 || value.ordinal === 1);
+}
+
+function duoLaunchSide(value: unknown): boolean {
+  return record(value)
+    && (value.ordinal === 0 || value.ordinal === 1)
+    && nullableStringField(value, "conversationId")
+    && nullableStringField(value, "turnId")
+    && oneOf(value, "dispatchState", DUO_DISPATCH_STATES);
+}
+
+function duoComparison(value: unknown): boolean {
+  return record(value)
+    && oneOf(value, "state", DUO_COMPARISON_STATES)
+    && nullableStringField(value, "conversationId")
+    && nullableStringField(value, "turnId")
+    && integerField(value, "attempt")
+    && Number(value.attempt) >= 0
+    && nullableStringField(value, "error");
+}
+
+function duoRecoveryAction(value: unknown): boolean {
+  return recordWithStrings(value, "label", "cwd")
+    && value.executable === "git"
+    && arrayOf(value.args, (entry) => typeof entry === "string");
+}
+
+function duoRecoveryGuidance(value: unknown): boolean {
+  return recordWithStrings(
+    value,
+    "repositoryPath",
+    "plannedPath",
+    "generatedBranch",
+  )
+    && value.kind === "git-worktree"
+    && (value.ordinal === 0 || value.ordinal === 1)
+    && oneOf(value, "topology", ["owned", "conflict", "ambiguous", "branch-retained"])
+    && nullableStringField(value, "observedPath")
+    && nullableStringField(value, "worktreeId")
+    && nullableStringField(value, "expectedHead")
+    && nullableStringField(value, "observedBranch")
+    && nullableStringField(value, "observedHead")
+    && arrayOf(value.actions, duoRecoveryAction);
+}
+
+function duoPrepared(value: UnknownRecord): boolean {
+  return stringField(value, "launchId")
+    && value.state === "prepared"
+    && Array.isArray(value.sides)
+    && value.sides.length === 2
+    && value.sides[0]?.ordinal === 0
+    && value.sides[1]?.ordinal === 1
+    && value.sides.every(duoPreparedSide)
+    && (value.comparison === undefined
+      || recordWithStrings(value.comparison, "conversationId"));
+}
+
+function duoStatus(value: UnknownRecord): boolean {
+  return stringField(value, "launchId")
+    && oneOf(value, "state", DUO_LAUNCH_STATES)
+    && nullableStringField(value, "error")
+    && Array.isArray(value.sides)
+    && value.sides.length === 2
+    && value.sides[0]?.ordinal === 0
+    && value.sides[1]?.ordinal === 1
+    && value.sides.every(duoLaunchSide)
+    && (value.comparison === undefined || duoComparison(value.comparison))
+    && (value.recoveryGuidance === undefined
+      || arrayOf(value.recoveryGuidance, duoRecoveryGuidance));
+}
+
+function changedFile(value: unknown): boolean {
+  return recordWithStrings(value, "path", "status", "indexStatus", "worktreeStatus")
+    && integerField(value, "insertions")
+    && Number(value.insertions) >= 0
+    && integerField(value, "deletions")
+    && Number(value.deletions) >= 0
+    && booleanField(value, "untracked")
+    && booleanField(value, "staged")
+    && booleanField(value, "unstaged");
+}
+
+function pullRequestCapability(value: unknown): boolean {
+  return record(value)
+    && booleanField(value, "available")
+    && nullableStringField(value, "remoteName")
+    && (value.forge === null || oneOf(value, "forge", ["github", "gitlab", "bitbucket"]))
+    && (value.unavailableReason === null || oneOf(value, "unavailableReason", [
+      "no-branch", "no-remotes", "ambiguous-remote", "missing-remote",
+      "unsupported-url", "unsupported-forge", "ambiguous-url",
+    ]));
+}
+
+function gitStatus(value: unknown): boolean {
+  return record(value)
+    && booleanField(value, "isRepository")
+    && optionalNullableStringField(value, "authorityRef")
+    && nullableStringField(value, "root")
+    && nullableStringField(value, "branch")
+    && nullableStringField(value, "upstream")
+    && integerField(value, "ahead")
+    && integerField(value, "behind")
+    && booleanField(value, "hasRemote")
+    && (value.pullRequest === undefined || pullRequestCapability(value.pullRequest))
+    && arrayOf(value.files, changedFile)
+    && integerField(value, "insertions")
+    && integerField(value, "deletions");
+}
+
+function gitDiff(value: unknown): boolean {
+  return recordWithStrings(value, "patch")
+    && booleanField(value, "truncated")
+    && arrayOf(value.files, changedFile);
+}
+
+function workspaceGitRepository(value: unknown): boolean {
+  return recordWithStrings(value, "repositoryPath")
+    && optionalNullableStringField(value, "authorityRef")
+    && oneOf(value, "state", ["ready", "error"])
+    && nullableStringField(value, "error")
+    && nullableStringField(value, "branch")
+    && nullableStringField(value, "upstream")
+    && integerField(value, "ahead")
+    && integerField(value, "behind")
+    && booleanField(value, "hasRemote")
+    && (value.pullRequest === undefined || pullRequestCapability(value.pullRequest))
+    && arrayOf(value.files, changedFile)
+    && integerField(value, "insertions")
+    && integerField(value, "deletions")
+    && booleanField(value, "clean")
+    && booleanField(value, "truncated");
+}
+
+function workspaceGitStatus(value: unknown): boolean {
+  return record(value)
+    && arrayOf(value.repositories, workspaceGitRepository)
+    && [
+      "files", "insertions", "deletions", "scannedDirectories", "skippedDirectories",
+      "discoveredRepositories", "repositoryLimit",
+    ].every((key) => integerField(value, key) && Number(value[key]) >= 0)
+    && booleanField(value, "partial")
+    && booleanField(value, "truncated")
+    && arrayOf(value.issues, (issue) =>
+      recordWithStrings(issue, "repositoryPath", "message"));
+}
+
+function workspaceGitDiff(value: unknown): boolean {
+  return gitDiff(value)
+    && record(value)
+    && stringField(value, "repositoryPath")
+    && optionalBooleanField(value, "reviewMetadataChanged");
+}
+
+function turnGitDiff(value: unknown): boolean {
+  return gitDiff(value)
+    && recordWithStrings(value, "artifactId", "turnId", "title")
+    && oneOf(value, "completeness", ["complete", "truncated", "partial", "unavailable"])
+    && oneOf(value, "patchState", ["none", "available", "truncated", "expired", "failed"]);
+}
+
+function reversalValidation(value: unknown): boolean {
+  return recordWithStrings(
+    value,
+    "diffFingerprint",
+    "fileFingerprint",
+    "hunkFingerprint",
+    "selectionFingerprint",
+    "gitStateFingerprint",
+  );
+}
+
+function reversalPlan(value: unknown): boolean {
+  return recordWithStrings(value, "filePath", "hunkId", "hunkHeader")
+    && optionalStringField(value, "authorityRef")
+    && integerField(value, "selectedLineCount")
+    && integerField(value, "changedLineCount")
+    && arrayOf(value.affectedLayers, (entry) => entry === "index" || entry === "worktree")
+    && reversalValidation(value.validation);
+}
+
+function reversalOperation(value: unknown): boolean {
+  return recordWithStrings(value, "id", "filePath", "createdAt")
+    && optionalStringField(value, "authorityRef")
+    && optionalStringField(value, "repositoryPath")
+    && integerField(value, "selectedLineCount")
+    && arrayOf(value.affectedLayers, (entry) => entry === "index" || entry === "worktree");
+}
+
+const REVIEW_CLASSIFICATIONS = [
+  "behavior-change", "regression-risk", "security-sensitive", "migration",
+  "test-impact", "performance-sensitive", "documentation-only",
+] as const;
+
+function reviewClassification(value: unknown): boolean {
+  return recordWithStrings(value, "evidence")
+    && oneOf(value, "classification", REVIEW_CLASSIFICATIONS);
+}
+
+function reviewSummary(value: unknown): boolean {
+  return recordWithStrings(
+    value,
+    "conversationId",
+    "fingerprint",
+    "providerId",
+    "overall",
+    "generatedAt",
+  )
+    && providerId(value, "providerId")
+    && nullableStringField(value, "harnessId")
+    && nullableStringField(value, "backendProfileId")
+    && nullableStringField(value, "model")
+    && arrayOf(value.classifications, reviewClassification)
+    && arrayOf(value.files, (file) =>
+      recordWithStrings(file, "path", "summary")
+      && arrayOf(file.classifications, reviewClassification)
+      && arrayOf(file.hunks, (hunk) =>
+        recordWithStrings(hunk, "hunkId", "summary")
+        && arrayOf(hunk.classifications, reviewClassification)));
+}
+
+function reviewSelectionAnswer(value: unknown): boolean {
+  return recordWithStrings(
+    value,
+    "conversationId",
+    "fingerprint",
+    "filePath",
+    "hunkId",
+    "question",
+    "answer",
+    "providerId",
+    "generatedAt",
+  )
+    && providerId(value, "providerId")
+    && optionalStringField(value, "repositoryPath")
+    && integerField(value, "selectedLineCount")
+    && modelSelection(value.modelSelection);
+}
+
+function turnUsage(value: unknown): boolean {
+  return recordWithStrings(value, "capturedAt")
+    && [
+      "usedTokens", "totalProcessedTokens", "maxTokens", "inputTokens",
+      "cachedInputTokens", "cacheWriteInputTokens", "outputTokens",
+      "reasoningOutputTokens",
+    ].every((key) => nullableNumberField(value, key))
+    && (value.totalProcessedScope === null
+      || oneOf(value, "totalProcessedScope", ["thread", "session", "run"]))
+    && (value.compactsAutomatically === null
+      || booleanField(value, "compactsAutomatically"));
+}
+
+function agentTurn(value: unknown): boolean {
+  return recordWithStrings(
+    value,
+    "id",
+    "conversationId",
+    "runId",
+    "userMessageId",
+    "providerId",
+    "harnessId",
+    "backendProfileId",
+    "model",
+    "reasoningEffort",
+    "interactionMode",
+    "accessMode",
+    "requestedAt",
+    "status",
+    "association",
+    "createdAt",
+    "updatedAt",
+  )
+    && providerId(value, "providerId")
+    && nullableStringField(value, "terminalAssistantMessageId")
+    && modelSelection(value.modelSelection)
+    && continuationIdentity(value.continuationIdentity)
+    && nullableStringField(value, "modelAlias")
+    && nullableStringField(value, "providerSessionBefore")
+    && nullableStringField(value, "providerSessionAfter")
+    && nullableStringField(value, "startedAt")
+    && nullableStringField(value, "completedAt")
+    && nullableStringField(value, "terminalReason")
+    && nullableStringField(value, "checkpointId")
+    && oneOf(value, "status", AGENT_TURN_STATUSES)
+    && (value.usageAtStart === null || turnUsage(value.usageAtStart))
+    && (value.usageAtCompletion === null || turnUsage(value.usageAtCompletion))
+    && integerField(value, "configurationRevision")
+    && oneOf(value, "association", ["authoritative", "inferred"]);
+}
+
+function turnGitArtifactFile(value: unknown): boolean {
+  return changedFile(value)
+    && record(value)
+    && nullableStringField(value, "previousPath")
+    && booleanField(value, "binary");
+}
+
+function turnGitArtifact(value: unknown): boolean {
+  return recordWithStrings(value, "id", "turnId", "conversationId", "runId")
+    && [
+      "repositoryIdentity", "worktreeIdentity", "branch", "beforeCheckpointId",
+      "beforeFingerprint", "afterFingerprint", "patchDigest", "capturedAt",
+      "terminalAssistantMessageId", "failureReason",
+    ].every((key) => nullableStringField(value, key))
+    && optionalNullableStringField(value, "absenceReason")
+    && (value.absenceReason === undefined
+      || value.absenceReason === null
+      || value.absenceReason === "not-repository")
+    && arrayOf(value.files, turnGitArtifactFile)
+    && integerField(value, "insertions")
+    && integerField(value, "deletions")
+    && oneOf(value, "status", ["pending", "ready", "partial", "unavailable", "failed"])
+    && oneOf(value, "completeness", ["complete", "truncated", "partial", "unavailable"])
+    && oneOf(value, "patchState", ["none", "available", "truncated", "expired", "failed"]);
+}
+
+function agentReasoning(value: unknown): boolean {
+  return recordWithStrings(value, "id", "conversationId", "runId", "content", "createdAt")
+    && nullableStringField(value, "turnId")
+    && oneOf(value, "status", ["running", "completed", "failed"]);
+}
+
+function checkpoint(value: unknown): boolean {
+  return recordWithStrings(value, "id", "conversationId", "ref", "label", "createdAt")
+    && nullableStringField(value, "turnId")
+    && integerField(value, "turnIndex")
+    && integerField(value, "filesChanged")
+    && integerField(value, "insertions")
+    && integerField(value, "deletions");
+}
+
+function reviewState(value: unknown): boolean {
+  return recordWithStrings(value, "conversationId", "path", "targetFingerprint", "updatedAt")
+    && optionalStringField(value, "repositoryPath")
+    && oneOf(value, "scope", ["file", "hunk"])
+    && nullableStringField(value, "hunkId")
+    && booleanField(value, "reviewed")
+    && booleanField(value, "stale");
+}
+
+function reviewNote(value: unknown): boolean {
+  return recordWithStrings(
+    value,
+    "id",
+    "conversationId",
+    "path",
+    "targetFingerprint",
+    "body",
+    "createdAt",
+    "updatedAt",
+  )
+    && optionalStringField(value, "repositoryPath")
+    && nullableStringField(value, "hunkId")
+    && arrayOf(value.lineIds, (entry) => typeof entry === "string")
+    && booleanField(value, "stale");
+}
+
+function conversationDetail(value: unknown): boolean {
+  return record(value)
+    && conversation(value.conversation)
+    && arrayOf(value.agentTurns, agentTurn)
+    && arrayOf(value.turnGitArtifacts, turnGitArtifact)
+    && arrayOf(value.messages, chatMessage)
+    && arrayOf(value.activities, activity)
+    && arrayOf(value.subagents, subagentTrace)
+    && arrayOf(value.reasonings, agentReasoning)
+    && arrayOf(value.usage, threadUsage)
+    && arrayOf(value.plans, agentPlan)
+    && arrayOf(value.goals, agentGoal)
+    && arrayOf(value.checkpoints, checkpoint)
+    && arrayOf(value.reviewSummaries, reviewSummary)
+    && arrayOf(value.reviewStates, reviewState)
+    && arrayOf(value.reviewNotes, reviewNote);
 }
 
 function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
@@ -592,75 +1057,59 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
 }
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
+type RequestResultKind = RequestResult["kind"];
+type RequestResultValidator = (value: UnknownRecord) => boolean;
+
+const REQUEST_RESULT_VALIDATORS = {
+  "message.accepted": (value) =>
+    recordWithStrings(value, "conversationId", "turnId", "userMessageId")
+    && oneOf(value, "disposition", ["new-turn", "follow-up"]),
+  "backend.profile": (value) => backendProfile(value.profile, true),
+  "backend.profile.probe": (value) => backendProfile(value.profile, true),
+  "backend.default": (value) => value.value === null || backendDefault(value.value),
+  "provider.maintenance": (value) =>
+    arrayOf(value.providers, providerMaintenanceStatus),
+  "provider.maintenance.operation": (value) =>
+    providerMaintenanceOperation(value.operation),
+  "conversation.created": (value) => stringField(value, "conversationId"),
+  "project.created": (value) => stringField(value, "projectId"),
+  "worktree.created": (value) => recordWithStrings(value, "path", "branch"),
+  "git.action": (value) => stringField(value, "message"),
+  "external.url": (value) => recordWithStrings(value, "url", "label"),
+  "git.branches": (value) => arrayOf(value.branches, gitBranch),
+  "workspace.entries": (value) => workspaceEntriesPage(value),
+  "workspace.file": (value) => workspaceFile(value.file),
+  "project.actions": (value) => arrayOf(value.actions, projectAction),
+  "agent.workflow": (value) => agentWorkflow(value.workflow),
+  "agent.skills": (value) => stringField(value, "conversationId")
+    && arrayOf(value.skills, agentSkill)
+    && skillDiscovery(value.skillDiscovery),
+  "conversation.detail": (value) => stringField(value, "conversationId")
+    && oneOf(value, "state", ["ready", "missing", "deleted", "failed"])
+    && (value.sync === undefined || syncCursor(value.sync))
+    && (value.state !== "ready" || conversationDetail(value.detail))
+    && (value.state !== "failed" || stringField(value, "message")),
+  "duo.pending": (value) =>
+    arrayOf(value.launchIds, (entry) => typeof entry === "string")
+    && booleanField(value, "hasMore"),
+  "duo.prepared": (value) => duoPrepared(value),
+  "duo.status": (value) => duoStatus(value),
+  "git.status": (value) => gitStatus(value.status),
+  "git.workspace.status": (value) => workspaceGitStatus(value.status),
+  "git.diff": (value) => gitDiff(value.diff),
+  "git.workspace.diff": (value) => workspaceGitDiff(value.diff),
+  "git.turn.diff": (value) => turnGitDiff(value.diff),
+  "git.reversal.plan": (value) => reversalPlan(value.plan),
+  "git.reversal": (value) =>
+    gitDiff(value.diff) && reversalOperation(value.operation),
+  "review.selection.answer": (value) => reviewSelectionAnswer(value.answer),
+  "review.summary": (value) => reviewSummary(value.summary),
+} satisfies Record<RequestResultKind, RequestResultValidator>;
 
 function requestResult(value: unknown): value is RequestResult {
   if (!recordWithStrings(value, "kind")) return false;
-  switch (value.kind) {
-    case "message.accepted":
-      return recordWithStrings(value, "conversationId", "turnId", "userMessageId")
-        && oneOf(value, "disposition", ["new-turn", "follow-up"]);
-    case "backend.profile":
-    case "backend.profile.probe":
-      return backendProfile(value.profile, true);
-    case "backend.default":
-      return value.value === null || backendDefault(value.value);
-    case "provider.maintenance":
-      return arrayOf(value.providers, providerMaintenanceStatus);
-    case "provider.maintenance.operation":
-      return providerMaintenanceOperation(value.operation);
-    case "conversation.created":
-    case "project.created":
-      return stringField(value, value.kind === "conversation.created" ? "conversationId" : "projectId");
-    case "worktree.created":
-      return recordWithStrings(value, "path", "branch");
-    case "git.action":
-      return stringField(value, "message");
-    case "external.url":
-      return recordWithStrings(value, "url", "label");
-    case "git.branches":
-      return Array.isArray(value.branches);
-    case "workspace.entries":
-      return Array.isArray(value.entries);
-    case "workspace.file":
-      return record(value.file) && stringField(value.file, "path");
-    case "project.actions":
-      return Array.isArray(value.actions);
-    case "agent.workflow":
-      return agentWorkflow(value.workflow);
-    case "agent.skills":
-      return stringField(value, "conversationId")
-        && arrayOf(value.skills, agentSkill)
-        && skillDiscovery(value.skillDiscovery);
-    case "conversation.detail":
-      return stringField(value, "conversationId")
-        && oneOf(value, "state", ["ready", "missing", "deleted", "failed"])
-        && (value.sync === undefined || syncCursor(value.sync))
-        && (value.state !== "ready" || record(value.detail))
-        && (value.state !== "failed" || stringField(value, "message"));
-    case "duo.pending":
-      return Array.isArray(value.launchIds);
-    case "duo.prepared":
-    case "duo.status":
-      return stringField(value, "launchId") && Array.isArray(value.sides);
-    case "git.status":
-      return record(value.status) && Array.isArray(value.status.files);
-    case "git.workspace.status":
-      return record(value.status) && Array.isArray(value.status.repositories);
-    case "git.diff":
-    case "git.workspace.diff":
-    case "git.turn.diff":
-      return record(value.diff);
-    case "git.reversal.plan":
-      return record(value.plan);
-    case "git.reversal":
-      return record(value.diff) && record(value.operation);
-    case "review.selection.answer":
-      return record(value.answer);
-    case "review.summary":
-      return record(value.summary);
-    default:
-      return false;
-  }
+  const validator = REQUEST_RESULT_VALIDATORS[value.kind as RequestResultKind];
+  return validator?.(value) === true;
 }
 
 function isServerEvent(value: unknown): value is ServerEvent {

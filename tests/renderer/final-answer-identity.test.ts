@@ -32,6 +32,15 @@ describe("final answer identity", () => {
     }))).toBe("Claude · Kimi");
   });
 
+  it("uses the current provider identity label for active work only", () => {
+    expect(activeWorkIdentityLabel(selection(), {
+      claude: "Research route",
+    })).toBe("Research route · Anthropic");
+    expect(finalAnswerIdentityLabel(selection())).toBe(
+      "Claude · Anthropic · Sonnet 4.5",
+    );
+  });
+
   it("uses the persisted harness, backend, and friendly model identity", () => {
     expect(finalAnswerIdentityLabel(selection())).toBe(
       "Claude · Anthropic · Sonnet 4.5",

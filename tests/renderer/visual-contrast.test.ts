@@ -235,7 +235,10 @@ describe("visual contrast system", () => {
       /\.project-row\.is-active \.project-name\s*\{[^}]*font-weight:\s*680;/su,
     );
     expect(css).toMatch(
-      /\.conversation-row\.is-active\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--surface-hover\) 72%, transparent\);/su,
+      /\.conversation-row\.is-active\s*\{[^}]*background:\s*transparent;/su,
+    );
+    expect(css).toMatch(
+      /\.conversation-row\.is-active::before\s*\{[^}]*width:\s*2px;[^}]*background:\s*var\(--accent\);/su,
     );
   });
 

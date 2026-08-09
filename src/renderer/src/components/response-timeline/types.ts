@@ -11,6 +11,7 @@ import type {
   CheckpointSummary,
   SubagentTrace,
 } from "@shared/contracts";
+import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { TurnGitArtifactSummary } from "../../utils/responseTimeline";
 
 export interface ResponseTimelineProps {
@@ -29,6 +30,7 @@ export interface ResponseTimelineProps {
   streamingReasoning: string;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
+  providerIdentityLabels?: ProviderIdentityLabels;
   showTimestamps: boolean;
   showThinking: boolean;
   defaultCodeWrap: boolean;

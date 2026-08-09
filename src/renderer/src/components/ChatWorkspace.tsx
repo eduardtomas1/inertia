@@ -600,6 +600,7 @@ export function ChatWorkspace({
               streamingReasoning={streamingReasoning}
               approvals={approvals}
               inputRequests={inputRequests}
+              providerIdentityLabels={providerIdentityLabels}
               showTimestamps={showTimestamps}
               showThinking={showThinking}
               defaultCodeWrap={defaultCodeWrap}
@@ -656,8 +657,10 @@ export function ChatWorkspace({
           </div>
         )}
         <ProviderMaintenanceNotice
-          providerLabel={providers.find(({ id }) =>
-            id === conversation.providerId)?.label ?? conversation.providerId}
+          providerLabel={providerIdentityLabels?.[conversation.providerId]
+            ?? providers.find(({ id }) =>
+              id === conversation.providerId)?.label
+            ?? conversation.providerId}
           status={maintenanceStatus}
           operation={maintenanceOperation}
           onRefresh={onRefreshProviderMaintenance}

@@ -293,6 +293,45 @@ function validateOpenDatabase(
       )) return "corrupt";
     }
   }
+  if (version >= 47) {
+    const conversationColumns = new Set(
+      (database.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    const stateColumns = new Set(
+      (database.prepare("PRAGMA table_info(app_state)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    if (
+      ["pinned_at", "snoozed_until"].some(
+        (column) => !conversationColumns.has(column),
+      )
+      || !stateColumns.has("desktop_notifications")
+    ) return "corrupt";
+    const indexes = new Set(
+      (database.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index'",
+      ).all() as Array<{ name: string }>).map(({ name }) => name),
+    );
+    if (
+      !indexes.has("conversations_pinned_at_idx")
+      || !indexes.has("conversations_snoozed_until_idx")
+    ) return "corrupt";
+  }
+  if (version >= 48) {
+    const stateColumns = new Set(
+      (database.prepare("PRAGMA table_info(app_state)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    if (!stateColumns.has("provider_identity_labels_json")) return "corrupt";
+  }
+  if (version >= 49) {
+    const stateColumns = new Set(
+      (database.prepare("PRAGMA table_info(app_state)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    if (!stateColumns.has("keybindings_json")) return "corrupt";
+  }
   return "valid-current";
 }
 

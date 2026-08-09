@@ -262,11 +262,23 @@ describe("Private Connect loopback gateway", () => {
     const origin = `https://${hostValue}`;
     const invitation = { protocolVersion: 1, hostId: "11111111-1111-4111-8111-111111111111", invitationId: "33333333-3333-4333-8333-333333333333", pairingSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", createdAt: "2029-12-31T23:55:00.000Z", expiresAt: "2030-01-01T00:05:00.000Z" };
     const pairRequest = () => fetch(`http://${hostValue}/api/pair/start`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify({ invitation, deviceId: session.deviceId, deviceLabel: "browser" }) });
-    const pairResponses = await Promise.all(Array.from({ length: 11 }, () => pairRequest()));
-    expect(pairResponses.at(-1)?.status).toBe(429);
+    const pairStatuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const response = await pairRequest();
+      pairStatuses.push(response.status);
+      await response.arrayBuffer();
+    }
+    expect(pairStatuses.slice(0, 10)).toEqual(Array.from({ length: 10 }, () => 202));
+    expect(pairStatuses.at(-1)).toBe(429);
     const request = (requestId: string) => fetch(`http://${hostValue}/api/request`, { method: "POST", headers: { Origin: origin, Cookie: "__Host-inertia-private-connect=session-token", "Content-Type": "application/json", "x-inertia-private-connect-csrf": session.csrf }, body: JSON.stringify({ protocolVersion: 1, type: "client.ping", requestId }) });
-    const responses = await Promise.all(Array.from({ length: 121 }, (_, index) => request(`33333333-3333-4333-8333-${String(index + 1).padStart(12, "0")}`)));
-    expect(responses.at(-1)?.status).toBe(429);
+    const requestStatuses: number[] = [];
+    for (let index = 0; index < 121; index += 1) {
+      const response = await request(`33333333-3333-4333-8333-${String(index + 1).padStart(12, "0")}`);
+      requestStatuses.push(response.status);
+      await response.arrayBuffer();
+    }
+    expect(requestStatuses.slice(0, 120)).toEqual(Array.from({ length: 120 }, () => 200));
+    expect(requestStatuses.at(-1)).toBe(429);
     nowValue += 61_000;
     expect((await request("44444444-4444-4444-8444-444444444444")).status).toBe(200);
   });

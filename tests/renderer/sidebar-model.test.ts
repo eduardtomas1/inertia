@@ -234,6 +234,38 @@ describe("classic sidebar search", () => {
       newer.id,
     ]);
   });
+
+  it("hides snoozed ordinary chats in classic mode until their expiry", () => {
+    const snoozed = conversation({
+      id: "snoozed",
+      projectId: first.id,
+      snoozedUntil: "2026-07-23T11:00:00.000Z",
+    });
+    const working = conversation({
+      id: "working-snooze",
+      projectId: first.id,
+      status: "running",
+      snoozedUntil: "2026-07-23T11:00:00.000Z",
+    });
+
+    expect(classicSidebarSearch(
+      [first],
+      [snoozed, working],
+      "",
+      Date.parse("2026-07-23T10:00:00.000Z"),
+    ).conversationsByProject.get(first.id)?.map(({ id }) => id)).toEqual([
+      working.id,
+    ]);
+    expect(classicSidebarSearch(
+      [first],
+      [snoozed, working],
+      "",
+      Date.parse("2026-07-23T11:00:00.001Z"),
+    ).conversationsByProject.get(first.id)?.map(({ id }) => id)).toEqual([
+      snoozed.id,
+      working.id,
+    ]);
+  });
 });
 
 describe("work-first chat model", () => {

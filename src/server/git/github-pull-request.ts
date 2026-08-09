@@ -3,12 +3,22 @@ import { inspectGitRemoteRouting } from "./remote-routing";
 import { getRepositoryStatus } from "./status";
 import { GitError } from "./types";
 import {
+  executableCandidates,
+  providerEnvironment,
+  type ProviderEnvironment,
+} from "../environment";
+import {
   RestrictedCliError,
   runRestrictedCli,
   type RestrictedCliDependencies,
 } from "../restricted-cli-runner";
 
 const MAX_PULL_REQUEST_BODY_BYTES = 64 * 1024;
+
+export interface GitHubPullRequestDependencies extends RestrictedCliDependencies {
+  environment?: () => Promise<ProviderEnvironment>;
+  executableCandidates?: typeof executableCandidates;
+}
 
 export interface GitHubPullRequestInput {
   title: string;
@@ -34,15 +44,34 @@ export function verifiedGitHubPullRequestUrl(
   const url = new URL(match[0]);
   const repository = new URL(repositoryBaseUrl);
   return url.origin === repository.origin
-    && url.pathname.startsWith(`${repository.pathname}/pull/`)
+    && url.pathname.toLowerCase().startsWith(
+      `${repository.pathname.toLowerCase()}/pull/`,
+    )
     ? url.toString()
     : null;
+}
+
+export async function resolveGitHubCli(
+  dependencies: GitHubPullRequestDependencies = {},
+): Promise<{ executable: string; environment: NodeJS.ProcessEnv }> {
+  const environment = await (dependencies.environment ?? providerEnvironment)();
+  const candidates = await (
+    dependencies.executableCandidates ?? executableCandidates
+  )("gh", environment);
+  const executable = candidates[0];
+  if (!executable) {
+    throw new RestrictedCliError(
+      "unavailable",
+      "gh is not installed or could not be started.",
+    );
+  }
+  return { executable, environment: environment.env };
 }
 
 export async function createGitHubPullRequest(
   repositoryPath: string,
   input: GitHubPullRequestInput,
-  dependencies: RestrictedCliDependencies = {},
+  dependencies: GitHubPullRequestDependencies = {},
 ): Promise<string> {
   const root = await repositoryRoot(repositoryPath);
   const status = await getRepositoryStatus(root);
@@ -64,8 +93,9 @@ export async function createGitHubPullRequest(
   }
   const repositorySlug = githubRepositorySlug(routing.target.baseUrl);
   try {
+    const gh = await resolveGitHubCli(dependencies);
     const result = await runRestrictedCli(
-      "gh",
+      gh.executable,
       [
         "pr", "create", "--repo", repositorySlug, "--title", input.title,
         "--body-file", "-", "--head", status.branch,
@@ -73,6 +103,7 @@ export async function createGitHubPullRequest(
       ],
       {
         cwd: root,
+        environment: gh.environment,
         input: input.body,
         failureMessage: "GitHub could not create the pull request. Confirm the branch is pushed and GitHub CLI is signed in.",
       },

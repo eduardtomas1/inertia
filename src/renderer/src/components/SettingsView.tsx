@@ -136,6 +136,14 @@ const shortcuts: Array<[AppShortcutAction, string]> = [
   ["toggle-terminal", "Toggle terminal"],
 ] as const;
 
+function stableRecordFingerprint(
+  value: Readonly<Record<string, string | undefined>>,
+): string {
+  return JSON.stringify(Object.entries(value).sort(([left], [right]) => (
+    left.localeCompare(right)
+  )));
+}
+
 export function formatStorageBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"] as const;
@@ -222,6 +230,39 @@ export function SettingsView({
   const [appHealth, setAppHealth] = useState<AppHealthSnapshot | null>(null);
   const [healthStatus, setHealthStatus] = useState<string | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
+  const [providerIdentityLabelsDraft, setProviderIdentityLabelsDraft] = useState(
+    () => settings.providerIdentityLabels,
+  );
+  const providerIdentityLabelsDraftRef = useRef(providerIdentityLabelsDraft);
+  const pendingProviderIdentityLabelsRef = useRef<string | null>(null);
+  const [keybindingsDraft, setKeybindingsDraft] = useState(
+    () => settings.keybindings,
+  );
+  const keybindingsDraftRef = useRef(keybindingsDraft);
+  const pendingKeybindingsRef = useRef<string | null>(null);
+  const providerIdentityLabelsFingerprint = stableRecordFingerprint(
+    settings.providerIdentityLabels,
+  );
+  const keybindingsFingerprint = stableRecordFingerprint(settings.keybindings);
+  useEffect(() => {
+    if (
+      pendingProviderIdentityLabelsRef.current !== null
+      && pendingProviderIdentityLabelsRef.current
+        !== providerIdentityLabelsFingerprint
+    ) return;
+    pendingProviderIdentityLabelsRef.current = null;
+    providerIdentityLabelsDraftRef.current = settings.providerIdentityLabels;
+    setProviderIdentityLabelsDraft(settings.providerIdentityLabels);
+  }, [providerIdentityLabelsFingerprint, settings.providerIdentityLabels]);
+  useEffect(() => {
+    if (
+      pendingKeybindingsRef.current !== null
+      && pendingKeybindingsRef.current !== keybindingsFingerprint
+    ) return;
+    pendingKeybindingsRef.current = null;
+    keybindingsDraftRef.current = settings.keybindings;
+    setKeybindingsDraft(settings.keybindings);
+  }, [keybindingsFingerprint, settings.keybindings]);
   const defaultProvider = providers.find(({ id }) => id === settings.defaultProvider);
   const defaultModel = defaultProvider?.models.find(({ id }) => id === settings.defaultModel)
     ?? defaultProvider?.models.find(({ isDefault }) => isDefault)
@@ -464,7 +505,7 @@ export function SettingsView({
               <div className="settings-rows provider-account-list">
                 {providers.map((provider) => {
                   const action = providerSetupAction(provider);
-                  const identityLabel = settings.providerIdentityLabels[provider.id];
+                  const identityLabel = providerIdentityLabelsDraft[provider.id];
                   return (
                     <div className="setting-row provider-account-row" key={provider.id}>
                       <span className="setting-row-icon"><Bot size={17} /></span>
@@ -482,19 +523,42 @@ export function SettingsView({
                         <label className="provider-identity-alias">
                           <span>Name in Inertia</span>
                           <input
-                            key={`${provider.id}:${identityLabel ?? ""}`}
-                            defaultValue={identityLabel ?? ""}
+                            value={identityLabel ?? ""}
                             maxLength={48}
                             placeholder={`${provider.label} account`}
                             disabled={disabled}
+                            onChange={(event) => {
+                              const providerIdentityLabels = {
+                                ...providerIdentityLabelsDraftRef.current,
+                                [provider.id]: event.currentTarget.value,
+                              };
+                              providerIdentityLabelsDraftRef.current =
+                                providerIdentityLabels;
+                              setProviderIdentityLabelsDraft(
+                                providerIdentityLabels,
+                              );
+                            }}
                             onBlur={(event) => {
                               const next = event.currentTarget.value.trim();
-                              if (next === (identityLabel ?? "")) return;
                               const providerIdentityLabels = {
-                                ...settings.providerIdentityLabels,
+                                ...providerIdentityLabelsDraftRef.current,
                               };
                               if (next) providerIdentityLabels[provider.id] = next;
                               else delete providerIdentityLabels[provider.id];
+                              providerIdentityLabelsDraftRef.current =
+                                providerIdentityLabels;
+                              setProviderIdentityLabelsDraft(
+                                providerIdentityLabels,
+                              );
+                              const fingerprint = stableRecordFingerprint(
+                                providerIdentityLabels,
+                              );
+                              if (
+                                fingerprint === providerIdentityLabelsFingerprint
+                                || fingerprint
+                                  === pendingProviderIdentityLabelsRef.current
+                              ) return;
+                              pendingProviderIdentityLabelsRef.current = fingerprint;
                               onUpdate({ providerIdentityLabels });
                             }}
                           />
@@ -600,8 +664,24 @@ export function SettingsView({
         {section === "keybindings" && (
           <section className="settings-card" aria-labelledby="keybindings-heading">
             <div className="settings-card-heading"><div><Keyboard size={18} /></div><span><h3 id="keybindings-heading">Keyboard shortcuts</h3><p>Fast paths for the actions used most often.</p></span></div>
-            <div className="shortcut-list">{shortcuts.map(([action, label]) => <label key={action}><span>{label}</span><span className="shortcut-binding"><kbd>{primaryModifier}</kbd><select aria-label={`${label} key`} value={settings.keybindings[action]} disabled={disabled} onChange={(event) => onUpdate({ keybindings: { ...settings.keybindings, [action]: event.target.value as AppShortcutKey } })}>{APP_SHORTCUT_KEYS.map((key) => <option value={key} key={key} disabled={shortcuts.some(([other]) => other !== action && settings.keybindings[other] === key)}>{key.toUpperCase()}</option>)}</select></span></label>)}</div>
-            <button className="secondary-button settings-keybinding-reset" type="button" disabled={disabled || Object.entries(DEFAULT_APP_KEYBINDINGS).every(([action, key]) => settings.keybindings[action as AppShortcutAction] === key)} onClick={() => onUpdate({ keybindings: DEFAULT_APP_KEYBINDINGS })}><RotateCcw size={14} />Reset shortcuts</button>
+            <div className="shortcut-list">{shortcuts.map(([action, label]) => <label key={action}><span>{label}</span><span className="shortcut-binding"><kbd>{primaryModifier}</kbd><select aria-label={`${label} key`} value={keybindingsDraft[action]} disabled={disabled} onChange={(event) => {
+              const keybindings = {
+                ...keybindingsDraftRef.current,
+                [action]: event.target.value as AppShortcutKey,
+              };
+              keybindingsDraftRef.current = keybindings;
+              setKeybindingsDraft(keybindings);
+              const fingerprint = stableRecordFingerprint(keybindings);
+              pendingKeybindingsRef.current = fingerprint;
+              onUpdate({ keybindings });
+            }}>{APP_SHORTCUT_KEYS.map((key) => <option value={key} key={key} disabled={shortcuts.some(([other]) => other !== action && keybindingsDraft[other] === key)}>{key.toUpperCase()}</option>)}</select></span></label>)}</div>
+            <button className="secondary-button settings-keybinding-reset" type="button" disabled={disabled || Object.entries(DEFAULT_APP_KEYBINDINGS).every(([action, key]) => keybindingsDraft[action as AppShortcutAction] === key)} onClick={() => {
+              const keybindings = { ...DEFAULT_APP_KEYBINDINGS };
+              keybindingsDraftRef.current = keybindings;
+              setKeybindingsDraft(keybindings);
+              pendingKeybindingsRef.current = stableRecordFingerprint(keybindings);
+              onUpdate({ keybindings });
+            }}><RotateCcw size={14} />Reset shortcuts</button>
             <p className="settings-card-note">The primary Cmd/Ctrl modifier stays fixed. Available keys avoid common browser and system shortcuts.</p>
           </section>
         )}

@@ -31,8 +31,18 @@ export function PullRequestDialog({
   const [title, setTitle] = useState(initialTitle);
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState(true);
+  const [createdUrl, setCreatedUrl] = useState<string | null>(null);
+  const [completionNotice, setCompletionNotice] = useState<
+    "open-failed" | "copied" | "copy-failed" | null
+  >(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  const createdUrlRef = useRef<HTMLInputElement>(null);
   useNativePreviewSuspension(open);
+  useEffect(() => {
+    if (!open) return;
+    setCreatedUrl(null);
+    setCompletionNotice(null);
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     setTitle(initialTitle);
@@ -62,10 +72,35 @@ export function PullRequestDialog({
         },
       }));
       if (event.result.kind !== "external.url") return;
-      await window.inertia.openExternal(event.result.url);
-      onClose();
+      try {
+        await window.inertia.openExternal(event.result.url);
+        onClose();
+      } catch {
+        setCreatedUrl(event.result.url);
+        setCompletionNotice("open-failed");
+        window.requestAnimationFrame(() => createdUrlRef.current?.focus());
+      }
     } catch {
       // The application error toast owns the public failure message.
+    }
+  };
+  const openCreatedPullRequest = async (): Promise<void> => {
+    if (!createdUrl) return;
+    try {
+      await window.inertia.openExternal(createdUrl);
+      onClose();
+    } catch {
+      setCompletionNotice("open-failed");
+    }
+  };
+  const copyCreatedPullRequest = async (): Promise<void> => {
+    if (!createdUrl) return;
+    try {
+      setCompletionNotice(await window.inertia.copyText(createdUrl)
+        ? "copied"
+        : "copy-failed");
+    } catch {
+      setCompletionNotice("copy-failed");
     }
   };
   const openBrowser = async (): Promise<void> => {
@@ -124,7 +159,23 @@ export function PullRequestDialog({
           </div>
           <IconButton label="Close pull request dialog" onClick={onClose} disabled={busy}><X size={16} /></IconButton>
         </header>
-        {integrated && <label>
+        {createdUrl ? <>
+          <p className="commit-review-warning" role="alert">
+            The pull request was created, but Inertia could not open it in your browser. Do not create it again; copy the verified link or retry opening it.
+          </p>
+          <label>
+            <span>Created pull request</span>
+            <input ref={createdUrlRef} value={createdUrl} readOnly aria-label="Created pull request link" />
+          </label>
+          {completionNotice === "copied" && (
+            <p className="commit-stage-note" role="status">Pull request link copied.</p>
+          )}
+          {completionNotice === "copy-failed" && (
+            <p className="commit-review-warning" role="alert">
+              The link could not be copied automatically. Select it above and copy it manually.
+            </p>
+          )}
+        </> : integrated && <label>
           <span>Title</span>
           <input
             ref={titleRef}
@@ -135,7 +186,7 @@ export function PullRequestDialog({
             onChange={(event) => setTitle(event.target.value)}
           />
         </label>}
-        {integrated && <label>
+        {!createdUrl && integrated && <label>
           <span>Description</span>
           <textarea
             value={body}
@@ -146,7 +197,7 @@ export function PullRequestDialog({
             onChange={(event) => setBody(event.target.value)}
           />
         </label>}
-        {integrated && <label className="pull-request-draft">
+        {!createdUrl && integrated && <label className="pull-request-draft">
           <input
             type="checkbox"
             checked={draft}
@@ -155,10 +206,15 @@ export function PullRequestDialog({
           />
           <span><strong>Create as draft</strong><small>Mark it ready on GitHub after review.</small></span>
         </label>}
-        <p className="commit-stage-note">{integrated ? "The branch must already be pushed. If GitHub CLI is unavailable, continue in your browser." : "Inertia constructs the provider-hosted request URL locally and does not receive hosting credentials."}</p>
+        {!createdUrl && <p className="commit-stage-note">{integrated ? "The branch must already be pushed. If GitHub CLI is unavailable, continue in your browser." : "Inertia constructs the provider-hosted request URL locally and does not receive hosting credentials."}</p>}
         <footer>
-          {integrated && <button type="button" className="secondary-button" disabled={busy} onClick={() => { void openBrowser(); }}>Open browser flow</button>}
-          <button type="button" className="primary-button dialog-primary" disabled={(integrated && !title.trim()) || busy} onClick={() => { void (integrated ? submit() : openBrowser()); }}>{busy ? <LoadingMark label={integrated ? "Creating pull request" : "Opening browser flow"} /> : <GitPullRequest size={15} />}<span>{integrated ? "Create pull request" : `Open in ${forgeLabel}`}</span></button>
+          {createdUrl ? <>
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => { void copyCreatedPullRequest(); }}>Copy link</button>
+            <button type="button" className="primary-button dialog-primary" disabled={busy} onClick={() => { void openCreatedPullRequest(); }}><GitPullRequest size={15} /><span>Try opening GitHub</span></button>
+          </> : <>
+            {integrated && <button type="button" className="secondary-button" disabled={busy} onClick={() => { void openBrowser(); }}>Open browser flow</button>}
+            <button type="button" className="primary-button dialog-primary" disabled={(integrated && !title.trim()) || busy} onClick={() => { void (integrated ? submit() : openBrowser()); }}>{busy ? <LoadingMark label={integrated ? "Creating pull request" : "Opening browser flow"} /> : <GitPullRequest size={15} />}<span>{integrated ? "Create pull request" : `Open in ${forgeLabel}`}</span></button>
+          </>}
         </footer>
       </section>
     </div>

@@ -42,7 +42,10 @@ function TurnTimelineComponent({
   const reasoningContent = turn.isActive
     ? props.streamingReasoning || turn.reasoning?.content || ""
     : turn.reasoning?.content || "";
-  const providerLabel = activeWorkIdentityLabel(turn.agentTurn.modelSelection);
+  const providerLabel = activeWorkIdentityLabel(
+    turn.agentTurn.modelSelection,
+    props.providerIdentityLabels,
+  );
   const timerStart = turn.startedAt ?? turn.requestedAt;
   const wasActive = useRef(turn.isActive);
   const [completionAnnouncement, setCompletionAnnouncement] = useState("");

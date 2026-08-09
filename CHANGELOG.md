@@ -4,6 +4,35 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.29 — 2026-08-09
+
+### Runtime boundaries reject ambiguous state
+
+- Every runtime-to-renderer result is validated deeply before it can affect the desktop. Conversation, turn, run, message, activity, reasoning, plan, goal, review, provider, Git, Duo, project-action, and workspace identities now preserve their real storage and ownership relationships instead of relying on shallow array checks.
+- Runtime WebSocket delivery uses a 1 MiB soft watermark with progress acknowledgement, a five-second no-progress watchdog, and a 64 MiB absolute queued-byte ceiling. Legitimate multi-megabyte hydration can drain and continue receiving events, while a genuinely stalled consumer remains bounded and disconnects.
+- Recovery validates every released v47–v49 column and index before accepting a primary database or backup. Git and provider subprocesses keep only the required non-secret discovery, configuration, network, and identity environment while preserving shell-free, bounded process-tree ownership across macOS, Linux, and Windows.
+
+### Threads stay visible, attributable, and manageable
+
+- Pinning, snoozing, status filters, and a quieter chat index make long project histories easier to scan. Snooze works in the default classic sidebar, keeps active or input-blocked work visible, and expires on time without waiting for an unrelated snapshot.
+- Privacy-preserving desktop notifications cover completion, failure, approval, and input transitions. Clicking one recreates or waits for the desktop window, survives renderer hydration, targets either split pane correctly, closes obstructing non-destructive overlays, and keeps working after notification generation is disabled.
+- Provider aliases and custom keybindings are consistent across Settings, model selection, the composer, live turn attribution, maintenance notices, Duo, and command search. Rapid edits merge optimistically without stale snapshots or rejected writes erasing newer local input.
+
+### Desktop workflows do more without widening authority
+
+- Inertia can create a GitHub pull request through a bounded, credential-restricted `gh` process, including packaged-app executable discovery and safe Windows batch invocation. GitLab, Bitbucket, and browser fallback stay explicit, and a PR created successfully remains recoverable by URL even if the operating system cannot open the browser.
+- The composer exposes the active goal and supported actions directly, shows why skills or tools are unavailable, carries explicit preview context, and stores bounded recurring scratch prompts that never execute automatically.
+- Settings adds aggregate process and storage health, safe Chromium-cache clearing, provider identity labels, and keybinding controls. macOS preserves the native traffic-light safe area, while the simplified sidebar and trusted-overlay handling keep navigation clear.
+
+### Private Connect and headless foundations are more resilient
+
+- The packaged Private Connect client is installable as a versioned PWA with a scoped service worker, read-only offline state, UUID-only notification navigation, and HTTP projection fallback while WebSocket reconnects. Authority loss and revocation still fail closed.
+- A credential-free, non-listening runtime status CLI reports provider installation/protocol readiness, workspace access, and detected Git, Jujutsu, Mercurial, Subversion, or Fossil roots without exposing executable paths, environment values, authentication, or unsupported mutation claims.
+
+### Release confidence
+
+- Architecture and both lint layers, five TypeScript projects, 2,652 unit and integration tests, 223 portable provider contracts, 46 Electron scenarios, production audits, renderer bundle budgets, and exact-head Linux, macOS, and Windows coverage, performance, packaging, fuse, signature, and smoke gates protect the release.
+
 ## 0.0.28 — 2026-08-09
 
 ### Goals and native sessions start from the composer

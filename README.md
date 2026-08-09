@@ -160,13 +160,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.28
+### Version 0.0.29
 
-This release moves goals and native session continuation into the composer through `/goal` and `/resume`, simplifies the project sidebar, keeps provider questions visible, and gives the working label a seamless loop. The verified session picker shows eligible provider chats from the current directory without guessing identity or falling back to a fresh run.
+This release makes Inertia's runtime boundary substantially stricter and its everyday thread management calmer. Deep event validation now preserves conversation, turn, run, provider, Git, review, Duo, and storage identities; bounded WebSocket backpressure allows large hydration without leaving a stalled client unbounded; and current databases or recovery backups must contain every released structure before they are trusted.
 
-Duo's optional third-model setup is compact, its source questions remain actionable, and a finished judge opens automatically only while you remain on the launched pair. Pathological diffs use a bounded lazy worker pool, while generation-aware workspace authority prevents automatic handoffs, navigation, chat creation, and activating sends from racing one another.
+Threads can be pinned, snoozed, filtered, and opened from privacy-preserving desktop notifications. Provider aliases and custom keybindings remain consistent across live work, while the built-in GitHub pull-request flow, packaged Private Connect PWA, runtime health and cache controls, and credential-free status CLI add useful workflows without moving privileged authority into the renderer.
 
-Download [Inertia v0.0.28](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.28):
+Download [Inertia v0.0.29](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.29):
 
 | Platform | Download |
 | --- | --- |

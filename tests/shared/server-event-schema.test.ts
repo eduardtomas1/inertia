@@ -132,6 +132,28 @@ const conversation = {
   createdAt: "2030-01-01T00:00:00.000Z",
   updatedAt: "2030-01-01T00:00:00.000Z",
 };
+const conversationShell = {
+  ...conversation,
+  latestTurn: {
+    id: "turn-1",
+    runId: "run-1",
+    status: "running",
+    providerId: "codex",
+    harnessId: selection.harnessId,
+    backendProfileId: selection.backendProfileId,
+    modelSelection: selection,
+    continuationIdentity: continuationIdentityForSelection(selection),
+    model: selection.modelId,
+    reasoningEffort: "high",
+    requestedAt: checkedAt,
+    startedAt: checkedAt,
+    completedAt: null,
+    terminalReason: null,
+    updatedAt: checkedAt,
+  },
+  pendingApproval: false,
+  pendingInput: false,
+};
 
 const conversationDetail = {
   conversation,
@@ -694,6 +716,79 @@ describe("server event settings trust boundary", () => {
     expect(() => parseServerEvent(snapshotEvent({
       ...defaultSettings,
       [key]: invalidValue,
+    }))).toThrow("Malformed server event");
+  });
+});
+
+describe("server event conversation discriminant boundary", () => {
+  const snapshotEvent = (shell: unknown): unknown => ({
+    type: "snapshot.updated",
+    snapshot: {
+      projects: [],
+      conversations: [shell],
+      runs: [],
+      providers: [],
+      settings: defaultSettings,
+      activeProjectId: null,
+      activeConversationId: conversation.id,
+    },
+  });
+  const detailEvent = (nextConversation: unknown): unknown => event({
+    kind: "conversation.detail",
+    conversationId: conversation.id,
+    state: "ready",
+    detail: {
+      ...conversationDetail,
+      conversation: nextConversation,
+    },
+  });
+
+  it("accepts canonical conversation enums through shell and detail projections", () => {
+    expect(parseServerEvent(snapshotEvent(conversationShell))).toMatchObject({
+      type: "snapshot.updated",
+    });
+    expect(parseServerEvent(detailEvent(conversation))).toMatchObject({
+      type: "request.result",
+      result: { kind: "conversation.detail", state: "ready" },
+    });
+  });
+
+  it.each([
+    ["providerId", "gemini"],
+    ["interactionMode", "chat"],
+    ["accessMode", "unrestricted"],
+    ["status", "sleeping"],
+    ["attentionKind", "confirmation"],
+  ])("rejects malformed shell conversation.%s", (key, invalidValue) => {
+    expect(() => parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      [key]: invalidValue,
+    }))).toThrow("Malformed server event");
+  });
+
+  it.each([
+    ["providerId", "gemini"],
+    ["interactionMode", "chat"],
+    ["accessMode", "unrestricted"],
+    ["status", "sleeping"],
+    ["attentionKind", "confirmation"],
+  ])("rejects malformed detail conversation.%s", (key, invalidValue) => {
+    expect(() => parseServerEvent(detailEvent({
+      ...conversation,
+      [key]: invalidValue,
+    }))).toThrow("Malformed server event");
+  });
+
+  it.each([
+    ["providerId", "gemini"],
+    ["status", "sleeping"],
+  ])("rejects malformed shell latestTurn.%s", (key, invalidValue) => {
+    expect(() => parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      latestTurn: {
+        ...conversationShell.latestTurn,
+        [key]: invalidValue,
+      },
     }))).toThrow("Malformed server event");
   });
 });

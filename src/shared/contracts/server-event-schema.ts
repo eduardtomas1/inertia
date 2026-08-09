@@ -183,6 +183,8 @@ function latestTurn(value: unknown): boolean {
     "requestedAt",
     "updatedAt",
   )
+    && providerId(value, "providerId")
+    && oneOf(value, "status", AGENT_TURN_STATUSES)
     && nullableStringField(value, "startedAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "terminalReason")
@@ -205,6 +207,10 @@ function conversation(value: unknown): value is UnknownRecord {
     "createdAt",
     "updatedAt",
   )
+    && providerId(value, "providerId")
+    && oneOf(value, "interactionMode", ["build", "plan"])
+    && oneOf(value, "accessMode", ["supervised", "auto-edit", "full"])
+    && oneOf(value, "status", ["idle", "running", "needs-input", "completed", "failed"])
     && modelSelection(value.modelSelection)
     && (value.continuationIdentity === null
       || continuationIdentity(value.continuationIdentity))

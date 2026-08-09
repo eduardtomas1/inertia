@@ -79,6 +79,7 @@ describe("thread notifications", () => {
     const closeActivity = vi.fn();
     const closeCommitDialog = vi.fn(() => calls.push("commit"));
     const closePullRequestDialog = vi.fn(() => calls.push("pull-request"));
+    const closeProviderAuth = vi.fn(() => calls.push("provider-auth"));
     selectConversation.mockImplementation(() => calls.push("conversation"));
 
     activateNotificationConversation(thread, {
@@ -89,9 +90,15 @@ describe("thread notifications", () => {
       closeActivity,
       closeCommitDialog,
       closePullRequestDialog,
+      closeProviderAuth,
     });
 
-    expect(calls).toEqual(["commit", "pull-request", "conversation"]);
+    expect(calls).toEqual([
+      "commit",
+      "pull-request",
+      "provider-auth",
+      "conversation",
+    ]);
     expect(selectConversation).toHaveBeenCalledWith(thread);
     expect(showWorkspace).toHaveBeenCalledOnce();
     expect(closeSidebar).toHaveBeenCalledOnce();
@@ -99,6 +106,7 @@ describe("thread notifications", () => {
     expect(closeActivity).toHaveBeenCalledOnce();
     expect(closeCommitDialog).toHaveBeenCalledOnce();
     expect(closePullRequestDialog).toHaveBeenCalledOnce();
+    expect(closeProviderAuth).toHaveBeenCalledOnce();
   });
 
   it("maps only meaningful status transitions to native notification kinds", () => {

@@ -129,7 +129,8 @@ function chatMessage(value: unknown): boolean {
   return recordWithStrings(value, "id", "conversationId", "role", "content", "createdAt")
     && nullableStringField(value, "turnId")
     && oneOf(value, "role", ["user", "assistant", "system"])
-    && arrayOf(value.attachments, attachment);
+    && arrayOf(value.attachments, attachment)
+    && uniqueRecordField(value.attachments as unknown[], "id");
 }
 
 function providerMaintenanceStatus(value: unknown): boolean {
@@ -600,6 +601,7 @@ function agentWorkflow(value: unknown): boolean {
       goal.conversationId === conversationId)
     && workflowGoalCapability(value.goalCapability)
     && arrayOf(value.skills, agentSkill)
+    && uniqueRecordField(value.skills as unknown[], "id")
     && (value.skills as UnknownRecord[]).every((skill) =>
       skill.conversationId === conversationId)
     && workflowSkillsCapability(value.skillsCapability)
@@ -1050,7 +1052,8 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
         workspaceRun(entry)
         && record(entry)
         && entry.conversationId === conversationValue.id
-        && entry.projectId === conversationValue.projectId);
+        && entry.projectId === conversationValue.projectId)
+        && uniqueRecordField(value.runs as unknown[], "id");
     }
     case "workspace.git.invalidated":
       return recordWithStrings(value, "requestId", "projectId")
@@ -1061,7 +1064,8 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
     case "agent.commentary.persisted":
       return chatMessage(value.message);
     case "provider.maintenance.updated":
-      return arrayOf(value.providers, providerMaintenanceStatus);
+      return arrayOf(value.providers, providerMaintenanceStatus)
+        && uniqueRecordField(value.providers as unknown[], "providerId");
     case "provider.maintenance.operation":
       return providerMaintenanceOperation(value.operation);
     case "agent.started":
@@ -1117,7 +1121,8 @@ const REQUEST_RESULT_VALIDATORS = {
   "backend.profile.probe": (value) => backendProfile(value.profile, true),
   "backend.default": (value) => value.value === null || backendDefault(value.value),
   "provider.maintenance": (value) =>
-    arrayOf(value.providers, providerMaintenanceStatus),
+    arrayOf(value.providers, providerMaintenanceStatus)
+    && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) =>
     providerMaintenanceOperation(value.operation),
   "conversation.created": (value) => stringField(value, "conversationId"),
@@ -1128,13 +1133,15 @@ const REQUEST_RESULT_VALIDATORS = {
   "git.branches": (value) => arrayOf(value.branches, gitBranch),
   "workspace.entries": (value) => workspaceEntriesPage(value),
   "workspace.file": (value) => workspaceFile(value.file),
-  "project.actions": (value) => arrayOf(value.actions, projectAction),
+  "project.actions": (value) => arrayOf(value.actions, projectAction)
+    && uniqueRecordField(value.actions as unknown[], "id"),
   "agent.workflow": (value) => agentWorkflow(value.workflow),
   "agent.skills": (value) => stringField(value, "conversationId")
     && arrayOf(value.skills, (entry) =>
       agentSkill(entry)
       && record(entry)
       && entry.conversationId === value.conversationId)
+    && uniqueRecordField(value.skills as unknown[], "id")
     && skillDiscovery(value.skillDiscovery),
   "conversation.detail": (value) => stringField(value, "conversationId")
     && oneOf(value, "state", ["ready", "missing", "deleted", "failed"])
@@ -1144,6 +1151,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && (value.state !== "failed" || stringField(value, "message")),
   "duo.pending": (value) =>
     arrayOf(value.launchIds, (entry) => typeof entry === "string")
+    && new Set(value.launchIds as unknown[]).size === (value.launchIds as unknown[]).length
     && booleanField(value, "hasMore"),
   "duo.prepared": (value) => duoPrepared(value),
   "duo.status": (value) => duoStatus(value),

@@ -157,10 +157,12 @@ export function activateNotificationConversation(
     closeActivity: () => void;
     closeCommitDialog: () => void;
     closePullRequestDialog: () => void;
+    closeProviderAuth: () => void;
   },
 ): void {
   actions.closeCommitDialog();
   actions.closePullRequestDialog();
+  actions.closeProviderAuth();
   actions.closeSidebar();
   actions.closePalette();
   actions.closeActivity();
@@ -379,6 +381,7 @@ export function AppLayout({
         closeActivity: () => setActivityOpen(false),
         closeCommitDialog: () => setCommitDialogOpen(false),
         closePullRequestDialog: () => setPullRequestDialogOpen(false),
+        closeProviderAuth: providerAuth.onClose,
       },
     ),
   });

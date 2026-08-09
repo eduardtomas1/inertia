@@ -1228,19 +1228,19 @@ describe("server event remaining discriminant and identity boundary", () => {
     ];
     for (const active of invalidActiveStates) expect(() => parseServerEvent({ type: "snapshot.updated", snapshot: snapshot(active) })).toThrow("Malformed server event");
   });
-  it("binds workflow goals and skills to the outer conversation", () => {
-    expect(() => parseServerEvent(event({
-      kind: "agent.workflow",
-      workflow: {
-        ...workflow,
-        goals: [{ ...workflow.goals[0], conversationId: "conversation-2" }],
-      },
-    }))).toThrow("Malformed server event");
-    expect(() => parseServerEvent(event({
-      kind: "agent.skills",
-      conversationId: conversation.id,
-      skills: [{ ...workflow.skills[0], conversationId: "conversation-2" }],
-      skillDiscovery: workflow.skillDiscovery,
-    }))).toThrow("Malformed server event");
+  it("rejects mismatched and duplicate event-local identities", () => {
+    const skill = workflow.skills[0]; const attachment = conversationDetail.messages[0].attachments[0];
+    const duplicateEvents = [
+      { type: "conversation.shell.updated", conversation: conversationShell, runs: [run, { ...run }] },
+      { type: "conversation.message.persisted", message: { ...conversationDetail.messages[0], attachments: [attachment, { ...attachment }] } },
+      { type: "provider.maintenance.updated", providers: [maintenance, { ...maintenance }] },
+      event({ kind: "provider.maintenance", providers: [maintenance, { ...maintenance }] }),
+      event({ kind: "project.actions", actions: [{ id: "test", label: "Test", command: "npm test", preview: false }, { id: "test", label: "Duplicate", command: "npm test", preview: false }] }),
+      event({ kind: "agent.workflow", workflow: { ...workflow, skills: [skill, { ...skill }] } }), event({ kind: "agent.skills", conversationId: conversation.id, skills: [skill, { ...skill }], skillDiscovery: workflow.skillDiscovery }),
+      event({ kind: "duo.pending", launchIds: ["launch-1", "launch-1"], hasMore: false }),
+    ];
+    for (const malformed of duplicateEvents) expect(() => parseServerEvent(malformed)).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({ kind: "agent.workflow", workflow: { ...workflow, goals: [{ ...workflow.goals[0], conversationId: "conversation-2" }] } }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({ kind: "agent.skills", conversationId: conversation.id, skills: [{ ...skill, conversationId: "conversation-2" }], skillDiscovery: workflow.skillDiscovery }))).toThrow("Malformed server event");
   });
 });

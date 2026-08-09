@@ -1,7 +1,9 @@
-import { render } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadNotifications } from "../../src/renderer/src/hooks/useThreadNotifications";
+import { activateNotificationConversation } from "../../src/renderer/src/components/AppLayout";
 import type { AppSnapshot, Conversation } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 
@@ -47,6 +49,64 @@ function snapshot(thread: Conversation): AppSnapshot {
 }
 
 describe("thread notification lifecycle", () => {
+  it("closes provider authentication before activating its thread", () => {
+    let activateNativeNotification = (_conversationId: string): void => {
+      throw new Error("Notification activation was not subscribed.");
+    };
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        onThreadNotificationActivated: vi.fn((listener: (
+          conversationId: string,
+        ) => void) => {
+          activateNativeNotification = listener;
+          return vi.fn();
+        }),
+      },
+    });
+    const selected = vi.fn();
+    const thread = conversation("completed");
+    function ActivationShell(): React.JSX.Element {
+      const [providerAuthOpen, setProviderAuthOpen] = useState(true);
+      return (
+        <>
+          <ThreadNotifications
+            snapshot={snapshot(thread)}
+            documentActive={false}
+            activeConversationVisible={false}
+            secondaryConversationId={null}
+            enabled
+            onActivate={(conversation) => activateNotificationConversation(
+              conversation,
+              {
+                selectConversation: selected,
+                showWorkspace: vi.fn(),
+                closeSidebar: vi.fn(),
+                closePalette: vi.fn(),
+                closeActivity: vi.fn(),
+                closeCommitDialog: vi.fn(),
+                closePullRequestDialog: vi.fn(),
+                closeProviderAuth: () => setProviderAuthOpen(false),
+              },
+            )}
+          />
+          {providerAuthOpen && (
+            <div role="dialog" aria-label="Connect provider" />
+          )}
+        </>
+      );
+    }
+    render(<ActivationShell />);
+    expect(screen.getByRole("dialog", { name: "Connect provider" }))
+      .toBeInTheDocument();
+
+    act(() => activateNativeNotification(thread.id));
+
+    expect(screen.queryByRole("dialog", { name: "Connect provider" }))
+      .not.toBeInTheDocument();
+    expect(selected).toHaveBeenCalledWith(thread);
+  });
+
   it("activates the latest native click once its thread is hydrated", () => {
     let activateNativeNotification = (_conversationId: string): void => {
       throw new Error("Notification activation was not subscribed.");

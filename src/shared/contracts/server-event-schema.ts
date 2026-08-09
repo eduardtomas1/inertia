@@ -384,7 +384,7 @@ function appKeybindings(value: unknown): boolean {
 }
 
 function appSnapshot(value: unknown): boolean {
-  return record(value)
+  if (!(record(value)
     && arrayOf(value.projects, project)
     && arrayOf(value.conversations, conversationShell)
     && arrayOf(value.runs, workspaceRun)
@@ -401,7 +401,16 @@ function appSnapshot(value: unknown): boolean {
     && appSettings(value.settings)
     && nullableStringField(value, "activeProjectId")
     && nullableStringField(value, "activeConversationId")
-    && (value.sync === undefined || syncCursor(value.sync));
+    && (value.sync === undefined || syncCursor(value.sync)))) return false;
+  const conversationProjects = new Map(
+    (value.conversations as UnknownRecord[]).map((entry) => [
+      entry.id,
+      entry.projectId,
+    ]),
+  );
+  return (value.runs as UnknownRecord[]).every((run) =>
+    run.conversationId === null
+    || conversationProjects.get(run.conversationId) === run.projectId);
 }
 
 function threadUsage(value: unknown): boolean {
@@ -1045,7 +1054,8 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return arrayOf(value.runs, (entry) =>
         workspaceRun(entry)
         && record(entry)
-        && entry.conversationId === conversationValue.id);
+        && entry.conversationId === conversationValue.id
+        && entry.projectId === conversationValue.projectId);
     }
     case "workspace.git.invalidated":
       return recordWithStrings(value, "requestId", "projectId")

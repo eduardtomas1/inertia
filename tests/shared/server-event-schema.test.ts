@@ -914,7 +914,7 @@ describe("server event workspace-run discriminant boundary", () => {
     type: "snapshot.updated",
     snapshot: {
       projects: [],
-      conversations: [],
+      conversations: [conversationShell],
       runs: [workspaceRun],
       providers: [],
       settings: defaultSettings,
@@ -955,41 +955,27 @@ describe("server event remaining discriminant and identity boundary", () => {
     createdAt: checkedAt, updatedAt: checkedAt,
   };
   const maintenance = {
-    providerId: "codex",
-    installedVersion: "1.0.0",
-    latestVersion: "1.0.1",
-    versionStatus: "update-available",
-    freshness: "fresh",
-    checkedAt,
-    installMethod: "npm-global",
-    updateAvailability: "available",
-    updateLabel: "Update",
-    instructionsUrl: "https://example.test/update",
+    providerId: "codex", installedVersion: "1.0.0",
+    latestVersion: "1.0.1", versionStatus: "update-available",
+    freshness: "fresh", checkedAt,
+    installMethod: "npm-global", updateAvailability: "available",
+    updateLabel: "Update", instructionsUrl: "https://example.test/update",
     message: null,
   };
   const operation = {
-    id: "operation-1",
-    providerId: "codex",
-    status: "running",
-    startedAt: checkedAt,
+    id: "operation-1", providerId: "codex",
+    status: "running", startedAt: checkedAt,
     finishedAt: null, afterVersion: null,
-    beforeVersion: "1.0.0",
-    targetVersion: "1.0.1",
-    message: "Updating",
-    output: null,
+    beforeVersion: "1.0.0", targetVersion: "1.0.1",
+    message: "Updating", output: null,
     outputTruncated: false,
   };
   const provider = {
-    id: "codex",
-    label: "Codex",
-    command: "codex",
-    available: true,
-    version: "1.0.0",
-    executable: "/opt/bin/codex",
-    installState: "installed",
-    authState: "authenticated",
-    canRun: true,
-    statusMessage: null,
+    id: "codex", label: "Codex",
+    command: "codex", available: true,
+    version: "1.0.0", executable: "/opt/bin/codex",
+    installState: "installed", authState: "authenticated",
+    canRun: true, statusMessage: null,
     models: [], rateLimits: [],
     metadataState: {
       models: {
@@ -1028,18 +1014,12 @@ describe("server event remaining discriminant and identity boundary", () => {
     ...overrides,
   });
   const run = {
-    id: "run-1",
-    kind: "agent",
-    projectId: project.id,
-    conversationId: conversation.id,
-    actionId: null,
-    label: "Agent run",
-    detail: null,
-    status: "running",
-    attentionState: "unseen",
-    canStop: true,
-    port: null,
-    startedAt: checkedAt,
+    id: "run-1", kind: "agent",
+    projectId: project.id, conversationId: conversation.id,
+    actionId: null, label: "Agent run",
+    detail: null, status: "running",
+    attentionState: "unseen", canStop: true,
+    port: null, startedAt: checkedAt,
     finishedAt: null,
   };
   const approval = {
@@ -1226,11 +1206,27 @@ describe("server event remaining discriminant and identity boundary", () => {
       conversation: conversationShell,
       runs: [{ ...run, conversationId: "conversation-2" }],
     })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({
+      type: "conversation.shell.updated",
+      conversation: conversationShell,
+      runs: [{ ...run, projectId: "project-2" }],
+    })).toThrow("Malformed server event");
     expect(parseServerEvent(frame({ kind: "shell" }, {
       type: "conversation.shell.updated",
       conversation: conversationShell,
       runs: [run],
     }))).toBeTruthy();
+  });
+  it("binds snapshot conversation runs while preserving project-scoped runs", () => {
+    const parseSnapshot = (runs: unknown[]): unknown => parseServerEvent({
+      type: "snapshot.updated",
+      snapshot: snapshot({ conversations: [conversationShell], runs }),
+    });
+    expect(parseSnapshot([{ ...run, conversationId: null }])).toBeTruthy();
+    expect(() => parseSnapshot([{ ...run, conversationId: "missing" }]))
+      .toThrow("Malformed server event");
+    expect(() => parseSnapshot([{ ...run, projectId: "project-2" }]))
+      .toThrow("Malformed server event");
   });
   it("binds workflow goals and skills to the outer conversation", () => {
     expect(() => parseServerEvent(event({

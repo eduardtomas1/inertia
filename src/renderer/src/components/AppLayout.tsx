@@ -155,13 +155,17 @@ export function activateNotificationConversation(
     closeSidebar: () => void;
     closePalette: () => void;
     closeActivity: () => void;
+    closeCommitDialog: () => void;
+    closePullRequestDialog: () => void;
   },
 ): void {
-  actions.selectConversation(conversation);
-  actions.showWorkspace();
+  actions.closeCommitDialog();
+  actions.closePullRequestDialog();
   actions.closeSidebar();
   actions.closePalette();
   actions.closeActivity();
+  actions.selectConversation(conversation);
+  actions.showWorkspace();
 }
 
 export function formatAppShortcutLabel(
@@ -352,6 +356,8 @@ export function AppLayout({
         closeSidebar: () => setSidebarOpen(false),
         closePalette: () => setPaletteOpen(false),
         closeActivity: () => setActivityOpen(false),
+        closeCommitDialog: () => setCommitDialogOpen(false),
+        closePullRequestDialog: () => setPullRequestDialogOpen(false),
       },
     ),
   });

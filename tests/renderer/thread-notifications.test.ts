@@ -48,13 +48,17 @@ describe("thread notifications", () => {
     expect(formatAppShortcutLabel("linux", "y")).toBe("Ctrl+Y");
   });
 
-  it("returns from navigation overlays to the activated workspace thread", () => {
+  it("closes navigation and repository dialogs before activating a workspace thread", () => {
     const thread = conversation("completed");
+    const calls: string[] = [];
     const selectConversation = vi.fn();
     const showWorkspace = vi.fn();
     const closeSidebar = vi.fn();
     const closePalette = vi.fn();
     const closeActivity = vi.fn();
+    const closeCommitDialog = vi.fn(() => calls.push("commit"));
+    const closePullRequestDialog = vi.fn(() => calls.push("pull-request"));
+    selectConversation.mockImplementation(() => calls.push("conversation"));
 
     activateNotificationConversation(thread, {
       selectConversation,
@@ -62,13 +66,18 @@ describe("thread notifications", () => {
       closeSidebar,
       closePalette,
       closeActivity,
+      closeCommitDialog,
+      closePullRequestDialog,
     });
 
+    expect(calls).toEqual(["commit", "pull-request", "conversation"]);
     expect(selectConversation).toHaveBeenCalledWith(thread);
     expect(showWorkspace).toHaveBeenCalledOnce();
     expect(closeSidebar).toHaveBeenCalledOnce();
     expect(closePalette).toHaveBeenCalledOnce();
     expect(closeActivity).toHaveBeenCalledOnce();
+    expect(closeCommitDialog).toHaveBeenCalledOnce();
+    expect(closePullRequestDialog).toHaveBeenCalledOnce();
   });
 
   it("maps only meaningful status transitions to native notification kinds", () => {

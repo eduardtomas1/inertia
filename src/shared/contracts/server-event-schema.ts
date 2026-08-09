@@ -402,15 +402,15 @@ function appSnapshot(value: unknown): boolean {
     && nullableStringField(value, "activeProjectId")
     && nullableStringField(value, "activeConversationId")
     && (value.sync === undefined || syncCursor(value.sync)))) return false;
-  const conversationProjects = new Map(
-    (value.conversations as UnknownRecord[]).map((entry) => [
-      entry.id,
-      entry.projectId,
-    ]),
-  );
-  return (value.runs as UnknownRecord[]).every((run) =>
-    run.conversationId === null
-    || conversationProjects.get(run.conversationId) === run.projectId);
+  const conversationProjects = new Map((value.conversations as UnknownRecord[])
+    .map((entry) => [entry.id, entry.projectId]));
+  const projectIds = new Set((value.projects as UnknownRecord[]).map((entry) => entry.id));
+  const activeConversationProject = value.activeConversationId === null
+    ? null : conversationProjects.get(value.activeConversationId);
+  return (value.activeProjectId === null || projectIds.has(value.activeProjectId))
+    && (value.activeConversationId === null || activeConversationProject === value.activeProjectId)
+    && (value.runs as UnknownRecord[]).every((run) => run.conversationId === null
+      || conversationProjects.get(run.conversationId) === run.projectId);
 }
 
 function threadUsage(value: unknown): boolean {

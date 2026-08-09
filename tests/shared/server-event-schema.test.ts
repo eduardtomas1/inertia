@@ -730,7 +730,7 @@ describe("server event conversation discriminant boundary", () => {
       providers: [],
       settings: defaultSettings,
       activeProjectId: null,
-      activeConversationId: conversation.id,
+      activeConversationId: null,
     },
   });
   const detailEvent = (nextConversation: unknown): unknown => event({
@@ -744,9 +744,8 @@ describe("server event conversation discriminant boundary", () => {
   });
 
   it("accepts canonical conversation enums through shell and detail projections", () => {
-    expect(parseServerEvent(snapshotEvent(conversationShell))).toMatchObject({
-      type: "snapshot.updated",
-    });
+    expect(parseServerEvent(snapshotEvent(conversationShell)))
+      .toMatchObject({ type: "snapshot.updated" });
     expect(parseServerEvent(detailEvent(conversation))).toMatchObject({
       type: "request.result",
       result: { kind: "conversation.detail", state: "ready" },
@@ -1225,8 +1224,13 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(parseSnapshot([{ ...run, conversationId: null }])).toBeTruthy();
     expect(() => parseSnapshot([{ ...run, conversationId: "missing" }]))
       .toThrow("Malformed server event");
-    expect(() => parseSnapshot([{ ...run, projectId: "project-2" }]))
-      .toThrow("Malformed server event");
+    expect(() => parseSnapshot([{ ...run, projectId: "project-2" }])).toThrow("Malformed server event");
+    expect(parseServerEvent({ type: "snapshot.updated", snapshot: snapshot({ conversations: [conversationShell], activeConversationId: conversation.id }) })).toBeTruthy();
+    const invalidActiveStates = [
+      { activeProjectId: "missing" }, { activeConversationId: "missing" },
+      { projects: [project, { ...project, id: "project-2" }], conversations: [conversationShell], activeProjectId: "project-2", activeConversationId: conversation.id },
+    ];
+    for (const active of invalidActiveStates) expect(() => parseServerEvent({ type: "snapshot.updated", snapshot: snapshot(active) })).toThrow("Malformed server event");
   });
   it("binds workflow goals and skills to the outer conversation", () => {
     expect(() => parseServerEvent(event({

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   clientCommandSchema,
+  defaultSettings,
   type Conversation,
   type Project,
 } from "../../src/shared/contracts";
@@ -161,7 +162,16 @@ describe("durable Git reconnect reconciliation", () => {
         data: JSON.stringify({
           type: "server.welcome",
           protocolVersion: 1,
-          snapshot: { sync: initialSync },
+          snapshot: {
+            projects: [],
+            conversations: [],
+            runs: [],
+            providers: [],
+            settings: defaultSettings,
+            activeProjectId: null,
+            activeConversationId: null,
+            sync: initialSync,
+          },
           sync: initialSync,
         }),
       }));

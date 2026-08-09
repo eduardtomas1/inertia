@@ -4,6 +4,11 @@ import { access, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
 import type { ProviderId } from "./provider/contracts";
+import {
+  requireProcessTreeTermination,
+  terminateProcessTreeAndWait,
+  type ProcessTreeTerminator,
+} from "./process-lifecycle";
 
 const MAX_ENVIRONMENT_BYTES = 512 * 1024;
 const ENVIRONMENT_TIMEOUT_MS = 3_000;
@@ -202,17 +207,20 @@ function parseEnvironment(buffer: Buffer): NodeJS.ProcessEnv {
   return result;
 }
 
-async function loginShellEnvironment(): Promise<NodeJS.ProcessEnv> {
+export async function loginShellEnvironment(
+  terminateProcessTree: ProcessTreeTerminator = terminateProcessTreeAndWait,
+): Promise<NodeJS.ProcessEnv> {
   if (process.platform === "win32") return {};
   const configured = process.env.SHELL;
   const shell = configured && isAbsolute(configured) && SAFE_SHELLS.has(basename(configured))
     ? configured
     : process.platform === "darwin" ? "/bin/zsh" : "/bin/sh";
 
-  return await new Promise<NodeJS.ProcessEnv>((resolveEnvironment) => {
+  return await new Promise<NodeJS.ProcessEnv>((resolveEnvironment, rejectEnvironment) => {
     const chunks: Buffer[] = [];
     let size = 0;
     let settled = false;
+    let termination: Promise<void> | undefined;
     let timer: NodeJS.Timeout | undefined;
     const finish = (value: NodeJS.ProcessEnv): void => {
       if (settled) return;
@@ -224,6 +232,7 @@ async function loginShellEnvironment(): Promise<NodeJS.ProcessEnv> {
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(shell, ["-ilc", "/usr/bin/env -0"], {
+        detached: true,
         env: process.env,
         shell: false,
         stdio: ["ignore", "pipe", "ignore"],
@@ -241,12 +250,19 @@ async function loginShellEnvironment(): Promise<NodeJS.ProcessEnv> {
       chunks.push(next);
       size += next.length;
     });
-    child.once("error", () => finish({}));
-    child.once("close", (code) => finish(code === 0 ? parseEnvironment(Buffer.concat(chunks)) : {}));
+    child.once("error", () => { if (!termination) finish({}); });
+    child.once("close", (code) => {
+      if (!termination) finish(code === 0 ? parseEnvironment(Buffer.concat(chunks)) : {});
+    });
 
     timer = setTimeout(() => {
-      try { child.kill("SIGKILL"); } catch { /* The shell may already have exited. */ }
-      finish({});
+      termination = requireProcessTreeTermination(
+        terminateProcessTree,
+        child,
+        true,
+        "Login shell environment process tree",
+      );
+      void termination.then(() => finish({}), rejectEnvironment);
     }, ENVIRONMENT_TIMEOUT_MS);
     timer.unref();
   });

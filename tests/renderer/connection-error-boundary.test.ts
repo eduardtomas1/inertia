@@ -75,7 +75,7 @@ describe("renderer error visibility boundary", () => {
     const unreadable = vi.fn();
     const projectionError = new Error("projection failed");
     const deliver = () => deliverDecodedServerEvent(
-      JSON.stringify({ type: "snapshot.updated", snapshot: {} }),
+      JSON.stringify({ type: "request.ok", requestId: "valid" }),
       (event) => {
         notifyConnectionListeners(event, [
           () => { throw projectionError; },
@@ -86,6 +86,50 @@ describe("renderer error visibility boundary", () => {
 
     expect(deliver).toThrow(projectionError);
     expect(unreadable).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { type: "snapshot.updated", snapshot: {} },
+    { type: "runtime.cursor", sync: {} },
+    { type: "runtime.cursor", sync: { runtimeGeneration: "", latestSequence: 0 } },
+    { type: "request.error", requestId: "known" },
+    { type: "request.result", requestId: "known", result: { kind: "message.accepted" } },
+    {
+      type: "snapshot.updated",
+      snapshot: {
+        projects: [],
+        conversations: [],
+        runs: [],
+        providers: [{ id: "codex" }],
+        settings: {},
+        activeProjectId: null,
+        activeConversationId: null,
+      },
+    },
+    {
+      type: "terminal.created",
+      requestId: "known",
+      terminalId: "terminal",
+      providerResume: {},
+    },
+    { type: "terminal.output", terminalId: "terminal" },
+    { type: "unknown.event" },
+  ])("rejects malformed known and unknown runtime events", (event) => {
+    expect(() => decodeServerEventMessage(JSON.stringify(event)))
+      .toThrow("Malformed server event");
+  });
+
+  it("accepts legacy plans with a null turn identity", () => {
+    expect(decodeServerEventMessage(JSON.stringify({
+      type: "agent.plan.updated",
+      plan: {
+        conversationId: "conversation",
+        runId: "run",
+        turnId: null,
+        explanation: null,
+        steps: [],
+      },
+    }))).toMatchObject({ type: "agent.plan.updated" });
   });
 
   it("distinguishes late Git results awaiting or preceded by durable publication", () => {

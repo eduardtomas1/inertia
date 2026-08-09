@@ -1,3 +1,4 @@
+import { PRIVATE_CONNECT_LIMITS } from "../../../../shared/private-connect/protocol";
 import { QuestionForm } from "../components/QuestionForm";
 import type { Detail, Shell } from "../types";
 import { ActivitySummary } from "./ActivitySummary";
@@ -81,6 +82,7 @@ export function ConversationPane({
             >
               <textarea
                 aria-label="Send a prompt"
+                maxLength={PRIVATE_CONNECT_LIMITS.promptCharacters}
                 value={prompt}
                 onChange={(event) => onPromptChange(event.target.value)}
                 placeholder="Send a supervised prompt"

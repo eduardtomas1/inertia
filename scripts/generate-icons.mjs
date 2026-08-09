@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 const ROOT = resolve(import.meta.dirname, "..");
 const SOURCE_PATH = join(ROOT, "resources", "icon.svg");
 const ICON_DIRECTORY = join(ROOT, "resources", "icons");
-const SIZES = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
+const SIZES = [16, 24, 32, 48, 64, 128, 192, 256, 512, 1024];
 const EXPECTED_SOURCE_MARKERS = [
   'viewBox="0 0 1024 1024"',
   'fill="#07070a"',

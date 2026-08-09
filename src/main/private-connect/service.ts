@@ -28,6 +28,7 @@ import {
   type PrivateConnectScope,
 } from "../../shared/private-connect/scopes";
 import type { PrivateConnectRuntimeGrant } from "../../shared/private-connect/runtime-grants";
+import { sanitizePrivateConnectLabel } from "../../shared/private-connect/sanitizer";
 import type {
   PrivateConnectRuntimeAuthorization,
   PrivateConnectRuntimeRequest,
@@ -1116,8 +1117,10 @@ function success(requestId: string, result: unknown): PrivateConnectResponse { r
 function failure(requestId: string, code: Extract<PrivateConnectResponse, { ok: false }>["code"], message: string): PrivateConnectResponse { return { type: "response", requestId, ok: false, code, message: sanitizeError(message) }; }
 
 function sanitizeDeviceLabel(value: string): string | null {
-  const normalized = value.trim().replace(/[\u0000-\u001f\u007f]/gu, "").slice(0, PRIVATE_CONNECT_LIMITS.deviceLabelCharacters);
-  return normalized || null;
+  return sanitizePrivateConnectLabel(
+    value,
+    PRIVATE_CONNECT_LIMITS.deviceLabelCharacters,
+  );
 }
 
 function sanitizeError(value: string): string { return value.replace(/[\u0000-\u001f\u007f]/gu, "").slice(0, 300) || "The request was rejected."; }

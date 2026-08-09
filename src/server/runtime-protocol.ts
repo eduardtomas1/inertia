@@ -5,6 +5,12 @@ import WebSocket, { type RawData } from "ws";
 
 import { clientCommandSchema, type ClientCommand, type ServerEvent } from "../shared/contracts";
 
+export const MAX_BUFFERED_RUNTIME_EVENT_BYTES = 1024 * 1024;
+
+function terminateSocket(socket: WebSocket): void {
+  try { socket.terminate(); } catch { /* The transport is already unusable. */ }
+}
+
 export function isAllowedRuntimeOrigin(origin: string | undefined): boolean {
   if (origin === "inertia://bundle") return true;
   if (origin === undefined || origin === "null" || origin === "file://") return false;
@@ -29,7 +35,16 @@ function requestIdFrom(value: unknown): string {
 }
 
 export function sendRuntimeEvent(socket: WebSocket, event: ServerEvent): void {
-  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event));
+  if (socket.readyState !== WebSocket.OPEN) return;
+  if (socket.bufferedAmount > MAX_BUFFERED_RUNTIME_EVENT_BYTES) {
+    terminateSocket(socket);
+    return;
+  }
+  try {
+    socket.send(JSON.stringify(event));
+  } catch {
+    terminateSocket(socket);
+  }
 }
 
 export function parseRuntimeCommand(data: RawData, isBinary: boolean): { command?: ClientCommand; error?: ServerEvent } {

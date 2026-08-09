@@ -1,6 +1,7 @@
 import type { ChatAttachmentMimeType } from "./attachments";
-import type {
-  PrivateConnectConversationGrant,
+import {
+  PRIVATE_CONNECT_GRANT_LIMITS,
+  type PrivateConnectConversationGrant,
 } from "./private-connect/grants";
 import type {
   PrivateConnectPreset,
@@ -214,7 +215,10 @@ function privateConnectGrantList(value: unknown): value is PrivateConnectConvers
     return keys.length === 3
       && keys.every((key) => key === "projectId" || key === "conversationIds" || key === "includeFutureConversations")
       && boundedEntityId(candidate.projectId)
-      && boundedEntityIds(candidate.conversationIds, 256)
+      && boundedEntityIds(
+        candidate.conversationIds,
+        PRIVATE_CONNECT_GRANT_LIMITS.conversationsPerProject,
+      )
       && typeof candidate.includeFutureConversations === "boolean";
   });
 }

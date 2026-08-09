@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  PRIVATE_CONNECT_LIMITS,
   PRIVATE_CONNECT_SOCKET_CLOSE,
   privateConnectConversationDetailSchema,
   privateConnectStateSchema,
@@ -54,7 +55,8 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   const applyStateResponse = useCallback((response: PrivateConnectResponse): void => {
     if (!response.ok) throw new Error(response.message);
     const result = projectionResult(response);
-    if (!result || result.kind === "not-modified") return;
+    if (!result) throw new Error("Private Connect returned an invalid state projection.");
+    if (result.kind === "not-modified") return;
     if (result.kind !== "state") throw new Error("Private Connect returned an invalid state projection.");
     stateValidatorRef.current = result.validator;
     setShell(result.state);
@@ -66,9 +68,13 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   ): void => {
     if (!response.ok) throw new Error(response.message);
     const result = projectionResult(response);
-    if (!result || result.kind === "not-modified") return;
+    if (!result) throw new Error("Private Connect returned an invalid conversation projection.");
+    if (result.kind === "not-modified") return;
     if (result.kind !== "conversation") {
       throw new Error("Private Connect returned an invalid conversation projection.");
+    }
+    if (result.detail.conversation.id !== conversationId) {
+      throw new Error("Private Connect returned a conversation outside the requested scope.");
     }
     conversationValidatorsRef.current.set(conversationId, result.validator);
     setDetail(result.detail);
@@ -259,9 +265,15 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
 
   const sendPrompt = async (): Promise<void> => {
     if (pair.kind !== "ready" || !prompt.trim() || !shell?.capabilities.scopes.includes("private:prompt") || !selectedConversation) return;
+    const content = prompt.trim();
+    if (content.length > PRIVATE_CONNECT_LIMITS.promptCharacters) {
+      setPair((current) => current.kind === "ready"
+        ? { ...current, error: `Prompts are limited to ${PRIVATE_CONNECT_LIMITS.promptCharacters.toLocaleString()} characters.` }
+        : current);
+      return;
+    }
     setBusy(true);
     try {
-      const content = prompt.trim();
       const deliveryId = pendingPromptDelivery?.conversationId === selectedConversation
         && pendingPromptDelivery.content === content
         ? pendingPromptDelivery.deliveryId

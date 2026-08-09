@@ -1,9 +1,7 @@
-import { execFile } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, win32 } from "node:path";
-import { promisify } from "node:util";
+import { runGitInspection } from "./git/runner";
 
-const execFileAsync = promisify(execFile);
 const IDENTITY_TIMEOUT_MS = 3_000;
 const MAX_IDENTITY_OUTPUT = 16 * 1024;
 
@@ -26,20 +24,12 @@ async function canonicalDirectory(path: string): Promise<string> {
 }
 
 async function gitValue(cwd: string, args: readonly string[]): Promise<string> {
-  const result = await execFileAsync("git", [...args], {
-    cwd,
-    encoding: "utf8",
-    timeout: IDENTITY_TIMEOUT_MS,
-    windowsHide: true,
-    maxBuffer: MAX_IDENTITY_OUTPUT,
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: "0",
-      GIT_ASKPASS: "",
-      LC_ALL: "C",
-    },
+  const result = await runGitInspection(cwd, args, {
+    failureMessage: "Project identity inspection failed.",
+    maxOutputBytes: MAX_IDENTITY_OUTPUT,
+    timeoutMs: IDENTITY_TIMEOUT_MS,
   });
-  return result.stdout.trim();
+  return result.stdout.toString("utf8").trim();
 }
 
 export const PROJECT_IDENTITY_DEADLINE_MS = 8_000;

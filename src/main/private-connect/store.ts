@@ -15,11 +15,13 @@ import {
 import {
   ElectronSafeStorageBackend,
   FileCredentialVaultPersistence,
+  MAX_CREDENTIAL_VAULT_BYTES,
   type CredentialVaultPersistence,
 } from "../credential-vault";
 
 const timestamp = z.string().datetime({ offset: true });
 const entityId = z.string().trim().min(1).max(200);
+const MAX_PRIVATE_CONNECT_STORE_PLAINTEXT_BYTES = 700_000;
 
 const privateConnectDeviceSchema = z.object({
   id: z.string().uuid(),
@@ -110,7 +112,14 @@ const privateConnectStoreSchema = z.object({
   deliveryReceipts: z.array(privateConnectDeliveryReceiptSchema).max(PRIVATE_CONNECT_LIMITS.deliveryReceipts).default([]),
   audit: z.array(privateConnectAuditSchema).max(PRIVATE_CONNECT_LIMITS.auditEvents),
   migrationNoticeShown: z.boolean(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_PRIVATE_CONNECT_STORE_PLAINTEXT_BYTES) {
+    context.addIssue({
+      code: "custom",
+      message: "The Private Connect grant set is too large.",
+    });
+  }
+});
 
 export interface PrivateConnectDevice {
   id: string;
@@ -238,7 +247,10 @@ export class PrivateConnectStore {
     if (!this.available()) return null;
     const encoded = await this.persistence.read();
     if (encoded === null) return null;
-    if (encoded.length > 1_000_000 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)) {
+    if (
+      Buffer.byteLength(encoded, "utf8") > MAX_CREDENTIAL_VAULT_BYTES
+      || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)
+    ) {
       throw new Error("The encrypted Private Connect store is invalid.");
     }
     try {
@@ -252,6 +264,9 @@ export class PrivateConnectStore {
   async save(value: PersistedPrivateConnect): Promise<void> {
     if (!this.available()) throw new Error("Secure platform storage is unavailable.");
     const encoded = Buffer.from(this.encryption.encrypt(JSON.stringify(privateConnectStoreSchema.parse(value)))).toString("base64");
+    if (Buffer.byteLength(encoded, "utf8") > MAX_CREDENTIAL_VAULT_BYTES) {
+      throw new Error("The encrypted Private Connect store is too large.");
+    }
     await this.persistence.write(encoded);
   }
 

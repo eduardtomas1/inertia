@@ -27,6 +27,7 @@ export interface RunGitOptions {
   maxOutputBytes?: number;
   truncateOutput?: boolean;
   input?: Buffer;
+  environment?: NodeJS.ProcessEnv;
   failureMessage: string;
 }
 
@@ -151,7 +152,7 @@ export function runGit(
       detached: process.platform !== "win32",
       windowsHide: true,
       stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
-      env: gitProcessEnvironment(),
+      env: gitProcessEnvironment(process.env, options.environment),
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];

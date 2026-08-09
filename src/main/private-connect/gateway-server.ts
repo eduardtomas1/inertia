@@ -14,10 +14,12 @@ import {
   type PrivateConnectResponse,
 } from "../../shared/private-connect/protocol";
 import type { PrivateConnectInvitation } from "../../shared/private-connect/protocol";
+import { sanitizePrivateConnectLabel } from "../../shared/private-connect/sanitizer";
 
 const SESSION_COOKIE = "__Host-inertia-private-connect";
 const CSRF_HEADER = "x-inertia-private-connect-csrf";
 const MAX_CONNECTIONS = 8;
+const MAX_HTTP_CONNECTIONS = 128;
 const REQUEST_TIMEOUT_MS = 15_000;
 const RATE_WINDOW_MS = 60_000;
 
@@ -60,6 +62,7 @@ export interface PrivateConnectGatewayServerOptions {
   buildVersion: string;
   maxBodyBytes?: number;
   requestTimeoutMs?: number;
+  transportTimeoutMs?: number;
   now?: () => Date;
 }
 
@@ -72,6 +75,7 @@ export class PrivateConnectGatewayServer {
   private readonly buildVersion: string;
   private readonly maxBodyBytes: number;
   private readonly requestTimeoutMs: number;
+  private readonly transportTimeoutMs: number;
   private readonly now: () => Date;
   private addressValue: { port: number; host: string } | null = null;
   private stopped = false;
@@ -85,6 +89,7 @@ export class PrivateConnectGatewayServer {
     this.buildVersion = options.buildVersion;
     this.maxBodyBytes = Math.max(1_024, Math.min(options.maxBodyBytes ?? PRIVATE_CONNECT_LIMITS.bodyBytes, PRIVATE_CONNECT_LIMITS.bodyBytes));
     this.requestTimeoutMs = Math.max(25, Math.min(options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS));
+    this.transportTimeoutMs = Math.max(25, Math.min(options.transportTimeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS));
     this.now = options.now ?? (() => new Date());
     this.server = createServer((request, response) => {
       void this.handleHttp(request, response).catch(() => {
@@ -95,6 +100,12 @@ export class PrivateConnectGatewayServer {
         }
       });
     });
+    this.server.headersTimeout = this.transportTimeoutMs;
+    this.server.requestTimeout = this.transportTimeoutMs;
+    this.server.keepAliveTimeout = Math.min(5_000, this.transportTimeoutMs);
+    this.server.maxHeadersCount = 32;
+    this.server.maxConnections = MAX_HTTP_CONNECTIONS;
+    this.server.maxRequestsPerSocket = 100;
     this.websocketServer = new WebSocketServer({
       noServer: true,
       clientTracking: false,
@@ -227,7 +238,7 @@ export class PrivateConnectGatewayServer {
     }
     let body: unknown;
     try {
-      body = await readJsonBody(request, this.maxBodyBytes);
+      body = await readJsonBody(request, this.maxBodyBytes, this.transportTimeoutMs);
     } catch (error) {
       writeJson(response, 400, { error: "invalid", message: error instanceof Error ? error.message : "The request body is invalid." });
       return;
@@ -567,19 +578,31 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function readJsonBody(request: IncomingMessage, maximum: number): Promise<unknown> {
+async function readJsonBody(
+  request: IncomingMessage,
+  maximum: number,
+  timeoutMs: number,
+): Promise<unknown> {
   const contentLength = Number(request.headers["content-length"] ?? NaN);
   if (!Number.isFinite(contentLength) || contentLength < 0 || contentLength > maximum) throw new Error("The request body is too large or missing its length.");
-  const chunks: Buffer[] = [];
-  let length = 0;
-  for await (const chunk of request) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    length += bytes.byteLength;
-    if (length > maximum) throw new Error("The request body is too large.");
-    chunks.push(bytes);
+  const timer = setTimeout(() => {
+    request.destroy(new Error("The request body timed out."));
+  }, timeoutMs);
+  timer.unref();
+  try {
+    const chunks: Buffer[] = [];
+    let length = 0;
+    for await (const chunk of request) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      length += bytes.byteLength;
+      if (length > maximum) throw new Error("The request body is too large.");
+      chunks.push(bytes);
+    }
+    if (length !== contentLength) throw new Error("The request body length was invalid.");
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  } finally {
+    clearTimeout(timer);
   }
-  if (length !== contentLength) throw new Error("The request body length was invalid.");
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
 }
 
 function writeJson(response: ServerResponse, status: number, value: unknown): void {
@@ -610,9 +633,7 @@ function clearSessionCookie(response: ServerResponse): void {
 
 function normalizeNetworkLabel(value: string | string[] | undefined): string | null {
   const candidate = Array.isArray(value) ? value[0] : value;
-  if (!candidate) return null;
-  const sanitized = candidate.trim().replace(/[\u0000-\u001f\u007f]/gu, "").slice(0, 120);
-  return sanitized || null;
+  return sanitizePrivateConnectLabel(candidate, 120);
 }
 
 function securityHeaders(html: boolean, validatedHost: string | null): Record<string, string> {

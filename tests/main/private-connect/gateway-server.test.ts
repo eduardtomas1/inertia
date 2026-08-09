@@ -1,5 +1,6 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -154,6 +155,91 @@ describe("Private Connect loopback gateway", () => {
     expect(noCsrf.status).toBe(403);
     const accepted = await fetch(`http://${hostHeader(address)}/api/request`, { method: "POST", headers: { Host: hostHeader(address), Origin: origin, Cookie: "__Host-inertia-private-connect=session-token", "Content-Type": "application/json", "Content-Length": String(Buffer.byteLength(request)), "x-inertia-private-connect-csrf": session.csrf }, body: request });
     expect(accepted.status).toBe(200);
+  });
+
+  it("closes clients that hold a declared request body open", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-timeout-"));
+    writeFileSync(join(root, "index.html"), "<html>ok</html>");
+    const server = new PrivateConnectGatewayServer({
+      host: host(),
+      staticRoot: root,
+      buildVersion: "0.0.24",
+      transportTimeoutMs: 25,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const hostValue = hostHeader(address);
+
+    await expect(new Promise<void>((resolve, reject) => {
+      const socket = connect(address.port, "127.0.0.1", () => {
+        socket.write([
+          "POST /api/pair/start HTTP/1.1",
+          `Host: ${hostValue}`,
+          `Origin: https://${hostValue}`,
+          "Content-Type: application/json",
+          "Content-Length: 100",
+          "Connection: close",
+          "",
+          "{",
+        ].join("\r\n"));
+      });
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error("The partial request socket stayed open."));
+      }, 1_000);
+      socket.once("close", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      socket.once("error", () => undefined);
+    })).resolves.toBeUndefined();
+    expect((await fetch(`http://${hostValue}/.well-known/inertia/private-connect`, {
+      headers: { Host: hostValue },
+    })).status).toBe(200);
+  });
+
+  it("returns a structured application timeout before the transport deadline", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-application-timeout-"));
+    writeFileSync(join(root, "index.html"), "<html>ok</html>");
+    const blockingHost: PrivateConnectGatewayHost = {
+      ...host(),
+      handleRequest: async () => await new Promise<PrivateConnectResponse>(() => undefined),
+    };
+    const server = new PrivateConnectGatewayServer({
+      host: blockingHost,
+      staticRoot: root,
+      buildVersion: "0.0.24",
+      requestTimeoutMs: 25,
+      transportTimeoutMs: 25,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const hostValue = hostHeader(address);
+    const request = JSON.stringify({
+      protocolVersion: 1,
+      type: "client.ping",
+      requestId: "33333333-3333-4333-8333-333333333333",
+    } satisfies PrivateConnectRequest);
+    const response = await fetch(`http://${hostValue}/api/request`, {
+      method: "POST",
+      headers: {
+        Host: hostValue,
+        Origin: `https://${hostValue}`,
+        Cookie: "__Host-inertia-private-connect=session-token",
+        "Content-Type": "application/json",
+        "Content-Length": String(Buffer.byteLength(request)),
+        "x-inertia-private-connect-csrf": session.csrf,
+      },
+      body: request,
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      type: "response",
+      requestId: "33333333-3333-4333-8333-333333333333",
+      ok: false,
+      code: "unavailable",
+    });
   });
 
   it("bounds pairing and authenticated admissions with a deterministic window", async () => {

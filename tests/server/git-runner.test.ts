@@ -58,17 +58,44 @@ describe("Git runner locale", () => {
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
-  it("overrides inherited locales for every Git child process", () => {
-    expect(gitProcessEnvironment({
+  it("strips ambient routing and secrets while preserving explicit Git state", () => {
+    const inherited = {
+      PATH: "/usr/bin:/bin",
+      HOME: "/tmp/home",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/dbus",
+      SSH_AUTH_SOCK: "/tmp/agent.sock",
+      USERNAME: "twin",
+      XDG_CACHE_HOME: "/tmp/cache",
+      GIT_DIR: "/tmp/other.git",
+      GIT_INDEX_FILE: "/tmp/checkpoint.index",
+      GIT_WORK_TREE: "/tmp/other-worktree",
+      GIT_SSH_VARIANT: "ssh",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.extraHeader",
+      GIT_CONFIG_VALUE_0: "Authorization: secret",
+      OPENAI_API_KEY: "secret",
       LANG: "es_ES.UTF-8",
       LC_ALL: "es_ES.UTF-8",
-      SENTINEL: "preserved",
-    })).toMatchObject({
+    };
+    expect(gitProcessEnvironment(inherited)).toEqual({
+      PATH: "/usr/bin:/bin",
+      HOME: "/tmp/home",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/dbus",
+      SSH_AUTH_SOCK: "/tmp/agent.sock",
+      USERNAME: "twin",
+      XDG_CACHE_HOME: "/tmp/cache",
+      GIT_SSH_VARIANT: "ssh",
       LANG: "C",
       LC_ALL: "C",
       GIT_TERMINAL_PROMPT: "0",
       GIT_ASKPASS: "",
-      SENTINEL: "preserved",
+    });
+    expect(gitProcessEnvironment(inherited, {
+      GIT_INDEX_FILE: "/tmp/checkpoint.index",
+      GIT_WORK_TREE: "/tmp/checkpoint-worktree",
+    })).toMatchObject({
+      GIT_INDEX_FILE: "/tmp/checkpoint.index",
+      GIT_WORK_TREE: "/tmp/checkpoint-worktree",
     });
   });
 

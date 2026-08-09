@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import WebSocket from "ws";
 
 import { projectActionCommand } from "../../src/server/runtime-commands";
-import { isAllowedRuntimeOrigin, parseRuntimeCommand } from "../../src/server/runtime-protocol";
+import {
+  isAllowedRuntimeOrigin,
+  MAX_BUFFERED_RUNTIME_EVENT_BYTES,
+  parseRuntimeCommand,
+  sendRuntimeEvent,
+} from "../../src/server/runtime-protocol";
 import { initialProviderSnapshots, providerSnapshot } from "../../src/server/runtime-snapshots";
 
 describe("runtime boundary helpers", () => {
@@ -21,6 +27,28 @@ describe("runtime boundary helpers", () => {
       requestId: "known",
       message: "Invalid command.",
     });
+  });
+
+  it("disconnects slow or failed runtime event consumers", () => {
+    const event = { type: "request.ok", requestId: "request-1" } as const;
+    const slowSocket = {
+      readyState: WebSocket.OPEN,
+      bufferedAmount: MAX_BUFFERED_RUNTIME_EVENT_BYTES + 1,
+      send: vi.fn(),
+      terminate: vi.fn(() => { throw new Error("already closed"); }),
+    } as unknown as WebSocket;
+    expect(() => sendRuntimeEvent(slowSocket, event)).not.toThrow();
+    expect(slowSocket.send).not.toHaveBeenCalled();
+    expect(slowSocket.terminate).toHaveBeenCalledOnce();
+
+    const failedSocket = {
+      readyState: WebSocket.OPEN,
+      bufferedAmount: 0,
+      send: vi.fn(() => { throw new Error("socket closed"); }),
+      terminate: vi.fn(() => { throw new Error("already closed"); }),
+    } as unknown as WebSocket;
+    expect(() => sendRuntimeEvent(failedSocket, event)).not.toThrow();
+    expect(failedSocket.terminate).toHaveBeenCalledOnce();
   });
 
   it("builds only allow-listed package script commands", () => {

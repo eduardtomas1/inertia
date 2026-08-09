@@ -270,7 +270,13 @@ function useCopiedState(): ClipboardControlState {
 }
 
 function quoteCsvCell(value: string): string {
-  return /[",\n\r]/u.test(value) ? `"${value.replace(/"/gu, "\"\"")}"` : value;
+  const safeValue = /^[\t\r]/u.test(value)
+    || /^[\s\u0000-\u001f]*[=+@-]/u.test(value)
+    ? `'${value}`
+    : value;
+  return /[",\n\r]/u.test(safeValue)
+    ? `"${safeValue.replace(/"/gu, "\"\"")}"`
+    : safeValue;
 }
 
 function escapeMarkdownCell(value: string): string {

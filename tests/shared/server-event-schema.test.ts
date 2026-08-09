@@ -831,8 +831,8 @@ describe("server event provider identity boundary", () => {
     authState: "authenticated",
     canRun: true,
     statusMessage: null,
-    models: [],
-    rateLimits: [],
+    models: [{ id: "gpt-test", label: "GPT Test", description: "Test model", isDefault: true, inputModalities: ["text"], reasoningOptions: [], defaultReasoningEffort: "high" }],
+    rateLimits: [{ id: "five-hour", label: "Five hour", usedPercent: 20, remainingPercent: 80, windowMinutes: 300, resetsAt: checkedAt }],
     metadataState: {
       models: {
         freshness: "fresh",
@@ -870,11 +870,11 @@ describe("server event provider identity boundary", () => {
       });
     },
   );
-  it("rejects an unknown provider identity", () => {
-    expect(() => parseServerEvent(snapshotEvent({
-      ...provider,
-      id: "gemini",
-    }))).toThrow("Malformed server event");
+  it.each([
+    ["provider identity", { ...provider, id: "gemini" }], ["model IDs", { ...provider, models: [provider.models[0], { ...provider.models[0] }] }],
+    ["rate-limit IDs", { ...provider, rateLimits: [provider.rateLimits[0], { ...provider.rateLimits[0] }] }],
+  ])("rejects duplicate or malformed %s", (_label, malformed) => {
+    expect(() => parseServerEvent(snapshotEvent(malformed))).toThrow("Malformed server event");
   });
 });
 describe("server event workspace-run discriminant boundary", () => {

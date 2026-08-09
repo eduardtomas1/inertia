@@ -87,6 +87,10 @@ function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean
   return Array.isArray(value) && value.every(validate);
 }
 
+function uniqueRecordField(values: unknown[], key: string): boolean {
+  return new Set(values.map((value) => (value as UnknownRecord)[key])).size === values.length;
+}
+
 function modelSelection(value: unknown): boolean {
   return modelSelectionSchema.safeParse(value).success;
 }
@@ -327,6 +331,8 @@ function providerInfo(value: unknown): boolean {
     && nullableStringField(value, "statusMessage")
     && arrayOf(value.models, providerModel)
     && arrayOf(value.rateLimits, providerRateLimit)
+    && uniqueRecordField(value.models as unknown[], "id")
+    && uniqueRecordField(value.rateLimits as unknown[], "id")
     && record(value.metadataState)
     && providerMetadataField(value.metadataState.models)
     && providerMetadataField(value.metadataState.rateLimits)

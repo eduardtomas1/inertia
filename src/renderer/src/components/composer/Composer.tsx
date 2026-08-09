@@ -153,7 +153,7 @@ export const Composer = memo(function Composer({
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
   const dismissCommandSurface = useCallback((
-    reason: "action" | "escape" | "outside" | "owner-change",
+    reason: "action" | "escape" | "owner-change",
   ) => {
     setCommandSurface(null);
     if (reason === "action" || reason === "escape") {
@@ -925,13 +925,6 @@ export const Composer = memo(function Composer({
 
   return (
     <div className="composer-shell">
-      {goal && (
-        <ChatGoalControl
-          {...goal}
-          open={commandSurface === "goal"}
-          onDismiss={dismissCommandSurface}
-        />
-      )}
       <section
         ref={composerRef}
         className={clsx("composer", menu && "has-open-menu")}
@@ -948,6 +941,13 @@ export const Composer = memo(function Composer({
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
         onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
       >
+        {goal && (
+          <ChatGoalControl
+            {...goal}
+            open={commandSurface === "goal"}
+            onDismiss={dismissCommandSurface}
+          />
+        )}
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}

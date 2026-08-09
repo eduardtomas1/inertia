@@ -2790,64 +2790,57 @@ textarea {
 
 .chat-goal-control {
   position: relative;
-  z-index: 7;
   width: 100%;
-  max-width: var(--composer-max-width);
-  margin: 0 auto 4px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--panel-border);
+  border-radius: calc(var(--radius-composer) - 1px) calc(var(--radius-composer) - 1px) 0 0;
+  background: color-mix(in srgb, var(--accent-soft) 10%, transparent);
 }
 
-.chat-goal-popover {
-  position: absolute;
-  z-index: 32;
-  bottom: calc(100% + 7px);
-  left: 0;
-  width: min(420px, 100%);
-  max-height: min(430px, calc(100dvh - 104px), calc(100cqh - 72px));
+.chat-goal-inline {
+  width: 100%;
+  max-height: min(430px, calc(100dvh - 180px), calc(100cqh - 130px));
   overflow-x: hidden;
   overflow-y: auto;
   padding: 7px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
   color: var(--text);
-  background: var(--surface-strong);
-  box-shadow: var(--shadow), var(--glass-inset);
 }
 
-.chat-goal-popover > header,
-.chat-goal-popover > header > span,
-.chat-goal-popover > header > span > span {
+.chat-goal-inline > header,
+.chat-goal-inline > header > span,
+.chat-goal-inline > header > span > span {
   display: flex;
   min-width: 0;
 }
 
-.chat-goal-popover > header {
+.chat-goal-inline > header {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 3px 3px 7px 5px;
 }
 
-.chat-goal-popover > header > span {
+.chat-goal-inline > header > span {
   align-items: center;
   gap: 7px;
 }
 
-.chat-goal-popover > header > span > svg {
+.chat-goal-inline > header > span > svg {
   flex: 0 0 auto;
   color: var(--accent-strong);
 }
 
-.chat-goal-popover > header > span > span {
+.chat-goal-inline > header > span > span {
   flex-direction: column;
   gap: 1px;
 }
 
-.chat-goal-popover > header strong {
+.chat-goal-inline > header strong {
   font-size: var(--ui-font-secondary);
   font-weight: 670;
 }
 
-.chat-goal-popover > header small {
+.chat-goal-inline > header small {
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
 }

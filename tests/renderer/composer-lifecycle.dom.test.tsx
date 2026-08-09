@@ -191,11 +191,11 @@ describe("composer asynchronous ownership", () => {
 
     fireEvent.change(input, { target: { value: "/goal" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByRole("dialog", { name: "Goal" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Goal" })).toBeVisible();
     expect(input).toHaveValue("");
   });
 
-  it("keeps focus on the clicked workspace control when /goal dismisses outside", async () => {
+  it("keeps the inline goal visible when another workspace control receives focus", () => {
     const current = conversation("18181818-1818-4818-8818-181818181818");
     render(
       <>
@@ -217,14 +217,13 @@ describe("composer asynchronous ownership", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "/goal" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByRole("dialog", { name: "Goal" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Goal" })).toBeVisible();
 
     const outside = screen.getByRole("button", { name: "Open another pane" });
     fireEvent.pointerDown(outside);
     outside.focus();
 
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Goal" }))
-      .not.toBeInTheDocument());
+    expect(screen.getByRole("region", { name: "Goal" })).toBeVisible();
     expect(outside).toHaveFocus();
   });
 

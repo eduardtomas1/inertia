@@ -7,6 +7,10 @@ import {
   MODEL_CAPABILITY_IDS,
   MODEL_CAPABILITY_STATES,
 } from "../model-routing";
+import {
+  modelBackendProfileDetailSchema,
+  modelBackendProfileViewSchema,
+} from "../backend-profile-settings";
 import { AGENT_TURN_STATUSES } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
 import {
@@ -125,27 +129,8 @@ function continuationIdentity(value: unknown): boolean {
 }
 
 function backendProfile(value: unknown, detail = false): boolean {
-  return recordWithStrings(
-    value,
-    "id",
-    "displayName",
-    "harnessId",
-    "protocol",
-    "authenticationMode",
-    "preset",
-    "source",
-    "createdAt",
-    "updatedAt",
-  )
-    && booleanField(value, "enabled")
-    && integerField(value, "configurationRevision")
-    && nullableStringField(value, "credentialGeneration")
-    && nullableStringField(value, "endpointHost")
-    && stringField(value, "authState")
-    && stringField(value, "connectionState")
-    && booleanField(value, "canDelete")
-    && booleanField(value, "canDisable")
-    && (!detail || nullableStringField(value, "baseUrl"));
+  return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)
+    .safeParse(value).success;
 }
 
 function backendDefault(value: unknown): boolean {

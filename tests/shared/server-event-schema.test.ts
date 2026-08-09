@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   continuationIdentityForSelection,
+  MODEL_CAPABILITY_IDS,
+  nativeBackendProfile,
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
@@ -11,6 +13,82 @@ const selection = nativeModelSelection({
   modelId: "gpt-test",
   reasoningEffort: "high",
 });
+const nativeBackend = nativeBackendProfile("codex");
+const capability = {
+  id: "streaming",
+  state: "verified",
+  provenance: "built-in",
+  detail: null,
+};
+const checkedAt = "2030-01-01T00:00:00.000Z";
+const probeCapabilities = MODEL_CAPABILITY_IDS.map((id) => ({
+  id,
+  state: id === "streaming" ? "verified" : "unknown",
+  provenance: "probe",
+  detail: null,
+  checkedAt,
+}));
+const backendProfile = {
+  id: nativeBackend.id,
+  displayName: nativeBackend.displayName,
+  harnessId: selection.harnessId,
+  protocol: nativeBackend.protocol,
+  authenticationMode: nativeBackend.authenticationMode,
+  source: nativeBackend.source,
+  enabled: true,
+  configurationRevision: nativeBackend.configurationRevision,
+  endpointIdentity: nativeBackend.endpointIdentity,
+  preset: "native",
+  baseUrl: null,
+  allowInsecureLocalhost: false,
+  credentialGeneration: null,
+  models: [{
+    id: selection.modelId,
+    displayName: "GPT Test",
+    contextWindowTokens: null,
+    reasoningOptions: [{ value: "high", label: "High", description: "Thorough." }],
+    capabilities: [capability],
+  }],
+  routing: { mode: "simple", primaryModelId: selection.modelId },
+  capabilityHints: [capability],
+  createdAt: checkedAt,
+  updatedAt: checkedAt,
+  endpointHost: null,
+  authState: "harness-managed",
+  connectionState: "connected",
+  compatibility: {
+    harnessId: selection.harnessId,
+    backendProfileId: nativeBackend.id,
+    backendProtocol: nativeBackend.protocol,
+    state: "verified",
+    provenance: "built-in",
+    allowsModelSwitchWithinSession: true,
+    reasonCode: "native-backend",
+    reason: "The native backend is supported.",
+  },
+  latestProbe: {
+    profileId: nativeBackend.id,
+    backendConfigurationRevision: nativeBackend.configurationRevision,
+    endpointIdentity: nativeBackend.endpointIdentity,
+    protocol: nativeBackend.protocol,
+    modelId: selection.modelId,
+    compatibility: "protocol-compatible",
+    protocolVerified: true,
+    modelVerified: true,
+    capabilities: probeCapabilities,
+    contextWindow: {
+      tokens: null,
+      state: "unknown",
+      provenance: "probe",
+      detail: null,
+      checkedAt,
+    },
+    failure: null,
+    checkedAt,
+  },
+  canDelete: false,
+  canDisable: false,
+};
 
 const changedFile = {
   path: "src/example.ts",
@@ -265,6 +343,8 @@ const pullRequest = {
 
 describe("server event request-result trust boundary", () => {
   it.each([
+    { kind: "backend.profile", profile: backendProfile },
+    { kind: "backend.profile.probe", profile: backendProfile },
     {
       kind: "workspace.entries",
       directory: "src",
@@ -467,6 +547,40 @@ describe("server event request-result trust boundary", () => {
   });
 
   it.each([
+    {
+      kind: "backend.profile",
+      profile: { ...backendProfile, compatibility: { state: "verified" } },
+    },
+    {
+      kind: "backend.profile.probe",
+      profile: {
+        ...backendProfile,
+        models: [{
+          ...backendProfile.models[0],
+          reasoningOptions: [{ value: "high", label: "High", description: 7 }],
+        }],
+      },
+    },
+    {
+      kind: "backend.profile",
+      profile: {
+        ...backendProfile,
+        routing: { mode: "simple", primaryModelId: "missing-model" },
+      },
+    },
+    {
+      kind: "backend.profile.probe",
+      profile: {
+        ...backendProfile,
+        latestProbe: {
+          ...backendProfile.latestProbe,
+          contextWindow: {
+            ...backendProfile.latestProbe.contextWindow,
+            tokens: "many",
+          },
+        },
+      },
+    },
     { kind: "workspace.entries", directory: "", entries: [{ path: "x" }], truncated: false },
     { kind: "workspace.file", file: { path: "x", content: 7 } },
     { kind: "git.branches", branches: [{ name: "main", current: "yes" }] },

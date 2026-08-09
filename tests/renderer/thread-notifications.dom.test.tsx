@@ -47,6 +47,82 @@ function snapshot(thread: Conversation): AppSnapshot {
 }
 
 describe("thread notification lifecycle", () => {
+  it("activates the latest native click once its thread is hydrated", () => {
+    let activateNativeNotification = (_conversationId: string): void => {
+      throw new Error("Notification activation was not subscribed.");
+    };
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        onThreadNotificationActivated: vi.fn((listener: (
+          conversationId: string,
+        ) => void) => {
+          activateNativeNotification = listener;
+          return vi.fn();
+        }),
+        showThreadNotification: vi.fn(async () => true),
+      },
+    });
+    const onActivate = vi.fn();
+    const first = conversation("completed");
+    const latest = {
+      ...conversation("completed"),
+      id: "33333333-3333-4333-8333-333333333333",
+      title: "Latest clicked thread",
+    };
+    const view = render(
+      <ThreadNotifications
+        snapshot={null}
+        documentActive={false}
+        activeConversationVisible={false}
+        secondaryConversationId={null}
+        enabled
+        onActivate={onActivate}
+      />,
+    );
+
+    activateNativeNotification(first.id);
+    activateNativeNotification(latest.id);
+    expect(onActivate).not.toHaveBeenCalled();
+
+    view.rerender(
+      <ThreadNotifications
+        snapshot={snapshot(first)}
+        documentActive={false}
+        activeConversationVisible={false}
+        secondaryConversationId={null}
+        enabled
+        onActivate={onActivate}
+      />,
+    );
+    expect(onActivate).not.toHaveBeenCalled();
+
+    view.rerender(
+      <ThreadNotifications
+        snapshot={snapshot(latest)}
+        documentActive={false}
+        activeConversationVisible={false}
+        secondaryConversationId={null}
+        enabled
+        onActivate={onActivate}
+      />,
+    );
+    expect(onActivate).toHaveBeenCalledOnce();
+    expect(onActivate).toHaveBeenCalledWith(latest);
+
+    view.rerender(
+      <ThreadNotifications
+        snapshot={{ ...snapshot(latest) }}
+        documentActive={false}
+        activeConversationVisible={false}
+        secondaryConversationId={null}
+        enabled
+        onActivate={onActivate}
+      />,
+    );
+    expect(onActivate).toHaveBeenCalledOnce();
+  });
+
   it("keeps activation subscribed after alert generation is disabled", () => {
     let activateNativeNotification = (_conversationId: string): void => {
       throw new Error("Notification activation was not subscribed.");

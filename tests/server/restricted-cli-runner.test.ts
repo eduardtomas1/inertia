@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+
+import { describe, expect, it, vi } from "vitest";
 
 import {
   restrictedCliEnvironment,
@@ -60,5 +64,58 @@ describe("restricted CLI runner", () => {
       sentinel: null,
     });
     expect(result.stderr).toBe("");
+  });
+
+  it("launches a Windows gh.cmd shim through hardened ComSpec semantics", async () => {
+    const spawn = vi.fn(() => {
+      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
+      Object.assign(child, {
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+      });
+      queueMicrotask(() => child.emit("close", 0));
+      return child;
+    });
+
+    await expect(runRestrictedCli(
+      "C:\\Users\\Test User\\gh.cmd",
+      ["pr", "create", "--title", "Test PR"],
+      {
+        cwd: "C:\\workspace",
+        environment: {
+          PATH: "C:\\tools",
+          ComSpec: "C:\\Windows\\System32\\cmd.exe",
+          SYSTEMROOT: "C:\\Windows",
+          GH_TOKEN: "must-not-cross",
+        },
+        failureMessage: "Fixture failed.",
+      },
+      { platform: "win32", spawn },
+    )).resolves.toEqual({ stdout: "", stderr: "" });
+
+    expect(spawn).toHaveBeenCalledWith(
+      "C:\\Windows\\System32\\cmd.exe",
+      [
+        "/d",
+        "/s",
+        "/v:off",
+        "/c",
+        "\"C:\\Users\\Test^ User\\gh.cmd ^\"pr^\" ^\"create^\" ^\"--title^\" ^\"Test^ PR^\"\"",
+      ],
+      expect.objectContaining({
+        cwd: "C:\\workspace",
+        detached: false,
+        env: {
+          COMSPEC: "C:\\Windows\\System32\\cmd.exe",
+          NO_COLOR: "1",
+          PATH: "C:\\tools",
+          SYSTEMROOT: "C:\\Windows",
+        },
+        shell: false,
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+      }),
+    );
   });
 });

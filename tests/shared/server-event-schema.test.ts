@@ -217,7 +217,7 @@ const conversationDetail = {
     turnId: null,
     role: "user",
     content: "Inspect this.",
-    attachments: [],
+    attachments: [{ id: "attachment-1", name: "note.txt", path: "/tmp/note.txt", mimeType: "text/plain", size: 4 }],
     createdAt: conversation.createdAt,
   }],
   activities: [{
@@ -937,6 +937,314 @@ describe("server event workspace-run discriminant boundary", () => {
     expect(() => parseServerEvent(snapshotEvent({
       ...run,
       [key]: invalidValue,
+    }))).toThrow("Malformed server event");
+  });
+});
+
+describe("server event remaining discriminant and identity boundary", () => {
+  const project = {
+    id: "project-1",
+    name: "Boundary",
+    path: "/workspace/boundary", normalizedPath: "/workspace/boundary",
+    repositoryIdentity: null, repositoryRoot: null,
+    repositoryRelativePath: ".",
+    groupingMode: null,
+    gitRepositoryLimit: 64,
+    color: "violet",
+    status: "ready",
+    createdAt: checkedAt, updatedAt: checkedAt,
+  };
+  const maintenance = {
+    providerId: "codex",
+    installedVersion: "1.0.0",
+    latestVersion: "1.0.1",
+    versionStatus: "update-available",
+    freshness: "fresh",
+    checkedAt,
+    installMethod: "npm-global",
+    updateAvailability: "available",
+    updateLabel: "Update",
+    instructionsUrl: "https://example.test/update",
+    message: null,
+  };
+  const operation = {
+    id: "operation-1",
+    providerId: "codex",
+    status: "running",
+    startedAt: checkedAt,
+    finishedAt: null, afterVersion: null,
+    beforeVersion: "1.0.0",
+    targetVersion: "1.0.1",
+    message: "Updating",
+    output: null,
+    outputTruncated: false,
+  };
+  const provider = {
+    id: "codex",
+    label: "Codex",
+    command: "codex",
+    available: true,
+    version: "1.0.0",
+    executable: "/opt/bin/codex",
+    installState: "installed",
+    authState: "authenticated",
+    canRun: true,
+    statusMessage: null,
+    models: [], rateLimits: [],
+    metadataState: {
+      models: {
+        freshness: "fresh",
+        provenance: "provider",
+        updatedAt: checkedAt,
+        lastAttemptedAt: checkedAt,
+        refreshing: false,
+      },
+      rateLimits: {
+        freshness: "stale",
+        provenance: "persistent-cache",
+        updatedAt: checkedAt,
+        lastAttemptedAt: checkedAt,
+        refreshing: false,
+      },
+    },
+    maintenance,
+  };
+  const backendDefault = {
+    scope: "project",
+    projectId: "11111111-1111-4111-8111-111111111111",
+    selection,
+    updatedAt: checkedAt,
+  };
+  const snapshot = (overrides: Record<string, unknown> = {}): unknown => ({
+    projects: [project],
+    conversations: [],
+    runs: [],
+    providers: [provider],
+    maintenanceOperations: [operation],
+    backendDefaults: [backendDefault],
+    settings: defaultSettings,
+    activeProjectId: project.id,
+    activeConversationId: null,
+    ...overrides,
+  });
+  const run = {
+    id: "run-1",
+    kind: "agent",
+    projectId: project.id,
+    conversationId: conversation.id,
+    actionId: null,
+    label: "Agent run",
+    detail: null,
+    status: "running",
+    attentionState: "unseen",
+    canStop: true,
+    port: null,
+    startedAt: checkedAt,
+    finishedAt: null,
+  };
+  const approval = {
+    id: "approval-1",
+    providerId: "codex",
+    conversationId: conversation.id,
+    runId: "run-1",
+    turnId: "turn-1",
+    kind: "command",
+    title: "Run tests",
+    detail: null,
+    command: "npm test",
+    cwd: "/workspace/boundary",
+    reason: null,
+    networkScope: { host: "example.test", protocol: "https" },
+    permissionRoots: [{ path: "/workspace/boundary", access: "read" }],
+    availableDecisions: ["approve", "deny", "cancel"],
+  };
+  const input = {
+    id: "input-1",
+    providerId: "codex",
+    conversationId: conversation.id,
+    runId: "run-1",
+    turnId: "turn-1",
+    autoResolutionMs: null,
+    questions: [{
+      id: "question-1",
+      header: "Choice",
+      question: "Continue?",
+      isOther: false,
+      isSecret: false,
+      allowMultiple: false,
+      options: [{ id: "yes", label: "Yes", description: "Continue." }],
+    }],
+  };
+  const workflow = {
+    conversationId: conversation.id,
+    goals: conversationDetail.goals,
+    goalCapability: {
+      kind: "inertia-local",
+      available: true,
+      label: "Inertia local goal",
+      reason: "Local fallback.",
+    },
+    skills: [{
+      id: "skill-1",
+      conversationId: conversation.id,
+      name: "review",
+      description: "Review changes.",
+      shortDescription: null,
+      scope: "repo",
+      enabled: true,
+      source: "codex-native",
+    }],
+    skillsCapability: {
+      kind: "codex-native",
+      available: true,
+      label: "Codex skills",
+    },
+    goalRefreshWarning: null,
+    skillDiscovery: { truncated: false, warningCount: 0, synchronizedAt: checkedAt },
+    refreshedAt: checkedAt,
+  };
+  it("accepts representative canonical snapshot and live projections", () => {
+    expect(parseServerEvent({ type: "snapshot.updated", snapshot: snapshot() })).toBeTruthy();
+    expect(parseServerEvent({ type: "agent.approval.requested", request: approval })).toBeTruthy();
+    expect(parseServerEvent({ type: "agent.input.requested", request: input })).toBeTruthy();
+    expect(parseServerEvent(event({ kind: "agent.workflow", workflow }))).toBeTruthy();
+    expect(parseServerEvent(event({
+      kind: "agent.skills",
+      conversationId: conversation.id,
+      skills: workflow.skills,
+      skillDiscovery: workflow.skillDiscovery,
+    }))).toBeTruthy();
+  });
+  it.each([
+    ["project status", { projects: [{ ...project, status: "paused" }] }],
+    ["provider install state", { providers: [{ ...provider, installState: "missing" }] }],
+    ["provider auth state", { providers: [{ ...provider, authState: "ready" }] }],
+    ["provider metadata freshness", { providers: [{ ...provider, metadataState: {
+      ...provider.metadataState,
+      models: { ...provider.metadataState.models, freshness: "recent" },
+    } }] }],
+    ["provider metadata provenance", { providers: [{ ...provider, metadataState: {
+      ...provider.metadataState,
+      rateLimits: { ...provider.metadataState.rateLimits, provenance: "database" },
+    } }] }],
+    ["maintenance provider", { providers: [{ ...provider, maintenance: {
+      ...maintenance, providerId: "claude",
+    } }] }],
+    ["maintenance status", { providers: [{ ...provider, maintenance: {
+      ...maintenance, versionStatus: "outdated",
+    } }] }],
+    ["maintenance freshness", { providers: [{ ...provider, maintenance: {
+      ...maintenance, freshness: "recent",
+    } }] }],
+    ["maintenance install method", { providers: [{ ...provider, maintenance: {
+      ...maintenance, installMethod: "script",
+    } }] }],
+    ["maintenance availability", { providers: [{ ...provider, maintenance: {
+      ...maintenance, updateAvailability: "maybe",
+    } }] }],
+    ["operation provider", { maintenanceOperations: [{ ...operation, providerId: "gemini" }] }],
+    ["operation status", { maintenanceOperations: [{ ...operation, status: "paused" }] }],
+    ["backend default scope", { backendDefaults: [{ ...backendDefault, scope: "workspace" }] }],
+    ["backend default relationship", { backendDefaults: [{
+      ...backendDefault, scope: "global", projectId: backendDefault.projectId,
+    }] }],
+  ])("rejects malformed snapshot %s", (_label, overrides) => {
+    expect(() => parseServerEvent({
+      type: "snapshot.updated",
+      snapshot: snapshot(overrides),
+    })).toThrow("Malformed server event");
+  });
+  it.each([
+    ["activity kind", "activities", { ...conversationDetail.activities[0], kind: "network" }],
+    ["activity status", "activities", { ...conversationDetail.activities[0], status: "paused" }],
+    ["subagent provider", "subagents", { ...conversationDetail.subagents[0], providerId: "gemini" }],
+    ["subagent status", "subagents", { ...conversationDetail.subagents[0], status: "paused" }],
+    ["turn interaction", "agentTurns", { ...conversationDetail.agentTurns[0], interactionMode: "chat" }],
+    ["turn access", "agentTurns", { ...conversationDetail.agentTurns[0], accessMode: "unrestricted" }],
+    ["attachment MIME", "messages", { ...conversationDetail.messages[0], attachments: [{
+      id: "attachment-1", name: "x.exe", path: "/tmp/x.exe", mimeType: "application/x-msdownload", size: 1,
+    }] }],
+  ])("rejects malformed detail %s", (_label, collection, value) => {
+    expect(() => parseServerEvent(event({
+      kind: "conversation.detail",
+      conversationId: conversation.id,
+      state: "ready",
+      detail: { ...conversationDetail, [collection]: [value] },
+    }))).toThrow("Malformed server event");
+  });
+  it.each([
+    ["approval provider", { ...approval, providerId: "gemini" }],
+    ["approval kind", { ...approval, kind: "network" }],
+    ["approval protocol", { ...approval, networkScope: { host: "x", protocol: "ftp" } }],
+    ["approval access", { ...approval, permissionRoots: [{ path: "/tmp", access: "execute" }] }],
+  ])("rejects malformed %s", (_label, request) => {
+    expect(() => parseServerEvent({
+      type: "agent.approval.requested",
+      request,
+    })).toThrow("Malformed server event");
+  });
+  it("rejects malformed input and cleared-goal provider discriminants", () => {
+    expect(parseServerEvent({
+      type: "agent.goal.cleared",
+      conversationId: conversation.id,
+      source: "codex-native",
+    })).toBeTruthy();
+    expect(() => parseServerEvent({
+      type: "agent.input.requested",
+      request: { ...input, providerId: "gemini" },
+    })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({
+      type: "agent.goal.cleared",
+      conversationId: conversation.id,
+      source: "provider-native",
+    })).toThrow("Malformed server event");
+  });
+  it("requires sequenced scope and shell run identities to match their payload", () => {
+    const textEvent = {
+      type: "agent.text",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      text: "Working",
+    };
+    const frame = (scope: unknown, mutation: unknown): unknown => ({
+      type: "runtime.event",
+      sync: { runtimeGeneration: "runtime-1", latestSequence: 1 },
+      scope,
+      event: mutation,
+    });
+    expect(parseServerEvent(frame({
+      kind: "conversation-detail", conversationId: conversation.id,
+    }, textEvent))).toBeTruthy();
+    expect(() => parseServerEvent(frame({
+      kind: "conversation-detail", conversationId: "conversation-2",
+    }, textEvent))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(frame({ kind: "shell" }, textEvent)))
+      .toThrow("Malformed server event");
+    expect(() => parseServerEvent({
+      type: "conversation.shell.updated",
+      conversation: conversationShell,
+      runs: [{ ...run, conversationId: "conversation-2" }],
+    })).toThrow("Malformed server event");
+    expect(parseServerEvent(frame({ kind: "shell" }, {
+      type: "conversation.shell.updated",
+      conversation: conversationShell,
+      runs: [run],
+    }))).toBeTruthy();
+  });
+  it("binds workflow goals and skills to the outer conversation", () => {
+    expect(() => parseServerEvent(event({
+      kind: "agent.workflow",
+      workflow: {
+        ...workflow,
+        goals: [{ ...workflow.goals[0], conversationId: "conversation-2" }],
+      },
+    }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({
+      kind: "agent.skills",
+      conversationId: conversation.id,
+      skills: [{ ...workflow.skills[0], conversationId: "conversation-2" }],
+      skillDiscovery: workflow.skillDiscovery,
     }))).toThrow("Malformed server event");
   });
 });

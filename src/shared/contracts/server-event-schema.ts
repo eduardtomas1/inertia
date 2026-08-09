@@ -1,13 +1,19 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import {
+  runtimeEventScopeMatches,
+  SERVER_EVENT_OPTIONS,
+} from "./server-event-discriminants";
+import {
   APP_SHORTCUT_KEYS,
   DEFAULT_APP_KEYBINDINGS,
 } from "../keybindings";
 import { modelSelectionSchema } from "../model-routing";
 import {
+  modelBackendDefaultSchema,
   modelBackendProfileDetailSchema,
   modelBackendProfileViewSchema,
 } from "../backend-profile-settings";
+import { CHAT_ATTACHMENT_MIME_TYPES } from "../attachments";
 import { AGENT_TURN_STATUSES } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
 import {
@@ -15,6 +21,7 @@ import {
   DUO_DISPATCH_STATES,
   DUO_LAUNCH_STATES,
 } from "./duo";
+import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -95,9 +102,7 @@ function backendProfile(value: unknown, detail = false): boolean {
 }
 
 function backendDefault(value: unknown): boolean {
-  return recordWithStrings(value, "scope", "updatedAt")
-    && nullableStringField(value, "projectId")
-    && modelSelection(value.selection);
+  return modelBackendDefaultSchema.safeParse(value).success;
 }
 
 function syncCursor(value: unknown): boolean {
@@ -109,6 +114,7 @@ function syncCursor(value: unknown): boolean {
 
 function attachment(value: unknown): boolean {
   return recordWithStrings(value, "id", "name", "path", "mimeType")
+    && oneOf(value, "mimeType", CHAT_ATTACHMENT_MIME_TYPES)
     && numberField(value, "size")
     && Number(value.size) >= 0;
 }
@@ -130,6 +136,15 @@ function providerMaintenanceStatus(value: unknown): boolean {
     "updateAvailability",
     "instructionsUrl",
   )
+    && providerMaintenanceProviderIdSchema.safeParse(value.providerId).success
+    && oneOf(value, "versionStatus", SERVER_EVENT_OPTIONS.maintenanceVersionStatuses)
+    && oneOf(value, "freshness", SERVER_EVENT_OPTIONS.maintenanceFreshness)
+    && oneOf(value, "installMethod", SERVER_EVENT_OPTIONS.maintenanceInstallMethods)
+    && oneOf(
+      value,
+      "updateAvailability",
+      SERVER_EVENT_OPTIONS.maintenanceUpdateAvailability,
+    )
     && nullableStringField(value, "installedVersion")
     && nullableStringField(value, "latestVersion")
     && nullableStringField(value, "checkedAt")
@@ -139,6 +154,8 @@ function providerMaintenanceStatus(value: unknown): boolean {
 
 function providerMaintenanceOperation(value: unknown): boolean {
   return recordWithStrings(value, "id", "providerId", "status", "message")
+    && providerMaintenanceProviderIdSchema.safeParse(value.providerId).success
+    && oneOf(value, "status", SERVER_EVENT_OPTIONS.maintenanceOperationStatuses)
     && nullableStringField(value, "startedAt")
     && nullableStringField(value, "finishedAt")
     && nullableStringField(value, "beforeVersion")
@@ -161,6 +178,7 @@ function project(value: unknown): boolean {
     "createdAt",
     "updatedAt",
   )
+    && oneOf(value, "status", SERVER_EVENT_OPTIONS.projectStatuses)
     && nullableStringField(value, "repositoryIdentity")
     && nullableStringField(value, "repositoryRoot")
     && (value.groupingMode === null
@@ -257,7 +275,9 @@ function workspaceRun(value: unknown): boolean {
 
 function providerMetadataField(value: unknown): boolean {
   return recordWithStrings(value, "freshness")
-    && nullableStringField(value, "provenance")
+    && oneOf(value, "freshness", SERVER_EVENT_OPTIONS.providerMetadataFreshness)
+    && (value.provenance === null
+      || oneOf(value, "provenance", SERVER_EVENT_OPTIONS.providerMetadataProvenance))
     && nullableStringField(value, "updatedAt")
     && nullableStringField(value, "lastAttemptedAt")
     && booleanField(value, "refreshing");
@@ -295,6 +315,8 @@ function providerInfo(value: unknown): boolean {
     "authState",
   )
     && providerId(value, "id")
+    && oneOf(value, "installState", SERVER_EVENT_OPTIONS.providerInstallStates)
+    && oneOf(value, "authState", SERVER_EVENT_OPTIONS.providerAuthStates)
     && booleanField(value, "available")
     && nullableStringField(value, "version")
     && (value.executable === undefined || nullableStringField(value, "executable"))
@@ -305,7 +327,10 @@ function providerInfo(value: unknown): boolean {
     && record(value.metadataState)
     && providerMetadataField(value.metadataState.models)
     && providerMetadataField(value.metadataState.rateLimits)
-    && (value.maintenance === undefined || providerMaintenanceStatus(value.maintenance));
+    && (value.maintenance === undefined
+      || (providerMaintenanceStatus(value.maintenance)
+        && record(value.maintenance)
+        && value.maintenance.providerId === value.id));
 }
 
 function appSettings(value: unknown): boolean {
@@ -404,6 +429,8 @@ function activity(value: unknown): boolean {
     "status",
     "createdAt",
   )
+    && oneOf(value, "kind", SERVER_EVENT_OPTIONS.activityKinds)
+    && oneOf(value, "status", SERVER_EVENT_OPTIONS.activityStatuses)
     && nullableStringField(value, "turnId")
     && nullableStringField(value, "detail");
 }
@@ -427,6 +454,8 @@ function subagentTrace(value: unknown): boolean {
     "progress", "result",
   ];
   return nullableStrings.every((key) => nullableStringField(value, key))
+    && providerId(value, "providerId")
+    && oneOf(value, "status", SERVER_EVENT_OPTIONS.subagentStatuses)
     && booleanField(value, "isLive")
     && integerField(value, "sequence");
 }
@@ -442,12 +471,20 @@ function approvalRequest(value: unknown): boolean {
     "kind",
     "title",
   )
+    && providerId(value, "providerId")
+    && oneOf(value, "kind", SERVER_EVENT_OPTIONS.approvalKinds)
     && ["detail", "command", "cwd", "reason"].every((key) =>
       nullableStringField(value, key))
     && (value.networkScope === null
-      || (recordWithStrings(value.networkScope, "host", "protocol")))
+      || (recordWithStrings(value.networkScope, "host", "protocol")
+        && oneOf(
+          value.networkScope,
+          "protocol",
+          SERVER_EVENT_OPTIONS.approvalNetworkProtocols,
+        )))
     && arrayOf(value.permissionRoots, (entry) =>
-      recordWithStrings(entry, "path", "access"))
+      recordWithStrings(entry, "path", "access")
+      && oneOf(entry, "access", SERVER_EVENT_OPTIONS.approvalPermissionAccess))
     && arrayOf(value.availableDecisions, (entry) =>
       entry === "approve" || entry === "deny" || entry === "cancel");
 }
@@ -461,6 +498,7 @@ function inputRequest(value: unknown): boolean {
     "runId",
     "turnId",
   )
+    && providerId(value, "providerId")
     && nullableNumberField(value, "autoResolutionMs")
     && arrayOf(value.questions, (question) =>
       recordWithStrings(question, "id", "header", "question")
@@ -542,10 +580,15 @@ function skillDiscovery(value: unknown): boolean {
 }
 
 function agentWorkflow(value: unknown): boolean {
-  return recordWithStrings(value, "conversationId", "refreshedAt")
-    && arrayOf(value.goals, agentGoal)
+  if (!recordWithStrings(value, "conversationId", "refreshedAt")) return false;
+  const conversationId = value.conversationId;
+  return arrayOf(value.goals, agentGoal)
+    && (value.goals as UnknownRecord[]).every((goal) =>
+      goal.conversationId === conversationId)
     && workflowGoalCapability(value.goalCapability)
     && arrayOf(value.skills, agentSkill)
+    && (value.skills as UnknownRecord[]).every((skill) =>
+      skill.conversationId === conversationId)
     && workflowSkillsCapability(value.skillsCapability)
     && nullableStringField(value, "goalRefreshWarning")
     && skillDiscovery(value.skillDiscovery);
@@ -861,6 +904,8 @@ function agentTurn(value: unknown): boolean {
     "updatedAt",
   )
     && providerId(value, "providerId")
+    && oneOf(value, "interactionMode", SERVER_EVENT_OPTIONS.interactionModes)
+    && oneOf(value, "accessMode", SERVER_EVENT_OPTIONS.accessModes)
     && nullableStringField(value, "terminalAssistantMessageId")
     && modelSelection(value.modelSelection)
     && continuationIdentity(value.continuationIdentity)
@@ -992,9 +1037,16 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
   switch (value.type) {
     case "snapshot.updated":
       return appSnapshot(value.snapshot);
-    case "conversation.shell.updated":
-      return conversationShell(value.conversation)
-        && arrayOf(value.runs, workspaceRun);
+    case "conversation.shell.updated": {
+      const conversationValue = value.conversation;
+      if (!record(conversationValue) || !conversationShell(conversationValue)) {
+        return false;
+      }
+      return arrayOf(value.runs, (entry) =>
+        workspaceRun(entry)
+        && record(entry)
+        && entry.conversationId === conversationValue.id);
+    }
     case "workspace.git.invalidated":
       return recordWithStrings(value, "requestId", "projectId")
         && nullableStringField(value, "conversationId");
@@ -1039,7 +1091,8 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
     case "agent.goal.updated":
       return agentGoal(value.goal);
     case "agent.goal.cleared":
-      return recordWithStrings(value, "conversationId", "source");
+      return recordWithStrings(value, "conversationId", "source")
+        && oneOf(value, "source", SERVER_EVENT_OPTIONS.goalSources);
     case "agent.failed":
       return recordWithStrings(value, "conversationId", "runId", "turnId", "message");
     default:
@@ -1073,7 +1126,10 @@ const REQUEST_RESULT_VALIDATORS = {
   "project.actions": (value) => arrayOf(value.actions, projectAction),
   "agent.workflow": (value) => agentWorkflow(value.workflow),
   "agent.skills": (value) => stringField(value, "conversationId")
-    && arrayOf(value.skills, agentSkill)
+    && arrayOf(value.skills, (entry) =>
+      agentSkill(entry)
+      && record(entry)
+      && entry.conversationId === value.conversationId)
     && skillDiscovery(value.skillDiscovery),
   "conversation.detail": (value) => stringField(value, "conversationId")
     && oneOf(value, "state", ["ready", "missing", "deleted", "failed"])
@@ -1118,11 +1174,8 @@ function isServerEvent(value: unknown): value is ServerEvent {
       return syncCursor(value.sync);
     case "runtime.event":
       return syncCursor(value.sync)
-        && record(value.scope)
-        && (value.scope.kind === "shell"
-          || (value.scope.kind === "conversation-detail"
-            && stringField(value.scope, "conversationId")))
-        && runtimeMutationEvent(value.event);
+        && runtimeMutationEvent(value.event)
+        && runtimeEventScopeMatches(value.scope, value.event);
     case "request.ok":
       return stringField(value, "requestId");
     case "request.error":

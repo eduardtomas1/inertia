@@ -5,6 +5,7 @@ import {
 } from "node:child_process";
 
 import { environmentValue } from "./environment";
+import { providerProcessInvocation } from "./provider/process";
 import {
   createOwnedProcessTreeTermination,
   terminateProcessTreeAndWait,
@@ -15,7 +16,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_OUTPUT_BYTES = 64 * 1024;
 
 const SAFE_ENVIRONMENT_KEYS = [
-  "ALL_PROXY", "APPDATA", "DBUS_SESSION_BUS_ADDRESS", "GH_CONFIG_DIR", "HOME",
+  "ALL_PROXY", "APPDATA", "COMSPEC", "DBUS_SESSION_BUS_ADDRESS", "GH_CONFIG_DIR", "HOME",
   "HTTP_PROXY", "HTTPS_PROXY", "LANG", "LOCALAPPDATA", "NO_COLOR", "NO_PROXY", "PATH", "PATHEXT",
   "SSL_CERT_DIR", "SSL_CERT_FILE", "SYSTEMROOT", "TEMP", "TERM", "TMP", "TMPDIR",
   "USERPROFILE", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR",
@@ -101,14 +102,22 @@ export async function runRestrictedCli(
   return await new Promise<RestrictedCliResult>((resolveRun, rejectRun) => {
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawnProcess(executable, args, {
+      const environment = restrictedCliEnvironment(
+        options.environment ?? process.env,
+        platform,
+      );
+      const invocation = providerProcessInvocation(
+        executable,
+        args,
+        environment,
+        platform,
+      );
+      child = spawnProcess(invocation.command, invocation.args, {
         cwd: options.cwd,
-        env: restrictedCliEnvironment(
-          options.environment ?? process.env,
-          platform,
-        ),
+        env: environment,
         shell: false,
         detached: platform !== "win32",
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         windowsHide: true,
       });
     } catch (error) {

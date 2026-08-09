@@ -34,6 +34,7 @@ export function useThreadNotifications(
   const previousRef = useRef<Map<string, Conversation> | null>(null);
   const snapshotRef = useRef(snapshot);
   const activateRef = useRef(onActivate);
+  const pendingActivationIdRef = useRef<string | null>(null);
   snapshotRef.current = snapshot;
   activateRef.current = onActivate;
 
@@ -44,9 +45,25 @@ export function useThreadNotifications(
       const conversation = snapshotRef.current?.conversations.find(
         ({ id }) => id === conversationId,
       );
-      if (conversation) activateRef.current(conversation);
+      if (!conversation) {
+        pendingActivationIdRef.current = conversationId;
+        return;
+      }
+      pendingActivationIdRef.current = null;
+      activateRef.current(conversation);
     });
   }, []);
+
+  useEffect(() => {
+    const conversationId = pendingActivationIdRef.current;
+    if (!conversationId) return;
+    const conversation = snapshot?.conversations.find(
+      ({ id }) => id === conversationId,
+    );
+    if (!conversation) return;
+    pendingActivationIdRef.current = null;
+    activateRef.current(conversation);
+  }, [snapshot]);
 
   useEffect(() => {
     if (!snapshot) return;

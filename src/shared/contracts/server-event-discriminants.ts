@@ -162,10 +162,18 @@ export function modelRouteIdentityCoherent(value: IdentityRecord): boolean {
   if (value.backendProfileId !== undefined
     && value.backendProfileId !== selection.backendProfileId) return false;
   const identity = value.continuationIdentity as IdentityRecord | null | undefined;
-  return identity == null
-    || (identity.harnessId === selection.harnessId
+  if (identity != null && !(identity.harnessId === selection.harnessId
       && identity.backendProfileId === selection.backendProfileId
-      && identity.backendConfigurationRevision === selection.backendConfigurationRevision);
+      && identity.backendConfigurationRevision === selection.backendConfigurationRevision
+      && (identity.modelIdentity === null || identity.modelIdentity === selection.modelId))) return false;
+  if (value.model !== undefined
+    && value.model !== selection.modelId
+    && !(selection.modelId === "provider-default" && value.model === "")) return false;
+  if (value.modelAlias !== undefined && value.modelAlias !== selection.alias) return false;
+  if (value.reasoningEffort !== undefined
+    && value.reasoningEffort !== (selection.reasoningEffort ?? "")) return false;
+  return value.configurationRevision === undefined
+    || value.configurationRevision === selection.backendConfigurationRevision;
 }
 
 function mutationConversationId(event: RuntimeMutationEvent): string | null {

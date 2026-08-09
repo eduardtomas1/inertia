@@ -1,4 +1,5 @@
 import type {
+  CSSProperties,
   Dispatch,
   SetStateAction,
 } from "react";
@@ -13,6 +14,7 @@ import type {
   ServerEvent,
   WorkspaceRun,
 } from "@shared/contracts";
+import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 
 import type { useAppUpdate } from "../app-update";
 import type { useInertiaConnection } from "../hooks/useInertiaConnection";
@@ -197,6 +199,12 @@ export function AppLayout({
     workspaceBodyStyle,
     sidebar: sidebarLayout,
   } = workspaceLayout;
+  const shellStyle = platform === "darwin"
+    ? {
+        ...appShellStyle,
+        "--mac-titlebar-brand-safe-inset": `${MAC_BRAND_SAFE_INSET}px`,
+      } as CSSProperties
+    : appShellStyle;
   useNativePreviewSuspension(
     Boolean(visibleError)
       || providerQuotaNotices.notices.length > 0
@@ -310,7 +318,7 @@ export function AppLayout({
       data-runtime-generation={connection.runtimeGeneration ?? undefined}
       data-connection-status={connection.status}
       data-document-active={documentActive ? "true" : "false"}
-      style={appShellStyle}
+      style={shellStyle}
     >
       {(mobileNavigation || !sidebarCollapsed) && (
         <Sidebar

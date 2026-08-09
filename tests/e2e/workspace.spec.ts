@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   MAC_BRAND_MIN_CLEAR_GAP,
+  MAC_BRAND_SAFE_INSET,
   MAC_TRAFFIC_LIGHT_CLUSTER_WIDTH,
   MAC_TRAFFIC_LIGHT_POSITION,
 } from "../../src/shared/window-chrome";
@@ -161,15 +162,19 @@ test("keeps the macOS brand in the native titlebar row and navigates it home", a
   if (process.platform === "darwin") {
     const geometry = await page.evaluate(() => {
       const row = document.querySelector(".sidebar-brand")?.getBoundingClientRect();
+      const shell = document.querySelector(".app-shell");
       const lockup = document.querySelector(".brand-lockup");
       const logo = document.querySelector(".brand-logo");
       const markStyles = lockup ? getComputedStyle(lockup, "::before") : null;
       const lockupStyles = lockup ? getComputedStyle(lockup) : null;
       const logoStyles = logo ? getComputedStyle(logo) : null;
       const lockupBounds = lockup?.getBoundingClientRect();
-      return row && lockupBounds && markStyles && lockupStyles && logoStyles ? {
+      return row && shell && lockupBounds && markStyles && lockupStyles && logoStyles ? {
         row: { top: row.top, height: row.height },
         markLeft: lockupBounds.left + Number.parseFloat(lockupStyles.paddingLeft),
+        safeInset: Number.parseFloat(getComputedStyle(shell).getPropertyValue(
+          "--mac-titlebar-brand-safe-inset",
+        )),
         mark: { width: markStyles.width, height: markStyles.height, maskImage: markStyles.maskImage },
         logoDisplay: logoStyles.display,
       } : null;
@@ -181,6 +186,8 @@ test("keeps the macOS brand in the native titlebar row and navigates it home", a
     expect(geometry?.mark.height).toBe("24px");
     expect(geometry?.mark.maskImage).toContain("inertia-logo.png");
     expect(geometry?.logoDisplay).toBe("none");
+    expect(geometry?.safeInset).toBe(MAC_BRAND_SAFE_INSET);
+    expect(geometry?.markLeft).toBeGreaterThanOrEqual(MAC_BRAND_SAFE_INSET);
     const trafficLightClusterRight = MAC_TRAFFIC_LIGHT_POSITION.x + MAC_TRAFFIC_LIGHT_CLUSTER_WIDTH;
     expect((geometry?.markLeft ?? 0) - trafficLightClusterRight).toBeGreaterThanOrEqual(MAC_BRAND_MIN_CLEAR_GAP);
     await page.screenshot({ path: testInfo.outputPath("v004-brand-wide.png") });

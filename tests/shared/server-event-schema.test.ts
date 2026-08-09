@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-
 import {
   continuationIdentityForSelection,
   MODEL_CAPABILITY_IDS,
@@ -8,7 +7,6 @@ import {
 } from "../../src/shared/model-routing";
 import { defaultSettings } from "../../src/shared/contracts/app";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
-
 const selection = nativeModelSelection({
   providerId: "codex",
   modelId: "gpt-test",
@@ -90,7 +88,6 @@ const backendProfile = {
   canDelete: false,
   canDisable: false,
 };
-
 const changedFile = {
   path: "src/example.ts",
   status: "modified",
@@ -102,13 +99,11 @@ const changedFile = {
   indexStatus: " ",
   worktreeStatus: "M",
 };
-
 const diff = {
   patch: "diff --git a/src/example.ts b/src/example.ts\n",
   truncated: false,
   files: [changedFile],
 };
-
 const conversation = {
   id: "conversation-1",
   projectId: "project-1",
@@ -154,7 +149,6 @@ const conversationShell = {
   pendingApproval: false,
   pendingInput: false,
 };
-
 const conversationDetail = {
   conversation,
   agentTurns: [{
@@ -348,7 +342,6 @@ const conversationDetail = {
     updatedAt: conversation.updatedAt,
   }],
 };
-
 function event(result: Record<string, unknown>): unknown {
   return {
     type: "request.result",
@@ -356,7 +349,6 @@ function event(result: Record<string, unknown>): unknown {
     result,
   };
 }
-
 const pullRequest = {
   available: true,
   remoteName: "origin",
@@ -367,7 +359,6 @@ const gitStatus = { isRepository: true, authorityRef: "authority-1", root: "/rep
   branch: "main", upstream: "origin/main", ahead: 0, behind: 0, hasRemote: true,
   pullRequest, files: [changedFile], insertions: 2, deletions: 1,
 };
-
 describe("server event request-result trust boundary", () => {
   it.each([
     { kind: "backend.profile", profile: backendProfile },
@@ -559,7 +550,6 @@ describe("server event request-result trust boundary", () => {
       result: { kind: result.kind },
     });
   });
-
   it.each([
     {
       kind: "backend.profile",
@@ -669,14 +659,19 @@ describe("server event request-result trust boundary", () => {
     expect(() => parseServerEvent(event(result))).toThrow("Malformed server event");
   });
   it.each([
-    { available: true, remoteName: null, forge: null, unavailableReason: "no-remotes" },
-    { available: false, remoteName: "origin", forge: "github", unavailableReason: "unsupported-forge" },
-    { available: false, remoteName: null, forge: null, unavailableReason: null },
+    { available: true, remoteName: null, forge: null, unavailableReason: "no-remotes" }, { available: true, remoteName: "", forge: "github", unavailableReason: null },
+    { available: false, remoteName: "origin", forge: "github", unavailableReason: "unsupported-forge" }, { available: false, remoteName: null, forge: null, unavailableReason: null },
+    { available: false, remoteName: "origin", forge: null, unavailableReason: "no-remotes" }, { available: false, remoteName: null, forge: null, unavailableReason: "unsupported-url" },
   ])("rejects incoherent pull-request capability state", (next) => {
     expect(() => parseServerEvent(event({ kind: "git.status", status: { ...gitStatus, pullRequest: next } }))).toThrow("Malformed server event");
   });
+  it.each([
+    [pullRequest, false, "main"], [pullRequest, true, null],
+    [{ available: false, remoteName: null, forge: null, unavailableReason: "no-remotes" }, true, "main"], [{ available: false, remoteName: null, forge: null, unavailableReason: "no-branch" }, true, "main"],
+  ])("rejects pull-request capability contradictions with Git state", (next, hasRemote, branch) => {
+    expect(() => parseServerEvent(event({ kind: "git.status", status: { ...gitStatus, hasRemote, branch, pullRequest: next } }))).toThrow("Malformed server event");
+  });
 });
-
 describe("server event settings trust boundary", () => {
   const snapshotEvent = (settings: unknown): unknown => ({
     type: "snapshot.updated",
@@ -690,13 +685,11 @@ describe("server event settings trust boundary", () => {
       activeConversationId: null,
     },
   });
-
   it("accepts the canonical settings projection", () => {
     expect(parseServerEvent(snapshotEvent(defaultSettings))).toMatchObject({
       type: "snapshot.updated",
     });
   });
-
   it.each([
     ["theme", "sepia"],
     ["defaultProvider", "gemini"],
@@ -720,16 +713,9 @@ describe("server event settings trust boundary", () => {
 
 describe("server event conversation discriminant boundary", () => {
   const snapshotEvent = (shell: unknown): unknown => ({
-    type: "snapshot.updated",
-    snapshot: {
-      projects: [],
-      conversations: [shell],
-      runs: [],
-      providers: [],
-      settings: defaultSettings,
-      activeProjectId: null,
-      activeConversationId: null,
-    },
+    type: "conversation.shell.updated",
+    conversation: shell,
+    runs: [],
   });
   const detailEvent = (nextConversation: unknown): unknown => event({
     kind: "conversation.detail",
@@ -743,7 +729,7 @@ describe("server event conversation discriminant boundary", () => {
 
   it("accepts canonical conversation enums through shell and detail projections", () => {
     expect(parseServerEvent(snapshotEvent(conversationShell)))
-      .toMatchObject({ type: "snapshot.updated" });
+      .toMatchObject({ type: "conversation.shell.updated" });
     expect(parseServerEvent(detailEvent(conversation))).toMatchObject({
       type: "request.result",
       result: { kind: "conversation.detail", state: "ready" },
@@ -908,21 +894,14 @@ describe("server event workspace-run discriminant boundary", () => {
     finishedAt: null,
   };
   const snapshotEvent = (workspaceRun: unknown): unknown => ({
-    type: "snapshot.updated",
-    snapshot: {
-      projects: [],
-      conversations: [conversationShell],
-      runs: [workspaceRun],
-      providers: [],
-      settings: defaultSettings,
-      activeProjectId: null,
-      activeConversationId: null,
-    },
+    type: "conversation.shell.updated",
+    conversation: conversationShell,
+    runs: [workspaceRun],
   });
 
   it("accepts a canonical workspace run", () => {
     expect(parseServerEvent(snapshotEvent(run))).toMatchObject({
-      type: "snapshot.updated",
+      type: "conversation.shell.updated",
     });
   });
 
@@ -993,8 +972,8 @@ describe("server event remaining discriminant and identity boundary", () => {
     maintenance,
   };
   const backendDefault = {
-    scope: "project",
-    projectId: "11111111-1111-4111-8111-111111111111",
+    scope: "global",
+    projectId: null,
     selection,
     updatedAt: checkedAt,
   };
@@ -1123,7 +1102,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     ["operation status", { maintenanceOperations: [{ ...operation, status: "paused" }] }],
     ["backend default scope", { backendDefaults: [{ ...backendDefault, scope: "workspace" }] }],
     ["backend default relationship", { backendDefaults: [{
-      ...backendDefault, scope: "global", projectId: backendDefault.projectId,
+      ...backendDefault, scope: "global", projectId: "11111111-1111-4111-8111-111111111111",
     }] }],
   ])("rejects malformed snapshot %s", (_label, overrides) => {
     expect(() => parseServerEvent({
@@ -1226,6 +1205,13 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(parseServerEvent({ type: "snapshot.updated", snapshot: snapshot({ conversations: [conversationShell], activeConversationId: conversation.id }) })).toBeTruthy();
     expect(() => parseServerEvent({ type: "snapshot.updated", snapshot: snapshot({ projects: [project, { ...project }] }) })).toThrow("Malformed server event");
     expect(() => parseServerEvent({ type: "snapshot.updated", snapshot: snapshot({ projects: [project, { ...project, id: "project-2" }], conversations: [conversationShell, { ...conversationShell, projectId: "project-2" }] }) })).toThrow("Malformed server event");
+    const invalidCollections = [
+      { conversations: [{ ...conversationShell, projectId: "missing" }] }, { runs: [{ ...run, conversationId: null, projectId: "missing" }] },
+      { providers: [provider, { ...provider }] }, { runs: [run, { ...run }] }, { backendProfiles: [backendProfile, { ...backendProfile }] },
+      { maintenanceOperations: [operation, { ...operation }] }, { backendDefaults: [backendDefault, { ...backendDefault }] },
+      { backendDefaults: [{ ...backendDefault, scope: "project", projectId: "22222222-2222-4222-8222-222222222222" }] },
+    ];
+    for (const invalid of invalidCollections) expect(() => parseServerEvent({ type: "snapshot.updated", snapshot: snapshot(invalid) })).toThrow("Malformed server event");
     const invalidActiveStates = [
       { activeProjectId: "missing" }, { activeConversationId: "missing" },
       { projects: [project, { ...project, id: "project-2" }], conversations: [conversationShell], activeProjectId: "project-2", activeConversationId: conversation.id },

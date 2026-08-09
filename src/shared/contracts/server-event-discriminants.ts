@@ -95,6 +95,62 @@ export const SERVER_EVENT_OPTIONS = Object.freeze({
     }),
 });
 
+type IdentityRecord = Record<string, unknown>;
+
+function uniqueIdentity(entries: IdentityRecord[], key = "id"): boolean {
+  return new Set(entries.map((entry) => entry[key])).size === entries.length;
+}
+
+export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): boolean {
+  const projects = value.projects as IdentityRecord[];
+  const conversations = value.conversations as IdentityRecord[];
+  const runs = value.runs as IdentityRecord[];
+  const providers = value.providers as IdentityRecord[];
+  const operations = (value.maintenanceOperations ?? []) as IdentityRecord[];
+  const profiles = (value.backendProfiles ?? []) as IdentityRecord[];
+  const defaults = (value.backendDefaults ?? []) as IdentityRecord[];
+  const projectIds = new Set(projects.map((project) => project.id));
+  const conversationProjects = new Map(conversations.map((conversation) => [
+    conversation.id, conversation.projectId,
+  ]));
+  const defaultKeys = defaults.map((entry) => `${String(entry.scope)}:${String(entry.projectId)}`);
+  return uniqueIdentity(projects)
+    && uniqueIdentity(conversations)
+    && uniqueIdentity(runs)
+    && uniqueIdentity(providers)
+    && uniqueIdentity(operations)
+    && uniqueIdentity(profiles)
+    && new Set(defaultKeys).size === defaultKeys.length
+    && conversations.every((conversation) => projectIds.has(conversation.projectId))
+    && runs.every((run) => projectIds.has(run.projectId)
+      && (run.conversationId === null
+        || conversationProjects.get(run.conversationId) === run.projectId))
+    && defaults.every((entry) => entry.scope !== "project" || projectIds.has(entry.projectId))
+    && (value.activeProjectId === null || projectIds.has(value.activeProjectId))
+    && (value.activeConversationId === null
+      || conversationProjects.get(value.activeConversationId) === value.activeProjectId);
+}
+
+export function pullRequestCapabilityStateCoherent(
+  value: IdentityRecord,
+  hasRemote: boolean,
+  branch: string | null,
+): boolean {
+  const remoteName = value.remoteName as string | null;
+  const reason = value.unavailableReason as string | null;
+  if (value.available) {
+    return remoteName !== null && remoteName.length > 0
+      && value.forge !== null && reason === null && hasRemote
+      && branch !== null && branch.length > 0;
+  }
+  if (value.forge !== null || reason === null) return false;
+  const reasonHasSelectedRemote = !["no-branch", "no-remotes", "ambiguous-remote"].includes(reason);
+  if ((remoteName !== null && remoteName.length === 0)
+    || (remoteName !== null) !== reasonHasSelectedRemote) return false;
+  if (reason === "no-branch") return branch === null;
+  return branch !== null && branch.length > 0 && hasRemote === (reason !== "no-remotes");
+}
+
 function mutationConversationId(event: RuntimeMutationEvent): string | null {
   switch (event.type) {
     case "snapshot.updated":

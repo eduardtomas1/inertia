@@ -1,7 +1,9 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import {
+  pullRequestCapabilityStateCoherent,
   runtimeEventScopeMatches,
   SERVER_EVENT_OPTIONS,
+  snapshotIdentityCollectionsCoherent,
 } from "./server-event-discriminants";
 import {
   APP_SHORTCUT_KEYS,
@@ -402,16 +404,7 @@ function appSnapshot(value: unknown): boolean {
     && nullableStringField(value, "activeProjectId")
     && nullableStringField(value, "activeConversationId")
     && (value.sync === undefined || syncCursor(value.sync)))) return false;
-  const conversationProjects = new Map((value.conversations as UnknownRecord[])
-    .map((entry) => [entry.id, entry.projectId]));
-  const projectIds = new Set((value.projects as UnknownRecord[]).map((entry) => entry.id));
-  if (conversationProjects.size !== (value.conversations as unknown[]).length || projectIds.size !== (value.projects as unknown[]).length) return false;
-  const activeConversationProject = value.activeConversationId === null
-    ? null : conversationProjects.get(value.activeConversationId);
-  return (value.activeProjectId === null || projectIds.has(value.activeProjectId))
-    && (value.activeConversationId === null || activeConversationProject === value.activeProjectId)
-    && (value.runs as UnknownRecord[]).every((run) => run.conversationId === null
-      || conversationProjects.get(run.conversationId) === run.projectId);
+  return snapshotIdentityCollectionsCoherent(value);
 }
 
 function threadUsage(value: unknown): boolean {
@@ -724,7 +717,11 @@ function changedFile(value: unknown): boolean {
     && booleanField(value, "unstaged");
 }
 
-function pullRequestCapability(value: unknown): boolean {
+function pullRequestCapability(
+  value: unknown,
+  hasRemote: boolean,
+  branch: string | null,
+): boolean {
   return record(value)
     && booleanField(value, "available")
     && nullableStringField(value, "remoteName")
@@ -733,8 +730,7 @@ function pullRequestCapability(value: unknown): boolean {
       "no-branch", "no-remotes", "ambiguous-remote", "missing-remote",
       "unsupported-url", "unsupported-forge", "ambiguous-url",
     ]))
-    && (value.available ? value.remoteName !== null && value.forge !== null && value.unavailableReason === null
-      : value.forge === null && value.unavailableReason !== null);
+    && pullRequestCapabilityStateCoherent(value, hasRemote, branch);
 }
 
 function gitStatus(value: unknown): boolean {
@@ -747,7 +743,9 @@ function gitStatus(value: unknown): boolean {
     && integerField(value, "ahead")
     && integerField(value, "behind")
     && booleanField(value, "hasRemote")
-    && (value.pullRequest === undefined || pullRequestCapability(value.pullRequest))
+    && (value.pullRequest === undefined || pullRequestCapability(
+      value.pullRequest, value.hasRemote as boolean, value.branch as string | null,
+    ))
     && arrayOf(value.files, changedFile)
     && integerField(value, "insertions")
     && integerField(value, "deletions");
@@ -769,7 +767,9 @@ function workspaceGitRepository(value: unknown): boolean {
     && integerField(value, "ahead")
     && integerField(value, "behind")
     && booleanField(value, "hasRemote")
-    && (value.pullRequest === undefined || pullRequestCapability(value.pullRequest))
+    && (value.pullRequest === undefined || pullRequestCapability(
+      value.pullRequest, value.hasRemote as boolean, value.branch as string | null,
+    ))
     && arrayOf(value.files, changedFile)
     && integerField(value, "insertions")
     && integerField(value, "deletions")

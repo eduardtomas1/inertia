@@ -791,6 +791,46 @@ describe("server event conversation discriminant boundary", () => {
       },
     }))).toThrow("Malformed server event");
   });
+
+  it("rejects a ready detail whose outer conversation identity disagrees", () => {
+    expect(() => parseServerEvent(event({
+      kind: "conversation.detail",
+      conversationId: "different-conversation",
+      state: "ready",
+      detail: conversationDetail,
+    }))).toThrow("Malformed server event");
+  });
+
+  it.each([
+    "agentTurns",
+    "turnGitArtifacts",
+    "messages",
+    "activities",
+    "subagents",
+    "reasonings",
+    "usage",
+    "plans",
+    "goals",
+    "checkpoints",
+    "reviewSummaries",
+    "reviewStates",
+    "reviewNotes",
+  ])("rejects a mismatched detail.%s conversation identity", (collectionName) => {
+    const collection = Reflect.get(conversationDetail, collectionName) as Array<Record<string, unknown>>;
+    expect(collection).not.toHaveLength(0);
+    expect(() => parseServerEvent(event({
+      kind: "conversation.detail",
+      conversationId: conversation.id,
+      state: "ready",
+      detail: {
+        ...conversationDetail,
+        [collectionName]: [{
+          ...collection[0],
+          conversationId: "different-conversation",
+        }],
+      },
+    }))).toThrow("Malformed server event");
+  });
 });
 
 describe("server event provider identity boundary", () => {
@@ -850,6 +890,53 @@ describe("server event provider identity boundary", () => {
     expect(() => parseServerEvent(snapshotEvent({
       ...provider,
       id: "gemini",
+    }))).toThrow("Malformed server event");
+  });
+});
+
+describe("server event workspace-run discriminant boundary", () => {
+  const run = {
+    id: "run-1",
+    kind: "agent",
+    projectId: "project-1",
+    conversationId: conversation.id,
+    actionId: null,
+    label: "Agent run",
+    detail: null,
+    status: "running",
+    attentionState: "unseen",
+    canStop: true,
+    port: null,
+    startedAt: checkedAt,
+    finishedAt: null,
+  };
+  const snapshotEvent = (workspaceRun: unknown): unknown => ({
+    type: "snapshot.updated",
+    snapshot: {
+      projects: [],
+      conversations: [],
+      runs: [workspaceRun],
+      providers: [],
+      settings: defaultSettings,
+      activeProjectId: null,
+      activeConversationId: null,
+    },
+  });
+
+  it("accepts a canonical workspace run", () => {
+    expect(parseServerEvent(snapshotEvent(run))).toMatchObject({
+      type: "snapshot.updated",
+    });
+  });
+
+  it.each([
+    ["kind", "background"],
+    ["status", "paused"],
+    ["attentionState", "ignored"],
+  ])("rejects malformed workspace run %s", (key, invalidValue) => {
+    expect(() => parseServerEvent(snapshotEvent({
+      ...run,
+      [key]: invalidValue,
     }))).toThrow("Malformed server event");
   });
 });

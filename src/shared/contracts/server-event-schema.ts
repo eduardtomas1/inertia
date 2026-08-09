@@ -244,6 +244,9 @@ function workspaceRun(value: unknown): boolean {
     "attentionState",
     "startedAt",
   )
+    && oneOf(value, "kind", ["agent", "check", "service", "source-control"])
+    && oneOf(value, "status", ["running", "waiting", "succeeded", "failed", "cancelled"])
+    && oneOf(value, "attentionState", ["unseen", "seen", "acknowledged", "dismissed"])
     && nullableStringField(value, "conversationId")
     && nullableStringField(value, "actionId")
     && nullableStringField(value, "detail")
@@ -942,9 +945,30 @@ function reviewNote(value: unknown): boolean {
     && booleanField(value, "stale");
 }
 
-function conversationDetail(value: unknown): boolean {
-  return record(value)
-    && conversation(value.conversation)
+const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [
+  "agentTurns",
+  "turnGitArtifacts",
+  "messages",
+  "activities",
+  "subagents",
+  "reasonings",
+  "usage",
+  "plans",
+  "goals",
+  "checkpoints",
+  "reviewSummaries",
+  "reviewStates",
+  "reviewNotes",
+] as const;
+
+function conversationDetail(
+  value: unknown,
+  expectedConversationId?: string,
+): boolean {
+  if (!record(value) || !conversation(value.conversation)) return false;
+  const conversationId = value.conversation.id as string;
+  return (expectedConversationId === undefined
+      || conversationId === expectedConversationId)
     && arrayOf(value.agentTurns, agentTurn)
     && arrayOf(value.turnGitArtifacts, turnGitArtifact)
     && arrayOf(value.messages, chatMessage)
@@ -957,7 +981,10 @@ function conversationDetail(value: unknown): boolean {
     && arrayOf(value.checkpoints, checkpoint)
     && arrayOf(value.reviewSummaries, reviewSummary)
     && arrayOf(value.reviewStates, reviewState)
-    && arrayOf(value.reviewNotes, reviewNote);
+    && arrayOf(value.reviewNotes, reviewNote)
+    && CONVERSATION_DETAIL_SCOPED_COLLECTIONS.every((key) =>
+      (value[key] as unknown[]).every((entry) =>
+        record(entry) && entry.conversationId === conversationId));
 }
 
 function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
@@ -1051,7 +1078,8 @@ const REQUEST_RESULT_VALIDATORS = {
   "conversation.detail": (value) => stringField(value, "conversationId")
     && oneOf(value, "state", ["ready", "missing", "deleted", "failed"])
     && (value.sync === undefined || syncCursor(value.sync))
-    && (value.state !== "ready" || conversationDetail(value.detail))
+    && (value.state !== "ready"
+      || conversationDetail(value.detail, value.conversationId as string))
     && (value.state !== "failed" || stringField(value, "message")),
   "duo.pending": (value) =>
     arrayOf(value.launchIds, (entry) => typeof entry === "string")

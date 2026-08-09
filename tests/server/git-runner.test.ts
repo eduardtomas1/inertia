@@ -41,6 +41,29 @@ function processExists(pid: number): boolean {
 }
 
 describe("Git runner locale", () => {
+  it("preserves Git's EMAIL identity fallback without restoring unrelated state", () => {
+    const environment = gitProcessEnvironment({
+      PATH: "/usr/bin:/bin",
+      EMAIL: "custom@example.test",
+      HOME: undefined,
+      GIT_CONFIG_GLOBAL: undefined,
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.extraHeader",
+      GIT_CONFIG_VALUE_0: "Authorization: secret",
+      GITHUB_TOKEN: "github-secret",
+      OPENAI_API_KEY: "provider-secret",
+    });
+
+    expect(environment).toEqual({
+      PATH: "/usr/bin:/bin",
+      EMAIL: "custom@example.test",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_ASKPASS: "",
+      LANG: "C",
+      LC_ALL: "C",
+    });
+  });
+
   it("does not start Git after an aggregate operation deadline has expired", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-git-deadline-"));
     temporaryDirectories.push(directory);

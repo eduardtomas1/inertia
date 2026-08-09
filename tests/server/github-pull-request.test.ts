@@ -1,10 +1,10 @@
 import {
   chmodSync,
   mkdtempSync,
-  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -63,7 +63,7 @@ describe("GitHub pull request URL verification", () => {
         pathEntries: [directory, "/usr/bin", "/bin"],
       }),
     })).resolves.toEqual({
-      executable: realpathSync(executable),
+      executable: await realpath(executable),
       environment: { PATH: [directory, "/usr/bin", "/bin"].join(delimiter) },
     });
   });

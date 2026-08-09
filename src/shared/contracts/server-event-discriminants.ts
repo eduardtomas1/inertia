@@ -117,11 +117,33 @@ export function conversationDetailCollectionsCoherent(
   value: IdentityRecord,
   conversationId: string,
 ): boolean {
+  const turns = value.agentTurns as IdentityRecord[];
+  const artifacts = value.turnGitArtifacts as IdentityRecord[];
+  const messagesById = new Map((value.messages as IdentityRecord[])
+    .map((message) => [message.id, message]));
+  const checkpointsById = new Map((value.checkpoints as IdentityRecord[])
+    .map((checkpoint) => [checkpoint.id, checkpoint]));
+  const turnsById = new Map(turns.map((turn) => [turn.id, turn]));
   return CONVERSATION_DETAIL_SCOPED_COLLECTIONS.every((key) =>
     (value[key] as IdentityRecord[]).every((entry) =>
       entry.conversationId === conversationId))
     && CONVERSATION_DETAIL_ID_COLLECTIONS.every((key) =>
-      uniqueIdentity(value[key] as IdentityRecord[]));
+      uniqueIdentity(value[key] as IdentityRecord[]))
+    && uniqueIdentity(turns, "runId")
+    && turns.every((turn) => {
+      const userMessage = messagesById.get(turn.userMessageId);
+      const terminalMessage = turn.terminalAssistantMessageId === null
+        ? null : messagesById.get(turn.terminalAssistantMessageId);
+      const checkpoint = turn.checkpointId === null
+        ? null : checkpointsById.get(turn.checkpointId);
+      return userMessage?.role === "user" && userMessage.turnId === turn.id
+        && (terminalMessage === null
+          || (terminalMessage?.role === "assistant" && terminalMessage.turnId === turn.id))
+        && (checkpoint === null || checkpoint?.turnId === turn.id);
+    })
+    && uniqueIdentity(artifacts, "turnId")
+    && artifacts.every((artifact) =>
+      turnsById.get(artifact.turnId)?.runId === artifact.runId);
 }
 
 export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): boolean {

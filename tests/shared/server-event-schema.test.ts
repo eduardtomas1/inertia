@@ -175,7 +175,7 @@ const conversationDetail = {
     completedAt: null,
     status: "running",
     terminalReason: null,
-    checkpointId: null,
+    checkpointId: "checkpoint-1",
     usageAtStart: null,
     usageAtCompletion: null,
     configurationRevision: selection.backendConfigurationRevision,
@@ -209,7 +209,7 @@ const conversationDetail = {
   messages: [{
     id: "message-1",
     conversationId: conversation.id,
-    turnId: null,
+    turnId: "turn-1",
     role: "user",
     content: "Inspect this.",
     attachments: [{ id: "attachment-1", name: "note.txt", path: "/tmp/note.txt", mimeType: "text/plain", size: 4 }],
@@ -715,7 +715,6 @@ describe("server event settings trust boundary", () => {
     }))).toThrow("Malformed server event");
   });
 });
-
 describe("server event conversation discriminant boundary", () => {
   const snapshotEvent = (shell: unknown): unknown => ({
     type: "conversation.shell.updated",
@@ -820,7 +819,6 @@ describe("server event conversation discriminant boundary", () => {
     }))).toThrow("Malformed server event");
   });
 });
-
 describe("server event provider identity boundary", () => {
   const provider = {
     id: "codex",
@@ -879,7 +877,6 @@ describe("server event provider identity boundary", () => {
     }))).toThrow("Malformed server event");
   });
 });
-
 describe("server event workspace-run discriminant boundary", () => {
   const run = {
     id: "run-1",
@@ -1120,6 +1117,9 @@ describe("server event remaining discriminant and identity boundary", () => {
     ["turn route", "agentTurns", { ...conversationDetail.agentTurns[0], modelSelection: claudeSelection }],
     ["turn model", "agentTurns", { ...conversationDetail.agentTurns[0], model: "other-model" }], ["turn alias", "agentTurns", { ...conversationDetail.agentTurns[0], modelAlias: "other" }],
     ["turn reasoning", "agentTurns", { ...conversationDetail.agentTurns[0], reasoningEffort: "low" }], ["turn revision", "agentTurns", { ...conversationDetail.agentTurns[0], configurationRevision: 99 }],
+    ["turn user message", "agentTurns", { ...conversationDetail.agentTurns[0], userMessageId: "missing-message" }], ["turn terminal message", "agentTurns", { ...conversationDetail.agentTurns[0], terminalAssistantMessageId: "missing-message" }], ["turn terminal role", "agentTurns", { ...conversationDetail.agentTurns[0], terminalAssistantMessageId: "message-1" }], ["turn checkpoint", "agentTurns", { ...conversationDetail.agentTurns[0], checkpointId: "missing-checkpoint" }],
+    ["user message role", "messages", { ...conversationDetail.messages[0], role: "assistant" }], ["user message turn", "messages", { ...conversationDetail.messages[0], turnId: "other-turn" }], ["checkpoint turn", "checkpoints", { ...conversationDetail.checkpoints[0], turnId: "other-turn" }],
+    ["artifact turn", "turnGitArtifacts", { ...conversationDetail.turnGitArtifacts[0], turnId: "missing-turn" }], ["artifact run", "turnGitArtifacts", { ...conversationDetail.turnGitArtifacts[0], runId: "other-run" }],
     ["attachment MIME", "messages", { ...conversationDetail.messages[0], attachments: [{
       id: "attachment-1", name: "x.exe", path: "/tmp/x.exe", mimeType: "application/x-msdownload", size: 1,
     }] }],
@@ -1132,14 +1132,14 @@ describe("server event remaining discriminant and identity boundary", () => {
     }))).toThrow("Malformed server event");
   });
   it.each([
-    ["turn", "agentTurns", conversationDetail.agentTurns[0]], ["Git artifact", "turnGitArtifacts", conversationDetail.turnGitArtifacts[0]],
-    ["message", "messages", conversationDetail.messages[0]], ["activity", "activities", conversationDetail.activities[0]],
-    ["subagent", "subagents", conversationDetail.subagents[0]], ["reasoning", "reasonings", conversationDetail.reasonings[0]],
-    ["checkpoint", "checkpoints", conversationDetail.checkpoints[0]], ["review note", "reviewNotes", conversationDetail.reviewNotes[0]],
-  ])("rejects duplicate detail %s IDs", (_label, collection, entry) => {
+    ["turn", "agentTurns", conversationDetail.agentTurns[0], undefined], ["turn run", "agentTurns", conversationDetail.agentTurns[0], "turn-2"], ["Git artifact", "turnGitArtifacts", conversationDetail.turnGitArtifacts[0], undefined], ["artifact turn", "turnGitArtifacts", conversationDetail.turnGitArtifacts[0], "artifact-2"],
+    ["message", "messages", conversationDetail.messages[0], undefined], ["activity", "activities", conversationDetail.activities[0], undefined],
+    ["subagent", "subagents", conversationDetail.subagents[0], undefined], ["reasoning", "reasonings", conversationDetail.reasonings[0], undefined],
+    ["checkpoint", "checkpoints", conversationDetail.checkpoints[0], undefined], ["review note", "reviewNotes", conversationDetail.reviewNotes[0], undefined],
+  ])("rejects duplicate detail %s identities", (_label, collection, entry, duplicateId) => {
     expect(() => parseServerEvent(event({
       kind: "conversation.detail", conversationId: conversation.id, state: "ready",
-      detail: { ...conversationDetail, [collection]: [entry, { ...entry }] },
+      detail: { ...conversationDetail, [collection]: [entry, { ...entry, id: duplicateId ?? entry.id }] },
     }))).toThrow("Malformed server event");
   });
   it.each([

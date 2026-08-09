@@ -63,7 +63,7 @@ export default function App({
   }, []);
 
   const noteRequestFailure = useCallback((error: unknown): void => {
-    if (hasHttpStatus(error)) setHostUnavailable(false);
+    if (isSocketOnlyFailure(error) || hasHttpStatus(error)) setHostUnavailable(false);
     else setHostUnavailable(true);
   }, []);
 
@@ -198,9 +198,8 @@ export default function App({
           } else {
             if (code === PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged) {
               clearWorkspace();
-            } else {
-              setHostUnavailable(true);
             }
+            setHostUnavailable(false);
             retry();
           }
         });
@@ -473,5 +472,15 @@ function hasHttpStatus(error: unknown): boolean {
     && typeof error === "object"
     && "status" in error
     && typeof (error as { status?: unknown }).status === "number",
+  );
+}
+
+function isSocketOnlyFailure(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "privateConnectTransport" in error
+    && (error as { privateConnectTransport?: unknown }).privateConnectTransport
+      === "private-connect-websocket",
   );
 }

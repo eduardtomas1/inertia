@@ -27,7 +27,10 @@ vi.mock("../../src/renderer/private-connect/src/connection", () => ({
 }));
 
 import App from "../../src/renderer/private-connect/src/App";
-import { connectPrivateConnectSocket } from "../../src/renderer/private-connect/src/connection";
+import {
+  apiRequest,
+  connectPrivateConnectSocket,
+} from "../../src/renderer/private-connect/src/connection";
 
 afterEach(() => {
   closeListeners.clear();
@@ -71,6 +74,22 @@ describe("Private Connect browser lifecycle", () => {
     await waitFor(() => expect(screen.getByText("Private Connect returned an invalid state projection.")).toBeInTheDocument());
   });
 
+  it("uses the HTTP projection path when only the live socket cannot open", async () => {
+    vi.mocked(connectPrivateConnectSocket).mockRejectedValueOnce(Object.assign(
+      new Error("Private Connect could not open a live connection."),
+      { privateConnectTransport: "private-connect-websocket" },
+    ));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+
+    render(<App initialPairingFragment={null} />);
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
+    expect(vi.mocked(apiRequest)).toHaveBeenCalledWith(expect.objectContaining({
+      type: "state.get",
+    }), "csrf-token");
+    expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
+  });
+
   it("rejects conversation detail outside the requested conversation scope", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
     render(<App initialPairingFragment={null} />);
@@ -98,12 +117,36 @@ describe("Private Connect browser lifecycle", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
     await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
     const initialConnectCalls = vi.mocked(connectPrivateConnectSocket).mock.calls.length;
+    const initialApiCalls = vi.mocked(apiRequest).mock.calls.length;
     vi.useFakeTimers();
     act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
     expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument();
     expect(screen.queryByText(/pair it again/iu)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(vi.mocked(apiRequest).mock.calls.length).toBeGreaterThan(initialApiCalls);
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
     expect(vi.mocked(connectPrivateConnectSocket)).toHaveBeenCalledTimes(initialConnectCalls + 1);
+  });
+
+  it("marks the host unavailable only when the HTTP fallback also fails, then recovers", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    render(<App initialPairingFragment={null} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
+    await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
+    const initialConnectCalls = vi.mocked(connectPrivateConnectSocket).mock.calls.length;
+    vi.mocked(apiRequest).mockRejectedValueOnce(new TypeError("HTTP transport unavailable"));
+
+    vi.useFakeTimers();
+    await act(async () => {
+      notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(screen.getByText(/Offline — showing only data/iu)).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(vi.mocked(connectPrivateConnectSocket)).toHaveBeenCalledTimes(initialConnectCalls + 1);
+    expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
   });
 
   it("purges stale authority and reconnects without requiring another pairing", async () => {

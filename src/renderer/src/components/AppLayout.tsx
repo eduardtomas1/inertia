@@ -372,15 +372,14 @@ export function AppLayout({
       data-document-active={documentActive ? "true" : "false"}
       style={shellStyle}
     >
-      {settings.desktopNotifications && (
-        <Suspense fallback={null}>
-          <ThreadNotifications
-            snapshot={connection.snapshot}
-            documentActive={documentActive}
-            onActivate={notificationActions.activate}
-          />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <ThreadNotifications
+          snapshot={connection.snapshot}
+          documentActive={documentActive}
+          enabled={settings.desktopNotifications}
+          onActivate={notificationActions.activate}
+        />
+      </Suspense>
       {(mobileNavigation || !sidebarCollapsed) && (
         <Sidebar
           snapshot={connection.snapshot}

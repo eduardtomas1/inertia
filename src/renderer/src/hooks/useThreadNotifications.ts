@@ -81,12 +81,13 @@ export function useThreadNotifications(
 export function ThreadNotifications(props: {
   snapshot: AppSnapshot | null;
   documentActive: boolean;
+  enabled: boolean;
   onActivate: (conversation: Conversation) => void;
 }): null {
   useThreadNotifications(
     props.snapshot,
     props.documentActive,
-    true,
+    props.enabled,
     props.onActivate,
   );
   return null;

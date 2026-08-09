@@ -73,7 +73,7 @@ export type SettingsViewProps = {
   conversations: Conversation[];
   archived: Conversation[];
   databaseBackup?: DatabaseBackupStatus;
-  onUpdate: (settings: Partial<AppSettings>) => void;
+  onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
   maintenanceOperations: ReadonlyMap<
@@ -174,7 +174,7 @@ export function SettingsView({
   conversations: _conversations,
   archived,
   databaseBackup,
-  onUpdate,
+  onUpdate: updateSettingsRequest,
   onConnectProvider,
   onRefreshProvider,
   maintenanceOperations,
@@ -201,6 +201,9 @@ export function SettingsView({
   onSetBackendDefault,
   onClearBackendDefault,
 }: SettingsViewProps): React.JSX.Element {
+  const onUpdate = (updates: Partial<AppSettings>): void => {
+    void updateSettingsRequest(updates).catch(() => undefined);
+  };
   const [section, setSection] = useState<SettingsSection>(
     target?.section ?? "general",
   );
@@ -234,17 +237,23 @@ export function SettingsView({
     () => settings.providerIdentityLabels,
   );
   const providerIdentityLabelsDraftRef = useRef(providerIdentityLabelsDraft);
+  const authoritativeProviderIdentityLabelsRef = useRef(
+    settings.providerIdentityLabels,
+  );
   const pendingProviderIdentityLabelsRef = useRef<string | null>(null);
   const [keybindingsDraft, setKeybindingsDraft] = useState(
     () => settings.keybindings,
   );
   const keybindingsDraftRef = useRef(keybindingsDraft);
+  const authoritativeKeybindingsRef = useRef(settings.keybindings);
   const pendingKeybindingsRef = useRef<string | null>(null);
   const providerIdentityLabelsFingerprint = stableRecordFingerprint(
     settings.providerIdentityLabels,
   );
   const keybindingsFingerprint = stableRecordFingerprint(settings.keybindings);
   useEffect(() => {
+    authoritativeProviderIdentityLabelsRef.current =
+      settings.providerIdentityLabels;
     if (
       pendingProviderIdentityLabelsRef.current !== null
       && pendingProviderIdentityLabelsRef.current
@@ -255,6 +264,7 @@ export function SettingsView({
     setProviderIdentityLabelsDraft(settings.providerIdentityLabels);
   }, [providerIdentityLabelsFingerprint, settings.providerIdentityLabels]);
   useEffect(() => {
+    authoritativeKeybindingsRef.current = settings.keybindings;
     if (
       pendingKeybindingsRef.current !== null
       && pendingKeybindingsRef.current !== keybindingsFingerprint
@@ -559,7 +569,18 @@ export function SettingsView({
                                   === pendingProviderIdentityLabelsRef.current
                               ) return;
                               pendingProviderIdentityLabelsRef.current = fingerprint;
-                              onUpdate({ providerIdentityLabels });
+                              void updateSettingsRequest({ providerIdentityLabels }).catch(() => {
+                                if (
+                                  pendingProviderIdentityLabelsRef.current
+                                    !== fingerprint
+                                ) return;
+                                pendingProviderIdentityLabelsRef.current = null;
+                                const authoritative =
+                                  authoritativeProviderIdentityLabelsRef.current;
+                                providerIdentityLabelsDraftRef.current =
+                                  authoritative;
+                                setProviderIdentityLabelsDraft(authoritative);
+                              });
                             }}
                           />
                         </label>
@@ -673,14 +694,27 @@ export function SettingsView({
               setKeybindingsDraft(keybindings);
               const fingerprint = stableRecordFingerprint(keybindings);
               pendingKeybindingsRef.current = fingerprint;
-              onUpdate({ keybindings });
+              void updateSettingsRequest({ keybindings }).catch(() => {
+                if (pendingKeybindingsRef.current !== fingerprint) return;
+                pendingKeybindingsRef.current = null;
+                const authoritative = authoritativeKeybindingsRef.current;
+                keybindingsDraftRef.current = authoritative;
+                setKeybindingsDraft(authoritative);
+              });
             }}>{APP_SHORTCUT_KEYS.map((key) => <option value={key} key={key} disabled={shortcuts.some(([other]) => other !== action && keybindingsDraft[other] === key)}>{key.toUpperCase()}</option>)}</select></span></label>)}</div>
             <button className="secondary-button settings-keybinding-reset" type="button" disabled={disabled || Object.entries(DEFAULT_APP_KEYBINDINGS).every(([action, key]) => keybindingsDraft[action as AppShortcutAction] === key)} onClick={() => {
               const keybindings = { ...DEFAULT_APP_KEYBINDINGS };
               keybindingsDraftRef.current = keybindings;
               setKeybindingsDraft(keybindings);
-              pendingKeybindingsRef.current = stableRecordFingerprint(keybindings);
-              onUpdate({ keybindings });
+              const fingerprint = stableRecordFingerprint(keybindings);
+              pendingKeybindingsRef.current = fingerprint;
+              void updateSettingsRequest({ keybindings }).catch(() => {
+                if (pendingKeybindingsRef.current !== fingerprint) return;
+                pendingKeybindingsRef.current = null;
+                const authoritative = authoritativeKeybindingsRef.current;
+                keybindingsDraftRef.current = authoritative;
+                setKeybindingsDraft(authoritative);
+              });
             }}><RotateCcw size={14} />Reset shortcuts</button>
             <p className="settings-card-note">The primary Cmd/Ctrl modifier stays fixed. Available keys avoid common browser and system shortcuts.</p>
           </section>

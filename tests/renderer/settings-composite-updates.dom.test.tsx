@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 
@@ -91,7 +91,7 @@ describe("Settings composite updates", () => {
       configurable: true,
       value: { getPlatform: () => "darwin" },
     });
-    const onUpdate = vi.fn();
+    const onUpdate = vi.fn(async () => undefined);
     render(<SettingsView {...settingsProps(onUpdate)} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
@@ -123,6 +123,30 @@ describe("Settings composite updates", () => {
         search: "g",
         "new-chat": "h",
       },
+    });
+  });
+
+  it("clears a rejected alias draft so the same value can be retried", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    const onUpdate = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(undefined);
+    render(<SettingsView {...settingsProps(onUpdate)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    const alias = screen.getAllByLabelText("Name in Inertia")[0]!;
+
+    fireEvent.change(alias, { target: { value: "Team Codex" } });
+    fireEvent.blur(alias);
+    await waitFor(() => expect(alias).toHaveValue(""));
+
+    fireEvent.change(alias, { target: { value: "Team Codex" } });
+    fireEvent.blur(alias);
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      providerIdentityLabels: { codex: "Team Codex" },
     });
   });
 });

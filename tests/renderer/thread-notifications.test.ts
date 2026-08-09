@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { activateNotificationConversation } from "../../src/renderer/src/components/AppLayout";
 import { threadNotificationKind } from "../../src/renderer/src/hooks/useThreadNotifications";
 import type { Conversation } from "../../src/shared/contracts";
 import { parseDesktopNotificationRequest } from "../../src/shared/desktop";
@@ -38,6 +39,29 @@ function conversation(
 }
 
 describe("thread notifications", () => {
+  it("returns from navigation overlays to the activated workspace thread", () => {
+    const thread = conversation("completed");
+    const selectConversation = vi.fn();
+    const showWorkspace = vi.fn();
+    const closeSidebar = vi.fn();
+    const closePalette = vi.fn();
+    const closeActivity = vi.fn();
+
+    activateNotificationConversation(thread, {
+      selectConversation,
+      showWorkspace,
+      closeSidebar,
+      closePalette,
+      closeActivity,
+    });
+
+    expect(selectConversation).toHaveBeenCalledWith(thread);
+    expect(showWorkspace).toHaveBeenCalledOnce();
+    expect(closeSidebar).toHaveBeenCalledOnce();
+    expect(closePalette).toHaveBeenCalledOnce();
+    expect(closeActivity).toHaveBeenCalledOnce();
+  });
+
   it("maps only meaningful status transitions to native notification kinds", () => {
     const idle = conversation("idle");
     expect(threadNotificationKind(idle, conversation("needs-input", {

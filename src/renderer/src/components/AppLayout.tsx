@@ -147,6 +147,23 @@ interface AppLayoutProps {
   actions: AppLayoutActions;
 }
 
+export function activateNotificationConversation(
+  conversation: Conversation,
+  actions: {
+    selectConversation: (conversation: Conversation) => void;
+    showWorkspace: () => void;
+    closeSidebar: () => void;
+    closePalette: () => void;
+    closeActivity: () => void;
+  },
+): void {
+  actions.selectConversation(conversation);
+  actions.showWorkspace();
+  actions.closeSidebar();
+  actions.closePalette();
+  actions.closeActivity();
+}
+
 export function AppLayout({
   platform,
   documentActive,
@@ -304,7 +321,7 @@ export function AppLayout({
       }).catch(() => undefined);
     },
     sidebarModeChange: (sidebarMode: AppSettings["sidebarMode"]) => {
-      void actions.updateSettings({ sidebarMode });
+      void actions.updateSettings({ sidebarMode }).catch(() => undefined);
     },
     removeProject: (item: Project) => {
       const confirmed = !settings.confirmDestructiveActions
@@ -318,6 +335,18 @@ export function AppLayout({
         }).catch(() => undefined);
       }
     },
+  });
+  const notificationActions = useStableActions({
+    activate: (thread: Conversation) => activateNotificationConversation(
+      thread,
+      {
+        selectConversation: actions.selectConversation,
+        showWorkspace: () => setView("workspace"),
+        closeSidebar: () => setSidebarOpen(false),
+        closePalette: () => setPaletteOpen(false),
+        closeActivity: () => setActivityOpen(false),
+      },
+    ),
   });
   useEffect(() => {
     if (connection.status !== "online") return;
@@ -341,7 +370,7 @@ export function AppLayout({
           <ThreadNotifications
             snapshot={connection.snapshot}
             documentActive={documentActive}
-            onActivate={actions.selectConversation}
+            onActivate={notificationActions.activate}
           />
         </Suspense>
       )}

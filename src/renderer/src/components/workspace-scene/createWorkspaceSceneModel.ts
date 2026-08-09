@@ -351,9 +351,7 @@ export function createWorkspaceSceneModel({
         ({ archivedAt }) => archivedAt !== null,
       ) ?? [],
       databaseBackup: connection.snapshot?.databaseBackup,
-      onUpdate: (updates) => {
-        void actions.updateSettings(updates);
-      },
+      onUpdate: actions.updateSettings,
       onConnectProvider: actions.connectProvider,
       onRefreshProvider: (providerId) => {
         actions.refreshProvider(providerId);
@@ -492,7 +490,8 @@ export function createWorkspaceSceneModel({
         void window.inertia.openExternal(url).catch(() => undefined);
       },
       onUsageDisplayModeChange: (usageDisplayMode) => {
-        void actions.updateSettings({ usageDisplayMode });
+        void actions.updateSettings({ usageDisplayMode })
+          .catch(() => undefined);
       },
       onClearPromptContext: () => workspaceTools.setPendingDiffContext(null),
       onLatestContentVisibilityChange: setLatestContentVisible,

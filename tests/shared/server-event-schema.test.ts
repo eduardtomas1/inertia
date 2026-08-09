@@ -363,6 +363,10 @@ const pullRequest = {
   forge: "github",
   unavailableReason: null,
 };
+const gitStatus = { isRepository: true, authorityRef: "authority-1", root: "/repo",
+  branch: "main", upstream: "origin/main", ahead: 0, behind: 0, hasRemote: true,
+  pullRequest, files: [changedFile], insertions: 2, deletions: 1,
+};
 
 describe("server event request-result trust boundary", () => {
   it.each([
@@ -424,20 +428,7 @@ describe("server event request-result trust boundary", () => {
     },
     {
       kind: "git.status",
-      status: {
-        isRepository: true,
-        authorityRef: "authority-1",
-        root: "/repo",
-        branch: "main",
-        upstream: "origin/main",
-        ahead: 0,
-        behind: 0,
-        hasRemote: true,
-        pullRequest,
-        files: [changedFile],
-        insertions: 2,
-        deletions: 1,
-      },
+      status: gitStatus,
     },
     {
       kind: "git.workspace.status",
@@ -676,6 +667,13 @@ describe("server event request-result trust boundary", () => {
     },
   ])("rejects malformed nested $kind state", (result) => {
     expect(() => parseServerEvent(event(result))).toThrow("Malformed server event");
+  });
+  it.each([
+    { available: true, remoteName: null, forge: null, unavailableReason: "no-remotes" },
+    { available: false, remoteName: "origin", forge: "github", unavailableReason: "unsupported-forge" },
+    { available: false, remoteName: null, forge: null, unavailableReason: null },
+  ])("rejects incoherent pull-request capability state", (next) => {
+    expect(() => parseServerEvent(event({ kind: "git.status", status: { ...gitStatus, pullRequest: next } }))).toThrow("Malformed server event");
   });
 });
 
@@ -1226,6 +1224,8 @@ describe("server event remaining discriminant and identity boundary", () => {
       .toThrow("Malformed server event");
     expect(() => parseSnapshot([{ ...run, projectId: "project-2" }])).toThrow("Malformed server event");
     expect(parseServerEvent({ type: "snapshot.updated", snapshot: snapshot({ conversations: [conversationShell], activeConversationId: conversation.id }) })).toBeTruthy();
+    expect(() => parseServerEvent({ type: "snapshot.updated", snapshot: snapshot({ projects: [project, { ...project }] }) })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({ type: "snapshot.updated", snapshot: snapshot({ projects: [project, { ...project, id: "project-2" }], conversations: [conversationShell, { ...conversationShell, projectId: "project-2" }] }) })).toThrow("Malformed server event");
     const invalidActiveStates = [
       { activeProjectId: "missing" }, { activeConversationId: "missing" },
       { projects: [project, { ...project, id: "project-2" }], conversations: [conversationShell], activeProjectId: "project-2", activeConversationId: conversation.id },

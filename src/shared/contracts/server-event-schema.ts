@@ -405,6 +405,7 @@ function appSnapshot(value: unknown): boolean {
   const conversationProjects = new Map((value.conversations as UnknownRecord[])
     .map((entry) => [entry.id, entry.projectId]));
   const projectIds = new Set((value.projects as UnknownRecord[]).map((entry) => entry.id));
+  if (conversationProjects.size !== (value.conversations as unknown[]).length || projectIds.size !== (value.projects as unknown[]).length) return false;
   const activeConversationProject = value.activeConversationId === null
     ? null : conversationProjects.get(value.activeConversationId);
   return (value.activeProjectId === null || projectIds.has(value.activeProjectId))
@@ -731,7 +732,9 @@ function pullRequestCapability(value: unknown): boolean {
     && (value.unavailableReason === null || oneOf(value, "unavailableReason", [
       "no-branch", "no-remotes", "ambiguous-remote", "missing-remote",
       "unsupported-url", "unsupported-forge", "ambiguous-url",
-    ]));
+    ]))
+    && (value.available ? value.remoteName !== null && value.forge !== null && value.unavailableReason === null
+      : value.forge === null && value.unavailableReason !== null);
 }
 
 function gitStatus(value: unknown): boolean {

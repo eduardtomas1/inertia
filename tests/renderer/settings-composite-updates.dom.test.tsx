@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 
@@ -177,5 +183,35 @@ describe("Settings composite updates", () => {
     expect(onUpdate).toHaveBeenLastCalledWith({
       providerIdentityLabels: { codex: "Team Codex" },
     });
+  });
+
+  it("preserves aliases edited while an earlier save is rejecting", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    let rejectSave = (_error: Error): void => {
+      throw new Error("The alias save did not start.");
+    };
+    const onUpdate = vi.fn(() => new Promise<void>((_resolve, reject) => {
+      rejectSave = reject;
+    }));
+    render(<SettingsView {...settingsProps(onUpdate)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    const aliases = screen.getAllByLabelText("Name in Inertia");
+
+    fireEvent.change(aliases[0]!, { target: { value: "Saving Codex" } });
+    fireEvent.blur(aliases[0]!);
+    expect(onUpdate).toHaveBeenCalledOnce();
+
+    fireEvent.change(aliases[0]!, { target: { value: "New Codex draft" } });
+    fireEvent.change(aliases[1]!, { target: { value: "New Claude draft" } });
+    await act(async () => {
+      rejectSave(new Error("offline"));
+    });
+
+    expect(aliases[0]).toHaveValue("New Codex draft");
+    expect(aliases[1]).toHaveValue("New Claude draft");
+    expect(onUpdate).toHaveBeenCalledOnce();
   });
 });

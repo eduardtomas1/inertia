@@ -144,6 +144,20 @@ function stableRecordFingerprint(
   )));
 }
 
+function overlayDirtyProviderIdentityLabels(
+  authoritative: AppSettings["providerIdentityLabels"],
+  draft: AppSettings["providerIdentityLabels"],
+  dirtyProviderIds: ReadonlySet<ProviderId>,
+): AppSettings["providerIdentityLabels"] {
+  const providerIdentityLabels = { ...authoritative };
+  for (const providerId of dirtyProviderIds) {
+    const value = draft[providerId];
+    if (value !== undefined) providerIdentityLabels[providerId] = value;
+    else delete providerIdentityLabels[providerId];
+  }
+  return providerIdentityLabels;
+}
+
 export function formatStorageBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"] as const;
@@ -261,14 +275,11 @@ export function SettingsView({
         !== providerIdentityLabelsFingerprint
     ) return;
     pendingProviderIdentityLabelsRef.current = null;
-    const providerIdentityLabels = {
-      ...settings.providerIdentityLabels,
-    };
-    for (const providerId of dirtyProviderIdentityLabelsRef.current) {
-      const draft = providerIdentityLabelsDraftRef.current[providerId];
-      if (draft !== undefined) providerIdentityLabels[providerId] = draft;
-      else delete providerIdentityLabels[providerId];
-    }
+    const providerIdentityLabels = overlayDirtyProviderIdentityLabels(
+      settings.providerIdentityLabels,
+      providerIdentityLabelsDraftRef.current,
+      dirtyProviderIdentityLabelsRef.current,
+    );
     providerIdentityLabelsDraftRef.current = providerIdentityLabels;
     setProviderIdentityLabelsDraft(providerIdentityLabels);
   }, [providerIdentityLabelsFingerprint, settings.providerIdentityLabels]);
@@ -592,9 +603,17 @@ export function SettingsView({
                                 pendingProviderIdentityLabelsRef.current = null;
                                 const authoritative =
                                   authoritativeProviderIdentityLabelsRef.current;
+                                const providerIdentityLabels =
+                                  overlayDirtyProviderIdentityLabels(
+                                    authoritative,
+                                    providerIdentityLabelsDraftRef.current,
+                                    dirtyProviderIdentityLabelsRef.current,
+                                  );
                                 providerIdentityLabelsDraftRef.current =
-                                  authoritative;
-                                setProviderIdentityLabelsDraft(authoritative);
+                                  providerIdentityLabels;
+                                setProviderIdentityLabelsDraft(
+                                  providerIdentityLabels,
+                                );
                               });
                             }}
                           />

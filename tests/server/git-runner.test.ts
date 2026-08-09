@@ -46,6 +46,7 @@ describe("Git runner locale", () => {
       PATH: "/usr/bin:/bin",
       EMAIL: "custom@example.test",
       GIT_CEILING_DIRECTORIES: "/workspace-boundary",
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
       HOME: undefined,
       GIT_CONFIG_GLOBAL: undefined,
       GIT_CONFIG_COUNT: "1",
@@ -59,11 +60,42 @@ describe("Git runner locale", () => {
       PATH: "/usr/bin:/bin",
       EMAIL: "custom@example.test",
       GIT_CEILING_DIRECTORIES: "/workspace-boundary",
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
       GIT_TERMINAL_PROMPT: "0",
       GIT_ASKPASS: "",
       LANG: "C",
       LC_ALL: "C",
     });
+  });
+
+  it("preserves cross-filesystem discovery in the spawned Git environment", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-discovery-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "show-environment", `
+process.stdout.write(JSON.stringify({
+  discovery: process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM,
+  token: process.env.GITHUB_TOKEN,
+}));
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    try {
+      const result = await runGit(directory, ["show-environment"], {
+        environment: {
+          GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
+          GITHUB_TOKEN: "must-not-leak",
+        },
+        failureMessage: "Git environment inspection failed.",
+      });
+
+      expect(JSON.parse(result.stdout.toString("utf8"))).toEqual({
+        discovery: "1",
+      });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   });
 
   it("does not start Git after an aggregate operation deadline has expired", async () => {

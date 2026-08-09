@@ -37,6 +37,9 @@ export function PullRequestDialog({
   >(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const createdUrlRef = useRef<HTMLInputElement>(null);
+  const primaryActionRef = useRef<HTMLButtonElement>(null);
+  const initialTitleRef = useRef(initialTitle);
+  initialTitleRef.current = initialTitle;
   useNativePreviewSuspension(open);
   useEffect(() => {
     if (!open) return;
@@ -45,16 +48,18 @@ export function PullRequestDialog({
   }, [open]);
   useEffect(() => {
     if (!open) return;
-    setTitle(initialTitle);
+    setTitle(initialTitleRef.current);
     const previous = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    const timer = window.setTimeout(() => titleRef.current?.focus(), 0);
+    const timer = window.setTimeout(() => {
+      (titleRef.current ?? primaryActionRef.current)?.focus();
+    }, 0);
     return () => {
       window.clearTimeout(timer);
       if (previous?.isConnected) previous.focus();
     };
-  }, [initialTitle, open]);
+  }, [open]);
   if (!open) return null;
   const integrated = forge === "github";
   const forgeLabel = forge === "gitlab" ? "GitLab" : forge === "bitbucket" ? "Bitbucket" : "GitHub";
@@ -210,10 +215,10 @@ export function PullRequestDialog({
         <footer>
           {createdUrl ? <>
             <button type="button" className="secondary-button" disabled={busy} onClick={() => { void copyCreatedPullRequest(); }}>Copy link</button>
-            <button type="button" className="primary-button dialog-primary" disabled={busy} onClick={() => { void openCreatedPullRequest(); }}><GitPullRequest size={15} /><span>Try opening GitHub</span></button>
+            <button ref={primaryActionRef} type="button" className="primary-button dialog-primary" disabled={busy} onClick={() => { void openCreatedPullRequest(); }}><GitPullRequest size={15} /><span>Try opening GitHub</span></button>
           </> : <>
             {integrated && <button type="button" className="secondary-button" disabled={busy} onClick={() => { void openBrowser(); }}>Open browser flow</button>}
-            <button type="button" className="primary-button dialog-primary" disabled={(integrated && !title.trim()) || busy} onClick={() => { void (integrated ? submit() : openBrowser()); }}>{busy ? <LoadingMark label={integrated ? "Creating pull request" : "Opening browser flow"} /> : <GitPullRequest size={15} />}<span>{integrated ? "Create pull request" : `Open in ${forgeLabel}`}</span></button>
+            <button ref={primaryActionRef} type="button" className="primary-button dialog-primary" disabled={(integrated && !title.trim()) || busy} onClick={() => { void (integrated ? submit() : openBrowser()); }}>{busy ? <LoadingMark label={integrated ? "Creating pull request" : "Opening browser flow"} /> : <GitPullRequest size={15} />}<span>{integrated ? "Create pull request" : `Open in ${forgeLabel}`}</span></button>
           </>}
         </footer>
       </section>

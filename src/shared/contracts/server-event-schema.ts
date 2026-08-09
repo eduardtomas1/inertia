@@ -1,5 +1,6 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import {
+  conversationDetailCollectionsCoherent,
   modelRouteIdentityCoherent,
   pullRequestCapabilityStateCoherent,
   runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent,
@@ -1002,22 +1003,6 @@ function reviewNote(value: unknown): boolean {
     && booleanField(value, "stale");
 }
 
-const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [
-  "agentTurns",
-  "turnGitArtifacts",
-  "messages",
-  "activities",
-  "subagents",
-  "reasonings",
-  "usage",
-  "plans",
-  "goals",
-  "checkpoints",
-  "reviewSummaries",
-  "reviewStates",
-  "reviewNotes",
-] as const;
-
 function conversationDetail(
   value: unknown,
   expectedConversationId?: string,
@@ -1039,9 +1024,7 @@ function conversationDetail(
     && arrayOf(value.reviewSummaries, reviewSummary)
     && arrayOf(value.reviewStates, reviewState)
     && arrayOf(value.reviewNotes, reviewNote)
-    && CONVERSATION_DETAIL_SCOPED_COLLECTIONS.every((key) =>
-      (value[key] as unknown[]).every((entry) =>
-        record(entry) && entry.conversationId === conversationId));
+    && conversationDetailCollectionsCoherent(value, conversationId);
 }
 
 function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {

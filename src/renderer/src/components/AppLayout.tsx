@@ -262,6 +262,7 @@ export function AppLayout({
       || providerQuotaNotices.notices.length > 0
       || Boolean(appUpdate.visible && appUpdate.status)
       || commitDialogOpen
+      || pullRequestDialogOpen
       || multiSpawn.open,
   );
   const sidebarActions = useStableActions({

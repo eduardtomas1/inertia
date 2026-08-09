@@ -731,7 +731,6 @@ describe("server event conversation discriminant boundary", () => {
       conversation: nextConversation,
     },
   });
-
   it("accepts canonical conversation enums through shell and detail projections", () => {
     expect(parseServerEvent(snapshotEvent(conversationShell)))
       .toMatchObject({ type: "conversation.shell.updated" });
@@ -740,7 +739,6 @@ describe("server event conversation discriminant boundary", () => {
       result: { kind: "conversation.detail", state: "ready" },
     });
   });
-
   it.each([
     ["providerId", "gemini"],
     ["modelSelection", claudeSelection],
@@ -759,7 +757,6 @@ describe("server event conversation discriminant boundary", () => {
       [key]: invalidValue,
     }))).toThrow("Malformed server event");
   });
-
   it.each([
     ["providerId", "gemini"],
     ["interactionMode", "chat"],
@@ -772,7 +769,6 @@ describe("server event conversation discriminant boundary", () => {
       [key]: invalidValue,
     }))).toThrow("Malformed server event");
   });
-
   it.each([
     ["providerId", "gemini"],
     ["status", "sleeping"],
@@ -785,7 +781,6 @@ describe("server event conversation discriminant boundary", () => {
       },
     }))).toThrow("Malformed server event");
   });
-
   it("rejects a ready detail whose outer conversation identity disagrees", () => {
     expect(() => parseServerEvent(event({
       kind: "conversation.detail",
@@ -794,7 +789,6 @@ describe("server event conversation discriminant boundary", () => {
       detail: conversationDetail,
     }))).toThrow("Malformed server event");
   });
-
   it.each([
     "agentTurns",
     "turnGitArtifacts",
@@ -870,7 +864,6 @@ describe("server event provider identity boundary", () => {
       activeConversationId: null,
     },
   });
-
   it.each(["codex", "claude", "cursor", "opencode"])(
     "accepts the canonical %s provider identity",
     (id) => {
@@ -879,7 +872,6 @@ describe("server event provider identity boundary", () => {
       });
     },
   );
-
   it("rejects an unknown provider identity", () => {
     expect(() => parseServerEvent(snapshotEvent({
       ...provider,
@@ -909,13 +901,11 @@ describe("server event workspace-run discriminant boundary", () => {
     conversation: conversationShell,
     runs: [workspaceRun],
   });
-
   it("accepts a canonical workspace run", () => {
     expect(parseServerEvent(snapshotEvent(run))).toMatchObject({
       type: "conversation.shell.updated",
     });
   });
-
   it.each([
     ["kind", "background"],
     ["status", "paused"],
@@ -927,7 +917,6 @@ describe("server event workspace-run discriminant boundary", () => {
     }))).toThrow("Malformed server event");
   });
 });
-
 describe("server event remaining discriminant and identity boundary", () => {
   const project = {
     id: "project-1",
@@ -1140,6 +1129,17 @@ describe("server event remaining discriminant and identity boundary", () => {
       conversationId: conversation.id,
       state: "ready",
       detail: { ...conversationDetail, [collection]: [value] },
+    }))).toThrow("Malformed server event");
+  });
+  it.each([
+    ["turn", "agentTurns", conversationDetail.agentTurns[0]], ["Git artifact", "turnGitArtifacts", conversationDetail.turnGitArtifacts[0]],
+    ["message", "messages", conversationDetail.messages[0]], ["activity", "activities", conversationDetail.activities[0]],
+    ["subagent", "subagents", conversationDetail.subagents[0]], ["reasoning", "reasonings", conversationDetail.reasonings[0]],
+    ["checkpoint", "checkpoints", conversationDetail.checkpoints[0]], ["review note", "reviewNotes", conversationDetail.reviewNotes[0]],
+  ])("rejects duplicate detail %s IDs", (_label, collection, entry) => {
+    expect(() => parseServerEvent(event({
+      kind: "conversation.detail", conversationId: conversation.id, state: "ready",
+      detail: { ...conversationDetail, [collection]: [entry, { ...entry }] },
     }))).toThrow("Malformed server event");
   });
   it.each([

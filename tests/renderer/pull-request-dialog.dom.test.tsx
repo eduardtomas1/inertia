@@ -37,7 +37,8 @@ describe("PullRequestDialog", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the provider-hosted browser flow for GitLab", () => {
+  it("focuses and closes the provider-hosted browser flow for GitLab", async () => {
+    const onClose = vi.fn();
     render(<PullRequestDialog
       open
       initialTitle="Ship the roadmap"
@@ -45,16 +46,42 @@ describe("PullRequestDialog", () => {
       forge="gitlab"
       projectId={crypto.randomUUID()}
       run={vi.fn()}
-      onClose={vi.fn()}
+      onClose={onClose}
     />);
 
-    expect(screen.getByRole("dialog", {
+    const dialog = screen.getByRole("dialog", {
       name: "Open GitLab merge request",
-    })).toBeInTheDocument();
+    });
+    expect(dialog).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Title" }))
       .not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open in GitLab" }))
-      .toBeInTheDocument();
+    const open = screen.getByRole("button", { name: "Open in GitLab" });
+    await waitFor(() => expect(open).toHaveFocus());
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("preserves an edited title across background title refreshes", async () => {
+    const props = {
+      open: true,
+      busy: false,
+      projectId: crypto.randomUUID(),
+      run: vi.fn(),
+      onClose: vi.fn(),
+    };
+    const view = render(
+      <PullRequestDialog initialTitle="Initial chat title" {...props} />,
+    );
+    const title = screen.getByRole("textbox", { name: "Title" });
+    await waitFor(() => expect(title).toHaveFocus());
+    fireEvent.change(title, { target: { value: "Deliberate PR title" } });
+
+    view.rerender(
+      <PullRequestDialog initialTitle="Background chat rename" {...props} />,
+    );
+
+    expect(title).toHaveValue("Deliberate PR title");
+    expect(title).toHaveFocus();
   });
 
   it("preserves a created pull request when opening the browser fails", async () => {

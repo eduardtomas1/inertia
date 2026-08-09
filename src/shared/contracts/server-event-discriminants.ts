@@ -102,6 +102,28 @@ function uniqueIdentity(entries: IdentityRecord[], key = "id"): boolean {
   return new Set(entries.map((entry) => entry[key])).size === entries.length;
 }
 
+const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [
+  "agentTurns", "turnGitArtifacts", "messages", "activities", "subagents",
+  "reasonings", "usage", "plans", "goals", "checkpoints", "reviewSummaries",
+  "reviewStates", "reviewNotes",
+] as const;
+
+const CONVERSATION_DETAIL_ID_COLLECTIONS = [
+  "agentTurns", "turnGitArtifacts", "messages", "activities", "subagents",
+  "reasonings", "checkpoints", "reviewNotes",
+] as const;
+
+export function conversationDetailCollectionsCoherent(
+  value: IdentityRecord,
+  conversationId: string,
+): boolean {
+  return CONVERSATION_DETAIL_SCOPED_COLLECTIONS.every((key) =>
+    (value[key] as IdentityRecord[]).every((entry) =>
+      entry.conversationId === conversationId))
+    && CONVERSATION_DETAIL_ID_COLLECTIONS.every((key) =>
+      uniqueIdentity(value[key] as IdentityRecord[]));
+}
+
 export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): boolean {
   const projects = value.projects as IdentityRecord[];
   const conversations = value.conversations as IdentityRecord[];

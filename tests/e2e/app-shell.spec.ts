@@ -7,13 +7,7 @@ import { promisify } from "node:util";
 import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
-import {
-  continuationIdentityForSelection,
-  nativeModelSelection,
-} from "../../src/shared/model-routing";
-import {
-  expectComposerEndsAtDock,
-} from "./support/layout-assertions";
+import { expectComposerEndsAtDock } from "./support/layout-assertions";
 import {
   createAppFixture,
   processExists,
@@ -595,18 +589,12 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
   const seedViewedContext = async (): Promise<number> => {
     const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
     const state = database.prepare("SELECT active_conversation_id FROM app_state WHERE id = 1").get() as { active_conversation_id: string };
-    const viewedSelection = nativeModelSelection({
-      providerId: "claude",
-      modelId: "viewed-model",
-      alias: "viewed-model",
-      reasoningEffort: "viewed-effort",
-    });
     database.prepare(`
       UPDATE conversations
       SET
         provider_id = 'claude',
-        model_selection_json = ?,
-        continuation_identity_json = ?,
+        model_selection_json = json_set(model_selection_json, '$.harnessId', 'claude-agent-sdk', '$.backendProfileId', 'builtin:anthropic', '$.backendProfileDisplayName', 'Anthropic', '$.modelId', 'viewed-model', '$.alias', 'viewed-model', '$.reasoningEffort', 'viewed-effort'),
+        continuation_identity_json = json_object('harnessId', 'claude-agent-sdk', 'backendProfileId', 'builtin:anthropic', 'backendConfigurationRevision', 0, 'modelIdentity', 'viewed-model', 'endpointIdentity', NULL),
         model = 'viewed-model',
         reasoning_effort = 'viewed-effort',
         interaction_mode = 'plan',
@@ -615,12 +603,7 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
         worktree_path = ?,
         provider_session_id = 'viewed-provider-session'
       WHERE id = ?
-    `).run(
-      JSON.stringify(viewedSelection),
-      JSON.stringify(continuationIdentityForSelection(viewedSelection)),
-      workspaceDirectory,
-      state.active_conversation_id,
-    );
+    `).run(workspaceDirectory, state.active_conversation_id);
     const count = (database.prepare("SELECT COUNT(*) AS count FROM conversations").get() as { count: number }).count;
     database.close();
     await page.reload();

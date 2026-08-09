@@ -45,14 +45,14 @@ const readyProvider = {
   metadataState: {
     models: {
       freshness: "fresh",
-      provenance: "runtime",
+      provenance: "provider",
       updatedAt: null,
       lastAttemptedAt: null,
       refreshing: false,
     },
     rateLimits: {
       freshness: "fresh",
-      provenance: "runtime",
+      provenance: "provider",
       updatedAt: null,
       lastAttemptedAt: null,
       refreshing: false,

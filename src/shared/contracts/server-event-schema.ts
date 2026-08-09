@@ -719,8 +719,7 @@ function changedFile(value: unknown): boolean {
 
 function pullRequestCapability(
   value: unknown,
-  hasRemote: boolean,
-  branch: string | null,
+  isRepository: boolean, hasRemote: boolean, branch: string | null,
 ): boolean {
   return record(value)
     && booleanField(value, "available")
@@ -730,7 +729,7 @@ function pullRequestCapability(
       "no-branch", "no-remotes", "ambiguous-remote", "missing-remote",
       "unsupported-url", "unsupported-forge", "ambiguous-url",
     ]))
-    && pullRequestCapabilityStateCoherent(value, hasRemote, branch);
+    && pullRequestCapabilityStateCoherent(value, isRepository, hasRemote, branch);
 }
 
 function gitStatus(value: unknown): boolean {
@@ -744,7 +743,8 @@ function gitStatus(value: unknown): boolean {
     && integerField(value, "behind")
     && booleanField(value, "hasRemote")
     && (value.pullRequest === undefined || pullRequestCapability(
-      value.pullRequest, value.hasRemote as boolean, value.branch as string | null,
+      value.pullRequest, value.isRepository as boolean,
+      value.hasRemote as boolean, value.branch as string | null,
     ))
     && arrayOf(value.files, changedFile)
     && integerField(value, "insertions")
@@ -768,7 +768,7 @@ function workspaceGitRepository(value: unknown): boolean {
     && integerField(value, "behind")
     && booleanField(value, "hasRemote")
     && (value.pullRequest === undefined || pullRequestCapability(
-      value.pullRequest, value.hasRemote as boolean, value.branch as string | null,
+      value.pullRequest, true, value.hasRemote as boolean, value.branch as string | null,
     ))
     && arrayOf(value.files, changedFile)
     && integerField(value, "insertions")

@@ -668,8 +668,12 @@ describe("server event request-result trust boundary", () => {
   it.each([
     [pullRequest, false, "main"], [pullRequest, true, null],
     [{ available: false, remoteName: null, forge: null, unavailableReason: "no-remotes" }, true, "main"], [{ available: false, remoteName: null, forge: null, unavailableReason: "no-branch" }, true, "main"],
+    [{ available: false, remoteName: null, forge: null, unavailableReason: "no-remotes" }, false, null],
   ])("rejects pull-request capability contradictions with Git state", (next, hasRemote, branch) => {
     expect(() => parseServerEvent(event({ kind: "git.status", status: { ...gitStatus, hasRemote, branch, pullRequest: next } }))).toThrow("Malformed server event");
+  });
+  it("accepts the non-repository no-remotes projection", () => {
+    expect(parseServerEvent(event({ kind: "git.status", status: { ...gitStatus, isRepository: false, root: null, branch: null, upstream: null, hasRemote: false, pullRequest: { available: false, remoteName: null, forge: null, unavailableReason: "no-remotes" } } }))).toBeTruthy();
   });
 });
 describe("server event settings trust boundary", () => {

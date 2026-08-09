@@ -133,6 +133,7 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
 
 export function pullRequestCapabilityStateCoherent(
   value: IdentityRecord,
+  isRepository: boolean,
   hasRemote: boolean,
   branch: string | null,
 ): boolean {
@@ -148,6 +149,7 @@ export function pullRequestCapabilityStateCoherent(
   if ((remoteName !== null && remoteName.length === 0)
     || (remoteName !== null) !== reasonHasSelectedRemote) return false;
   if (reason === "no-branch") return branch === null;
+  if (reason === "no-remotes" && !isRepository) return branch === null && !hasRemote;
   return branch !== null && branch.length > 0 && hasRemote === (reason !== "no-remotes");
 }
 

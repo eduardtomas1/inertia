@@ -123,17 +123,39 @@ export function conversationDetailCollectionsCoherent(
 ): boolean {
   const turns = value.agentTurns as IdentityRecord[];
   const artifacts = value.turnGitArtifacts as IdentityRecord[];
+  const subagents = value.subagents as IdentityRecord[];
+  const usage = value.usage as IdentityRecord[];
+  const plans = value.plans as IdentityRecord[];
+  const goals = value.goals as IdentityRecord[];
+  const reviewSummaries = value.reviewSummaries as IdentityRecord[];
+  const reviewStates = value.reviewStates as IdentityRecord[];
   const messagesById = new Map((value.messages as IdentityRecord[])
     .map((message) => [message.id, message]));
   const checkpointsById = new Map((value.checkpoints as IdentityRecord[])
     .map((checkpoint) => [checkpoint.id, checkpoint]));
   const turnsById = new Map(turns.map((turn) => [turn.id, turn]));
+  const providerIdentityUnique = (key: "providerTaskId" | "providerAgentId") => {
+    const identified = subagents.filter((trace) => trace[key] !== null);
+    return new Set(identified.map((trace) => JSON.stringify([
+      trace.runId, trace.providerId, trace[key],
+    ]))).size === identified.length;
+  };
+  const reviewStateKeys = reviewStates.map((state) => JSON.stringify([
+    state.repositoryPath ?? ".", state.scope, state.path, state.hunkId ?? "",
+  ]));
   return CONVERSATION_DETAIL_SCOPED_COLLECTIONS.every((key) =>
     (value[key] as IdentityRecord[]).every((entry) =>
       entry.conversationId === conversationId))
     && CONVERSATION_DETAIL_ID_COLLECTIONS.every((key) =>
       uniqueIdentity(value[key] as IdentityRecord[]))
     && uniqueIdentity(turns, "runId")
+    && usage.length <= 1
+    && uniqueIdentity(plans, "runId")
+    && uniqueIdentity(goals, "source")
+    && reviewSummaries.length <= 1
+    && new Set(reviewStateKeys).size === reviewStateKeys.length
+    && providerIdentityUnique("providerTaskId")
+    && providerIdentityUnique("providerAgentId")
     && CONVERSATION_DETAIL_TURN_RUN_COLLECTIONS.every((key) =>
       (value[key] as IdentityRecord[]).every((entry) => entry.turnId === null
         || turnsById.get(entry.turnId)?.runId === entry.runId))

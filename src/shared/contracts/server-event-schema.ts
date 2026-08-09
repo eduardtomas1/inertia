@@ -597,6 +597,7 @@ function agentWorkflow(value: unknown): boolean {
   if (!recordWithStrings(value, "conversationId", "refreshedAt")) return false;
   const conversationId = value.conversationId;
   return arrayOf(value.goals, agentGoal)
+    && uniqueRecordField(value.goals as unknown[], "source")
     && (value.goals as UnknownRecord[]).every((goal) =>
       goal.conversationId === conversationId)
     && workflowGoalCapability(value.goalCapability)
@@ -1120,8 +1121,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "backend.profile": (value) => backendProfile(value.profile, true),
   "backend.profile.probe": (value) => backendProfile(value.profile, true),
   "backend.default": (value) => value.value === null || backendDefault(value.value),
-  "provider.maintenance": (value) =>
-    arrayOf(value.providers, providerMaintenanceStatus)
+  "provider.maintenance": (value) => arrayOf(value.providers, providerMaintenanceStatus)
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) =>
     providerMaintenanceOperation(value.operation),

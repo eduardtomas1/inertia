@@ -1137,10 +1137,13 @@ describe("server event remaining discriminant and identity boundary", () => {
     ["message", "messages", conversationDetail.messages[0], undefined], ["activity", "activities", conversationDetail.activities[0], undefined],
     ["subagent", "subagents", conversationDetail.subagents[0], undefined], ["reasoning", "reasonings", conversationDetail.reasonings[0], undefined],
     ["checkpoint", "checkpoints", conversationDetail.checkpoints[0], undefined], ["review note", "reviewNotes", conversationDetail.reviewNotes[0], undefined],
+    ["usage", "usage", conversationDetail.usage[0], undefined], ["plan run", "plans", conversationDetail.plans[0], undefined],
+    ["goal source", "goals", conversationDetail.goals[0], undefined], ["review summary", "reviewSummaries", conversationDetail.reviewSummaries[0], undefined],
+    ["review state key", "reviewStates", conversationDetail.reviewStates[0], undefined], ["subagent task identity", "subagents", { ...conversationDetail.subagents[0], providerTaskId: "task-1" }, "trace-2"], ["subagent agent identity", "subagents", { ...conversationDetail.subagents[0], providerAgentId: "agent-1" }, "trace-2"],
   ])("rejects duplicate detail %s identities", (_label, collection, entry, duplicateId) => {
     expect(() => parseServerEvent(event({
       kind: "conversation.detail", conversationId: conversation.id, state: "ready",
-      detail: { ...conversationDetail, [collection]: [entry, { ...entry, id: duplicateId ?? entry.id }] },
+      detail: { ...conversationDetail, [collection]: [entry, { ...entry, id: duplicateId ?? ("id" in entry ? entry.id : undefined) }] },
     }))).toThrow("Malformed server event");
   });
   it.each([
@@ -1236,7 +1239,7 @@ describe("server event remaining discriminant and identity boundary", () => {
       { type: "provider.maintenance.updated", providers: [maintenance, { ...maintenance }] },
       event({ kind: "provider.maintenance", providers: [maintenance, { ...maintenance }] }),
       event({ kind: "project.actions", actions: [{ id: "test", label: "Test", command: "npm test", preview: false }, { id: "test", label: "Duplicate", command: "npm test", preview: false }] }),
-      event({ kind: "agent.workflow", workflow: { ...workflow, skills: [skill, { ...skill }] } }), event({ kind: "agent.skills", conversationId: conversation.id, skills: [skill, { ...skill }], skillDiscovery: workflow.skillDiscovery }),
+      event({ kind: "agent.workflow", workflow: { ...workflow, skills: [skill, { ...skill }] } }), event({ kind: "agent.workflow", workflow: { ...workflow, goals: [workflow.goals[0], { ...workflow.goals[0] }] } }), event({ kind: "agent.skills", conversationId: conversation.id, skills: [skill, { ...skill }], skillDiscovery: workflow.skillDiscovery }),
       event({ kind: "duo.pending", launchIds: ["launch-1", "launch-1"], hasMore: false }),
     ];
     for (const malformed of duplicateEvents) expect(() => parseServerEvent(malformed)).toThrow("Malformed server event");

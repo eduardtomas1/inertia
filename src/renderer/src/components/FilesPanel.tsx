@@ -355,6 +355,10 @@ export function FilesPanel({
     event: KeyboardEvent<HTMLButtonElement>,
     row: WorkspaceTreeRow,
   ): void => {
+    // Native buttons synthesize one click for Enter/Space. Handling the same
+    // activation in keydown can race the search-result rerender and toggle the
+    // newly revealed directory closed again on slower platforms.
+    if (event.key === "Enter" || event.key === " ") return;
     const action = workspaceTreeKeyboardAction(event.key, row.entry.path, rows);
     if (action.type === "none") return;
     event.preventDefault();

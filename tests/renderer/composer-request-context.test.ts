@@ -74,4 +74,21 @@ describe("composer structured request context", () => {
       visibleContent: "Please inspect the attached file.",
     });
   });
+
+  it("attaches the explicitly selected preview URL as structured context", () => {
+    expect(buildComposerTurnRequest(
+      "",
+      [],
+      null,
+      [],
+      "http://127.0.0.1:4173/dashboard",
+    )).toEqual({
+      visibleContent: "Please inspect the current preview.",
+      context: {
+        previewContexts: [{
+          url: "http://127.0.0.1:4173/dashboard",
+        }],
+      },
+    });
+  });
 });

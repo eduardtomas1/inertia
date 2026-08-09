@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  PRIVATE_CONNECT_LIMITS,
   PRIVATE_CONNECT_SOCKET_CLOSE,
   privateConnectConversationDetailSchema,
   privateConnectStateSchema,
@@ -14,7 +15,8 @@ import {
   type PrivateConnectSocket,
   type PairingInvitation,
 } from "./connection";
-import { CheckingScreen, PairScreen, WaitingScreen } from "./pairing/PairingScreen";
+import { CheckingScreen, OfflineScreen, PairScreen, WaitingScreen } from "./pairing/PairingScreen";
+import { onPrivateConnectConversationNavigation } from "./pwa";
 import { WorkspaceShell } from "./workspace/WorkspaceShell";
 import type { Detail, Shell } from "./types";
 
@@ -24,7 +26,13 @@ type PairState =
   | { kind: "waiting"; requestId: string; comparisonCode: string; error: string | null }
   | { kind: "ready"; csrf: string; error: string | null };
 
-export default function App({ initialPairingFragment }: { initialPairingFragment: string | null }): React.JSX.Element {
+export default function App({
+  initialPairingFragment,
+  initialConversationId = null,
+}: {
+  initialPairingFragment: string | null;
+  initialConversationId?: string | null;
+}): React.JSX.Element {
   const invitation = useMemo(() => parsePairingFragment(initialPairingFragment), [initialPairingFragment]);
   const [pair, setPair] = useState<PairState>(() => ({ kind: "checking" }));
   const [shell, setShell] = useState<Shell | null>(null);
@@ -33,6 +41,9 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [socket, setSocket] = useState<PrivateConnectSocket | null>(null);
+  const [hostUnavailable, setHostUnavailable] = useState(() => navigator.onLine === false);
+  const [pairRetry, setPairRetry] = useState(0);
+  const [requestedConversationId, setRequestedConversationId] = useState(initialConversationId);
   const [pendingPromptDelivery, setPendingPromptDelivery] = useState<{
     conversationId: string;
     content: string;
@@ -51,10 +62,48 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
     conversationValidatorsRef.current.clear();
   }, []);
 
+  const noteRequestFailure = useCallback((error: unknown): void => {
+    if (isSocketOnlyFailure(error) || hasHttpStatus(error)) setHostUnavailable(false);
+    else setHostUnavailable(true);
+  }, []);
+  const demoteSocket = useCallback((candidate: PrivateConnectSocket, error: unknown): void => {
+    if (!isSocketOnlyFailure(error)) return;
+    setSocket((current) => current === candidate ? null : current);
+    candidate.close();
+  }, []);
+
+  useEffect(() => {
+    const offline = (): void => setHostUnavailable(true);
+    const online = (): void => setHostUnavailable(false);
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
+    return () => {
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("online", online);
+    };
+  }, []);
+
+  useEffect(() => onPrivateConnectConversationNavigation(
+    setRequestedConversationId,
+  ), []);
+
+  useEffect(() => {
+    if (!shell || !requestedConversationId) return;
+    const allowed = shell.conversations.some(({ id }) => id === requestedConversationId);
+    if (allowed) {
+      conversationValidatorsRef.current.delete(requestedConversationId);
+      setSelectedConversation(requestedConversationId);
+      setDetail(null);
+      followLatestRef.current = true;
+    }
+    setRequestedConversationId(null);
+  }, [requestedConversationId, shell]);
+
   const applyStateResponse = useCallback((response: PrivateConnectResponse): void => {
     if (!response.ok) throw new Error(response.message);
     const result = projectionResult(response);
-    if (!result || result.kind === "not-modified") return;
+    if (!result) throw new Error("Private Connect returned an invalid state projection.");
+    if (result.kind === "not-modified") return;
     if (result.kind !== "state") throw new Error("Private Connect returned an invalid state projection.");
     stateValidatorRef.current = result.validator;
     setShell(result.state);
@@ -66,9 +115,13 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   ): void => {
     if (!response.ok) throw new Error(response.message);
     const result = projectionResult(response);
-    if (!result || result.kind === "not-modified") return;
+    if (!result) throw new Error("Private Connect returned an invalid conversation projection.");
+    if (result.kind === "not-modified") return;
     if (result.kind !== "conversation") {
       throw new Error("Private Connect returned an invalid conversation projection.");
+    }
+    if (result.detail.conversation.id !== conversationId) {
+      throw new Error("Private Connect returned a conversation outside the requested scope.");
     }
     conversationValidatorsRef.current.set(conversationId, result.validator);
     setDetail(result.detail);
@@ -76,6 +129,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
 
   const loadSession = useCallback(async () => {
     const response = await fetch("/api/session/csrf", { credentials: "same-origin" });
+    setHostUnavailable(false);
     if (response.status === 401) {
       setPair({ kind: "pair", invitation, error: invitation || !initialPairingFragment ? null : "This pairing link is invalid." });
       return;
@@ -87,8 +141,11 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   }, [initialPairingFragment, invitation]);
 
   useEffect(() => {
-    void loadSession().catch((error) => setPair({ kind: "pair", invitation, error: error instanceof Error ? error.message : "Private Connect is unavailable." }));
-  }, [loadSession, invitation]);
+    void loadSession().catch((error) => {
+      noteRequestFailure(error);
+      setPair({ kind: "pair", invitation, error: error instanceof Error ? error.message : "Private Connect is unavailable." });
+    });
+  }, [loadSession, invitation, noteRequestFailure]);
 
   const pairingInvitation = pair.kind === "pair" ? pair.invitation : null;
   useEffect(() => {
@@ -101,13 +158,19 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
           deviceId: browserDeviceId(),
           deviceLabel: suggestedDeviceLabel(),
         });
-        if (!cancelled) setPair({ kind: "waiting", requestId: started.requestId, comparisonCode: started.comparisonCode, error: null });
+        if (!cancelled) {
+          setHostUnavailable(false);
+          setPair({ kind: "waiting", requestId: started.requestId, comparisonCode: started.comparisonCode, error: null });
+        }
       } catch (error) {
-        if (!cancelled) setPair((current) => ({ ...current, error: error instanceof Error ? error.message : "Pairing could not start." }));
+        if (!cancelled) {
+          noteRequestFailure(error);
+          setPair((current) => ({ ...current, error: error instanceof Error ? error.message : "Pairing could not start." }));
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [pair.kind, pairingInvitation]);
+  }, [noteRequestFailure, pair.kind, pairRetry, pairingInvitation]);
 
   const readyCsrf = pair.kind === "ready" ? pair.csrf : null;
   useEffect(() => {
@@ -132,6 +195,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
         const next = await connectPrivateConnectSocket(readyCsrf);
         if (cancelled) { next.close(); return; }
         current = next;
+        setHostUnavailable(false);
         unsubscribeClose = next.onClose((code) => {
           if (code === PRIVATE_CONNECT_SOCKET_CLOSE.accessRevoked) {
             clearWorkspace();
@@ -140,6 +204,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
             if (code === PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged) {
               clearWorkspace();
             }
+            setHostUnavailable(false);
             retry();
           }
         });
@@ -150,7 +215,10 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
           setDetail(null);
           setSelectedConversation(null);
           setPair({ kind: "pair", invitation: null, error: "This browser no longer has access. Pair it again from the desktop." });
-        } else retry();
+        } else {
+          noteRequestFailure(error);
+          retry();
+        }
       }
     };
     void connect();
@@ -161,11 +229,22 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
       current?.close();
       setSocket(null);
     };
-  }, [clearWorkspace, pair.kind, readyCsrf]);
+  }, [clearWorkspace, noteRequestFailure, pair.kind, readyCsrf]);
 
   const request = useCallback(async (value: Parameters<PrivateConnectSocket["request"]>[0], csrf: string) => {
-    return socket ? await socket.request(value) : await apiRequest(value, csrf);
-  }, [socket]);
+    const currentSocket = socket;
+    try {
+      const response = currentSocket
+        ? await currentSocket.request(value)
+        : await apiRequest(value, csrf);
+      setHostUnavailable(false);
+      return response;
+    } catch (error) {
+      if (currentSocket) demoteSocket(currentSocket, error);
+      noteRequestFailure(error);
+      throw error;
+    }
+  }, [demoteSocket, noteRequestFailure, socket]);
 
   useEffect(() => {
     if (pair.kind !== "waiting") return;
@@ -176,11 +255,14 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
         if (status.status === "approved") void loadSession();
         else if (status.status === "denied" || status.status === "expired") setPair({ kind: "pair", invitation: null, error: "Pairing was not approved." });
       }).catch((error) => {
-        if (!cancelled) setPair({ kind: "pair", invitation: null, error: error instanceof Error ? error.message : "Pairing status is unavailable." });
+        if (!cancelled) {
+          noteRequestFailure(error);
+          setPair({ kind: "pair", invitation: null, error: error instanceof Error ? error.message : "Pairing status is unavailable." });
+        }
       });
     }, 1_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [pair, loadSession]);
+  }, [pair, loadSession, noteRequestFailure]);
 
   useEffect(() => {
     if (!readyCsrf) return;
@@ -246,11 +328,14 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
     };
     const timer = window.setInterval(() => {
       void refresh().catch((error) => {
-        if (!cancelled) setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "Private Connect state could not be refreshed." } : current);
+        if (!cancelled) {
+          demoteSocket(socket, error);
+          setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "Private Connect state could not be refreshed." } : current);
+        }
       });
     }, 5_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [applyConversationResponse, applyStateResponse, readyCsrf, selectedConversation, socket]);
+  }, [applyConversationResponse, applyStateResponse, demoteSocket, readyCsrf, selectedConversation, socket]);
 
   useLayoutEffect(() => {
     const messages = messagesRef.current;
@@ -258,10 +343,16 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   }, [detail?.messages]);
 
   const sendPrompt = async (): Promise<void> => {
-    if (pair.kind !== "ready" || !prompt.trim() || !shell?.capabilities.scopes.includes("private:prompt") || !selectedConversation) return;
+    if (hostUnavailable || pair.kind !== "ready" || !prompt.trim() || !shell?.capabilities.scopes.includes("private:prompt") || !selectedConversation) return;
+    const content = prompt.trim();
+    if (content.length > PRIVATE_CONNECT_LIMITS.promptCharacters) {
+      setPair((current) => current.kind === "ready"
+        ? { ...current, error: `Prompts are limited to ${PRIVATE_CONNECT_LIMITS.promptCharacters.toLocaleString()} characters.` }
+        : current);
+      return;
+    }
     setBusy(true);
     try {
-      const content = prompt.trim();
       const deliveryId = pendingPromptDelivery?.conversationId === selectedConversation
         && pendingPromptDelivery.content === content
         ? pendingPromptDelivery.deliveryId
@@ -281,7 +372,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   };
 
   const answerQuestions = async (answers: Record<string, string[]>): Promise<void> => {
-    if (pair.kind !== "ready" || !selectedConversation || !detail?.inputRequestId || !shell?.capabilities.scopes.includes("private:input")) return;
+    if (hostUnavailable || pair.kind !== "ready" || !selectedConversation || !detail?.inputRequestId || !shell?.capabilities.scopes.includes("private:input")) return;
     setBusy(true);
     try {
       const response = await request({ protocolVersion: 1, type: "input.respond", requestId: crypto.randomUUID(), conversationId: selectedConversation, inputRequestId: detail.inputRequestId, answers }, pair.csrf);
@@ -292,7 +383,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   };
 
   const stopRun = async (): Promise<void> => {
-    if (pair.kind !== "ready" || !selectedConversation || !detail?.conversation.runId || !shell?.capabilities.scopes.includes("private:stop")) return;
+    if (hostUnavailable || pair.kind !== "ready" || !selectedConversation || !detail?.conversation.runId || !shell?.capabilities.scopes.includes("private:stop")) return;
     try {
       const response = await request({ protocolVersion: 1, type: "run.stop", requestId: crypto.randomUUID(), conversationId: selectedConversation, runId: detail.conversation.runId }, pair.csrf);
       if (!response.ok) throw new Error(response.message);
@@ -312,6 +403,13 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
     }
   };
 
+  if (hostUnavailable && pair.kind !== "ready") {
+    return <OfflineScreen onRetry={() => {
+      setHostUnavailable(false);
+      if (pair.kind === "pair" && pair.invitation) setPairRetry((current) => current + 1);
+      else void loadSession().catch((error) => noteRequestFailure(error));
+    }} />;
+  }
   if (pair.kind === "checking") return <CheckingScreen />;
   if (pair.kind === "pair") return <PairScreen error={pair.error} />;
   if (pair.kind === "waiting") return <WaitingScreen comparisonCode={pair.comparisonCode} />;
@@ -322,6 +420,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
       error={pair.error}
       prompt={prompt}
       busy={busy}
+      offline={hostUnavailable}
       selectedConversation={selectedConversation}
       messagesRef={messagesRef}
       onSelectConversation={(conversationId) => {
@@ -377,4 +476,23 @@ function suggestedDeviceLabel(): string {
 
 function isUnauthorized(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "status" in error && (error as { status?: unknown }).status === 401);
+}
+
+function hasHttpStatus(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "status" in error
+    && typeof (error as { status?: unknown }).status === "number",
+  );
+}
+
+function isSocketOnlyFailure(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "privateConnectTransport" in error
+    && (error as { privateConnectTransport?: unknown }).privateConnectTransport
+      === "private-connect-websocket",
+  );
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const PROJECT_ID = "22222222-2222-4222-8222-222222222222";
@@ -105,6 +105,7 @@ describe("Private Connect packaged workspace", () => {
     await openConversation();
 
     const composer = screen.getByRole("textbox", { name: "Send a prompt" });
+    expect(composer).toHaveAttribute("maxlength", "8000");
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     fireEvent.change(composer, { target: { value: "  please continue  " } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -119,6 +120,31 @@ describe("Private Connect packaged workspace", () => {
       conversationId: CONVERSATION_ID,
       runId: "run-1",
     });
+  });
+
+  it("keeps in-memory context visible offline but disables every mutation", async () => {
+    scopes = ["private:read", "private:prompt", "private:input", "private:stop"];
+    runId = "run-1";
+    await openConversation();
+
+    await act(() => window.dispatchEvent(new Event("offline")));
+
+    expect(screen.getByRole("status")).toHaveTextContent(/not stored for offline use/iu);
+    expect(screen.getByRole("textbox", { name: "Send a prompt" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: "Conversation" })).toBeInTheDocument();
+  });
+
+  it("does not send a prompt that exceeds the shared protocol limit", async () => {
+    scopes = ["private:read", "private:prompt"];
+    await openConversation();
+
+    const composer = screen.getByRole("textbox", { name: "Send a prompt" });
+    fireEvent.change(composer, { target: { value: "x".repeat(8_001) } });
+    fireEvent.submit(composer.closest("form")!);
+
+    await waitFor(() => expect(screen.getByText("Prompts are limited to 8,000 characters.")).toBeInTheDocument());
+    expect(sent.some((request) => request.type === "prompt.send")).toBe(false);
   });
 
   it("offers no stop control when the granted conversation has no active run", async () => {

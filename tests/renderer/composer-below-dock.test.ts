@@ -28,8 +28,11 @@ const css = readFileSync(
 describe("composer below-dock cleanup", () => {
   it("ends the Composer and workspace topology at the dock", () => {
     expect(composerSource).toContain("{goal && (");
-    expect(composerSource.indexOf("<ChatGoalControl")).toBeLessThan(
+    expect(composerSource.indexOf("<ChatGoalControl")).toBeGreaterThan(
       composerSource.indexOf('<section\n        ref={composerRef}'),
+    );
+    expect(composerSource.indexOf("<ChatGoalControl")).toBeLessThan(
+      composerSource.indexOf("<ComposerInputZone"),
     );
     expect(composerSource).toMatch(
       /<div className="composer-shell">[\s\S]*?<section[\s\S]*?<\/section>\s*<\/div>\s*\);/u,

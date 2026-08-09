@@ -55,7 +55,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await app.close();
+  await app?.close();
 });
 
 async function openPaneTool(
@@ -153,14 +153,14 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
 
   await primaryMessage.fill("/goal");
   await primary.getByRole("option", { name: /^\/goal/u }).click();
-  const primaryGoalDialog = primary.getByRole("dialog", {
+  const primaryGoalSurface = primary.getByRole("region", {
     name: "Local objective",
   });
-  await expect(primaryGoalDialog).toContainText("Primary chat objective");
-  await expect(primaryGoalDialog).toContainText(
+  await expect(primaryGoalSurface).toContainText("Primary chat objective");
+  await expect(primaryGoalSurface).toContainText(
     "Saved in Inertia only; it is not shared with the provider.",
   );
-  await expect(secondary.getByRole("dialog", {
+  await expect(secondary.getByRole("region", {
     name: "Local objective",
   })).toHaveCount(0);
   await expect(primary.getByRole("complementary", {
@@ -177,14 +177,14 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     path: chatGoalScreenshot,
     contentType: "image/png",
   });
-  await primaryGoalDialog.getByRole("button", { name: "Complete" }).click();
-  await expect(primaryGoalDialog.getByText("Complete", { exact: true }))
+  await primaryGoalSurface.getByRole("button", { name: "Complete" }).click();
+  await expect(primaryGoalSurface.getByText("Complete", { exact: true }))
     .toBeVisible();
-  await expect(secondary.getByRole("dialog", {
+  await expect(secondary.getByRole("region", {
     name: "Local objective",
   })).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await expect(primaryGoalDialog).toHaveCount(0);
+  await expect(primaryGoalSurface).toHaveCount(0);
   await expect(primaryMessage).toBeFocused();
 
   await primaryMessage.fill("Draft owned by Inertia");
@@ -192,22 +192,22 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
 
-  await primary.getByRole("button", { name: "Prompt stash" }).click();
-  await primary.getByRole("menu", { name: "Prompt stash" })
-    .getByRole("menuitem", { name: /Stash current prompt/u })
+  await primary.getByRole("button", { name: "Scratch prompts" }).click();
+  await primary.getByRole("menu", { name: "Scratch prompts" })
+    .getByRole("menuitem", { name: /Save current prompt/u })
     .click();
   await expect(primaryMessage).toHaveValue("");
   const secondaryStash = secondary.getByRole("button", {
-    name: "Prompt stash, 1 saved",
+    name: "Scratch prompts, 1 saved",
   });
   await expect(secondaryStash).toBeVisible();
   await secondaryStash.click();
-  await secondary.getByRole("menu", { name: "Prompt stash" })
+  await secondary.getByRole("menu", { name: "Scratch prompts" })
     .getByRole("menuitem", { name: /^Draft owned by Inertia/u })
     .click();
   await expect(secondaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(primary.getByRole("button", {
-    name: "Prompt stash, 1 saved",
+    name: "Scratch prompts, 1 saved",
   })).toBeVisible();
   await primaryMessage.fill("Draft owned by Inertia");
   await secondaryMessage.fill("Draft owned by Companion");

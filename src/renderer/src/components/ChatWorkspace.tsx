@@ -51,6 +51,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { shouldFollowTimeline } from "../utils/responseTimeline";
 import { revealAgentInputRequest } from "../utils/agentInputNavigation";
@@ -110,6 +111,8 @@ type ChatWorkspaceProps = {
   autoCollapseWorkLog: boolean;
   showChangedFileSummaries: boolean;
   promptContext?: string | null;
+  previewContextUrl?: string | null;
+  providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
   sending: boolean;
   onAddProject: () => void;
@@ -195,6 +198,8 @@ export function ChatWorkspace({
   autoCollapseWorkLog,
   showChangedFileSummaries,
   promptContext,
+  previewContextUrl,
+  providerIdentityLabels,
   loading,
   sending,
   onAddProject,
@@ -237,6 +242,8 @@ export function ChatWorkspace({
     approvals.length > 0 || inputRequests.length > 0,
   );
   const Root = embedded ? "section" : "main";
+  const selectedReasoningEffort = conversation?.modelSelection.reasoningEffort
+    ?.trim().toLowerCase() ?? "";
   const keyboardHelpId = useId();
   const stopTimeline = useCallback(() => {
     void onStop().catch(() => undefined);
@@ -549,7 +556,10 @@ export function ChatWorkspace({
   }
 
   return (
-    <Root className={clsx("chat-workspace", `response-density-${responseDensity}`)}>
+    <Root
+      className={clsx("chat-workspace", `response-density-${responseDensity}`)}
+      data-reasoning-effort={selectedReasoningEffort}
+    >
       <div
         ref={scrollRef}
         className="message-scroll"
@@ -590,6 +600,7 @@ export function ChatWorkspace({
               streamingReasoning={streamingReasoning}
               approvals={approvals}
               inputRequests={inputRequests}
+              providerIdentityLabels={providerIdentityLabels}
               showTimestamps={showTimestamps}
               showThinking={showThinking}
               defaultCodeWrap={defaultCodeWrap}
@@ -646,8 +657,10 @@ export function ChatWorkspace({
           </div>
         )}
         <ProviderMaintenanceNotice
-          providerLabel={providers.find(({ id }) =>
-            id === conversation.providerId)?.label ?? conversation.providerId}
+          providerLabel={providerIdentityLabels?.[conversation.providerId]
+            ?? providers.find(({ id }) =>
+              id === conversation.providerId)?.label
+            ?? conversation.providerId}
           status={maintenanceStatus}
           operation={maintenanceOperation}
           onRefresh={onRefreshProviderMaintenance}
@@ -669,6 +682,8 @@ export function ChatWorkspace({
           skillsError={skillsError}
           goal={goalControl}
           promptContext={promptContext}
+          previewContextUrl={previewContextUrl}
+          providerIdentityLabels={providerIdentityLabels}
           disabled={!conversation}
           sending={sending}
           running={conversation.status === "running" || conversation.status === "needs-input"}

@@ -64,6 +64,8 @@ export interface ConversationRow {
   settled_at: string | null;
   completed_at: string | null;
   last_viewed_at: string | null;
+  pinned_at: string | null;
+  snoozed_until: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -302,6 +304,9 @@ export interface StateRow {
   project_grouping: AppSettings["projectGrouping"];
   auto_open_plan: 0 | 1;
   confirm_destructive_actions: 0 | 1;
+  desktop_notifications: 0 | 1;
+  provider_identity_labels_json: string;
+  keybindings_json: string;
   default_reasoning_effort: string;
   default_interaction_mode: InteractionMode;
   codex_binary_path: string;

@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PRIVATE_CONNECT_GRANT_LIMITS,
   normalizePrivateConnectGrants,
   privateConnectGrantAllowsConversation,
   privateConnectGrantedProjectIds,
   privateConnectGrantsForSelectedProjects,
   privateConnectGrantsFromProjectIds,
 } from "../../../src/shared/private-connect/grants";
+import {
+  privateConnectRuntimeAuthorizationSchema,
+} from "../../../src/shared/private-connect/runtime-contract";
 import {
   normalizePrivateConnectRuntimeGrants,
   privateConnectRuntimeGrantAllowsConversation,
@@ -63,6 +67,38 @@ describe("Private Connect grants and scopes", () => {
     expect(samePrivateConnectRuntimeGrants(legacy, [...legacy])).toBe(true);
     expect(samePrivateConnectRuntimeGrants(legacy, [])).toBe(false);
     expect(samePrivateConnectRuntimeGrants(legacy, [{ ...legacy[0]!, projectId: "different" }])).toBe(false);
+  });
+
+  it("accepts the desktop grant limit across the runtime boundary", () => {
+    const authorization = {
+      deviceId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "22222222-2222-4222-8222-222222222222",
+      scopes: ["view"],
+      projectIds: ["project"],
+      grants: [{
+        projectId: "project",
+        conversationIds: Array.from(
+          {
+            length:
+              PRIVATE_CONNECT_GRANT_LIMITS.conversationsPerProject,
+          },
+          (_, index) => `conversation-${index}`,
+        ),
+        includeFutureConversations: false,
+        legacyProjectWide: false,
+      }],
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    expect(
+      privateConnectRuntimeAuthorizationSchema.safeParse(authorization)
+        .success,
+    ).toBe(true);
+    authorization.grants[0]!.conversationIds.push("one-too-many");
+    expect(
+      privateConnectRuntimeAuthorizationSchema.safeParse(authorization)
+        .success,
+    ).toBe(false);
   });
 
   it("maps scopes to least-privilege presets", () => {

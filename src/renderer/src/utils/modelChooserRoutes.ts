@@ -7,6 +7,7 @@ import type {
   ProviderId,
   ProviderInfo,
 } from "@shared/contracts";
+import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import {
   continuationIdentityForSelection,
   legacyProviderIdForHarness,
@@ -293,9 +294,17 @@ export function buildComposerModelRoutes(
   providers: readonly ProviderInfo[],
   backendProfiles: readonly ModelBackendProfileView[],
   currentSelection: ModelSelection,
+  providerIdentityLabels: ProviderIdentityLabels = {},
 ): ComposerModelRoute[] {
+  const applyIdentityLabels = (routes: ComposerModelRoute[]) => routes.map(
+    (route) => route.providerId && providerIdentityLabels[route.providerId]
+      ? { ...route, providerLabel: providerIdentityLabels[route.providerId]! }
+      : route,
+  );
   if (backendProfiles.length === 0) {
-    return fallbackNativeRoutes(providers, currentSelection);
+    return applyIdentityLabels(
+      fallbackNativeRoutes(providers, currentSelection),
+    );
   }
   const profileRoutes = backendProfiles.flatMap((sourceProfile) => {
     const profile = profileWithProviderDefault(sourceProfile, providers);
@@ -311,7 +320,7 @@ export function buildComposerModelRoutes(
   const missingNativeRoutes = fallbackNativeRoutes(providers, currentSelection)
     .filter(({ providerId }) =>
       providerId !== null && !nativeProvidersWithRoutes.has(providerId));
-  return [...profileRoutes, ...missingNativeRoutes];
+  return applyIdentityLabels([...profileRoutes, ...missingNativeRoutes]);
 }
 
 export function selectedModelSearchRoute(

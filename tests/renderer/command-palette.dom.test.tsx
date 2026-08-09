@@ -49,12 +49,17 @@ const conversation: Conversation = {
 
 const noOp = (): void => undefined;
 
-function palette(open: boolean, onClose = noOp): React.JSX.Element {
+function palette(
+  open: boolean,
+  onClose = noOp,
+  newThreadShortcut = "⌘N",
+): React.JSX.Element {
   return (
     <CommandPalette
       open={open}
       projects={[project]}
       conversations={[conversation]}
+      newThreadShortcut={newThreadShortcut}
       onClose={onClose}
       onSelectProject={noOp}
       onSelectConversation={noOp}
@@ -76,6 +81,7 @@ function ResetHarness({ onOpenSettings }: {
         open={open}
         projects={[project]}
         conversations={[conversation]}
+        newThreadShortcut="⌘N"
         onClose={() => setOpen(false)}
         onSelectProject={noOp}
         onSelectConversation={noOp}
@@ -97,6 +103,7 @@ function FocusHarness(): React.JSX.Element {
         open={open}
         projects={[project]}
         conversations={[conversation]}
+        newThreadShortcut="⌘N"
         onClose={() => setOpen(false)}
         onSelectProject={noOp}
         onSelectConversation={noOp}
@@ -109,6 +116,13 @@ function FocusHarness(): React.JSX.Element {
 }
 
 describe("CommandPalette behavior", () => {
+  it("shows the active platform shortcut for a remapped new-chat action", () => {
+    render(palette(true, noOp, "Ctrl+Y"));
+
+    expect(screen.getByRole("option", { name: /New chat/u }))
+      .toHaveTextContent("Ctrl+Y");
+  });
+
   it("takes focus synchronously when it opens over a focused widget", () => {
     const view = render(
       <>

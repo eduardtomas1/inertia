@@ -375,38 +375,72 @@ export async function createAppFixture(
     secondWorkspaceDirectory,
   });
   const rendererErrors: string[] = [];
-  const electronApp = await electron.launch({
-    args: [".", `--user-data-dir=${join(testDirectory, "electron-profile")}`],
-    env: {
-      ...process.env,
-      NODE_ENV: "test",
-      INERTIA_DATA_DIR: join(testDirectory, "data"),
-      INERTIA_WORKSPACE_DIR: workspace.workspaceDirectory,
-      ...(options.codexAppServerSource
-        ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
-        : {}),
-    },
-  });
-  const page = await electronApp.firstWindow();
-  if (options.windowDisplay === "primary") {
-    await electronApp.evaluate(
-      ({ BrowserWindow, screen }) => {
-        const origin = screen.getPrimaryDisplay().workArea;
-        BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
+  const startupDiagnostics: string[] = [];
+  let electronApp: ElectronApplication | null = null;
+  let page: Page;
+  try {
+    electronApp = await electron.launch({
+      args: [".", `--user-data-dir=${join(testDirectory, "electron-profile")}`],
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        INERTIA_DATA_DIR: join(testDirectory, "data"),
+        INERTIA_WORKSPACE_DIR: workspace.workspaceDirectory,
+        ...(options.codexAppServerSource
+          ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
+          : {}),
       },
+    });
+    const appendDiagnostic = (source: string, chunk: Buffer | string): void => {
+      startupDiagnostics.push(`${source}: ${String(chunk)}`.slice(0, 16_384));
+      if (startupDiagnostics.length > 40) startupDiagnostics.shift();
+    };
+    electronApp.process().stdout?.on("data", (chunk: Buffer) => {
+      appendDiagnostic("stdout", chunk);
+    });
+    electronApp.process().stderr?.on("data", (chunk: Buffer) => {
+      appendDiagnostic("stderr", chunk);
+    });
+    page = await electronApp.firstWindow();
+    if (options.windowDisplay === "primary") {
+      await electronApp.evaluate(
+        ({ BrowserWindow, screen }) => {
+          const origin = screen.getPrimaryDisplay().workArea;
+          BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
+        },
+      );
+    }
+    page.on("console", (message) => {
+      if (message.type() === "error") rendererErrors.push(message.text());
+    });
+    page.on("pageerror", (error) => rendererErrors.push(error.message));
+    await page.locator(
+      '.app-shell[data-connection-status="online"]',
+    ).waitFor();
+    if (options.initialState === "empty") {
+      await page.getByRole("button", { name: "Add your first project" }).waitFor();
+    } else {
+      await page.getByRole("textbox", { name: "Message" }).waitFor();
+    }
+  } catch (cause) {
+    preview.server.closeAllConnections();
+    await new Promise<void>((resolve) => preview.server.close(() => resolve()));
+    await electronApp?.close().catch(() => undefined);
+    await rm(testDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 8,
+      retryDelay: 100,
+    });
+    const diagnostics = [...startupDiagnostics, ...rendererErrors]
+      .join("\n")
+      .trim();
+    throw new Error(
+      `Electron fixture did not reach its ready state${
+        diagnostics ? `:\n${diagnostics}` : "."
+      }`,
+      { cause },
     );
-  }
-  page.on("console", (message) => {
-    if (message.type() === "error") rendererErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => rendererErrors.push(error.message));
-  await page.locator(
-    '.app-shell[data-connection-status="online"]',
-  ).waitFor();
-  if (options.initialState === "empty") {
-    await page.getByRole("button", { name: "Add your first project" }).waitFor();
-  } else {
-    await page.getByRole("textbox", { name: "Message" }).waitFor();
   }
 
   const runtimeSnapshot = async (): Promise<RuntimeTestSnapshot> => {

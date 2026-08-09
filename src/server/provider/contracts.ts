@@ -49,6 +49,8 @@ export interface ProviderDetectionOptions {
   cwd?: string;
   timeoutMs?: number;
   refreshEnvironment?: boolean;
+  /** Installation/protocol readiness only; never probes or forwards credentials. */
+  probeAuthentication?: boolean;
 }
 
 interface ProviderRunRequest {

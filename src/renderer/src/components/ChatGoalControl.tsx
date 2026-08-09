@@ -20,7 +20,6 @@ import type {
   AgentGoalStatus,
   AgentWorkflowState,
 } from "@shared/contracts";
-import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { IconButton } from "./ui";
 
 interface GoalInput {
@@ -40,10 +39,10 @@ export interface ChatGoalControlProps {
   onClearGoal: (source: AgentGoalSource) => Promise<void>;
 }
 
-export interface ChatGoalPopoverProps extends ChatGoalControlProps {
+export interface ChatGoalInlineProps extends ChatGoalControlProps {
   open: boolean;
   onDismiss: (
-    reason: "action" | "escape" | "outside" | "owner-change",
+    reason: "action" | "escape" | "owner-change",
   ) => void;
 }
 
@@ -103,10 +102,9 @@ export function ChatGoalControl({
   onClearGoal,
   open,
   onDismiss,
-}: ChatGoalPopoverProps): React.JSX.Element | null {
+}: ChatGoalInlineProps): React.JSX.Element | null {
   const inputId = useId();
   const headingId = useId();
-  const popoverRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const firstActionRef = useRef<HTMLButtonElement>(null);
   const [objective, setObjective] = useState("");
@@ -120,8 +118,6 @@ export function ChatGoalControl({
   const ownerKey = `${workflow?.conversationId ?? ""}:${source ?? ""}`;
   const ownerKeyRef = useRef(ownerKey);
 
-  useNativePreviewSuspension(open);
-
   useEffect(() => {
     if (ownerKeyRef.current === ownerKey) return;
     ownerKeyRef.current = ownerKey;
@@ -131,20 +127,13 @@ export function ChatGoalControl({
 
   useEffect(() => {
     if (!open) return;
-    const dismissOutside = (event: PointerEvent): void => {
-      if (!popoverRef.current?.contains(event.target as Node)) {
-        onDismiss("outside");
-      }
-    };
     const dismissOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       onDismiss("escape");
     };
-    document.addEventListener("pointerdown", dismissOutside, true);
     document.addEventListener("keydown", dismissOnEscape);
     return () => {
-      document.removeEventListener("pointerdown", dismissOutside, true);
       document.removeEventListener("keydown", dismissOnEscape);
     };
   }, [onDismiss, open]);
@@ -213,9 +202,8 @@ export function ChatGoalControl({
       data-goal-status={goal?.status ?? "empty"}
     >
       <div
-        ref={popoverRef}
-        className="chat-goal-popover"
-        role="dialog"
+        className="chat-goal-inline"
+        role="region"
         aria-labelledby={headingId}
         aria-busy={busy || submitting}
       >

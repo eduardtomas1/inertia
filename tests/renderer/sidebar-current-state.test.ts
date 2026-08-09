@@ -32,9 +32,30 @@ describe("classic sidebar current-state presentation", () => {
       /\.project-row\.is-active \.project-name\s*\{[^}]*font-weight:\s*680;/su,
     );
     expect(styles).toMatch(
-      /\.conversation-row\.is-active\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--surface-hover\) 72%, transparent\);/su,
+      /\.conversation-row\.is-active\s*\{[^}]*background:\s*transparent;/su,
+    );
+    expect(styles).toMatch(
+      /\.conversation-row\.is-active::before\s*\{[^}]*width:\s*2px;[^}]*background:\s*var\(--accent\);/su,
     );
     expect(styles).not.toMatch(/\.project-row\.is-active\s*\{[^}]*box-shadow:/su);
     expect(styles).not.toMatch(/\.conversation-row\.is-active\s*\{[^}]*box-shadow:/su);
+  });
+
+  it("keeps the conversation hierarchy flat and reserves emphasis for meaningful state", () => {
+    expect(styles).toMatch(
+      /\.conversation-list\s*\{[^}]*border-left:\s*1px solid color-mix\(in srgb, var\(--border\) 72%, transparent\);/su,
+    );
+    expect(styles).toMatch(
+      /\.project-status\.status-ready\s*\{[^}]*background:\s*var\(--text-muted\);/su,
+    );
+    expect(styles).toMatch(
+      /\.thread-status-dot\.is-completed,\s*\.thread-status-dot\.is-idle\s*\{[^}]*opacity:\s*\.42;/su,
+    );
+    expect(styles).toMatch(
+      /\.thread-filter-bar button\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/su,
+    );
+    expect(styles).not.toMatch(
+      /\.thread-filter-bar button\s*\{[^}]*border-radius:\s*999px;/su,
+    );
   });
 });

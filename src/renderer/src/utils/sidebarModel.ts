@@ -13,25 +13,40 @@ export interface ClassicSidebarSearchResult {
 }
 
 /**
- * Archived chats never participate in classic search. A project-name/path
- * match exposes its active chats, while a chat-only match exposes only the
- * matching chats instead of every sibling in the project.
+ * Archived and ordinary snoozed chats never participate in classic search.
+ * Running or attention-blocked chats stay visible even while snoozed. A
+ * project-name/path match exposes its visible chats, while a chat-only match
+ * exposes only the matching chats instead of every sibling in the project.
  */
 export function classicSidebarSearch(
   projects: readonly Project[],
   conversations: readonly Conversation[],
   query: string,
+  now = Date.now(),
 ): ClassicSidebarSearchResult {
   const needle = query.trim().toLocaleLowerCase();
   const activeByProject = new Map<string, Conversation[]>();
   for (const conversation of conversations) {
     if (conversation.archivedAt !== null) continue;
+    const snoozed = Boolean(
+      conversation.snoozedUntil
+      && Date.parse(conversation.snoozedUntil) > now,
+    );
+    if (
+      snoozed
+      && conversation.status !== "running"
+      && conversation.status !== "needs-input"
+    ) continue;
     const current = activeByProject.get(conversation.projectId) ?? [];
     current.push(conversation);
     activeByProject.set(conversation.projectId, current);
   }
   for (const current of activeByProject.values()) {
-    current.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    current.sort((left, right) => (
+      Number(Boolean(right.pinnedAt)) - Number(Boolean(left.pinnedAt))
+      || (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "")
+      || right.updatedAt.localeCompare(left.updatedAt)
+    ));
   }
 
   const visibleProjects: Project[] = [];
@@ -228,6 +243,8 @@ export function sortSidebarThreadViews(
     .sort((a, b) => (
       Number(a.settled) - Number(b.settled)
       || Number(b.needsAttention) - Number(a.needsAttention)
+      || Number(Boolean(b.conversation.pinnedAt))
+        - Number(Boolean(a.conversation.pinnedAt))
       || statusPriority[a.status] - statusPriority[b.status]
       || Number(b.unread) - Number(a.unread)
       || b.conversation.updatedAt.localeCompare(a.conversation.updatedAt)

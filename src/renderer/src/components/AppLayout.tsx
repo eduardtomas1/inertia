@@ -1,8 +1,9 @@
 import type {
+  CSSProperties,
   Dispatch,
   SetStateAction,
 } from "react";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type {
   AppSettings,
   Conversation,
@@ -13,6 +14,7 @@ import type {
   ServerEvent,
   WorkspaceRun,
 } from "@shared/contracts";
+import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 
 import type { useAppUpdate } from "../app-update";
 import type { useInertiaConnection } from "../hooks/useInertiaConnection";
@@ -36,7 +38,6 @@ import {
   type WorkspaceSceneProps,
 } from "./WorkspaceScene";
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
-import { resultEvent } from "../lib/runtimeCommands";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
 import {
   loadCommitDialog,
@@ -49,6 +50,10 @@ const CommitDialog = lazy(async () => ({
 }));
 const MultiSpawnDialog = lazy(async () => ({
   default: (await loadMultiSpawnDialog()).MultiSpawnDialog,
+}));
+const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
+const ThreadNotifications = lazy(async () => ({
+  default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
 }));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -142,6 +147,56 @@ interface AppLayoutProps {
   actions: AppLayoutActions;
 }
 
+export function activateNotificationConversation(
+  conversation: Conversation,
+  actions: {
+    selectConversation: (conversation: Conversation) => void;
+    showWorkspace: () => void;
+    closeSidebar: () => void;
+    closePalette: () => void;
+    closeActivity: () => void;
+    closeCommitDialog: () => void;
+    closePullRequestDialog: () => void;
+    closeProviderAuth: () => void;
+  },
+): void {
+  actions.closeCommitDialog();
+  actions.closePullRequestDialog();
+  actions.closeProviderAuth();
+  actions.closeSidebar();
+  actions.closePalette();
+  actions.closeActivity();
+  actions.selectConversation(conversation);
+  actions.showWorkspace();
+}
+
+export function formatAppShortcutLabel(
+  platform: string,
+  key: string,
+): string {
+  return `${platform === "darwin" ? "⌘" : "Ctrl+"}${key.toUpperCase()}`;
+}
+
+export function activeConversationIsVisible(input: {
+  view: "workspace" | "settings";
+  commitDialogOpen: boolean;
+  pullRequestDialogOpen: boolean;
+  multiSpawnOpen: boolean;
+  paletteOpen: boolean;
+  activityOpen: boolean;
+  providerAuthOpen: boolean;
+  mobileSidebarOpen: boolean;
+}): boolean {
+  return input.view === "workspace"
+    && !input.commitDialogOpen
+    && !input.pullRequestDialogOpen
+    && !input.multiSpawnOpen
+    && !input.paletteOpen
+    && !input.activityOpen
+    && !input.providerAuthOpen
+    && !input.mobileSidebarOpen;
+}
+
 export function AppLayout({
   platform,
   documentActive,
@@ -181,6 +236,7 @@ export function AppLayout({
   providerAuth,
   actions,
 }: AppLayoutProps): React.JSX.Element {
+  const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
   const {
     sidebarOpen,
     setSidebarOpen,
@@ -197,11 +253,18 @@ export function AppLayout({
     workspaceBodyStyle,
     sidebar: sidebarLayout,
   } = workspaceLayout;
+  const shellStyle = platform === "darwin"
+    ? {
+        ...appShellStyle,
+        "--mac-titlebar-brand-safe-inset": `${MAC_BRAND_SAFE_INSET}px`,
+      } as CSSProperties
+    : appShellStyle;
   useNativePreviewSuspension(
     Boolean(visibleError)
       || providerQuotaNotices.notices.length > 0
       || Boolean(appUpdate.visible && appUpdate.status)
       || commitDialogOpen
+      || pullRequestDialogOpen
       || multiSpawn.open,
   );
   const sidebarActions = useStableActions({
@@ -218,6 +281,18 @@ export function AppLayout({
       void actions.run("conversation.update", {
         type: "conversation.update",
         payload: { conversationId: thread.id, title },
+      }).catch(() => undefined);
+    },
+    pinConversation: (thread: Conversation, pinned: boolean) => {
+      void actions.run("conversation.update", {
+        type: "conversation.update",
+        payload: { conversationId: thread.id, pinned },
+      }).catch(() => undefined);
+    },
+    snoozeConversation: (thread: Conversation, snoozedUntil: string | null) => {
+      void actions.run("conversation.update", {
+        type: "conversation.update",
+        payload: { conversationId: thread.id, snoozedUntil },
       }).catch(() => undefined);
     },
     archiveConversation: (thread: Conversation) => {
@@ -280,7 +355,7 @@ export function AppLayout({
       }).catch(() => undefined);
     },
     sidebarModeChange: (sidebarMode: AppSettings["sidebarMode"]) => {
-      void actions.updateSettings({ sidebarMode });
+      void actions.updateSettings({ sidebarMode }).catch(() => undefined);
     },
     removeProject: (item: Project) => {
       const confirmed = !settings.confirmDestructiveActions
@@ -295,10 +370,35 @@ export function AppLayout({
       }
     },
   });
+  const notificationActions = useStableActions({
+    activate: (thread: Conversation) => activateNotificationConversation(
+      thread,
+      {
+        selectConversation: actions.selectConversation,
+        showWorkspace: () => setView("workspace"),
+        closeSidebar: () => setSidebarOpen(false),
+        closePalette: () => setPaletteOpen(false),
+        closeActivity: () => setActivityOpen(false),
+        closeCommitDialog: () => setCommitDialogOpen(false),
+        closePullRequestDialog: () => setPullRequestDialogOpen(false),
+        closeProviderAuth: providerAuth.onClose,
+      },
+    ),
+  });
   useEffect(() => {
     if (connection.status !== "online") return;
     return scheduleFrequentSurfacePrefetch();
   }, [connection.status]);
+  const activeConversationVisible = activeConversationIsVisible({
+    view,
+    commitDialogOpen,
+    pullRequestDialogOpen,
+    multiSpawnOpen: multiSpawn.open,
+    paletteOpen,
+    activityOpen,
+    providerAuthOpen: Boolean(providerAuth.provider),
+    mobileSidebarOpen: mobileNavigation && sidebarOpen,
+  });
 
   return (
     <div
@@ -310,8 +410,18 @@ export function AppLayout({
       data-runtime-generation={connection.runtimeGeneration ?? undefined}
       data-connection-status={connection.status}
       data-document-active={documentActive ? "true" : "false"}
-      style={appShellStyle}
+      style={shellStyle}
     >
+      <Suspense fallback={null}>
+        <ThreadNotifications
+          snapshot={connection.snapshot}
+          documentActive={documentActive}
+          activeConversationVisible={activeConversationVisible}
+          secondaryConversationId={splitConversationId}
+          enabled={settings.desktopNotifications}
+          onActivate={notificationActions.activate}
+        />
+      </Suspense>
       {(mobileNavigation || !sidebarCollapsed) && (
         <Sidebar
           snapshot={connection.snapshot}
@@ -330,6 +440,8 @@ export function AppLayout({
           onCreateConversation={sidebarActions.createConversation}
           onOpenMultiSpawn={sidebarActions.openMultiSpawn}
           onRenameConversation={sidebarActions.renameConversation}
+          onPinConversation={sidebarActions.pinConversation}
+          onSnoozeConversation={sidebarActions.snoozeConversation}
           onArchiveConversation={sidebarActions.archiveConversation}
           onSettleConversation={sidebarActions.settleConversation}
           onRestoreConversation={sidebarActions.restoreConversation}
@@ -431,17 +543,7 @@ export function AppLayout({
               })}
             onOpenPullRequest={() => {
               if (!project) return;
-              void actions.run("git.pr.open", {
-                type: "git.pr.open",
-                payload: {
-                  projectId: project.id,
-                  conversationId: conversation?.id,
-                },
-              }).then(resultEvent).then((event) => {
-                if (event.result.kind === "external.url") {
-                  return window.inertia.openExternal(event.result.url);
-                }
-              }).catch(() => undefined);
+              setPullRequestDialogOpen(true);
             }}
             onPull={() => {
               if (!project) return;
@@ -489,6 +591,20 @@ export function AppLayout({
           />
         </Suspense>
       )}
+      {pullRequestDialogOpen && project && (
+        <Suspense fallback={null}>
+          <PullRequestDialog
+            open
+            initialTitle={conversation?.title ?? gitStatus?.branch ?? "Pull request"}
+            busy={busyAction === "git.pr.create" || busyAction === "git.pr.open"}
+            projectId={project.id}
+            conversationId={conversation?.id}
+            forge={gitStatus?.pullRequest?.forge ?? "github"}
+            run={actions.run}
+            onClose={() => setPullRequestDialogOpen(false)}
+          />
+        </Suspense>
+      )}
       {multiSpawn.open && (
         <Suspense fallback={null}>
           <MultiSpawnDialog
@@ -519,6 +635,10 @@ export function AppLayout({
         snapshot={connection.snapshot}
         activityOpen={activityOpen}
         paletteOpen={paletteOpen}
+        newThreadShortcut={formatAppShortcutLabel(
+          platform,
+          settings.keybindings["new-chat"],
+        )}
         setActivityOpen={setActivityOpen}
         setPaletteOpen={setPaletteOpen}
         setWorkspaceView={() => setView("workspace")}

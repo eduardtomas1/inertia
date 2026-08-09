@@ -43,6 +43,7 @@ function Harness({
       onStash={onStash}
       onRestore={onRestore}
       onRemove={onRemove}
+      onSetRecurrence={vi.fn()}
     />
   );
 }
@@ -61,15 +62,15 @@ describe("PromptStashMenu", () => {
     );
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Prompt stash, 1 saved",
+      name: "Scratch prompts, 1 saved",
     }));
-    expect(screen.getByRole("menu", { name: "Prompt stash" }))
+    expect(screen.getByRole("menu", { name: "Scratch prompts" }))
       .toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Saved prompts" }))
+    expect(screen.getByRole("group", { name: "Saved scratch prompts" }))
       .toBeInTheDocument();
 
     const stash = screen.getByRole("menuitem", {
-      name: /Stash current prompt Remove attachments before stashing text/u,
+      name: /Save current prompt Remove attachments before stashing text/u,
     });
     expect(stash).toHaveAttribute("aria-disabled", "true");
     expect(stash).not.toBeDisabled();
@@ -116,13 +117,14 @@ describe("PromptStashMenu", () => {
           onStash={vi.fn()}
           onRestore={vi.fn()}
           onRemove={vi.fn()}
+          onSetRecurrence={vi.fn()}
         />
       );
     }
     render(<LongEntryHarness />);
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Prompt stash, 1 saved",
+      name: "Scratch prompts, 1 saved",
     }));
     const restore = screen.getByRole("menuitem", {
       name: new RegExp(`^${longEntry.content}`, "u"),

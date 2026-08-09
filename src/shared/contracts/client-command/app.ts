@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { APP_SHORTCUT_KEYS } from "../../keybindings";
 
 import {
   modelBackendProfileIdSchema,
@@ -215,6 +216,8 @@ export const appCommandSchemas = [
           reasoningEffort: z.string().trim().max(40).optional(),
           interactionMode: interactionModeSchema.optional(),
           accessMode: accessModeSchema.optional(),
+          pinned: z.boolean().optional(),
+          snoozedUntil: z.string().datetime({ offset: true }).nullable().optional(),
         })
         .strict(),
     })
@@ -263,6 +266,23 @@ export const configurationCommandSchemas = [
           projectGrouping: z.enum(["repository", "repository-path", "separate"]).optional(),
           autoOpenPlan: z.boolean().optional(),
           confirmDestructiveActions: z.boolean().optional(),
+          desktopNotifications: z.boolean().optional(),
+          providerIdentityLabels: z.partialRecord(
+            providerIdSchema,
+            z.string().trim().min(1).max(48).refine(
+              (value) => !/[\0\r\n]/u.test(value),
+              "Provider labels must stay on one line.",
+            ),
+          ).optional(),
+          keybindings: z.object({
+            search: z.enum(APP_SHORTCUT_KEYS),
+            "new-chat": z.enum(APP_SHORTCUT_KEYS),
+            "toggle-sidebar": z.enum(APP_SHORTCUT_KEYS),
+            "toggle-terminal": z.enum(APP_SHORTCUT_KEYS),
+          }).strict().refine(
+            (bindings) => new Set(Object.values(bindings)).size === 4,
+            "App shortcuts must use unique keys.",
+          ).optional(),
           defaultReasoningEffort: z.string().trim().max(40).optional(),
           defaultInteractionMode: interactionModeSchema.optional(),
           codexBinaryPath: z.string().trim().max(4096).optional(),

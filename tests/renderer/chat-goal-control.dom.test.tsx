@@ -85,7 +85,7 @@ function props(
 function openProps(onDismiss = vi.fn()): {
   open: true;
   onDismiss: (
-    reason: "action" | "escape" | "outside" | "owner-change",
+    reason: "action" | "escape" | "owner-change",
   ) => void;
 } {
   return { open: true, onDismiss };
@@ -114,18 +114,18 @@ describe("ChatGoalControl", () => {
       />,
     );
 
-    const dialog = screen.getByRole("dialog", { name: "Local objective" });
-    const objective = within(dialog).getByRole("textbox", {
+    const surface = screen.getByRole("region", { name: "Local objective" });
+    const objective = within(surface).getByRole("textbox", {
       name: "Objective",
     });
     await waitFor(() => expect(objective).toHaveFocus());
-    expect(dialog).toHaveTextContent(
+    expect(surface).toHaveTextContent(
       "This stays in Inertia and is never injected into provider context.",
     );
-    expect(dialog).toHaveTextContent(localCapability.reason);
+    expect(surface).toHaveTextContent(localCapability.reason);
 
     await user.type(objective, "Keep this pane's work independently scoped");
-    await user.click(within(dialog).getByRole("button", {
+    await user.click(within(surface).getByRole("button", {
       name: "Save local objective",
     }));
 
@@ -154,22 +154,22 @@ describe("ChatGoalControl", () => {
       />,
     );
 
-    const dialog = screen.getByRole("dialog", { name: "Codex goal" });
-    expect(within(dialog).getByRole("region", { name: "Current goal" }))
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    expect(within(surface).getByRole("region", { name: "Current goal" }))
       .toHaveTextContent("Ship the review-clean change");
-    expect(dialog).not.toHaveTextContent("Private reminder for later");
-    expect(dialog).toHaveTextContent(
+    expect(surface).not.toHaveTextContent("Private reminder for later");
+    expect(surface).toHaveTextContent(
       "One separately tracked goal remains visible in the Goal workspace tool",
     );
 
-    await user.click(within(dialog).getByRole("button", { name: "Complete" }));
+    await user.click(within(surface).getByRole("button", { name: "Complete" }));
     expect(onSetGoal).toHaveBeenCalledWith({
       source: "codex-native",
       status: "complete",
     });
     expect(onClearGoal).not.toHaveBeenCalled();
 
-    await user.click(within(dialog).getByRole("button", {
+    await user.click(within(surface).getByRole("button", {
       name: "Clear Codex goal",
     }));
     expect(onClearGoal).toHaveBeenCalledWith("codex-native");
@@ -186,11 +186,11 @@ describe("ChatGoalControl", () => {
       />,
     );
 
-    const dialog = screen.getByRole("dialog", { name: "Codex goal" });
-    expect(within(dialog).getByRole("form", { name: "Create Codex goal" }))
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    expect(within(surface).getByRole("form", { name: "Create Codex goal" }))
       .toBeInTheDocument();
-    expect(dialog).not.toHaveTextContent("Do not present this as provider-owned");
-    expect(dialog).toHaveTextContent("One separately tracked goal");
+    expect(surface).not.toHaveTextContent("Do not present this as provider-owned");
+    expect(surface).toHaveTextContent("One separately tracked goal");
   });
 
   it("dismisses on Escape and keeps split actions with their pane owner", async () => {
@@ -236,7 +236,7 @@ describe("ChatGoalControl", () => {
     expect(dismissSecondary).not.toHaveBeenCalled();
   });
 
-  it("distinguishes an outside pointer dismissal from focus-restoring actions", () => {
+  it("stays integrated while the user interacts elsewhere in the chat", () => {
     const onDismiss = vi.fn();
     render(
       <>
@@ -252,7 +252,9 @@ describe("ChatGoalControl", () => {
       name: "Another workspace control",
     }));
 
-    expect(onDismiss).toHaveBeenCalledWith("outside");
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(screen.getByRole("region", { name: "Codex goal" }))
+      .toBeInTheDocument();
   });
 
   it("does not dismiss a closed surface when background ownership refreshes", () => {
@@ -288,10 +290,10 @@ describe("ChatGoalControl", () => {
       />,
     );
 
-    const dialog = screen.getByRole("dialog", { name: "Goal" });
-    expect(within(dialog).getByRole("alert"))
+    const surface = screen.getByRole("region", { name: "Goal" });
+    expect(within(surface).getByRole("alert"))
       .toHaveTextContent("The workflow request failed.");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
+    fireEvent.click(within(surface).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(onRetry).toHaveBeenCalledTimes(1));
   });
 });

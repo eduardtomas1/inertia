@@ -5,6 +5,80 @@ import WebSocket, { type RawData } from "ws";
 
 import { clientCommandSchema, type ClientCommand, type ServerEvent } from "../shared/contracts";
 
+/**
+ * A temporary backlog above this watermark is expected when hydrating a long
+ * conversation. It becomes a transport failure only when it stops draining.
+ */
+export const MAX_BUFFERED_RUNTIME_EVENT_BYTES = 1024 * 1024;
+export const MAX_QUEUED_RUNTIME_EVENT_BYTES = 64 * 1024 * 1024;
+export const MAX_RUNTIME_EVENT_STALL_MS = 5_000;
+const RUNTIME_EVENT_BACKPRESSURE_POLL_MS = 250;
+
+interface RuntimeEventBackpressureState {
+  lastBufferedAmount: number;
+  lastProgressAt: number;
+  timer: NodeJS.Timeout | null;
+}
+
+const runtimeEventBackpressure = new WeakMap<
+  WebSocket,
+  RuntimeEventBackpressureState
+>();
+
+function clearRuntimeEventBackpressure(socket: WebSocket): void {
+  const state = runtimeEventBackpressure.get(socket);
+  if (state?.timer) clearTimeout(state.timer);
+  runtimeEventBackpressure.delete(socket);
+}
+
+function terminateSocket(socket: WebSocket): void {
+  clearRuntimeEventBackpressure(socket);
+  try { socket.terminate(); } catch { /* The transport is already unusable. */ }
+}
+
+function observeRuntimeEventBackpressure(socket: WebSocket): void {
+  if (
+    socket.readyState !== WebSocket.OPEN
+    || socket.bufferedAmount <= MAX_BUFFERED_RUNTIME_EVENT_BYTES
+  ) {
+    clearRuntimeEventBackpressure(socket);
+    return;
+  }
+
+  const now = Date.now();
+  const state = runtimeEventBackpressure.get(socket) ?? {
+    lastBufferedAmount: socket.bufferedAmount,
+    lastProgressAt: now,
+    timer: null,
+  };
+  runtimeEventBackpressure.set(socket, state);
+  if (state.timer) return;
+
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    if (socket.readyState !== WebSocket.OPEN) {
+      clearRuntimeEventBackpressure(socket);
+      return;
+    }
+
+    const bufferedAmount = socket.bufferedAmount;
+    if (bufferedAmount <= MAX_BUFFERED_RUNTIME_EVENT_BYTES) {
+      clearRuntimeEventBackpressure(socket);
+      return;
+    }
+    if (bufferedAmount < state.lastBufferedAmount) {
+      state.lastProgressAt = Date.now();
+    }
+    state.lastBufferedAmount = bufferedAmount;
+    if (Date.now() - state.lastProgressAt >= MAX_RUNTIME_EVENT_STALL_MS) {
+      terminateSocket(socket);
+      return;
+    }
+    observeRuntimeEventBackpressure(socket);
+  }, RUNTIME_EVENT_BACKPRESSURE_POLL_MS);
+  state.timer.unref();
+}
+
 export function isAllowedRuntimeOrigin(origin: string | undefined): boolean {
   if (origin === "inertia://bundle") return true;
   if (origin === undefined || origin === "null" || origin === "file://") return false;
@@ -29,7 +103,40 @@ function requestIdFrom(value: unknown): string {
 }
 
 export function sendRuntimeEvent(socket: WebSocket, event: ServerEvent): void {
-  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event));
+  if (socket.readyState !== WebSocket.OPEN) return;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(event);
+  } catch {
+    terminateSocket(socket);
+    return;
+  }
+  const eventBytes = Buffer.byteLength(serialized, "utf8");
+  if (
+    eventBytes > MAX_QUEUED_RUNTIME_EVENT_BYTES
+    || socket.bufferedAmount
+      > MAX_QUEUED_RUNTIME_EVENT_BYTES - eventBytes
+  ) {
+    terminateSocket(socket);
+    return;
+  }
+  try {
+    socket.send(serialized, (error) => {
+      if (error) {
+        terminateSocket(socket);
+        return;
+      }
+      const state = runtimeEventBackpressure.get(socket);
+      if (state) {
+        state.lastBufferedAmount = socket.bufferedAmount;
+        state.lastProgressAt = Date.now();
+      }
+      observeRuntimeEventBackpressure(socket);
+    });
+    observeRuntimeEventBackpressure(socket);
+  } catch {
+    terminateSocket(socket);
+  }
 }
 
 export function parseRuntimeCommand(data: RawData, isBinary: boolean): { command?: ClientCommand; error?: ServerEvent } {

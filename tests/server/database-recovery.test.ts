@@ -1165,6 +1165,49 @@ describe("database backup and startup recovery", () => {
     recovered.close();
   });
 
+  it.each([
+    {
+      label: "a required current-schema column",
+      mutate: (database: Database.Database) => {
+        database.exec("ALTER TABLE app_state DROP COLUMN keybindings_json");
+      },
+    },
+    {
+      label: "a required current-schema index",
+      mutate: (database: Database.Database) => {
+        database.exec("DROP INDEX conversations_snoozed_until_idx");
+      },
+    },
+  ])("skips a current-schema backup missing $label", async ({ mutate }) => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "coherent schema");
+    const older = await store.createBackup();
+    store.createMessage(conversationId, "malformed schema", "assistant");
+    const newer = await store.createBackup();
+    store.close();
+    const malformed = new Database(join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      newer.filename,
+    ));
+    mutate(malformed);
+    expect(malformed.pragma("quick_check", { simple: true })).toBe("ok");
+    malformed.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: older.filename,
+      invalidBackupsSkipped: 1,
+    });
+    expect(recovered.conversationDetail(conversationId)?.messages
+      .map(({ content }) => content)).toEqual(["coherent schema"]);
+    recovered.close();
+  });
+
   it("cleans interrupted partials and bounds count and bytes without deleting the last valid backup", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

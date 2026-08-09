@@ -27,7 +27,7 @@ import {
 } from "../shared/backend-credentials.js";
 
 const VAULT_SCHEMA_VERSION = 2;
-const MAX_VAULT_BYTES = 1_048_576;
+export const MAX_CREDENTIAL_VAULT_BYTES = 1_048_576;
 const MAX_VAULT_ENTRIES = 256;
 const MAX_CIPHERTEXT_BASE64_LENGTH = 65_536;
 
@@ -190,7 +190,7 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
         !metadata.isFile()
         || metadata.dev !== before.dev
         || metadata.ino !== before.ino
-        || metadata.size > MAX_VAULT_BYTES
+        || metadata.size > MAX_CREDENTIAL_VAULT_BYTES
       ) {
         throw new CredentialVaultError(
           "storage-corrupt",
@@ -219,7 +219,7 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
   }
 
   async write(value: string): Promise<void> {
-    if (Buffer.byteLength(value, "utf8") > MAX_VAULT_BYTES) {
+    if (Buffer.byteLength(value, "utf8") > MAX_CREDENTIAL_VAULT_BYTES) {
       throw new CredentialVaultError(
         "persistence-failed",
         "The secure credential vault is too large.",

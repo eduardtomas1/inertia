@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   clientCommandSchema,
+  defaultSettings,
   type Conversation,
   type Project,
 } from "../../src/shared/contracts";
@@ -161,7 +162,16 @@ describe("durable Git reconnect reconciliation", () => {
         data: JSON.stringify({
           type: "server.welcome",
           protocolVersion: 1,
-          snapshot: { sync: initialSync },
+          snapshot: {
+            projects: [],
+            conversations: [],
+            runs: [],
+            providers: [],
+            settings: defaultSettings,
+            activeProjectId: null,
+            activeConversationId: null,
+            sync: initialSync,
+          },
           sync: initialSync,
         }),
       }));
@@ -242,7 +252,7 @@ describe("durable Git reconnect reconciliation", () => {
     const secondSocket = FakeWebSocket.instances[1]!;
     expect(secondSocket.url).toContain("runtimeGeneration=runtime-durable-git");
 
-    act(() => {
+    await act(async () => {
       secondSocket.dispatchEvent(new MessageEvent("message", {
         data: JSON.stringify({
           type: "runtime.resumed",
@@ -256,6 +266,7 @@ describe("durable Git reconnect reconciliation", () => {
           sync: initialSync,
         }),
       }));
+      await Promise.resolve();
     });
     await vi.advanceTimersByTimeAsync(0);
     const reconnectRefreshes = () => sentCommands(secondSocket).filter(
@@ -273,7 +284,7 @@ describe("durable Git reconnect reconciliation", () => {
     });
     expect(hook.result.current.git.gitStatus?.branch).toBe("feature/first");
 
-    act(() => {
+    await act(async () => {
       secondSocket.dispatchEvent(new MessageEvent("message", {
         data: JSON.stringify({
           type: "runtime.event",
@@ -287,6 +298,7 @@ describe("durable Git reconnect reconciliation", () => {
           },
         }),
       }));
+      await Promise.resolve();
     });
     expect(reconnectRefreshes()).toHaveLength(2);
     await act(async () => {

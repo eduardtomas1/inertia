@@ -666,6 +666,7 @@ export default function App(): React.JSX.Element {
       .catch(() => undefined);
   };
   useGlobalShortcuts({
+    keybindings: settings.keybindings,
     createConversation: () => createConversation(),
     mobileNavigation, suspended: multiSpawn.open,
     setActiveTool: sceneSetActiveTool,
@@ -729,16 +730,12 @@ export default function App(): React.JSX.Element {
     });
   };
   const updateSettings = async (updates: Partial<AppSettings>): Promise<void> => {
-    try {
-      await run("settings.update", {
-        type: "settings.update",
-        payload: updates,
-      });
-      if (updates.workspaceStartupSurface) {
-        showStartupSurface(updates.workspaceStartupSurface);
-      }
-    } catch {
-      // The shared action error already explains the failed update.
+    await run("settings.update", {
+      type: "settings.update",
+      payload: updates,
+    });
+    if (updates.workspaceStartupSurface) {
+      showStartupSurface(updates.workspaceStartupSurface);
     }
   };
   useEffect(() => {
@@ -769,7 +766,7 @@ export default function App(): React.JSX.Element {
   const cycleTheme = () => {
     void updateSettings({
       theme: nextQuickTheme(settings.theme, window.matchMedia("(prefers-color-scheme: dark)").matches),
-    });
+    }).catch(() => undefined);
   };
   const refreshProvider = useCallback((providerId?: ProviderId) => {
     void run("provider.refresh", {

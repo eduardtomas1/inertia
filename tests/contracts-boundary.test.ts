@@ -122,6 +122,7 @@ describe("shared contracts boundary", () => {
       "git.commit",
       "git.push",
       "git.pr.open",
+      "git.pr.create",
       "workspace.entries",
       "workspace.file.read",
       "workspace.file.write",

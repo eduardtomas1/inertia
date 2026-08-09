@@ -351,6 +351,7 @@ describe("trusted overlay native preview suspension", () => {
     const props = {
       projects: [],
       conversations: [],
+      newThreadShortcut: "⌘N",
       onClose: vi.fn(),
       onSelectProject: vi.fn(),
       onSelectConversation: vi.fn(),

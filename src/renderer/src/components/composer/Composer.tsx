@@ -35,12 +35,14 @@ import {
 } from "./config";
 import {
   addPromptStashEntry,
+  advanceRecurringPrompt,
   persistPromptStashUpdate,
   PROMPT_STASH_CHANGED_EVENT,
   PROMPT_STASH_STORAGE_KEY,
   promptStashRouteMatches,
   readPromptStash,
   removePromptStashEntry,
+  setPromptStashRecurrence,
   type PromptStashEntry,
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
@@ -79,6 +81,8 @@ export const Composer = memo(function Composer({
   skillsLoading,
   skillsError,
   promptContext,
+  previewContextUrl,
+  providerIdentityLabels,
   goal,
   onSend,
   onListSkills,
@@ -136,6 +140,8 @@ export const Composer = memo(function Composer({
   ]));
   const releaseAttachmentRef = useRef(onReleaseAttachment);
   const [fileReferences, setFileReferences] = useState<string[]>([]);
+  const [previewContextSelected, setPreviewContextSelected] = useState(false);
+  const selectedPreviewUrlRef = useRef<string | null>(null);
   const [pendingRoute, setPendingRoute] = useState<PendingModelRoute | null>(null);
   const [creatingRouteConversation, setCreatingRouteConversation] = useState(false);
   const [routeCreationError, setRouteCreationError] = useState<string | null>(null);
@@ -153,7 +159,7 @@ export const Composer = memo(function Composer({
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
   const dismissCommandSurface = useCallback((
-    reason: "action" | "escape" | "outside" | "owner-change",
+    reason: "action" | "escape" | "owner-change",
   ) => {
     setCommandSurface(null);
     if (reason === "action" || reason === "escape") {
@@ -289,6 +295,19 @@ export const Composer = memo(function Composer({
   }, [conversation.id, promptContext]);
 
   useEffect(() => {
+    if (!previewContextSelected) return;
+    const next = previewContextUrl ?? null;
+    if (selectedPreviewUrlRef.current === next) return;
+    selectedPreviewUrlRef.current = next;
+    editorRevisionSequenceRef.current += 1;
+    editorRevisionsRef.current.set(
+      conversation.id,
+      editorRevisionSequenceRef.current,
+    );
+    if (!next) setPreviewContextSelected(false);
+  }, [conversation.id, previewContextSelected, previewContextUrl]);
+
+  useEffect(() => {
     flushDraftPersistence();
     attachmentAuthorityRef.current += 1;
     if (submissionReleaseTimerRef.current !== null) {
@@ -314,6 +333,8 @@ export const Composer = memo(function Composer({
     attachmentsRef.current = [];
     setAttachments([]);
     setFileReferences([]);
+    selectedPreviewUrlRef.current = null;
+    setPreviewContextSelected(false);
     setPendingRoute(null);
     setCreatingRouteConversation(false);
     setRouteRepairing(false);
@@ -456,6 +477,13 @@ export const Composer = memo(function Composer({
     onClearPromptContext?.();
   };
 
+  const togglePreviewContext = (): void => {
+    markEditorChanged();
+    const next = selectedPreviewUrlRef.current ? null : previewContextUrl ?? null;
+    selectedPreviewUrlRef.current = next;
+    setPreviewContextSelected(Boolean(next));
+  };
+
   const submit = async () => {
     const request = running
       ? {
@@ -467,6 +495,7 @@ export const Composer = memo(function Composer({
           attachments,
           promptContext,
           fileReferences,
+          selectedPreviewUrlRef.current,
         );
     if (
       (!canSend && followUpState !== "ready")
@@ -477,6 +506,7 @@ export const Composer = memo(function Composer({
     const submittedConversationId = conversation.id;
     const submittedDraft = message;
     const submittedPromptContext = promptContext;
+    const submittedPreviewUrl = selectedPreviewUrlRef.current;
     const submittedRevision =
       editorRevisionsRef.current.get(submittedConversationId) ?? 0;
     const submissionSequence = submissionSequenceRef.current + 1;
@@ -507,7 +537,8 @@ export const Composer = memo(function Composer({
         (editorRevisionsRef.current.get(submittedConversationId) ?? 0)
           === submittedRevision
         && promptContextsRef.current.get(submittedConversationId)
-          === (submittedPromptContext ?? null);
+          === (submittedPromptContext ?? null)
+        && selectedPreviewUrlRef.current === submittedPreviewUrl;
       if (editorUnchanged) {
         try {
           const key = `inertia:draft:${submittedConversationId}`;
@@ -528,6 +559,8 @@ export const Composer = memo(function Composer({
         setMessage("");
         setAttachments([]);
         setFileReferences([]);
+        selectedPreviewUrlRef.current = null;
+        setPreviewContextSelected(false);
         promptContextsRef.current.set(submittedConversationId, null);
         onClearPromptContext?.();
       }
@@ -553,7 +586,8 @@ export const Composer = memo(function Composer({
         (editorRevisionsRef.current.get(submittedConversationId) ?? 0)
           === submittedRevision
         && promptContextsRef.current.get(submittedConversationId)
-          === (submittedPromptContext ?? null);
+          === (submittedPromptContext ?? null)
+        && selectedPreviewUrlRef.current === submittedPreviewUrl;
       if (ownsCurrentComposer && editorUnchanged) {
         setMessage(submittedDraft);
         attachmentsRef.current = submittedAttachments;
@@ -699,12 +733,12 @@ export const Composer = memo(function Composer({
   const selectedIdentityLabel = selectedBackendProfile
     ? `${composerHarnessLabel(selectedBackendProfile.harnessId)} · ${selectedBackendProfile.displayName} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
     : selectedProvider
-      ? `${selectedProvider.label} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
+      ? `${providerIdentityLabels?.[selectedProvider.id] ?? selectedProvider.label} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
       : conversation.modelSelection.backendProfileDisplayName;
-  const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached file." : "Please review the selected diff context.")).length;
+  const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached file." : selectedPreviewUrlRef.current ? "Please inspect the current preview." : "Please review the selected diff context.")).length;
   const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
-  const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext))
+  const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected)
     && messageFits
     && routeReadiness.ready
     && !disabled
@@ -724,6 +758,7 @@ export const Composer = memo(function Composer({
     textOnly:
       attachments.length === 0
       && !promptContext
+      && !previewContextSelected
       && fileReferences.length === 0
       && selectedSkillIds.length === 0
       && messageFits
@@ -805,7 +840,8 @@ export const Composer = memo(function Composer({
     providers,
     backendProfiles,
     conversation.modelSelection,
-  ), [backendProfiles, conversation.modelSelection, providers]);
+    providerIdentityLabels,
+  ), [backendProfiles, conversation.modelSelection, providerIdentityLabels, providers]);
   const selectedModelRoute = useMemo(() => selectedModelSearchRoute(
     modelRoutes,
     conversation.modelSelection,
@@ -892,7 +928,7 @@ export const Composer = memo(function Composer({
       )
     ) return;
     const persisted = updatePromptStash((current) => {
-      const withoutRestored = removePromptStashEntry(current, entry.id);
+      const withoutRestored = advanceRecurringPrompt(current, entry.id);
       return message.trim()
         ? addPromptStashEntry(
             withoutRestored,
@@ -917,21 +953,15 @@ export const Composer = memo(function Composer({
   const routeCreationBlockedReason = pendingRoute && (
     attachments.length > 0
     || Boolean(promptContext)
+    || previewContextSelected
     || fileReferences.length > 0
     || selectedSkillIds.length > 0
   )
-    ? "Remove attachments, diff context, file references, and selected skills before transferring this text to a new chat."
+    ? "Remove attachments, preview or diff context, file references, and selected skills before transferring this text to a new chat."
     : null;
 
   return (
     <div className="composer-shell">
-      {goal && (
-        <ChatGoalControl
-          {...goal}
-          open={commandSurface === "goal"}
-          onDismiss={dismissCommandSurface}
-        />
-      )}
       <section
         ref={composerRef}
         className={clsx("composer", menu && "has-open-menu")}
@@ -948,6 +978,13 @@ export const Composer = memo(function Composer({
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
         onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
       >
+        {goal && (
+          <ChatGoalControl
+            {...goal}
+            open={commandSurface === "goal"}
+            onDismiss={dismissCommandSurface}
+          />
+        )}
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
@@ -955,6 +992,9 @@ export const Composer = memo(function Composer({
           onRunRouteRepair={runRouteRepair}
           promptContext={promptContext}
           onClearPromptContext={clearPromptContext}
+          previewContextUrl={previewContextUrl}
+          previewContextSelected={previewContextSelected}
+          onTogglePreviewContext={togglePreviewContext}
           attachments={attachments}
           onRemoveAttachment={removeAttachment}
           pendingRoute={pendingRoute}
@@ -1068,6 +1108,9 @@ export const Composer = memo(function Composer({
           onRemoveStashedPrompt={(entryId) =>
             updatePromptStash((current) =>
               removePromptStashEntry(current, entryId))}
+          onSetPromptRecurrence={(entryId, recurrence) =>
+            updatePromptStash((current) =>
+              setPromptStashRecurrence(current, entryId, recurrence))}
           modelRoutes={modelRoutes}
           selectedModelRoute={selectedModelRoute}
           onChooseModelRoute={chooseModelRoute}

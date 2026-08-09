@@ -67,6 +67,14 @@ export interface PrivateConnectSocket {
   close(): void;
 }
 
+const PRIVATE_CONNECT_SOCKET_FAILURE = "private-connect-websocket";
+
+function socketFailure(message: string): Error {
+  return Object.assign(new Error(message), {
+    privateConnectTransport: PRIVATE_CONNECT_SOCKET_FAILURE,
+  });
+}
+
 export async function connectPrivateConnectSocket(csrf: string): Promise<PrivateConnectSocket> {
   const ticket = await jsonRequest<{ ticket?: string }>("/api/session/ws-ticket", {}, csrf);
   if (typeof ticket.ticket !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(ticket.ticket)) {
@@ -84,7 +92,7 @@ export async function connectPrivateConnectSocket(csrf: string): Promise<Private
     openingReject = reject;
   });
   const failPending = (message: string): void => {
-    const error = new Error(message);
+    const error = socketFailure(message);
     for (const [requestId, request] of pending) {
       window.clearTimeout(request.timer);
       pending.delete(requestId);
@@ -110,11 +118,11 @@ export async function connectPrivateConnectSocket(csrf: string): Promise<Private
     request.resolve(parsed.data);
   };
   socket.onerror = () => {
-    if (!opened) openingReject?.(new Error("Private Connect could not open a live connection."));
+    if (!opened) openingReject?.(socketFailure("Private Connect could not open a live connection."));
     failPending("The Private Connect live connection failed.");
   };
   socket.onclose = (event) => {
-    if (!opened) openingReject?.(new Error("Private Connect could not open a live connection."));
+    if (!opened) openingReject?.(socketFailure("Private Connect could not open a live connection."));
     failPending("The Private Connect live connection closed.");
     for (const listener of closeListeners) listener(event.code);
     closeListeners.clear();
@@ -127,14 +135,22 @@ export async function connectPrivateConnectSocket(csrf: string): Promise<Private
   }
   return {
     request: (request) => {
-      if (socket.readyState !== WebSocket.OPEN) return Promise.reject(new Error("The Private Connect live connection is not open."));
+      if (socket.readyState !== WebSocket.OPEN) {
+        return Promise.reject(socketFailure("The Private Connect live connection is not open."));
+      }
       return new Promise<PrivateConnectResponse>((resolve, reject) => {
         const timer = window.setTimeout(() => {
           pending.delete(request.requestId);
-          reject(new Error("The Private Connect live request timed out."));
+          reject(socketFailure("The Private Connect live request timed out."));
         }, 15_000);
         pending.set(request.requestId, { resolve, reject, timer });
-        socket.send(JSON.stringify(request));
+        try {
+          socket.send(JSON.stringify(request));
+        } catch {
+          window.clearTimeout(timer);
+          pending.delete(request.requestId);
+          reject(socketFailure("The Private Connect live request could not be sent."));
+        }
       });
     },
     onClose: (listener) => {

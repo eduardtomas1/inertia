@@ -12,6 +12,8 @@ import type {
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
 } from "@shared/contracts";
+import { COMPOSER_LABELS } from "../../lib/interfaceLabels";
+import { composerSkillsReadiness } from "../../utils/composerToolReadiness";
 import { MAX_SELECTED_SKILLS } from "./config";
 import type { ComposerMenuController } from "./useComposerMenus";
 
@@ -63,7 +65,13 @@ export function ComposerSkillsMenu({
   const selectedCount = selected.size;
   const limitReached = selectedCount >= MAX_SELECTED_SKILLS;
 
-  if (!capability?.available) return null;
+  if (!capability) return null;
+  const readiness = composerSkillsReadiness({
+    capability,
+    composerDisabled: disabled,
+    running,
+    loading,
+  });
 
   const menuItems = (): HTMLButtonElement[] => [
     ...(document.getElementById(popoverId)
@@ -78,6 +86,7 @@ export function ComposerSkillsMenu({
     });
   };
   const openFromKeyboard = (edge: "first" | "last"): void => {
+    if (!readiness.interactive) return;
     if (menu !== "skills" && skills.length === 0 && !loading) {
       void onList(false).catch(() => undefined);
     }
@@ -87,6 +96,7 @@ export function ComposerSkillsMenu({
   const handleTriggerKeyDown = (
     event: React.KeyboardEvent<HTMLButtonElement>,
   ): void => {
+    if (!readiness.interactive) return;
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
     openFromKeyboard(event.key === "ArrowUp" ? "last" : "first");
@@ -119,15 +129,20 @@ export function ComposerSkillsMenu({
           selectedCount > 0 && "has-selection",
           menu === "skills" && "is-active",
         )}
-        aria-label={selectedCount > 0
+        aria-label={!readiness.interactive
+          ? `${COMPOSER_LABELS.skills} unavailable: ${readiness.reason}`
+          : selectedCount > 0
           ? `Skills, ${selectedCount} selected`
           : `Select ${capability.label}`}
-        aria-haspopup="menu"
-        aria-controls={popoverId}
-        aria-expanded={menu === "skills"}
-        disabled={disabled || running}
+        aria-haspopup={readiness.interactive ? "menu" : undefined}
+        aria-controls={readiness.interactive ? popoverId : undefined}
+        aria-expanded={readiness.interactive ? menu === "skills" : undefined}
+        aria-disabled={!readiness.interactive}
+        data-readiness={readiness.state}
+        title={readiness.reason ?? undefined}
         onKeyDown={handleTriggerKeyDown}
         onClick={() => {
+          if (!readiness.interactive) return;
           const opening = menu !== "skills";
           if (menu !== "skills" && skills.length === 0 && !loading) {
             void onList(false).catch(() => undefined);
@@ -137,9 +152,11 @@ export function ComposerSkillsMenu({
         }}
       >
         <Sparkles size={14} aria-hidden="true" />
-        <span>Skills{selectedCount > 0 ? ` ${selectedCount}` : ""}</span>
+        <span>
+          {COMPOSER_LABELS.skills}{selectedCount > 0 ? ` ${selectedCount}` : ""}
+        </span>
       </button>
-      {menu === "skills" && (
+      {readiness.interactive && menu === "skills" && (
         <div
           ref={(node) => setMenuPopover("skills", node)}
           id={popoverId}
@@ -187,6 +204,11 @@ export function ComposerSkillsMenu({
             {skills.map((skill) => {
               const checked = selected.has(skill.id);
               const disabledByLimit = limitReached && !checked;
+              const disabledReason = disabledByLimit
+                ? `Select at most ${MAX_SELECTED_SKILLS} skills for one turn.`
+                : !skill.enabled
+                  ? `${skill.name} was reported unavailable for this project.`
+                  : null;
               return (
                 <button
                   type="button"
@@ -196,9 +218,7 @@ export function ComposerSkillsMenu({
                   tabIndex={-1}
                   key={skill.id}
                   onClick={() => onToggle(skill)}
-                  title={disabledByLimit
-                    ? `Select at most ${MAX_SELECTED_SKILLS} skills for one turn.`
-                    : skill.description}
+                  title={disabledReason ?? skill.description}
                 >
                   <span className="composer-skill-check" aria-hidden="true">
                     {checked && <Check size={12} />}

@@ -1,4 +1,5 @@
 import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
+import { COMPOSER_LABELS } from "../../lib/interfaceLabels";
 import type { PromptStashEntry } from "../../utils/promptStash";
 import { menuId } from "./config";
 import type { ComposerMenuController } from "./useComposerMenus";
@@ -12,6 +13,7 @@ export function PromptStashMenu({
   onStash,
   onRestore,
   onRemove,
+  onSetRecurrence,
 }: {
   entries: readonly PromptStashEntry[];
   canStash: boolean;
@@ -21,6 +23,10 @@ export function PromptStashMenu({
   onStash: () => void;
   onRestore: (entry: PromptStashEntry) => void;
   onRemove: (entryId: string) => void;
+  onSetRecurrence: (
+    entryId: string,
+    recurrence: PromptStashEntry["recurrence"],
+  ) => void;
 }): React.JSX.Element {
   const {
     menu,
@@ -44,11 +50,11 @@ export function PromptStashMenu({
         ref={(node) => setMenuTrigger("stash", node)}
         type="button"
         className="icon-button"
-        aria-label={`Prompt stash${entries.length ? `, ${entries.length} saved` : ""}`}
+        aria-label={`${COMPOSER_LABELS.scratchPrompts}${entries.length ? `, ${entries.length} saved` : ""}`}
         aria-haspopup="menu"
         aria-controls={menuId("stash")}
         aria-expanded={menu === "stash"}
-        title="Prompt stash"
+        title={COMPOSER_LABELS.scratchPrompts}
         onClick={() => toggleMenu("stash")}
         onKeyDown={(event) =>
           handleComposerMenuTriggerKeyDown("stash", event)}
@@ -61,11 +67,11 @@ export function PromptStashMenu({
           id={menuId("stash")}
           className="composer-popover prompt-stash-popover"
           role="menu"
-          aria-label="Prompt stash"
+          aria-label={COMPOSER_LABELS.scratchPrompts}
           onKeyDown={handleMoreMenuNavigation}
         >
           <div className="popover-title" role="presentation">
-            Prompt stash
+            {COMPOSER_LABELS.scratchPrompts}
           </div>
           <button
             type="button"
@@ -80,21 +86,31 @@ export function PromptStashMenu({
           >
             <Archive size={14} />
             <span>
-              <strong>Stash current prompt</strong>
+              <strong>{COMPOSER_LABELS.saveScratchPrompt}</strong>
               <small>{blockedReason ?? "Text and route only"}</small>
             </span>
           </button>
           {entries.length === 0 ? (
-            <p className="popover-empty">No saved prompts yet.</p>
+            <p className="popover-empty">
+              {COMPOSER_LABELS.noScratchPrompts}
+            </p>
           ) : (
             <div
               className="prompt-stash-list"
               role="group"
-              aria-label="Saved prompts"
+              aria-label={COMPOSER_LABELS.savedScratchPrompts}
             >
               {entries.map((entry) => {
                 const restoreReason = restoreBlockedReason(entry);
                 const deleteLabel = entryDeleteLabel(entry);
+                const nextRecurrence = entry.recurrence === "daily"
+                  ? "weekly"
+                  : entry.recurrence === "weekly" ? undefined : "daily";
+                const recurrenceLabel = entry.recurrence
+                  ? `${entry.recurrence === "daily" ? "Daily" : "Weekly"} recurring prompt`
+                  : "Repeat daily";
+                const recurrenceDue = entry.nextDueAt
+                  && Date.parse(entry.nextDueAt) <= Date.now();
                 return (
                 <div className="prompt-stash-entry" key={entry.id}>
                   <button
@@ -120,10 +136,26 @@ export function PromptStashMenu({
                             {entry.route.reasoningEffort
                               ? ` · ${entry.route.reasoningEffort}`
                               : ""}
+                            {entry.recurrence
+                              ? ` · repeats ${entry.recurrence}${recurrenceDue ? " · due" : ""}`
+                              : ""}
                           </>
                         )}
                       </small>
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="prompt-stash-recurrence"
+                    aria-label={`${recurrenceLabel}: ${entry.content}`}
+                    title={entry.recurrence
+                      ? `${recurrenceLabel}; activate to ${nextRecurrence ? "change cadence" : "turn off"}`
+                      : "Keep this prompt recurring; it will never run automatically"}
+                    onClick={() => onSetRecurrence(entry.id, nextRecurrence)}
+                  >
+                    <span aria-hidden="true">↻</span>
+                    {entry.recurrence && <small>{entry.recurrence === "daily" ? "1d" : "7d"}</small>}
                   </button>
                   <button
                     type="button"

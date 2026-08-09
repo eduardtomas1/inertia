@@ -67,6 +67,12 @@ export {
   pushCurrentBranch,
 } from "./git/remotes";
 export {
+  createGitHubPullRequest,
+  githubRepositorySlug,
+  verifiedGitHubPullRequestUrl,
+  type GitHubPullRequestInput,
+} from "./git/github-pull-request";
+export {
   inspectGitRemoteRouting,
   parseGitRemoteWebTarget,
   type GitPullRequestTarget,

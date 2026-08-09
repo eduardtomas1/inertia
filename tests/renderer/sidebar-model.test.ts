@@ -211,6 +211,61 @@ describe("classic sidebar search", () => {
 
     expect(result.projects.some(({ id }) => id === second.id)).toBe(false);
   });
+
+  it("keeps pinned chats above newer unpinned chats", () => {
+    const pinned = conversation({
+      id: "pinned",
+      projectId: first.id,
+      pinnedAt: "2026-07-23T09:00:00.000Z",
+      updatedAt: "2026-07-23T09:00:00.000Z",
+    });
+    const newer = conversation({
+      id: "newer",
+      projectId: first.id,
+      updatedAt: "2026-07-23T12:00:00.000Z",
+    });
+
+    expect(classicSidebarSearch(
+      [first],
+      [newer, pinned],
+      "",
+    ).conversationsByProject.get(first.id)?.map(({ id }) => id)).toEqual([
+      pinned.id,
+      newer.id,
+    ]);
+  });
+
+  it("hides snoozed ordinary chats in classic mode until their expiry", () => {
+    const snoozed = conversation({
+      id: "snoozed",
+      projectId: first.id,
+      snoozedUntil: "2026-07-23T11:00:00.000Z",
+    });
+    const working = conversation({
+      id: "working-snooze",
+      projectId: first.id,
+      status: "running",
+      snoozedUntil: "2026-07-23T11:00:00.000Z",
+    });
+
+    expect(classicSidebarSearch(
+      [first],
+      [snoozed, working],
+      "",
+      Date.parse("2026-07-23T10:00:00.000Z"),
+    ).conversationsByProject.get(first.id)?.map(({ id }) => id)).toEqual([
+      working.id,
+    ]);
+    expect(classicSidebarSearch(
+      [first],
+      [snoozed, working],
+      "",
+      Date.parse("2026-07-23T11:00:00.001Z"),
+    ).conversationsByProject.get(first.id)?.map(({ id }) => id)).toEqual([
+      snoozed.id,
+      working.id,
+    ]);
+  });
 });
 
 describe("work-first chat model", () => {
@@ -273,6 +328,32 @@ describe("work-first chat model", () => {
       { id: "in-progress", threads: ["working"] },
       { id: "recent", threads: ["completed", "idle"] },
     ]);
+  });
+
+  it("keeps actionable work above pins and pins above ordinary recency", () => {
+    const entries = [
+      conversation({
+        id: "newer",
+        projectId: "p",
+        updatedAt: "2026-07-23T12:00:00.000Z",
+      }),
+      conversation({
+        id: "pinned",
+        projectId: "p",
+        pinnedAt: "2026-07-23T09:00:00.000Z",
+        updatedAt: "2026-07-23T09:00:00.000Z",
+      }),
+      conversation({
+        id: "approval",
+        projectId: "p",
+        status: "needs-input",
+        attentionKind: "approval",
+      }),
+    ];
+
+    expect(sortActivityThreads(entries, null).map(({ conversation: entry }) => (
+      entry.id
+    ))).toEqual(["approval", "pinned", "newer"]);
   });
 
   it("tracks unseen completions without marking legacy, active, or visited work unread", () => {

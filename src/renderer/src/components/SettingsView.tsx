@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArchiveRestore,
+  Activity,
   Bot,
   Check,
   Copy,
@@ -40,8 +41,14 @@ import {
   type ProviderMaintenanceProviderId,
   type ThemePreference,
 } from "@shared/contracts";
-import type { AppUpdateStatus } from "@shared/desktop";
+import type { AppHealthSnapshot, AppUpdateStatus } from "@shared/desktop";
 import { INERTIA_VERSION } from "@shared/version";
+import {
+  APP_SHORTCUT_KEYS,
+  DEFAULT_APP_KEYBINDINGS,
+  type AppShortcutAction,
+  type AppShortcutKey,
+} from "@shared/keybindings";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { LoadingMark, Switch } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
@@ -66,7 +73,7 @@ export type SettingsViewProps = {
   conversations: Conversation[];
   archived: Conversation[];
   databaseBackup?: DatabaseBackupStatus;
-  onUpdate: (settings: Partial<AppSettings>) => void;
+  onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
   maintenanceOperations: ReadonlyMap<
@@ -122,12 +129,45 @@ const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> 
   { id: "archive", label: "Archive & data", icon: ArchiveRestore },
 ];
 
-const shortcuts = [
-  ["Search everything", "⌘ K"],
-  ["New chat", "⌘ N"],
-  ["Toggle project navigation", "⌘ B"],
-  ["Toggle terminal", "⌘ J"],
+const shortcuts: Array<[AppShortcutAction, string]> = [
+  ["search", "Search everything"],
+  ["new-chat", "New chat"],
+  ["toggle-sidebar", "Toggle project navigation"],
+  ["toggle-terminal", "Toggle terminal"],
 ] as const;
+
+function stableRecordFingerprint(
+  value: Readonly<Record<string, string | undefined>>,
+): string {
+  return JSON.stringify(Object.entries(value).sort(([left], [right]) => (
+    left.localeCompare(right)
+  )));
+}
+
+function overlayDirtyProviderIdentityLabels(
+  authoritative: AppSettings["providerIdentityLabels"],
+  draft: AppSettings["providerIdentityLabels"],
+  dirtyProviderIds: ReadonlySet<ProviderId>,
+): AppSettings["providerIdentityLabels"] {
+  const providerIdentityLabels = { ...authoritative };
+  for (const providerId of dirtyProviderIds) {
+    const value = draft[providerId];
+    if (value !== undefined) providerIdentityLabels[providerId] = value;
+    else delete providerIdentityLabels[providerId];
+  }
+  return providerIdentityLabels;
+}
+
+export function formatStorageBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"] as const;
+  const unit = Math.min(
+    units.length - 1,
+    Math.floor(Math.log(bytes) / Math.log(1_024)),
+  );
+  const value = bytes / 1_024 ** unit;
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
 
 function SettingsSectionFallback(): React.JSX.Element {
   return (
@@ -148,7 +188,7 @@ export function SettingsView({
   conversations: _conversations,
   archived,
   databaseBackup,
-  onUpdate,
+  onUpdate: updateSettingsRequest,
   onConnectProvider,
   onRefreshProvider,
   maintenanceOperations,
@@ -175,6 +215,9 @@ export function SettingsView({
   onSetBackendDefault,
   onClearBackendDefault,
 }: SettingsViewProps): React.JSX.Element {
+  const onUpdate = (updates: Partial<AppSettings>): void => {
+    void updateSettingsRequest(updates).catch(() => undefined);
+  };
   const [section, setSection] = useState<SettingsSection>(
     target?.section ?? "general",
   );
@@ -201,12 +244,96 @@ export function SettingsView({
     "export" | "import" | null
   >(null);
   const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
+  const [appHealth, setAppHealth] = useState<AppHealthSnapshot | null>(null);
+  const [healthStatus, setHealthStatus] = useState<string | null>(null);
+  const [clearingCache, setClearingCache] = useState(false);
+  const [providerIdentityLabelsDraft, setProviderIdentityLabelsDraft] = useState(
+    () => settings.providerIdentityLabels,
+  );
+  const providerIdentityLabelsDraftRef = useRef(providerIdentityLabelsDraft);
+  const authoritativeProviderIdentityLabelsRef = useRef(
+    settings.providerIdentityLabels,
+  );
+  const dirtyProviderIdentityLabelsRef = useRef(new Set<ProviderId>());
+  const pendingProviderIdentityLabelsRef = useRef<string | null>(null);
+  const [keybindingsDraft, setKeybindingsDraft] = useState(
+    () => settings.keybindings,
+  );
+  const keybindingsDraftRef = useRef(keybindingsDraft);
+  const authoritativeKeybindingsRef = useRef(settings.keybindings);
+  const pendingKeybindingsRef = useRef<string | null>(null);
+  const providerIdentityLabelsFingerprint = stableRecordFingerprint(
+    settings.providerIdentityLabels,
+  );
+  const keybindingsFingerprint = stableRecordFingerprint(settings.keybindings);
+  useEffect(() => {
+    authoritativeProviderIdentityLabelsRef.current =
+      settings.providerIdentityLabels;
+    if (
+      pendingProviderIdentityLabelsRef.current !== null
+      && pendingProviderIdentityLabelsRef.current
+        !== providerIdentityLabelsFingerprint
+    ) return;
+    pendingProviderIdentityLabelsRef.current = null;
+    const providerIdentityLabels = overlayDirtyProviderIdentityLabels(
+      settings.providerIdentityLabels,
+      providerIdentityLabelsDraftRef.current,
+      dirtyProviderIdentityLabelsRef.current,
+    );
+    providerIdentityLabelsDraftRef.current = providerIdentityLabels;
+    setProviderIdentityLabelsDraft(providerIdentityLabels);
+  }, [providerIdentityLabelsFingerprint, settings.providerIdentityLabels]);
+  useEffect(() => {
+    authoritativeKeybindingsRef.current = settings.keybindings;
+    if (
+      pendingKeybindingsRef.current !== null
+      && pendingKeybindingsRef.current !== keybindingsFingerprint
+    ) return;
+    pendingKeybindingsRef.current = null;
+    keybindingsDraftRef.current = settings.keybindings;
+    setKeybindingsDraft(settings.keybindings);
+  }, [keybindingsFingerprint, settings.keybindings]);
   const defaultProvider = providers.find(({ id }) => id === settings.defaultProvider);
   const defaultModel = defaultProvider?.models.find(({ id }) => id === settings.defaultModel)
     ?? defaultProvider?.models.find(({ isDefault }) => isDefault)
     ?? defaultProvider?.models[0];
   const reasoningOptions = defaultModel?.reasoningOptions ?? [];
+  const primaryModifier = window.inertia.getPlatform() === "darwin" ? "⌘" : "Ctrl";
   const archivedByProvider = useMemo(() => new Map(providers.map((provider) => [provider.id, provider.label])), [providers]);
+  useEffect(() => {
+    if (section !== "archive") return;
+    let active = true;
+    const sample = async (): Promise<void> => {
+      try {
+        const health = await window.inertia.getAppHealth();
+        if (active) {
+          setAppHealth(health);
+          setHealthStatus(null);
+        }
+      } catch {
+        if (active) setHealthStatus("Local health data is unavailable.");
+      }
+    };
+    void sample();
+    const timer = window.setInterval(() => { void sample(); }, 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [section]);
+  const clearAppCache = async (): Promise<void> => {
+    if (clearingCache) return;
+    setClearingCache(true);
+    setHealthStatus(null);
+    try {
+      setAppHealth(await window.inertia.clearAppCache());
+      setHealthStatus("Recreatable browser cache cleared. User data was not changed.");
+    } catch {
+      setHealthStatus("The browser cache could not be cleared.");
+    } finally {
+      setClearingCache(false);
+    }
+  };
   const revealRuntimeLogs = async (): Promise<void> => {
     if (revealingLogs) return;
     setRevealingLogs(true);
@@ -348,6 +475,7 @@ export function SettingsView({
                 <SettingSwitch title="Message timestamps" detail="Show a quiet time label alongside each message." checked={settings.showTimestamps} disabled={disabled} onChange={(showTimestamps) => onUpdate({ showTimestamps })} />
                 <SettingSwitch title="Live thinking summaries" detail="Show provider-supplied reasoning summaries as they arrive." checked={settings.showThinking} disabled={disabled} onChange={(showThinking) => onUpdate({ showThinking })} />
                 <SettingSwitch title="Open plan automatically" detail="Reveal the Plan panel when an agent publishes steps." checked={settings.autoOpenPlan} disabled={disabled} onChange={(autoOpenPlan) => onUpdate({ autoOpenPlan })} />
+                <SettingSwitch title="Desktop notifications" detail="Show privacy-safe completion and attention alerts without prompt or response text." checked={settings.desktopNotifications} disabled={disabled} onChange={(desktopNotifications) => onUpdate({ desktopNotifications })} />
                 <SettingSwitch title="Confirm destructive actions" detail="Ask before deleting threads or restoring checkpoints." checked={settings.confirmDestructiveActions} disabled={disabled} onChange={(confirmDestructiveActions) => onUpdate({ confirmDestructiveActions })} />
               </div>
               <div className="response-density-setting usage-display-setting">
@@ -407,20 +535,89 @@ export function SettingsView({
               <div className="settings-rows provider-account-list">
                 {providers.map((provider) => {
                   const action = providerSetupAction(provider);
+                  const identityLabel = providerIdentityLabelsDraft[provider.id];
                   return (
                     <div className="setting-row provider-account-row" key={provider.id}>
                       <span className="setting-row-icon"><Bot size={17} /></span>
                       <div className="setting-copy provider-account-copy">
                         <span className="provider-account-title">
-                          <strong>{provider.label}</strong>
+                          <strong>{identityLabel ?? provider.label}</strong>
                           <ProviderStatus provider={provider} />
                         </span>
                         <small>
-                          {providerStateDetail(provider)}
+                          {identityLabel ? `${provider.label} · ` : ""}{providerStateDetail(provider)}
                           {provider.models.length > 0
                             ? ` · ${provider.models.length} models available`
                             : ""}
                         </small>
+                        <label className="provider-identity-alias">
+                          <span>Name in Inertia</span>
+                          <input
+                            value={identityLabel ?? ""}
+                            maxLength={48}
+                            placeholder={`${provider.label} account`}
+                            disabled={disabled}
+                            onChange={(event) => {
+                              const providerIdentityLabels = {
+                                ...providerIdentityLabelsDraftRef.current,
+                                [provider.id]: event.currentTarget.value,
+                              };
+                              providerIdentityLabelsDraftRef.current =
+                                providerIdentityLabels;
+                              dirtyProviderIdentityLabelsRef.current.add(
+                                provider.id,
+                              );
+                              setProviderIdentityLabelsDraft(
+                                providerIdentityLabels,
+                              );
+                            }}
+                            onBlur={(event) => {
+                              const next = event.currentTarget.value.trim();
+                              const providerIdentityLabels = {
+                                ...providerIdentityLabelsDraftRef.current,
+                              };
+                              if (next) providerIdentityLabels[provider.id] = next;
+                              else delete providerIdentityLabels[provider.id];
+                              providerIdentityLabelsDraftRef.current =
+                                providerIdentityLabels;
+                              dirtyProviderIdentityLabelsRef.current.delete(
+                                provider.id,
+                              );
+                              setProviderIdentityLabelsDraft(
+                                providerIdentityLabels,
+                              );
+                              const fingerprint = stableRecordFingerprint(
+                                providerIdentityLabels,
+                              );
+                              if (
+                                fingerprint === providerIdentityLabelsFingerprint
+                                || fingerprint
+                                  === pendingProviderIdentityLabelsRef.current
+                              ) return;
+                              pendingProviderIdentityLabelsRef.current = fingerprint;
+                              void updateSettingsRequest({ providerIdentityLabels }).catch(() => {
+                                if (
+                                  pendingProviderIdentityLabelsRef.current
+                                    !== fingerprint
+                                ) return;
+                                pendingProviderIdentityLabelsRef.current = null;
+                                const authoritative =
+                                  authoritativeProviderIdentityLabelsRef.current;
+                                const providerIdentityLabels =
+                                  overlayDirtyProviderIdentityLabels(
+                                    authoritative,
+                                    providerIdentityLabelsDraftRef.current,
+                                    dirtyProviderIdentityLabelsRef.current,
+                                  );
+                                providerIdentityLabelsDraftRef.current =
+                                  providerIdentityLabels;
+                                setProviderIdentityLabelsDraft(
+                                  providerIdentityLabels,
+                                );
+                              });
+                            }}
+                          />
+                        </label>
                         <ProviderMaintenanceNotice
                           providerLabel={provider.label}
                           status={maintenanceStatuses.get(provider.id) ?? null}
@@ -522,8 +719,38 @@ export function SettingsView({
         {section === "keybindings" && (
           <section className="settings-card" aria-labelledby="keybindings-heading">
             <div className="settings-card-heading"><div><Keyboard size={18} /></div><span><h3 id="keybindings-heading">Keyboard shortcuts</h3><p>Fast paths for the actions used most often.</p></span></div>
-            <div className="shortcut-list">{shortcuts.map(([label, keys]) => <div key={label}><span>{label}</span><kbd>{keys}</kbd></div>)}</div>
-            <p className="settings-card-note">Custom bindings are planned; the current set avoids conflicting with provider terminals.</p>
+            <div className="shortcut-list">{shortcuts.map(([action, label]) => <label key={action}><span>{label}</span><span className="shortcut-binding"><kbd>{primaryModifier}</kbd><select aria-label={`${label} key`} value={keybindingsDraft[action]} disabled={disabled} onChange={(event) => {
+              const keybindings = {
+                ...keybindingsDraftRef.current,
+                [action]: event.target.value as AppShortcutKey,
+              };
+              keybindingsDraftRef.current = keybindings;
+              setKeybindingsDraft(keybindings);
+              const fingerprint = stableRecordFingerprint(keybindings);
+              pendingKeybindingsRef.current = fingerprint;
+              void updateSettingsRequest({ keybindings }).catch(() => {
+                if (pendingKeybindingsRef.current !== fingerprint) return;
+                pendingKeybindingsRef.current = null;
+                const authoritative = authoritativeKeybindingsRef.current;
+                keybindingsDraftRef.current = authoritative;
+                setKeybindingsDraft(authoritative);
+              });
+            }}>{APP_SHORTCUT_KEYS.map((key) => <option value={key} key={key} disabled={shortcuts.some(([other]) => other !== action && keybindingsDraft[other] === key)}>{key.toUpperCase()}</option>)}</select></span></label>)}</div>
+            <button className="secondary-button settings-keybinding-reset" type="button" disabled={disabled || Object.entries(DEFAULT_APP_KEYBINDINGS).every(([action, key]) => keybindingsDraft[action as AppShortcutAction] === key)} onClick={() => {
+              const keybindings = { ...DEFAULT_APP_KEYBINDINGS };
+              keybindingsDraftRef.current = keybindings;
+              setKeybindingsDraft(keybindings);
+              const fingerprint = stableRecordFingerprint(keybindings);
+              pendingKeybindingsRef.current = fingerprint;
+              void updateSettingsRequest({ keybindings }).catch(() => {
+                if (pendingKeybindingsRef.current !== fingerprint) return;
+                pendingKeybindingsRef.current = null;
+                const authoritative = authoritativeKeybindingsRef.current;
+                keybindingsDraftRef.current = authoritative;
+                setKeybindingsDraft(authoritative);
+              });
+            }}><RotateCcw size={14} />Reset shortcuts</button>
+            <p className="settings-card-note">The primary Cmd/Ctrl modifier stays fixed. Available keys avoid common browser and system shortcuts.</p>
           </section>
         )}
 
@@ -536,6 +763,25 @@ export function SettingsView({
             <section className="settings-card" aria-labelledby="data-heading">
               <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="data-heading">Local data</h3><p>Full SQLite backups and portable conversation exports serve different recovery needs.</p></span></div>
               <div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div>
+              <div className="codex-binary-path runtime-log-setting app-health-setting">
+                <span>
+                  <strong><Activity size={14} />Local resource health</strong>
+                  <small>Sampled only while this page is open. Values cover Inertia processes and fixed app-owned storage; project files are never scanned.</small>
+                  {appHealth ? (
+                    <span className="app-health-grid">
+                      <span><b>{formatStorageBytes(appHealth.totalMemoryBytes)}</b><small>App memory</small></span>
+                      <span><b>{formatStorageBytes(appHealth.databaseBytes)}</b><small>Database</small></span>
+                      <span><b>{formatStorageBytes(appHealth.cacheBytes)}</b><small>Browser cache</small></span>
+                      <span><b>{formatStorageBytes(appHealth.temporaryAttachmentBytes)}</b><small>Temporary attachments</small></span>
+                    </span>
+                  ) : <small>Measuring local usage…</small>}
+                  {appHealth && <small>Local service: {appHealth.runtimePhase} · main {appHealth.mainProcess ? `${appHealth.mainProcess.cpuPercent.toFixed(1)}% CPU` : "unavailable"} · renderer {appHealth.rendererProcess ? formatStorageBytes(appHealth.rendererProcess.memoryBytes) : "unavailable"}.</small>}
+                </span>
+                <div>
+                  <button type="button" className="secondary-button" disabled={clearingCache || !appHealth} onClick={() => { void clearAppCache(); }}><Trash2 size={14} />{clearingCache ? "Clearing…" : "Clear browser cache"}</button>
+                </div>
+              </div>
+              {healthStatus && <p className="settings-card-note" role="status">{healthStatus}</p>}
               <div className="codex-binary-path runtime-log-setting">
                 <span>
                   <strong>Full local database backup</strong>

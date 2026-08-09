@@ -13,6 +13,7 @@ export default defineConfig({
         input: {
           index: resolve("src/main/index.ts"),
           "runtime-worker": resolve("src/server/runtime-worker.ts"),
+          "runtime-status-cli": resolve("src/server/runtime-status-cli.ts"),
           "database-recovery-import-worker": resolve(
             "src/server/persistence/database-recovery-import-worker.ts",
           ),

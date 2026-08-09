@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import WebSocket from "ws";
 
 import { projectActionCommand } from "../../src/server/runtime-commands";
-import { isAllowedRuntimeOrigin, parseRuntimeCommand } from "../../src/server/runtime-protocol";
+import {
+  isAllowedRuntimeOrigin,
+  MAX_BUFFERED_RUNTIME_EVENT_BYTES,
+  MAX_QUEUED_RUNTIME_EVENT_BYTES,
+  MAX_RUNTIME_EVENT_STALL_MS,
+  parseRuntimeCommand,
+  sendRuntimeEvent,
+} from "../../src/server/runtime-protocol";
 import { initialProviderSnapshots, providerSnapshot } from "../../src/server/runtime-snapshots";
 
 describe("runtime boundary helpers", () => {
@@ -21,6 +29,102 @@ describe("runtime boundary helpers", () => {
       requestId: "known",
       message: "Invalid command.",
     });
+  });
+
+  it("allows a legitimate large hydration frame to drain before later events", () => {
+    vi.useFakeTimers();
+    let bufferedAmount = 0;
+    const socket = {
+      readyState: WebSocket.OPEN,
+      get bufferedAmount() { return bufferedAmount; },
+      send: vi.fn((serialized: string) => {
+        bufferedAmount += Buffer.byteLength(serialized, "utf8");
+      }),
+      terminate: vi.fn(),
+    } as unknown as WebSocket;
+    const hydration = {
+      type: "request.error",
+      requestId: "request-1",
+      message: "x".repeat(MAX_BUFFERED_RUNTIME_EVENT_BYTES + 1),
+    } as const;
+
+    sendRuntimeEvent(socket, hydration);
+    sendRuntimeEvent(socket, {
+      type: "request.ok",
+      requestId: "request-2",
+    });
+
+    expect(socket.send).toHaveBeenCalledTimes(2);
+    expect(socket.terminate).not.toHaveBeenCalled();
+    bufferedAmount = 0;
+    vi.advanceTimersByTime(250);
+    expect(socket.terminate).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("disconnects only stalled or absolutely bounded runtime event consumers", () => {
+    vi.useFakeTimers();
+    const event = { type: "request.ok", requestId: "request-1" } as const;
+    let bufferedAmount = MAX_BUFFERED_RUNTIME_EVENT_BYTES + 1_024;
+    const slowSocket = {
+      readyState: WebSocket.OPEN,
+      get bufferedAmount() { return bufferedAmount; },
+      send: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as WebSocket;
+    expect(() => sendRuntimeEvent(slowSocket, event)).not.toThrow();
+    expect(slowSocket.send).toHaveBeenCalledOnce();
+    expect(slowSocket.terminate).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(MAX_RUNTIME_EVENT_STALL_MS);
+    expect(slowSocket.terminate).toHaveBeenCalledOnce();
+
+    const boundedSocket = {
+      readyState: WebSocket.OPEN,
+      bufferedAmount: MAX_QUEUED_RUNTIME_EVENT_BYTES,
+      send: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as WebSocket;
+    sendRuntimeEvent(boundedSocket, event);
+    expect(boundedSocket.send).not.toHaveBeenCalled();
+    expect(boundedSocket.terminate).toHaveBeenCalledOnce();
+
+    const failedSocket = {
+      readyState: WebSocket.OPEN,
+      bufferedAmount: 0,
+      send: vi.fn(() => { throw new Error("socket closed"); }),
+      terminate: vi.fn(() => { throw new Error("already closed"); }),
+    } as unknown as WebSocket;
+    expect(() => sendRuntimeEvent(failedSocket, event)).not.toThrow();
+    expect(failedSocket.terminate).toHaveBeenCalledOnce();
+    bufferedAmount = 0;
+    vi.useRealTimers();
+  });
+
+  it("extends the backpressure grace period when queued events make progress", () => {
+    vi.useFakeTimers();
+    let bufferedAmount = MAX_BUFFERED_RUNTIME_EVENT_BYTES + 1_024;
+    let acknowledgeSend: ((error?: Error) => void) | undefined;
+    const socket = {
+      readyState: WebSocket.OPEN,
+      get bufferedAmount() { return bufferedAmount; },
+      send: vi.fn((_serialized: string, callback: (error?: Error) => void) => {
+        acknowledgeSend = callback;
+      }),
+      terminate: vi.fn(),
+    } as unknown as WebSocket;
+
+    sendRuntimeEvent(socket, {
+      type: "request.ok",
+      requestId: "request-1",
+    });
+    vi.advanceTimersByTime(MAX_RUNTIME_EVENT_STALL_MS - 1_000);
+    bufferedAmount -= 1;
+    acknowledgeSend?.();
+    vi.advanceTimersByTime(MAX_RUNTIME_EVENT_STALL_MS - 1_000);
+    expect(socket.terminate).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1_000);
+    expect(socket.terminate).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 
   it("builds only allow-listed package script commands", () => {

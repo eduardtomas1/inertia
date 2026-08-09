@@ -459,7 +459,7 @@ export class RuntimeStore {
     return this.conversationRepository.hasTurns(conversationId);
   }
 
-  updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind">>): Conversation {
+  updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>): Conversation {
     return this.conversationRepository.update(conversationId, update);
   }
 

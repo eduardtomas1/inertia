@@ -4,7 +4,8 @@ import type {
   PreviewStateUpdate,
   RuntimeConnection,
 } from "../shared/desktop.js";
-import { PRIVATE_CONNECT_IPC } from "../shared/desktop.js";
+import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
+import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -23,6 +24,10 @@ const IPC = {
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
+  showThreadNotification: "inertia:show-thread-notification",
+  threadNotificationActivated: "inertia:thread-notification-activated",
+  getAppHealth: "inertia:get-app-health",
+  clearAppCache: "inertia:clear-app-cache",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
   previewSetBounds: "inertia:preview-set-bounds",
@@ -33,6 +38,16 @@ const IPC = {
   clearBackendCredential: "inertia:clear-backend-credential",
   getBackendCredentialState: "inertia:get-backend-credential-state",
 } as const;
+
+const threadNotificationActivations = new ThreadNotificationActivationBuffer();
+ipcRenderer.on(
+  IPC.threadNotificationActivated,
+  (_event, conversationId: unknown) => {
+    if (typeof conversationId === "string") {
+      threadNotificationActivations.receive(conversationId);
+    }
+  },
+);
 
 const bridge: DesktopBridge = Object.freeze({
   getRuntimeConnection: () =>
@@ -73,6 +88,14 @@ const bridge: DesktopBridge = Object.freeze({
   openProjectPath: (request: Parameters<DesktopBridge["openProjectPath"]>[0]) =>
     ipcRenderer.invoke(IPC.openProjectPath, request) as Promise<string>,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
+  showThreadNotification: (request: Parameters<DesktopBridge["showThreadNotification"]>[0]) =>
+    ipcRenderer.invoke(IPC.showThreadNotification, request) as Promise<boolean>,
+  onThreadNotificationActivated: (listener: (conversationId: string) => void) =>
+    threadNotificationActivations.subscribe(listener),
+  getAppHealth: () =>
+    ipcRenderer.invoke(IPC.getAppHealth) as ReturnType<DesktopBridge["getAppHealth"]>,
+  clearAppCache: () =>
+    ipcRenderer.invoke(IPC.clearAppCache) as ReturnType<DesktopBridge["clearAppCache"]>,
   previewNavigate: (request: Parameters<DesktopBridge["previewNavigate"]>[0]) =>
     ipcRenderer.invoke(IPC.previewNavigate, request) as ReturnType<
       DesktopBridge["previewNavigate"]

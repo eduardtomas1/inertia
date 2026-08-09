@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   PrivateConnectStore,
   type PersistedPrivateConnect,
   type PrivateConnectStoreEncryption,
 } from "../../../src/main/private-connect/store";
+import { MAX_CREDENTIAL_VAULT_BYTES } from "../../../src/main/credential-vault";
 
 function encryption(available = true): PrivateConnectStoreEncryption {
   return {
@@ -84,5 +85,64 @@ describe("Private Connect encrypted store", () => {
     await store.save(stored);
     expect(await store.load()).toEqual(stored);
     expect(Buffer.from(encoded!, "base64").toString("utf8")).not.toContain('"content":');
+  });
+
+  it("uses the persistence byte ceiling identically for save and load", async () => {
+    const ciphertextBytesAtLimit = MAX_CREDENTIAL_VAULT_BYTES / 4 * 3;
+    let encoded = "A".repeat(MAX_CREDENTIAL_VAULT_BYTES);
+    const write = vi.fn(async (next: string) => { encoded = next; });
+    const atLimit = new PrivateConnectStore("/tmp/private-connect-test.vault", {
+      available: () => true,
+      encrypt: () => new Uint8Array(ciphertextBytesAtLimit),
+      decrypt: () => JSON.stringify(value()),
+    }, { read: async () => encoded, write });
+
+    await atLimit.save(value());
+    expect(encoded).toHaveLength(MAX_CREDENTIAL_VAULT_BYTES);
+    expect(await atLimit.load()).toEqual(value());
+
+    const aboveLimit = new PrivateConnectStore("/tmp/private-connect-test.vault", {
+      available: () => true,
+      encrypt: () => new Uint8Array(ciphertextBytesAtLimit + 1),
+      decrypt: () => JSON.stringify(value()),
+    }, { read: async () => `${encoded}A`, write });
+    await expect(aboveLimit.save(value())).rejects.toThrow("store is too large");
+    await expect(aboveLimit.load()).rejects.toThrow("store is invalid");
+    expect(write).toHaveBeenCalledOnce();
+  });
+
+  it("rejects aggregate grant state before replacing the durable store", async () => {
+    let encoded: string | null = null;
+    const write = vi.fn(async (next: string) => { encoded = next; });
+    const store = new PrivateConnectStore("/tmp/private-connect-test.vault", encryption(), {
+      read: async () => encoded,
+      write,
+    });
+    await store.save(value());
+    const durable = encoded;
+    const oversized = value();
+    const conversationIds = Array.from({ length: 256 }, (_, index) =>
+      `${index}-${"x".repeat(190)}`);
+    const grants = Array.from({ length: 64 }, (_, index) => ({
+      projectId: `${index}-${"p".repeat(190)}`,
+      conversationIds,
+      includeFutureConversations: false,
+    }));
+    oversized.devices = [{
+      id: "22222222-2222-4222-8222-222222222222",
+      label: "browser",
+      scopes: ["private:read"],
+      projectIds: grants.map(({ projectId }) => projectId),
+      grants,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      expiresAt: "2030-02-01T00:00:00.000Z",
+      lastSeenAt: null,
+      revokedAt: null,
+      grantVersion: 1,
+    }];
+
+    await expect(store.save(oversized)).rejects.toThrow("grant set is too large");
+    expect(encoded).toBe(durable);
+    expect(write).toHaveBeenCalledOnce();
   });
 });

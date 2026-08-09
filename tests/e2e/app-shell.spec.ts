@@ -7,9 +7,7 @@ import { promisify } from "node:util";
 import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
-import {
-  expectComposerEndsAtDock,
-} from "./support/layout-assertions";
+import { expectComposerEndsAtDock } from "./support/layout-assertions";
 import {
   createAppFixture,
   processExists,
@@ -595,6 +593,8 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
       UPDATE conversations
       SET
         provider_id = 'claude',
+        model_selection_json = json_set(model_selection_json, '$.harnessId', 'claude-agent-sdk', '$.backendProfileId', 'builtin:anthropic', '$.backendProfileDisplayName', 'Anthropic', '$.modelId', 'viewed-model', '$.alias', 'viewed-model', '$.reasoningEffort', 'viewed-effort'),
+        continuation_identity_json = json_object('harnessId', 'claude-agent-sdk', 'backendProfileId', 'builtin:anthropic', 'backendConfigurationRevision', 0, 'modelIdentity', 'viewed-model', 'endpointIdentity', NULL),
         model = 'viewed-model',
         reasoning_effort = 'viewed-effort',
         interaction_mode = 'plan',

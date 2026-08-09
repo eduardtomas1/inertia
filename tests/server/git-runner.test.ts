@@ -41,6 +41,63 @@ function processExists(pid: number): boolean {
 }
 
 describe("Git runner locale", () => {
+  it("preserves Git's EMAIL identity fallback without restoring unrelated state", () => {
+    const environment = gitProcessEnvironment({
+      PATH: "/usr/bin:/bin",
+      EMAIL: "custom@example.test",
+      GIT_CEILING_DIRECTORIES: "/workspace-boundary",
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
+      HOME: undefined,
+      GIT_CONFIG_GLOBAL: undefined,
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.extraHeader",
+      GIT_CONFIG_VALUE_0: "Authorization: secret",
+      GITHUB_TOKEN: "github-secret",
+      OPENAI_API_KEY: "provider-secret",
+    });
+
+    expect(environment).toEqual({
+      PATH: "/usr/bin:/bin",
+      EMAIL: "custom@example.test",
+      GIT_CEILING_DIRECTORIES: "/workspace-boundary",
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_ASKPASS: "",
+      LANG: "C",
+      LC_ALL: "C",
+    });
+  });
+
+  it("preserves cross-filesystem discovery in the spawned Git environment", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-discovery-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "show-environment", `
+process.stdout.write(JSON.stringify({
+  discovery: process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM,
+  token: process.env.GITHUB_TOKEN,
+}));
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    try {
+      const result = await runGit(directory, ["show-environment"], {
+        environment: {
+          GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
+          GITHUB_TOKEN: "must-not-leak",
+        },
+        failureMessage: "Git environment inspection failed.",
+      });
+
+      expect(JSON.parse(result.stdout.toString("utf8"))).toEqual({
+        discovery: "1",
+      });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
   it("does not start Git after an aggregate operation deadline has expired", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-git-deadline-"));
     temporaryDirectories.push(directory);
@@ -58,17 +115,50 @@ describe("Git runner locale", () => {
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
-  it("overrides inherited locales for every Git child process", () => {
-    expect(gitProcessEnvironment({
+  it("strips ambient routing and secrets while preserving explicit Git state", () => {
+    const inherited = {
+      PATH: "/usr/bin:/bin",
+      HOME: "/tmp/home",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/dbus",
+      SSH_AUTH_SOCK: "/tmp/agent.sock",
+      USERNAME: "twin",
+      XDG_CACHE_HOME: "/tmp/cache",
+      GIT_DIR: "/tmp/other.git",
+      GIT_INDEX_FILE: "/tmp/checkpoint.index",
+      GIT_WORK_TREE: "/tmp/other-worktree",
+      GIT_SSH_VARIANT: "ssh",
+      GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_SYSTEM: "/tmp/system-gitconfig",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.extraHeader",
+      GIT_CONFIG_VALUE_0: "Authorization: secret",
+      OPENAI_API_KEY: "secret",
       LANG: "es_ES.UTF-8",
       LC_ALL: "es_ES.UTF-8",
-      SENTINEL: "preserved",
-    })).toMatchObject({
+    };
+    expect(gitProcessEnvironment(inherited)).toEqual({
+      PATH: "/usr/bin:/bin",
+      HOME: "/tmp/home",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/dbus",
+      SSH_AUTH_SOCK: "/tmp/agent.sock",
+      USERNAME: "twin",
+      XDG_CACHE_HOME: "/tmp/cache",
+      GIT_SSH_VARIANT: "ssh",
+      GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_SYSTEM: "/tmp/system-gitconfig",
       LANG: "C",
       LC_ALL: "C",
       GIT_TERMINAL_PROMPT: "0",
       GIT_ASKPASS: "",
-      SENTINEL: "preserved",
+    });
+    expect(gitProcessEnvironment(inherited, {
+      GIT_INDEX_FILE: "/tmp/checkpoint.index",
+      GIT_WORK_TREE: "/tmp/checkpoint-worktree",
+    })).toMatchObject({
+      GIT_INDEX_FILE: "/tmp/checkpoint.index",
+      GIT_WORK_TREE: "/tmp/checkpoint-worktree",
     });
   });
 

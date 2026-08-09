@@ -9,6 +9,7 @@ type CommandPaletteProps = {
   open: boolean;
   projects: Project[];
   conversations: Conversation[];
+  newThreadShortcut: string;
   onClose: () => void;
   onSelectProject: (project: Project) => void;
   onSelectConversation: (conversation: Conversation) => void;
@@ -52,7 +53,7 @@ function paletteFocusableElements(root: HTMLElement): HTMLElement[] {
   )].filter((element) => !element.hasAttribute("hidden"));
 }
 
-export function CommandPalette({ open, projects, conversations, onClose, onSelectProject, onSelectConversation, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
+export function CommandPalette({ open, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -72,7 +73,7 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
   const allItems = useMemo(() => {
     const actions: PaletteItem[] = [
       ...(projects.length > 0
-        ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", detail: "Start work in the current project", icon: <SquarePen size={15} />, shortcut: "⌘N", run: onNewThread }]
+        ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", detail: "Start work in the current project", icon: <SquarePen size={15} />, shortcut: newThreadShortcut, run: onNewThread }]
         : []),
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
       { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
@@ -81,7 +82,7 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={15} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];
-  }, [conversations, onAddProject, onNewThread, onOpenSettings, onSelectConversation, onSelectProject, projects]);
+  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onOpenSettings, onSelectConversation, onSelectProject, projects]);
   const items = useMemo(() => filterItems(allItems, query), [allItems, query]);
 
   useEffect(() => setActiveIndex((current) => Math.min(current, Math.max(0, items.length - 1))), [items.length]);

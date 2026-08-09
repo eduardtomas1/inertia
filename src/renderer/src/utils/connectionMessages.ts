@@ -1,5 +1,8 @@
 import type { ServerEvent } from "@shared/contracts";
 
+const serverEventParser = import("@shared/contracts/server-event-schema")
+  .then(({ parseServerEvent }) => parseServerEvent);
+
 export const UNREADABLE_RUNTIME_RESPONSE =
   "Inertia received an unreadable response from its local service.";
 
@@ -41,29 +44,19 @@ export type PendingConnectionSettlement =
   | "late-published"
   | null;
 
-function isServerEvent(value: unknown): value is ServerEvent {
-  return Boolean(
-    value
-    && typeof value === "object"
-    && "type" in value
-    && typeof value.type === "string",
-  );
-}
-
-export function decodeServerEventMessage(data: unknown): ServerEvent {
+export async function decodeServerEventMessage(data: unknown): Promise<ServerEvent> {
   const received: unknown = JSON.parse(String(data));
-  if (!isServerEvent(received)) throw new Error("Malformed server event");
-  return received;
+  return (await serverEventParser)(received);
 }
 
-export function deliverDecodedServerEvent(
+export async function deliverDecodedServerEvent(
   data: unknown,
   onEvent: (event: ServerEvent) => void,
   onUnreadable: () => void,
-): boolean {
+): Promise<boolean> {
   let event: ServerEvent;
   try {
-    event = decodeServerEventMessage(data);
+    event = await decodeServerEventMessage(data);
   } catch {
     onUnreadable();
     return false;

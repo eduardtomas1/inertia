@@ -34,6 +34,7 @@ interface AppNavigationOverlaysProps {
   snapshot: AppSnapshot | null;
   activityOpen: boolean;
   paletteOpen: boolean;
+  newThreadShortcut: string;
   setActivityOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   setWorkspaceView: () => void;
@@ -59,6 +60,7 @@ export function AppNavigationOverlays({
   snapshot,
   activityOpen,
   paletteOpen,
+  newThreadShortcut,
   setActivityOpen,
   setPaletteOpen,
   setWorkspaceView,
@@ -119,6 +121,7 @@ export function AppNavigationOverlays({
             open
             projects={projects}
             conversations={conversations}
+            newThreadShortcut={newThreadShortcut}
             onClose={() => setPaletteOpen(false)}
             onSelectProject={(project) => {
               selectProject(project);

@@ -1,14 +1,20 @@
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  credentialFreeProviderEnvironment,
   executableCandidates,
   expandHomePath,
+  loginShellEnvironment,
   providerChildEnvironment,
   providerEnvironment,
 } from "../../src/server/environment";
+import {
+  ProcessTreeTerminationError,
+  type ProcessTreeTerminator,
+} from "../../src/server/process-lifecycle";
 import { portableNodeExecutable } from "../helpers/portable-provider-fixture";
 
 const ENVIRONMENT_KEYS = [
@@ -41,6 +47,7 @@ const ENVIRONMENT_KEYS = [
 
 describe.sequential("provider environment discovery", () => {
   const roots: string[] = [];
+  const descendantPids: number[] = [];
   const originalEnvironment = Object.fromEntries(ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));
 
   function temporaryRoot(): string {
@@ -62,6 +69,9 @@ describe.sequential("provider environment discovery", () => {
   }
 
   afterEach(async () => {
+    for (const pid of descendantPids.splice(0)) {
+      try { process.kill(pid, "SIGKILL"); } catch { /* Timeout cleanup may already have stopped it. */ }
+    }
     for (const key of ENVIRONMENT_KEYS) {
       const value = originalEnvironment[key];
       if (value === undefined) delete process.env[key];
@@ -70,6 +80,47 @@ describe.sequential("provider environment discovery", () => {
     roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
     await providerEnvironment(true);
   });
+
+  it.skipIf(process.platform === "win32")("removes login-shell descendants after environment discovery times out", async () => {
+    const home = temporaryRoot();
+    const pidPath = join(home, "descendant.pid");
+    const descendant = join(home, "descendant.cjs");
+    const shell = join(home, "zsh");
+    writeFileSync(
+      descendant,
+      `require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 1_000);\n`,
+    );
+    writeFileSync(
+      shell,
+      `#!/bin/sh\n${JSON.stringify(process.execPath)} ${JSON.stringify(descendant)} &\nwait\n`,
+    );
+    chmodSync(shell, 0o700);
+
+    setEnvironment({ HOME: home, SHELL: shell, PATH: "/usr/bin:/bin" });
+    await providerEnvironment(true);
+    const pid = Number.parseInt(readFileSync(pidPath, "utf8"), 10);
+    descendantPids.push(pid);
+
+    expect(() => process.kill(pid, 0)).toThrow();
+  }, 10_000);
+
+  it.skipIf(process.platform === "win32")("fails closed when login-shell cleanup cannot be confirmed", async () => {
+    const home = temporaryRoot();
+    const shell = join(home, "zsh");
+    writeFileSync(shell, "#!/bin/sh\nsleep 30\n");
+    chmodSync(shell, 0o700);
+    setEnvironment({ HOME: home, SHELL: shell, PATH: "/usr/bin:/bin" });
+    const terminate: ProcessTreeTerminator = async (child) => {
+      if (child.pid) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { /* Best-effort test cleanup. */ }
+      }
+      return false;
+    };
+
+    await expect(loginShellEnvironment(terminate)).rejects.toBeInstanceOf(
+      ProcessTreeTerminationError,
+    );
+  }, 10_000);
 
   it.skipIf(process.platform === "win32")("recovers commands exported by the login shell from a stripped GUI PATH", async () => {
     const home = temporaryRoot();
@@ -277,6 +328,37 @@ describe.sequential("provider environment discovery", () => {
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(
       "INERTIA_LOGIN_SHELL_MARKER",
     );
+  });
+
+  it("builds credential-free installation probe environments", () => {
+    const environment = credentialFreeProviderEnvironment({
+      PATH: "/usr/bin:/bin",
+      PATHEXT: ".EXE;.CMD",
+      SYSTEMROOT: "C:\\Windows",
+      LANG: "en_US.UTF-8",
+      LC_MESSAGES: "en_US.UTF-8",
+      HOME: "/private/home",
+      APPDATA: "C:\\private\\appdata",
+      HTTPS_PROXY: "https://user:password@proxy.example",
+      NODE_EXTRA_CA_CERTS: "/private/provider-ca.pem",
+      OPENAI_API_KEY: "openai-secret",
+      ANTHROPIC_API_KEY: "anthropic-secret",
+    });
+
+    expect(environment).toMatchObject({
+      PATH: "/usr/bin:/bin",
+      PATHEXT: ".EXE;.CMD",
+      SYSTEMROOT: "C:\\Windows",
+      LANG: "en_US.UTF-8",
+      LC_MESSAGES: "en_US.UTF-8",
+      NO_COLOR: "1",
+    });
+    expect(environment).not.toHaveProperty("HOME");
+    expect(environment).not.toHaveProperty("APPDATA");
+    expect(environment).not.toHaveProperty("HTTPS_PROXY");
+    expect(environment).not.toHaveProperty("NODE_EXTRA_CA_CERTS");
+    expect(environment).not.toHaveProperty("OPENAI_API_KEY");
+    expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
   });
 
   it("expands Codex's leading home shorthand before a shell-free launch", () => {

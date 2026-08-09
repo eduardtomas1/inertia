@@ -60,21 +60,26 @@ export function buildComposerTurnRequest(
   attachments: readonly ChatAttachment[],
   promptContext: string | null | undefined,
   fileReferences: readonly string[] = [],
+  previewUrl?: string | null,
 ): { visibleContent: string; context?: TurnRequestContext } {
   const visibleContent = message.trim()
     || (attachments.length > 0
       ? "Please inspect the attached file."
-      : "Please review the selected diff context.");
+      : previewUrl
+        ? "Please inspect the current preview."
+        : "Please review the selected diff context.");
   const promptRequestContext = turnRequestContextFromPromptContext(promptContext);
   const selectedFileReferences = fileReferences.filter((path) =>
     visibleContent.includes(`@${path}`));
   const context: TurnRequestContext | undefined = promptRequestContext
     || selectedFileReferences.length > 0
+    || previewUrl
     ? {
         ...promptRequestContext,
         ...(selectedFileReferences.length > 0
           ? { fileReferences: selectedFileReferences.map((path) => ({ path })) }
           : {}),
+        ...(previewUrl ? { previewContexts: [{ url: previewUrl }] } : {}),
       }
     : undefined;
   return { visibleContent, ...(context ? { context } : {}) };

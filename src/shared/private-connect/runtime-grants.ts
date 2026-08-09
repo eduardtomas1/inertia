@@ -1,9 +1,8 @@
 import { z } from "zod";
+import { PRIVATE_CONNECT_GRANT_LIMITS } from "./grants";
 
-export const PRIVATE_CONNECT_RUNTIME_GRANT_LIMITS = Object.freeze({
-  projects: 64,
-  conversationsPerProject: 200,
-} as const);
+export const PRIVATE_CONNECT_RUNTIME_GRANT_LIMITS =
+  PRIVATE_CONNECT_GRANT_LIMITS;
 
 export interface PrivateConnectRuntimeGrant {
   projectId: string;

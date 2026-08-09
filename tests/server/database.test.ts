@@ -687,10 +687,22 @@ describe("RuntimeStore conversation lifecycle", () => {
 
   it("persists sidebar mode, canonical grouping metadata, and per-project overrides", async () => {
     const { databasePath, workspacePath, store } = await createStore();
+    expect(store.snapshot().settings.desktopNotifications).toBe(true);
     store.updateSettings({
       sidebarMode: "activity",
       projectGrouping: "repository",
       codexBinaryPath: process.platform === "win32" ? "C:\\Tools\\Codex\\codex.exe" : "/opt/codex/bin/codex",
+      desktopNotifications: false,
+      providerIdentityLabels: {
+        codex: "Work account",
+        claude: "Personal account",
+      },
+      keybindings: {
+        search: "u",
+        "new-chat": "y",
+        "toggle-sidebar": "g",
+        "toggle-terminal": "h",
+      },
     });
     const project = store.createProject("Package", workspacePath, {
       normalizedPath: workspacePath,
@@ -711,6 +723,17 @@ describe("RuntimeStore conversation lifecycle", () => {
       sidebarMode: "activity",
       projectGrouping: "repository",
       codexBinaryPath: process.platform === "win32" ? "C:\\Tools\\Codex\\codex.exe" : "/opt/codex/bin/codex",
+      desktopNotifications: false,
+      providerIdentityLabels: {
+        codex: "Work account",
+        claude: "Personal account",
+      },
+      keybindings: {
+        search: "u",
+        "new-chat": "y",
+        "toggle-sidebar": "g",
+        "toggle-terminal": "h",
+      },
     });
     expect(reopened.project(project.id)).toMatchObject({
       name: "App package",
@@ -719,6 +742,52 @@ describe("RuntimeStore conversation lifecycle", () => {
       repositoryRelativePath: "packages/app",
       groupingMode: "repository-path",
       gitRepositoryLimit: 256,
+    });
+    reopened.close();
+  });
+
+  it("persists thread pinning and snoozing across restart", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const pinnedAt = "2026-08-09T09:00:00.000Z";
+    const snoozedUntil = "2026-08-10T09:00:00.000Z";
+
+    expect(store.updateConversation(conversation.id, {
+      pinnedAt,
+      snoozedUntil,
+    })).toMatchObject({ pinnedAt, snoozedUntil });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.conversation(conversation.id)).toMatchObject({
+      pinnedAt,
+      snoozedUntil,
+    });
+    expect(reopened.updateConversation(conversation.id, {
+      pinnedAt: null,
+      snoozedUntil: null,
+    })).toMatchObject({ pinnedAt: null, snoozedUntil: null });
+    reopened.close();
+  });
+
+  it("falls back safely when optional settings JSON is corrupted", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    store.close();
+    const database = new Database(databasePath);
+    database.prepare(`
+      UPDATE app_state
+      SET provider_identity_labels_json = ?, keybindings_json = ?
+      WHERE id = 1
+    `).run("{broken", "{broken");
+    database.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.snapshot().settings.providerIdentityLabels).toEqual({});
+    expect(reopened.snapshot().settings.keybindings).toEqual({
+      search: "k",
+      "new-chat": "n",
+      "toggle-sidebar": "b",
+      "toggle-terminal": "j",
     });
     reopened.close();
   });

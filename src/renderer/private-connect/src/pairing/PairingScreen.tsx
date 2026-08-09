@@ -35,3 +35,15 @@ export function WaitingScreen({ comparisonCode }: { comparisonCode: string }): R
     </ConnectCard>
   );
 }
+
+export function OfflineScreen({ onRetry }: { onRetry: () => void }): React.JSX.Element {
+  return (
+    <ConnectCard title="Your Inertia computer is offline">
+      <p>Reconnect this browser to the private Tailscale host, then try again.</p>
+      <button type="button" onClick={onRetry}>Try again</button>
+      <p className="muted offline-privacy">
+        The installed app shell works offline. Conversations and API responses are never stored in its offline cache.
+      </p>
+    </ConnectCard>
+  );
+}

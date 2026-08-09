@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
 import { useGlobalShortcuts } from "../../src/renderer/src/hooks/useGlobalShortcuts";
+import { DEFAULT_APP_KEYBINDINGS } from "../../src/shared/keybindings";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -14,6 +15,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
 }): React.JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   useGlobalShortcuts({
+    keybindings: DEFAULT_APP_KEYBINDINGS,
     createConversation: vi.fn(),
     mobileNavigation: false,
     suspended: false,
@@ -36,6 +38,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
         open={paletteOpen}
         projects={[]}
         conversations={[]}
+        newThreadShortcut="Ctrl+N"
         onClose={() => setPaletteOpen(false)}
         onSelectProject={vi.fn()}
         onSelectConversation={vi.fn()}
@@ -50,6 +53,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
 function StableListenerHarness(): React.JSX.Element {
   const [count, setCount] = useState(0);
   useGlobalShortcuts({
+    keybindings: DEFAULT_APP_KEYBINDINGS,
     createConversation: vi.fn(),
     mobileNavigation: false,
     suspended: false,
@@ -77,6 +81,7 @@ function SuspendedShortcutHarness({
   setSidebarCollapsed: () => void;
 }): React.JSX.Element {
   useGlobalShortcuts({
+    keybindings: DEFAULT_APP_KEYBINDINGS,
     createConversation,
     mobileNavigation: false,
     suspended: true,
@@ -89,7 +94,7 @@ function SuspendedShortcutHarness({
 }
 
 describe("global shortcut DOM integration", () => {
-  it("does not re-bind global listeners after an unrelated render", () => {
+  it("does not re-bind global listeners after an unrelated render", async () => {
     const add = vi.spyOn(window, "addEventListener");
     const remove = vi.spyOn(window, "removeEventListener");
     const view = render(<StableListenerHarness />);
@@ -97,7 +102,7 @@ describe("global shortcut DOM integration", () => {
       ([name]) => name === "keydown" || name === "keyup",
     ).length;
 
-    expect(shortcutAdds()).toBe(2);
+    await waitFor(() => expect(shortcutAdds()).toBe(2));
     fireEvent.click(screen.getByRole("button", { name: "Unrelated update 0" }));
     expect(screen.getByRole("button", { name: "Unrelated update 1" }))
       .toBeInTheDocument();
@@ -109,9 +114,13 @@ describe("global shortcut DOM integration", () => {
     )).toHaveLength(2);
   });
 
-  it("keeps palette input through the complete chord released from a terminal widget", () => {
+  it("keeps palette input through the complete chord released from a terminal widget", async () => {
+    const add = vi.spyOn(window, "addEventListener");
     const terminalKeyUp = vi.fn();
     render(<ShortcutHarness onTerminalKeyUp={terminalKeyUp} />);
+    await waitFor(() => expect(add.mock.calls.filter(
+      ([name]) => name === "keydown" || name === "keyup",
+    )).toHaveLength(2));
     const terminal = screen.getByRole("textbox", { name: "Terminal input" });
     terminal.focus();
 
@@ -133,7 +142,8 @@ describe("global shortcut DOM integration", () => {
       .toHaveAttribute("aria-selected", "true");
   });
 
-  it("consumes app shortcuts without acting while a modal owns focus", () => {
+  it("consumes app shortcuts without acting while a modal owns focus", async () => {
+    const add = vi.spyOn(window, "addEventListener");
     const createConversation = vi.fn();
     const setActiveTool = vi.fn();
     const setPaletteOpen = vi.fn();
@@ -146,6 +156,9 @@ describe("global shortcut DOM integration", () => {
         setSidebarCollapsed={setSidebarCollapsed}
       />,
     );
+    await waitFor(() => expect(add.mock.calls.filter(
+      ([name]) => name === "keydown" || name === "keyup",
+    )).toHaveLength(2));
     const prompt = screen.getByRole("textbox", { name: "Duo prompt" });
     prompt.focus();
 
@@ -167,7 +180,8 @@ describe("global shortcut DOM integration", () => {
     expect(setSidebarCollapsed).not.toHaveBeenCalled();
   });
 
-  it("does not run background shortcuts from inside the command palette", () => {
+  it("does not run background shortcuts from inside the command palette", async () => {
+    const add = vi.spyOn(window, "addEventListener");
     const createConversation = vi.fn();
     const setActiveTool = vi.fn();
     const setPaletteOpen = vi.fn();
@@ -175,6 +189,7 @@ describe("global shortcut DOM integration", () => {
 
     function PaletteHarness(): React.JSX.Element {
       useGlobalShortcuts({
+        keybindings: DEFAULT_APP_KEYBINDINGS,
         createConversation,
         mobileNavigation: false,
         suspended: false,
@@ -188,6 +203,7 @@ describe("global shortcut DOM integration", () => {
           open
           projects={[]}
           conversations={[]}
+          newThreadShortcut="Ctrl+N"
           onClose={vi.fn()}
           onSelectProject={vi.fn()}
           onSelectConversation={vi.fn()}
@@ -199,6 +215,9 @@ describe("global shortcut DOM integration", () => {
     }
 
     render(<PaletteHarness />);
+    await waitFor(() => expect(add.mock.calls.filter(
+      ([name]) => name === "keydown" || name === "keyup",
+    )).toHaveLength(2));
     const search = screen.getByRole("combobox", {
       name: "Search commands, projects, and threads",
     });

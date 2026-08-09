@@ -124,6 +124,17 @@ describe("response Markdown", () => {
     ].join("\n"));
   });
 
+  it("neutralizes spreadsheet formulas in provider-authored CSV cells", () => {
+    expect(tableAsCsv([[
+      "=SUM(1,2)",
+      "+cmd",
+      " -2",
+      "@lookup",
+      "\t=hidden",
+      "ordinary",
+    ]])).toBe(`"'=SUM(1,2)",'+cmd,' -2,'@lookup,'\t=hidden,ordinary`);
+  });
+
   it("normalizes Windows paths case-insensitively without allowing traversal", () => {
     expect(resolveResponseLink("C:\\Work Space\\Project", "src\\index.ts")).toEqual({ kind: "project", relativePath: "src/index.ts", action: "reveal" });
     expect(resolveResponseLink("C:\\Work Space\\Project", "C:\\Work Space\\Project\\src\\index.ts:42:7")).toEqual({ kind: "project", relativePath: "src/index.ts:42:7", action: "reveal" });

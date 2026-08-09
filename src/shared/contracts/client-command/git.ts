@@ -291,4 +291,16 @@ export const gitCommandSchemas = [
       payload: z.object(projectWithOptionalConversation).strict(),
     })
     .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.pr.create"),
+      payload: z.object({
+        ...projectWithOptionalConversation,
+        title: z.string().trim().min(1).max(256),
+        body: z.string().max(64 * 1024),
+        draft: z.boolean(),
+      }).strict(),
+    })
+    .strict(),
 ] as const;

@@ -4,10 +4,12 @@ import {
   MAX_PROMPT_STASH_ENTRIES,
   PROMPT_STASH_STORAGE_KEY,
   addPromptStashEntry,
+  advanceRecurringPrompt,
   promptStashRouteMatches,
   persistPromptStashUpdate,
   readPromptStash,
   removePromptStashEntry,
+  setPromptStashRecurrence,
   type PromptStashEntry,
   writePromptStash,
 } from "../../src/renderer/src/utils/promptStash";
@@ -110,5 +112,35 @@ describe("bounded prompt stash", () => {
       () => [],
     )).toBeNull();
     expect(entries).toHaveLength(1);
+  });
+
+  it("keeps recurring prompts after restore and advances their reminder", () => {
+    const entries = addPromptStashEntry([], "Review open work.", route, {
+      id: "recurring-one",
+      now: "2026-07-29T10:00:00.000Z",
+    });
+    const scheduled = setPromptStashRecurrence(
+      entries,
+      "recurring-one",
+      "daily",
+      Date.parse("2026-07-29T10:00:00.000Z"),
+    );
+    expect(scheduled[0]).toMatchObject({
+      recurrence: "daily",
+      nextDueAt: "2026-07-30T10:00:00.000Z",
+    });
+    expect(advanceRecurringPrompt(
+      scheduled,
+      "recurring-one",
+      Date.parse("2026-07-30T10:00:00.000Z"),
+    )[0]).toMatchObject({
+      recurrence: "daily",
+      nextDueAt: "2026-07-31T10:00:00.000Z",
+    });
+    expect(setPromptStashRecurrence(
+      scheduled,
+      "recurring-one",
+      undefined,
+    )[0]).not.toHaveProperty("recurrence");
   });
 });

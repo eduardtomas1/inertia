@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { gitProcessEnvironment } from "./git/environment";
+import { runGit as runBoundedGit } from "./git/runner";
+import { GitError } from "./git/types";
 
 export class CheckpointError extends Error {}
 
@@ -46,76 +46,40 @@ function parseTaggedCheckpointPaths(
   };
 }
 
-function runGit(
+async function runGit(
   cwd: string,
   args: string[],
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: NodeJS.ProcessEnv = {},
   input?: Buffer,
-  acceptedExitCodes: readonly number[] = [0],
   maxStdoutBytes = 1024 * 1024,
   deadlineAt?: number,
 ): Promise<RunResult> {
-  const deadlineTimeoutMs = deadlineAt === undefined
-    ? 20_000
-    : Math.floor(deadlineAt - Date.now());
-  if (deadlineTimeoutMs <= 0) {
-    return Promise.reject(
-      new CheckpointError("Checkpoint operation timed out."),
-    );
-  }
-  const timeoutMs = Math.min(20_000, deadlineTimeoutMs);
-  return new Promise((resolveRun, rejectRun) => {
-    const child = spawn("git", args, {
-      cwd,
-      shell: false,
-      windowsHide: true,
-      stdio: [input ? "pipe" : "ignore", "pipe", "pipe"],
-      env: gitProcessEnvironment(environment),
+  try {
+    const result = await runBoundedGit(cwd, args, {
+      deadlineAt,
+      environment,
+      input,
+      maxOutputBytes: maxStdoutBytes,
+      timeoutMs: 20_000,
+      failureMessage: "Git could not create the checkpoint.",
     });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let stdoutLimitExceeded = false;
-    const timer = setTimeout(() => { child.kill("SIGKILL"); rejectRun(new CheckpointError("Checkpoint operation timed out.")); }, timeoutMs);
-    timer.unref();
-    if (input && child.stdin) {
-      child.stdin.on("error", () => undefined);
-      child.stdin.end(input);
+    return { stdout: result.stdout, stderr: result.stderr };
+  } catch (error) {
+    if (error instanceof GitError) {
+      if (error.code === "timeout") {
+        throw new CheckpointError("Checkpoint operation timed out.");
+      }
+      if (error.code === "output-limit") {
+        throw new CheckpointError(
+          "The checkpoint contains too many file paths.",
+        );
+      }
+      if (error.code === "not-repository") {
+        throw new CheckpointError("not-repository");
+      }
     }
-    child.stdout!.on("data", (chunk: Buffer) => {
-      if (stdoutBytes >= maxStdoutBytes) {
-        stdoutLimitExceeded = true;
-        child.kill("SIGKILL");
-        return;
-      }
-      const part = chunk.subarray(0, maxStdoutBytes - stdoutBytes);
-      stdout.push(part);
-      stdoutBytes += part.length;
-      if (part.length < chunk.length) {
-        stdoutLimitExceeded = true;
-        child.kill("SIGKILL");
-      }
-    });
-    child.stderr!.on("data", (chunk: Buffer) => {
-      if (stderrBytes >= 16 * 1024) return;
-      const part = chunk.subarray(0, 16 * 1024 - stderrBytes);
-      stderr.push(part);
-      stderrBytes += part.length;
-    });
-    child.once("error", () => { clearTimeout(timer); rejectRun(new CheckpointError("Git could not create the checkpoint.")); });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      const result = {
-        stdout: Buffer.concat(stdout),
-        stderr: Buffer.concat(stderr),
-      };
-      if (stdoutLimitExceeded) {
-        rejectRun(new CheckpointError("The checkpoint contains too many file paths."));
-      } else if (code !== null && acceptedExitCodes.includes(code)) resolveRun(result);
-      else rejectRun(new CheckpointError(result.stderr.toString("utf8").toLowerCase().includes("not a git repository") ? "not-repository" : "Git could not create the checkpoint."));
-    });
-  });
+    throw new CheckpointError("Git could not create the checkpoint.");
+  }
 }
 
 function checkpointGitArguments(
@@ -177,7 +141,6 @@ async function checkpointEnvironment(
       checkpointGitArguments(["rev-parse", "--show-object-format"]),
       isolatedConfiguration,
       undefined,
-      [0],
       1024 * 1024,
       deadlineAt,
     )
@@ -193,7 +156,6 @@ async function checkpointEnvironment(
       ]),
       isolatedConfiguration,
       undefined,
-      [0],
       1024 * 1024,
       deadlineAt,
     )
@@ -220,7 +182,6 @@ async function checkpointEnvironment(
     ],
     isolatedConfiguration,
     undefined,
-    [0],
     1024 * 1024,
     deadlineAt,
   );
@@ -254,7 +215,6 @@ export async function createCheckpoint(
   await mkdir(storageDirectory, { recursive: true, mode: 0o700 });
   const indexPath = resolve(storageDirectory, `${checkpointId}.index`);
   const baseEnvironment = {
-    ...process.env,
     GIT_INDEX_FILE: indexPath,
     GIT_AUTHOR_NAME: "Inertia",
     GIT_AUTHOR_EMAIL: "checkpoint@inertia.local",
@@ -269,9 +229,8 @@ export async function createCheckpoint(
         await runGit(
           repositoryPath,
           checkpointGitArguments(["rev-parse", "--verify", "HEAD"]),
-          process.env,
+          {},
           undefined,
-          [0],
           1024 * 1024,
           options.deadlineAt,
         )
@@ -291,9 +250,8 @@ export async function createCheckpoint(
           "-t",
           "-z",
         ]),
-        process.env,
+        {},
         undefined,
-        [0],
         MAX_CHECKPOINT_PATH_BYTES,
         options.deadlineAt,
       )
@@ -304,9 +262,8 @@ export async function createCheckpoint(
       await runGit(
         repositoryPath,
         checkpointGitArguments(["ls-files", "--stage", "-z"]),
-        process.env,
+        {},
         undefined,
-        [0],
         MAX_CHECKPOINT_PATH_BYTES,
         options.deadlineAt,
       )
@@ -325,7 +282,6 @@ export async function createCheckpoint(
         ["update-index", "-z", "--index-info"],
         environment,
         indexEntries,
-        [0],
         1024 * 1024,
         options.deadlineAt,
       );
@@ -335,7 +291,6 @@ export async function createCheckpoint(
         ["read-tree", "--empty"],
         environment,
         undefined,
-        [0],
         1024 * 1024,
         options.deadlineAt,
       );
@@ -352,7 +307,6 @@ export async function createCheckpoint(
         ]),
         environment,
         includedPaths,
-        [0],
         1024 * 1024,
         options.deadlineAt,
       );
@@ -363,7 +317,6 @@ export async function createCheckpoint(
         ["write-tree"],
         environment,
         undefined,
-        [0],
         1024 * 1024,
         options.deadlineAt,
       )
@@ -376,7 +329,6 @@ export async function createCheckpoint(
         commitArgs,
         environment,
         undefined,
-        [0],
         1024 * 1024,
         options.deadlineAt,
       )
@@ -394,7 +346,6 @@ export async function createCheckpoint(
       ]),
       baseEnvironment,
       undefined,
-      [0],
       1024 * 1024,
       options.deadlineAt,
     );
@@ -424,7 +375,6 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
   );
   const indexPath = resolve(restoreDirectory, `${restoreId}.index`);
   const baseEnvironment = {
-    ...process.env,
     GIT_INDEX_FILE: indexPath,
   };
   try {
@@ -442,9 +392,8 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
       await runGit(
         repositoryPath,
         checkpointGitArguments(["ls-files", "--stage", "-z"]),
-        process.env,
+        {},
         undefined,
-        [0],
         MAX_CHECKPOINT_PATH_BYTES,
       )
     ).stdout;
@@ -452,9 +401,8 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
       await runGit(
         repositoryPath,
         checkpointGitArguments(["ls-files", "--cached", "-t", "-z"]),
-        process.env,
+        {},
         undefined,
-        [0],
         MAX_CHECKPOINT_PATH_BYTES,
       )
     ).stdout;

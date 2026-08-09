@@ -37,6 +37,15 @@ encrypted digest of a non-expired session remains local so that the same
 approved browser can reconnect after unlock; while locked, session lookup and
 every request fail closed.
 
+The installable browser client caches only its generated HTML, scripts, styles,
+manifest, and icons. Its service worker bypasses every `/api/` request and never
+adds runtime responses, transcripts, cookies, CSRF values, or pairing fragments
+to the cache. When the host is unreachable, an already-open tab may keep its
+in-memory view visible but disables mutations; a cold offline launch shows only
+the app shell. Notification navigation carries at most a validated conversation
+identifier in a fragment, which the client consumes before rendering so it is
+not sent to the gateway.
+
 Disabling, revoking, and reducing a device grant first commit an encrypted
 authority-reduction marker, which immediately rejects newly arriving work.
 Already-admitted mutations drain through one bounded gate before the reduced

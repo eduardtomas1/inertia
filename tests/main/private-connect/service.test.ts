@@ -147,6 +147,20 @@ describe("Private Connect service lifecycle", () => {
     expect(service.state().pendingPairings).toHaveLength(1);
   });
 
+  it("removes directional controls from untrusted device labels", async () => {
+    const service = await createService();
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+
+    await service.pairStart({
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId,
+      deviceLabel: "Browser\u202Ecod.exe",
+    }, "example");
+
+    expect(service.state().pendingPairings[0]?.deviceLabel).toBe("Browser cod.exe");
+  });
+
   it("does not expose an approved browser session before its grant is durable", async () => {
     const memory = testStore();
     const service = await createServiceWith(memory);

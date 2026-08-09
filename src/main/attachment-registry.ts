@@ -413,6 +413,16 @@ export class AttachmentRegistry {
     );
   }
 
+  usage(): AttachmentStorageReservation {
+    return {
+      records: this.reservedRecords + this.records.size,
+      bytes: this.reservedBytes + [...this.records.values()].reduce(
+        (total, { size }) => total + size,
+        0,
+      ),
+    };
+  }
+
   async import(values: readonly unknown[]): Promise<ChatAttachment[]> {
     if (this.disposed) {
       throw new Error("Temporary attachment storage is no longer available.");

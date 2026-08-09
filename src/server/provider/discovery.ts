@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import {
+  credentialFreeProviderEnvironment,
+  environmentValue,
   executableCandidates,
   providerChildEnvironment,
   providerEnvironment,
@@ -210,10 +212,32 @@ export async function detectProvider(
   const discoveredEnvironment = await providerEnvironment(
     options.refreshEnvironment === true,
   );
+  const probeAuthentication = options.probeAuthentication !== false;
   const environment: ProviderEnvironment = {
-    env: providerChildEnvironment(providerId, discoveredEnvironment.env),
+    env: probeAuthentication
+      ? providerChildEnvironment(providerId, discoveredEnvironment.env)
+      : credentialFreeProviderEnvironment(discoveredEnvironment.env),
     pathEntries: discoveredEnvironment.pathEntries,
   };
+  const candidateEnvironment: ProviderEnvironment = !probeAuthentication
+    && providerId === "codex"
+    ? {
+        env: {
+          ...environment.env,
+          ...Object.fromEntries(
+            ["CODEX_HOME", "CODEX_INSTALL_DIR"].flatMap((name) => {
+              const value = environmentValue(
+                discoveredEnvironment.env,
+                name,
+                process.platform,
+              );
+              return value ? [[name, value]] : [];
+            }),
+          ),
+        },
+        pathEntries: environment.pathEntries,
+      }
+    : environment;
   const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
     ? [command, "cursor-agent"]
     : [command];
@@ -221,9 +245,13 @@ export async function detectProvider(
     && process.platform === "win32"
     && command.toLocaleLowerCase("en-US") === PROVIDER_INFO.codex.command
     && dependencies.executableCandidates === undefined
-    ? await windowsCodexExecutableCandidates(environment, cwd)
+    ? await windowsCodexExecutableCandidates(candidateEnvironment, cwd)
     : [...new Set((await Promise.all(candidateCommands.map(
-      async (candidate) => await resolveCandidates(candidate, environment, cwd),
+      async (candidate) => await resolveCandidates(
+        candidate,
+        candidateEnvironment,
+        cwd,
+      ),
     ))).flat())];
   if (candidates.length === 0) {
     return {
@@ -284,6 +312,21 @@ export async function detectProvider(
         : cursorWithoutAcp
         ? "Cursor CLI found, but ACP is unavailable"
         : providerId === "codex" ? "Codex CLI was found but failed to start" : statusMessage("error", "unknown"),
+    };
+  }
+
+  if (!probeAuthentication) {
+    return {
+      provider,
+      available: true,
+      executable: selected.executable,
+      ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      statusMessage: providerId === "codex" && !selected.appServerReady
+        ? "Codex App Server is unsupported; update the selected CLI"
+        : `${provider.name} is installed; authentication was not checked`,
     };
   }
 

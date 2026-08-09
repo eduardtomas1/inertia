@@ -10,6 +10,7 @@ import {
   ipcMain,
   net,
   nativeTheme,
+  Notification,
   protocol,
   safeStorage,
   screen,
@@ -29,7 +30,12 @@ import {
   builtInKimiClaudeBackendProfile,
   KIMI_CLAUDE_BUILTIN_PROFILE_ID,
 } from "../shared/claude-backend-profiles.js";
-import { parseOpenProjectPathRequest } from "../shared/desktop.js";
+import {
+  type AppHealthSnapshot,
+  type AppProcessHealth,
+  parseDesktopNotificationRequest,
+  parseOpenProjectPathRequest,
+} from "../shared/desktop.js";
 import {
   safeHttpUrl,
 } from "../shared/preview-url.js";
@@ -66,6 +72,10 @@ import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
 import {
+  activateThreadNotification,
+  waitForThreadNotificationWindowLoad,
+} from "./thread-notification-activation.js";
+import {
   WINDOW_APPEARANCE_FILENAME,
   isWindowThemePreference,
   readWindowThemePreference,
@@ -91,6 +101,10 @@ const IPC = {
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
+  showThreadNotification: "inertia:show-thread-notification",
+  threadNotificationActivated: "inertia:thread-notification-activated",
+  getAppHealth: "inertia:get-app-health",
+  clearAppCache: "inertia:clear-app-cache",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
   previewSetBounds: "inertia:preview-set-bounds",
@@ -119,6 +133,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow: BrowserWindow | null = null;
+let mainWindowCreation: Promise<void> | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let privateConnectHost: PrivateConnectHost | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
@@ -159,6 +174,7 @@ let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
 let attachmentCleanup: Promise<void> = Promise.resolve();
 let attachmentStorageDirectory: string | null = null;
+let runtimeDataDirectory: string | null = null;
 let attachmentReservation: AttachmentStorageReservation = {
   records: 0,
   bytes: 0,
@@ -193,6 +209,72 @@ function attachmentRegistry(): AttachmentRegistry {
     reservedBytes: attachmentReservation.bytes,
   });
   return importedAttachments;
+}
+
+type ElectronAppMetric = ReturnType<typeof app.getAppMetrics>[number];
+
+function processHealth(
+  metrics: readonly ElectronAppMetric[],
+  pid: number | null,
+): AppProcessHealth | null {
+  if (pid === null) return null;
+  const metric = metrics.find((candidate) => candidate.pid === pid);
+  if (!metric) return null;
+  return {
+    pid,
+    cpuPercent: Math.max(0, metric.cpu.percentCPUUsage),
+    memoryBytes: Math.max(0, metric.memory.workingSetSize * 1_024),
+  };
+}
+
+async function fixedRegularFileSize(path: string): Promise<number> {
+  try {
+    const metadata = await lstat(path);
+    return metadata.isFile() && !metadata.isSymbolicLink()
+      ? metadata.size
+      : 0;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
+}
+
+async function collectAppHealth(): Promise<AppHealthSnapshot> {
+  const metrics = app.getAppMetrics();
+  const runtime = runtimeSupervisor?.snapshot() ?? null;
+  const rendererPid = mainWindow && !mainWindow.isDestroyed()
+    ? mainWindow.webContents.getOSProcessId()
+    : null;
+  const databaseBytes = runtimeDataDirectory
+    ? (await Promise.all([
+        "inertia.sqlite",
+        "inertia.sqlite-wal",
+        "inertia.sqlite-shm",
+      ].map((name) => fixedRegularFileSize(join(runtimeDataDirectory!, name)))))
+        .reduce((total, size) => total + size, 0)
+    : 0;
+  const cacheBytes = mainWindow && !mainWindow.isDestroyed()
+    ? await mainWindow.webContents.session.getCacheSize()
+    : 0;
+  const attachmentUsage = importedAttachments?.usage()
+    ?? attachmentReservation;
+  return {
+    sampledAt: new Date().toISOString(),
+    totalMemoryBytes: metrics.reduce(
+      (total, metric) => total + Math.max(
+        0,
+        metric.memory.workingSetSize * 1_024,
+      ),
+      0,
+    ),
+    mainProcess: processHealth(metrics, process.pid),
+    rendererProcess: processHealth(metrics, rendererPid),
+    runtimeProcess: processHealth(metrics, runtime?.pid ?? null),
+    runtimePhase: runtime?.phase ?? "idle",
+    databaseBytes,
+    cacheBytes,
+    temporaryAttachmentBytes: attachmentUsage.bytes,
+  };
 }
 
 function disposeImportedAttachments(): Promise<void> {
@@ -641,6 +723,46 @@ function registerIpcHandlers(): void {
     await shell.openExternal(url.toString());
   });
 
+  ipcMain.handle(IPC.showThreadNotification, (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const request = parseDesktopNotificationRequest(args[0]);
+    if (!request) throw new Error("Invalid desktop notification request");
+    if (!Notification.isSupported()) return false;
+    const copy = {
+      completed: ["Inertia finished", "A coding task completed."],
+      approval: ["Inertia needs approval", "A coding task is waiting for approval."],
+      input: ["Inertia needs your input", "A coding task is waiting for your answer."],
+      failed: ["Inertia task failed", "A coding task needs attention."],
+    } as const;
+    const [title, body] = copy[request.kind];
+    const notification = new Notification({ title, body });
+    notification.once("click", () => {
+      void activateThreadNotification(request.conversationId, {
+        channel: IPC.threadNotificationActivated,
+        currentWindow: () => mainWindow,
+        createWindow,
+      }).catch((error: unknown) => {
+        console.error("Failed to activate a thread notification", error);
+      });
+    });
+    notification.show();
+    return true;
+  });
+
+  ipcMain.handle(IPC.getAppHealth, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    return await collectAppHealth();
+  });
+
+  ipcMain.handle(IPC.clearAppCache, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error("The app cache is unavailable.");
+    }
+    await mainWindow.webContents.session.clearCache();
+    return await collectAppHealth();
+  });
+
   ipcMain.handle(IPC.previewNavigate, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     return previewBroker.navigate(args[0]);
@@ -704,7 +826,7 @@ function registerIpcHandlers(): void {
   });
 }
 
-async function createWindow(): Promise<void> {
+async function createMainWindow(): Promise<void> {
   const renderer = rendererLocation();
   trustedRendererUrl = renderer.isUrl
     ? new URL(renderer.target).href
@@ -781,20 +903,31 @@ async function createWindow(): Promise<void> {
   }
 }
 
+function createWindow(): Promise<void> {
+  if (mainWindowCreation) return mainWindowCreation;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return waitForThreadNotificationWindowLoad(mainWindow);
+  }
+  const creation = createMainWindow();
+  mainWindowCreation = creation;
+  const clearCreation = (): void => {
+    if (mainWindowCreation === creation) mainWindowCreation = null;
+  };
+  void creation.then(clearCreation, clearCreation);
+  return creation;
+}
+
 function focusMainWindow(): void {
-  if (!mainWindow) {
-    if (app.isReady()) {
-      void createWindow();
-    }
-    return;
-  }
-
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore();
-  }
-
-  mainWindow.show();
-  mainWindow.focus();
+  if (!app.isReady()) return;
+  void createWindow().then(() => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  }).catch((error: unknown) => {
+    console.error("Failed to focus the Inertia window", error);
+  });
 }
 
 function finishQuitAfterCleanup(): void {
@@ -840,6 +973,7 @@ async function bootstrap(): Promise<void> {
   const dataDirectory = process.env.INERTIA_DATA_DIR
     ? resolve(process.env.INERTIA_DATA_DIR)
     : join(app.getPath("userData"), "runtime");
+  runtimeDataDirectory = dataDirectory;
   const defaultWorkspacePath = process.env.INERTIA_WORKSPACE_DIR
     ? resolve(process.env.INERTIA_WORKSPACE_DIR)
     : join(app.getPath("home"), "Inertia");

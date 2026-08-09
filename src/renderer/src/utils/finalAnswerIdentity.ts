@@ -2,7 +2,11 @@ import {
   isKimiCodingModelId,
   kimiCodingModelDisplayName,
 } from "../../../shared/claude-backend-profiles";
-import type { ModelSelection } from "../../../shared/model-routing";
+import {
+  legacyProviderIdForHarness,
+  type ModelSelection,
+} from "../../../shared/model-routing";
+import type { ProviderIdentityLabels } from "../../../shared/provider-identities";
 
 const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "codex-app-server": "Codex",
@@ -43,8 +47,14 @@ function persistedModelLabel(selection: ModelSelection): string {
  * stops at the persisted harness/backend route; the exact model remains
  * available in the final-answer identity and run details.
  */
-export function activeWorkIdentityLabel(selection: ModelSelection): string {
-  const harness = HARNESS_LABELS[selection.harnessId] ?? selection.harnessId;
+export function activeWorkIdentityLabel(
+  selection: ModelSelection,
+  providerIdentityLabels: ProviderIdentityLabels = {},
+): string {
+  const providerId = legacyProviderIdForHarness(selection.harnessId);
+  const harness = (providerId && providerIdentityLabels[providerId])
+    ?? HARNESS_LABELS[selection.harnessId]
+    ?? selection.harnessId;
   return `${harness} · ${selection.backendProfileDisplayName}`;
 }
 

@@ -10,6 +10,7 @@ describe("restricted CLI runner", () => {
     expect(restrictedCliEnvironment({
       PATH: "/usr/bin",
       HOME: "/Users/test",
+      GH_CONFIG_DIR: "/Users/test/.config/custom-gh",
       XDG_CONFIG_HOME: "/Users/test/.config",
       GH_TOKEN: "secret",
       GITHUB_TOKEN: "secret",
@@ -17,6 +18,7 @@ describe("restricted CLI runner", () => {
       SENTINEL_SECRET: "secret",
     }, "darwin")).toEqual({
       NO_COLOR: "1",
+      GH_CONFIG_DIR: "/Users/test/.config/custom-gh",
       HOME: "/Users/test",
       PATH: "/usr/bin",
       XDG_CONFIG_HOME: "/Users/test/.config",

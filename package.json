@@ -17,6 +17,7 @@
     "build:bundle": "electron-vite build && npm run build:private-connect && npm run check:renderer-bundle",
     "check:renderer-bundle": "node scripts/check-renderer-bundle.mjs",
     "preview": "electron-vite preview",
+    "prestatus:runtime": "electron-vite build --config scripts/runtime-status.vite.config.mjs --logLevel error",
     "status:runtime": "node out/main/runtime-status-cli.js",
     "check:architecture": "node scripts/check-architecture.mjs",
     "lint": "npm run lint:standard && npm run lint:type-aware",

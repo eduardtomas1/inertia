@@ -66,6 +66,11 @@ export default function App({
     if (isSocketOnlyFailure(error) || hasHttpStatus(error)) setHostUnavailable(false);
     else setHostUnavailable(true);
   }, []);
+  const demoteSocket = useCallback((candidate: PrivateConnectSocket, error: unknown): void => {
+    if (!isSocketOnlyFailure(error)) return;
+    setSocket((current) => current === candidate ? null : current);
+    candidate.close();
+  }, []);
 
   useEffect(() => {
     const offline = (): void => setHostUnavailable(true);
@@ -227,15 +232,19 @@ export default function App({
   }, [clearWorkspace, noteRequestFailure, pair.kind, readyCsrf]);
 
   const request = useCallback(async (value: Parameters<PrivateConnectSocket["request"]>[0], csrf: string) => {
+    const currentSocket = socket;
     try {
-      const response = socket ? await socket.request(value) : await apiRequest(value, csrf);
+      const response = currentSocket
+        ? await currentSocket.request(value)
+        : await apiRequest(value, csrf);
       setHostUnavailable(false);
       return response;
     } catch (error) {
+      if (currentSocket) demoteSocket(currentSocket, error);
       noteRequestFailure(error);
       throw error;
     }
-  }, [noteRequestFailure, socket]);
+  }, [demoteSocket, noteRequestFailure, socket]);
 
   useEffect(() => {
     if (pair.kind !== "waiting") return;
@@ -319,11 +328,14 @@ export default function App({
     };
     const timer = window.setInterval(() => {
       void refresh().catch((error) => {
-        if (!cancelled) setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "Private Connect state could not be refreshed." } : current);
+        if (!cancelled) {
+          demoteSocket(socket, error);
+          setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "Private Connect state could not be refreshed." } : current);
+        }
       });
     }, 5_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [applyConversationResponse, applyStateResponse, readyCsrf, selectedConversation, socket]);
+  }, [applyConversationResponse, applyStateResponse, demoteSocket, readyCsrf, selectedConversation, socket]);
 
   useLayoutEffect(() => {
     const messages = messagesRef.current;

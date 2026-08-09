@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  activeConversationIsVisible,
   activateNotificationConversation,
   formatAppShortcutLabel,
 } from "../../src/renderer/src/components/AppLayout";
@@ -42,6 +43,26 @@ function conversation(
 }
 
 describe("thread notifications", () => {
+  it("treats settings and modal overlays as obscuring the active chat", () => {
+    const visible = {
+      view: "workspace" as const,
+      commitDialogOpen: false,
+      pullRequestDialogOpen: false,
+      multiSpawnOpen: false,
+      paletteOpen: false,
+      activityOpen: false,
+      providerAuthOpen: false,
+      mobileSidebarOpen: false,
+    };
+    expect(activeConversationIsVisible(visible)).toBe(true);
+    expect(activeConversationIsVisible({ ...visible, view: "settings" }))
+      .toBe(false);
+    expect(activeConversationIsVisible({ ...visible, commitDialogOpen: true }))
+      .toBe(false);
+    expect(activeConversationIsVisible({ ...visible, paletteOpen: true }))
+      .toBe(false);
+  });
+
   it("formats remapped shortcut labels for the active platform", () => {
     expect(formatAppShortcutLabel("darwin", "y")).toBe("⌘Y");
     expect(formatAppShortcutLabel("win32", "y")).toBe("Ctrl+Y");

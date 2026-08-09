@@ -149,6 +149,34 @@ describe("Private Connect browser lifecycle", () => {
     expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
   });
 
+  it("demotes an unresponsive live socket and starts the reconnect cycle", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    render(<App initialPairingFragment={null} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Conversation/u })).toBeInTheDocument());
+    const initialConnectCalls = vi.mocked(connectPrivateConnectSocket).mock.calls.length;
+    socket.close.mockClear();
+    socket.request.mockRejectedValueOnce(Object.assign(
+      new Error("The Private Connect live request timed out."),
+      { privateConnectTransport: "private-connect-websocket" },
+    ));
+    socket.close.mockImplementationOnce(() => {
+      notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable);
+    });
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: /Conversation/u }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(socket.close).toHaveBeenCalled();
+    expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(vi.mocked(connectPrivateConnectSocket)).toHaveBeenCalledTimes(initialConnectCalls + 1);
+  });
+
   it("purges stale authority and reconnects without requiring another pairing", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
     render(<App initialPairingFragment={null} />);

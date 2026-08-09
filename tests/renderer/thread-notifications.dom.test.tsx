@@ -72,6 +72,7 @@ describe("thread notification lifecycle", () => {
       <ThreadNotifications
         snapshot={idle}
         documentActive={false}
+        activeConversationVisible
         enabled
         onActivate={onActivate}
       />,
@@ -80,6 +81,7 @@ describe("thread notification lifecycle", () => {
       <ThreadNotifications
         snapshot={completed}
         documentActive={false}
+        activeConversationVisible
         enabled
         onActivate={onActivate}
       />,
@@ -90,6 +92,7 @@ describe("thread notification lifecycle", () => {
       <ThreadNotifications
         snapshot={completed}
         documentActive={false}
+        activeConversationVisible
         enabled={false}
         onActivate={onActivate}
       />,
@@ -100,5 +103,65 @@ describe("thread notification lifecycle", () => {
 
     view.unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("suppresses the visible active chat but alerts when an overlay obscures it", () => {
+    const showThreadNotification = vi.fn(async () => true);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        onThreadNotificationActivated: vi.fn(() => vi.fn()),
+        showThreadNotification,
+      },
+    });
+    const idleThread = conversation("idle");
+    const completedThread = conversation("completed");
+    const activeIdle = {
+      ...snapshot(idleThread),
+      activeConversationId: idleThread.id,
+    };
+    const activeCompleted = {
+      ...snapshot(completedThread),
+      activeConversationId: completedThread.id,
+    };
+    const view = render(
+      <ThreadNotifications
+        snapshot={activeIdle}
+        documentActive
+        activeConversationVisible
+        enabled
+        onActivate={vi.fn()}
+      />,
+    );
+    view.rerender(
+      <ThreadNotifications
+        snapshot={activeCompleted}
+        documentActive
+        activeConversationVisible
+        enabled
+        onActivate={vi.fn()}
+      />,
+    );
+    expect(showThreadNotification).not.toHaveBeenCalled();
+
+    view.rerender(
+      <ThreadNotifications
+        snapshot={activeIdle}
+        documentActive
+        activeConversationVisible={false}
+        enabled
+        onActivate={vi.fn()}
+      />,
+    );
+    view.rerender(
+      <ThreadNotifications
+        snapshot={activeCompleted}
+        documentActive
+        activeConversationVisible={false}
+        enabled
+        onActivate={vi.fn()}
+      />,
+    );
+    expect(showThreadNotification).toHaveBeenCalledOnce();
   });
 });

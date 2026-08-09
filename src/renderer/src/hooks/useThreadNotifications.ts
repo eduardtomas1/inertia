@@ -26,6 +26,7 @@ export function threadNotificationKind(
 export function useThreadNotifications(
   snapshot: AppSnapshot | null,
   documentActive: boolean,
+  activeConversationVisible: boolean,
   enabled: boolean,
   onActivate: (conversation: Conversation) => void,
 ): void {
@@ -67,6 +68,7 @@ export function useThreadNotifications(
       ) continue;
       if (
         documentActive
+        && activeConversationVisible
         && snapshot.activeConversationId === conversation.id
       ) continue;
       const notification = window.inertia?.showThreadNotification?.({
@@ -75,18 +77,20 @@ export function useThreadNotifications(
       });
       void notification?.catch(() => undefined);
     }
-  }, [documentActive, enabled, snapshot]);
+  }, [activeConversationVisible, documentActive, enabled, snapshot]);
 }
 
 export function ThreadNotifications(props: {
   snapshot: AppSnapshot | null;
   documentActive: boolean;
+  activeConversationVisible: boolean;
   enabled: boolean;
   onActivate: (conversation: Conversation) => void;
 }): null {
   useThreadNotifications(
     props.snapshot,
     props.documentActive,
+    props.activeConversationVisible,
     props.enabled,
     props.onActivate,
   );

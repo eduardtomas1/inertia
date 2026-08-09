@@ -6,6 +6,7 @@ import {
   nativeBackendProfile,
   nativeModelSelection,
 } from "../../src/shared/model-routing";
+import { defaultSettings } from "../../src/shared/contracts/app";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
 
 const selection = nativeModelSelection({
@@ -653,5 +654,46 @@ describe("server event request-result trust boundary", () => {
     },
   ])("rejects malformed nested $kind state", (result) => {
     expect(() => parseServerEvent(event(result))).toThrow("Malformed server event");
+  });
+});
+
+describe("server event settings trust boundary", () => {
+  const snapshotEvent = (settings: unknown): unknown => ({
+    type: "snapshot.updated",
+    snapshot: {
+      projects: [],
+      conversations: [],
+      runs: [],
+      providers: [],
+      settings,
+      activeProjectId: null,
+      activeConversationId: null,
+    },
+  });
+
+  it("accepts the canonical settings projection", () => {
+    expect(parseServerEvent(snapshotEvent(defaultSettings))).toMatchObject({
+      type: "snapshot.updated",
+    });
+  });
+
+  it.each([
+    ["theme", "sepia"],
+    ["defaultProvider", "gemini"],
+    ["defaultAccessMode", "unrestricted"],
+    ["newThreadMode", "remote"],
+    ["usageDisplayMode", "verbose"],
+    ["interfaceScale", "huge"],
+    ["responseDensity", "dense"],
+    ["workspaceStartupSurface", "terminal"],
+    ["sidebarMode", "folders"],
+    ["projectGrouping", "flat"],
+    ["defaultInteractionMode", "chat"],
+    ["terminalFontSize", 13.5],
+  ])("rejects malformed nested settings.%s", (key, invalidValue) => {
+    expect(() => parseServerEvent(snapshotEvent({
+      ...defaultSettings,
+      [key]: invalidValue,
+    }))).toThrow("Malformed server event");
   });
 });

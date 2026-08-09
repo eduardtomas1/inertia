@@ -175,6 +175,26 @@ export function formatAppShortcutLabel(
   return `${platform === "darwin" ? "⌘" : "Ctrl+"}${key.toUpperCase()}`;
 }
 
+export function activeConversationIsVisible(input: {
+  view: "workspace" | "settings";
+  commitDialogOpen: boolean;
+  pullRequestDialogOpen: boolean;
+  multiSpawnOpen: boolean;
+  paletteOpen: boolean;
+  activityOpen: boolean;
+  providerAuthOpen: boolean;
+  mobileSidebarOpen: boolean;
+}): boolean {
+  return input.view === "workspace"
+    && !input.commitDialogOpen
+    && !input.pullRequestDialogOpen
+    && !input.multiSpawnOpen
+    && !input.paletteOpen
+    && !input.activityOpen
+    && !input.providerAuthOpen
+    && !input.mobileSidebarOpen;
+}
+
 export function AppLayout({
   platform,
   documentActive,
@@ -365,6 +385,16 @@ export function AppLayout({
     if (connection.status !== "online") return;
     return scheduleFrequentSurfacePrefetch();
   }, [connection.status]);
+  const activeConversationVisible = activeConversationIsVisible({
+    view,
+    commitDialogOpen,
+    pullRequestDialogOpen,
+    multiSpawnOpen: multiSpawn.open,
+    paletteOpen,
+    activityOpen,
+    providerAuthOpen: Boolean(providerAuth.provider),
+    mobileSidebarOpen: mobileNavigation && sidebarOpen,
+  });
 
   return (
     <div
@@ -382,6 +412,7 @@ export function AppLayout({
         <ThreadNotifications
           snapshot={connection.snapshot}
           documentActive={documentActive}
+          activeConversationVisible={activeConversationVisible}
           enabled={settings.desktopNotifications}
           onActivate={notificationActions.activate}
         />

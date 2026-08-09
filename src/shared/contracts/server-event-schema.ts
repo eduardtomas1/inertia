@@ -300,12 +300,20 @@ function providerInfo(value: unknown): boolean {
 
 function appSettings(value: unknown): boolean {
   if (!record(value)) return false;
-  const strings = [
-    "theme", "defaultProvider", "defaultModel", "defaultAccessMode",
-    "newThreadMode", "usageDisplayMode", "interfaceScale", "responseDensity",
-    "workspaceStartupSurface", "sidebarMode", "projectGrouping",
-    "defaultReasoningEffort", "defaultInteractionMode", "codexBinaryPath",
-  ];
+  const strings = ["defaultModel", "defaultReasoningEffort", "codexBinaryPath"];
+  const enums = {
+    theme: ["system", "light", "dark"],
+    defaultProvider: ["codex", "claude", "cursor", "opencode"],
+    defaultAccessMode: ["supervised", "auto-edit", "full"],
+    newThreadMode: ["local", "worktree"],
+    usageDisplayMode: ["expanded", "compact", "hidden"],
+    interfaceScale: ["compact", "default", "comfortable", "large"],
+    responseDensity: ["compact", "default", "comfortable"],
+    workspaceStartupSurface: ["summary", "tools"],
+    sidebarMode: ["classic", "activity"],
+    projectGrouping: ["repository", "repository-path", "separate"],
+    defaultInteractionMode: ["build", "plan"],
+  } as const;
   const booleans = [
     "compactSidebar", "showTimestamps", "wrapDiffs", "ignoreWhitespace",
     "showThinking", "defaultCodeWrap", "autoCollapseWorkLog",
@@ -313,8 +321,11 @@ function appSettings(value: unknown): boolean {
     "desktopNotifications",
   ];
   return strings.every((key) => stringField(value, key))
+    && Object.entries(enums).every(([key, options]) => oneOf(value, key, options))
     && booleans.every((key) => booleanField(value, key))
-    && numberField(value, "terminalFontSize")
+    && integerField(value, "terminalFontSize")
+    && Number(value.terminalFontSize) >= 11
+    && Number(value.terminalFontSize) <= 22
     && record(value.providerIdentityLabels)
     && Object.entries(value.providerIdentityLabels).every(([key, label]) => (
       ["codex", "claude", "cursor", "opencode"].includes(key)

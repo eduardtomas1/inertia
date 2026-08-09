@@ -10,18 +10,30 @@ describe("restricted CLI runner", () => {
     expect(restrictedCliEnvironment({
       PATH: "/usr/bin",
       HOME: "/Users/test",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
       GH_CONFIG_DIR: "/Users/test/.config/custom-gh",
       XDG_CONFIG_HOME: "/Users/test/.config",
+      XDG_RUNTIME_DIR: "/run/user/1000",
+      HTTP_PROXY: "http://proxy.example:8080",
+      https_proxy: "http://secure-proxy.example:8443",
+      NO_PROXY: "127.0.0.1,localhost",
+      SSL_CERT_FILE: "/Users/test/.config/company-ca.pem",
       GH_TOKEN: "secret",
       GITHUB_TOKEN: "secret",
       OPENAI_API_KEY: "secret",
       SENTINEL_SECRET: "secret",
     }, "darwin")).toEqual({
       NO_COLOR: "1",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
       GH_CONFIG_DIR: "/Users/test/.config/custom-gh",
       HOME: "/Users/test",
+      HTTP_PROXY: "http://proxy.example:8080",
+      NO_PROXY: "127.0.0.1,localhost",
       PATH: "/usr/bin",
+      SSL_CERT_FILE: "/Users/test/.config/company-ca.pem",
       XDG_CONFIG_HOME: "/Users/test/.config",
+      XDG_RUNTIME_DIR: "/run/user/1000",
+      https_proxy: "http://secure-proxy.example:8443",
     });
   });
 

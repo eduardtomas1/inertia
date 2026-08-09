@@ -1120,6 +1120,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     ["turn user message", "agentTurns", { ...conversationDetail.agentTurns[0], userMessageId: "missing-message" }], ["turn terminal message", "agentTurns", { ...conversationDetail.agentTurns[0], terminalAssistantMessageId: "missing-message" }], ["turn terminal role", "agentTurns", { ...conversationDetail.agentTurns[0], terminalAssistantMessageId: "message-1" }], ["turn checkpoint", "agentTurns", { ...conversationDetail.agentTurns[0], checkpointId: "missing-checkpoint" }],
     ["user message role", "messages", { ...conversationDetail.messages[0], role: "assistant" }], ["user message turn", "messages", { ...conversationDetail.messages[0], turnId: "other-turn" }], ["checkpoint turn", "checkpoints", { ...conversationDetail.checkpoints[0], turnId: "other-turn" }],
     ["artifact turn", "turnGitArtifacts", { ...conversationDetail.turnGitArtifacts[0], turnId: "missing-turn" }], ["artifact run", "turnGitArtifacts", { ...conversationDetail.turnGitArtifacts[0], runId: "other-run" }],
+    ["activity run", "activities", { ...conversationDetail.activities[0], runId: "other-run" }], ["subagent run", "subagents", { ...conversationDetail.subagents[0], runId: "other-run" }], ["reasoning run", "reasonings", { ...conversationDetail.reasonings[0], runId: "other-run" }], ["plan run", "plans", { ...conversationDetail.plans[0], runId: "other-run" }],
     ["attachment MIME", "messages", { ...conversationDetail.messages[0], attachments: [{
       id: "attachment-1", name: "x.exe", path: "/tmp/x.exe", mimeType: "application/x-msdownload", size: 1,
     }] }],
@@ -1159,15 +1160,10 @@ describe("server event remaining discriminant and identity boundary", () => {
       conversationId: conversation.id,
       source: "codex-native",
     })).toBeTruthy();
-    expect(() => parseServerEvent({
-      type: "agent.input.requested",
-      request: { ...input, providerId: "gemini" },
-    })).toThrow("Malformed server event");
-    expect(() => parseServerEvent({
-      type: "agent.goal.cleared",
-      conversationId: conversation.id,
-      source: "provider-native",
-    })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({ type: "agent.input.requested", request: { ...input, providerId: "gemini" } })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({ type: "agent.input.requested", request: { ...input, questions: [input.questions[0], { ...input.questions[0] }] } })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({ type: "agent.input.requested", request: { ...input, questions: [{ ...input.questions[0], options: [input.questions[0].options[0], { ...input.questions[0].options[0] }] }] } })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({ type: "agent.goal.cleared", conversationId: conversation.id, source: "provider-native" })).toThrow("Malformed server event");
   });
   it("requires sequenced scope and shell run identities to match their payload", () => {
     const textEvent = {

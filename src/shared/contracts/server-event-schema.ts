@@ -516,7 +516,10 @@ function inputRequest(value: unknown): boolean {
       && booleanField(question, "isSecret")
       && booleanField(question, "allowMultiple")
       && arrayOf(question.options, (option) =>
-        recordWithStrings(option, "id", "label", "description")));
+        recordWithStrings(option, "id", "label", "description")))
+    && uniqueRecordField(value.questions as unknown[], "id")
+    && (value.questions as UnknownRecord[]).every((question) =>
+      uniqueRecordField(question.options as unknown[], "id"));
 }
 
 function agentPlan(value: unknown): boolean {

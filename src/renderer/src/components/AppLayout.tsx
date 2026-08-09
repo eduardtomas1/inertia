@@ -413,6 +413,7 @@ export function AppLayout({
           snapshot={connection.snapshot}
           documentActive={documentActive}
           activeConversationVisible={activeConversationVisible}
+          secondaryConversationId={splitConversationId}
           enabled={settings.desktopNotifications}
           onActivate={notificationActions.activate}
         />

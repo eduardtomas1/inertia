@@ -73,6 +73,7 @@ describe("thread notification lifecycle", () => {
         snapshot={idle}
         documentActive={false}
         activeConversationVisible
+        secondaryConversationId={null}
         enabled
         onActivate={onActivate}
       />,
@@ -82,6 +83,7 @@ describe("thread notification lifecycle", () => {
         snapshot={completed}
         documentActive={false}
         activeConversationVisible
+        secondaryConversationId={null}
         enabled
         onActivate={onActivate}
       />,
@@ -93,6 +95,7 @@ describe("thread notification lifecycle", () => {
         snapshot={completed}
         documentActive={false}
         activeConversationVisible
+        secondaryConversationId={null}
         enabled={false}
         onActivate={onActivate}
       />,
@@ -129,6 +132,7 @@ describe("thread notification lifecycle", () => {
         snapshot={activeIdle}
         documentActive
         activeConversationVisible
+        secondaryConversationId={null}
         enabled
         onActivate={vi.fn()}
       />,
@@ -138,6 +142,7 @@ describe("thread notification lifecycle", () => {
         snapshot={activeCompleted}
         documentActive
         activeConversationVisible
+        secondaryConversationId={null}
         enabled
         onActivate={vi.fn()}
       />,
@@ -149,6 +154,7 @@ describe("thread notification lifecycle", () => {
         snapshot={activeIdle}
         documentActive
         activeConversationVisible={false}
+        secondaryConversationId={null}
         enabled
         onActivate={vi.fn()}
       />,
@@ -158,10 +164,61 @@ describe("thread notification lifecycle", () => {
         snapshot={activeCompleted}
         documentActive
         activeConversationVisible={false}
+        secondaryConversationId={null}
         enabled
         onActivate={vi.fn()}
       />,
     );
     expect(showThreadNotification).toHaveBeenCalledOnce();
+  });
+
+  it("suppresses transitions for the visible secondary split chat", () => {
+    const showThreadNotification = vi.fn(async () => true);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        onThreadNotificationActivated: vi.fn(() => vi.fn()),
+        showThreadNotification,
+      },
+    });
+    const primary = conversation("idle");
+    const secondaryIdle = {
+      ...conversation("idle"),
+      id: "33333333-3333-4333-8333-333333333333",
+      title: "Secondary thread",
+    };
+    const secondaryCompleted = {
+      ...conversation("completed"),
+      id: secondaryIdle.id,
+      title: secondaryIdle.title,
+    };
+    const splitSnapshot = (secondary: Conversation) => ({
+      ...snapshot(primary),
+      conversations: [primary, secondary],
+      activeConversationId: primary.id,
+    }) as AppSnapshot;
+    const view = render(
+      <ThreadNotifications
+        snapshot={splitSnapshot(secondaryIdle)}
+        documentActive
+        activeConversationVisible
+        secondaryConversationId={secondaryIdle.id}
+        enabled
+        onActivate={vi.fn()}
+      />,
+    );
+
+    view.rerender(
+      <ThreadNotifications
+        snapshot={splitSnapshot(secondaryCompleted)}
+        documentActive
+        activeConversationVisible
+        secondaryConversationId={secondaryIdle.id}
+        enabled
+        onActivate={vi.fn()}
+      />,
+    );
+
+    expect(showThreadNotification).not.toHaveBeenCalled();
   });
 });

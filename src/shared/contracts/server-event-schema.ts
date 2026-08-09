@@ -291,6 +291,7 @@ function providerInfo(value: unknown): boolean {
     "installState",
     "authState",
   )
+    && providerId(value, "id")
     && booleanField(value, "available")
     && nullableStringField(value, "version")
     && (value.executable === undefined || nullableStringField(value, "executable"))

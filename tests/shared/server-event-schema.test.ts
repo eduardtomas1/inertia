@@ -792,3 +792,64 @@ describe("server event conversation discriminant boundary", () => {
     }))).toThrow("Malformed server event");
   });
 });
+
+describe("server event provider identity boundary", () => {
+  const provider = {
+    id: "codex",
+    label: "Codex",
+    command: "codex",
+    available: true,
+    version: "1.0.0",
+    executable: "/opt/bin/codex",
+    installState: "installed",
+    authState: "authenticated",
+    canRun: true,
+    statusMessage: null,
+    models: [],
+    rateLimits: [],
+    metadataState: {
+      models: {
+        freshness: "fresh",
+        provenance: "provider",
+        updatedAt: checkedAt,
+        lastAttemptedAt: checkedAt,
+        refreshing: false,
+      },
+      rateLimits: {
+        freshness: "fresh",
+        provenance: "provider",
+        updatedAt: checkedAt,
+        lastAttemptedAt: checkedAt,
+        refreshing: false,
+      },
+    },
+  };
+  const snapshotEvent = (providerInfo: unknown): unknown => ({
+    type: "snapshot.updated",
+    snapshot: {
+      projects: [],
+      conversations: [],
+      runs: [],
+      providers: [providerInfo],
+      settings: defaultSettings,
+      activeProjectId: null,
+      activeConversationId: null,
+    },
+  });
+
+  it.each(["codex", "claude", "cursor", "opencode"])(
+    "accepts the canonical %s provider identity",
+    (id) => {
+      expect(parseServerEvent(snapshotEvent({ ...provider, id }))).toMatchObject({
+        type: "snapshot.updated",
+      });
+    },
+  );
+
+  it("rejects an unknown provider identity", () => {
+    expect(() => parseServerEvent(snapshotEvent({
+      ...provider,
+      id: "gemini",
+    }))).toThrow("Malformed server event");
+  });
+});

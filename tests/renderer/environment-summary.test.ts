@@ -189,4 +189,27 @@ describe("environment summary projection", () => {
       attachments: [],
     });
   });
+
+  it("uses the authoritative live bit for queued and future provider states", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [],
+      subagents: [
+        subagent({ id: "queued", status: "queued", isLive: true }),
+        subagent({ id: "future", status: "unknown", isLive: true }),
+        subagent({ id: "stale-running", status: "running", isLive: false }),
+      ],
+      messages: [],
+    });
+
+    expect(summary.subagents.map(({ id }) => id)).toEqual([
+      "queued",
+      "future",
+    ]);
+  });
 });

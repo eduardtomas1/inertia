@@ -7,12 +7,6 @@ import type {
 } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 
-const ACTIVE_SUBAGENT_STATUSES: ReadonlySet<SubagentTrace["status"]> = new Set([
-  "spawned",
-  "running",
-  "waiting",
-]);
-
 export interface EnvironmentSummarySnapshot {
   projectName: string | null;
   runtime: {
@@ -157,7 +151,7 @@ export function buildEnvironmentSummary({
     ? subagents
       .filter((trace) =>
         trace.conversationId === conversationId
-        && ACTIVE_SUBAGENT_STATUSES.has(trace.status))
+        && trace.isLive)
       .slice(-3)
       .map(({ id, providerName, providerRole, status }) => ({
         id,

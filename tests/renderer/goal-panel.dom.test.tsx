@@ -373,6 +373,10 @@ describe("GoalPanel", () => {
       onOpenSubagent,
     });
 
+    expect(screen.getByText("2 working")).toHaveAttribute(
+      "aria-label",
+      "2 delegated tasks",
+    );
     expect(screen.getByRole("button", {
       name: "Stop Audit",
     })).toBeInTheDocument();
@@ -455,8 +459,8 @@ describe("GoalPanel", () => {
         <GoalPanel
           workflow={workflow({ conversationId: "conversation-2" })}
           plan={null}
-          subagents={[]}
-          turns={[]}
+          subagents={[trace({ conversationId: "conversation-2" })]}
+          turns={[turn({ conversationId: "conversation-2" })]}
         />
       </>,
     );
@@ -616,6 +620,10 @@ describe("GoalPanel", () => {
     expect(screen.queryByText("Deep 0")).not.toBeInTheDocument();
     expect(screen.getByText("2 earlier ancestors compacted"))
       .toBeInTheDocument();
+    expect(screen.getByRole("listitem", { name: /Deep 2/u }))
+      .toHaveAttribute("data-depth", "0");
+    expect(screen.getByRole("listitem", { name: /Deep 7/u }))
+      .toHaveAttribute("data-depth", "5");
     expect(screen.getByRole("list", { name: "Delegated agent tree" }).children)
       .toHaveLength(6);
   });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, MessageSquare, Network, Square } from "lucide-react";
 
 import type {
@@ -8,16 +8,18 @@ import type {
 import {
   canFollowUpSubagentTrace,
   isLiveSubagentTrace,
-  subagentElapsedMs,
   subagentDisclosureRows,
   subagentDisclosureSummary,
+  subagentHasNestedParent,
+  subagentNeedsReview,
   subagentRelationshipLabel,
   subagentRouteLabel,
   subagentStatusLabel,
   subagentTraceLabel,
   subagentTraceSummary,
 } from "../utils/subagentDisclosure";
-import { formatElapsed } from "../utils/responseTimeline";
+import type { SubagentDisclosureRow } from "../utils/subagentDisclosure";
+import { SubagentElapsed } from "./SubagentElapsed";
 import { SubagentTraceDetails } from "./SubagentTraceDetails";
 
 interface SubagentDisclosureProps {
@@ -30,22 +32,51 @@ interface SubagentDisclosureProps {
   now?: number;
 }
 
-function useDisclosureNow(
-  hasLiveSubagents: boolean,
-  fixedNow: number | undefined,
-): number {
-  const [now, setNow] = useState(() => fixedNow ?? Date.now());
-  useEffect(() => {
-    if (fixedNow !== undefined) {
-      setNow(fixedNow);
-      return;
-    }
-    if (!hasLiveSubagents) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [fixedNow, hasLiveSubagents]);
-  return fixedNow ?? now;
+const MAX_INLINE_SUBAGENTS = 6;
+
+function compactInlineRows(
+  rows: readonly SubagentDisclosureRow[],
+): Array<SubagentDisclosureRow & { omittedAncestors: number }> {
+  if (rows.length <= MAX_INLINE_SUBAGENTS) {
+    return rows.map((row) => ({ ...row, omittedAncestors: 0 }));
+  }
+  const byId = new Map(rows.map((row) => [row.trace.id, row]));
+  const selected = new Set(rows
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => {
+      const leftUrgent = Number(
+        isLiveSubagentTrace(left.row.trace)
+          || subagentNeedsReview(left.row.trace),
+      );
+      const rightUrgent = Number(
+        isLiveSubagentTrace(right.row.trace)
+          || subagentNeedsReview(right.row.trace),
+      );
+      return rightUrgent - leftUrgent
+        || right.row.trace.sequence - left.row.trace.sequence
+        || right.index - left.index;
+    })
+    .slice(0, MAX_INLINE_SUBAGENTS)
+    .map(({ row }) => row.trace.id));
+  const visibleDepth = new Map<string, number>();
+  return rows
+    .filter(({ trace }) => selected.has(trace.id))
+    .map((row) => {
+      let omittedAncestors = 0;
+      let parentId = row.trace.parentTraceId;
+      const visited = new Set<string>();
+      while (parentId && !selected.has(parentId) && !visited.has(parentId)) {
+        visited.add(parentId);
+        omittedAncestors += 1;
+        parentId = byId.get(parentId)?.trace.parentTraceId ?? null;
+      }
+      const parentDepth = row.trace.parentTraceId
+        ? visibleDepth.get(row.trace.parentTraceId)
+        : undefined;
+      const depth = parentDepth === undefined ? 0 : Math.min(parentDepth + 1, 8);
+      visibleDepth.set(row.trace.id, depth);
+      return { ...row, depth, omittedAncestors };
+    });
 }
 
 export function SubagentDisclosure({
@@ -57,13 +88,16 @@ export function SubagentDisclosure({
   onAfterToggle,
   now: fixedNow,
 }: SubagentDisclosureProps): React.JSX.Element | null {
+  const disclosureId = useId();
+  const listId = `${disclosureId}-subagent-list`;
   const hasLiveSubagents = subagents.some(isLiveSubagentTrace);
+  const hasReviewableOutcome = subagents.some(subagentNeedsReview);
   const activeIdentity = subagents
     .filter(isLiveSubagentTrace)
     .map(({ id }) => id)
     .join("\0");
-  const now = useDisclosureNow(hasLiveSubagents, fixedNow);
   const [open, setOpen] = useState(hasLiveSubagents);
+  const [showAll, setShowAll] = useState(false);
   const [expandedTraceIds, setExpandedTraceIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -75,13 +109,20 @@ export function SubagentDisclosure({
     const previouslyActive = previousActiveIdentity.current.length > 0;
     const currentlyActive = activeIdentity.length > 0;
     if (!previouslyActive && currentlyActive) setOpen(true);
-    if (previouslyActive && !currentlyActive) setOpen(false);
     previousActiveIdentity.current = activeIdentity;
   }, [activeIdentity]);
   const rows = useMemo(
     () => subagentDisclosureRows(subagents, turns),
     [subagents, turns],
   );
+  const compactRows = useMemo(
+    () => compactInlineRows(rows),
+    [rows],
+  );
+  const visibleRows = showAll
+    ? rows.map((row) => ({ ...row, omittedAncestors: 0 }))
+    : compactRows;
+  const hiddenCount = rows.length - compactRows.length;
   const finishToggle = (): void => {
     if (!onAfterToggle) return;
     window.requestAnimationFrame(() => onAfterToggle?.());
@@ -114,6 +155,7 @@ export function SubagentDisclosure({
     <details
       className="subagent-disclosure"
       data-active={hasLiveSubagents}
+      data-needs-review={hasReviewableOutcome}
       open={open}
       onToggle={(event) => {
         setOpen(event.currentTarget.open);
@@ -143,8 +185,8 @@ export function SubagentDisclosure({
           aria-hidden="true"
         />
       </summary>
-      <ol aria-label="Delegated agent tree">
-        {rows.map(({ trace, depth, canStop }) => {
+      <ol id={listId} aria-label="Delegated agent tree">
+        {visibleRows.map(({ trace, depth, canStop, omittedAncestors }) => {
           const detail = subagentTraceSummary(trace);
           const label = subagentTraceLabel(trace);
           const route = subagentRouteLabel(trace, turns);
@@ -156,7 +198,7 @@ export function SubagentDisclosure({
           );
           const expanded = expandedTraceIds.has(trace.id);
           const stopping = stoppingTraceIds.has(trace.id);
-          const detailId = `subagent-${trace.id}-details`;
+          const detailId = `${disclosureId}-${trace.id}-details`;
           return (
             <li
               key={trace.id}
@@ -175,12 +217,19 @@ export function SubagentDisclosure({
                       : undefined}
                   >
                     {route} · {state} ·{" "}
-                    {formatElapsed(subagentElapsedMs(trace, now))}
+                    <SubagentElapsed trace={trace} now={fixedNow} />
                   </small>
                 </span>
-                {trace.parentTraceId && (
+                {subagentHasNestedParent(trace) && (
                   <small className="subagent-relationship">
                     {relationship}
+                  </small>
+                )}
+                {omittedAncestors > 0 && (
+                  <small className="subagent-relationship">
+                    {omittedAncestors} earlier {omittedAncestors === 1
+                      ? "ancestor"
+                      : "ancestors"} compacted
                   </small>
                 )}
                 {detail && (
@@ -238,6 +287,21 @@ export function SubagentDisclosure({
           );
         })}
       </ol>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          className="subagent-history-toggle"
+          aria-controls={listId}
+          aria-expanded={showAll}
+          onClick={() => setShowAll((current) => !current)}
+        >
+          {showAll
+            ? "Show recent delegated work"
+            : `Show ${hiddenCount} earlier delegated ${hiddenCount === 1
+              ? "task"
+              : "tasks"}`}
+        </button>
+      )}
     </details>
   );
 }

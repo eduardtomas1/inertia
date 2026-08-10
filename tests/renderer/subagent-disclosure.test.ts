@@ -6,11 +6,14 @@ import type {
   AgentTurn,
   SubagentTrace,
 } from "../../src/shared/contracts";
+import { compactSubagentDisclosureRows } from "../../src/renderer/src/utils/subagentCompactRows";
 import {
   canFollowUpSubagentTrace,
   canStopSubagentTrace,
   subagentDisclosureRows,
   subagentDisclosureSummary,
+  subagentDisclosureStats,
+  subagentRelationshipLabel,
   subagentRouteLabel,
   subagentStatusLabel,
   subagentTraceSummary,
@@ -125,7 +128,7 @@ describe("inline delegated-agent disclosure", () => {
       { trace: { id: "trace-child" }, depth: 1, canStop: true },
     ]);
     expect(subagentDisclosureSummary([parent, child])).toBe(
-      "2 delegated tasks · 2 active",
+      "2 delegated tasks · 2 working",
     );
   });
 
@@ -185,7 +188,13 @@ describe("inline delegated-agent disclosure", () => {
       providerStatus: "killed",
       status: "cancelled",
       isLive: false,
-    }))).toBe("Cancelled (killed)");
+    }))).toBe("Cancelled");
+    expect(subagentStatusLabel(trace({
+      providerId: "claude",
+      providerStatus: "in_progress",
+      status: "running",
+      isLive: true,
+    }))).toBe("Running");
     expect(subagentStatusLabel(trace({
       providerId: "claude",
       providerStatus: "running",
@@ -210,7 +219,51 @@ describe("inline delegated-agent disclosure", () => {
         status: "unknown",
         isLive: true,
       }),
-    ])).toBe("1 delegated task · 1 active");
+    ])).toBe("1 delegated task · 1 working");
+  });
+
+  it("summarizes outcomes and keeps every urgent branch in a bounded roster", () => {
+    const traces = [
+      trace({ id: "done", status: "completed", isLive: false, sequence: 1 }),
+      trace({ id: "failed", status: "failed", isLive: false, sequence: 2 }),
+      trace({ id: "lost", status: "lost", isLive: false, sequence: 3 }),
+      trace({ id: "stopped", status: "cancelled", isLive: false, sequence: 4 }),
+      trace({ id: "live-a", sequence: 5 }),
+      trace({ id: "live-b", sequence: 6 }),
+      trace({ id: "older", status: "completed", isLive: false, sequence: 0 }),
+    ];
+    const rows = subagentDisclosureRows(traces, [turn()]);
+    const compact = compactSubagentDisclosureRows(rows, 4);
+
+    expect(compact.map(({ trace: item }) => item.id)).toEqual([
+      "failed",
+      "lost",
+      "live-a",
+      "live-b",
+    ]);
+    expect(subagentDisclosureStats(traces)).toEqual({
+      total: 7,
+      active: 2,
+      completed: 2,
+      stopped: 1,
+      needsReview: 2,
+    });
+    expect(subagentDisclosureSummary(traces)).toBe(
+      "7 delegated tasks · 2 working · 2 needs review · 3 settled",
+    );
+  });
+
+  it("does not mislabel an unresolved nested provider parent as the host turn", () => {
+    const orphan = trace({
+      parentTraceId: null,
+      parentProviderAgentId: "provider-parent-that-aged-out",
+    });
+    expect(subagentRelationshipLabel(orphan, [orphan])).toBe(
+      "Nested delegated task · parent unavailable",
+    );
+    expect(subagentRelationshipLabel(trace(), [trace()])).toBe(
+      "Delegated by parent agent",
+    );
   });
 
   it("bounds collapsed recent activity while leaving the persisted detail intact", () => {

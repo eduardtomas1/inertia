@@ -378,6 +378,37 @@ describe("delegated-agent timeline disclosure", () => {
     }
   });
 
+  it("shares one elapsed clock across live delegated rows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:10.000Z"));
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    try {
+      const view = render(
+        <SubagentDisclosure
+          subagents={[
+            trace(),
+            trace({
+              id: "trace-second",
+              providerTaskId: "task-second",
+              providerAgentId: "agent-second",
+              providerName: "Second worker",
+            }),
+          ]}
+          turns={[turn()]}
+        />,
+      );
+      expect(screen.getAllByText("10s")).toHaveLength(2);
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1_000);
+      expect(screen.getAllByText("11s")).toHaveLength(2);
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      setIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps disclosure relationships instance-scoped across split panes", () => {
     const item = trace({ status: "completed", isLive: false });
     const { container } = render(

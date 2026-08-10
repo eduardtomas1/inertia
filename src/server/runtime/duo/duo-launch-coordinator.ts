@@ -28,6 +28,7 @@ import {
 import type { NewConversationOptions } from "../../persistence/types";
 import type { WorktreeFilesystemReceipt } from "../../worktree-filesystem-identity";
 import type { ProviderManager } from "../../providers";
+import { normalizeIdentityPath } from "../../project-identity";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
@@ -1007,17 +1008,27 @@ export class DuoLaunchCoordinator {
     const conversationId = randomUUID();
     if (payload.worktreePath) {
       const requestedPath = resolve(payload.worktreePath);
-      const reusable = this.store.shellSnapshot().conversations.some(
+      const reusable = this.store.shellSnapshot().conversations.find(
         (conversation) => conversation.projectId === payload.projectId
           && conversation.worktreePath !== null
-          && resolve(conversation.worktreePath) === requestedPath,
+          && normalizeIdentityPath(resolve(conversation.worktreePath))
+            === normalizeIdentityPath(requestedPath),
       );
-      if (!reusable || requestedPath === resolve(repositoryPath)) {
+      const reusablePath = reusable
+        ? this.store.conversationPath(reusable.id)
+        : null;
+      if (
+        reusablePath === null
+        || normalizeIdentityPath(reusablePath)
+          !== normalizeIdentityPath(requestedPath)
+        || normalizeIdentityPath(requestedPath)
+          === normalizeIdentityPath(resolve(repositoryPath))
+      ) {
         throw new Error(
           "That worktree is not attached to a chat in this project.",
         );
       }
-      const status = await getRepositoryStatus(requestedPath);
+      const status = await getRepositoryStatus(reusablePath);
       if (payload.branch && payload.branch !== status.branch) {
         throw new Error(
           `That worktree is currently on ${status.branch ?? "a detached checkout"}, not ${payload.branch}.`,

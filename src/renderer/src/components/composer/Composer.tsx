@@ -442,7 +442,14 @@ export const Composer = memo(function Composer({
   }, []);
 
   useEffect(() => {
-    const flushBeforeUnload = (): void => flushDraftPersistence();
+    const flushBeforeUnload = (): void => {
+      flushDraftPersistence();
+      const unsent = attachmentsRef.current;
+      attachmentsRef.current = [];
+      for (const attachment of unsent) {
+        void releaseAttachmentRef.current(attachment.id);
+      }
+    };
     window.addEventListener("beforeunload", flushBeforeUnload);
     return () => {
       window.removeEventListener("beforeunload", flushBeforeUnload);

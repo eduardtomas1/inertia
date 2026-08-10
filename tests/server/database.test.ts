@@ -729,7 +729,9 @@ describe("RuntimeStore conversation lifecycle", () => {
   });
 
   it("persists sidebar mode, canonical grouping metadata, and per-project overrides", async () => {
-    const { databasePath, workspacePath, store } = await createStore();
+    const { databasePath, workspacePath, store } = await createStore({
+      withProject: false,
+    });
     expect(store.snapshot().settings.desktopNotifications).toBe(true);
     store.updateSettings({
       sidebarMode: "activity",
@@ -747,10 +749,12 @@ describe("RuntimeStore conversation lifecycle", () => {
         "toggle-terminal": "h",
       },
     });
+    await mkdir(join(workspacePath, ".git"));
+    const repositoryIdentity = `git:${join(workspacePath, ".git")}`;
     const project = store.createProject("Package", workspacePath, {
       normalizedPath: workspacePath,
-      repositoryIdentity: "git:/workspace/.git",
-      repositoryRoot: "/workspace",
+      repositoryIdentity,
+      repositoryRoot: workspacePath,
       repositoryRelativePath: "packages/app",
     });
     expect(project.gitRepositoryLimit).toBe(128);
@@ -780,8 +784,8 @@ describe("RuntimeStore conversation lifecycle", () => {
     });
     expect(reopened.project(project.id)).toMatchObject({
       name: "App package",
-      repositoryIdentity: "git:/workspace/.git",
-      repositoryRoot: "/workspace",
+      repositoryIdentity,
+      repositoryRoot: workspacePath,
       repositoryRelativePath: "packages/app",
       groupingMode: "repository-path",
       gitRepositoryLimit: 256,

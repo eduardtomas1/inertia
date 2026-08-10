@@ -29,19 +29,16 @@ import {
   type ModelBackendDefault,
   type PersistedModelBackendProfile,
 } from "../shared/backend-profile-settings";
-import {
-  type BackendCompatibilityProbeResult,
-} from "../shared/backend-probe";
+import type { BackendCompatibilityProbeResult } from "../shared/backend-probe";
 import type { PersistedProviderMetadata } from "./provider/metadata";
-import {
-  type SanitizedTurnExecutionManifest,
-} from "./runtime/turns/request-context";
+import type { SanitizedTurnExecutionManifest } from "./runtime/turns/request-context";
 import { BackendProfileRepository } from "./persistence/backend-profile-repository";
 import {
   AgentWorkflowRepository,
   type NativeAgentGoalMergeResult,
 } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
+import { ConversationWorktreeRepository } from "./persistence/conversation-worktree-repository";
 import {
   createDuoConversationsAtomically,
   type DuoConversationPlan,
@@ -132,6 +129,7 @@ export class RuntimeStore {
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   private readonly conversationRepository: ConversationRepository;
+  readonly conversationWorktrees: ConversationWorktreeRepository;
   private readonly executionLedgerRepository: ExecutionLedgerRepository;
   private readonly gitArtifactRepository: GitArtifactRepository;
   private readonly providerMetadataRepository: ProviderMetadataRepository;
@@ -203,6 +201,10 @@ export class RuntimeStore {
       state: () => this.settingsRepository.state(),
       touchProject: (projectId, timestamp) => this.projectRepository.touch(projectId, timestamp),
     });
+    this.conversationWorktrees = new ConversationWorktreeRepository(
+      this.database,
+      (conversationId) => this.requireConversation(conversationId),
+    );
     this.reviewRepository = new ReviewRepository({
       database: this.database,
       requireConversation: (conversationId) => this.requireConversation(conversationId),
@@ -268,7 +270,8 @@ export class RuntimeStore {
       this.database.pragma("cache_size = -16000");
       this.database.pragma("mmap_size = 268435456");
       this.database.pragma("temp_store = MEMORY");
-      this.migrate();
+      migrateRuntimeDatabase(this.database);
+      this.projectRepository.enrollMissingPaths();
       reconcileRecoveryImportJournal(this.database);
       this.initializeState();
       if (options.recoverInterruptedRuns !== false) this.recoverInterruptedRuns();
@@ -333,15 +336,13 @@ export class RuntimeStore {
             accessMode: "supervised",
             activate: false,
           }).id,
-        createMessage: (conversationId, message) => {
-          this.createMessage(
+        createMessage: (id, conversationId, message) => {
+          this.transcriptRepository.createRecoveredMessage(
+            id,
             conversationId,
             message.content,
             message.role,
-            [],
-            null,
             message.createdAt,
-            { activateConversation: false },
           );
         },
       },
@@ -1233,10 +1234,6 @@ export class RuntimeStore {
     const turn = this.database.prepare("SELECT * FROM agent_turns WHERE id = ?").get(turnId) as AgentTurnRow | undefined;
     if (!turn) throw new RecordNotFoundError("Agent turn not found.");
     return turn;
-  }
-
-  private migrate(): void {
-    migrateRuntimeDatabase(this.database);
   }
 
   private initializeState(): void {

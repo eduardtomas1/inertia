@@ -1178,6 +1178,21 @@ describe("database backup and startup recovery", () => {
         database.exec("DROP INDEX conversations_snoozed_until_idx");
       },
     },
+    {
+      label: "a required worktree ownership receipt column",
+      mutate: (database: Database.Database) => {
+        database.exec(`
+          ALTER TABLE conversation_worktree_ownership
+            RENAME TO malformed_conversation_worktree_ownership;
+          CREATE TABLE conversation_worktree_ownership AS
+          SELECT conversation_id, path, branch, owns_worktree, creation_state,
+            ownership_token, worktree_id, repository_identity,
+            filesystem_identity_json
+          FROM malformed_conversation_worktree_ownership;
+          DROP TABLE malformed_conversation_worktree_ownership;
+        `);
+      },
+    },
   ])("skips a current-schema backup missing $label", async ({ mutate }) => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

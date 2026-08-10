@@ -7,6 +7,7 @@ import { TerminalError } from "./terminal";
 import { WorkspaceError } from "./workspace";
 import { BackendProfileControllerError } from "./runtime/backends/backend-profile-controller";
 import { ProviderMaintenanceError } from "./provider/maintenance-controller";
+import { WorkspacePathAuthorityError } from "./workspace-path-authority";
 
 export class RuntimeRequestError extends Error {}
 
@@ -22,6 +23,7 @@ export function publicRuntimeError(error: unknown): string {
     || error instanceof ReviewSummaryError
     || error instanceof BackendProfileControllerError
     || error instanceof ProviderMaintenanceError
+    || error instanceof WorkspacePathAuthorityError
   ) return error.message;
   return "The request could not be completed.";
 }

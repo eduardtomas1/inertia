@@ -38,6 +38,7 @@ import type {
   AgentPlanStep,
 } from "./interactions";
 import { providerActivityDetailSections } from "./activity-detail";
+import { isSafeApprovalDisplayText } from "./approval-display";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { providerProcessInvocation } from "./process";
 
@@ -298,10 +299,17 @@ function startCursorRun(
     emitter.status("running");
     const response = await context.request(acp.methods.agent.session.prompt, { sessionId, prompt });
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter.rich);
-    if (cancelRequested || response.stopReason === "cancelled") return finish("cancelled");
-    if (response.stopReason !== "end_turn") return finish("failed", `Cursor stopped with reason: ${response.stopReason}.`);
-    return finish("completed");
+    const outcome = cancelRequested || response.stopReason === "cancelled"
+      ? finish("cancelled")
+      : response.stopReason !== "end_turn"
+        ? finish("failed", `Cursor stopped with reason: ${response.stopReason}.`)
+        : finish("completed");
+    // Arm owned termination before returning control to connectWith, which may
+    // close/reap the ACP transport before the public-result continuation runs.
+    requestProcessTermination(true);
+    return outcome;
   }).catch((error: unknown) => {
+    requestProcessTermination(true);
     if (cancelRequested) return finish("cancelled");
     const diagnostic = stderr.toString().trim();
     const message = safeError(error, diagnostic ? `Cursor ACP stopped: ${diagnostic}` : "Cursor ACP stopped unexpectedly.");
@@ -377,13 +385,16 @@ async function cursorPermission(
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   approvals: Map<string, PendingApproval>,
 ): Promise<RequestPermissionResponse> {
-  const allow = permissionOption(params.options, true);
+  const allow = cursorOneShotPermissionOption(params.options, true);
   const fileMutation = isCursorFileMutationKind(params.toolCall.kind);
   if (
     options.input.access === "full"
     || (options.input.access === "auto-edit" && fileMutation)
   ) {
     return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } };
+  }
+  if (!cursorPermissionDisplayIsSafe(params)) {
+    return { outcome: { outcome: "cancelled" } };
   }
   const requestId = randomUUID();
   const decision = await new Promise<AgentApprovalDecision>((resolve) => {
@@ -414,8 +425,19 @@ async function cursorPermission(
     });
   });
   if (decision === "cancel") return { outcome: { outcome: "cancelled" } };
-  const selected = permissionOption(params.options, decision === "approve");
+  const selected = cursorOneShotPermissionOption(
+    params.options,
+    decision === "approve",
+  );
   return selected ? { outcome: { outcome: "selected", optionId: selected.optionId } } : { outcome: { outcome: "cancelled" } };
+}
+
+export function cursorPermissionDisplayIsSafe(
+  params: Pick<RequestPermissionRequest, "toolCall">,
+): boolean {
+  return isSafeApprovalDisplayText(
+    params.toolCall.title || "Cursor requested permission",
+  ) && isSafeApprovalDisplayText(jsonSummary(params.toolCall.rawInput), true);
 }
 
 export function isCursorFileMutationKind(
@@ -424,9 +446,15 @@ export function isCursorFileMutationKind(
   return kind === "edit" || kind === "delete" || kind === "move";
 }
 
-function permissionOption(options: PermissionOption[], allow: boolean): PermissionOption | undefined {
-  const kinds = allow ? ["allow_once", "allow_always"] : ["reject_once", "reject_always"];
-  return kinds.flatMap((kind) => options.filter((option) => option.kind === kind)).at(0);
+export function cursorOneShotPermissionOption(
+  options: PermissionOption[],
+  allow: boolean,
+): PermissionOption | undefined {
+  // Inertia's provider-neutral approval only represents this request. Never
+  // turn it into a provider-persisted grant or denial without an explicit UI
+  // choice for that stronger scope.
+  const kind = allow ? "allow_once" : "reject_once";
+  return options.find((option) => option.kind === kind);
 }
 
 function handleCursorUpdate(

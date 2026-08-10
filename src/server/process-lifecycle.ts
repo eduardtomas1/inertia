@@ -507,6 +507,13 @@ export async function terminateProcessTreeAndWait(
     return false;
   }
 
+  // Once Node has observed both root exit and complete stdio closure, the
+  // numeric PID/PGID is no longer an ownership capability. It may already
+  // identify an unrelated recycled process group. Callers that must clean up
+  // descendants therefore start their memoized owned termination before
+  // closing/reaping the provider and await that original attempt afterward.
+  if (directChildResourcesAreClosed(child)) return false;
+
   if (force) {
     const descendants = forceKillPosixProcessTree(pid, {
       kill: killProcess,

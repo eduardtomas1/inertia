@@ -53,13 +53,19 @@ export default function App({
   const followLatestRef = useRef(true);
   const stateValidatorRef = useRef<string | null>(null);
   const conversationValidatorsRef = useRef(new Map<string, string>());
+  const authorizedConversationIdsRef = useRef(new Set<string>());
+  const selectedConversationRef = useRef<string | null>(null);
 
   const clearWorkspace = useCallback((): void => {
     setShell(null);
     setDetail(null);
+    setPrompt("");
+    setPendingPromptDelivery(null);
     setSelectedConversation(null);
+    selectedConversationRef.current = null;
     stateValidatorRef.current = null;
     conversationValidatorsRef.current.clear();
+    authorizedConversationIdsRef.current.clear();
   }, []);
 
   const noteRequestFailure = useCallback((error: unknown): void => {
@@ -92,6 +98,7 @@ export default function App({
     const allowed = shell.conversations.some(({ id }) => id === requestedConversationId);
     if (allowed) {
       conversationValidatorsRef.current.delete(requestedConversationId);
+      selectedConversationRef.current = requestedConversationId;
       setSelectedConversation(requestedConversationId);
       setDetail(null);
       followLatestRef.current = true;
@@ -106,6 +113,20 @@ export default function App({
     if (result.kind === "not-modified") return;
     if (result.kind !== "state") throw new Error("Private Connect returned an invalid state projection.");
     stateValidatorRef.current = result.validator;
+    const authorizedConversationIds = new Set(
+      result.state.conversations.map(({ id }) => id),
+    );
+    authorizedConversationIdsRef.current = authorizedConversationIds;
+    const selected = selectedConversationRef.current;
+    if (selected && !authorizedConversationIds.has(selected)) {
+      selectedConversationRef.current = null;
+      conversationValidatorsRef.current.delete(selected);
+      setDetail(null);
+      setPrompt("");
+      setPendingPromptDelivery(null);
+      followLatestRef.current = true;
+      setSelectedConversation(null);
+    }
     setShell(result.state);
   }, []);
 
@@ -123,6 +144,10 @@ export default function App({
     if (result.detail.conversation.id !== conversationId) {
       throw new Error("Private Connect returned a conversation outside the requested scope.");
     }
+    if (
+      selectedConversationRef.current !== conversationId
+      || !authorizedConversationIdsRef.current.has(conversationId)
+    ) return;
     conversationValidatorsRef.current.set(conversationId, result.validator);
     setDetail(result.detail);
   }, []);
@@ -211,9 +236,7 @@ export default function App({
         setSocket(next);
       } catch (error) {
         if (isUnauthorized(error)) {
-          setShell(null);
-          setDetail(null);
-          setSelectedConversation(null);
+          clearWorkspace();
           setPair({ kind: "pair", invitation: null, error: "This browser no longer has access. Pair it again from the desktop." });
         } else {
           noteRequestFailure(error);
@@ -316,14 +339,21 @@ export default function App({
             ifNoneMatch: conversationValidatorsRef.current.get(selectedConversation) ?? null,
           })
         : null;
-      const [stateResponse, detailResponse] = await Promise.all([
+      const [stateOutcome, detailOutcome] = await Promise.allSettled([
         stateRequest,
         detailRequest,
       ]);
       if (cancelled) return;
-      applyStateResponse(stateResponse);
-      if (detailResponse && selectedConversation) {
-        applyConversationResponse(detailResponse, selectedConversation);
+      if (stateOutcome.status === "rejected") throw stateOutcome.reason;
+      applyStateResponse(stateOutcome.value);
+      if (
+        selectedConversation
+        && authorizedConversationIdsRef.current.has(selectedConversation)
+      ) {
+        if (detailOutcome.status === "rejected") throw detailOutcome.reason;
+        if (detailOutcome.value) {
+          applyConversationResponse(detailOutcome.value, selectedConversation);
+        }
       }
     };
     const timer = window.setInterval(() => {
@@ -425,6 +455,7 @@ export default function App({
       messagesRef={messagesRef}
       onSelectConversation={(conversationId) => {
         conversationValidatorsRef.current.delete(conversationId);
+        selectedConversationRef.current = conversationId;
         setSelectedConversation(conversationId);
         setDetail(null);
         followLatestRef.current = true;

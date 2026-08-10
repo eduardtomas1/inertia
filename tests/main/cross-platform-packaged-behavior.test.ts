@@ -136,6 +136,17 @@ describe("cross-platform packaged behavior contract", () => {
     );
   });
 
+  it("destroys native previews when the renderer reloads or exits", async () => {
+    const main = await source("src/main/index.ts");
+    expect(main).toContain('window.webContents.on("did-start-navigation"');
+    expect(main).toContain(
+      "if (details.isMainFrame && !details.isSameDocument) previewBroker.close()",
+    );
+    expect(main).toContain(
+      'window.webContents.on("render-process-gone", () => previewBroker.close())',
+    );
+  });
+
   it("keeps exact-tag release packages and smoke validation aligned across every platform", async () => {
     const workflow = await source(".github/workflows/release-platforms.yml");
     for (const expected of [

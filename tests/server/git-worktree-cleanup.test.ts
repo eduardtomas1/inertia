@@ -25,6 +25,7 @@ import {
   inspectUnacknowledgedWorktreeCreation,
   parseWorktreeFilesystemReceipt,
   removeWorktree,
+  removeOwnedWorktree,
   serializeWorktreeFilesystemReceipt,
   type RegisteredWorktreeIdentity,
   type WorktreeFilesystemIdentityDependencies,
@@ -465,6 +466,39 @@ describe("launch-owned Git cleanup", () => {
     expectSamePath(inspected.path, path);
     expect(git(root, "for-each-ref", "--format=%(refname)", `refs/heads/${branch}`))
       .toBe(`refs/heads/${branch}`);
+  });
+
+  it("revalidates the receipt at deletion time after a post-inspection ABA swap", async () => {
+    const root = repository();
+    const path = ownedPath(root, "at-use replacement path");
+    const branch = "inertia/at-use-replacement";
+    const ownership = await createOwnedWorktree(root, path, branch);
+    const staging = ownedPath(root, "at-use replacement staging");
+    const sentinel = join(path, "valuable-replacement.bin");
+    let swapped = false;
+
+    await expect(removeOwnedWorktree(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+      {
+        afterInitialInspection: () => {
+          swapped = true;
+          git(root, "worktree", "remove", "--", path);
+          git(root, "worktree", "add", "--", staging, branch);
+          git(root, "worktree", "move", "--", staging, path);
+          writeFileSync(sentinel, "valuable replacement data\n");
+        },
+      },
+    )).resolves.toBe("conflict");
+    expect(swapped).toBe(true);
+    expect(readFileSync(sentinel, "utf8")).toBe("valuable replacement data\n");
+    expect(git(root, "worktree", "list", "--porcelain")).toContain(path);
   });
 
   it("treats an absent exact branch as absent while preserving descendants", async () => {

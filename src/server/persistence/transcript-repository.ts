@@ -40,6 +40,47 @@ export class TranscriptRepository {
     createdAt?: string,
     options: CreateMessageOptions = {},
   ): ChatMessage {
+    return this.createMessageWithId(
+      randomUUID(),
+      conversationId,
+      content,
+      role,
+      attachments,
+      turnId,
+      createdAt,
+      options,
+    );
+  }
+
+  createRecoveredMessage(
+    id: string,
+    conversationId: string,
+    content: string,
+    role: ChatMessage["role"],
+    createdAt: string,
+  ): ChatMessage {
+    return this.createMessageWithId(
+      id,
+      conversationId,
+      content,
+      role,
+      [],
+      null,
+      createdAt,
+      { activateConversation: false },
+    );
+  }
+
+  private createMessageWithId(
+    id: string,
+    conversationId: string,
+    content: string,
+    role: ChatMessage["role"],
+    attachments: ChatAttachment[],
+    turnId: string | null,
+    createdAt: string | undefined,
+    options: CreateMessageOptions,
+  ): ChatMessage {
     const conversation = this.context.requireConversation(conversationId);
     if (turnId) {
       const turn = agentTurnFromRow(this.context.requireAgentTurn(turnId));
@@ -51,7 +92,7 @@ export class TranscriptRepository {
     const now = createdAt === undefined
       ? new Date().toISOString()
       : requireTimestamp(createdAt, "Message creation time");
-    const message: ChatMessage = { id: randomUUID(), conversationId, turnId, role, content, attachments, createdAt: now };
+    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now };
     this.context.database.transaction(() => {
       this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt)`).run({ ...message, attachmentsJson: JSON.stringify(attachments) });
       this.context.database.prepare(`

@@ -34,6 +34,7 @@ import {
   resolveHarnessBackendCompatibility,
 } from "../../shared/model-routing";
 import { providerTimestamp, validateProviderUsage } from "../provider/usage-values";
+import { parseWorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
 import type {
   ActivityRow,
   AgentPlanRow,
@@ -42,6 +43,7 @@ import type {
   AgentTurnRow,
   CheckpointRow,
   ConversationRow,
+  ConversationWorktreeOwnershipRow,
   MessageRow,
   ProjectRow,
   StateRow,
@@ -49,6 +51,7 @@ import type {
   ThreadUsageRow,
   WorkspaceRunRow,
 } from "./rows";
+import type { StoredConversationWorktreeOwnership } from "./types";
 
 export function projectFromRow(row: ProjectRow): Project {
   return {
@@ -196,6 +199,72 @@ export function conversationFromRow(row: ConversationRow): Conversation {
     snoozedUntil: row.snoozed_until,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function conversationWorktreeOwnershipFromRow(
+  row: ConversationWorktreeOwnershipRow,
+): StoredConversationWorktreeOwnership {
+  const base = {
+    conversationId: row.conversation_id,
+    path: row.path,
+    branch: row.branch,
+  };
+  if (row.owns_worktree === 0 && row.creation_state === "external") {
+    return {
+      ...base,
+      ownsWorktree: false,
+      creationState: "external",
+      ownershipToken: null,
+      worktreeId: null,
+      repositoryIdentity: null,
+      filesystemReceipt: null,
+      branchHead: null,
+    };
+  }
+  if (
+    row.owns_worktree === 1
+    && row.creation_state === "creating"
+    && row.branch !== null
+    && row.ownership_token !== null
+  ) {
+    return {
+      ...base,
+      branch: row.branch,
+      ownsWorktree: true,
+      creationState: "creating",
+      ownershipToken: row.ownership_token,
+      worktreeId: null,
+      repositoryIdentity: null,
+      filesystemReceipt: null,
+      branchHead: null,
+    };
+  }
+  const filesystemReceipt = parseWorktreeFilesystemReceipt(
+    row.filesystem_identity_json,
+  );
+  if (
+    row.owns_worktree !== 1
+    || row.creation_state !== "created"
+    || row.branch === null
+    || row.ownership_token === null
+    || row.worktree_id === null
+    || row.repository_identity === null
+    || filesystemReceipt === null
+    || row.branch_head === null
+  ) {
+    throw new Error("The conversation worktree ownership receipt is invalid.");
+  }
+  return {
+    ...base,
+    branch: row.branch,
+    ownsWorktree: true,
+    creationState: "created",
+    ownershipToken: row.ownership_token,
+    worktreeId: row.worktree_id,
+    repositoryIdentity: row.repository_identity,
+    filesystemReceipt,
+    branchHead: row.branch_head,
   };
 }
 

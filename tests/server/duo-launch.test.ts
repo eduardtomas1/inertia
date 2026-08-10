@@ -45,6 +45,7 @@ import {
 } from "../../src/server/runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "../../src/server/runtime/turns/turn-recovery";
 import { resolveNativeModelRoute } from "./model-route-fixture";
+import { createMockLinkedCheckout } from "../support/mock-linked-checkout";
 
 const temporaryDirectories: string[] = [];
 const execFileAsync = promisify(execFile);
@@ -93,6 +94,7 @@ function acknowledgeMockOwnedWorktree(
 ): void {
   const ownershipToken = randomUUID();
   hooks.beforeAdd(ownershipToken);
+  createMockLinkedCheckout(path, ownershipToken);
   hooks.added({
     path,
     branch,
@@ -270,6 +272,12 @@ async function createRuntime(
     store,
     workspace,
   };
+}
+
+async function createOtherProject(runtime: DuoTestRuntime) {
+  const path = join(runtime.workspace, "other");
+  await mkdir(path);
+  return runtime.store.createProject("Other Duo project", path);
 }
 
 function createIntent(
@@ -589,10 +597,7 @@ describe("atomic Duo launch persistence", () => {
     "blocks cross-project removal while a Duo launch is %s",
     async (state) => {
       const runtime = await createRuntime();
-      const otherProject = runtime.store.createProject(
-        "Other Duo project",
-        join(runtime.workspace, "other"),
-      );
+      const otherProject = await createOtherProject(runtime);
       const projectIds = [runtime.projectId, otherProject.id] as const;
       let launchId: string;
       let conversations: ReturnType<typeof preparePair>["conversations"] | null = null;
@@ -624,10 +629,7 @@ describe("atomic Duo launch persistence", () => {
 
   it("purges terminal cross-project history only after both queued turns are settled", async () => {
     const runtime = await createRuntime();
-    const otherProject = runtime.store.createProject(
-      "Other Duo project",
-      join(runtime.workspace, "other"),
-    );
+    const otherProject = await createOtherProject(runtime);
     const prepared = preparePair(
       runtime,
       [runtime.projectId, otherProject.id],
@@ -649,10 +651,7 @@ describe("atomic Duo launch persistence", () => {
 
   it("allows failed pre-turn launch history to be purged with its project", async () => {
     const runtime = await createRuntime();
-    const otherProject = runtime.store.createProject(
-      "Other Duo project",
-      join(runtime.workspace, "other"),
-    );
+    const otherProject = await createOtherProject(runtime);
     const launch = createIntent(
       runtime,
       [runtime.projectId, otherProject.id],
@@ -673,10 +672,7 @@ describe("atomic Duo launch persistence", () => {
 
   it("allows cross-project removal after both running providers complete", async () => {
     const runtime = await createRuntime();
-    const otherProject = runtime.store.createProject(
-      "Other Duo project",
-      join(runtime.workspace, "other"),
-    );
+    const otherProject = await createOtherProject(runtime);
     const prepared = preparePair(
       runtime,
       [runtime.projectId, otherProject.id],
@@ -803,10 +799,7 @@ describe("atomic Duo launch persistence", () => {
     "settles a cross-project %s launch on restart before project removal",
     async (state) => {
       const runtime = await createRuntime();
-      const otherProject = runtime.store.createProject(
-        "Other Duo project",
-        join(runtime.workspace, "other"),
-      );
+      const otherProject = await createOtherProject(runtime);
       const prepared = preparePair(
         runtime,
         [runtime.projectId, otherProject.id],

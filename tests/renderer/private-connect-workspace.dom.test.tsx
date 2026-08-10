@@ -8,6 +8,8 @@ const CONVERSATION_VALIDATOR = "B".repeat(43);
 
 let scopes: string[] = [];
 let runId: string | null = null;
+let conversationAvailable = true;
+let uncertainPromptResponses = 0;
 const sent: Array<Record<string, unknown>> = [];
 
 function conversation() {
@@ -36,13 +38,20 @@ const socket = {
           state: {
             generatedAt: "2030-01-01T00:00:00.000Z",
             projects: [{ id: PROJECT_ID, name: "Project" }],
-            conversations: [conversation()],
+            conversations: conversationAvailable ? [conversation()] : [],
             capabilities: { scopes, preset: scopes.length > 1 ? "collaborate" : "monitor", expiresAt: "2030-02-01T00:00:00.000Z" },
           },
         },
       };
     }
     if (request.type === "conversation.get") {
+      if (!conversationAvailable) {
+        return {
+          type: "response", requestId, ok: false,
+          code: "not-found",
+          message: "That conversation is unavailable to this device.",
+        };
+      }
       return {
         type: "response", requestId, ok: true,
         result: {
@@ -55,6 +64,14 @@ const socket = {
             waitingForLocalAction: false,
           },
         },
+      };
+    }
+    if (request.type === "prompt.send" && uncertainPromptResponses > 0) {
+      uncertainPromptResponses -= 1;
+      return {
+        type: "response", requestId, ok: false,
+        code: "uncertain",
+        message: "The prompt result is uncertain.",
       };
     }
     return { type: "response", requestId, ok: true, result: { kind: "prompt.accepted", deliveryId: "d", turnId: "t" } };
@@ -77,7 +94,10 @@ afterEach(() => {
   sent.length = 0;
   scopes = [];
   runId = null;
+  conversationAvailable = true;
+  uncertainPromptResponses = 0;
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 async function openConversation(): Promise<void> {
@@ -153,5 +173,56 @@ describe("Private Connect packaged workspace", () => {
     await openConversation();
     expect(screen.queryByRole("button", { name: "Stop run" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Send a prompt" })).toBeInTheDocument();
+  });
+
+  it("clears removed conversation state and stops requesting its detail", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let uuidSequence = 0;
+    vi.spyOn(crypto, "randomUUID").mockImplementation(() =>
+      `10000000-0000-4000-8000-${String(++uuidSequence).padStart(12, "0")}`);
+    scopes = ["private:read", "private:prompt"];
+    uncertainPromptResponses = 1;
+    await openConversation();
+
+    const composer = screen.getByRole("textbox", { name: "Send a prompt" });
+    fireEvent.change(composer, { target: { value: "retry this prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByText(/Sending again will safely check/iu)).toBeInTheDocument());
+    const firstDeliveryId = sent.find((request) =>
+      request.type === "prompt.send")?.deliveryId;
+
+    conversationAvailable = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+
+    await waitFor(() => expect(screen.getByRole("heading", {
+      name: "Choose a conversation",
+    })).toBeInTheDocument());
+    expect(screen.queryByText("hello", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Send a prompt" })).not.toBeInTheDocument();
+    const detailRequestsAfterRemoval = sent.filter((request) =>
+      request.type === "conversation.get").length;
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(sent.filter((request) => request.type === "conversation.get"))
+      .toHaveLength(detailRequestsAfterRemoval);
+
+    conversationAvailable = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: /Conversation/u,
+    })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Conversation/u }));
+    const restoredComposer = await screen.findByRole("textbox", {
+      name: "Send a prompt",
+    });
+    expect(restoredComposer).toHaveValue("");
+
+    fireEvent.change(restoredComposer, { target: { value: "retry this prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sent.filter((request) =>
+      request.type === "prompt.send")).toHaveLength(2));
+    const secondDeliveryId = sent.filter((request) =>
+      request.type === "prompt.send")[1]?.deliveryId;
+    expect(secondDeliveryId).not.toBe(firstDeliveryId);
   });
 });

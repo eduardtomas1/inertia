@@ -18,13 +18,15 @@ import {
 import { deleteCheckpoints } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import {
-  createWorktree,
+  createWorktreeWithOwnershipReceipt,
   getRepositoryStatus,
   GitError,
-  removeWorktree,
+  inspectUnacknowledgedWorktreeCreation,
+  removeOwnedWorktree,
 } from "../../git";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { ProviderManager } from "../../providers";
+import { normalizeIdentityPath } from "../../project-identity";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
@@ -162,17 +164,24 @@ export function createConversationCommandHandler(
             .conversations.find((candidate) => (
               candidate.projectId === command.payload.projectId
               && candidate.worktreePath !== null
-              && resolve(candidate.worktreePath) === requestedPath
+              && normalizeIdentityPath(resolve(candidate.worktreePath))
+                === normalizeIdentityPath(requestedPath)
             ));
+          const reusablePath = reusableContext
+            ? dependencies.store.conversationPath(reusableContext.id)
+            : null;
           if (
-            !reusableContext
-            || requestedPath === resolve(repositoryPath)
+            reusablePath === null
+            || normalizeIdentityPath(reusablePath)
+              !== normalizeIdentityPath(requestedPath)
+            || normalizeIdentityPath(requestedPath)
+              === normalizeIdentityPath(resolve(repositoryPath))
           ) {
             throw new RuntimeRequestError(
               "That worktree is not attached to a chat in this project.",
             );
           }
-          const status = await getRepositoryStatus(requestedPath);
+          const status = await getRepositoryStatus(reusablePath);
           if (
             command.payload.branch
             && command.payload.branch !== status.branch
@@ -233,10 +242,6 @@ export function createConversationCommandHandler(
           },
         );
         if (command.payload.useWorktree) {
-          const createdWorktreeReceipt: {
-            value: Awaited<ReturnType<typeof createWorktree>> | null;
-          } = { value: null };
-          let generatedBranch: string | null = null;
           try {
             if (!worktreeSource) {
               throw new RuntimeRequestError(
@@ -249,7 +254,6 @@ export function createConversationCommandHandler(
               );
             }
             const branch = `inertia/${conversation.id.slice(0, 8)}`;
-            generatedBranch = branch;
             const target = join(
               dependencies.dataDirectory,
               "worktrees",
@@ -270,7 +274,7 @@ export function createConversationCommandHandler(
                   repositoryPath,
                   worktreeSource,
                 );
-                const created = await createWorktree(
+                const created = await createWorktreeWithOwnershipReceipt(
                   verifiedRoot,
                   target,
                   {
@@ -278,8 +282,30 @@ export function createConversationCommandHandler(
                     createBranch: true,
                     startPoint: projectStatus.branch!,
                   },
+                  {
+                    beforeAdd: (ownershipToken) => {
+                      dependencies.store.conversationWorktrees.beginCreation(
+                        conversation.id,
+                        target,
+                        branch,
+                        ownershipToken,
+                      );
+                    },
+                    notAdded: () => {
+                      dependencies.store.conversationWorktrees.rejectCreation(
+                        conversation.id,
+                      );
+                    },
+                    added: (identity) => {
+                      dependencies.store.conversationWorktrees.recordCreation(
+                        conversation.id,
+                        target,
+                        branch,
+                        identity,
+                      );
+                    },
+                  },
                 );
-                createdWorktreeReceipt.value = created;
                 dependencies.store.updateConversation(conversation.id, {
                   worktreePath: created.root,
                   branch: created.branch ?? branch,
@@ -307,13 +333,9 @@ export function createConversationCommandHandler(
               branch: createdStatus.branch ?? branch,
             });
           } catch (error) {
-            if (createdWorktreeReceipt.value) {
-              dependencies.store.updateConversation(conversation.id, {
-                worktreePath: createdWorktreeReceipt.value.root,
-                branch: createdWorktreeReceipt.value.branch ?? generatedBranch,
-              });
-              dependencies.broadcastSnapshot();
-            } else {
+            const ownership = dependencies.store
+              .conversationWorktrees.get(conversation.id);
+            if (!ownership?.ownsWorktree) {
               dependencies.store.deleteConversation(conversation.id);
             }
             throw error;
@@ -602,28 +624,66 @@ export function createConversationCommandHandler(
             ) throw new RuntimeRequestError(error.message);
             throw error;
           }
-          if (conversation.worktreePath) {
+          let ownership = dependencies.store.conversationWorktrees.get(
+            conversation.id,
+          );
+          if (ownership?.creationState === "creating") {
+            const creation = await inspectUnacknowledgedWorktreeCreation(
+              dependencies.store.projectPath(conversation.projectId),
+              ownership.path,
+              ownership.branch,
+            );
+            if (creation === "absent") {
+              dependencies.store.conversationWorktrees.rejectCreation(
+                conversation.id,
+              );
+              ownership = null;
+            } else {
+              dependencies.store.conversationWorktrees
+                .retainInterruptedCreation(conversation.id);
+              ownership = null;
+            }
+          }
+          if (ownership?.ownsWorktree) {
+            if (
+              conversation.worktreePath === null
+              || resolve(conversation.worktreePath) !== resolve(ownership.path)
+            ) {
+              throw new RuntimeRequestError(
+                "The isolated worktree no longer matches this thread's ownership receipt.",
+              );
+            }
             const sharedCheckout = dependencies.store.shellSnapshot()
-              .conversations.some((candidate) => (
+              .conversations.find((candidate) => (
                 candidate.id !== conversation.id
                 && candidate.projectId === conversation.projectId
                 && candidate.worktreePath !== null
                 && resolve(candidate.worktreePath)
                   === resolve(conversation.worktreePath!)
               ));
-            if (!sharedCheckout) {
-              try {
-                await removeWorktree(
-                  dependencies.store.projectPath(conversation.projectId),
-                  conversation.worktreePath,
-                  false,
+            if (sharedCheckout) {
+              dependencies.store.conversationWorktrees.transfer(
+                conversation.id,
+                sharedCheckout.id,
+              );
+            } else {
+              const repositoryPath = dependencies.store.projectPath(
+                conversation.projectId,
+              );
+              const removal = await removeOwnedWorktree(
+                repositoryPath,
+                ownership.path,
+                ownership.branch,
+                ownership.branchHead,
+                ownership.worktreeId,
+                ownership.repositoryIdentity,
+                ownership.ownershipToken,
+                ownership.filesystemReceipt,
+              );
+              if (removal === "conflict") {
+                throw new RuntimeRequestError(
+                  "The isolated worktree was replaced or changed ownership, so it was preserved.",
                 );
-              } catch (error) {
-                if (
-                  !(error instanceof GitError && error.code === "not-found")
-                ) {
-                  throw error;
-                }
               }
             }
           }

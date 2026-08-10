@@ -17,12 +17,14 @@ import {
   createRuntimeMigrationCatalog,
   type DatabaseMigrationDefinition,
 } from "./catalog";
+import { conversationWorktreeOwnershipMigration } from "./conversation-worktree-ownership";
 import { durableDataMigrationDefinitions } from "./durable-data";
 import { protectCancellingDuoDeletion, protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
 import { persistFinalAnswerAutoScroll, roadmapSettingsMigrationDefinitions } from "./roadmap-settings";
 import { quotedSqlIdentifier } from "./sql-identifiers";
+import { workspacePathAuthoritiesMigration } from "./workspace-path-authorities";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
 const MODEL_SELECTION_COLUMNS = [
   "model_selection_json",
@@ -37,7 +39,6 @@ const TURN_ASSOCIATION_TABLES = [
   "checkpoints",
 ] as const;
 const TURN_ASSOCIATION_COLUMNS = ["turn_id"] as const;
-
 export function migrateRuntimeDatabase(database: Database.Database): void {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
       (sql, index) => {
@@ -1205,7 +1206,12 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
     migrationExtensions.push({ name: "ProtectInterruptedDuoRecovery", up: protectInterruptedPairedLaunchDeletion });
     migrationExtensions.push({ name: "PersistDuoThirdModelComparison", up: persistDuoThirdModelComparison });
     migrationExtensions.push(...roadmapSettingsMigrationDefinitions);
-    migrationExtensions.push({ name: "ProtectCancellingDuoProviderCleanup", up: protectCancellingDuoDeletion }, persistFinalAnswerAutoScroll);
+    migrationExtensions.push(
+      { name: "ProtectCancellingDuoProviderCleanup", up: protectCancellingDuoDeletion },
+      persistFinalAnswerAutoScroll,
+      conversationWorktreeOwnershipMigration,
+      workspacePathAuthoritiesMigration,
+    );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,
@@ -1226,7 +1232,6 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
       },
     });
   }
-
 function ensureTurnAssociationColumns(database: Database.Database): void {
     const associations = [
       ["messages", "turn_id"],

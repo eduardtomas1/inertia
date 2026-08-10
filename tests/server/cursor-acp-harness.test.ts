@@ -1,11 +1,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ToolKind } from "@agentclientprotocol/sdk";
+import type { PermissionOption, ToolKind } from "@agentclientprotocol/sdk";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
   createCursorAcpHarness,
+  cursorOneShotPermissionOption,
+  cursorPermissionDisplayIsSafe,
   isCursorFileMutationKind,
   parseCursorQuestionRequest,
 } from "../../src/server/provider/cursor-acp-harness";
@@ -158,6 +160,48 @@ describe.sequential("Cursor ACP harness", () => {
       "delete",
       "move",
     ]);
+  });
+
+  it("never turns a generic approval into a remembered ACP decision", () => {
+    const options = [
+      { optionId: "allow-always", name: "Always allow", kind: "allow_always" },
+      { optionId: "reject-always", name: "Always reject", kind: "reject_always" },
+    ] satisfies PermissionOption[];
+    expect(cursorOneShotPermissionOption(options, true)).toBeUndefined();
+    expect(cursorOneShotPermissionOption(options, false)).toBeUndefined();
+
+    const oneShot = [
+      ...options,
+      { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+      { optionId: "reject-once", name: "Reject once", kind: "reject_once" },
+    ] satisfies PermissionOption[];
+    expect(cursorOneShotPermissionOption(oneShot, true)?.optionId).toBe(
+      "allow-once",
+    );
+    expect(cursorOneShotPermissionOption(oneShot, false)?.optionId).toBe(
+      "reject-once",
+    );
+  });
+
+  it("rejects direction-changing or controlled approval copy", () => {
+    const request = (title: string, rawInput: unknown) => ({
+      toolCall: {
+        toolCallId: "tool-approval-copy",
+        title,
+        kind: "execute" as const,
+        status: "pending" as const,
+        rawInput,
+      },
+    });
+    expect(cursorPermissionDisplayIsSafe(
+      request("Run tests", { command: "npm test" }),
+    )).toBe(true);
+    expect(cursorPermissionDisplayIsSafe(
+      request("Run safe\u202Etxt.exe", { command: "npm test" }),
+    )).toBe(false);
+    expect(cursorPermissionDisplayIsSafe(
+      request("Run\u0000tests", { command: "npm test" }),
+    )).toBe(false);
   });
 
   it.each([

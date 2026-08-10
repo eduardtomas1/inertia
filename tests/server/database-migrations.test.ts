@@ -302,6 +302,57 @@ describe("published database fixtures", () => {
     }
   }, 30_000);
 
+  it("backfills pre-receipt conversation worktrees as explicitly external", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "worktree-ownership.sqlite");
+    const workspacePath = join(directory, "workspace");
+    const linkedPath = join(directory, "legacy-linked-worktree");
+    await mkdir(workspacePath);
+    await mkdir(linkedPath);
+    const store = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Legacy worktree", workspacePath);
+    const conversation = store.createConversation(
+      project.id,
+      "Legacy linked checkout",
+      { branch: "legacy/topic", worktreePath: linkedPath },
+    );
+    store.close();
+
+    const legacy = new Database(databasePath);
+    legacy.exec("DROP TABLE conversation_worktree_ownership");
+    legacy.prepare("DELETE FROM schema_migrations WHERE version = 50").run();
+    legacy.close();
+
+    migrateFixtureInPlace(databasePath);
+    const migrated = new Database(databasePath, { readonly: true });
+    expect(migrated.prepare(`
+      SELECT conversation_id, path, branch, owns_worktree, creation_state,
+        ownership_token, worktree_id, repository_identity,
+        filesystem_identity_json, branch_head
+      FROM conversation_worktree_ownership
+    `).get()).toEqual({
+      conversation_id: conversation.id,
+      path: linkedPath,
+      branch: "legacy/topic",
+      owns_worktree: 0,
+      creation_state: "external",
+      ownership_token: null,
+      worktree_id: null,
+      repository_identity: null,
+      filesystem_identity_json: null,
+      branch_head: null,
+    });
+    expect((migrated.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(
+      CURRENT_DATABASE_SCHEMA_VERSION,
+    );
+    expect(migrated.pragma("foreign_key_check")).toEqual([]);
+    migrated.close();
+  });
+
   it("backfills typed non-repository artifact absence for legacy persisted rows", async () => {
     const directory = await temporaryDirectory();
     const databasePath = join(directory, "artifact-absence.sqlite");

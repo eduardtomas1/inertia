@@ -1,11 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatAttachment } from "@shared/contracts";
 import type { PreviewBounds, PreviewState } from "@shared/desktop";
+import {
+  MAX_CHAT_ATTACHMENT_BYTES,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+} from "@shared/attachments";
 
 interface DesktopToolsOptions {
   setActionError: (message: string | null) => void;
   previewOwnerId?: "primary" | "secondary";
   previewContextId?: string | null;
+}
+
+export async function prepareComposerAttachmentImports(
+  files: readonly File[],
+): Promise<Array<{ name: string; mimeType: string; data: ArrayBuffer }>> {
+  let totalBytes = 0;
+  for (const file of files) {
+    if (
+      !Number.isSafeInteger(file.size)
+      || file.size < 1
+      || file.size > MAX_CHAT_ATTACHMENT_BYTES
+    ) {
+      throw new Error(
+        "An attachment is empty or exceeds the 10 MB file limit.",
+      );
+    }
+    totalBytes += file.size;
+    if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
+      throw new Error("Attachments exceed the 20 MB turn limit.");
+    }
+  }
+  return await Promise.all(files.map(async (file) => ({
+    name: file.name,
+    mimeType: file.type,
+    data: await file.arrayBuffer(),
+  })));
 }
 
 export function useDesktopTools({
@@ -72,13 +102,9 @@ export function useDesktopTools({
   const importComposerAttachments = useCallback(
     async (files: File[]): Promise<ChatAttachment[]> => {
       try {
-        return await window.inertia.importAttachments(await Promise.all(
-          files.map(async (file) => ({
-            name: file.name,
-            mimeType: file.type,
-            data: await file.arrayBuffer(),
-          })),
-        ));
+        return await window.inertia.importAttachments(
+          await prepareComposerAttachmentImports(files),
+        );
       } catch (error) {
         setActionError(
           error instanceof Error

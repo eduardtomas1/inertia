@@ -476,6 +476,70 @@ describe("provider process-tree termination", () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 
+  it("refuses to signal a POSIX PGID after the owned root and stdio fully closed", async () => {
+    const child = fakeChild();
+    child.exitCode = 0;
+    child.stdio[1] = { closed: true };
+    const killProcess = vi.fn();
+    const spawnProcessSync = vi.fn();
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "linux",
+        killProcess,
+        spawnProcessSync: spawnProcessSync as never,
+        waitMs: 25,
+      },
+    )).resolves.toBe(false);
+
+    expect(killProcess).not.toHaveBeenCalled();
+    expect(spawnProcessSync).not.toHaveBeenCalled();
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("reuses a live-owned POSIX termination that kills detached descendants", async () => {
+    const child = fakeChild();
+    child.stdio[1] = { closed: false };
+    const running = new Set([4_242, 4_243]);
+    const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+      const target = Math.abs(pid);
+      if (signal === 0) {
+        if (!running.has(target)) throw new Error("process gone");
+        return true as const;
+      }
+      if (signal === "SIGKILL") running.delete(target);
+      return true as const;
+    });
+    const terminate = vi.fn(async (ownedChild, force: boolean) =>
+      await terminateProcessTreeAndWait(ownedChild, force, {
+        platform: "linux",
+        killProcess,
+        spawnProcessSync: vi.fn(() => ({
+          status: 0,
+          stdout: "4243 4242\n",
+        })) as never,
+        waitMs: 100,
+      }));
+    const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
+      child as never,
+      "Provider process tree",
+      terminate,
+    );
+
+    const startedWhileOwned = terminateOwnedProcessTree(true);
+    child.exitCode = 0;
+    child.stdio[1] = { closed: true };
+    const lateAwait = terminateOwnedProcessTree(true);
+
+    expect(lateAwait).toBe(startedWhileOwned);
+    await expect(lateAwait).resolves.toBeUndefined();
+    expect(terminate).toHaveBeenCalledOnce();
+    expect(killProcess).toHaveBeenCalledWith(4_243, "SIGKILL");
+    expect(killProcess).toHaveBeenCalledWith(-4_242, "SIGKILL");
+  });
+
   it("keeps POSIX confirmation bounded when a target does not disappear", async () => {
     const child = fakeChild();
     const killProcess = vi.fn(() => true as const);

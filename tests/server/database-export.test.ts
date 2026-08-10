@@ -340,6 +340,104 @@ describe("safe database recovery exports", () => {
     destination.close();
   });
 
+  it("round-trips current same-timestamp transcripts in their exact order", async () => {
+    const sourceDirectory = temporaryDirectory();
+    const source = new RuntimeStore(
+      join(sourceDirectory, "inertia.sqlite"),
+      sourceDirectory,
+      { recoverInterruptedRuns: false },
+    );
+    const project = source.createProject("Ordered export", sourceDirectory);
+    const conversation = source.createConversation(project.id, "Ordered export");
+    const createdAt = "2026-08-10T10:00:00.000Z";
+    for (let index = 0; index < 20; index += 1) {
+      source.createMessage(
+        conversation.id,
+        `same-time-${index}`,
+        index % 2 === 0 ? "user" : "assistant",
+        [],
+        null,
+        createdAt,
+      );
+    }
+    const expected = source.conversationDetail(conversation.id)!.messages.map(
+      ({ role, content }) => ({ role, content }),
+    );
+    const serialized = source.exportRecoveryData();
+    const exported = JSON.parse(serialized) as {
+      version: number;
+      projects: Array<{
+        conversations: Array<{
+          messages: Array<{
+            role: string;
+            content: string;
+            ordinal: number;
+          }>;
+        }>;
+      }>;
+    };
+    expect(exported.version).toBe(2);
+    expect(exported.projects[0]?.conversations[0]?.messages.map(
+      ({ role, content }) => ({ role, content }),
+    )).toEqual(expected);
+    expect(exported.projects[0]?.conversations[0]?.messages.map(
+      ({ ordinal }) => ordinal,
+    )).toEqual(Array.from({ length: 20 }, (_unused, index) => index));
+    source.close();
+
+    const destinationDirectory = temporaryDirectory();
+    const destination = new RuntimeStore(
+      join(destinationDirectory, "inertia.sqlite"),
+      destinationDirectory,
+      { recoverInterruptedRuns: false },
+    );
+    await destination.importRecoveryData(serialized, temporaryDirectory());
+    const importedConversation = destination.shellSnapshot().conversations[0]!;
+    expect(destination.conversationDetail(importedConversation.id)!.messages.map(
+      ({ role, content }) => ({ role, content }),
+    )).toEqual(expected);
+    destination.close();
+  });
+
+  it("preserves legacy version 1 array order for same-timestamp messages", async () => {
+    const dataDirectory = temporaryDirectory();
+    const store = new RuntimeStore(
+      join(dataDirectory, "inertia.sqlite"),
+      dataDirectory,
+      { recoverInterruptedRuns: false },
+    );
+    const createdAt = "2026-08-10T11:00:00.000Z";
+    const expected = Array.from({ length: 20 }, (_unused, index) => ({
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      content: `legacy-same-time-${index}`,
+    }));
+    const serialized = JSON.stringify({
+      format: "inertia-recovery-export",
+      version: 1,
+      exportedAt: "2026-08-10T12:00:00.000Z",
+      projects: [{
+        name: "Legacy ordered export",
+        path: "/informational/legacy-project",
+        conversations: [{
+          title: "Legacy ordered export",
+          providerId: "codex",
+          model: "provider-default",
+          reasoningEffort: "medium",
+          interactionMode: "build",
+          accessMode: "supervised",
+          messages: expected.map((message) => ({ ...message, createdAt })),
+        }],
+      }],
+    });
+
+    await store.importRecoveryData(serialized, temporaryDirectory());
+    const importedConversation = store.shellSnapshot().conversations[0]!;
+    expect(store.conversationDetail(importedConversation.id)!.messages.map(
+      ({ role, content }) => ({ role, content }),
+    )).toEqual(expected);
+    store.close();
+  });
+
   it("rejects malformed or extended exports before changing the database", async () => {
     const directory = temporaryDirectory();
     const store = new RuntimeStore(
@@ -368,6 +466,28 @@ describe("safe database recovery exports", () => {
         name: "unsafe path identity",
         path: "relative/\0project",
         conversations: [],
+      }],
+    }), directory)).rejects.toThrow(/supported format/u);
+    await expect(store.importRecoveryData(JSON.stringify({
+      ...valid,
+      version: 2,
+      projects: [{
+        name: "invalid message order",
+        path: "/informational/project",
+        conversations: [{
+          title: "invalid message order",
+          providerId: "codex",
+          model: "provider-default",
+          reasoningEffort: "medium",
+          interactionMode: "build",
+          accessMode: "supervised",
+          messages: [{
+            role: "user",
+            content: "out of order",
+            createdAt: new Date().toISOString(),
+            ordinal: 1,
+          }],
+        }],
       }],
     }), directory)).rejects.toThrow(/supported format/u);
     expect(store.shellSnapshot()).toEqual(before);

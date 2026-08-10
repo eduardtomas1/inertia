@@ -14,6 +14,7 @@ import {
   type AppFixture,
   type RuntimeTestSnapshot,
 } from "./support/app-fixture";
+import { seedViewedConversationContext } from "./support/viewed-conversation-context";
 
 const execFileAsync = promisify(execFile);
 
@@ -586,35 +587,6 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
     provider_session_id: string | null;
   };
 
-  const seedViewedContext = async (): Promise<number> => {
-    const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
-    const state = database.prepare("SELECT active_conversation_id FROM app_state WHERE id = 1").get() as { active_conversation_id: string };
-    database.prepare(`
-      UPDATE conversations
-      SET
-        provider_id = 'claude',
-        model_selection_json = json_set(model_selection_json, '$.harnessId', 'claude-agent-sdk', '$.backendProfileId', 'builtin:anthropic', '$.backendProfileDisplayName', 'Anthropic', '$.modelId', 'viewed-model', '$.alias', 'viewed-model', '$.reasoningEffort', 'viewed-effort'),
-        continuation_identity_json = json_object('harnessId', 'claude-agent-sdk', 'backendProfileId', 'builtin:anthropic', 'backendConfigurationRevision', 0, 'modelIdentity', 'viewed-model', 'endpointIdentity', NULL),
-        model = 'viewed-model',
-        reasoning_effort = 'viewed-effort',
-        interaction_mode = 'plan',
-        access_mode = 'full',
-        branch = 'viewed/branch',
-        worktree_path = ?,
-        provider_session_id = 'viewed-provider-session'
-      WHERE id = ?
-    `).run(workspaceDirectory, state.active_conversation_id);
-    const count = (database.prepare("SELECT COUNT(*) AS count FROM conversations").get() as { count: number }).count;
-    database.close();
-    await page.reload();
-    await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
-    await expect(page.locator(".app-shell")).toHaveAttribute(
-      "data-runtime-generation",
-      /^[0-9a-f-]{36}$/iu,
-    );
-    return count;
-  };
-
   const expectIsolatedConversation = async (previousCount: number): Promise<void> => {
     await expect.poll(() => {
       const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
@@ -669,7 +641,11 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
     expect(turnCount).toBe(0);
   };
 
-  let count = await seedViewedContext();
+  let count = await seedViewedConversationContext(
+    page,
+    testDirectory,
+    workspaceDirectory,
+  );
   const contextTrigger = page.getByRole("button", { name: /Checkout context differs/u });
   await expect(contextTrigger).toBeVisible();
   await contextTrigger.click();
@@ -696,7 +672,11 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
   await expect(page.getByRole("menu", { name: "Branches" }).getByRole("menuitem", { name: `New chat on ${currentBranch}` })).toBeVisible();
   await currentBranchTrigger.click();
 
-  count = await seedViewedContext();
+  count = await seedViewedConversationContext(
+    page,
+    testDirectory,
+    workspaceDirectory,
+  );
   const projectQuickChat = sidebar.getByRole("button", { name: "New chat in Inertia", exact: true });
   await expect(projectQuickChat).toHaveCSS("opacity", "0");
   await projectQuickChat.locator("xpath=..").hover();
@@ -712,13 +692,21 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
   await expect(sidebar.getByLabel("Inertia threads")).toBeVisible();
   await expect(sidebar.getByRole("menu", { name: "Project actions for Inertia" })).toHaveCount(0);
 
-  count = await seedViewedContext();
+  count = await seedViewedConversationContext(
+    page,
+    testDirectory,
+    workspaceDirectory,
+  );
   await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
   const palette = page.getByRole("dialog", { name: "Search Inertia" });
   await palette.locator('[id="palette-action:new-thread"]').click();
   await expectIsolatedConversation(count);
 
-  count = await seedViewedContext();
+  count = await seedViewedConversationContext(
+    page,
+    testDirectory,
+    workspaceDirectory,
+  );
   await page.keyboard.press(process.platform === "darwin" ? "Meta+N" : "Control+N");
   await expectIsolatedConversation(count);
   expect(rendererErrors).toEqual([]);

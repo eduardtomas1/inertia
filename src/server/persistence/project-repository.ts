@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import type { Project } from "../../shared/contracts";
+import { WorkspacePathAuthority } from "../workspace-path-authority";
 import { projectFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 
@@ -10,7 +11,11 @@ const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "
 type ProjectPersistenceContext = Pick<PersistenceContext, "database" | "requireProject">;
 
 export class ProjectRepository {
-  constructor(private readonly context: ProjectPersistenceContext) {}
+  private readonly pathAuthority: WorkspacePathAuthority;
+
+  constructor(private readonly context: ProjectPersistenceContext) {
+    this.pathAuthority = new WorkspacePathAuthority(context.database);
+  }
 
   create(
     name: string,
@@ -49,6 +54,12 @@ export class ProjectRepository {
         )
       `).run(project);
       this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = NULL WHERE id = 1").run(project.id);
+      this.pathAuthority.enrollProject(
+        project.id,
+        project.path,
+        project.repositoryRoot,
+        project.repositoryIdentity,
+      );
     })();
     return project;
   }
@@ -61,18 +72,39 @@ export class ProjectRepository {
     const unchanged = Object.entries(update).every(([key, value]) => current[key as keyof Project] === value);
     if (unchanged) return current;
     const next = { ...current, ...update, updatedAt: new Date().toISOString() };
-    this.context.database.prepare(`
-      UPDATE projects SET
-        name = @name,
-        normalized_path = @normalizedPath,
-        repository_identity = @repositoryIdentity,
-        repository_root = @repositoryRoot,
-        repository_relative_path = @repositoryRelativePath,
-        grouping_mode = @groupingMode,
-        git_repository_limit = @gitRepositoryLimit,
-        updated_at = @updatedAt
-      WHERE id = @id
-    `).run(next);
+    this.context.database.transaction(() => {
+      const repositoryChanged =
+        next.repositoryIdentity !== current.repositoryIdentity
+        || next.repositoryRoot !== current.repositoryRoot;
+      if (repositoryChanged) {
+        if (
+          current.repositoryIdentity !== null
+          || current.repositoryRoot !== null
+          || next.repositoryIdentity === null
+          || next.repositoryRoot === null
+        ) {
+          throw new Error("The enrolled project repository identity cannot be changed.");
+        }
+        this.pathAuthority.promoteProjectRepository(
+          projectId,
+          current.path,
+          next.repositoryRoot,
+          next.repositoryIdentity,
+        );
+      }
+      this.context.database.prepare(`
+        UPDATE projects SET
+          name = @name,
+          normalized_path = @normalizedPath,
+          repository_identity = @repositoryIdentity,
+          repository_root = @repositoryRoot,
+          repository_relative_path = @repositoryRelativePath,
+          grouping_mode = @groupingMode,
+          git_repository_limit = @gitRepositoryLimit,
+          updated_at = @updatedAt
+        WHERE id = @id
+      `).run(next);
+    })();
     return next;
   }
 
@@ -94,7 +126,13 @@ export class ProjectRepository {
   }
 
   path(projectId: string): string {
-    return this.context.requireProject(projectId).path;
+    return this.pathAuthority.resolveProject(
+      this.context.requireProject(projectId),
+    );
+  }
+
+  enrollMissingPaths(): void {
+    this.pathAuthority.enrollMissing();
   }
 
   touch(projectId: string, timestamp: string): void {

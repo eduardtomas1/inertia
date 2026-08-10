@@ -649,16 +649,64 @@ export class PairedLaunchRepository {
     conversationIds: [string, string],
     now: string,
   ): void {
-    const update = this.database.prepare(`
-      UPDATE paired_launch_sides SET conversation_id = ?
-      WHERE launch_id = ? AND ordinal = ? AND conversation_id IS NULL
-    `);
-    conversationIds.forEach((conversationId, ordinal) => {
-      if (update.run(conversationId, launchId, ordinal).changes !== 1) {
-        throw new Error("The Duo conversation identity was already adopted.");
-      }
-    });
-    this.touch(launchId, "preparing", null, now);
+    this.database.transaction(() => {
+      const update = this.database.prepare(`
+        UPDATE paired_launch_sides SET conversation_id = ?
+        WHERE launch_id = ? AND ordinal = ? AND conversation_id IS NULL
+      `);
+      const planStatement = this.database.prepare(`
+        SELECT * FROM paired_launch_sides
+        WHERE launch_id = ? AND ordinal = ?
+      `);
+      const promoteOwnership = this.database.prepare(`
+        UPDATE conversation_worktree_ownership
+        SET owns_worktree = 1, creation_state = 'created',
+          ownership_token = ?, worktree_id = ?, repository_identity = ?,
+          filesystem_identity_json = ?, branch_head = ?
+        WHERE conversation_id = ?
+          AND path = ? AND branch = ?
+          AND owns_worktree = 0 AND creation_state = 'external'
+      `);
+      conversationIds.forEach((conversationId, ordinal) => {
+        if (update.run(conversationId, launchId, ordinal).changes !== 1) {
+          throw new Error("The Duo conversation identity was already adopted.");
+        }
+        const plan = planStatement.get(
+          launchId,
+          ordinal,
+        ) as PairedLaunchSideRow;
+        if (plan.owns_worktree !== 1) return;
+        if (
+          plan.worktree_creation_state !== "created"
+          || plan.planned_worktree_path === null
+          || plan.planned_branch === null
+          || plan.cleanup_worktree_token === null
+          || plan.cleanup_worktree_id === null
+          || plan.cleanup_repository_identity === null
+          || plan.cleanup_filesystem_identity_json === null
+          || parseWorktreeFilesystemReceipt(
+            plan.cleanup_filesystem_identity_json,
+          ) === null
+          || plan.cleanup_branch_head === null
+        ) {
+          throw new Error("The adopted Duo worktree ownership is incomplete.");
+        }
+        const promoted = promoteOwnership.run(
+          plan.cleanup_worktree_token,
+          plan.cleanup_worktree_id,
+          plan.cleanup_repository_identity,
+          plan.cleanup_filesystem_identity_json,
+          plan.cleanup_branch_head,
+          conversationId,
+          plan.planned_worktree_path,
+          plan.planned_branch,
+        );
+        if (promoted.changes !== 1) {
+          throw new Error("The adopted Duo worktree ownership changed.");
+        }
+      });
+      this.touch(launchId, "preparing", null, now);
+    })();
   }
 
   attachComparisonConversation(

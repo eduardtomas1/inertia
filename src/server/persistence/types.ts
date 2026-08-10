@@ -37,6 +37,7 @@ import type {
 } from "../../shared/backend-profile-settings";
 import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe";
 import type { PersistedTurnExecutionContext } from "../runtime/turns/request-context";
+import type { WorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
 
 export interface NewConversationOptions {
   /** Privileged preallocation used by atomic multi-conversation workflows. */
@@ -51,6 +52,43 @@ export interface NewConversationOptions {
   branch?: string | null;
   worktreePath?: string | null;
 }
+
+interface ConversationWorktreeOwnershipBase {
+  conversationId: string;
+  path: string;
+  branch: string | null;
+}
+
+export type StoredConversationWorktreeOwnership =
+  | ConversationWorktreeOwnershipBase & {
+      ownsWorktree: false;
+      creationState: "external";
+      ownershipToken: null;
+      worktreeId: null;
+      repositoryIdentity: null;
+      filesystemReceipt: null;
+      branchHead: null;
+    }
+  | ConversationWorktreeOwnershipBase & {
+      ownsWorktree: true;
+      creationState: "creating";
+      branch: string;
+      ownershipToken: string;
+      worktreeId: null;
+      repositoryIdentity: null;
+      filesystemReceipt: null;
+      branchHead: null;
+    }
+  | ConversationWorktreeOwnershipBase & {
+      ownsWorktree: true;
+      creationState: "created";
+      branch: string;
+      ownershipToken: string;
+      worktreeId: string;
+      repositoryIdentity: string;
+      filesystemReceipt: WorktreeFilesystemReceipt;
+      branchHead: string;
+    };
 
 export interface CreateAgentTurnInput {
   id?: string;

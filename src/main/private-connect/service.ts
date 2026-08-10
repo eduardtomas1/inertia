@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   PRIVATE_CONNECT_LIMITS,
   PRIVATE_CONNECT_SOCKET_CLOSE,
+  isPrivateConnectUuid,
   privateConnectRequestSchema,
   type PrivateConnectInvitation,
   type PrivateConnectRequest,
@@ -265,7 +266,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       throw new Error("That Private Connect invitation has expired.");
     }
     const deviceLabel = sanitizeDeviceLabel(request.deviceLabel);
-    if (!deviceLabel || !isUuid(request.deviceId)) throw new Error("The browser identity is invalid.");
+    if (!deviceLabel || !isPrivateConnectUuid(request.deviceId)) throw new Error("The browser identity is invalid.");
     const existing = [...this.pending.values()].find((pending) => pending.invitationId === invitation.invitationId);
     if (existing) {
       if (existing.deviceId !== request.deviceId) throw new Error("A pairing request is already waiting for approval.");
@@ -335,7 +336,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       throw new Error("That pairing request expired.");
     }
     if (!this.data) throw new Error("Private Connect storage is unavailable.");
-    const normalizedProjects = [...new Set(projectIds.map((id) => id.trim()))].filter((id) => isUuid(id)).slice(0, PRIVATE_CONNECT_LIMITS.projectIds);
+    const normalizedProjects = [...new Set(projectIds.map((id) => id.trim()))].filter((id) => isPrivateConnectUuid(id)).slice(0, PRIVATE_CONNECT_LIMITS.projectIds);
     if (normalizedProjects.length === 0) throw new Error("Choose at least one project.");
     const scopes = scopesForPreset(preset);
     const normalizedGrants = privateConnectGrantsForSelectedProjects(normalizedProjects, grants);
@@ -428,7 +429,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const maximum = this.now().getTime() + (preset === "collaborate" ? 30 : 90) * 24 * 60 * 60 * 1_000;
     if (!Number.isFinite(expiry) || expiry <= this.now().getTime() || expiry > maximum) throw new Error("The device expiry is outside the allowed range.");
     const normalizedProjects = [...new Set(projectIds.map((id) => id.trim()))]
-      .filter((id) => isUuid(id))
+      .filter((id) => isPrivateConnectUuid(id))
       .slice(0, PRIVATE_CONNECT_LIMITS.projectIds);
     const normalizedGrants = privateConnectGrantsForSelectedProjects(normalizedProjects, grants);
     if (normalizedGrants.length === 0) throw new Error("Choose at least one project.");
@@ -1135,7 +1136,6 @@ function withDeadline<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 function contentDigest(value: string): string { return createHash("sha256").update("inertia-private-connect-delivery\0").update(value).digest("hex"); }
-function isUuid(value: string): boolean { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value); }
 function digest(value: string): string { return createHash("sha256").update("inertia-private-connect-cookie\0").update(value).digest("hex"); }
 function sessionCookieValue(session: PrivateConnectSession): string { return (session as PrivateConnectSession & { __token?: string }).__token ?? ""; }
 function comparisonCodeFor(hostId: string, deviceId: string, invitationId: string): string { return (createHash("sha256").update("inertia-private-connect-pairing\0").update(hostId).update("\0").update(deviceId).update("\0").update(invitationId).digest().readUInt32BE(0) % 1_000_000).toString().padStart(6, "0"); }

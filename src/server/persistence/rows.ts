@@ -70,6 +70,19 @@ export interface ConversationRow {
   updated_at: string;
 }
 
+export interface ConversationWorktreeOwnershipRow {
+  conversation_id: string;
+  path: string;
+  branch: string | null;
+  owns_worktree: 0 | 1;
+  creation_state: "external" | "creating" | "created";
+  ownership_token: string | null;
+  worktree_id: string | null;
+  repository_identity: string | null;
+  filesystem_identity_json: string | null;
+  branch_head: string | null;
+}
+
 export interface AgentTurnRow {
   id: string;
   conversation_id: string;

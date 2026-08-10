@@ -8,13 +8,9 @@ import type {
   AgentApprovalPermissionRoot,
   AgentApprovalRequest,
 } from "../provider/interactions";
+import { isSafeApprovalDisplayText } from "../provider/approval-display";
 
 const MAX_PERMISSION_ROOTS = 12;
-const UNSAFE_APPROVAL_FORMATTING =
-  /(?:\p{Cf}|\p{Zl}|\p{Zp})/u;
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
-const CONTROL_CHARACTERS_EXCEPT_LINE_BREAKS =
-  /[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
 const APPROVAL_METHODS = new Set([
   "item/commandExecution/requestApproval",
   "item/fileChange/requestApproval",
@@ -46,12 +42,7 @@ function strictBoundedText(
 ): string | undefined {
   if (
     typeof value !== "string"
-    || UNSAFE_APPROVAL_FORMATTING.test(value)
-    || (
-      allowLineBreaks
-        ? CONTROL_CHARACTERS_EXCEPT_LINE_BREAKS.test(value)
-        : CONTROL_CHARACTERS.test(value)
-    )
+    || !isSafeApprovalDisplayText(value, allowLineBreaks)
     || value.length > maxChars
   ) return undefined;
   return value.trim().length > 0 ? value : undefined;
@@ -72,8 +63,7 @@ function legacyCommand(value: unknown): string | undefined {
     || value.length > 128
     || value.some((part) =>
       typeof part !== "string"
-      || CONTROL_CHARACTERS.test(part)
-      || UNSAFE_APPROVAL_FORMATTING.test(part)
+      || !isSafeApprovalDisplayText(part)
       || part.length > 2_000)
   ) return undefined;
   const command = value.map((part) =>
@@ -98,8 +88,7 @@ function legacyFileChangeSummary(value: unknown): string | undefined {
     if (
       !path
       || path.length > 4_096
-      || CONTROL_CHARACTERS.test(path)
-      || UNSAFE_APPROVAL_FORMATTING.test(path)
+      || !isSafeApprovalDisplayText(path)
     ) return undefined;
     const change = objectValue(rawChange);
     if (!change || typeof change.type !== "string") return undefined;

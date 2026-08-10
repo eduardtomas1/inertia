@@ -3,7 +3,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 
 import {
-  requireProcessTreeTermination,
+  createOwnedProcessTreeTermination,
+  type OwnedProcessTreeTermination,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import { CappedProviderBuffer } from "./io";
@@ -31,8 +32,13 @@ export async function startOwnedOpenCodeServer(
   environment: NodeJS.ProcessEnv,
   output: CappedProviderBuffer,
   terminateOwnedProcessTree: ProcessTreeTerminator,
+  terminationSubject: string,
   signal?: AbortSignal,
-): Promise<{ child: ChildProcessWithoutNullStreams; url: string }> {
+): Promise<{
+  child: ChildProcessWithoutNullStreams;
+  terminate: OwnedProcessTreeTermination;
+  url: string;
+}> {
   const invocation = openCodeServerProcessInvocation(executable, environment);
   const child = spawn(invocation.command, invocation.args, {
     cwd,
@@ -42,6 +48,16 @@ export async function startOwnedOpenCodeServer(
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
+  });
+  const terminate = createOwnedProcessTreeTermination(
+    child,
+    terminationSubject,
+    terminateOwnedProcessTree,
+  );
+  // Arm ownership while Node still has a live process/stdio capability. A
+  // later close-only cleanup must not signal a recycled POSIX PID or PGID.
+  child.once("exit", () => {
+    void terminate(true).catch(() => undefined);
   });
   child.stdin.end();
   let startupOutput = "";
@@ -93,16 +109,21 @@ export async function startOwnedOpenCodeServer(
     const url = await ready;
     clearTimeout(startupTimer);
     signal?.removeEventListener("abort", cancelStartup);
-    return { child, url };
+    return { child, terminate, url };
   } catch (error) {
     if (startupTimer) clearTimeout(startupTimer);
     signal?.removeEventListener("abort", cancelStartup);
-    await requireProcessTreeTermination(
-      terminateOwnedProcessTree,
-      child,
-      true,
-      "OpenCode startup process tree",
-    );
+    try {
+      await terminate(true);
+    } catch (cleanupError) {
+      throw new Error(
+        `${safeError(error, "OpenCode server failed during startup.")} ${safeError(
+          cleanupError,
+          `${terminationSubject} could not be confirmed stopped.`,
+        )}`,
+        { cause: cleanupError },
+      );
+    }
     throw error;
   }
 }

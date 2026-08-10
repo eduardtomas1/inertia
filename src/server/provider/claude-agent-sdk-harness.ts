@@ -5,17 +5,20 @@ import { extname } from "node:path";
 import {
   query as claudeQuery,
   type CanUseTool,
-  type Options as ClaudeOptions,
   type PermissionResult,
   type Query,
   type SDKMessage,
   type SDKUserMessage,
-  type SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
 import { providerActivityDetailSections } from "./activity-detail";
+import { isSafeApprovalDisplayText } from "./approval-display";
+import {
+  createClaudeOwnedQueryProcess,
+  type ClaudeOwnedQueryDependencies,
+} from "./claude-owned-query";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import {
   createAgentHarnessEmitter,
@@ -33,6 +36,17 @@ import type {
 import { providerFailureMessage } from "./adapters";
 import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
+import {
+  CLAUDE_ISOLATED_SKILL_SETTINGS,
+  claudePluginLoadedSelectedSkills,
+  stageClaudeSkillPlugin,
+} from "./claude-skill-plugin";
+import {
+  createClaudeSkillDeadline,
+  raceClaudeSkillStaging,
+  type ClaudeSkillFilesystemTestSeam,
+} from "./claude-skill-operation";
+import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
 import {
   parseClaudeRateLimitEvent,
@@ -52,12 +66,13 @@ const CLAUDE_STOP_TASK_TIMEOUT_MS = 2_000;
 const MIN_CLAUDE_STOP_TASK_TIMEOUT_MS = 25;
 const CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 2_000;
 const MIN_CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 25;
+const CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS = 6_000;
 const CLAUDE_MESSAGE_DRAIN_TIMEOUT = Symbol("claude-message-drain-timeout");
 
 export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
   session: { resume: "native", identity: "session" },
-  cancellation: { graceful: "protocol-interrupt", forceFallback: "sdk-abort-close" },
+  cancellation: { graceful: "protocol-interrupt", forceFallback: "process-tree-kill" },
   extension: {
     kind: "claude-agent-sdk",
     protocol: "claude-agent-sdk",
@@ -72,9 +87,8 @@ export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   },
 } as const satisfies ClaudeAgentSdkHarnessCapabilities;
 
-type ClaudeQueryFactory = (params: { prompt: string | AsyncIterable<SDKUserMessage>; options?: ClaudeOptions }) => Query;
-
-export interface ClaudeAgentSdkHarnessOptions {
+export interface ClaudeAgentSdkHarnessOptions
+  extends ClaudeOwnedQueryDependencies {
   createQuery?: ClaudeQueryFactory;
   /**
    * May shorten, but never extend, the production delegated-task stop
@@ -87,7 +101,10 @@ export interface ClaudeAgentSdkHarnessOptions {
    * result. Primarily useful for deterministic tests.
    */
   terminalSubagentDrainTimeoutMs?: number;
+  skillFilesystem?: ClaudeSkillFilesystemTestSeam;
 }
+
+export { readClaudeAgentSdkSkills } from "./claude-skill-query";
 
 function claudeStopTaskTimeout(value: number | undefined): number {
   if (
@@ -199,37 +216,61 @@ export async function readClaudeAgentSdkMetadata(
   timeoutMs = 6_000,
   createQuery: ClaudeQueryFactory = claudeQuery,
   fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
+  lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
 ): Promise<{ models?: ProviderModel[]; rateLimits?: ProviderRateLimit[] }> {
   const abortController = new AbortController();
+  const ownedProcess = createClaudeOwnedQueryProcess(
+    "Claude metadata process tree",
+    lifecycleDependencies,
+  );
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
   async function* dormantPrompt(): AsyncIterable<SDKUserMessage> {
     await hold;
     yield* [] as SDKUserMessage[];
   }
-  const query = createQuery({
-    prompt: dormantPrompt(),
-    options: { abortController, cwd, env: environment, pathToClaudeCodeExecutable: executable },
-  });
-  const timer = setTimeout(() => abortController.abort(), timeoutMs);
-  timer.unref();
+  let query: Query | undefined;
+  let timer: NodeJS.Timeout | undefined;
   try {
+    query = createQuery({
+      prompt: dormantPrompt(),
+      options: {
+        abortController,
+        cwd,
+        env: environment,
+        pathToClaudeCodeExecutable: executable,
+        spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
+        settingSources: [],
+      },
+    });
     const usageReader = query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
-    const [modelsResult, limitsResult] = await Promise.allSettled([
-      fields.includes("models") ? query.supportedModels() : Promise.resolve(undefined),
-      fields.includes("rateLimits") && typeof usageReader === "function"
-        ? usageReader.call(query)
-        : Promise.resolve(undefined),
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        abortController.abort();
+        reject(new Error("Claude metadata discovery timed out."));
+      }, timeoutMs);
+      timer.unref();
+    });
+    const [modelsResult, limitsResult] = await Promise.race([
+      Promise.allSettled([
+        fields.includes("models") ? query.supportedModels() : Promise.resolve(undefined),
+        fields.includes("rateLimits") && typeof usageReader === "function"
+          ? usageReader.call(query)
+          : Promise.resolve(undefined),
+      ]),
+      timeout,
     ]);
     return {
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
       ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? { rateLimits: parseClaudeRateLimits(limitsResult.value) } : {}),
     };
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
+    ownedProcess.requestTermination(true);
     release();
     abortController.abort();
-    try { query.close(); } catch { /* The metadata subprocess may already have exited. */ }
+    try { query?.close(); } catch { /* The metadata subprocess may already have exited. */ }
+    await ownedProcess.terminate(true);
   }
 }
 
@@ -239,59 +280,17 @@ export async function readClaudeAgentSdkModels(
   cwd: string,
   timeoutMs = 6_000,
   createQuery: ClaudeQueryFactory = claudeQuery,
+  lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
 ): Promise<ProviderModel[]> {
-  return (await readClaudeAgentSdkMetadata(executable, environment, cwd, timeoutMs, createQuery, ["models"])).models ?? [];
-}
-
-export async function readClaudeAgentSdkSkills(
-  executable: string,
-  environment: NodeJS.ProcessEnv,
-  cwd: string,
-  forceReload = false,
-  timeoutMs = 6_000,
-  createQuery: ClaudeQueryFactory = claudeQuery,
-): Promise<SlashCommand[]> {
-  const abortController = new AbortController();
-  let release!: () => void;
-  const hold = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  async function* dormantPrompt(): AsyncIterable<SDKUserMessage> {
-    await hold;
-    yield* [] as SDKUserMessage[];
-  }
-  const query = createQuery({
-    prompt: dormantPrompt(),
-    options: {
-      abortController,
-      cwd,
-      env: environment,
-      pathToClaudeCodeExecutable: executable,
-    },
-  });
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        abortController.abort();
-        reject(new Error("Claude skill discovery timed out."));
-      }, timeoutMs);
-      timer.unref();
-    });
-    const skills = forceReload
-      ? query.reloadSkills().then((result) => result.skills)
-      : query.supportedCommands();
-    return await Promise.race([skills, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    release();
-    abortController.abort();
-    try {
-      query.close();
-    } catch {
-      // The SDK subprocess may already have exited.
-    }
-  }
+  return (await readClaudeAgentSdkMetadata(
+    executable,
+    environment,
+    cwd,
+    timeoutMs,
+    createQuery,
+    ["models"],
+    lifecycleDependencies,
+  )).models ?? [];
 }
 
 interface PendingApproval {
@@ -319,8 +318,10 @@ export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOption
     start: (startOptions) => startClaudeRun(
       startOptions,
       options.createQuery ?? claudeQuery,
+      options,
       stopTaskTimeoutMs,
       terminalSubagentDrainTimeoutMs,
+      options.skillFilesystem,
     ),
   };
 }
@@ -328,8 +329,10 @@ export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOption
 function startClaudeRun(
   options: AgentHarnessStartOptions,
   createQuery: ClaudeQueryFactory,
+  lifecycleDependencies: ClaudeOwnedQueryDependencies,
   stopTaskTimeoutMs: number,
   terminalSubagentDrainTimeoutMs: number,
+  skillFilesystem: ClaudeSkillFilesystemTestSeam | undefined,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
@@ -350,6 +353,7 @@ function startClaudeRun(
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
   const abortController = new AbortController();
+  const skillAbortController = new AbortController();
   const delegateLifecycle = new ClaudeDelegateLifecycle();
   const promptChannel = new ClaudePromptChannel();
   const subagentTracker = new ClaudeSubagentTraceTracker(emitter.subagent);
@@ -365,6 +369,14 @@ function startClaudeRun(
   let sessionId = options.input.sessionId;
   let latestContextUsage: Awaited<ReturnType<typeof readClaudeContextUsage>>;
   let contextUsageRequest: Promise<void> | null = null;
+  let stagedSkillPlugin: Awaited<ReturnType<
+    typeof stageClaudeSkillPlugin
+  >> = null;
+  let selectedSkillsVerified = false;
+  const ownedProcess = createClaudeOwnedQueryProcess(
+    "Claude Code process tree",
+    lifecycleDependencies,
+  );
 
   const refreshContextUsage = (): void => {
     if (!query || contextUsageRequest) return;
@@ -431,7 +443,38 @@ function startClaudeRun(
       return deny("The proposed plan was returned to the user for review.");
     }
 
-    if (options.input.access === "full") return { behavior: "allow", updatedInput: toolInput };
+    if (options.input.access === "full") {
+      return { behavior: "allow", updatedInput: toolInput };
+    }
+    const approvalTitle = callbackOptions.title
+      ?? `Claude wants to use ${toolName}`;
+    const approvalDetail = callbackOptions.description
+      ?? summarizeInput(toolInput);
+    const approvalCommand = toolName === "Bash"
+      && typeof toolInput.command === "string"
+      ? toolInput.command
+      : undefined;
+    const approvalReason = callbackOptions.decisionReason;
+    const approvalBlockedPath = callbackOptions.blockedPath;
+    if (
+      !isSafeApprovalDisplayText(approvalTitle)
+      || !isSafeApprovalDisplayText(approvalDetail, true)
+      || (
+        approvalCommand !== undefined
+        && !isSafeApprovalDisplayText(approvalCommand, true)
+      )
+      || (
+        approvalReason !== undefined
+        && !isSafeApprovalDisplayText(approvalReason, true)
+      )
+      || (
+        approvalBlockedPath !== undefined
+        && !isSafeApprovalDisplayText(approvalBlockedPath)
+      )
+    ) {
+      return deny("Claude sent unsafe permission display text.");
+    }
+
     const requestId = randomUUID();
     const decision = await new Promise<AgentApprovalDecision>((resolve) => {
       approvals.set(requestId, { resolve, settled: false });
@@ -441,12 +484,16 @@ function startClaudeRun(
         request: {
           requestId,
           kind: toolName === "Bash" ? "command" : /edit|write|notebook/iu.test(toolName) ? "file-change" : "permissions",
-          title: bounded(callbackOptions.title ?? `Claude wants to use ${toolName}`),
-          detail: bounded(callbackOptions.description ?? summarizeInput(toolInput)),
-          ...(toolName === "Bash" && typeof toolInput.command === "string" ? { command: bounded(toolInput.command) } : {}),
+          title: bounded(approvalTitle),
+          detail: bounded(approvalDetail),
+          ...(approvalCommand !== undefined
+            ? { command: bounded(approvalCommand) }
+            : {}),
           cwd: options.input.cwd,
-          ...(callbackOptions.decisionReason ? { reason: bounded(callbackOptions.decisionReason) } : {}),
-          permissionRoots: callbackOptions.blockedPath ? [{ path: callbackOptions.blockedPath, access: "write" }] : [],
+          ...(approvalReason ? { reason: bounded(approvalReason) } : {}),
+          permissionRoots: approvalBlockedPath
+            ? [{ path: bounded(approvalBlockedPath), access: "write" }]
+            : [],
           availableDecisions: ["approve", "deny", "cancel"],
         },
       });
@@ -472,12 +519,35 @@ function startClaudeRun(
         "",
         options.input.backendProfile,
       );
-  const result = (async (): Promise<ProviderRunResult> => {
+  const providerResult = (async (): Promise<ProviderRunResult> => {
     try {
       const prompt = await claudePrompt(options.input.prompt, options.input.imagePaths ?? []);
       if (!promptChannel.push(prompt)) {
         return finishResult("cancelled");
       }
+      const selectedClaudeSkills = (options.input.skills ?? []).filter(
+        (skill) => skill.source === "claude-native",
+      );
+      const skillDeadline = createClaudeSkillDeadline(
+        CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS,
+        "Claude selected-skill staging timed out.",
+        skillAbortController.signal,
+      );
+      const staging = stageClaudeSkillPlugin(
+        selectedClaudeSkills,
+        options.input.cwd,
+        options.environment,
+        { ...skillFilesystem, signal: skillDeadline.signal },
+      );
+      try {
+        stagedSkillPlugin = await raceClaudeSkillStaging(
+          staging,
+          skillDeadline.signal,
+        );
+      } finally {
+        skillDeadline.dispose();
+      }
+      selectedSkillsVerified = stagedSkillPlugin === null;
       query = createQuery({
         prompt: promptChannel,
         options: {
@@ -485,7 +555,13 @@ function startClaudeRun(
           cwd: options.input.cwd,
           env: options.environment,
           pathToClaudeCodeExecutable: options.executable,
+          spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
           includePartialMessages: true,
+          // Inertia owns the approval boundary. Loading filesystem settings
+          // here would let a repository's .claude/settings.json install hooks
+          // or allow rules that execute before canUseTool can ask the user.
+          settingSources: [],
+          managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
           permissionMode: options.input.interactionMode === "plan"
             ? "plan"
             : options.input.access === "full"
@@ -498,10 +574,14 @@ function startClaudeRun(
           ...(options.input.sessionId ? { resume: options.input.sessionId } : {}),
           ...(options.input.model ? { model: options.input.model } : {}),
           ...(claudeEffort(options.input.reasoningEffort) ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
-          ...(options.input.skills?.length
+          ...(stagedSkillPlugin
             ? {
-                skills: options.input.skills.flatMap((skill) =>
-                  skill.source === "claude-native" ? [skill.name] : []),
+                plugins: [{
+                  type: "local" as const,
+                  path: stagedSkillPlugin.path,
+                  skipMcpDiscovery: true,
+                }],
+                skills: stagedSkillPlugin.skillNames,
               }
             : {}),
         },
@@ -522,6 +602,16 @@ function startClaudeRun(
         );
         if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
         const message = next.value;
+        if (
+          stagedSkillPlugin
+          && message.type === "system"
+          && message.subtype === "init"
+        ) {
+          if (!claudePluginLoadedSelectedSkills(message, stagedSkillPlugin)) {
+            throw new Error("Claude did not load the selected isolated skills.");
+          }
+          selectedSkillsVerified = true;
+        }
         drainTerminalSubagents = false;
         eventBudget.observe(message);
         const record = message as unknown as Record<string, unknown>;
@@ -648,6 +738,9 @@ function startClaudeRun(
           continue;
         }
       }
+      if (!selectedSkillsVerified) {
+        throw new Error("Claude did not confirm the selected isolated skills.");
+      }
       if (cancelRequested) return finishResult("cancelled");
       const completion = delegateLifecycle.complete();
       if (completion.kind === "incomplete") {
@@ -678,6 +771,10 @@ function startClaudeRun(
       );
     } finally {
       acceptingFollowUps = false;
+      // Start the owned shutdown while the SDK child is still an owned live
+      // process. The public result below awaits this same memoized attempt
+      // after protocol streams and selected-skill resources are closed.
+      ownedProcess.requestTermination(true);
       promptChannel.close();
       cancelPending();
       delegateLifecycle.dispose();
@@ -702,8 +799,39 @@ function startClaudeRun(
     }
   })();
 
+  const result = providerResult.then(async (outcome): Promise<ProviderRunResult> => {
+    let terminal = outcome;
+    try {
+      // The SDK has delivered its terminal protocol result and the finally
+      // block above has closed its streams. No useful graceful window remains.
+      await ownedProcess.terminate(true);
+    } catch {
+      terminal = {
+        ...outcome,
+        status: "failed",
+        error: "Claude Code process tree could not be confirmed stopped.",
+      };
+    }
+    try {
+      await stagedSkillPlugin?.cleanup();
+    } catch {
+      terminal = {
+        ...terminal,
+        status: "failed",
+        error: "Claude selected-skill staging could not be cleaned up.",
+      };
+    }
+    const child = ownedProcess.child();
+    terminal = {
+      ...terminal,
+      exitCode: child?.exitCode ?? null,
+      signal: child?.signalCode ?? null,
+    };
+    emitter.status(terminal.status, terminal.error);
+    return terminal;
+  });
+
   function finishResult(status: ProviderRunResult["status"], error?: string): ProviderRunResult {
-    emitter.status(status, error);
     return {
       providerId: "claude",
       conversationId,
@@ -720,11 +848,15 @@ function startClaudeRun(
   const cancel = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    skillAbortController.abort(
+      new Error("Claude selected-skill staging was cancelled."),
+    );
     acceptingFollowUps = false;
     promptChannel.cancel();
     emitter.status("cancelling");
     cancelPending();
     if (force) {
+      ownedProcess.requestTermination(true);
       abortController.abort();
       try { query?.close(); } catch { /* Best-effort force close. */ }
       return;

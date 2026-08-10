@@ -536,6 +536,29 @@ describe("composer asynchronous ownership", () => {
     expect(screen.queryByText("late-picker.png")).toBeNull();
   });
 
+  it("releases only unsent attachments before the renderer reloads", async () => {
+    const release = vi.fn(async () => undefined);
+    const view = render(<Composer {...composerProps(
+      conversation("12121212-1212-4212-8212-121212121212"),
+      {
+        onChooseAttachments: async () => [attachment("held-before-reload")],
+        onReleaseAttachment: release,
+      },
+    )} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach images or documents",
+    }));
+    await screen.findByText("held-before-reload.png");
+    window.dispatchEvent(new Event("beforeunload"));
+
+    await waitFor(() => expect(release).toHaveBeenCalledExactlyOnceWith(
+      "held-before-reload",
+    ));
+    view.unmount();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it("releases a late imported attachment after the composer unmounts", async () => {
     const imported = deferred<ChatAttachment[]>();
     const release = vi.fn(async () => undefined);

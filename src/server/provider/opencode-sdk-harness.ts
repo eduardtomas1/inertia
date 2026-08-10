@@ -14,7 +14,11 @@ import {
 } from "@opencode-ai/sdk/v2";
 
 import type { ProviderModel } from "../../shared/contracts";
-import { requireProcessTreeTermination, terminateProcessTreeAndWait, type ProcessTreeTerminator } from "../process-lifecycle";
+import {
+  terminateProcessTreeAndWait,
+  type OwnedProcessTreeTermination,
+  type ProcessTreeTerminator,
+} from "../process-lifecycle";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -28,6 +32,7 @@ import type {
   AgentPlanStep,
 } from "./interactions";
 import { providerActivityDetailSections } from "./activity-detail";
+import { isSafeApprovalDisplayText } from "./approval-display";
 import { CappedProviderBuffer } from "./io";
 import {
   createOwnedOpenCodeClient,
@@ -203,6 +208,7 @@ export async function readOpenCodeSdkModels(
     ownedOpenCodeEnvironment(environment, credentials),
     output,
     terminateOwnedProcessTree,
+    "OpenCode metadata server process tree",
   );
   const client = createOwnedOpenCodeClient(started.url, cwd, credentials);
   try {
@@ -217,9 +223,7 @@ export async function readOpenCodeSdkModels(
     );
     return openCodeModels(response.data.all, response.data.default, response.data.connected);
   } finally {
-    await requireProcessTreeTermination(
-      terminateOwnedProcessTree, started.child, true, "OpenCode metadata server process tree",
-    );
+    await started.terminate(true);
   }
 }
 
@@ -257,6 +261,7 @@ function startOpenCodeRun(
   let sessionId = options.input.sessionId;
   let client: OpencodeClient | undefined;
   let child: ChildProcessWithoutNullStreams | undefined;
+  let terminateOwnedRun: OwnedProcessTreeTermination | undefined;
   let cancelRequested = false;
   let terminalError: string | undefined;
   let cancelOwnedRun: (force: boolean) => void = () => {};
@@ -358,9 +363,11 @@ function startOpenCodeRun(
         ownedOpenCodeEnvironment(options.environment, credentials),
         serverOutput,
         terminateOwnedProcessTree,
+        "OpenCode server process tree",
         eventAbort.signal,
       );
       child = started.child;
+      terminateOwnedRun = started.terminate;
       if (cancelRequested) throw new Error("OpenCode startup was cancelled.");
       if (terminalError) throw new Error(terminalError);
       client = createOwnedOpenCodeClient(started.url, options.input.cwd, credentials);
@@ -515,9 +522,7 @@ function startOpenCodeRun(
     rejectPending();
     if (child) {
       try {
-        await requireProcessTreeTermination(
-          terminateOwnedProcessTree, child, true, "OpenCode server process tree",
-        );
+        await terminateOwnedRun?.(true);
       } catch (error) {
         outcome = {
           status: "failed",
@@ -718,20 +723,27 @@ function handleOpenCodeEvent(
       void client.permission.reply({ requestID: nativeId, reply: "once" }, { throwOnError: true }).catch(onFailure);
       return;
     }
+    const display = openCodeApprovalDisplay(properties, permission);
+    if (!display) {
+      void client.permission.reply(
+        { requestID: nativeId, reply: "reject" },
+        { throwOnError: true },
+      ).catch(onFailure);
+      return;
+    }
+    const { detail, resources, title } = display;
     const requestId = randomUUID();
     if (approvals.size >= MAX_PENDING_INTERACTIONS) {
       throw new Error("OpenCode exceeded the bounded approval budget.");
     }
     approvals.set(requestId, { nativeId, settled: false });
-    const patterns = Array.isArray(properties.patterns) ? properties.patterns.filter((value): value is string => typeof value === "string") : [];
-    const resources = Array.isArray(properties.resources) ? properties.resources.filter((value): value is string => typeof value === "string") : [];
     emitter.rich({
       type: "approval",
       request: {
         requestId,
         kind: permission === "bash" ? "command" : permission === "edit" ? "file-change" : "permissions",
-        title: bounded(`OpenCode wants to use ${permission}`),
-        detail: bounded([...patterns, ...resources].join("\n") || jsonSummary(properties.metadata)),
+        title: bounded(title),
+        detail: bounded(detail),
         cwd: options.input.cwd,
         permissionRoots: resources.map((path) => ({ path: bounded(path), access: "write" as const })).slice(0, 20),
         availableDecisions: ["approve", "deny", "cancel"],
@@ -756,6 +768,30 @@ function handleOpenCodeEvent(
     emitOpenCodeUsageSnapshot(usageState, emitter.rich);
     emitter.activity("system", "info", "OpenCode compacted the session context");
   }
+}
+
+export function openCodeApprovalDisplay(
+  properties: Record<string, unknown>,
+  permission = stringValue(properties.permission)
+    ?? stringValue(properties.action)
+    ?? "tool",
+): { detail: string; resources: string[]; title: string } | null {
+  const patterns = Array.isArray(properties.patterns)
+    ? properties.patterns.filter((value): value is string =>
+        typeof value === "string")
+    : [];
+  const resources = Array.isArray(properties.resources)
+    ? properties.resources.filter((value): value is string =>
+        typeof value === "string")
+    : [];
+  const title = `OpenCode wants to use ${permission}`;
+  const detail = [...patterns, ...resources].join("\n")
+    || jsonSummary(properties.metadata);
+  return isSafeApprovalDisplayText(title)
+      && isSafeApprovalDisplayText(detail, true)
+      && resources.every((path) => isSafeApprovalDisplayText(path))
+    ? { detail, resources, title }
+    : null;
 }
 
 function handleOpenCodePart(

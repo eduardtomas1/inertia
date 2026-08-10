@@ -47,7 +47,14 @@ export const PRIVATE_CONNECT_LIMITS = Object.freeze({
   auditEvents: 1_000,
 });
 
-const uuid = z.string().uuid();
+const PRIVATE_CONNECT_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+export function isPrivateConnectUuid(value: unknown): value is string {
+  return typeof value === "string" && PRIVATE_CONNECT_UUID_PATTERN.test(value);
+}
+
+const uuid = z.string().regex(PRIVATE_CONNECT_UUID_PATTERN);
 const timestamp = z.string().datetime({ offset: true });
 const entityId = z.string().trim().min(1).max(200);
 const validator = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);

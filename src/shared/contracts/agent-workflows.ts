@@ -108,4 +108,6 @@ export type ProviderSkillInput =
   | {
       source: "claude-native";
       name: string;
+      /** Privileged runtime capability; never serialize to the renderer. */
+      path: string;
     };

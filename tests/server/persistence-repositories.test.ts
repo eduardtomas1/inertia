@@ -178,6 +178,7 @@ describe("RuntimeStore repository compatibility", () => {
     const { store, workspacePath } = await createStore();
     const primaryProject = store.createProject("Primary", workspacePath);
     const primary = store.createConversation(primaryProject.id, "Primary chat");
+    await mkdir(join(workspacePath, "secondary"));
     const secondaryProject = store.createProject(
       "Secondary",
       join(workspacePath, "secondary"),

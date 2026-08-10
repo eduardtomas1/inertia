@@ -82,11 +82,7 @@ function sameProviderSkillIdentity(
   right: ProviderSkillInput,
 ): boolean {
   if (left.source !== right.source || left.name !== right.name) return false;
-  return left.source === "claude-native"
-    || (
-      right.source === "codex-native"
-      && normalizeIdentityPath(left.path) === normalizeIdentityPath(right.path)
-    );
+  return normalizeIdentityPath(left.path) === normalizeIdentityPath(right.path);
 }
 
 function boundedInteger(
@@ -711,13 +707,14 @@ export class AgentWorkflowController {
               description,
               shortDescription:
                 boundedDisplayString(raw.argumentHint, 240) ?? null,
-              scope: "provider",
+              scope: raw.scope,
               enabled: true,
               source: "claude-native",
             },
             providerInput: {
               source: "claude-native",
               name,
+              path: raw.path,
             },
           };
         },

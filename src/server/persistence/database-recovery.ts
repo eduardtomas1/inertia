@@ -50,6 +50,12 @@ const REQUIRED_TABLES_BY_SCHEMA_VERSION = [
   [38, ["paired_launches", "paired_launch_sides"]],
   [42, ["message_content_chunks", "reasoning_content_chunks"]],
   [43, ["recovery_import_receipts", "recovery_import_journals"]],
+  [50, ["conversation_worktree_ownership"]],
+  [51, [
+    "project_path_authorities",
+    "conversation_path_authorities",
+    "workspace_path_authority_enrollment",
+  ]],
 ] as const;
 
 export interface DatabaseRecoveryReport {
@@ -331,6 +337,59 @@ function validateOpenDatabase(
         .map(({ name }) => name),
     );
     if (!stateColumns.has("keybindings_json")) return "corrupt";
+  }
+  if (version >= 50) {
+    const ownershipColumns = new Set(
+      (database.prepare(
+        "PRAGMA table_info(conversation_worktree_ownership)",
+      ).all() as Array<{ name: string }>).map(({ name }) => name),
+    );
+    if ([
+      "conversation_id",
+      "path",
+      "branch",
+      "owns_worktree",
+      "creation_state",
+      "ownership_token",
+      "worktree_id",
+      "repository_identity",
+      "filesystem_identity_json",
+      "branch_head",
+    ].some((column) => !ownershipColumns.has(column))) return "corrupt";
+  }
+  if (version >= 51) {
+    for (const table of [
+      "project_path_authorities",
+      "conversation_path_authorities",
+    ]) {
+      const authorityColumns = new Set(
+        (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+          name: string;
+        }>).map(({ name }) => name),
+      );
+      const subjectColumn = table === "project_path_authorities"
+        ? "project_id"
+        : "conversation_id";
+      if ([subjectColumn, "path", "receipt_json"].some(
+        (column) => !authorityColumns.has(column),
+      )) return "corrupt";
+    }
+    const enrollmentColumns = new Set(
+      (database.prepare(
+        "PRAGMA table_info(workspace_path_authority_enrollment)",
+      ).all() as Array<{ name: string }>).map(({ name }) => name),
+    );
+    if (["id", "completed"].some(
+      (column) => !enrollmentColumns.has(column),
+    )) return "corrupt";
+    const enrollment = database.prepare(`
+      SELECT id, completed FROM workspace_path_authority_enrollment
+    `).all() as Array<{ id: number; completed: number }>;
+    if (
+      enrollment.length !== 1
+      || enrollment[0]?.id !== 1
+      || ![0, 1].includes(enrollment[0].completed)
+    ) return "corrupt";
   }
   return "valid-current";
 }

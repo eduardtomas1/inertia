@@ -101,6 +101,8 @@ function harness(options: {
     name: string;
     description: string;
     argumentHint: string;
+    path?: string;
+    scope?: "repo" | "user";
   }>;
   claudeSkillsImplementation?: (
     forceReload: boolean,
@@ -108,6 +110,8 @@ function harness(options: {
     name: string;
     description: string;
     argumentHint: string;
+    path?: string;
+    scope?: "repo" | "user";
   }>>;
 } = {}): {
   controller: AgentWorkflowController;
@@ -166,10 +170,17 @@ function harness(options: {
       environment: {},
       cwd: "/workspace/project",
     })),
-    claudeSkills: vi.fn(async (_cwd: string, forceReload: boolean) =>
-      options.claudeSkillsImplementation
+    claudeSkills: vi.fn(async (_cwd: string, forceReload: boolean) => {
+      const skills = options.claudeSkillsImplementation
         ? await options.claudeSkillsImplementation(forceReload)
-        : options.claudeSkills ?? []),
+        : options.claudeSkills ?? [];
+      return skills.map((skill) => ({
+        ...skill,
+        path: skill.path
+          ?? `/workspace/project/.claude/skills/${skill.name}/SKILL.md`,
+        scope: skill.scope ?? "repo",
+      }));
+    }),
   } as unknown as ProviderManager;
   return {
     controller: new AgentWorkflowController(
@@ -1034,7 +1045,7 @@ describe("AgentWorkflowController", () => {
     );
     expect(summary).toMatchObject({
       source: "claude-native",
-      scope: "provider",
+      scope: "repo",
       shortDescription: "<scope>",
     });
     expect(summary).not.toHaveProperty("path");
@@ -1044,6 +1055,7 @@ describe("AgentWorkflowController", () => {
     )).resolves.toEqual([{
       source: "claude-native",
       name: "security-review",
+      path: "/workspace/project/.claude/skills/security-review/SKILL.md",
     }]);
   });
 

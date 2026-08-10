@@ -1,4 +1,9 @@
-import { privateConnectResponseSchema, type PrivateConnectRequest, type PrivateConnectResponse } from "../../../shared/private-connect/protocol";
+import {
+  isPrivateConnectUuid,
+  privateConnectResponseSchema,
+  type PrivateConnectRequest,
+  type PrivateConnectResponse,
+} from "../../../shared/private-connect/protocol";
 
 export interface PairingInvitation {
   protocolVersion: 1;
@@ -32,7 +37,7 @@ export function parsePairingFragment(fragment: string | null): PairingInvitation
 export function browserDeviceId(): string {
   const key = "inertia-private-connect-device-id";
   const existing = window.localStorage.getItem(key);
-  if (existing && /^[0-9a-f-]{36}$/iu.test(existing)) return existing;
+  if (isPrivateConnectUuid(existing)) return existing;
   const value = crypto.randomUUID();
   window.localStorage.setItem(key, value);
   return value;

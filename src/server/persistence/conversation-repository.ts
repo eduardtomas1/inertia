@@ -15,6 +15,7 @@ import {
 import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { NewConversationOptions } from "./types";
+import { WorkspacePathAuthority } from "../workspace-path-authority";
 
 type ConversationPersistenceContext = Pick<
   PersistenceContext,
@@ -27,7 +28,11 @@ type ConversationPersistenceContext = Pick<
 >;
 
 export class ConversationRepository {
-  constructor(private readonly context: ConversationPersistenceContext) {}
+  private readonly pathAuthority: WorkspacePathAuthority;
+
+  constructor(private readonly context: ConversationPersistenceContext) {
+    this.pathAuthority = new WorkspacePathAuthority(context.database);
+  }
 
   create(
     projectId: string,
@@ -91,6 +96,22 @@ export class ConversationRepository {
           @createdAt, @updatedAt
         )
       `).run({ ...conversation, modelSelectionJson });
+      if (conversation.worktreePath !== null) {
+        this.context.database.prepare(`
+          INSERT INTO conversation_worktree_ownership (
+            conversation_id, path, branch, owns_worktree, creation_state
+          ) VALUES (?, ?, ?, 0, 'external')
+        `).run(
+          conversation.id,
+          conversation.worktreePath,
+          conversation.branch,
+        );
+        this.pathAuthority.enrollConversation(
+          conversation.id,
+          conversation.projectId,
+          conversation.worktreePath,
+        );
+      }
       this.context.touchProject(projectId, now);
       if (options.activate !== false) {
         this.context.database.prepare(
@@ -279,6 +300,9 @@ export class ConversationRepository {
 
   path(conversationId: string): string {
     const conversation = this.context.requireConversation(conversationId);
-    return conversation.worktree_path ?? this.context.requireProject(conversation.project_id).path;
+    return this.pathAuthority.resolveConversation(
+      conversation,
+      this.context.requireProject(conversation.project_id),
+    );
   }
 }

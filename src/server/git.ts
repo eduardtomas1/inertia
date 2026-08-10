@@ -44,11 +44,14 @@ export {
   type OwnedWorktreeCreationDependencies,
   type OwnedWorktreeInspectionDependencies,
   type OwnedWorktreeCleanupInspection,
+  type OwnedWorktreeRemovalDependencies,
+  type OwnedWorktreeRemovalOutcome,
   type UnacknowledgedWorktreeCreationInspection,
   type WorktreeFilesystemIdentityDependencies,
   type RegisteredWorktreeIdentity,
   type RegisteredWorktreeOwnership,
   type RegisteredWorktreeRegistration,
+  removeOwnedWorktree,
   removeWorktree,
 } from "./git/worktrees";
 export {

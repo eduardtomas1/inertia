@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
-import { createOpenCodeSdkHarness, readOpenCodeSdkModels } from "../../src/server/provider/opencode-sdk-harness";
+import {
+  createOpenCodeSdkHarness,
+  openCodeApprovalDisplay,
+  readOpenCodeSdkModels,
+} from "../../src/server/provider/opencode-sdk-harness";
 import {
   loopbackPortIsOpen,
   portableFixtureRoot,
@@ -249,6 +253,28 @@ server.listen(port, "127.0.0.1", () => {
 describe.sequential("OpenCode SDK harness", () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
+
+  it("rejects direction-changing approval titles, details, and paths", () => {
+    expect(openCodeApprovalDisplay({
+      permission: "bash",
+      patterns: ["npm test"],
+      resources: ["src/app.ts"],
+    })).toEqual({
+      title: "OpenCode wants to use bash",
+      detail: "npm test\nsrc/app.ts",
+      resources: ["src/app.ts"],
+    });
+    expect(openCodeApprovalDisplay({ permission: "bash\u202Etxt.exe" }))
+      .toBeNull();
+    expect(openCodeApprovalDisplay({
+      permission: "bash",
+      patterns: ["npm test\u2066hidden"],
+    })).toBeNull();
+    expect(openCodeApprovalDisplay({
+      permission: "edit",
+      resources: ["src/safe.ts\u0000hidden"],
+    })).toBeNull();
+  });
 
   it("owns the local server and bridges SSE text, reasoning, tools, todos, permissions, questions, usage, models, and images", async () => {
     const root = portableFixtureRoot("OpenCode SDK");

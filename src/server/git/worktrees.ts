@@ -79,6 +79,11 @@ export interface OwnedWorktreeInspectionDependencies {
   filesystemIdentity?: WorktreeFilesystemIdentityDependencies;
 }
 
+export interface OwnedWorktreeRemovalDependencies
+  extends OwnedWorktreeInspectionDependencies {
+  afterInitialInspection?(): Promise<void> | void;
+}
+
 export interface WorktreeFilesystemIdentityDependencies {
   afterLinuxStatClose?(): void;
   beforeLinuxStatProbe?(path: string): Promise<void> | void;
@@ -93,6 +98,8 @@ export type OwnedWorktreeCleanupInspection =
   | { state: "absent" }
   | { state: "conflict" }
   | { state: "registered"; identity: RegisteredWorktreeRegistration };
+
+export type OwnedWorktreeRemovalOutcome = "absent" | "conflict" | "removed";
 
 export type UnacknowledgedWorktreeCreationInspection = "absent" | "retained";
 
@@ -1084,6 +1091,41 @@ export async function inspectOwnedWorktreeCleanupState(
       worktreeId: expectedWorktreeId,
     },
   };
+}
+
+export async function removeOwnedWorktree(
+  repositoryPath: string,
+  worktreePath: string,
+  expectedBranch: string,
+  expectedHead: string,
+  expectedWorktreeId: string,
+  expectedRepositoryIdentity: string,
+  expectedOwnershipToken: string,
+  expectedFilesystemReceipt: WorktreeFilesystemReceipt,
+  dependencies: OwnedWorktreeRemovalDependencies = {},
+): Promise<OwnedWorktreeRemovalOutcome> {
+  const root = await repositoryRoot(repositoryPath);
+  const inspect = async (): Promise<OwnedWorktreeCleanupInspection> =>
+    await inspectOwnedWorktreeCleanupState(
+      root,
+      worktreePath,
+      expectedBranch,
+      expectedHead,
+      expectedWorktreeId,
+      expectedRepositoryIdentity,
+      expectedOwnershipToken,
+      expectedFilesystemReceipt,
+      dependencies,
+    );
+  const initial = await inspect();
+  if (initial.state !== "registered") return initial.state;
+  await dependencies.afterInitialInspection?.();
+  const atUse = await inspect();
+  if (atUse.state !== "registered") return atUse.state;
+  await runGit(root, ["worktree", "remove", "--", atUse.identity.path], {
+    failureMessage: "Unable to remove the worktree.",
+  });
+  return "removed";
 }
 
 export async function removeWorktree(

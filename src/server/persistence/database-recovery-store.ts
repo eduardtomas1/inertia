@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -46,7 +46,20 @@ export interface DatabaseRecoveryImportWriters {
     projectId: string,
     conversation: RecoveryConversation,
   ): string;
-  createMessage(conversationId: string, message: RecoveryMessage): void;
+  createMessage(
+    id: string,
+    conversationId: string,
+    message: RecoveryMessage,
+  ): void;
+}
+
+const RECOVERY_MESSAGE_ORDINAL_HEX_DIGITS = 5;
+
+function recoveryMessageId(prefix: string, ordinal: number): string {
+  return `${prefix}${ordinal.toString(16).padStart(
+    RECOVERY_MESSAGE_ORDINAL_HEX_DIGITS,
+    "0",
+  )}`;
 }
 
 function verifyRecoveredProjectDirectory(path: string, root: string): string {
@@ -219,11 +232,12 @@ export function exportDatabaseRecoveryData(
               interactionMode: conversation.interactionMode,
               accessMode: conversation.accessMode,
               messages: (messagesByConversation.get(conversation.id) ?? [])
-                .map((message) => {
+                .map((message, ordinal) => {
                   const exportedMessage = {
                     role: message.role,
                     content: message.content,
                     createdAt: message.createdAt,
+                    ordinal,
                   };
                   account(exportedMessage);
                   return exportedMessage;
@@ -310,8 +324,16 @@ export async function importDatabaseRecoveryData(
             importedConversation,
           );
           conversationCount += 1;
+          const messageIdPrefix = randomUUID().slice(
+            0,
+            -RECOVERY_MESSAGE_ORDINAL_HEX_DIGITS,
+          );
           for (const importedMessage of importedConversation.messages) {
-            writers.createMessage(conversationId, importedMessage);
+            writers.createMessage(
+              recoveryMessageId(messageIdPrefix, importedMessage.ordinal),
+              conversationId,
+              importedMessage,
+            );
             messageCount += 1;
             options.operations?.afterMessageCreate?.();
           }

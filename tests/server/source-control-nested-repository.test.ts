@@ -434,6 +434,72 @@ describe("nested source-control command scope", () => {
         verifyRepositoryIdentity: expect.any(Function),
       }),
     );
+
+    writeFileSync(join(repository, "README.md"), "reviewed from subdirectory\n");
+    const commitRefreshRequestId = crypto.randomUUID();
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.refresh",
+      requestId: commitRefreshRequestId,
+      payload: { projectId },
+    }))).resolves.toBe("handled");
+    const commitStatus = send.mock.calls.find(
+      ([, event]) => event.requestId === commitRefreshRequestId,
+    )?.[1];
+    if (
+      !commitStatus
+      || commitStatus.type !== "request.result"
+      || commitStatus.result.kind !== "git.status"
+      || !commitStatus.result.status.authorityRef
+    ) throw new Error("Expected fresh root authority for reviewed commit.");
+    const diffRequestId = crypto.randomUUID();
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.diff",
+      requestId: diffRequestId,
+      payload: {
+        projectId,
+        authorityRef: commitStatus.result.status.authorityRef,
+        ignoreWhitespace: false,
+        commitReview: true,
+      },
+    }))).resolves.toBe("handled");
+    const reviewed = send.mock.calls.find(
+      ([, event]) => event.requestId === diffRequestId,
+    )?.[1];
+    if (
+      !reviewed
+      || reviewed.type !== "request.result"
+      || reviewed.result.kind !== "git.diff"
+      || !reviewed.result.diff.commitReview
+    ) throw new Error("Expected complete root commit review.");
+    const commitRequestId = crypto.randomUUID();
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.commit",
+      requestId: commitRequestId,
+      payload: {
+        projectId,
+        repositoryPath: ".",
+        authorityRef: commitStatus.result.status.authorityRef,
+        message: "Commit from subdirectory project",
+        paths: ["README.md"],
+        reviewReceipt: reviewed.result.diff.commitReview,
+      },
+    }))).resolves.toBe("handled");
+
+    expect(git(repository, "log", "-1", "--pretty=%s"))
+      .toBe("Commit from subdirectory project");
+    expect(git(repository, "status", "--porcelain")).toBe("");
+    expect(trackSourceControl).toHaveBeenLastCalledWith(
+      "Commit changes",
+      projectId,
+      undefined,
+      workspace,
+      commitRequestId,
+      expect.any(Function),
+      expect.objectContaining({
+        recoverReviewedCommit: false,
+        serializationRoot: realpathSync.native(repository),
+      }),
+    );
   });
 
   it("commits in the selected nested repository while reserving its owning workspace", async () => {

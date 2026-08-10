@@ -15,6 +15,7 @@ import {
 } from "../../lib/runtimeCommands";
 import {
   rootGitMutationScope,
+  type RootGitMutationScope,
   workspaceGitRefreshIdentity,
 } from "../../utils/workspaceGit";
 
@@ -67,7 +68,10 @@ export function useWorkspaceGit({
   const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const authorityRef = useRef(authority);
   const requestGenerationRef = useRef(0);
-  const commitReviewRef = useRef<GitDiffSnapshot | null>(null);
+  const commitReviewRef = useRef<{
+    diff: GitDiffSnapshot;
+    scope: RootGitMutationScope;
+  } | null>(null);
   const loadGitInFlightRef = useRef<{
     identity: string;
     generation: number;
@@ -318,7 +322,11 @@ export function useWorkspaceGit({
       || requestGenerationRef.current !== generation
     ) return null;
     setGitStatus(status);
-    commitReviewRef.current = diff;
+    const scope = rootGitMutationScope(status);
+    if (!scope) {
+      throw new Error("Refresh repository status before committing changes.");
+    }
+    commitReviewRef.current = { diff, scope };
     return diff;
   }, [conversation?.id, ignoreWhitespace, project?.id, request]);
 
@@ -423,8 +431,8 @@ export function useWorkspaceGit({
     if (paths.length === 0) {
       throw new Error("Select at least one path to commit.");
     }
-    const commitReview = commitReviewRef.current;
-    if (commitReview?.truncated || !commitReview?.commitReview) {
+    const reviewed = commitReviewRef.current;
+    if (reviewed?.diff.truncated || !reviewed?.diff.commitReview) {
       throw new Error(
         "The complete reviewed repository state is unavailable. Refresh the diff before committing.",
       );
@@ -435,9 +443,10 @@ export function useWorkspaceGit({
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
+        ...reviewed.scope,
         message,
         paths,
-        reviewReceipt: commitReview.commitReview,
+        reviewReceipt: reviewed.diff.commitReview,
       },
     });
     if (push) {

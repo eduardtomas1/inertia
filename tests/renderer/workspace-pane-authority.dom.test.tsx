@@ -896,7 +896,7 @@ describe("workspace pane authority", () => {
     });
   });
 
-  it("refreshes root authority after commit before an optional push", async () => {
+  it("pins reviewed root authority and refreshes separately before an optional push", async () => {
     const reviewedAuthority = "66666666-6666-4666-8666-666666666666";
     const pushAuthority = "77777777-7777-4777-8777-777777777777";
     let refreshes = 0;
@@ -964,6 +964,7 @@ describe("workspace pane authority", () => {
 
     await act(async () => {
       expect(await hook.result.current.loadCommitReview()).not.toBeNull();
+      await hook.result.current.loadGit({ authoritative: true, scope: "status" });
       await hook.result.current.commit(
         "Commit then push",
         true,
@@ -973,6 +974,21 @@ describe("workspace pane authority", () => {
 
     expect(run.mock.calls.filter(([, command]) => command.type === "git.commit"))
       .toHaveLength(1);
+    expect(run).toHaveBeenCalledWith("git.commit", {
+      type: "git.commit",
+      payload: {
+        projectId: alpha.id,
+        conversationId: alphaChat.id,
+        repositoryPath: ".",
+        authorityRef: reviewedAuthority,
+        message: "Commit then push",
+        paths: ["selected.txt"],
+        reviewReceipt: {
+          authorityRef: "88888888-8888-4888-8888-888888888888",
+          fingerprint: "a".repeat(64),
+        },
+      },
+    });
     expect(run).toHaveBeenCalledWith("git.push", {
       type: "git.push",
       payload: {

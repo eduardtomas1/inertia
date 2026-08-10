@@ -246,34 +246,26 @@ export const gitCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("git.branch.create"),
-      payload: z.object({
-        ...projectWithOptionalConversation,
-        name: z.string().trim().min(1).max(255),
-      }).strict(),
+      payload: z
+        .object({
+          ...projectWithOptionalConversationAndRepository,
+          name: z.string().trim().min(1).max(255),
+        })
+        .strict()
+        .superRefine(requireRepositoryAuthority),
     })
     .strict(),
   z
     .object({
       ...requestBase,
       type: z.literal("git.branch.switch"),
-      payload: z.object({
-        ...projectWithOptionalConversation,
-        name: z.string().trim().min(1).max(255),
-      }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...requestBase,
-      type: z.literal("git.worktree.create"),
       payload: z
         .object({
-          projectId: z.string().uuid(),
-          conversationId: z.string().uuid(),
-          baseBranch: z.string().trim().min(1).max(255),
-          branch: z.string().trim().min(1).max(255),
+          ...projectWithOptionalConversationAndRepository,
+          name: z.string().trim().min(1).max(255),
         })
-        .strict(),
+        .strict()
+        .superRefine(requireRepositoryAuthority),
     })
     .strict(),
   z

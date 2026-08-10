@@ -1,9 +1,23 @@
 import type {
   ChangedFile,
+  GitStatusSnapshot,
   Project,
   WorkspaceGitRepositorySnapshot,
   WorkspaceGitSnapshot,
 } from "@shared/contracts";
+
+export interface RootGitMutationScope {
+  repositoryPath: ".";
+  authorityRef: string;
+}
+
+export function rootGitMutationScope(
+  status: GitStatusSnapshot | null,
+): RootGitMutationScope | null {
+  return status?.isRepository && status.authorityRef
+    ? { repositoryPath: ".", authorityRef: status.authorityRef }
+    : null;
+}
 
 export function workspaceGitRefreshIdentity(project: Project | null): string {
   return project ? `${project.id}:${project.gitRepositoryLimit}` : "";

@@ -889,9 +889,100 @@ describe("workspace pane authority", () => {
       payload: {
         projectId: alpha.id,
         conversationId: alphaChat.id,
+        repositoryPath: ".",
+        authorityRef: "66666666-6666-4666-8666-666666666666",
         name: "feature/chat-checkout",
       },
     });
+  });
+
+  it("refreshes root authority after commit before an optional push", async () => {
+    const reviewedAuthority = "66666666-6666-4666-8666-666666666666";
+    const pushAuthority = "77777777-7777-4777-8777-777777777777";
+    let refreshes = 0;
+    const status = (authorityRef: string): ServerEvent => result({
+      kind: "git.status",
+      status: {
+        isRepository: true,
+        authorityRef,
+        root: "/alpha-worktree",
+        branch: "inertia/alpha-chat",
+        upstream: "origin/inertia/alpha-chat",
+        ahead: 1,
+        behind: 0,
+        hasRemote: true,
+        files: [],
+        insertions: 0,
+        deletions: 0,
+      },
+    });
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") {
+        refreshes += 1;
+        return Promise.resolve(status(
+          refreshes === 1 ? reviewedAuthority : pushAuthority,
+        ));
+      }
+      if (command.type === "git.diff") {
+        return Promise.resolve(result({
+          kind: "git.diff",
+          diff: {
+            patch: "",
+            truncated: false,
+            files: [],
+            commitReview: {
+              authorityRef: "88888888-8888-4888-8888-888888888888",
+              fingerprint: "a".repeat(64),
+            },
+          },
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected ${command.type} command`));
+    });
+    const run = vi.fn(async (
+      _key: string,
+      _command: CommandWithoutId,
+    ): Promise<ServerEvent> => result({
+      kind: "git.action",
+      message: "Done.",
+    }));
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: false,
+      loadStatusOnMount: false,
+      loadWorkspaceOnMount: false,
+      project: alpha,
+      conversation: alphaChat,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request,
+      run,
+      subscribe: noopSubscribe,
+      setActionError,
+    }));
+
+    await act(async () => {
+      expect(await hook.result.current.loadCommitReview()).not.toBeNull();
+      await hook.result.current.commit(
+        "Commit then push",
+        true,
+        ["selected.txt"],
+      );
+    });
+
+    expect(run.mock.calls.filter(([, command]) => command.type === "git.commit"))
+      .toHaveLength(1);
+    expect(run).toHaveBeenCalledWith("git.push", {
+      type: "git.push",
+      payload: {
+        projectId: alpha.id,
+        conversationId: alphaChat.id,
+        repositoryPath: ".",
+        authorityRef: pushAuthority,
+      },
+    });
+    expect(setActionError).not.toHaveBeenCalled();
   });
 
   it("keeps the last Git projection visible while reconnect refreshes it", async () => {

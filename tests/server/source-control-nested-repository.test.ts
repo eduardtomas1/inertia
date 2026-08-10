@@ -643,6 +643,225 @@ describe("nested source-control command scope", () => {
     expect(git(repository, "status", "--porcelain")).toBe("M README.md");
   });
 
+  it("rejects a linked worktree when only its common Git directory changes", async () => {
+    const source = mkdtempSync(join(tmpdir(), "inertia-linked-source-"));
+    roots.push(source);
+    initializeRepository(source);
+    const workspace = mkdtempSync(join(tmpdir(), "inertia-linked-workspace-"));
+    roots.push(workspace);
+    const repository = join(workspace, "modules", "alpha");
+    mkdirSync(join(workspace, "modules"), { recursive: true });
+    git(source, "worktree", "add", "-q", "-b", "linked", repository);
+    writeFileSync(join(repository, "README.md"), "linked pending change\n");
+    const replacement = mkdtempSync(join(tmpdir(), "inertia-linked-replacement-"));
+    roots.push(replacement);
+    initializeRepository(replacement);
+
+    const gitDirectory = git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    );
+    const commonDirectory = git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    );
+    const replacementCommonDirectory = git(
+      replacement,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    );
+    const gitDirectoryInfo = lstatSync(gitDirectory, { bigint: true });
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = {} as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+      repository,
+    );
+    const issueRepositoryAuthority = async (): Promise<string> =>
+      await authorities.issue(
+        socket,
+        "git-repository",
+        [
+          projectId,
+          "",
+          workspace,
+          "modules/alpha",
+          metadataMarkerIdentity,
+        ],
+        await broker.authorizeRoot(repository),
+      );
+    const diffAuthorityRef = await issueRepositoryAuthority();
+    const commitAuthorityRef = await issueRepositoryAuthority();
+    const verifyCountBeforeReplacement = vi.mocked(broker.verifyRoot).mock.calls.length;
+    const linkedHead = git(source, "rev-parse", "refs/heads/linked");
+
+    expect(commonDirectory).not.toBe(replacementCommonDirectory);
+    writeFileSync(
+      join(gitDirectory, "commondir"),
+      `${replacementCommonDirectory}\n`,
+    );
+
+    expect(git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    )).toBe(gitDirectory);
+    const currentGitDirectoryInfo = lstatSync(gitDirectory, { bigint: true });
+    expect({
+      birthtimeNs: currentGitDirectoryInfo.birthtimeNs,
+      dev: currentGitDirectoryInfo.dev,
+      ino: currentGitDirectoryInfo.ino,
+    }).toEqual({
+      birthtimeNs: gitDirectoryInfo.birthtimeNs,
+      dev: gitDirectoryInfo.dev,
+      ino: gitDirectoryInfo.ino,
+    });
+    await expect(repositoryMetadataMarkerIdentity(repository)).resolves.not.toBe(
+      metadataMarkerIdentity,
+    );
+
+    const trackSourceControl = vi.fn();
+    const send = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+      send,
+    } as unknown as SourceControlCommandDependencies);
+    const diffCommand = clientCommandSchema.parse({
+      type: "git.workspace.diff",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "modules/alpha",
+        authorityRef: diffAuthorityRef,
+      },
+    });
+    const commitCommand = clientCommandSchema.parse({
+      type: "git.commit",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "modules/alpha",
+        authorityRef: commitAuthorityRef,
+        message: "Must not mutate redirected common metadata",
+        paths: ["README.md"],
+        reviewReceipt: {
+          authorityRef: crypto.randomUUID(),
+          fingerprint: "a".repeat(64),
+        },
+      },
+    });
+
+    await expect(handler(socket, diffCommand)).rejects.toThrow(
+      /filesystem authorization expired|refresh and try again/iu,
+    );
+    expect(broker.verifyRoot).toHaveBeenCalledTimes(
+      verifyCountBeforeReplacement,
+    );
+    await expect(handler(socket, commitCommand)).rejects.toThrow(
+      /filesystem authorization expired|refresh and try again/iu,
+    );
+
+    expect(trackSourceControl).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(broker.verifyRoot).toHaveBeenCalledTimes(
+      verifyCountBeforeReplacement + 1,
+    );
+    expect(git(source, "rev-parse", "refs/heads/linked")).toBe(linkedHead);
+    expect(readFileSync(join(repository, "README.md"), "utf8"))
+      .toBe("linked pending change\n");
+  });
+
+  it("rejects a queued root mutation when linked common metadata changes", async () => {
+    const source = mkdtempSync(join(tmpdir(), "inertia-root-linked-source-"));
+    roots.push(source);
+    initializeRepository(source);
+    const workspaceContainer = mkdtempSync(
+      join(tmpdir(), "inertia-root-linked-workspace-"),
+    );
+    roots.push(workspaceContainer);
+    const workspace = join(workspaceContainer, "checkout");
+    git(source, "worktree", "add", "-q", "-b", "root-linked", workspace);
+    const replacement = mkdtempSync(
+      join(tmpdir(), "inertia-root-linked-replacement-"),
+    );
+    roots.push(replacement);
+    initializeRepository(replacement);
+    const gitDirectory = git(
+      workspace,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    );
+    const replacementCommonDirectory = git(
+      replacement,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    );
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = {} as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+      workspace,
+    );
+    const authorityRef = await authorities.issue(
+      socket,
+      "git-repository",
+      [projectId, "", workspace, ".", metadataMarkerIdentity],
+      await broker.authorizeRoot(workspace),
+    );
+    const linkedHead = git(source, "rev-parse", "refs/heads/root-linked");
+    const trackSourceControl = vi.fn(async (
+      _label: string,
+      _projectId: string,
+      _conversationId: string | undefined,
+      _cwd: string,
+      _requestId: string,
+      operation: () => Promise<unknown>,
+    ) => {
+      writeFileSync(
+        join(gitDirectory, "commondir"),
+        `${replacementCommonDirectory}\n`,
+      );
+      return await operation();
+    });
+    const send = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+      send,
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type: "git.push",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: ".",
+        authorityRef,
+      },
+    });
+
+    await expect(handler(socket, command)).rejects.toThrow(
+      /repository changed after its status was loaded/iu,
+    );
+
+    expect(trackSourceControl).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(git(source, "rev-parse", "refs/heads/root-linked"))
+      .toBe(linkedHead);
+  });
+
   it("rejects replaced Git metadata before reading its corrupt index", async () => {
     const { workspace, repository } = workspaceWithNestedRepository();
     const broker = secureFiles();

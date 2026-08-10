@@ -30,6 +30,13 @@ import type { WorktreeFilesystemReceipt } from "../../worktree-filesystem-identi
 import type { ProviderManager } from "../../providers";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { TurnController } from "../turns/turn-controller";
+import type { WorkspaceRunController } from "../workspace-run-controller";
+import {
+  type PinnedWorktreeSourceIdentity,
+  pinWorktreeSourceIdentity,
+  verifyWorktreeSourceIdentity,
+  withWorktreeSourceReservations,
+} from "../worktree-source-identity";
 import { buildDuoComparisonPrompt } from "./duo-comparison";
 import { publicDuoLaunchStatus as publicStatus } from "./duo-launch-status";
 
@@ -61,6 +68,7 @@ interface PreflightSide {
   branch: string | null;
   worktreePath: string | null;
   ownsWorktree: boolean;
+  worktreeSource: PinnedWorktreeSourceIdentity | null;
 }
 
 interface PreflightComparison {
@@ -98,6 +106,11 @@ export interface DuoWorktreeOperations {
     expectedHead: string,
   ): ReturnType<typeof inspectBranchCleanupOutcome>;
 }
+
+type DuoSourceControlOperations = Pick<
+  WorkspaceRunController<unknown>,
+  "trackSourceControl"
+>;
 
 class DuoLaunchCancelledError extends Error {
   constructor() {
@@ -266,6 +279,7 @@ export class DuoLaunchCoordinator {
   /** Launch ids needing another comparison pass, and whether it is an explicit retry. */
   private readonly comparisonRechecks = new Map<string, boolean>();
   private readonly worktrees: DuoWorktreeOperations;
+  private readonly workspaceRuns: DuoSourceControlOperations | null;
 
   constructor(
     private readonly store: RuntimeStore,
@@ -274,7 +288,10 @@ export class DuoLaunchCoordinator {
     private readonly turns: TurnController,
     private readonly dataDirectory: string,
     private readonly providerInfo: () => readonly ProviderInfo[],
-    options: { worktrees?: DuoWorktreeOperations } = {},
+    options: {
+      worktrees?: DuoWorktreeOperations;
+      workspaceRuns?: DuoSourceControlOperations;
+    } = {},
   ) {
     this.worktrees = options.worktrees ?? {
       preflightFilesystem: preflightWorktreeFilesystemIdentity,
@@ -283,6 +300,7 @@ export class DuoLaunchCoordinator {
       inspectWorktree: inspectOwnedWorktreeCleanupState,
       inspectBranch: inspectBranchCleanupOutcome,
     };
+    this.workspaceRuns = options.workspaceRuns ?? null;
   }
 
   prepare(payload: DuoPreparePayload): Promise<PreparedDuoLaunch> {
@@ -697,27 +715,37 @@ export class DuoLaunchCoordinator {
         ? this.preflightComparison(payload.comparison)
         : Promise.resolve(null),
     ]);
-    const now = new Date().toISOString();
-    this.store.createPairedLaunch(payload.launchId, [
-      this.sidePlan(sides[0]),
-      this.sidePlan(sides[1]),
-    ], now, comparison
-      ? { plannedConversationId: comparison.conversationId }
-      : null);
+    const prepareReserved = async (): Promise<PreparedDuoLaunch> => {
+      const now = new Date().toISOString();
+      this.store.createPairedLaunch(payload.launchId, [
+        this.sidePlan(sides[0]),
+        this.sidePlan(sides[1]),
+      ], now, comparison
+        ? { plannedConversationId: comparison.conversationId }
+        : null);
 
-    let conversationsAdopted = false;
-    try {
+      let conversationsAdopted = false;
+      try {
       this.assertNotCancelled(payload.launchId);
       for (const side of sides) {
         if (!side.ownsWorktree || !side.worktreePath || !side.branch) continue;
+        if (!side.worktreeSource) {
+          throw new Error(
+            "The Duo source repository identity is unavailable.",
+          );
+        }
         mkdirSync(resolve(side.worktreePath, ".."), {
           recursive: true,
           mode: 0o700,
         });
         const plannedWorktreePath = side.worktreePath;
         const plannedBranch = side.branch;
-        const status = await this.worktrees.create(
+        const verifiedRoot = await verifyWorktreeSourceIdentity(
           side.repositoryPath,
+          side.worktreeSource,
+        );
+        const status = await this.worktrees.create(
+          verifiedRoot,
           side.worktreePath,
           {
             branch: side.branch,
@@ -757,6 +785,10 @@ export class DuoLaunchCoordinator {
               side.branch = ownership.branch;
             },
           },
+        );
+        await verifyWorktreeSourceIdentity(
+          side.repositoryPath,
+          side.worktreeSource,
         );
         if (
           resolve(status.root) !== resolve(side.worktreePath)
@@ -820,41 +852,55 @@ export class DuoLaunchCoordinator {
             }
           : {}),
       };
-    } catch (error) {
-      const cancellation = error instanceof DuoLaunchCancelledError;
-      let compensationFailure: string | null = null;
-      if (!conversationsAdopted) {
-        const compensation = await Promise.allSettled(
-          [...this.store.pairedLaunch(payload.launchId).plans].reverse().map((plan) =>
-            cleanupUnadoptedOwnedWorktree(
-              this.store,
-              payload.launchId,
-              plan.ordinal,
-              this.worktrees,
-            )),
-        );
-        compensationFailure = cleanupFailureMessage(
-          compensation,
-          "Owned worktree cleanup needs attention",
-        );
-      }
-      const failure = [errorMessage(error), compensationFailure]
-        .filter(Boolean)
-        .join(" ");
-      if (cancellation && !compensationFailure) {
-        this.store.finishPairedLaunchCancellation(payload.launchId);
-      } else {
-        this.store.failPairedLaunch(
-          payload.launchId,
-          compensationFailure ? "recovery-required" : "failed",
-          failure,
-        );
-        if (comparison) {
-          this.store.cancelPairedLaunchComparison(payload.launchId);
+      } catch (error) {
+        const cancellation = error instanceof DuoLaunchCancelledError;
+        let compensationFailure: string | null = null;
+        if (!conversationsAdopted) {
+          const compensation = await Promise.allSettled(
+            [...this.store.pairedLaunch(payload.launchId).plans].reverse().map((plan) =>
+              cleanupUnadoptedOwnedWorktree(
+                this.store,
+                payload.launchId,
+                plan.ordinal,
+                this.worktrees,
+              )),
+          );
+          compensationFailure = cleanupFailureMessage(
+            compensation,
+            "Owned worktree cleanup needs attention",
+          );
         }
+        const failure = [errorMessage(error), compensationFailure]
+          .filter(Boolean)
+          .join(" ");
+        if (cancellation && !compensationFailure) {
+          this.store.finishPairedLaunchCancellation(payload.launchId);
+        } else {
+          this.store.failPairedLaunch(
+            payload.launchId,
+            compensationFailure ? "recovery-required" : "failed",
+            failure,
+          );
+          if (comparison) {
+            this.store.cancelPairedLaunchComparison(payload.launchId);
+          }
+        }
+        throw error;
       }
-      throw error;
-    }
+    };
+    return await withWorktreeSourceReservations(
+      this.workspaceRuns,
+      payload.launchId,
+      sides.flatMap((side) => side.ownsWorktree && side.worktreeSource
+        ? [{
+            identity: side.worktreeSource,
+            ordinal: side.ordinal,
+            projectId: side.payload.projectId,
+            workspacePath: side.repositoryPath,
+          }]
+        : []),
+      prepareReserved,
+    );
   }
 
   private async retryRecoveryCleanup(
@@ -987,12 +1033,18 @@ export class DuoLaunchCoordinator {
         branch: status.branch,
         worktreePath: status.root,
         ownsWorktree: false,
+        worktreeSource: null,
       };
     }
 
+    const worktreeSource = payload.useWorktree
+      ? await pinWorktreeSourceIdentity(repositoryPath)
+      : null;
     let status: Awaited<ReturnType<typeof getRepositoryStatus>> | null = null;
     try {
-      status = await getRepositoryStatus(repositoryPath);
+      status = await getRepositoryStatus(
+        worktreeSource?.root ?? repositoryPath,
+      );
     } catch (error) {
       if (!(error instanceof GitError && error.code === "not-repository")) {
         throw error;
@@ -1007,7 +1059,7 @@ export class DuoLaunchCoordinator {
       throw new Error("Check out a branch before creating an isolated worktree.");
     }
     if (payload.useWorktree) {
-      await this.worktrees.preflightFilesystem(repositoryPath);
+      await this.worktrees.preflightFilesystem(worktreeSource!.root);
     }
     return {
       ordinal,
@@ -1023,6 +1075,7 @@ export class DuoLaunchCoordinator {
         ? join(this.dataDirectory, "worktrees", conversationId)
         : null,
       ownsWorktree: payload.useWorktree === true,
+      worktreeSource,
     };
   }
 

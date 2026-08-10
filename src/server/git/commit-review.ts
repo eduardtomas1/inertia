@@ -42,6 +42,7 @@ export interface GitCommitReviewCapture {
   fingerprint: string;
   status: GitRepositoryStatus;
   mutationPaths: string[];
+  removalPaths: string[];
   head: string | null;
   headRef: string | null;
   rawTree: string;
@@ -116,6 +117,26 @@ function nulPaths(paths: readonly string[]): Buffer {
   return Buffer.concat(paths.flatMap((path) => [Buffer.from(path), NUL]));
 }
 
+function removedMutationPaths(
+  status: GitRepositoryStatus,
+  mutationPaths: readonly string[],
+): string[] {
+  const present = new Set(status.files.filter(
+    (file) => file.status !== "deleted" && file.worktreeStatus !== "D",
+  ).map((file) => file.path));
+  const removed = new Set(status.files.flatMap((file) => [
+    ...(file.status === "renamed" && file.previousPath
+      ? [file.previousPath]
+      : []),
+    ...(file.status === "deleted" || file.worktreeStatus === "D"
+      ? [file.path]
+      : []),
+  ]));
+  return mutationPaths.filter(
+    (path) => removed.has(path) && !present.has(path),
+  );
+}
+
 /**
  * Captures source bytes and Git path semantics independently of presentation
  * whitespace settings and repository-provided clean filters.
@@ -134,9 +155,16 @@ async function captureRawReview(
     throw unavailable("There are no changes to review for commit.");
   }
   const paths = await changedPaths(root, status, options);
-  const raw = await captureRawWorktreeTree(root, nulPaths(paths), {
-    deadlineAt: options.deadlineAt,
-  });
+  const removalPaths = removedMutationPaths(status, paths);
+  const removalSet = new Set(removalPaths);
+  const raw = await captureRawWorktreeTree(
+    root,
+    nulPaths(paths.filter((path) => !removalSet.has(path))),
+    {
+      deadlineAt: options.deadlineAt,
+      removedPaths: nulPaths(removalPaths),
+    },
+  );
   let headRef: string | null = null;
   try {
     const symbolicHead = await runGitInspection(
@@ -166,6 +194,7 @@ async function captureRawReview(
       .update(JSON.stringify(canonical)).digest("hex"),
     status,
     mutationPaths: paths,
+    removalPaths,
     head: raw.head,
     headRef,
     rawTree: raw.tree,
@@ -183,6 +212,8 @@ export async function prepareGitCommitReview(
     before.head,
     before.mutationPaths,
     options,
+    true,
+    before.removalPaths,
   );
   try {
     const after = await captureRawReview(root, options);
@@ -199,6 +230,7 @@ export async function prepareGitCommitReview(
       capture: {
         status: after.status,
         mutationPaths: after.mutationPaths,
+        removalPaths: after.removalPaths,
         head: after.head,
         headRef: after.headRef,
         rawTree: after.rawTree,
@@ -233,6 +265,7 @@ export async function prepareGitCommitSelection(
   paths: readonly string[],
   options: GitPathInspectionOptions = {},
   isolateObjects = true,
+  removalPaths: readonly string[] = [],
 ): Promise<GitCommitSelection> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-commit-selection-"));
   const indexPath = join(directory, "index");
@@ -269,19 +302,37 @@ export async function prepareGitCommitSelection(
       maxOutputBytes: 1_024,
       failureMessage: "Unable to prepare the selected commit state.",
     });
-    await runGit(root, tempIndexArguments([
-      "--literal-pathspecs",
-      "add",
-      "-A",
-      "--pathspec-from-file=-",
-      "--pathspec-file-nul",
-    ]), {
-      deadlineAt: options.deadlineAt,
-      environment,
-      input: nulPaths(paths),
-      maxOutputBytes: 1_024,
-      failureMessage: "Unable to prepare the selected commit state.",
-    });
+    if (removalPaths.length > 0) {
+      await runGit(root, tempIndexArguments([
+        "update-index",
+        "--force-remove",
+        "-z",
+        "--stdin",
+      ]), {
+        deadlineAt: options.deadlineAt,
+        environment,
+        input: nulPaths(removalPaths),
+        maxOutputBytes: 1_024,
+        failureMessage: "Unable to prepare the selected commit state.",
+      });
+    }
+    const removalSet = new Set(removalPaths);
+    const additions = paths.filter((path) => !removalSet.has(path));
+    if (additions.length > 0) {
+      await runGit(root, tempIndexArguments([
+        "--literal-pathspecs",
+        "add",
+        "-A",
+        "--pathspec-from-file=-",
+        "--pathspec-file-nul",
+      ]), {
+        deadlineAt: options.deadlineAt,
+        environment,
+        input: nulPaths(additions),
+        maxOutputBytes: 1_024,
+        failureMessage: "Unable to prepare the selected commit state.",
+      });
+    }
     const result = await runGit(root, tempIndexArguments(["write-tree"]), {
       deadlineAt: options.deadlineAt,
       environment,

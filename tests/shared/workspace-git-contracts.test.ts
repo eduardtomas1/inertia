@@ -45,17 +45,83 @@ describe("workspace Git command contracts", () => {
         payload: {
           projectId,
           conversationId,
+          repositoryPath: ".",
+          authorityRef,
           name: "feature/chat-checkout",
         },
       },
       {
         type: "git.branch.switch",
         requestId,
-        payload: { projectId, conversationId, name: "main" },
+        payload: {
+          projectId,
+          conversationId,
+          repositoryPath: ".",
+          authorityRef,
+          name: "main",
+        },
       },
     ]) {
       expect(clientCommandSchema.parse(command)).toMatchObject(command);
     }
+  });
+
+  it("accepts paired root authority for every root Git mutation", () => {
+    const scoped = { projectId, conversationId, repositoryPath: ".", authorityRef };
+    for (const command of [
+      { type: "git.pull", requestId, payload: scoped },
+      { type: "git.push", requestId, payload: scoped },
+      { type: "git.pr.open", requestId, payload: scoped },
+      {
+        type: "git.pr.create",
+        requestId,
+        payload: { ...scoped, title: "Ship", body: "", draft: true },
+      },
+    ]) {
+      expect(clientCommandSchema.parse(command)).toMatchObject(command);
+    }
+  });
+
+  it("rejects partial repository authority on root mutations", () => {
+    for (const type of [
+      "git.branch.create",
+      "git.branch.switch",
+      "git.pull",
+      "git.push",
+      "git.pr.open",
+      "git.pr.create",
+    ] as const) {
+      const action = type === "git.branch.create" || type === "git.branch.switch"
+        ? { name: "main" }
+        : type === "git.pr.create"
+            ? { title: "Ship", body: "", draft: true }
+            : {};
+      expect(clientCommandSchema.safeParse({
+        type,
+        requestId,
+        payload: { projectId, conversationId, repositoryPath: ".", ...action },
+      }).success).toBe(false);
+      expect(clientCommandSchema.safeParse({
+        type,
+        requestId,
+        payload: { projectId, conversationId, authorityRef, ...action },
+      }).success).toBe(false);
+    }
+  });
+
+  it("rejects the retired direct worktree command", () => {
+    expect(clientCommandSchema.safeParse({
+      type: "git.worktree.create",
+      requestId,
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath: ".",
+        authorityRef,
+        baseBranch: "main",
+        branch: "feature/worktree",
+      },
+    }).success).toBe(false);
   });
 
   it("requires repository identity for workspace diffs and allows it on read-only review questions", () => {

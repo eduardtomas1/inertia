@@ -1,6 +1,5 @@
-import { mkdirSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import WebSocket from "ws";
 
@@ -17,7 +16,6 @@ import {
   commitReviewedChanges,
   createBranch,
   createGitHubPullRequest,
-  createWorktree,
   getPullRequestCreateUrl,
   getRepositoryStatus,
   getUnifiedDiff,
@@ -71,7 +69,6 @@ export interface SourceControlCommandDependencies {
   turnGitArtifacts: TurnGitArtifactManager;
   secureFiles: RuntimeSecureFileBroker;
   secureFileAuthorities: SecureFileAuthorityRegistry;
-  dataDirectory: string;
   workspacePath(projectId: string, conversationId?: string): string;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -141,12 +138,15 @@ export function createSourceControlCommandHandler(
     conversationId?: string;
     repositoryPath?: string;
     authorityRef?: string;
-  }) => {
+  }, options: { requireAuthority?: boolean } = {}) => {
     const workspaceRoot = dependencies.workspacePath(
       payload.projectId,
       payload.conversationId,
     );
     if (!payload.repositoryPath) {
+      if (options.requireAuthority) {
+        throw new RuntimeRequestError("Refresh repository status before changing this repository.");
+      }
       return {
         workspaceRoot,
         repositoryRoot: workspaceRoot,
@@ -217,6 +217,15 @@ export function createSourceControlCommandHandler(
       );
     }
   };
+  const runVerifiedRepositoryOperation = async <Result>(
+    repository: Awaited<ReturnType<typeof resolveCommandRepository>>,
+    operation: (root: string) => Promise<Result>,
+  ): Promise<Result> => {
+    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity);
+    const result = await operation(repository.repositoryRoot);
+    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity);
+    return result;
+  };
   const issueLiveAuthority = async (
     socket: WebSocket,
     purpose: Parameters<SecureFileAuthorityRegistry["issue"]>[1],
@@ -247,7 +256,6 @@ export function createSourceControlCommandHandler(
     "git.branches",
     "git.branch.create",
     "git.branch.switch",
-    "git.worktree.create",
     "git.pull",
     "git.commit",
     "git.push",
@@ -835,19 +843,20 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.branch.create": {
-        const path = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
+        const repository = await resolveCommandRepository(
+          socket,
+          command.payload,
+          { requireAuthority: true },
         );
         const result = await dependencies.workspaceRuns.trackSourceControl(
           "Create branch",
           command.payload.projectId,
           command.payload.conversationId,
-          path,
+          repository.workspaceRoot,
           command.requestId,
-          async () => await createBranch(
-            path,
-            command.payload.name,
+          async () => await runVerifiedRepositoryOperation(
+            repository,
+            async (root) => await createBranch(root, command.payload.name),
           ),
         );
         dependencies.send(socket, {
@@ -862,19 +871,20 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.branch.switch": {
-        const path = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
+        const repository = await resolveCommandRepository(
+          socket,
+          command.payload,
+          { requireAuthority: true },
         );
         const result = await dependencies.workspaceRuns.trackSourceControl(
           "Switch branch",
           command.payload.projectId,
           command.payload.conversationId,
-          path,
+          repository.workspaceRoot,
           command.requestId,
-          async () => await switchBranch(
-            path,
-            command.payload.name,
+          async () => await runVerifiedRepositoryOperation(
+            repository,
+            async (root) => await switchBranch(root, command.payload.name),
           ),
         );
         dependencies.send(socket, {
@@ -888,81 +898,22 @@ export function createSourceControlCommandHandler(
         });
         return "handled";
       }
-      case "git.worktree.create": {
-        const conversation = dependencies.store.conversation(
-          command.payload.conversationId,
-        );
-        if (conversation.projectId !== command.payload.projectId) {
-          throw new RuntimeRequestError(
-            "The thread does not belong to this project.",
-          );
-        }
-        if (conversation.worktreePath) {
-          throw new RuntimeRequestError(
-            "This thread already has a worktree.",
-          );
-        }
-        const target = join(
-          dependencies.dataDirectory,
-          "worktrees",
-          conversation.id,
-        );
-        mkdirSync(resolve(target, ".."), {
-          recursive: true,
-          mode: 0o700,
-        });
-        await dependencies.workspaceRuns.trackSourceControl(
-          "Create worktree",
-          command.payload.projectId,
-          command.payload.conversationId,
-          dependencies.store.projectPath(command.payload.projectId),
-          command.requestId,
-          async () => await createWorktree(
-            dependencies.store.projectPath(command.payload.projectId),
-            target,
-            {
-              branch: command.payload.branch,
-              createBranch: true,
-              startPoint: command.payload.baseBranch,
-            },
-          ),
-        );
-        dependencies.store.updateConversation(conversation.id, {
-          worktreePath: target,
-          branch: command.payload.branch,
-        });
-        dependencies.send(socket, {
-          type: "request.result",
-          requestId: command.requestId,
-          result: {
-            kind: "worktree.created",
-            path: target,
-            branch: command.payload.branch,
-          },
-        });
-        dependencies.broadcastSnapshot();
-        return "handled";
-      }
       case "git.pull": {
-        const repository = await resolveCommandRepository(socket, command.payload);
+        const repository = await resolveCommandRepository(
+          socket,
+          command.payload,
+          { requireAuthority: true },
+        );
         await dependencies.workspaceRuns.trackSourceControl(
           "Pull changes",
           command.payload.projectId,
           command.payload.conversationId,
           repository.workspaceRoot,
           command.requestId,
-          async () => {
-            await verifyCommandRepository(
-              repository.secureRoot,
-              repository.metadataMarkerIdentity,
-            );
-            const result = await pullRepository(repository.repositoryRoot);
-            await verifyCommandRepository(
-              repository.secureRoot,
-              repository.metadataMarkerIdentity,
-            );
-            return result;
-          },
+          async () => await runVerifiedRepositoryOperation(
+            repository,
+            pullRepository,
+          ),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -1107,25 +1058,21 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.push": {
-        const repository = await resolveCommandRepository(socket, command.payload);
+        const repository = await resolveCommandRepository(
+          socket,
+          command.payload,
+          { requireAuthority: true },
+        );
         await dependencies.workspaceRuns.trackSourceControl(
           "Push branch",
           command.payload.projectId,
           command.payload.conversationId,
           repository.workspaceRoot,
           command.requestId,
-          async () => {
-            await verifyCommandRepository(
-              repository.secureRoot,
-              repository.metadataMarkerIdentity,
-            );
-            const result = await pushCurrentBranch(repository.repositoryRoot);
-            await verifyCommandRepository(
-              repository.secureRoot,
-              repository.metadataMarkerIdentity,
-            );
-            return result;
-          },
+          async () => await runVerifiedRepositoryOperation(
+            repository,
+            pushCurrentBranch,
+          ),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -1138,25 +1085,21 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.pr.open": {
-        const repository = await resolveCommandRepository(socket, command.payload);
+        const repository = await resolveCommandRepository(
+          socket,
+          command.payload,
+          { requireAuthority: true },
+        );
         const url = await dependencies.workspaceRuns.trackSourceControl(
           "Prepare pull request",
           command.payload.projectId,
           command.payload.conversationId,
           repository.workspaceRoot,
           command.requestId,
-          async () => {
-            await verifyCommandRepository(
-              repository.secureRoot,
-              repository.metadataMarkerIdentity,
-            );
-            const result = await getPullRequestCreateUrl(repository.repositoryRoot);
-            await verifyCommandRepository(
-              repository.secureRoot,
-              repository.metadataMarkerIdentity,
-            );
-            return result;
-          },
+          async () => await runVerifiedRepositoryOperation(
+            repository,
+            getPullRequestCreateUrl,
+          ),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -1170,28 +1113,21 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.pr.create": {
-        const repository = await resolveCommandRepository(socket, command.payload);
+        const repository = await resolveCommandRepository(
+          socket,
+          command.payload,
+          { requireAuthority: true },
+        );
         const url = await dependencies.workspaceRuns.trackSourceControl(
           "Create pull request",
           command.payload.projectId,
           command.payload.conversationId,
           repository.workspaceRoot,
           command.requestId,
-          async () => {
-            await verifyCommandRepository(
-              repository.secureRoot,
-              repository.metadataMarkerIdentity,
-            );
-            const result = await createGitHubPullRequest(
-              repository.repositoryRoot,
-              command.payload,
-            );
-            await verifyCommandRepository(
-              repository.secureRoot,
-              repository.metadataMarkerIdentity,
-            );
-            return result;
-          },
+          async () => await runVerifiedRepositoryOperation(
+            repository,
+            async (root) => await createGitHubPullRequest(root, command.payload),
+          ),
         );
         dependencies.send(socket, {
           type: "request.result",

@@ -221,7 +221,7 @@ async function checkpointEnvironment(
 export async function captureRawWorktreeTree(
   repositoryPath: string,
   paths: Buffer,
-  options: CheckpointOperationOptions = {},
+  options: CheckpointOperationOptions & { removedPaths?: Buffer } = {},
 ): Promise<{ head: string | null; tree: string }> {
   const storageDirectory = await mkdtemp(
     join(tmpdir(), "inertia-commit-review-"),
@@ -264,6 +264,21 @@ export async function captureRawWorktreeTree(
       1024,
       options.deadlineAt,
     );
+    if (options.removedPaths && options.removedPaths.length > 0) {
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments([
+          "update-index",
+          "--force-remove",
+          "-z",
+          "--stdin",
+        ]),
+        isolated.environment,
+        options.removedPaths,
+        1024,
+        options.deadlineAt,
+      );
+    }
     if (paths.length > 0) {
       await runGit(
         repositoryPath,

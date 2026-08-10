@@ -13,7 +13,10 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
-import { workspaceGitRefreshIdentity } from "../../utils/workspaceGit";
+import {
+  rootGitMutationScope,
+  workspaceGitRefreshIdentity,
+} from "../../utils/workspaceGit";
 
 interface WorkspaceGitOptions {
   enabled: boolean;
@@ -395,15 +398,21 @@ export function useWorkspaceGit({
     name: string,
   ) => {
     if (!project) return;
+    const repository = rootGitMutationScope(gitStatus);
+    if (!repository) {
+      setActionError("Refresh repository status before changing branches.");
+      return;
+    }
     void run(type, {
       type,
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
+        ...repository,
         name,
       },
     } as CommandWithoutId).catch(() => undefined);
-  }, [conversation?.id, project, run]);
+  }, [conversation?.id, gitStatus, project, run, setActionError]);
 
   const commit = useCallback(async (
     message: string,
@@ -433,11 +442,31 @@ export function useWorkspaceGit({
     });
     if (push) {
       try {
+        const owner = `${project.id}:${conversation?.id ?? ""}`;
+        const refreshed = resultEvent(await request({
+          type: "git.refresh",
+          payload: {
+            projectId: project.id,
+            conversationId: conversation?.id,
+          },
+        }));
+        if (
+          authorityRef.current !== owner
+          || refreshed.result.kind !== "git.status"
+        ) {
+          throw new Error("Repository status changed before push.");
+        }
+        const pushRepository = rootGitMutationScope(refreshed.result.status);
+        if (!pushRepository) {
+          throw new Error("A fresh repository status is unavailable.");
+        }
+        setGitStatus(refreshed.result.status);
         await run("git.push", {
           type: "git.push",
           payload: {
             projectId: project.id,
             conversationId: conversation?.id,
+            ...pushRepository,
           },
         });
       } catch (error) {
@@ -448,7 +477,7 @@ export function useWorkspaceGit({
         );
       }
     }
-  }, [conversation?.id, project, run, setActionError]);
+  }, [conversation?.id, project, request, run, setActionError]);
 
   return {
     gitStatus,

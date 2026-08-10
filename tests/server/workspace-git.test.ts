@@ -97,7 +97,19 @@ describe("workspace Git repository discovery", () => {
         " repository\nwith-space ",
       );
 
-      expect(identity.split("\0")[0]).toBe(realpathSync(join(repository, ".git")));
+      const identityFields = identity.split("\0");
+      expect(identityFields).toEqual([
+        "git-dir",
+        realpathSync(join(repository, ".git")),
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+        "git-common-dir",
+        realpathSync(join(repository, ".git")),
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+      ]);
       expect(resolved.root).toBe(realpathSync(repository));
     },
   );

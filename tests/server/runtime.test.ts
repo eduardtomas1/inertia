@@ -883,51 +883,6 @@ process.exit(child.status ?? 1);
       providerSessionId: null,
     });
 
-    const currentBranch = (cwd: string): string => execFileSync(
-      "git", ["branch", "--show-current"], { cwd, encoding: "utf8" },
-    ).trim();
-    const gitRequest = async (
-      type: string,
-      payload: object,
-      kind: string,
-    ): Promise<Extract<ServerEvent, { type: "request.result" }>> => {
-      const requestId = randomUUID();
-      send(client.socket, { type, requestId, payload });
-      return await client.events.next(
-        (event): event is Extract<ServerEvent, { type: "request.result" }> =>
-          event.type === "request.result"
-          && event.requestId === requestId
-          && event.result.kind === kind,
-      );
-    };
-    const projectBranch = currentBranch(workspace);
-    const chatBranch = `regression/${randomUUID().slice(0, 8)}`;
-    const authority = {
-      projectId: project.id,
-      conversationId: isolatedWorktree.id,
-    };
-    await gitRequest(
-      "git.branch.create", { ...authority, name: chatBranch }, "git.action",
-    );
-    expect(currentBranch(isolatedWorktree.worktreePath!)).toBe(chatBranch);
-    expect(currentBranch(workspace)).toBe(projectBranch);
-
-    const listedBranches = await gitRequest(
-      "git.branches", authority, "git.branches",
-    );
-    expect(listedBranches.result).toMatchObject({
-      kind: "git.branches",
-      branches: expect.arrayContaining([
-        expect.objectContaining({ name: chatBranch, current: true }),
-      ]),
-    });
-
-    await gitRequest(
-      "git.branch.switch",
-      { ...authority, name: isolatedWorktree.branch },
-      "git.action",
-    );
-
     const deleteConversation = async (conversationId: string): Promise<void> => {
       const requestId = randomUUID();
       send(client.socket, {

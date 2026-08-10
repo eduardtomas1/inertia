@@ -166,7 +166,6 @@ export type ServerEvent =
             skills: AgentSkillSummary[];
             skillDiscovery: AgentWorkflowState["skillDiscovery"];
           }
-        | { kind: "worktree.created"; path: string; branch: string }
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult;

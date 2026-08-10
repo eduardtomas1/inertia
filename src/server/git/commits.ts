@@ -705,6 +705,7 @@ export async function commitReviewedChanges(
     verifyRepositoryIdentity?: (signal?: AbortSignal) => void | Promise<void>;
     testHooks?: {
       afterFinalReview?: () => void | Promise<void>;
+      runCommitTree?: typeof runGit;
       beforeTransactionLock?: () => void | Promise<void>;
       duringPreparedMutation?: () => void;
       afterReferenceCommit?: () => void | Promise<void>;
@@ -775,6 +776,7 @@ export async function commitReviewedChanges(
       stagedPaths,
       options,
       false,
+      current.removalPaths.filter((path) => stagedPaths.includes(path)),
     );
     if (finalSelection.tree !== expectedSelection.tree) {
       throw new GitError(
@@ -800,17 +802,43 @@ export async function commitReviewedChanges(
         "Reviewed commits require a checked-out branch. Switch from detached HEAD and try again.",
       );
     }
+    const parentTreeResult = current.head
+      ? await runGitInspection(
+          root,
+          ["rev-parse", "--verify", `${current.head}^{tree}`],
+          {
+            deadlineAt: options.deadlineAt,
+            maxOutputBytes: 256,
+            failureMessage: "Unable to verify the reviewed commit parent.",
+          },
+        )
+      : await runGit(root, ["hash-object", "-t", "tree", "--stdin"], {
+          deadlineAt: options.deadlineAt,
+          input: Buffer.alloc(0),
+          maxOutputBytes: 256,
+          failureMessage: "Unable to verify the reviewed empty tree.",
+        });
+    const parentTree = stripTerminalEol(
+      parentTreeResult.stdout.toString("utf8"),
+    );
+    if (finalSelection.tree === parentTree) {
+      throw new GitError(
+        "nothing-to-commit",
+        "The selected files have no changes to commit.",
+      );
+    }
     const indexPath = await commitIndexPath(root);
     const originalIndex = await readRegularFile(indexPath);
     const originalIndexHash = digest(originalIndex);
     await options.verifyRepositoryIdentity?.();
-    const commitResult = await runGit(root, [
+    const commitResult = await (options.testHooks?.runCommitTree ?? runGit)(root, [
       "commit-tree",
       finalSelection.tree,
       ...(current.head ? ["-p", current.head] : []),
       "-F",
       "-",
     ], {
+      deadlineAt: options.deadlineAt,
       timeoutMs: NETWORK_TIMEOUT_MS,
       environment: finalSelection.environment,
       input: Buffer.from(message),

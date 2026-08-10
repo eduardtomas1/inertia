@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -25,8 +26,15 @@ import {
   prepareGitCommitReview,
   renderGitCommitReviewDiff,
 } from "../../src/server/git";
+import { runGit } from "../../src/server/git/runner";
+import {
+  portableNodeExecutable,
+  waitFor,
+  writeNodeSubcommand,
+} from "../helpers/portable-provider-fixture";
 
 const roots: string[] = [];
+const descendantPids: number[] = [];
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -71,6 +79,15 @@ function repository(): string {
   return root;
 }
 
+function unbornRepository(): string {
+  const root = mkdtempSync(join(tmpdir(), "inertia-unborn-commit-review-"));
+  roots.push(root);
+  git(root, "init", "-q", "--initial-branch=main");
+  git(root, "config", "user.email", "tests@inertia.invalid");
+  git(root, "config", "user.name", "Inertia Tests");
+  return root;
+}
+
 function looseObjects(root: string): string[] {
   return readdirSync(join(root, ".git", "objects"), {
     recursive: true,
@@ -80,7 +97,32 @@ function looseObjects(root: string): string[] {
     .sort();
 }
 
+function commitObjects(root: string): string[] {
+  return git(
+    root,
+    "cat-file",
+    "--batch-all-objects",
+    "--batch-check=%(objecttype) %(objectname)",
+  ).split(/\r?\n/u).filter((line) => line.startsWith("commit ")).sort();
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 afterEach(() => {
+  for (const pid of descendantPids.splice(0)) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // The process-tree cleanup under test may already have removed it.
+    }
+  }
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -124,6 +166,137 @@ describe("Git commit review receipts", () => {
     expect(git(root, "write-tree")).toBe(indexTree);
     expect(git(root, "diff", "--cached", "--name-only")).toBe("");
   });
+
+  it("rejects a selected MM restoration without creating an empty commit", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "staged version\n");
+    git(root, "add", "--", "selected.txt");
+    writeFileSync(join(root, "selected.txt"), "selected before\n");
+    expect(git(root, "status", "--short", "--", "selected.txt"))
+      .toBe("MM selected.txt");
+    const review = await captureGitCommitReview(root);
+    const head = git(root, "rev-parse", "HEAD");
+    const indexTree = git(root, "write-tree");
+    const commits = commitObjects(root);
+
+    await expect(commitReviewedChanges(
+      root,
+      "Must not create an empty commit",
+      ["selected.txt"],
+      review.fingerprint,
+    )).rejects.toMatchObject({ code: "nothing-to-commit" });
+
+    expect(git(root, "rev-parse", "HEAD")).toBe(head);
+    expect(git(root, "write-tree")).toBe(indexTree);
+    expect(commitObjects(root)).toEqual(commits);
+    expect(git(root, "status", "--short", "--", "selected.txt"))
+      .toBe("MM selected.txt");
+  });
+
+  it("rejects an unborn selected restoration without creating an empty commit", async () => {
+    const root = unbornRepository();
+    writeFileSync(join(root, "selected.txt"), "staged unborn version\n");
+    git(root, "add", "--", "selected.txt");
+    rmSync(join(root, "selected.txt"));
+    expect(git(root, "status", "--short", "--", "selected.txt"))
+      .toBe("AD selected.txt");
+    const review = await captureGitCommitReview(root);
+    const headFile = readFileSync(join(root, ".git", "HEAD"));
+    const indexPath = git(
+      root,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "index",
+    );
+    const index = readFileSync(indexPath);
+    const commits = commitObjects(root);
+
+    await expect(commitReviewedChanges(
+      root,
+      "Must not create an unborn empty commit",
+      ["selected.txt"],
+      review.fingerprint,
+    )).rejects.toMatchObject({ code: "nothing-to-commit" });
+
+    expect(() => git(root, "rev-parse", "--verify", "HEAD")).toThrow();
+    expect(readFileSync(join(root, ".git", "HEAD"))).toEqual(headFile);
+    expect(readFileSync(indexPath)).toEqual(index);
+    expect(commitObjects(root)).toEqual(commits);
+    expect(existsSync(`${indexPath}.lock`)).toBe(false);
+    expect(existsSync(`${indexPath}.inertia-commit-transaction.json`))
+      .toBe(false);
+  });
+
+  it("bounds a stalled commit-tree by the original operation deadline", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed deadline source\n");
+    const review = await captureGitCommitReview(root);
+    const head = git(root, "rev-parse", "HEAD");
+    const indexPath = git(
+      root,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "index",
+    );
+    const index = readFileSync(indexPath);
+    const fixture = mkdtempSync(join(tmpdir(), "inertia stalled commit tree-"));
+    roots.push(fixture);
+    const pidsPath = join(fixture, "pids.txt");
+    portableNodeExecutable(fixture, "git");
+    writeNodeSubcommand(fixture, "commit-tree", `
+const { appendFileSync } = require("node:fs");
+const { spawn } = require("node:child_process");
+appendFileSync(${JSON.stringify(pidsPath)}, String(process.pid) + "\\n");
+const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+  stdio: "ignore",
+});
+appendFileSync(${JSON.stringify(pidsPath)}, String(child.pid) + "\\n");
+setInterval(() => {}, 1000);
+`);
+    const deadlineAt = Date.now() + 5_000;
+
+    await expect(commitReviewedChanges(
+      root,
+      "Must time out stalled commit-tree",
+      ["selected.txt"],
+      review.fingerprint,
+      {
+        deadlineAt,
+        testHooks: {
+          afterFinalReview: async () => {
+            const waitMs = deadlineAt - Date.now() - 2_000;
+            if (waitMs > 0) await delay(waitMs);
+          },
+          runCommitTree: async (_cwd, args, options) => await runGit(
+            fixture,
+            args,
+            {
+              ...options,
+              environment: {
+                ...options.environment,
+                PATH: fixture,
+              },
+            },
+          ),
+        },
+      },
+    )).rejects.toMatchObject({ code: "timeout" });
+
+    const pids = readFileSync(pidsPath, "utf8")
+      .trim().split(/\r?\n/u).map(Number);
+    descendantPids.push(...pids);
+    await waitFor(
+      "the stalled commit-tree process tree to terminate",
+      () => pids.every((pid) => !processExists(pid)),
+    );
+    expect(git(root, "rev-parse", "HEAD")).toBe(head);
+    expect(readFileSync(indexPath)).toEqual(index);
+    expect(existsSync(`${indexPath}.lock`)).toBe(false);
+    expect(existsSync(`${indexPath}.inertia-commit-transaction.json`))
+      .toBe(false);
+  }, 12_000);
 
   it("commits only reviewed selected paths and preserves unrelated staged work", async () => {
     const root = repository();
@@ -186,6 +359,61 @@ describe("Git commit review receipts", () => {
     expect(() => git(root, "show", "HEAD:selected.txt")).toThrow();
     expect(git(root, "show", "HEAD:renamed.txt")).toBe("selected before");
     expect(git(root, "status", "--short")).toBe("");
+  });
+
+  it("commits a staged deletion recreated in the worktree as replacement content", async () => {
+    const root = repository();
+    git(root, "rm", "-q", "--", "selected.txt");
+    writeFileSync(join(root, "selected.txt"), "replacement content\n");
+    const review = await captureGitCommitReview(root);
+
+    await commitReviewedChanges(
+      root,
+      "Commit recreated deletion",
+      ["selected.txt"],
+      review.fingerprint,
+    );
+
+    expect(git(root, "show", "HEAD:selected.txt"))
+      .toBe("replacement content");
+    expect(git(root, "status", "--short")).toBe("");
+  });
+
+  it("retains a recreated rename source in the reviewed commit", async () => {
+    const root = repository();
+    git(root, "mv", "selected.txt", "renamed.txt");
+    writeFileSync(join(root, "selected.txt"), "recreated source\n");
+    const review = await captureGitCommitReview(root);
+
+    await commitReviewedChanges(
+      root,
+      "Commit rename with recreated source",
+      ["renamed.txt"],
+      review.fingerprint,
+    );
+
+    expect(git(root, "show", "HEAD:renamed.txt")).toBe("selected before");
+    expect(git(root, "show", "HEAD:selected.txt")).toBe("recreated source");
+    expect(git(root, "status", "--short")).toBe("");
+  });
+
+  it("keeps a copy source when committing its reviewed destination", async () => {
+    const root = repository();
+    writeFileSync(
+      join(root, "copied.txt"),
+      readFileSync(join(root, "selected.txt")),
+    );
+    const review = await captureGitCommitReview(root);
+
+    await commitReviewedChanges(
+      root,
+      "Commit copied destination",
+      ["copied.txt"],
+      review.fingerprint,
+    );
+
+    expect(git(root, "show", "HEAD:selected.txt")).toBe("selected before");
+    expect(git(root, "show", "HEAD:copied.txt")).toBe("selected before");
   });
 
   it.skipIf(process.platform === "win32")(

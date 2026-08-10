@@ -54,4 +54,43 @@ describe("source-control command authority", () => {
     expect(workspacePath).toHaveBeenCalledWith(projectId, conversationId);
     expect(trackSourceControl).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["git.branch.create", { name: "feature/scoped" }],
+    ["git.branch.switch", { name: "main" }],
+    ["git.pull", {}],
+    ["git.push", {}],
+    ["git.pr.open", {}],
+    ["git.pr.create", {
+      title: "Reviewed pull request",
+      body: "Body",
+      draft: false,
+    }],
+  ] as const)("requires refreshed root repository authority for %s", async (
+    type,
+    extra,
+  ) => {
+    const trackSourceControl = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => "/workspace"),
+      workspaceRuns: { trackSourceControl },
+      store: {
+        conversation: vi.fn(() => ({
+          id: conversationId,
+          projectId,
+          worktreePath: null,
+        })),
+      },
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type,
+      requestId: crypto.randomUUID(),
+      payload: { projectId, ...extra },
+    });
+
+    await expect(handler({} as WebSocket, command)).rejects.toThrow(
+      /refresh repository status/iu,
+    );
+    expect(trackSourceControl).not.toHaveBeenCalled();
+  });
 });

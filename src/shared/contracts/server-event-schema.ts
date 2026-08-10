@@ -1128,7 +1128,6 @@ const REQUEST_RESULT_VALIDATORS = {
     providerMaintenanceOperation(value.operation),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "project.created": (value) => stringField(value, "projectId"),
-  "worktree.created": (value) => recordWithStrings(value, "path", "branch"),
   "git.action": (value) => stringField(value, "message"),
   "external.url": (value) => recordWithStrings(value, "url", "label"),
   "git.branches": (value) => arrayOf(value.branches, gitBranch),

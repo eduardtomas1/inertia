@@ -27,6 +27,7 @@ import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { ActivityRunSummary } from "../utils/activityCenter";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
+import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import type { CommitDialogProps } from "./CommitDialog";
@@ -235,6 +236,7 @@ export function AppLayout({
   actions,
 }: AppLayoutProps): React.JSX.Element {
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  const rootRepository = rootGitMutationScope(gitStatus);
   const commitReviewOwner = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const {
     sidebarOpen,
@@ -542,25 +544,41 @@ export function AppLayout({
               })}
             onOpenPullRequest={() => {
               if (!project) return;
+              if (!rootRepository) {
+                setActionError(
+                  "Refresh repository status before opening a pull request.",
+                );
+                return;
+              }
               setPullRequestDialogOpen(true);
             }}
             onPull={() => {
               if (!project) return;
+              if (!rootRepository) {
+                setActionError("Refresh repository status before pulling.");
+                return;
+              }
               void actions.run("git.pull", {
                 type: "git.pull",
                 payload: {
                   projectId: project.id,
                   conversationId: conversation?.id,
+                  ...rootRepository,
                 },
               }).catch(() => undefined);
             }}
             onPush={() => {
               if (!project) return;
+              if (!rootRepository) {
+                setActionError("Refresh repository status before pushing.");
+                return;
+              }
               void actions.run("git.push", {
                 type: "git.push",
                 payload: {
                   projectId: project.id,
                   conversationId: conversation?.id,
+                  ...rootRepository,
                 },
               }).catch(() => undefined);
             }}
@@ -597,7 +615,7 @@ export function AppLayout({
           />
         </Suspense>
       )}
-      {pullRequestDialogOpen && project && (
+      {pullRequestDialogOpen && project && rootRepository && (
         <Suspense fallback={null}>
           <PullRequestDialog
             open
@@ -605,6 +623,8 @@ export function AppLayout({
             busy={busyAction === "git.pr.create" || busyAction === "git.pr.open"}
             projectId={project.id}
             conversationId={conversation?.id}
+            repositoryPath={rootRepository.repositoryPath}
+            authorityRef={rootRepository.authorityRef}
             forge={gitStatus?.pullRequest?.forge ?? "github"}
             run={actions.run}
             onClose={() => setPullRequestDialogOpen(false)}

@@ -24,6 +24,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Launch a saved Duo from one shared prompt into two independently named chats, each with its own project, model route, reasoning, and access mode, with an optional independent third-model judgment.
 - Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
 - Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
+- Save up to 30 reusable prompt presets, search and organize them, and insert one into the selected composer without sending it. Optional route binding stores only harness, backend, model, and reasoning identity—never attachments, chat context, endpoints, continuation state, or credentials.
 - Start from a compact Environment summary of the current branch, changes, active work, delegated agents, and attached context, while keeping the full workspace tools one click away.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
 - Continue an eligible native Codex, Claude, Cursor, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle.
@@ -50,10 +51,11 @@ When you explicitly enable third-model comparison, Inertia locks the two source 
 
 - Read every file and hunk in a focused diff view, then mark progress as you review.
 - Review modified files across a project-root repository and nested module repositories without flattening their Git identity.
+- Use the branch-aware header action or complete Git menu for Commit, Pull, Push or Publish, and Pull request, with ahead/behind state and exact explanations when an action is unavailable.
 - Select a line range to ask a read-only question beside the matching hunk, request a focused revision, save a note, or carry the exact context into the next prompt.
 - Generate a concise agent summary for every current file and hunk, including evidence-backed hints for areas worth extra attention.
 - Revert only selected changed lines across staged, unstaged, and mixed files with current-state validation, a recovery backup, and Undo.
-- Commit only the paths you choose while leaving unrelated staged work alone and seeing which selected hunks remain unreviewed.
+- Commit only the exact prospective content you reviewed and the paths you chose, while leaving unrelated staged work alone and seeing which selected hunks remain unreviewed.
 
 Nested module repositories keep their own review marks, notes, questions, and selective reverts. Agent revision requests and generated whole-repository summaries remain limited to the project-root repository because their recovery checkpoint must cover the same Git worktree; Inertia explains that boundary instead of presenting nested repositories as temporarily unavailable.
 
@@ -62,7 +64,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - The transcript reads like one calm engineering document: a light request, an understandable workstream, a clean final answer, and a quiet supporting ledger.
 - Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
 - Provider updates and compact tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
-- The Activity Center keeps the latest meaningful operations close to the active agent, folds older successful calls behind one disclosure, and keeps manual Git work or failures independently visible.
+- The Activity Center groups work into Recent, Yesterday, and Earlier, showing the provider icon and configured alias with project, branch, status, and occurrence time while keeping manual Git work or failures independently visible.
 - Open project-file references from prose or fenced-code labels directly in Files, then edit supported text files in a focused dialog that refuses to overwrite content changed since it was opened.
 - Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
 - Codex-native goals and Inertia-local objectives keep their source visible, while next-turn skills stay route-bound and never expose provider paths or contents.
@@ -70,7 +72,8 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
 - Long transcripts keep stable rows, preview distant requests from the conversation minimap, and load heavier detail only when opened, while bounded runtime updates resume safely after a restart.
 - The transcript follows live work only while you are near the bottom, so reading earlier context is not interrupted.
-- Provider-reported delegated work remains attached to its parent turn. The Goal panel preserves the real hierarchy; **Guide parent** prepares an ordinary parent follow-up, while direct Stop appears only for supported live Claude tasks.
+- New final answers can settle at the beginning of the viewport for immediate reading without reclaiming the transcript after deliberate navigation; **Jump to completed answers** controls the behavior in Settings.
+- Provider-reported delegated work remains attached to its parent turn with provider and harness identity, live elapsed time, hierarchy, progress, and terminal outcome. **Guide parent** prepares an ordinary parent follow-up, while direct Stop appears only for an exact live Claude Agent SDK task.
 
 ![An active Inertia workstream with interleaved commentary and compact tool activity](docs/screenshots/inertia-workstream.png)
 
@@ -78,13 +81,13 @@ Nested module repositories keep their own review marks, notes, questions, and se
 
 - Codex-native goals and Inertia-local objectives are labeled separately, persisted across reconnects, and never substituted for one another.
 - Skills are discovered from the selected Codex or Claude route and attached only to the next turn after privileged revalidation; the renderer never receives their filesystem path or content.
-- Delegated agent trees preserve provider-reported parentage, status, and ownership. Guide parent prepares an ordinary supported follow-up; direct Stop appears only for supported live Claude tasks.
+- Delegated agent trees preserve provider-reported parentage, status, ownership, route identity, and elapsed time. Compact views keep separate live or failed branches represented; Guide parent prepares an ordinary supported follow-up, and direct Stop appears only for an exact live Claude Agent SDK task.
 
 ![Goals and delegated agent work in Inertia](docs/screenshots/inertia-agent-workflows.png)
 
 ### Keep the workspace moving
 
-- The Activity Center brings agents, checks, services, and source-control work together with the actions each run can actually support.
+- The Activity Center brings agents, checks, services, and source-control work together chronologically, with provider, project, and branch identity plus the actions each run can actually support.
 - Native previews, terminals, files, and Git reviews stay scoped to their owning chat when two different projects share the split workspace.
 - App turns, native provider terminals, project actions, reviews, and Git operations share canonical checkout authority, so independent entry points cannot silently edit the same worktree at once.
 - Activity-first navigation surfaces work that is running, waiting for approval or input, completed in the background, unread, failed, or settled.
@@ -160,13 +163,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.29
+### Version 0.0.30
 
-This release makes Inertia's runtime boundary substantially stricter and its everyday thread management calmer. Deep event validation now preserves conversation, turn, run, provider, Git, review, Duo, and storage identities; bounded WebSocket backpressure allows large hydration without leaving a stalled client unbounded; and current databases or recovery backups must contain every released structure before they are trusted.
+This release turns Git into a clearer end-to-end workspace workflow. Root and nested repositories keep independent review and action state; the header surfaces contextual Commit, Pull, Push or Publish, and Pull request controls; and every commit is bound to the exact prospective content reviewed before a crash-safe, race-checked transaction changes Git state.
 
-Threads can be pinned, snoozed, filtered, and opened from privacy-preserving desktop notifications. Provider aliases and custom keybindings remain consistent across live work, while the built-in GitHub pull-request flow, packaged Private Connect PWA, runtime health and cache controls, and credential-free status CLI add useful workflows without moving privileged authority into the renderer.
+Completed answers settle where reading starts, chronological activity carries provider icons and project or branch context, and delegated work stays compact without hiding live or failed branches. Reusable prompt presets add deliberate route-aware composition, while Duo recovery, scanned-PDF inputs, provider process ownership, attachments, and persistent workspace and worktree receipts close the deeper failure paths behind those visible improvements.
 
-Download [Inertia v0.0.29](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.29):
+Download [Inertia v0.0.30](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.30):
 
 | Platform | Download |
 | --- | --- |

@@ -4,6 +4,38 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.30 — 2026-08-10
+
+### Git actions stay visual, reviewed, and repository-scoped
+
+- The workspace header now presents one contextual Git action plus a complete keyboard-accessible menu for Commit, Pull, Push or Publish, and Pull request. Branch state, ahead/behind counts, and exact disabled reasons stay visible instead of leaving routine source-control work hidden in terminal commands.
+- Changes uses one repository picker and file navigator for both the project root and nested repositories. Review state, commit, push, pull-request recovery, and repository identity follow the selected repository without exposing a stale diff under a newly selected path; root-only revision and summary boundaries remain explicit.
+- A commit is built from the exact prospective content the user reviewed, consumes a one-shot receipt, and changes only the selected paths while preserving unrelated staged work. Repository, Git metadata, branch, index, signing policy, or reviewed content changes fail closed before mutation.
+- Reviewed commits use Git-native reference locks plus a durable private index journal so an acknowledgement loss, timeout, crash, packed ref, or Windows cleanup race cannot silently create a second commit or erase another Git operation's lock. Recovery completes or preserves only Inertia-owned artifacts before later branch, pull, push, or pull-request work proceeds.
+
+### Completed answers, activity, and delegated work read at a glance
+
+- **Jump to completed answers** positions each newly persisted final answer at the beginning of the transcript viewport by default. It settles delayed and virtualized layout without moving historical conversations or hydrated answers, stops immediately for deliberate reader navigation, and can be disabled in Settings.
+- Runs are grouped chronologically into **Recent**, **Yesterday**, and **Earlier**. Each row keeps its provider icon and configured alias beside project, branch, status, and occurrence time, while historical provider attribution comes from the immutable run projection rather than whichever route the chat uses now.
+- Delegated work shows provider and harness identity, live elapsed time, provider-reported hierarchy, compact progress, and terminal outcomes in a bounded tree. Separate live or failed branches remain represented, settled history collapses behind an accessible disclosure, **Guide parent** remains an ordinary follow-up, and direct Stop appears only for an exact live Claude Agent SDK task.
+
+### Duo, documents, providers, and worktrees recover conservatively
+
+- Duo keeps launch and deletion locks until cancelled providers actually detach, reconciles ambiguous judge retry or cancellation acknowledgements, and resumes only durable eligible comparisons after restart. Isolated launches pin their source repository identity; owned worktrees carry durable creation and filesystem receipts, ambiguous or still-registered artifacts require manual Git cleanup, and projects cannot be removed around unresolved owned chat worktrees.
+- Project and conversation paths are enrolled with persistent filesystem and Git identity receipts. Provider runs, terminals, project actions, and Git commands revalidate those authorities so a same-path replacement or symlink swap fails closed instead of inheriting workspace access.
+- Text PDFs retain bounded selectable text, while scanned or sparse pages become private UUID-named JPEG inputs for image-capable routes. Page count, dimensions, memory, files, and aggregate bytes are bounded; mixed PDFs share image capacity fairly; generated pages are removed after completion, cancellation, failure, and restart without exposing their private paths in prompts or persistence.
+- Claude skill discovery and selection now use bounded, revalidated private staging and one owned SDK process tree. Claude, Cursor, and OpenCode reject unsafe approval display text, bound provider event state and cleanup, and publish terminal results only after owned processes settle. Attachment preflight rejects over-limit selections before reading renderer bytes, while late, unsent, or cancelled private attachment leases are released instead of drifting into another chat or reload.
+
+### Reusable prompt presets stay deliberately narrow
+
+- The composer can create, search, insert, edit, duplicate, reorder, and delete up to 30 reusable prompt presets. Applying one edits only the selected composer: it does not send automatically, consume the scratch stash, move attachments, or cross into the other side of a split workspace.
+- A preset stores bounded text and, only when explicitly enabled, the exact harness, backend, model, and reasoning identity. A route-bound preset explains and refuses a mismatched chat until it is deliberately rebound; endpoints, provider options, capabilities, filesystem context, continuation identity, attachments, chat context, and credentials are outside the preset contract.
+- Presets live in the local database with revision-checked mutations and are included in both shell and full reconnect snapshots. Schema recovery validates the table, ordering index, and count-limit trigger before accepting a current database or backup.
+
+### Release confidence
+
+- Provider SDK and supporting dependency updates remain isolated behind their deterministic contracts. Architecture, lint, type, migration and recovery, portable-provider, Electron, performance, production-audit, bundle-budget, packaging, fuse, signature, checksum, provenance, and exact-head Linux, macOS, and Windows gates protect the release.
+
 ## 0.0.29 — 2026-08-09
 
 ### Runtime boundaries reject ambiguous state

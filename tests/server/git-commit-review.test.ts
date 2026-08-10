@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -36,6 +36,7 @@ import {
 
 const roots: string[] = [];
 const descendantPids: number[] = [];
+const LOOSE_OBJECT_PATH = /^[0-9a-f]{2}\/(?:[0-9a-f]{38}|[0-9a-f]{62})$/u;
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -90,11 +91,15 @@ function unbornRepository(): string {
 }
 
 function looseObjects(root: string): string[] {
-  return readdirSync(join(root, ".git", "objects"), {
+  const objectsRoot = join(root, ".git", "objects");
+  return readdirSync(objectsRoot, {
     recursive: true,
     withFileTypes: true,
   }).filter((entry) => entry.isFile())
     .map((entry) => join(entry.parentPath, entry.name))
+    .filter((path) => LOOSE_OBJECT_PATH.test(
+      relative(objectsRoot, path).replaceAll("\\", "/"),
+    ))
     .sort();
 }
 
@@ -130,6 +135,41 @@ afterEach(() => {
 });
 
 describe("Git commit review receipts", () => {
+  it("ignores Git housekeeping while still detecting new loose objects", () => {
+    const root = unbornRepository();
+    const objectsRoot = join(root, ".git", "objects");
+    const before = looseObjects(root);
+    writeFileSync(join(objectsRoot, "maintenance.lock"), "transient\n");
+    mkdirSync(join(objectsRoot, "info"), { recursive: true });
+    writeFileSync(join(objectsRoot, "info", "commit-graph"), "housekeeping\n");
+
+    expect(looseObjects(root)).toEqual(before);
+
+    const sha1Object = join(objectsRoot, "ab", "c".repeat(38));
+    const sha256Object = join(objectsRoot, "de", "f".repeat(62));
+    mkdirSync(join(objectsRoot, "ab"), { recursive: true });
+    mkdirSync(join(objectsRoot, "de"), { recursive: true });
+    writeFileSync(sha1Object, "sha1 loose object\n");
+    writeFileSync(sha256Object, "sha256 loose object\n");
+    writeFileSync(join(root, "real-object-source.txt"), "real object\n");
+    const realObjectId = git(
+      root,
+      "hash-object",
+      "-w",
+      "--",
+      "real-object-source.txt",
+    );
+    const realObject = join(
+      objectsRoot,
+      realObjectId.slice(0, 2),
+      realObjectId.slice(2),
+    );
+
+    expect(looseObjects(root)).toEqual(
+      [...new Set([...before, sha1Object, sha256Object, realObject])].sort(),
+    );
+  });
+
   it("captures a stable raw tree without adding objects to the real repository", async () => {
     const root = repository();
     writeFileSync(join(root, "selected.txt"), "selected after\n");

@@ -57,6 +57,7 @@ describe("Settings external section targets", () => {
       },
     });
     const providersTarget = { section: "providers" as const };
+    const onUpdate = vi.fn(async () => undefined);
     const props: ComponentProps<typeof SettingsView> = {
       target: providersTarget,
       settings: defaultSettings,
@@ -70,7 +71,7 @@ describe("Settings external section targets", () => {
       databaseBackup: {
         lastValidatedAt: "2026-08-03T10:15:00.000Z",
       },
-      onUpdate: vi.fn(),
+      onUpdate,
       onConnectProvider: vi.fn(),
       onRefreshProvider: vi.fn(),
       maintenanceOperations: new Map(),
@@ -111,6 +112,12 @@ describe("Settings external section targets", () => {
       .toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { level: 2, name: "General" }))
       .toHaveClass("visually-hidden");
+    const answerScrollSwitch = screen.getByRole("switch", {
+      name: "Jump to completed answers",
+    });
+    expect(answerScrollSwitch).toBeChecked();
+    fireEvent.click(answerScrollSwitch);
+    expect(onUpdate).toHaveBeenCalledWith({ autoScrollToFinalAnswer: false });
     view.rerender(<SettingsView {...props} disabled />);
     expect(screen.getByRole("button", { name: "General" }))
       .toHaveAttribute("aria-current", "page");

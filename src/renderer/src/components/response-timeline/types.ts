@@ -36,12 +36,15 @@ export interface ResponseTimelineProps {
   defaultCodeWrap: boolean;
   autoCollapseWorkLog: boolean;
   showChangedFileSummaries: boolean;
+  autoScrollToFinalAnswer?: boolean;
+  detailLoading?: boolean;
   checkpointRestoreDisabled: boolean;
   turnAnchorId?: string | null;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
   timelineElementRef?: RefObject<HTMLDivElement | null>;
   onTurnAnchorSettled?: (turnId: string) => void;
   onTurnAnchorCancelled?: (turnId: string) => void;
+  onFinalAnswerAutoScroll?: (event: FinalAnswerAutoScrollEvent) => void;
   onRespondToApproval: (
     request: AgentApprovalRequest,
     decision: AgentApprovalDecision,
@@ -58,3 +61,12 @@ export interface ResponseTimelineProps {
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
 }
+
+export type FinalAnswerAutoScrollEvent = {
+  conversationId: string;
+  answerId: string;
+} & (
+  | { status: "started" }
+  | { status: "positioned"; followsLatest: boolean }
+  | { status: "cancelled" }
+);

@@ -443,6 +443,22 @@ describe("client command contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts only boolean final-answer auto-scroll settings", () => {
+    const requestId = crypto.randomUUID();
+    for (const autoScrollToFinalAnswer of [true, false]) {
+      expect(clientCommandSchema.safeParse({
+        type: "settings.update",
+        requestId,
+        payload: { autoScrollToFinalAnswer },
+      }).success).toBe(true);
+    }
+    expect(clientCommandSchema.safeParse({
+      type: "settings.update",
+      requestId,
+      payload: { autoScrollToFinalAnswer: "yes" },
+    }).success).toBe(false);
+  });
+
   it("accepts only complete, unique app keybindings", () => {
     const requestId = crypto.randomUUID();
     expect(clientCommandSchema.safeParse({

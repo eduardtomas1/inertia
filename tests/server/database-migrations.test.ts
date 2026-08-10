@@ -285,6 +285,9 @@ describe("published database fixtures", () => {
       expect((inspection.prepare(
         "SELECT auto_open_plan AS autoOpenPlan FROM app_state WHERE id = 1",
       ).get() as { autoOpenPlan: number }).autoOpenPlan).toBe(0);
+      expect((inspection.prepare(
+        "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
+      ).get() as { enabled: number }).enabled).toBe(1);
       expect(inspection.pragma("foreign_key_check")).toEqual([]);
       inspection.close();
 
@@ -1356,6 +1359,32 @@ describe("runtime migration catalog", () => {
       .toThrow(/legacy schema catalog/iu);
     expect(() => createRuntimeMigrationCatalog(legacy, extensions.slice(1)))
       .toThrow(/runtime schema catalog/iu);
+  });
+
+  it("appends final-answer auto-scroll after the released schema-50 migration", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "schema-50-upgrade.sqlite");
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+
+    const store = new RuntimeStore(databasePath, workspacePath);
+    store.close();
+
+    const schema50 = new Database(databasePath);
+    schema50.exec("ALTER TABLE app_state DROP COLUMN auto_scroll_to_final_answer");
+    schema50.prepare("DELETE FROM schema_migrations WHERE version = 51").run();
+    schema50.close();
+
+    migrateFixtureInPlace(databasePath);
+
+    const migrated = new Database(databasePath, { readonly: true });
+    expect(migrated.prepare(
+      "SELECT version FROM schema_migrations WHERE version >= 50 ORDER BY version",
+    ).all()).toEqual([{ version: 50 }, { version: 51 }]);
+    expect((migrated.prepare(
+      "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
+    ).get() as { enabled: number }).enabled).toBe(1);
+    migrated.close();
   });
 });
 

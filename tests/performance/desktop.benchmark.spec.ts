@@ -305,6 +305,10 @@ function seedRuntime(dataDirectory: string, workspace: string): BenchmarkConvers
     workspace,
     { recoverInterruptedRuns: false },
   );
+  // This scenario measures the explicit follow-latest contract through final
+  // settlement. Completion positioning has its own renderer and Electron
+  // coverage and must not redefine this benchmark's bottom-gap signal.
+  store.updateSettings({ autoScrollToFinalAnswer: false });
   const project = store.createProject("Performance fixture", workspace);
   const primary = store.createConversation(project.id, "Performance primary");
   const baseTime = Date.now() - 300 * 60_000;

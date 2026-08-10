@@ -300,6 +300,7 @@ export interface StateRow {
   default_code_wrap: 0 | 1;
   auto_collapse_work_log: 0 | 1;
   show_changed_file_summaries: 0 | 1;
+  auto_scroll_to_final_answer: 0 | 1;
   sidebar_mode: AppSettings["sidebarMode"];
   project_grouping: AppSettings["projectGrouping"];
   auto_open_plan: 0 | 1;

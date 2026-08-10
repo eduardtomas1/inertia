@@ -62,3 +62,18 @@ export const roadmapSettingsMigrationDefinitions: readonly DatabaseMigrationDefi
     },
   },
 ];
+
+export const persistFinalAnswerAutoScroll: DatabaseMigrationDefinition = {
+  name: "PersistFinalAnswerAutoScroll",
+  up: (database) => {
+    const columns = database.prepare("PRAGMA table_info(app_state)")
+      .all() as Array<{ name: string }>;
+    if (!columns.some(({ name }) => name === "auto_scroll_to_final_answer")) {
+      database.exec(`
+        ALTER TABLE app_state
+          ADD COLUMN auto_scroll_to_final_answer INTEGER NOT NULL DEFAULT 1
+          CHECK (auto_scroll_to_final_answer IN (0, 1));
+      `);
+    }
+  },
+};

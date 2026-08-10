@@ -38,6 +38,7 @@ import {
   type ResponseTimelineItem,
 } from "../../utils/responseTimeline";
 import { CompatibilityTimeline } from "./compatibility";
+import { startFinalAnswerAnchor } from "./final-answer-anchor";
 import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
 
@@ -68,6 +69,28 @@ function findTurnElement(
   if (!root) return null;
   return [...root.querySelectorAll<HTMLElement>("[data-turn-id]")]
     .find((element) => element.dataset.turnId === turnId) ?? null;
+}
+
+function latestTurnCompletion(
+  timeline: ResponseTimelineItem[],
+): {
+  turnId: string;
+  isActive: boolean;
+  answerId: string | null;
+  timelineIndex: number;
+} | null {
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const item = timeline[index];
+    if (item?.kind === "turn") {
+      return {
+        turnId: item.turn.id,
+        isActive: item.turn.isActive,
+        answerId: item.turn.terminalAssistantMessage?.id ?? null,
+        timelineIndex: index,
+      };
+    }
+  }
+  return null;
 }
 
 function currentPlainTimelineIndex(
@@ -407,6 +430,24 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     ? timeline.findIndex((item) =>
         item.kind === "turn" && item.turn.id === props.turnAnchorId)
     : -1, [props.turnAnchorId, timeline]);
+  const latestCompletion = useMemo(
+    () => latestTurnCompletion(timeline),
+    [timeline],
+  );
+  const finalAnswerId = latestCompletion?.answerId ?? null;
+  const finalAnswerIndex = latestCompletion?.timelineIndex ?? -1;
+  const hasLatestCompletion = latestCompletion !== null;
+  const finalAnswerIndexRef = useRef(finalAnswerIndex);
+  finalAnswerIndexRef.current = finalAnswerIndex;
+  const observedLatestTurnRef = useRef({
+    conversationId: props.conversationId,
+    turnId: latestCompletion?.turnId ?? null,
+    isActive: latestCompletion?.isActive ?? false,
+    answerId: finalAnswerId,
+  });
+  const hydratingConversationRef = useRef(
+    props.detailLoading ? props.conversationId : null,
+  );
   const timelineRef = useRef(timeline);
   timelineRef.current = timeline;
   const previousComparableTurn = useMemo(() => {
@@ -528,8 +569,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const manuallyAdjustedRows = useRef(new Set<string>());
   const layoutAnchorActive = useRef(false);
   const turnAnchorActive = useRef(false);
+  const finalAnswerAnchorOwner = useRef<string | null>(null);
   const onTurnAnchorSettledRef = useRef(props.onTurnAnchorSettled);
   const onTurnAnchorCancelledRef = useRef(props.onTurnAnchorCancelled);
+  const onFinalAnswerAutoScroll = props.onFinalAnswerAutoScroll;
   onTurnAnchorSettledRef.current = props.onTurnAnchorSettled;
   onTurnAnchorCancelledRef.current = props.onTurnAnchorCancelled;
   const cancelLayoutAnchorRestoration = useRef<(() => void) | null>(null);
@@ -542,8 +585,83 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       scrollDirection: instance.scrollDirection,
       manuallyAnchored: layoutAnchorActive.current
         || turnAnchorActive.current
+        || finalAnswerAnchorOwner.current !== null
         || manuallyAdjustedRows.current.has(String(item.key)),
     });
+
+  useEffect(() => {
+    const observed = observedLatestTurnRef.current;
+    const completingHydration = !props.detailLoading
+      && hydratingConversationRef.current === props.conversationId;
+    if (props.detailLoading) {
+      hydratingConversationRef.current = props.conversationId;
+    } else if (completingHydration) {
+      hydratingConversationRef.current = null;
+    } else if (hydratingConversationRef.current !== props.conversationId) {
+      hydratingConversationRef.current = null;
+    }
+    const observedLiveCompletion = observed.conversationId
+      === props.conversationId
+      && observed.turnId === latestCompletion?.turnId
+      && observed.isActive
+      && latestCompletion?.isActive === false;
+    const newFinalAnswer = !props.detailLoading
+      && observed.conversationId === props.conversationId
+      && finalAnswerId !== null
+      && (
+        observedLiveCompletion
+        || (!completingHydration && observed.answerId !== finalAnswerId)
+      );
+    observedLatestTurnRef.current = observed.conversationId
+        === props.conversationId
+        && !hasLatestCompletion
+      ? observed
+      : {
+          conversationId: props.conversationId,
+          turnId: latestCompletion?.turnId ?? null,
+          isActive: latestCompletion?.isActive ?? false,
+          answerId: finalAnswerId,
+        };
+    if (!newFinalAnswer || !props.autoScrollToFinalAnswer) return;
+
+    const conversationId = props.conversationId;
+    const answerId = finalAnswerId;
+    const answerIndex = finalAnswerIndexRef.current;
+    const scrollElement = props.scrollElementRef?.current;
+    const root = props.timelineElementRef?.current;
+    if (!scrollElement || !root || answerIndex < 0) return;
+
+    return startFinalAnswerAnchor({
+      conversationId,
+      answerId,
+      scrollElement,
+      root,
+      virtualized,
+      getAnswerIndex: () => finalAnswerIndexRef.current,
+      scrollToIndex: (index) => virtualizer.scrollToIndex(index, {
+        align: "start",
+        behavior: "auto",
+      }),
+      activeOwner: finalAnswerAnchorOwner,
+      cancelLayoutAnchorRestoration: () => {
+        cancelLayoutAnchorRestoration.current?.();
+      },
+      onEvent: onFinalAnswerAutoScroll,
+    });
+  }, [
+    finalAnswerId,
+    hasLatestCompletion,
+    latestCompletion?.isActive,
+    latestCompletion?.turnId,
+    props.autoScrollToFinalAnswer,
+    props.conversationId,
+    props.detailLoading,
+    onFinalAnswerAutoScroll,
+    props.scrollElementRef,
+    props.timelineElementRef,
+    virtualized,
+    virtualizer,
+  ]);
 
   useEffect(() => {
     const turnId = props.turnAnchorId;

@@ -15,12 +15,17 @@ import { nativeModelSelection } from "../../src/shared/model-routing";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../src/renderer/src/utils/transcriptNavigation";
+import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
 
 vi.mock("../../src/renderer/src/hooks/useNativePreviewSuspension", () => ({
   useNativePreviewSuspension: () => undefined,
 }));
 
 const composerRenderCount = vi.hoisted(() => ({ value: 0 }));
+const timelineCallbacks = new Map<
+  string,
+  (event: FinalAnswerAutoScrollEvent) => void
+>();
 
 vi.mock("../../src/renderer/src/components/Composer", async () => {
   const { memo } = await import("react");
@@ -45,21 +50,30 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
 
 vi.mock("../../src/renderer/src/components/ResponseTimeline", () => ({
   ResponseTimeline: ({
+    conversationId,
     turnAnchorId,
     inputRequests,
+    onFinalAnswerAutoScroll,
   }: {
+    conversationId: string;
     turnAnchorId: string | null;
     inputRequests: AgentInputRequest[];
-  }) => (
-    <>
-      <div data-testid="turn-anchor-projection">{turnAnchorId ?? "none"}</div>
-      {inputRequests.map((request) => (
-        <section id={`agent-input-request-${request.id}`} key={request.id}>
-          <input aria-label={request.questions[0]?.question} />
-        </section>
-      ))}
-    </>
-  ),
+    onFinalAnswerAutoScroll?: (event: FinalAnswerAutoScrollEvent) => void;
+  }) => {
+    if (onFinalAnswerAutoScroll) {
+      timelineCallbacks.set(conversationId, onFinalAnswerAutoScroll);
+    }
+    return (
+      <>
+        <div data-testid="turn-anchor-projection">{turnAnchorId ?? "none"}</div>
+        {inputRequests.map((request) => (
+          <section id={`agent-input-request-${request.id}`} key={request.id}>
+            <input aria-label={request.questions[0]?.question} />
+          </section>
+        ))}
+      </>
+    );
+  },
 }));
 
 const project: Project = {
@@ -151,6 +165,7 @@ function workspaceProps(
     defaultCodeWrap: false,
     autoCollapseWorkLog: true,
     showChangedFileSummaries: false,
+    autoScrollToFinalAnswer: true,
     loading: false,
     sending: false,
     onAddProject: () => undefined,
@@ -189,10 +204,52 @@ function workspaceProps(
 }
 
 afterEach(() => {
+  timelineCallbacks.clear();
   vi.restoreAllMocks();
 });
 
 describe("draft turn anchoring", () => {
+  it("ignores a completed-answer callback owned by the previous conversation", async () => {
+    HTMLElement.prototype.scrollTo = vi.fn();
+    const visible = vi.fn();
+    const first = conversation("conversation-1");
+    const second = conversation("conversation-2");
+    const view = render(
+      <ChatWorkspace
+        {...workspaceProps(first, async () => null)}
+        onLatestContentVisibilityChange={visible}
+      />,
+    );
+    await screen.findByTestId("turn-anchor-projection");
+    const firstCallback = timelineCallbacks.get(first.id)!;
+    act(() => {
+      firstCallback({
+        status: "started",
+        conversationId: first.id,
+        answerId: "answer-1",
+      });
+    });
+
+    view.rerender(
+      <ChatWorkspace
+        {...workspaceProps(second, async () => null)}
+        onLatestContentVisibilityChange={visible}
+      />,
+    );
+    await waitFor(() => expect(timelineCallbacks.has(second.id)).toBe(true));
+    visible.mockClear();
+    act(() => {
+      firstCallback({
+        status: "positioned",
+        conversationId: first.id,
+        answerId: "answer-1",
+        followsLatest: false,
+      });
+    });
+
+    expect(visible).not.toHaveBeenCalled();
+  });
+
   it.each(["codex", "claude", "cursor", "opencode"] as const)(
     "marks %s ultra reasoning for the animated frame",
     (providerId) => {

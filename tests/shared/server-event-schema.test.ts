@@ -715,6 +715,7 @@ describe("server event settings trust boundary", () => {
     ["interfaceScale", "huge"],
     ["responseDensity", "dense"],
     ["workspaceStartupSurface", "terminal"],
+    ["autoScrollToFinalAnswer", "yes"],
     ["sidebarMode", "folders"],
     ["projectGrouping", "flat"],
     ["defaultInteractionMode", "chat"],

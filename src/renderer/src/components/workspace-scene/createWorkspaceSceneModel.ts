@@ -440,6 +440,7 @@ export function createWorkspaceSceneModel({
       defaultCodeWrap: settings.defaultCodeWrap,
       autoCollapseWorkLog: settings.autoCollapseWorkLog,
       showChangedFileSummaries: settings.showChangedFileSummaries,
+      autoScrollToFinalAnswer: settings.autoScrollToFinalAnswer,
       promptContext: workspaceTools.pendingDiffContext,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,

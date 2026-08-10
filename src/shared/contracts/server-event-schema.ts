@@ -362,8 +362,8 @@ function appSettings(value: unknown): boolean {
   const booleans = [
     "compactSidebar", "showTimestamps", "wrapDiffs", "ignoreWhitespace",
     "showThinking", "defaultCodeWrap", "autoCollapseWorkLog",
-    "showChangedFileSummaries", "autoOpenPlan", "confirmDestructiveActions",
-    "desktopNotifications",
+    "showChangedFileSummaries", "autoScrollToFinalAnswer", "autoOpenPlan",
+    "confirmDestructiveActions", "desktopNotifications",
   ];
   return strings.every((key) => stringField(value, key))
     && Object.entries(enums).every(([key, options]) => oneOf(value, key, options))

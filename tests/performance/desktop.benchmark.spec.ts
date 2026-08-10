@@ -33,6 +33,8 @@ const CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS = 500;
 const CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS = 500;
 const CI_STREAM_FINAL_PAINT_CATASTROPHIC_MS = 1_500;
 const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
+const FINAL_ANSWER_TOP_OFFSET_PX = 8;
+const FINAL_ANSWER_TOP_OFFSET_TOLERANCE_PX = 2;
 // These surfaces are loaded during idle time. Their first interaction should
 // therefore be a synchronous render, not React's delayed first lazy handoff.
 const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
@@ -932,6 +934,7 @@ async function streamingResponsivenessSample(
   const processDuring = await processSample(electronApp);
   let streamingBottomGap = Number.POSITIVE_INFINITY;
   let finalSettledBottomGap = Number.POSITIVE_INFINITY;
+  let finalAnswerTopOffset = Number.POSITIVE_INFINITY;
   let finalAnswerVisible = false;
   try {
     const jumpToLatest = page.getByRole("button", { name: "Jump to latest" });
@@ -958,9 +961,18 @@ async function streamingResponsivenessSample(
         element.classList.contains("is-pending")),
       { timeout: TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS },
     ).toBe(false);
-    await expect.poll(() => liveViewport.evaluate(
-      (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
-    )).toBeLessThanOrEqual(2);
+    const readFinalAnswerTopOffset = (): Promise<number> => finalAnswer.evaluate(
+      (answer) => {
+        const viewport = answer.closest<HTMLElement>(".message-scroll");
+        if (!viewport) return Number.POSITIVE_INFINITY;
+        return answer.getBoundingClientRect().top
+          - viewport.getBoundingClientRect().top;
+      },
+    );
+    await expect.poll(async () => Math.abs(
+      (await readFinalAnswerTopOffset()) - FINAL_ANSWER_TOP_OFFSET_PX,
+    )).toBeLessThanOrEqual(FINAL_ANSWER_TOP_OFFSET_TOLERANCE_PX);
+    finalAnswerTopOffset = await readFinalAnswerTopOffset();
     finalSettledBottomGap = await liveViewport.evaluate(
       (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
     );
@@ -1047,6 +1059,7 @@ async function streamingResponsivenessSample(
       jumpToLatestWithinFollowThreshold: streamingBottomGap <= 120,
       streamingBottomGap,
       finalSettledBottomGap,
+      finalAnswerTopOffset,
       finalAnswerVisible,
     },
   };
@@ -1121,6 +1134,11 @@ function summarizeStreamingResponsiveness(
       )),
       finalSettledBottomGap: Math.max(...samples.map(
         ({ followLatest }) => followLatest.finalSettledBottomGap,
+      )),
+      finalAnswerTopOffsetError: Math.max(...samples.map(
+        ({ followLatest }) => Math.abs(
+          followLatest.finalAnswerTopOffset - FINAL_ANSWER_TOP_OFFSET_PX,
+        ),
       )),
       finalAnswerVisible:
         samples.every(({ followLatest }) => followLatest.finalAnswerVisible),
@@ -1694,8 +1712,8 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       .toBe(true);
     expect(report.scenarios.streamingResponsiveness.followLatest.jumpToLatestWithinFollowThreshold)
       .toBe(true);
-    expect(report.scenarios.streamingResponsiveness.followLatest.finalSettledBottomGap)
-      .toBeLessThanOrEqual(2);
+    expect(report.scenarios.streamingResponsiveness.followLatest.finalAnswerTopOffsetError)
+      .toBeLessThanOrEqual(FINAL_ANSWER_TOP_OFFSET_TOLERANCE_PX);
     expect(report.scenarios.streamingResponsiveness.followLatest.finalAnswerVisible)
       .toBe(true);
     expect(report.scenarios.streamingResponsiveness.memory.after.usedJsHeapBytes)

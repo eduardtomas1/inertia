@@ -158,7 +158,7 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
-  it("opens goal and folder resume flows directly from slash commands", () => {
+  it("opens goal and folder resume flows directly from slash commands", async () => {
     const current = conversation("08080808-0808-4808-8808-080808080808");
     const onOpenResume = vi.fn();
     render(<Composer {...composerProps(current, {
@@ -191,11 +191,11 @@ describe("composer asynchronous ownership", () => {
 
     fireEvent.change(input, { target: { value: "/goal" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByRole("region", { name: "Goal" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Goal" })).toBeVisible();
     expect(input).toHaveValue("");
   });
 
-  it("keeps the inline goal visible when another workspace control receives focus", () => {
+  it("keeps the inline goal visible when another workspace control receives focus", async () => {
     const current = conversation("18181818-1818-4818-8818-181818181818");
     render(
       <>
@@ -217,7 +217,7 @@ describe("composer asynchronous ownership", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "/goal" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByRole("region", { name: "Goal" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Goal" })).toBeVisible();
 
     const outside = screen.getByRole("button", { name: "Open another pane" });
     fireEvent.pointerDown(outside);

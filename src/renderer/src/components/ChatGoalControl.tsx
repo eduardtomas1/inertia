@@ -300,14 +300,16 @@ export function ChatGoalControl({
                 disabled={busy || submitting}
                 onChange={(event) => setObjective(event.currentTarget.value)}
               />
-              <small>
-                {source === "codex-native"
-                  ? "This becomes the native goal for this Codex thread."
-                  : "This stays in Inertia and is never injected into provider context."}
-              </small>
-              {workflow.goalCapability.kind === "inertia-local" && (
-                <p>{workflow.goalCapability.reason}</p>
-              )}
+              <div className="chat-goal-notes">
+                <small>
+                  {source === "codex-native"
+                    ? "This becomes the native goal for this Codex thread."
+                    : "This stays in Inertia and is never injected into provider context."}
+                </small>
+                {workflow.goalCapability.kind === "inertia-local" && (
+                  <p>{workflow.goalCapability.reason}</p>
+                )}
+              </div>
               <button
                 type="submit"
                 disabled={busy || submitting || objective.trim().length === 0}

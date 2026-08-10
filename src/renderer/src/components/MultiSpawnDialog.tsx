@@ -60,6 +60,7 @@ export interface MultiSpawnDialogProps {
   settings: AppSettings;
   submitting: boolean;
   cancelling?: boolean;
+  launchBlocked?: boolean;
   error: string | null;
   recoveryGuidance?: IdentifiedDuoRecoveryGuidance[];
   recoveryStatus?: DuoLaunchStatus | null;
@@ -294,6 +295,7 @@ export function MultiSpawnDialog({
   settings,
   submitting,
   cancelling = false,
+  launchBlocked = false,
   error,
   recoveryGuidance = [],
   recoveryStatus = null,
@@ -966,7 +968,9 @@ export function MultiSpawnDialog({
             <button
               type="button"
               className="primary-button multi-spawn-launch"
-              disabled={busy || Boolean(validationError) || !routesReady}
+              disabled={
+                busy || launchBlocked || Boolean(validationError) || !routesReady
+              }
               title={validationError ?? (!routesReady
                 ? (draft.comparison.enabled
                     ? "All three routes must be ready."

@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { Columns2, Maximize2, MessagesSquare, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
+import { ChevronDown, Columns2, Maximize2, MessagesSquare, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
 import type {
   ClientCommand,
   ProviderTerminalResumeAvailability,
@@ -15,6 +15,8 @@ import { usePersistedSize } from "../hooks/usePersistedSize";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
 import { PaneResizeHandle } from "./PaneResizeHandle";
+import { ProviderResumePicker } from "./ProviderResumePicker";
+import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import { IconButton, LoadingMark } from "./ui";
 
 type TerminalPanelProps = {
@@ -30,17 +32,11 @@ type TerminalPanelProps = {
   onActionStarted?: () => void;
   providerResume?: ProviderTerminalResumeAvailability | null;
   providerResumes?: readonly ProviderTerminalResumeOption[];
+  resumeRequestConversationId?: string | null;
+  onResumeRequestHandled?: () => void;
   onClose: () => void;
   visible?: boolean;
 };
-
-export interface ProviderTerminalResumeOption {
-  projectId: string;
-  projectName: string;
-  conversationId: string;
-  conversationTitle: string;
-  availability: ProviderTerminalResumeAvailability;
-}
 
 type TerminalSessionProps = TerminalPanelProps & {
   siblingResumedConversationIds: ReadonlySet<string>;
@@ -90,6 +86,8 @@ function TerminalSession({
   onActionStarted,
   providerResume,
   providerResumes,
+  resumeRequestConversationId,
+  onResumeRequestHandled,
   siblingResumedConversationIds,
   onProviderResumeStarted,
   onClose,
@@ -137,8 +135,31 @@ function TerminalSession({
   const resumeBlockedBySibling = selectedResumeOption !== null
     && siblingResumedConversationIds.has(selectedResumeOption.conversationId);
   const [terminalId, setTerminalId] = useState<string | null>(null);
+  const [resumePickerOpen, setResumePickerOpen] = useState(false);
+  const resumePickerRef = useRef<HTMLSpanElement>(null);
+  const resumeTriggerRef = useRef<HTMLButtonElement>(null);
+  const resumeProviderSessionRef = useRef<() => boolean>(() => false);
+  const handledResumeRequestRef = useRef<string | null>(null);
   ownerRef.current = `${projectId}:${conversationId ?? ""}`;
   const resumeDescriptionId = useId();
+
+  useEffect(() => {
+    if (!resumePickerOpen) return;
+    const dismissOnOutsidePointer = (event: PointerEvent): void => {
+      const anchor = resumePickerRef.current;
+      if (!anchor || anchor.contains(event.target as Node)) return;
+      setResumePickerOpen(false);
+    };
+    document.addEventListener("pointerdown", dismissOnOutsidePointer);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOnOutsidePointer);
+    };
+  }, [resumePickerOpen]);
+
+  const closeResumePicker = (): void => {
+    setResumePickerOpen(false);
+    window.requestAnimationFrame(() => resumeTriggerRef.current?.focus());
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -453,7 +474,7 @@ function TerminalSession({
       });
   }, [actionId, conversationId, onActionStarted, projectId, resumeInFlight, sendCommand, sessionState, status]);
 
-  const resumeProviderSession = () => {
+  const resumeProviderSession = (): boolean => {
     if (
       selectedResumeOption?.availability.kind !== "available"
       || resumeBlockedBySibling
@@ -461,7 +482,7 @@ function TerminalSession({
       || sessionState !== "ready"
       || status !== "online"
       || !terminalIdRef.current
-    ) return;
+    ) return false;
     const resume = selectedResumeOption.availability.resume;
     const size = {
       cols: Math.max(20, terminalRef.current?.cols ?? lastSizeRef.current.cols ?? 80),
@@ -534,7 +555,53 @@ function TerminalSession({
           setResumeInFlight(false);
         }
       });
+    return true;
   };
+
+  resumeProviderSessionRef.current = resumeProviderSession;
+
+  /*
+   * A resume chosen from the composer arrives as a request rather than a call,
+   * because resuming needs a live terminal session that may still be starting.
+   * Selection is applied first and the resume fires on the following pass, once
+   * the session is ready, mirroring how queued project actions are handled.
+   */
+  useEffect(() => {
+    if (!resumeRequestConversationId) {
+      handledResumeRequestRef.current = null;
+      return;
+    }
+    if (handledResumeRequestRef.current === resumeRequestConversationId) return;
+    if (!resumeOptions.some(({ conversationId: candidateId }) =>
+      candidateId === resumeRequestConversationId)) return;
+    if (selectedResumeConversationId !== resumeRequestConversationId) {
+      setResumeError(null);
+      setSelectedResumeConversationId(resumeRequestConversationId);
+      return;
+    }
+    if (
+      selectedResumeOption?.availability.kind !== "available"
+      || resumeBlockedBySibling
+      || sessionState !== "ready"
+      || status !== "online"
+      || resumeInFlight
+      || activeResume
+    ) return;
+    if (!resumeProviderSessionRef.current()) return;
+    handledResumeRequestRef.current = resumeRequestConversationId;
+    onResumeRequestHandled?.();
+  }, [
+    activeResume,
+    onResumeRequestHandled,
+    resumeBlockedBySibling,
+    resumeInFlight,
+    resumeOptions,
+    resumeRequestConversationId,
+    selectedResumeOption?.availability.kind,
+    selectedResumeConversationId,
+    sessionState,
+    status,
+  ]);
 
   const restartTerminal = () => {
     resumeAttemptRef.current += 1;
@@ -577,25 +644,54 @@ function TerminalSession({
         >
           <MessagesSquare size={14} />
           <span id={resumeDescriptionId}>
-            <label className="terminal-resume-picker">
-              <span>Resume provider chat</span>
-              <select
-                aria-label="Chat to resume"
-                value={selectedResumeOption.conversationId}
-                disabled={Boolean(activeResume) || resumeInFlight}
-                onChange={(event) => {
-                  setResumeError(null);
-                  setSelectedResumeConversationId(event.currentTarget.value);
-                }}
-              >
-                {resumeOptions.map((option) => (
-                  <option value={option.conversationId} key={option.conversationId}>
-                    {option.conversationTitle} · {option.projectName}
-                    {option.availability.kind === "available" ? "" : " · unavailable"}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {resumeOptions.length > 1 && (
+              <span className="terminal-resume-picker">
+                <span className="terminal-resume-picker-caption">
+                  Resume provider chat
+                </span>
+                <span
+                  ref={resumePickerRef}
+                  className={`terminal-resume-anchor${resumePickerOpen ? " is-open" : ""}`}
+                >
+                  <button
+                    ref={resumeTriggerRef}
+                    type="button"
+                    className="terminal-resume-trigger"
+                    aria-label={`Chat to resume: ${selectedResumeOption.conversationTitle} in ${selectedResumeOption.projectName}`}
+                    aria-haspopup="dialog"
+                    aria-expanded={resumePickerOpen}
+                    disabled={Boolean(activeResume) || resumeInFlight}
+                    onClick={() => setResumePickerOpen((open) => !open)}
+                  >
+                    <span className="terminal-resume-trigger-copy">
+                      <strong>{selectedResumeOption.conversationTitle}</strong>
+                      <small>{selectedResumeOption.projectName}</small>
+                    </span>
+                    <ChevronDown size={13} aria-hidden="true" />
+                  </button>
+                  {resumePickerOpen && (
+                    <span
+                      className="terminal-resume-popover"
+                      role="dialog"
+                      aria-label="Choose a chat to resume"
+                    >
+                      <ProviderResumePicker
+                        options={resumeOptions}
+                        selectedConversationId={selectedResumeOption.conversationId}
+                        blockedConversationIds={siblingResumedConversationIds}
+                        autoFocus
+                        onSelect={(nextConversationId) => {
+                          setResumeError(null);
+                          setSelectedResumeConversationId(nextConversationId);
+                          closeResumePicker();
+                        }}
+                        onCancel={closeResumePicker}
+                      />
+                    </span>
+                  )}
+                </span>
+              </span>
+            )}
             {displayedResume ? (
               <>
                 <span>{displayedResume.providerLabel} session</span>
@@ -672,6 +768,8 @@ type TerminalTab = { id: string; label: string };
 
 export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const subscribe = props.subscribe;
+  const resumeRequestConversationId = props.resumeRequestConversationId;
+  const onResumeRequestHandled = props.onResumeRequestHandled;
   const [tabs, setTabs] = useState<TerminalTab[]>([{ id: crypto.randomUUID(), label: "Terminal 1" }]);
   const [activeId, setActiveId] = useState(() => tabs[0].id);
   const [split, setSplit] = useState(false);
@@ -683,6 +781,7 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     terminalId: string;
   }>>(() => new Map());
   const gridRef = useRef<HTMLDivElement>(null);
+  const handledPanelResumeRequestRef = useRef<string | null>(null);
 
   useEffect(() => setSplitPercent(persistedSplitPercent), [persistedSplitPercent]);
 
@@ -733,6 +832,41 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     return id;
   };
 
+  useEffect(() => {
+    const requestedConversationId = resumeRequestConversationId;
+    if (!requestedConversationId) {
+      handledPanelResumeRequestRef.current = null;
+      return;
+    }
+    if (handledPanelResumeRequestRef.current === requestedConversationId) return;
+    const existing = resumedTerminals.get(requestedConversationId);
+    if (existing && tabs.some(({ id }) => id === existing.tabId)) {
+      handledPanelResumeRequestRef.current = requestedConversationId;
+      setActiveId(existing.tabId);
+      onResumeRequestHandled?.();
+      return;
+    }
+    const activeTabAlreadyResumed = [...resumedTerminals.values()].some(
+      ({ tabId }) => tabId === activeId,
+    );
+    if (!activeTabAlreadyResumed) return;
+
+    // A resumed provider owns its terminal until that process exits. Preserve
+    // it and give the explicit composer request a fresh terminal to start in.
+    const id = crypto.randomUUID();
+    setTabs((current) => [
+      ...current,
+      { id, label: `Terminal ${current.length + 1}` },
+    ]);
+    setActiveId(id);
+  }, [
+    activeId,
+    onResumeRequestHandled,
+    resumeRequestConversationId,
+    resumedTerminals,
+    tabs,
+  ]);
+
   const closeTerminal = (id: string) => {
     const next = tabs.filter((tab) => tab.id !== id);
     if (next.length === tabs.length) return;
@@ -777,7 +911,7 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
               .filter(([, resumed]) => resumed.tabId !== tab.id)
               .map(([conversationId]) => conversationId),
           );
-          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} siblingResumedConversationIds={siblingResumedConversationIds} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
+          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} resumeRequestConversationId={tab.id === activeId ? props.resumeRequestConversationId : null} onResumeRequestHandled={tab.id === activeId ? props.onResumeRequestHandled : undefined} siblingResumedConversationIds={siblingResumedConversationIds} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
         })}
         {split && secondaryId && (
           <PaneResizeHandle

@@ -17,7 +17,11 @@ import {
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, GitError } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
-import { documentAttachmentContexts } from "../attachments/document-attachment-context";
+import {
+  prepareDocumentAttachments,
+  type PreparedDocumentAttachments,
+} from "../attachments/document-attachment-context";
+import type { PrivateGeneratedAttachmentStore } from "../attachments/private-generated-attachments";
 import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
@@ -47,6 +51,7 @@ export interface TurnInteractionCommandDependencies {
   dataDirectory: string;
   enableProviders: boolean;
   attachmentResolver: TrustedAttachmentResolver | null;
+  generatedAttachments: PrivateGeneratedAttachmentStore;
   workflows: AgentWorkflowController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   providerInfo(): readonly ProviderInfo[];
@@ -145,22 +150,41 @@ export function createTurnInteractionCommandHandler(
         const attachments = resolvedAttachments.map(
           ({ attachment }) => attachment,
         );
-        const relinquishAttachments = () =>
-          dependencies.attachmentResolver?.relinquishAll(
-            attachments.map(({ id }) => id),
-          );
-        let documentContexts;
+        let generatedAttachmentPaths: string[] = [];
+        const relinquishAttachments = async () => {
+          const generated = generatedAttachmentPaths;
+          generatedAttachmentPaths = [];
+          await Promise.all([
+            dependencies.attachmentResolver?.relinquishAll(
+              attachments.map(({ id }) => id),
+            ),
+            generated.length > 0
+              ? dependencies.generatedAttachments.release(generated)
+              : undefined,
+          ]);
+        };
+        let documentPreparation: PreparedDocumentAttachments;
+        let extraction: Promise<PreparedDocumentAttachments> | null = null;
         try {
           const extractionAbort = new AbortController();
-          documentContexts = await awaitMessageSendPreparation(
-            documentAttachmentContexts(resolvedAttachments, {
-              deadlineAt: preparationDeadlineAt,
-              signal: extractionAbort.signal,
-            }),
+          extraction = prepareDocumentAttachments(resolvedAttachments, {
+            deadlineAt: preparationDeadlineAt,
+            generatedAttachmentStore: dependencies.generatedAttachments,
+            signal: extractionAbort.signal,
+          });
+          documentPreparation = await awaitMessageSendPreparation(
+            extraction,
             preparationDeadlineAt,
             () => extractionAbort.abort(),
           );
+          generatedAttachmentPaths = documentPreparation.generatedImagePaths;
         } catch (error) {
+          void extraction?.then(
+            (late) => late.generatedImagePaths.length > 0
+              ? dependencies.generatedAttachments.release(late.generatedImagePaths)
+              : undefined,
+            () => undefined,
+          ).catch(() => undefined);
           await relinquishAttachments();
           throw new RuntimeRequestError(
             error instanceof Error
@@ -173,12 +197,34 @@ export function createTurnInteractionCommandHandler(
             ({ id }) => id === conversation.providerId,
           );
           try {
-            dependencies.backendProfileController.validateSelection(
-              conversation.modelSelection,
+            const validatedSelection = dependencies.backendProfileController
+              .validateSelection(conversation.modelSelection);
+            const selectedModel = validatedSelection.modelId === "provider-default"
+              ? selectedProvider?.models.find(({ isDefault }) => isDefault)
+                ?? selectedProvider?.models[0]
+              : selectedProvider?.models.find(
+                  ({ id }) => id === validatedSelection.modelId,
+                );
+            const externalImageCapability = validatedSelection.capabilities.find(
+              ({ id }) => id === "images",
             );
+            const supportsScannedPdfImages = dependencies.backendProfileController
+              .isExternalSelection(validatedSelection)
+              ? externalImageCapability !== undefined
+                && externalImageCapability.state !== "unknown"
+                && externalImageCapability.state !== "unavailable"
+              : selectedModel?.inputModalities.includes("image") === true;
+            if (
+              documentPreparation.generatedImagePaths.length > 0
+              && !supportsScannedPdfImages
+            ) {
+              throw new RuntimeRequestError(
+                "The selected model cannot inspect scanned PDF page images.",
+              );
+            }
             const backendReadiness = await awaitMessageSendPreparation(
               dependencies.backendProfileController.readiness(
-                conversation.modelSelection,
+                validatedSelection,
                 selectedProvider,
               ),
               preparationDeadlineAt,
@@ -332,7 +378,9 @@ export function createTurnInteractionCommandHandler(
                 conversationId: conversation.id,
                 content: command.payload.content,
                 attachments,
-                documentContexts,
+                imagePaths: documentPreparation.imagePaths,
+                generatedAttachmentPaths,
+                documentContexts: documentPreparation.contexts,
                 activateConversation: command.payload.activate,
                 context: command.payload.context,
                 checkpointId,
@@ -356,6 +404,10 @@ export function createTurnInteractionCommandHandler(
         let attachmentOwnershipAccepted = queued !== null;
         try {
           if (!dependencies.enableProviders) {
+            if (generatedAttachmentPaths.length > 0) {
+              await dependencies.generatedAttachments.release(generatedAttachmentPaths);
+            }
+            generatedAttachmentPaths = [];
             dependencies.store.createMessage(
               conversation.id,
               command.payload.content,

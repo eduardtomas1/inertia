@@ -34,6 +34,16 @@ interface PendingProjectAction {
   conversationId: string | null;
 }
 
+/*
+ * A resume chosen in the composer is scoped to the project it was chosen from,
+ * so switching projects before the terminal session is ready drops the request
+ * instead of resuming into an unrelated workspace.
+ */
+interface PendingResumeRequest {
+  resumeConversationId: string;
+  projectId: string;
+}
+
 export function useActivityActions({
   snapshot,
   project,
@@ -49,6 +59,8 @@ export function useActivityActions({
 }: ActivityActionsOptions) {
   const [pendingAction, setPendingAction] =
     useState<PendingProjectAction | null>(null);
+  const [pendingResume, setPendingResume] =
+    useState<PendingResumeRequest | null>(null);
   const [pendingActivityAction, setPendingActivityAction] =
     useState<WorkspaceRun | null>(null);
   const [pendingPreviewActivity, setPendingPreviewActivity] =
@@ -63,6 +75,11 @@ export function useActivityActions({
         : null
     ));
   }, [conversationId, project?.id]);
+
+  useEffect(() => {
+    setPendingResume((current) =>
+      current && current.projectId !== project?.id ? null : current);
+  }, [project?.id]);
 
   useEffect(() => {
     if (
@@ -189,10 +206,20 @@ export function useActivityActions({
     && pendingAction.conversationId === conversationId
     ? pendingAction.actionId
     : null;
+  const pendingResumeConversationId = pendingResume
+    && pendingResume.projectId === project?.id
+    ? pendingResume.resumeConversationId
+    : null;
 
   return useMemo(() => ({
     pendingActionId,
     clearPendingAction: () => setPendingAction(null),
+    pendingResumeConversationId,
+    requestProviderResume: (resumeConversationId: string) => {
+      if (!project) return;
+      setPendingResume({ resumeConversationId, projectId: project.id });
+    },
+    clearPendingResume: () => setPendingResume(null),
     runProjectAction,
     openActivityLocation,
     openActivityPreview,
@@ -208,6 +235,8 @@ export function useActivityActions({
     openActivityLocation,
     openActivityPreview,
     pendingActionId,
+    pendingResumeConversationId,
+    project,
     rerunActivity,
     runProjectAction,
     stopActivity,

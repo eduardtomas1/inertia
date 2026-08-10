@@ -601,6 +601,17 @@ describe("server event request-result trust boundary", () => {
       ],
     },
     {
+      kind: "duo.status",
+      launchId: "launch",
+      state: "running",
+      cancelRequested: "yes",
+      error: null,
+      sides: [
+        { ordinal: 0, conversationId: "one", turnId: "turn-one", dispatchState: "started" },
+        { ordinal: 1, conversationId: "two", turnId: "turn-two", dispatchState: "started" },
+      ],
+    },
+    {
       kind: "git.status",
       status: { files: [{ ...changedFile, insertions: "2" }] },
     },

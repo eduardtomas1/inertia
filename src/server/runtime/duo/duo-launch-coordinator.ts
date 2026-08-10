@@ -6,9 +6,7 @@ import {
   isAgentTurnTerminalStatus,
   type AgentTurn,
   ClientCommand,
-  DuoGitRecoveryAction,
   DuoLaunchStatus,
-  DuoWorktreeRecoveryGuidance,
   ModelSelection,
   ProviderInfo,
 } from "../../../shared/contracts";
@@ -33,6 +31,7 @@ import type { ProviderManager } from "../../providers";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { TurnController } from "../turns/turn-controller";
 import { buildDuoComparisonPrompt } from "./duo-comparison";
+import { publicDuoLaunchStatus as publicStatus } from "./duo-launch-status";
 
 type DuoPrepareCommand = Extract<ClientCommand, { type: "duo.prepare" }>;
 type DuoPreparePayload = DuoPrepareCommand["payload"];
@@ -118,96 +117,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error
     ? error.message
     : "The Duo launch could not be prepared.";
-}
-
-function recoveryGuidance(
-  store: RuntimeStore,
-  status: ReturnType<RuntimeStore["pairedLaunch"]>,
-): DuoWorktreeRecoveryGuidance[] {
-  if (status.state !== "recovery-required") return [];
-  return status.plans.flatMap((plan): DuoWorktreeRecoveryGuidance[] => {
-    if (
-      !plan.ownsWorktree
-      || !plan.plannedWorktreePath
-      || !plan.plannedBranch
-      || status.sides[plan.ordinal].conversationId
-    ) return [];
-    let topology: DuoWorktreeRecoveryGuidance["topology"];
-    if (
-      plan.worktreeCleanupOutcome === "absent"
-      && plan.branchCleanupOutcome === "retained"
-    ) {
-      topology = "branch-retained";
-    } else if (plan.worktreeCleanupOutcome === "retained") {
-      topology = plan.worktreeCleanupTopology ?? "ambiguous";
-    } else if (
-      plan.worktreeCreationState === "creating"
-      || plan.worktreeCreationState === "created"
-    ) {
-      topology = "ambiguous";
-    } else {
-      return [];
-    }
-    const cwd = store.projectPath(plan.projectId);
-    const branchAction: DuoGitRecoveryAction = {
-      label: "Remove generated branch after inspecting it",
-      cwd,
-      executable: "git",
-      args: ["branch", "-d", "--", plan.plannedBranch],
-    };
-    const actions: DuoGitRecoveryAction[] = topology === "owned"
-      && plan.cleanupObservedPath
-      ? [
-        {
-          label: "Remove retained linked worktree",
-          cwd,
-          executable: "git",
-          args: ["worktree", "remove", "--", plan.cleanupObservedPath],
-        },
-        branchAction,
-      ]
-      : topology === "branch-retained"
-        ? [branchAction]
-        : [];
-    return [{
-      kind: "git-worktree",
-      ordinal: plan.ordinal,
-      topology,
-      repositoryPath: cwd,
-      plannedPath: plan.plannedWorktreePath,
-      observedPath: plan.cleanupObservedPath,
-      worktreeId: plan.cleanupWorktreeId,
-      generatedBranch: plan.plannedBranch,
-      expectedHead: plan.cleanupBranchHead,
-      observedBranch: plan.cleanupObservedBranch,
-      observedHead: plan.cleanupObservedHead,
-      actions,
-    }];
-  });
-}
-
-function publicStatus(
-  store: RuntimeStore,
-  status: ReturnType<RuntimeStore["pairedLaunch"]>,
-): DuoLaunchStatus {
-  return {
-    launchId: status.launchId,
-    state: status.state,
-    error: status.error,
-    sides: status.sides,
-    ...(status.comparison
-      ? {
-          comparison: {
-            state: status.comparison.state,
-            conversationId: status.comparison.conversationId,
-            turnId: status.comparison.turnId,
-            attempt: status.comparison.attempt,
-            error: status.comparison.error,
-          },
-        }
-      : {}),
-    recoveryGuidance: recoveryGuidance(store, status),
-  };
 }
 
 function expectedLaunchOwnedBranch(
@@ -354,6 +263,8 @@ export class DuoLaunchCoordinator {
     string,
     Promise<DuoLaunchStatus>
   >();
+  /** Launch ids needing another comparison pass, and whether it is an explicit retry. */
+  private readonly comparisonRechecks = new Map<string, boolean>();
   private readonly worktrees: DuoWorktreeOperations;
 
   constructor(
@@ -399,6 +310,7 @@ export class DuoLaunchCoordinator {
     launch = this.store.pairedLaunch(launchId);
     const turnIds = launch.sides.map(({ turnId }) => turnId);
     if (!turnIds[0] || !turnIds[1]) {
+      this.cancelComparisonTurn(launch);
       return publicStatus(this.store, this.store.failPairedLaunch(
         launchId,
         "interrupted",
@@ -412,6 +324,9 @@ export class DuoLaunchCoordinator {
       for (const { conversationId } of launch.sides) {
         if (conversationId) this.turns.cancel(conversationId);
       }
+      this.cancelComparisonProviderTurn(this.store.pairedLaunch(launchId));
+      await this.waitForLaunchProviderCleanup(launch);
+      this.cancelComparisonTurn(this.store.pairedLaunch(launchId));
       return publicStatus(this.store, this.store.failPairedLaunch(
         launchId,
         "interrupted",
@@ -425,11 +340,17 @@ export class DuoLaunchCoordinator {
     const failure = started.every(Boolean)
       ? null
       : "Only part of the provider dispatch was accepted. Cancellation was requested for any started sibling, but provider-side effects are not atomic and must be inspected. Dispatch was not retried.";
-    return publicStatus(this.store, this.store.finishPairedLaunchDispatch(
+    if (failure) await this.waitForLaunchProviderCleanup(launch);
+    const finished = this.store.finishPairedLaunchDispatch(
       launchId,
       started,
       failure,
-    ));
+    );
+    if (finished.state === "running") {
+      // Synchronous settlements may have observed the pre-finish state.
+      return this.startComparison(launchId, false);
+    }
+    return publicStatus(this.store, finished);
   }
 
   async cancel(launchId: string): Promise<DuoLaunchStatus> {
@@ -447,15 +368,20 @@ export class DuoLaunchCoordinator {
     }
     this.store.requestPairedLaunchCancellation(launchId);
     const latest = this.store.pairedLaunch(launchId);
-    this.cancelComparisonTurn(latest);
+    this.cancelComparisonProviderTurn(latest);
     if (
       latest.state === "cancelled"
       || latest.state === "failed"
       || latest.state === "interrupted"
-    ) return publicStatus(this.store, latest);
+    ) {
+      await this.waitForLaunchProviderCleanup(latest);
+      this.store.cancelPairedLaunchComparison(launchId);
+      return publicStatus(this.store, this.store.pairedLaunch(launchId));
+    }
     for (const { conversationId } of latest.sides) {
       if (conversationId) this.turns.cancel(conversationId);
     }
+    await this.waitForLaunchProviderCleanup(latest);
     if (latest.state === "recovery-required") {
       const current = this.recoveryCleanupTasks.get(launchId);
       if (current) return current;
@@ -478,12 +404,15 @@ export class DuoLaunchCoordinator {
     return publicStatus(this.store, this.store.pairedLaunch(launchId));
   }
 
-  acknowledgeInterrupted(launchId: string): DuoLaunchStatus {
+  async acknowledgeInterrupted(launchId: string): Promise<DuoLaunchStatus> {
     const current = this.store.pairedLaunch(launchId);
     if (current.state === "interrupted") {
       for (const { conversationId } of current.sides) {
         if (conversationId) this.turns.cancel(conversationId);
       }
+      this.cancelComparisonProviderTurn(current);
+      await this.waitForLaunchProviderCleanup(current);
+      this.cancelComparisonTurn(current);
     }
     return publicStatus(
       this.store,
@@ -506,6 +435,7 @@ export class DuoLaunchCoordinator {
     const owner = this.store.pairedLaunchForTurn(turn.id);
     if (!owner) return;
     if (owner.role === "comparison") {
+      await this.turns.waitForProviderCleanup([turn.conversationId]);
       this.store.settlePairedLaunchComparisonTurn(
         owner.launchId,
         turn.id,
@@ -576,10 +506,34 @@ export class DuoLaunchCoordinator {
     return this.startComparison(launchId, true);
   }
 
-  cancelComparison(launchId: string): DuoLaunchStatus {
+  async cancelComparison(launchId: string): Promise<DuoLaunchStatus> {
     const launch = this.store.pairedLaunch(launchId);
+    this.cancelComparisonProviderTurn(launch);
+    await this.waitForLaunchProviderCleanup(launch, true);
     this.cancelComparisonTurn(launch);
     return publicStatus(this.store, this.store.pairedLaunch(launchId));
+  }
+
+  private cancelComparisonProviderTurn(
+    launch: ReturnType<RuntimeStore["pairedLaunch"]>,
+  ): void {
+    const comparison = launch.comparison;
+    if (
+      comparison?.conversationId
+      && (comparison.state === "dispatching" || comparison.state === "running")
+    ) this.turns.cancel(comparison.conversationId);
+  }
+
+  private waitForLaunchProviderCleanup(
+    launch: ReturnType<RuntimeStore["pairedLaunch"]>,
+    comparisonOnly = false,
+  ): Promise<void> {
+    const conversationIds = [
+      ...(comparisonOnly ? [] : launch.sides.map(({ conversationId }) => conversationId)),
+      launch.comparison?.conversationId ?? null,
+    ].filter((id): id is string => id !== null);
+    if (conversationIds.length === 0) return Promise.resolve();
+    return this.turns.waitForProviderCleanup(conversationIds);
   }
 
   private cancelComparisonTurn(
@@ -588,12 +542,7 @@ export class DuoLaunchCoordinator {
     const comparison = launch.comparison;
     if (!comparison) return;
     this.store.cancelPairedLaunchComparison(launch.launchId);
-    if (
-      comparison.conversationId
-      && (comparison.state === "dispatching" || comparison.state === "running")
-    ) {
-      this.turns.cancel(comparison.conversationId);
-    }
+    this.cancelComparisonProviderTurn(launch);
   }
 
   private startComparison(
@@ -601,10 +550,30 @@ export class DuoLaunchCoordinator {
     retry: boolean,
   ): Promise<DuoLaunchStatus> {
     const current = this.comparisonTasks.get(launchId);
-    if (current) return current;
-    const task = this.startComparisonFresh(launchId, retry).finally(() => {
-      this.comparisonTasks.delete(launchId);
-    });
+    if (current) {
+      // The current pass may have read state before this settlement landed.
+      this.comparisonRechecks.set(
+        launchId,
+        (this.comparisonRechecks.get(launchId) ?? false) || retry,
+      );
+      return current;
+    }
+    const task = (async () => {
+      try {
+        let status = await this.startComparisonFresh(launchId, retry);
+        // The durable claim makes every pass idempotent.
+        while (this.comparisonRechecks.has(launchId)) {
+          const recheckRetry = this.comparisonRechecks.get(launchId) ?? false;
+          this.comparisonRechecks.delete(launchId);
+          status = await this.startComparisonFresh(launchId, recheckRetry);
+        }
+        return status;
+      } finally {
+        // Avoid the extra cleanup microtask introduced by a chained finally.
+        this.comparisonTasks.delete(launchId);
+        this.comparisonRechecks.delete(launchId);
+      }
+    })();
     this.comparisonTasks.set(launchId, task);
     return task;
   }
@@ -616,6 +585,12 @@ export class DuoLaunchCoordinator {
     let launch = this.store.pairedLaunch(launchId);
     const comparison = launch.comparison;
     if (!comparison?.conversationId) return publicStatus(this.store, launch);
+    if (
+      launch.state !== "running"
+      || launch.sides.some(({ dispatchState }) => dispatchState !== "started")
+    ) {
+      return publicStatus(this.store, launch);
+    }
     const sourceTurnIds = launch.sides.map(({ turnId }) => turnId);
     if (!sourceTurnIds[0] || !sourceTurnIds[1]) {
       return publicStatus(this.store, launch);
@@ -638,6 +613,13 @@ export class DuoLaunchCoordinator {
         "The bounded judge input could not be assembled. Retry explicitly or cancel the comparison.",
       ));
     }
+    const sourceConversationIds = launch.sides
+      .map(({ conversationId }) => conversationId)
+      .filter((id): id is string => id !== null);
+    await this.turns.waitForProviderCleanup(sourceConversationIds);
+    // Shutdown settlements stay waiting so startup can recover them.
+    if (this.turns.isClosing())
+      return publicStatus(this.store, this.store.pairedLaunch(launchId));
     if (!this.store.claimPairedLaunchComparison(launchId, retry)) {
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
     }
@@ -1160,8 +1142,9 @@ export class DuoLaunchCoordinator {
 }
 
 /**
- * Reconciles durable pre-dispatch state before providers or clients are
- * admitted. Dispatch claims are never replayed. Only worktrees that this
+ * Reconciles durable launch state before providers or clients are admitted.
+ * Requested cancellations are finalized after turn recovery has detached the
+ * providers. Dispatch claims are never replayed. Only worktrees that this
  * launch created and never attached to a conversation are compensated.
  */
 export async function reconcileInterruptedDuoLaunches(
@@ -1175,6 +1158,7 @@ export async function reconcileInterruptedDuoLaunches(
     inspectWorktree: inspectOwnedWorktreeCleanupState,
     inspectBranch: inspectBranchCleanupOutcome,
   };
+  store.recoverRequestedPairedLaunchCancellations();
   const recovered = store.recoverInterruptedPairedLaunches();
   for (const launch of recovered) {
     if (launch.state === "interrupted") continue;

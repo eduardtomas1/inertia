@@ -90,7 +90,7 @@ export function createDuoCommandHandler(
         });
         return "handled";
       case "duo.acknowledge": {
-        const status = dependencies.coordinator.acknowledgeInterrupted(
+        const status = await dependencies.coordinator.acknowledgeInterrupted(
           command.payload.launchId,
         );
         dependencies.broadcastSnapshot();
@@ -114,7 +114,7 @@ export function createDuoCommandHandler(
         return "handled";
       }
       case "duo.comparison.cancel": {
-        const status = dependencies.coordinator.cancelComparison(
+        const status = await dependencies.coordinator.cancelComparison(
           command.payload.launchId,
         );
         dependencies.broadcastSnapshot();

@@ -1,5 +1,7 @@
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -47,7 +49,6 @@ import {
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
-import { ChatGoalControl } from "../ChatGoalControl";
 import type { ComposerProps, PendingModelRoute } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
@@ -55,6 +56,18 @@ import {
   COMPOSER_PREFILL_EVENT,
   type ComposerPrefillDetail,
 } from "../../utils/composerPrefill";
+
+/*
+ * The resume surface only matters once /resume runs, and the composer sits in
+ * the entry chunk. Loading it on demand keeps the picker and its list rendering
+ * out of first paint.
+ */
+const ChatResumeControl = lazy(async () => ({
+  default: (await import("../ChatResumeControl")).ChatResumeControl,
+}));
+const ChatGoalControl = lazy(async () => ({
+  default: (await import("../ChatGoalControl")).ChatGoalControl,
+}));
 
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // The first non-empty edit is synchronous. During uninterrupted typing, a
@@ -102,6 +115,8 @@ export const Composer = memo(function Composer({
   onProbeBackendProfile,
   onUsageDisplayModeChange,
   onOpenResume,
+  resumeOptions,
+  onResumeConversation,
   onStop,
   onClearPromptContext,
 }: ComposerProps): React.JSX.Element {
@@ -148,7 +163,7 @@ export const Composer = memo(function Composer({
   const [routeRepairing, setRouteRepairing] = useState(false);
   const [conversationUpdatePending, setConversationUpdatePending] = useState(false);
   const [conversationUpdateError, setConversationUpdateError] = useState<string | null>(null);
-  const [commandSurface, setCommandSurface] = useState<"goal" | null>(null);
+  const [commandSurface, setCommandSurface] = useState<"goal" | "resume" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
@@ -979,11 +994,26 @@ export const Composer = memo(function Composer({
         onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
       >
         {goal && (
-          <ChatGoalControl
-            {...goal}
-            open={commandSurface === "goal"}
-            onDismiss={dismissCommandSurface}
-          />
+          <Suspense fallback={null}>
+            <ChatGoalControl
+              {...goal}
+              open={commandSurface === "goal"}
+              onDismiss={dismissCommandSurface}
+            />
+          </Suspense>
+        )}
+        {commandSurface === "resume" && resumeOptions && resumeOptions.length > 0 && (
+          <Suspense fallback={null}>
+            <ChatResumeControl
+              options={resumeOptions}
+              open
+              onDismiss={dismissCommandSurface}
+              onResume={(resumeConversationId) => {
+                onResumeConversation?.(resumeConversationId);
+                onOpenResume();
+              }}
+            />
+          </Suspense>
         )}
         <ComposerInputZone
           routeReadiness={routeReadiness}
@@ -1062,7 +1092,11 @@ export const Composer = memo(function Composer({
           }}
           onOpenResume={() => {
             updateMessage("");
-            onOpenResume();
+            // Only the in-chat picker can offer a choice. With nothing
+            // resumable to choose between, fall back to opening the terminal so
+            // its own banner explains why.
+            if (resumeOptions && resumeOptions.length > 0) setCommandSurface("resume");
+            else onOpenResume();
           }}
           onUpdateConversation={updateConversation}
         />

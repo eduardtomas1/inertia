@@ -232,7 +232,7 @@ export function resolveComposerRouteState(input: {
       const catalogModel = provider.models.find(({ id }) =>
         id === input.selection.modelId);
       model = catalogModel ? providerModel(catalogModel) : undefined;
-      if (catalogFreshness !== "fresh") {
+      if (!model && catalogFreshness !== "fresh") {
         return resolved(
           providerId,
           provider,

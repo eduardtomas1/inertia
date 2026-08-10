@@ -430,6 +430,7 @@ export class BackendProfileController {
       if (
         submitted.modelId !== "provider-default"
         && catalogFreshness !== "fresh"
+        && !selectedModel
         && !options.allowUnavailableNativeCatalog
       ) {
         throw new BackendProfileControllerError(

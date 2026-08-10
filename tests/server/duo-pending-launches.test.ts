@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -52,6 +53,37 @@ afterEach(async () => {
 });
 
 describe("pending Duo launch discovery", () => {
+  it("rediscovers a running cancellation until provider cleanup releases it", async () => {
+    const fixture = await runtime();
+    try {
+      const launchId = randomUUID();
+      createPending(
+        fixture.store,
+        launchId,
+        [fixture.projectId, fixture.projectId],
+        "2026-08-02T09:59:00.000Z",
+      );
+      const database = new Database(fixture.databasePath);
+      try {
+        database.prepare(`
+          UPDATE paired_launches
+          SET status = 'running', cancel_requested = 1
+          WHERE id = ?
+        `).run(launchId);
+      } finally {
+        database.close();
+      }
+
+      expect(fixture.store.pendingPairedLaunchIds([fixture.projectId], 16))
+        .toEqual({ launchIds: [launchId], hasMore: false });
+      fixture.store.finishPairedLaunchCancellation(launchId);
+      expect(fixture.store.pendingPairedLaunchIds([fixture.projectId], 16))
+        .toEqual({ launchIds: [], hasMore: false });
+    } finally {
+      fixture.store.close();
+    }
+  });
+
   it("protects interrupted identity until an idempotent acknowledgement", async () => {
     const fixture = await runtime();
     try {

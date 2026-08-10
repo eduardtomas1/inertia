@@ -74,6 +74,7 @@ export interface DuoWorktreeRecoveryGuidance {
 export interface DuoLaunchStatus {
   launchId: string;
   state: DuoLaunchState;
+  cancelRequested?: boolean;
   error: string | null;
   sides: [DuoLaunchSideStatus, DuoLaunchSideStatus];
   comparison?: DuoComparisonStatus;

@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatWorkspace } from "../../src/renderer/src/components/ChatWorkspace";
 import type {
+  AgentTurn,
   AgentWorkflowState,
   AgentInputRequest,
   ChatMessage,
@@ -26,6 +27,10 @@ const timelineCallbacks = new Map<
   string,
   (event: FinalAnswerAutoScrollEvent) => void
 >();
+const timelineLifecycle = vi.hoisted(() => ({
+  mounts: 0,
+  unmounts: 0,
+}));
 
 vi.mock("../../src/renderer/src/components/Composer", async () => {
   const { memo } = await import("react");
@@ -48,33 +53,54 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
   };
 });
 
-vi.mock("../../src/renderer/src/components/ResponseTimeline", () => ({
-  ResponseTimeline: ({
-    conversationId,
-    turnAnchorId,
-    inputRequests,
-    onFinalAnswerAutoScroll,
-  }: {
-    conversationId: string;
-    turnAnchorId: string | null;
-    inputRequests: AgentInputRequest[];
-    onFinalAnswerAutoScroll?: (event: FinalAnswerAutoScrollEvent) => void;
-  }) => {
-    if (onFinalAnswerAutoScroll) {
-      timelineCallbacks.set(conversationId, onFinalAnswerAutoScroll);
-    }
-    return (
-      <>
-        <div data-testid="turn-anchor-projection">{turnAnchorId ?? "none"}</div>
-        {inputRequests.map((request) => (
-          <section id={`agent-input-request-${request.id}`} key={request.id}>
-            <input aria-label={request.questions[0]?.question} />
-          </section>
-        ))}
-      </>
-    );
-  },
-}));
+vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
+  const { useEffect } = await import("react");
+  return {
+    ResponseTimeline: ({
+      conversationId,
+      turns,
+      turnAnchorId,
+      inputRequests,
+      detailLoading,
+      onFinalAnswerAutoScroll,
+    }: {
+      conversationId: string;
+      turns: AgentTurn[];
+      turnAnchorId: string | null;
+      inputRequests: AgentInputRequest[];
+      detailLoading?: boolean;
+      onFinalAnswerAutoScroll?: (event: FinalAnswerAutoScrollEvent) => void;
+    }) => {
+      useEffect(() => {
+        timelineLifecycle.mounts += 1;
+        return () => {
+          timelineLifecycle.unmounts += 1;
+        };
+      }, []);
+      if (onFinalAnswerAutoScroll) {
+        timelineCallbacks.set(conversationId, onFinalAnswerAutoScroll);
+      }
+      return (
+        <>
+          <div data-testid="turn-anchor-projection">{turnAnchorId ?? "none"}</div>
+          <div data-testid="timeline-detail-loading">
+            {detailLoading ? "loading" : "ready"}
+          </div>
+          <div data-testid="timeline-turn-projection">
+            {turns.map((turn) => (
+              `${turn.conversationId}:${turn.id}:${turn.status}`
+            )).join(",") || "none"}
+          </div>
+          {inputRequests.map((request) => (
+            <section id={`agent-input-request-${request.id}`} key={request.id}>
+              <input aria-label={request.questions[0]?.question} />
+            </section>
+          ))}
+        </>
+      );
+    },
+  };
+});
 
 const project: Project = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -123,6 +149,55 @@ function conversation(
     lastViewedAt: null,
     createdAt: "2026-08-02T10:00:00.000Z",
     updatedAt: "2026-08-02T10:00:00.000Z",
+  };
+}
+
+function agentTurn(
+  activeConversation: Conversation,
+  status: "running" | "completed",
+): AgentTurn {
+  const completed = status === "completed";
+  return {
+    id: `${activeConversation.id}-turn`,
+    conversationId: activeConversation.id,
+    runId: `${activeConversation.id}-run`,
+    userMessageId: `${activeConversation.id}-request`,
+    terminalAssistantMessageId: completed
+      ? `${activeConversation.id}-answer`
+      : null,
+    providerId: activeConversation.providerId,
+    modelSelection: activeConversation.modelSelection,
+    continuationIdentity: {
+      harnessId: activeConversation.modelSelection.harnessId,
+      backendProfileId: activeConversation.modelSelection.backendProfileId,
+      backendConfigurationRevision:
+        activeConversation.modelSelection.backendConfigurationRevision,
+      endpointIdentity: null,
+      modelIdentity: activeConversation.modelSelection.modelId,
+    },
+    harnessId: activeConversation.modelSelection.harnessId,
+    backendProfileId: activeConversation.modelSelection.backendProfileId,
+    model: activeConversation.modelSelection.modelId,
+    modelAlias: activeConversation.modelSelection.alias,
+    reasoningEffort: activeConversation.reasoningEffort,
+    interactionMode: activeConversation.interactionMode,
+    accessMode: activeConversation.accessMode,
+    providerSessionBefore: null,
+    providerSessionAfter: null,
+    requestedAt: "2026-08-02T10:00:00.000Z",
+    startedAt: "2026-08-02T10:00:00.000Z",
+    completedAt: completed ? "2026-08-02T10:00:02.000Z" : null,
+    status,
+    terminalReason: completed ? "provider-completed" : null,
+    checkpointId: null,
+    usageAtStart: null,
+    usageAtCompletion: null,
+    configurationRevision: 1,
+    association: "authoritative",
+    createdAt: "2026-08-02T10:00:00.000Z",
+    updatedAt: completed
+      ? "2026-08-02T10:00:02.000Z"
+      : "2026-08-02T10:00:01.000Z",
   };
 }
 
@@ -203,12 +278,95 @@ function workspaceProps(
   };
 }
 
+beforeEach(() => {
+  timelineLifecycle.mounts = 0;
+  timelineLifecycle.unmounts = 0;
+});
+
 afterEach(() => {
   timelineCallbacks.clear();
   vi.restoreAllMocks();
 });
 
 describe("draft turn anchoring", () => {
+  it("keeps the timeline mounted behind an owner-correct detail-loading boundary", async () => {
+    HTMLElement.prototype.scrollTo = vi.fn();
+    const first = conversation("conversation-loading-first");
+    const second = conversation("conversation-loading-second");
+    const firstTurn = agentTurn(first, "completed");
+    const secondTurn = agentTurn(second, "completed");
+    const view = render(
+      <ChatWorkspace
+        {...workspaceProps(first, async () => null)}
+        turns={[firstTurn]}
+      />,
+    );
+
+    expect(await screen.findByTestId("timeline-turn-projection"))
+      .toHaveTextContent(`${first.id}:${firstTurn.id}:completed`);
+    expect(timelineLifecycle).toEqual({ mounts: 1, unmounts: 0 });
+
+    view.rerender(
+      <ChatWorkspace
+        {...workspaceProps(second, async () => null)}
+        turns={[firstTurn]}
+        loading
+        detailLoading
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "Loading conversation" }))
+      .toBeVisible();
+    expect(screen.getByTestId("timeline-detail-loading"))
+      .toHaveTextContent("loading");
+    expect(screen.getByTestId("timeline-turn-projection"))
+      .toHaveTextContent("none");
+    expect(screen.getByTestId("timeline-turn-projection"))
+      .not.toHaveTextContent(first.id);
+    expect(timelineLifecycle).toEqual({ mounts: 1, unmounts: 0 });
+
+    view.rerender(
+      <ChatWorkspace
+        {...workspaceProps(second, async () => null)}
+        turns={[secondTurn]}
+      />,
+    );
+
+    expect(screen.getByTestId("timeline-detail-loading"))
+      .toHaveTextContent("ready");
+    expect(screen.getByTestId("timeline-turn-projection"))
+      .toHaveTextContent(`${second.id}:${secondTurn.id}:completed`);
+    expect(timelineLifecycle).toEqual({ mounts: 1, unmounts: 0 });
+  });
+
+  it("preserves a running timeline subscription while detail reloads", async () => {
+    HTMLElement.prototype.scrollTo = vi.fn();
+    const activeConversation = conversation("conversation-live-hydration");
+    const runningTurn = agentTurn(activeConversation, "running");
+    const settledTurn = agentTurn(activeConversation, "completed");
+    const props = workspaceProps(activeConversation, async () => null);
+    const view = render(<ChatWorkspace {...props} turns={[runningTurn]} />);
+
+    expect(await screen.findByTestId("timeline-turn-projection"))
+      .toHaveTextContent(`${activeConversation.id}:${runningTurn.id}:running`);
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        turns={[settledTurn]}
+        loading
+        detailLoading
+      />,
+    );
+    expect(screen.getByTestId("timeline-turn-projection"))
+      .toHaveTextContent(`${activeConversation.id}:${settledTurn.id}:completed`);
+    expect(timelineLifecycle).toEqual({ mounts: 1, unmounts: 0 });
+
+    view.rerender(<ChatWorkspace {...props} turns={[settledTurn]} />);
+    expect(screen.getByTestId("timeline-turn-projection"))
+      .toHaveTextContent(`${activeConversation.id}:${settledTurn.id}:completed`);
+    expect(timelineLifecycle).toEqual({ mounts: 1, unmounts: 0 });
+  });
+
   it("ignores a completed-answer callback owned by the previous conversation", async () => {
     HTMLElement.prototype.scrollTo = vi.fn();
     const visible = vi.fn();

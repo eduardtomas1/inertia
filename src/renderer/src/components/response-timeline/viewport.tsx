@@ -9,10 +9,11 @@ import {
   type RefObject,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type {
-  InterfaceScale,
-  ResponseDensity,
-  SubagentTrace,
+import {
+  isAgentTurnTerminalStatus,
+  type InterfaceScale,
+  type ResponseDensity,
+  type SubagentTrace,
 } from "@shared/contracts";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../utils/interfaceScale";
 import {
@@ -39,6 +40,10 @@ import {
 } from "../../utils/responseTimeline";
 import { CompatibilityTimeline } from "./compatibility";
 import { startFinalAnswerAnchor } from "./final-answer-anchor";
+import {
+  advanceFinalAnswerObservation,
+  initialFinalAnswerObservation,
+} from "./final-answer-observer";
 import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
 
@@ -74,7 +79,9 @@ function findTurnElement(
 function latestTurnCompletion(
   timeline: ResponseTimelineItem[],
 ): {
+  conversationId: string;
   turnId: string;
+  runId: string;
   isActive: boolean;
   answerId: string | null;
   timelineIndex: number;
@@ -83,7 +90,9 @@ function latestTurnCompletion(
     const item = timeline[index];
     if (item?.kind === "turn") {
       return {
+        conversationId: item.turn.agentTurn.conversationId,
         turnId: item.turn.id,
+        runId: item.turn.agentTurn.runId,
         isActive: item.turn.isActive,
         answerId: item.turn.terminalAssistantMessage?.id ?? null,
         timelineIndex: index,
@@ -434,20 +443,43 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     () => latestTurnCompletion(timeline),
     [timeline],
   );
-  const finalAnswerId = latestCompletion?.answerId ?? null;
-  const finalAnswerIndex = latestCompletion?.timelineIndex ?? -1;
-  const hasLatestCompletion = latestCompletion !== null;
+  const ownerDetailCompletion = latestCompletion?.conversationId
+      === props.conversationId
+    ? latestCompletion
+    : null;
+  const latestShellTurn = props.latestTurnSummary?.conversationId
+      === props.conversationId
+    ? props.latestTurnSummary.turn
+    : null;
+  const latestShellSignal = latestShellTurn ? {
+    turnId: latestShellTurn.id,
+    runId: latestShellTurn.runId,
+    isActive: !isAgentTurnTerminalStatus(latestShellTurn.status),
+    answerId: null,
+    timelineIndex: -1,
+  } : null;
+  // The shell is owner-scoped and updates before detail hydration. Prefer its
+  // identity/lifecycle while taking answer geometry only from matching detail.
+  const latestTurnSignal = latestShellSignal ?? ownerDetailCompletion;
+  const hasLatestTurnSignal = latestTurnSignal !== null;
+  const latestSignalTurnId = latestTurnSignal?.turnId ?? null;
+  const latestSignalRunId = latestTurnSignal?.runId ?? null;
+  const latestSignalIsActive = latestTurnSignal?.isActive ?? false;
+  const matchingDetailCompletion = ownerDetailCompletion
+    && latestTurnSignal
+    && ownerDetailCompletion.turnId === latestTurnSignal.turnId
+    && ownerDetailCompletion.runId === latestTurnSignal.runId
+      ? ownerDetailCompletion
+      : null;
+  const finalAnswerId = matchingDetailCompletion?.answerId ?? null;
+  const finalAnswerIndex = matchingDetailCompletion?.timelineIndex ?? -1;
   const finalAnswerIndexRef = useRef(finalAnswerIndex);
   finalAnswerIndexRef.current = finalAnswerIndex;
-  const observedLatestTurnRef = useRef({
-    conversationId: props.conversationId,
-    turnId: latestCompletion?.turnId ?? null,
-    isActive: latestCompletion?.isActive ?? false,
-    answerId: finalAnswerId,
-  });
-  const hydratingConversationRef = useRef(
-    props.detailLoading ? props.conversationId : null,
-  );
+  const observedLatestTurnRef = useRef(initialFinalAnswerObservation(
+    props.conversationId,
+    latestTurnSignal,
+    finalAnswerId,
+  ));
   const timelineRef = useRef(timeline);
   timelineRef.current = timeline;
   const previousComparableTurn = useMemo(() => {
@@ -590,39 +622,28 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     });
 
   useEffect(() => {
-    const observed = observedLatestTurnRef.current;
-    const completingHydration = !props.detailLoading
-      && hydratingConversationRef.current === props.conversationId;
-    if (props.detailLoading) {
-      hydratingConversationRef.current = props.conversationId;
-    } else if (completingHydration) {
-      hydratingConversationRef.current = null;
-    } else if (hydratingConversationRef.current !== props.conversationId) {
-      hydratingConversationRef.current = null;
-    }
-    const observedLiveCompletion = observed.conversationId
-      === props.conversationId
-      && observed.turnId === latestCompletion?.turnId
-      && observed.isActive
-      && latestCompletion?.isActive === false;
-    const newFinalAnswer = !props.detailLoading
-      && observed.conversationId === props.conversationId
-      && finalAnswerId !== null
-      && (
-        observedLiveCompletion
-        || (!completingHydration && observed.answerId !== finalAnswerId)
-      );
-    observedLatestTurnRef.current = observed.conversationId
-        === props.conversationId
-        && !hasLatestCompletion
-      ? observed
-      : {
-          conversationId: props.conversationId,
-          turnId: latestCompletion?.turnId ?? null,
-          isActive: latestCompletion?.isActive ?? false,
-          answerId: finalAnswerId,
-        };
-    if (!newFinalAnswer || !props.autoScrollToFinalAnswer) return;
+    const signal = hasLatestTurnSignal
+        && latestSignalTurnId !== null
+        && latestSignalRunId !== null
+      ? {
+          turnId: latestSignalTurnId,
+          runId: latestSignalRunId,
+          isActive: latestSignalIsActive,
+        }
+      : null;
+    const transition = advanceFinalAnswerObservation({
+      observed: observedLatestTurnRef.current,
+      conversationId: props.conversationId,
+      signal,
+      detailLoading: Boolean(props.detailLoading),
+      answerId: finalAnswerId,
+    });
+    observedLatestTurnRef.current = transition.observation;
+    if (
+      !transition.shouldAnchor
+      || finalAnswerId === null
+      || !props.autoScrollToFinalAnswer
+    ) return;
 
     const conversationId = props.conversationId;
     const answerId = finalAnswerId;
@@ -650,9 +671,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     });
   }, [
     finalAnswerId,
-    hasLatestCompletion,
-    latestCompletion?.isActive,
-    latestCompletion?.turnId,
+    hasLatestTurnSignal,
+    latestSignalIsActive,
+    latestSignalRunId,
+    latestSignalTurnId,
     props.autoScrollToFinalAnswer,
     props.conversationId,
     props.detailLoading,

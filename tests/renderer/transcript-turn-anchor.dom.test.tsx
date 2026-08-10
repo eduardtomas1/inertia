@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
-import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
+import type {
+  AgentTurn,
+  ChatMessage,
+  ConversationLatestTurnSummary,
+} from "../../src/shared/contracts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 
@@ -405,7 +409,11 @@ describe("completed answer positioning", () => {
     };
   }
 
-  type HydrationSceneState = "loading" | "running" | "settled";
+  type HydrationSceneState =
+    | "loading"
+    | "running"
+    | "settled-loading"
+    | "settled";
 
   function hydrationScene(
     targetConversationId: string,
@@ -413,6 +421,8 @@ describe("completed answer positioning", () => {
     scrollElementRef: React.RefObject<HTMLDivElement | null>,
     timelineElementRef: React.RefObject<HTMLDivElement | null>,
     onFinalAnswerAutoScroll: (event: FinalAnswerAutoScrollEvent) => void,
+    latestTurnSummary: ConversationLatestTurnSummary | null = null,
+    latestTurnSummaryOwner = targetConversationId,
   ): React.JSX.Element {
     const turnId = `${targetConversationId}-turn`;
     const request: ChatMessage = {
@@ -445,15 +455,17 @@ describe("completed answer positioning", () => {
       terminalAssistantMessageId: null,
     };
     const hasTurn = state !== "loading";
+    const hasSettledDetail = state === "settled"
+      || state === "settled-loading";
     return (
       <div ref={scrollElementRef} className="anchor-test-scroll">
         <div ref={timelineElementRef}>
           <ResponseTimeline
             turns={hasTurn
-              ? [state === "running" ? runningTurn : settledTurn]
+              ? [hasSettledDetail ? settledTurn : runningTurn]
               : []}
             messages={hasTurn
-              ? [request, ...(state === "settled" ? [answer] : [])]
+              ? [request, ...(hasSettledDetail ? [answer] : [])]
               : []}
             activities={[]}
             reasonings={[]}
@@ -462,6 +474,10 @@ describe("completed answer positioning", () => {
             projectRoot="/workspace"
             projectId="project-1"
             conversationId={targetConversationId}
+            latestTurnSummary={latestTurnSummary ? {
+              conversationId: latestTurnSummaryOwner,
+              turn: latestTurnSummary,
+            } : null}
             streamingText=""
             streamingReasoning=""
             approvals={[]}
@@ -488,6 +504,35 @@ describe("completed answer positioning", () => {
         </div>
       </div>
     );
+  }
+
+  function hydrationLatestTurnSummary(
+    targetConversationId: string,
+    status: AgentTurn["status"],
+    runId = "run-1",
+  ): ConversationLatestTurnSummary {
+    const source = turn(1);
+    const terminal = status === "completed"
+      || status === "failed"
+      || status === "cancelled"
+      || status === "interrupted";
+    return {
+      id: `${targetConversationId}-turn`,
+      runId,
+      status,
+      providerId: source.providerId,
+      harnessId: source.harnessId,
+      backendProfileId: source.backendProfileId,
+      modelSelection: source.modelSelection,
+      continuationIdentity: source.continuationIdentity,
+      model: source.model,
+      reasoningEffort: source.reasoningEffort,
+      requestedAt: source.requestedAt,
+      startedAt: source.startedAt,
+      completedAt: terminal ? source.completedAt : null,
+      terminalReason: terminal ? source.terminalReason : null,
+      updatedAt: source.updatedAt,
+    };
   }
 
   it("places a newly persisted final answer at the viewport top", async () => {
@@ -718,6 +763,16 @@ describe("completed answer positioning", () => {
     await act(async () => {
       view.rerender(hydrationScene(
         nextConversationId,
+        "settled-loading",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+      ));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      view.rerender(hydrationScene(
+        nextConversationId,
         "settled",
         scrollElementRef,
         timelineElementRef,
@@ -760,6 +815,16 @@ describe("completed answer positioning", () => {
     await act(async () => {
       view.rerender(hydrationScene(
         targetConversationId,
+        "settled-loading",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+      ));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
         "settled",
         scrollElementRef,
         timelineElementRef,
@@ -773,5 +838,196 @@ describe("completed answer positioning", () => {
 
     expect(positioned.mock.calls.map(([event]) => event.status))
       .toEqual(["started", "positioned"]);
+  });
+
+  it("retains an owner-scoped shell subscription until matching detail settles", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const scrollElementRef = createRef<HTMLDivElement>();
+    const timelineElementRef = createRef<HTMLDivElement>();
+    const targetConversationId = "44444444-4444-4444-8444-444444444444";
+    let scrollTop = 1_500;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains("anchor-test-scroll")) {
+          return rect(100, 400);
+        }
+        if (this.dataset.terminalAnswerId === `${targetConversationId}-answer`) {
+          return rect(2_100 - scrollTop, 2_400);
+        }
+        return rect(0, 120);
+      });
+    const runningSummary = hydrationLatestTurnSummary(
+      targetConversationId,
+      "running",
+    );
+    const terminalSummary = hydrationLatestTurnSummary(
+      targetConversationId,
+      "completed",
+    );
+    const view = render(hydrationScene(
+      targetConversationId,
+      "loading",
+      scrollElementRef,
+      timelineElementRef,
+      positioned,
+      runningSummary,
+    ));
+    Object.defineProperties(scrollElementRef.current!, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 5_000 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+        },
+      },
+    });
+
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "settled-loading",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+        runningSummary,
+      ));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "settled",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+        terminalSummary,
+      ));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started", "positioned"]);
+    view.rerender(hydrationScene(
+      targetConversationId,
+      "settled",
+      scrollElementRef,
+      timelineElementRef,
+      positioned,
+      terminalSummary,
+    ));
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started", "positioned"]);
+  });
+
+  it("keeps an already-terminal shell hydration historical", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const scrollElementRef = createRef<HTMLDivElement>();
+    const timelineElementRef = createRef<HTMLDivElement>();
+    const targetConversationId = "55555555-5555-4555-8555-555555555555";
+    const terminalSummary = hydrationLatestTurnSummary(
+      targetConversationId,
+      "completed",
+    );
+    const view = render(hydrationScene(
+      targetConversationId,
+      "loading",
+      scrollElementRef,
+      timelineElementRef,
+      positioned,
+      terminalSummary,
+    ));
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "settled",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+        terminalSummary,
+      ));
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(positioned).not.toHaveBeenCalled();
+  });
+
+  it("does not cross-fire an owner, turn, or run mismatched shell", async () => {
+    for (const mismatch of ["owner", "turn", "run"] as const) {
+      const frames: FrameRequestCallback[] = [];
+      vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+      vi.stubGlobal("cancelAnimationFrame", () => undefined);
+      const positioned = vi.fn();
+      const scrollElementRef = createRef<HTMLDivElement>();
+      const timelineElementRef = createRef<HTMLDivElement>();
+      const targetConversationId = `shell-mismatch-${mismatch}`;
+      let runningSummary = hydrationLatestTurnSummary(
+        targetConversationId,
+        "running",
+      );
+      let terminalSummary = hydrationLatestTurnSummary(
+        targetConversationId,
+        "completed",
+      );
+      let owner = targetConversationId;
+      if (mismatch === "owner") owner = "different-owner";
+      if (mismatch === "turn") {
+        runningSummary = { ...runningSummary, id: "different-turn" };
+        terminalSummary = { ...terminalSummary, id: "different-turn" };
+      }
+      if (mismatch === "run") {
+        runningSummary = { ...runningSummary, runId: "different-run" };
+        terminalSummary = { ...terminalSummary, runId: "different-run" };
+      }
+      const view = render(hydrationScene(
+        targetConversationId,
+        "loading",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+        runningSummary,
+        owner,
+      ));
+      await act(async () => {
+        view.rerender(hydrationScene(
+          targetConversationId,
+          "settled",
+          scrollElementRef,
+          timelineElementRef,
+          positioned,
+          terminalSummary,
+          owner,
+        ));
+        await Promise.resolve();
+      });
+      await act(async () => {
+        while (frames.length > 0) frames.shift()!(performance.now());
+      });
+
+      expect(positioned, mismatch).not.toHaveBeenCalled();
+      view.unmount();
+    }
   });
 });

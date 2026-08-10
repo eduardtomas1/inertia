@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   runtimeConversationReference,
   terminalResumeDirectory,
+  visibleConversationLatestTurnSummary,
   visibleWorkspaceConversation,
   workspaceDirectoryIdentity,
 } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
@@ -73,6 +74,23 @@ describe("runtime conversation references", () => {
     )).toBe(draft);
     expect(visibleWorkspaceConversation(persisted as never, null))
       .toBe(persisted);
+  });
+
+  it("does not relabel a persisted shell turn as draft-owned", () => {
+    const persisted = { id: "persisted-conversation" };
+    const draft = { id: "renderer-draft" };
+    const summary = { id: "persisted-turn" };
+
+    expect(visibleConversationLatestTurnSummary(
+      persisted,
+      draft,
+      summary as never,
+    )).toBeNull();
+    expect(visibleConversationLatestTurnSummary(
+      persisted,
+      persisted,
+      summary as never,
+    )).toBe(summary);
   });
 
   it("keeps unmaterialized isolated-worktree drafts away from project tools", () => {

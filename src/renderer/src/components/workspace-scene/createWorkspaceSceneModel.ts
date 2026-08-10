@@ -11,6 +11,7 @@ import type {
   ChatAttachment,
   CheckpointSummary,
   Conversation,
+  ConversationLatestTurnSummary,
   ModelSelection,
   Project,
   ProviderId,
@@ -91,6 +92,14 @@ export function visibleWorkspaceConversation(
   draft: Conversation | null,
 ): Conversation | null {
   return draft ?? persisted;
+}
+
+export function visibleConversationLatestTurnSummary(
+  persisted: Pick<Conversation, "id"> | null,
+  visible: Pick<Conversation, "id"> | null,
+  latestTurnSummary: ConversationLatestTurnSummary | null,
+): ConversationLatestTurnSummary | null {
+  return persisted?.id === visible?.id ? latestTurnSummary : null;
 }
 
 export interface WorkspaceSceneActions {
@@ -398,7 +407,11 @@ export function createWorkspaceSceneModel({
     chat: {
       project,
       conversation: detail?.conversation ?? conversation,
-      latestTurnSummary: projection.latestTurnSummary,
+      latestTurnSummary: visibleConversationLatestTurnSummary(
+        persistedConversation,
+        conversation,
+        projection.latestTurnSummary,
+      ),
       turns: projection.turns,
       messages: projection.messages,
       activities: projection.activities,
@@ -446,6 +459,7 @@ export function createWorkspaceSceneModel({
       providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")
         || detailLoading,
+      detailLoading,
       sending: busyAction === "message.send",
       onAddProject: () => void actions.importProject(),
       onCreateConversation: () => actions.createConversation(),

@@ -75,6 +75,16 @@ const ResponseTimeline = lazy(async () => ({
 
 const READER_INTENT_GUARD_MS = 750;
 
+function recordsOwnedByConversation<T extends { conversationId: string }>(
+  records: T[],
+  conversationId: string | null,
+): T[] {
+  if (!conversationId) return [];
+  return records.every((record) => record.conversationId === conversationId)
+    ? records
+    : records.filter((record) => record.conversationId === conversationId);
+}
+
 type ChatWorkspaceProps = {
   embedded?: boolean;
   project: Project | null;
@@ -117,6 +127,7 @@ type ChatWorkspaceProps = {
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
+  detailLoading?: boolean;
   sending: boolean;
   onAddProject: () => void;
   onCreateConversation: () => void;
@@ -207,6 +218,7 @@ export function ChatWorkspace({
   previewContextUrl,
   providerIdentityLabels,
   loading,
+  detailLoading = false,
   sending,
   onAddProject,
   onCreateConversation,
@@ -312,9 +324,25 @@ export function ChatWorkspace({
   const readerIntentRef = useRef(false);
   const finalAnswerAutoScrollOwnerRef = useRef<string | null>(null);
   const showJump = activeNavigation.mode === "reading-history";
-  const pendingInputRequest = inputRequests.at(-1) ?? null;
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
-  const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${subagents.length}:${subagents.at(-1)?.updatedAt ?? ""}:${plans.length}:${checkpoints.length}:${turnGitArtifacts.length}:${turnGitArtifacts.at(-1)?.status ?? ""}:${turnGitArtifacts.at(-1)?.capturedAt ?? ""}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
+  const ownedTurns = recordsOwnedByConversation(turns, conversationId);
+  const ownedMessages = recordsOwnedByConversation(messages, conversationId);
+  const ownedActivities = recordsOwnedByConversation(activities, conversationId);
+  const ownedSubagents = recordsOwnedByConversation(subagents, conversationId);
+  const ownedReasonings = recordsOwnedByConversation(reasonings, conversationId);
+  const ownedPlans = recordsOwnedByConversation(plans, conversationId);
+  const ownedCheckpoints = recordsOwnedByConversation(checkpoints, conversationId);
+  const ownedTurnGitArtifacts = recordsOwnedByConversation(
+    turnGitArtifacts,
+    conversationId,
+  );
+  const ownedApprovals = recordsOwnedByConversation(approvals, conversationId);
+  const ownedInputRequests = recordsOwnedByConversation(
+    inputRequests,
+    conversationId,
+  );
+  const pendingInputRequest = ownedInputRequests.at(-1) ?? null;
+  const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${streamingText.length}:${streamingReasoning.length}:${ownedApprovals.length}:${ownedInputRequests.length}`;
 
   const clearReaderIntent = useCallback((): void => {
     readerIntentRef.current = false;
@@ -574,7 +602,7 @@ export function ChatWorkspace({
     onLatestContentVisibilityChange?.(false);
   }, [conversationId, onLatestContentVisibilityChange]);
 
-  if (loading) {
+  if (loading && !detailLoading) {
     return (
       <Root className="chat-workspace centered-state" aria-busy="true">
         <LoadingMark label="Loading workspace" />
@@ -617,6 +645,7 @@ export function ChatWorkspace({
     <Root
       className={clsx("chat-workspace", `response-density-${responseDensity}`)}
       data-reasoning-effort={selectedReasoningEffort}
+      aria-busy={detailLoading || undefined}
     >
       <div
         ref={scrollRef}
@@ -638,26 +667,31 @@ export function ChatWorkspace({
           Alt plus End for the final answer, and Alt plus G for the turn artifact.
         </span>
         <div ref={timelineRef} className="response-timeline">
-          {messages.length === 0 && turns.length === 0 && (
+          {detailLoading && <LoadingMark label="Loading conversation" />}
+          {!detailLoading && ownedMessages.length === 0 && ownedTurns.length === 0 && (
             <div className="empty-thread"><span className="empty-thread-icon"><Code2 size={20} /></span><h3>What should we work on?</h3><p>Describe the outcome you want. The details can take shape together.</p></div>
           )}
           <Suspense fallback={<LoadingMark label="Loading conversation" />}>
             <ResponseTimeline
-              turns={turns}
-              messages={messages}
-              activities={activities}
-              subagents={subagents}
-              reasonings={reasonings}
-              plans={plans}
-              checkpoints={checkpoints}
-              gitArtifacts={turnGitArtifacts}
+              turns={ownedTurns}
+              messages={ownedMessages}
+              activities={ownedActivities}
+              subagents={ownedSubagents}
+              reasonings={ownedReasonings}
+              plans={ownedPlans}
+              checkpoints={ownedCheckpoints}
+              gitArtifacts={ownedTurnGitArtifacts}
               projectRoot={projectRoot}
               projectId={project.id}
               conversationId={conversation.id}
-              streamingText={streamingText}
-              streamingReasoning={streamingReasoning}
-              approvals={approvals}
-              inputRequests={inputRequests}
+              latestTurnSummary={latestTurnSummary ? {
+                conversationId: conversation.id,
+                turn: latestTurnSummary,
+              } : null}
+              streamingText={detailLoading ? "" : streamingText}
+              streamingReasoning={detailLoading ? "" : streamingReasoning}
+              approvals={ownedApprovals}
+              inputRequests={ownedInputRequests}
               providerIdentityLabels={providerIdentityLabels}
               showTimestamps={showTimestamps}
               showThinking={showThinking}
@@ -666,14 +700,14 @@ export function ChatWorkspace({
               showChangedFileSummaries={showChangedFileSummaries}
               autoScrollToFinalAnswer={autoScrollToFinalAnswer
                 && transcriptNavigationFollowsContent(activeNavigation)}
-              detailLoading={loading}
+              detailLoading={detailLoading}
               turnAnchorId={turnAnchorId}
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}
               onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
               scrollElementRef={scrollRef}
               timelineElementRef={timelineRef}
-              checkpointRestoreDisabled={turns.some(({ status }) =>
+              checkpointRestoreDisabled={ownedTurns.some(({ status }) =>
                 status === "queued"
                 || status === "starting"
                 || status === "running"
@@ -750,7 +784,7 @@ export function ChatWorkspace({
           sending={sending}
           running={conversation.status === "running" || conversation.status === "needs-input"}
           backendProfiles={backendProfiles}
-          latestTurn={turns.at(-1) ?? null}
+          latestTurn={ownedTurns.at(-1) ?? null}
           latestTurnSummary={latestTurnSummary}
           onSend={sendMessage}
           onListSkills={onListSkills}

@@ -9,6 +9,7 @@ import type {
   AgentTurn,
   ChatMessage,
   CheckpointSummary,
+  ConversationLatestTurnSummary,
   SubagentTrace,
 } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
@@ -26,6 +27,10 @@ export interface ResponseTimelineProps {
   projectRoot: string;
   projectId: string;
   conversationId: string;
+  latestTurnSummary?: {
+    conversationId: string;
+    turn: ConversationLatestTurnSummary;
+  } | null;
   streamingText: string;
   streamingReasoning: string;
   approvals: AgentApprovalRequest[];

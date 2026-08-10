@@ -375,7 +375,7 @@ describe("GoalPanel", () => {
 
     expect(screen.getByText("2 working")).toHaveAttribute(
       "aria-label",
-      "2 delegated tasks",
+      "2 delegated tasks, 2 working",
     );
     expect(screen.getByRole("button", {
       name: "Stop Audit",

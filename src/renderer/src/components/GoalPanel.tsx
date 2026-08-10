@@ -446,6 +446,7 @@ function SubagentsSection({
     [rows],
   );
   const stats = subagentDisclosureStats(subagents);
+  const statsLabel = subagentStatsLabel(stats);
   const visibleRows = showAll
     ? rows.map((row) => ({ ...row, omittedAncestors: 0 }))
     : compactRows;
@@ -457,8 +458,10 @@ function SubagentsSection({
           <Network size={14} aria-hidden="true" />
           <h3 id={headingId}>Delegated work</h3>
         </div>
-        <span aria-label={`${subagents.length} delegated tasks`}>
-          {subagentStatsLabel(stats) || subagents.length}
+        <span aria-label={`${subagents.length} delegated tasks${statsLabel
+          ? `, ${statsLabel}`
+          : ""}`}>
+          {statsLabel || subagents.length}
         </span>
       </header>
       {rows.length === 0 ? (

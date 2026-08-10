@@ -150,7 +150,6 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutMs: WORKSPACE_GIT_REFRESH_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "rejected",
   },
-  "git.worktree.create": gitMutation,
   "message.send": {
     // The server enforces one aggregate preparation deadline before it can
     // queue a turn. Keep the socket pending through that boundary and its
@@ -224,7 +223,6 @@ const WORKSPACE_GIT_COMPLETION_PUBLICATIONS = new Set<ClientCommand["type"]>([
   "git.push",
   "git.selection.revert",
   "git.selection.undo",
-  "git.worktree.create",
 ]);
 
 export function publishesWorkspaceGitCompletion(

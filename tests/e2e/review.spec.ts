@@ -33,15 +33,32 @@ async function ensureWorkspaceTools(): Promise<void> {
 }
 
 test("keeps the Changes panel readable when the side tool area is narrow", async () => {
+  await resizeWindow(1024, 800);
+  const gitMenuTrigger = page.getByRole("button", { name: "More Git actions" });
+  await expect(gitMenuTrigger).toBeVisible();
+  await expect(gitMenuTrigger.locator("svg").last()).toBeVisible();
   await resizeWindow(1040, 800);
   await ensureWorkspaceTools();
   await page.getByRole("tab", { name: /Changes/ }).click();
   const picker = page.getByRole("combobox", { name: "Repository and changed file" });
   await expect(picker).toBeVisible();
-  await expect(picker.locator("option:checked")).toHaveText("Inertia — M · sample.ts");
+  await expect(picker.locator("option:checked")).toHaveText("M · sample.ts");
   await expect(page.getByLabel("Git repositories and changed files")).toBeHidden();
   await expect(page.getByLabel(/Diff for|Unified diff/)).toBeVisible();
+  await expect(gitMenuTrigger).toHaveCount(0);
+
+  await resizeWindow(760, 800);
+  const rootActions = page.getByLabel("Actions for Inertia", { exact: true });
+  const commit = rootActions.getByRole("button", { name: "Commit" });
+  await expect(rootActions).toBeVisible();
+  await expect(commit).toBeVisible();
+  await commit.click();
+  const dialog = page.getByRole("dialog", { name: "Commit changes" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
   await expectNoViewportOverflow();
+  await resizeWindow(1040, 800);
   expect(rendererErrors).toEqual([]);
 });
 

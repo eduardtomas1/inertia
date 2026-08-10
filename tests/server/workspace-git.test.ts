@@ -20,6 +20,7 @@ import {
   workspaceGitFilePath,
 } from "../../src/server/workspace-git";
 import { getRepositoryStatus, getUnifiedDiff } from "../../src/server/git";
+import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
 import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
 import { issueAuthorityForLiveOwner } from "../../src/server/runtime/live-authority";
 import { discoverFreshWorkspaceGitRepositories } from "../../src/server/runtime/commands/source-control-commands";
@@ -83,6 +84,36 @@ afterEach(() => {
 });
 
 describe("workspace Git repository discovery", () => {
+  it.skipIf(process.platform === "win32")(
+    "preserves whitespace in a resolved Git metadata path",
+    async () => {
+      const root = temporaryRoot("metadata-whitespace");
+      const repository = join(root, " repository\nwith-space ");
+      initializeRepository(repository, "tracked.txt");
+
+      const identity = await repositoryMetadataMarkerIdentity(repository);
+      const resolved = await resolveWorkspaceGitRepository(
+        root,
+        " repository\nwith-space ",
+      );
+
+      const identityFields = identity.split("\0");
+      expect(identityFields).toEqual([
+        "git-dir",
+        realpathSync(join(repository, ".git")),
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+        "git-common-dir",
+        realpathSync(join(repository, ".git")),
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+      ]);
+      expect(resolved.root).toBe(realpathSync(repository));
+    },
+  );
+
   it("stops discovery at its aggregate deadline", async () => {
     const root = temporaryRoot("workspace-deadline");
 
@@ -273,6 +304,36 @@ describe("workspace Git repository discovery", () => {
       state: "ready",
       branch: "module-worktree",
     });
+  });
+
+  it("changes identity when an ordinary Git marker target is replaced", async () => {
+    const first = temporaryRoot("marker-first");
+    const second = temporaryRoot("marker-second");
+    initializeRepository(first);
+    initializeRepository(second);
+    const checkout = temporaryRoot("marker-checkout");
+    const marker = join(checkout, ".git");
+    const firstMetadata = git(
+      first,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    );
+    const secondMetadata = git(
+      second,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    );
+    writeFileSync(marker, `gitdir: ${firstMetadata}\n`);
+    const originalIdentity = await repositoryMetadataMarkerIdentity(checkout);
+
+    rmSync(marker, { force: true });
+    writeFileSync(marker, `gitdir: ${secondMetadata}\n`);
+
+    await expect(repositoryMetadataMarkerIdentity(checkout)).resolves.not.toBe(
+      originalIdentity,
+    );
   });
 
   it("never follows directory symlinks outside the project", async () => {

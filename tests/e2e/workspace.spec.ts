@@ -137,7 +137,7 @@ test("collapses composer settings without displacing send and right-aligns user 
 
 test("contains commit dialog focus and restores its trigger", async () => {
   await resizeWindow(1440, 920);
-  const trigger = page.getByRole("button", { name: "Commit & push", exact: true });
+  const trigger = page.getByRole("button", { name: "Commit", exact: true });
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Commit changes" });
   const message = dialog.getByRole("textbox", { name: "Commit message" });

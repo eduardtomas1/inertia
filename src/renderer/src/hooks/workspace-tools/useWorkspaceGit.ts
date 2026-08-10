@@ -13,7 +13,11 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
-import { workspaceGitRefreshIdentity } from "../../utils/workspaceGit";
+import {
+  rootGitMutationScope,
+  type RootGitMutationScope,
+  workspaceGitRefreshIdentity,
+} from "../../utils/workspaceGit";
 
 interface WorkspaceGitOptions {
   enabled: boolean;
@@ -59,10 +63,15 @@ export function useWorkspaceGit({
     useState<WorkspaceGitSnapshot | null>(null);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [commitReviewRevision, setCommitReviewRevision] = useState(0);
   const projectRefreshIdentity = workspaceGitRefreshIdentity(project);
   const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const authorityRef = useRef(authority);
   const requestGenerationRef = useRef(0);
+  const commitReviewRef = useRef<{
+    diff: GitDiffSnapshot;
+    scope: RootGitMutationScope;
+  } | null>(null);
   const loadGitInFlightRef = useRef<{
     identity: string;
     generation: number;
@@ -209,6 +218,7 @@ export function useWorkspaceGit({
     requestGenerationRef.current += 1;
     setGitStatus(null);
     setGitDiff(null);
+    commitReviewRef.current = null;
     setWorkspaceGitStatus(null);
     setBranches([]);
     setLoading(false);
@@ -259,6 +269,7 @@ export function useWorkspaceGit({
   const loadWorkspaceRepositoryDiff = useCallback(async (
     repositoryPath: string,
     filePath?: string,
+    commitReview = false,
   ): Promise<WorkspaceGitDiffSnapshot> => {
     if (!project?.id) {
       throw new Error("Select a project before loading changes.");
@@ -278,6 +289,7 @@ export function useWorkspaceGit({
         authorityRef: repository.authorityRef,
         ...(filePath ? { path: filePath } : {}),
         ignoreWhitespace,
+        ...(commitReview ? { commitReview: true } : {}),
       },
     }));
     if (event.result.kind !== "git.workspace.diff") {
@@ -291,6 +303,36 @@ export function useWorkspaceGit({
     run,
     workspaceGitStatus?.repositories,
   ]);
+
+  const loadCommitReview = useCallback(async (): Promise<GitDiffSnapshot | null> => {
+    if (!project?.id) {
+      throw new Error("Select a project before committing changes.");
+    }
+    const owner = `${project.id}:${conversation?.id ?? ""}`;
+    const generation = requestGenerationRef.current;
+    const { requestRootCommitReview } = await import("../../components/CommitDialog");
+    const { status, diff } = await requestRootCommitReview({
+      projectId: project.id,
+      conversationId: conversation?.id,
+      ignoreWhitespace,
+      request,
+    });
+    if (
+      authorityRef.current !== owner
+      || requestGenerationRef.current !== generation
+    ) return null;
+    setGitStatus(status);
+    const scope = rootGitMutationScope(status);
+    if (!scope) {
+      throw new Error("Refresh repository status before committing changes.");
+    }
+    commitReviewRef.current = { diff, scope };
+    return diff;
+  }, [conversation?.id, ignoreWhitespace, project?.id, request]);
+
+  const discardCommitReview = useCallback((): void => {
+    commitReviewRef.current = null;
+  }, []);
 
   const loadBranches = useCallback(() => {
     if (!project || !gitStatus?.isRepository) return;
@@ -332,6 +374,8 @@ export function useWorkspaceGit({
       || event.projectId !== project.id
       || event.conversationId !== (conversation?.id ?? null)
     ) return;
+    commitReviewRef.current = null;
+    setCommitReviewRevision((current) => current + 1);
     setLoading(true);
     void loadGit({
       authoritative: true,
@@ -362,15 +406,21 @@ export function useWorkspaceGit({
     name: string,
   ) => {
     if (!project) return;
+    const repository = rootGitMutationScope(gitStatus);
+    if (!repository) {
+      setActionError("Refresh repository status before changing branches.");
+      return;
+    }
     void run(type, {
       type,
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
+        ...repository,
         name,
       },
     } as CommandWithoutId).catch(() => undefined);
-  }, [conversation?.id, project, run]);
+  }, [conversation?.id, gitStatus, project, run, setActionError]);
 
   const commit = useCallback(async (
     message: string,
@@ -381,25 +431,62 @@ export function useWorkspaceGit({
     if (paths.length === 0) {
       throw new Error("Select at least one path to commit.");
     }
+    const reviewed = commitReviewRef.current;
+    if (reviewed?.diff.truncated || !reviewed?.diff.commitReview) {
+      throw new Error(
+        "The complete reviewed repository state is unavailable. Refresh the diff before committing.",
+      );
+    }
+    commitReviewRef.current = null;
     await run("git.commit", {
       type: "git.commit",
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
+        ...reviewed.scope,
         message,
         paths,
+        reviewReceipt: reviewed.diff.commitReview,
       },
     });
     if (push) {
-      await run("git.push", {
-        type: "git.push",
-        payload: {
-          projectId: project.id,
-          conversationId: conversation?.id,
-        },
-      });
+      try {
+        const owner = `${project.id}:${conversation?.id ?? ""}`;
+        const refreshed = resultEvent(await request({
+          type: "git.refresh",
+          payload: {
+            projectId: project.id,
+            conversationId: conversation?.id,
+          },
+        }));
+        if (
+          authorityRef.current !== owner
+          || refreshed.result.kind !== "git.status"
+        ) {
+          throw new Error("Repository status changed before push.");
+        }
+        const pushRepository = rootGitMutationScope(refreshed.result.status);
+        if (!pushRepository) {
+          throw new Error("A fresh repository status is unavailable.");
+        }
+        setGitStatus(refreshed.result.status);
+        await run("git.push", {
+          type: "git.push",
+          payload: {
+            projectId: project.id,
+            conversationId: conversation?.id,
+            ...pushRepository,
+          },
+        });
+      } catch (error) {
+        setActionError(
+          `The commit was created, but push failed. ${error instanceof Error && error.message.trim()
+            ? error.message
+            : "Refresh Git status before retrying the push."}`,
+        );
+      }
     }
-  }, [conversation?.id, project, run]);
+  }, [conversation?.id, project, request, run, setActionError]);
 
   return {
     gitStatus,
@@ -410,6 +497,9 @@ export function useWorkspaceGit({
     loading,
     loadGit,
     loadWorkspaceRepositoryDiff,
+    loadCommitReview,
+    discardCommitReview,
+    commitReviewRevision,
     loadBranches,
     mutateBranch,
     commit,

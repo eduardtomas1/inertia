@@ -1,0 +1,1279 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, sep } from "node:path";
+
+import WebSocket from "ws";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  createSourceControlCommandHandler,
+  type SourceControlCommandDependencies,
+} from "../../src/server/runtime/commands/source-control-commands";
+import { captureGitCommitReview } from "../../src/server/git/commit-review";
+import { SecureFileAuthorityRegistry } from "../../src/server/runtime/secure-file-authorities";
+import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
+import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
+import { WorkspaceRunController } from "../../src/server/runtime/workspace-run-controller";
+import { clientCommandSchema } from "../../src/shared/contracts";
+
+const projectId = "11111111-1111-4111-8111-111111111111";
+const roots: string[] = [];
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+    },
+  }).trim();
+}
+
+function workspaceWithNestedRepository(): {
+  workspace: string;
+  repository: string;
+} {
+  const workspace = mkdtempSync(join(tmpdir(), "inertia-nested-action-"));
+  roots.push(workspace);
+  const repository = join(workspace, "modules", "alpha");
+  initializeRepository(repository);
+  return { workspace, repository };
+}
+
+function initializeRepository(repository: string): void {
+  mkdirSync(repository, { recursive: true });
+  git(repository, "init", "-q", "--initial-branch=main");
+  git(repository, "config", "user.email", "tests@inertia.invalid");
+  git(repository, "config", "user.name", "Inertia Tests");
+  writeFileSync(join(repository, "README.md"), "before\n");
+  git(repository, "add", "--", "README.md");
+  git(repository, "commit", "-q", "-m", "Initial");
+}
+
+function leaveInstalledReviewedCommitMarker(repository: string): {
+  indexLockPath: string;
+  journalPath: string;
+} {
+  const indexPath = git(
+    repository,
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-path",
+    "index",
+  );
+  const temporaryIndex = `${indexPath}.integration-reconciled`;
+  copyFileSync(indexPath, temporaryIndex);
+  const indexEnvironment = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_INDEX_FILE: temporaryIndex,
+    GIT_TERMINAL_PROMPT: "0",
+  };
+  execFileSync("git", ["add", "--", "README.md"], {
+    cwd: repository,
+    env: indexEnvironment,
+  });
+  const tree = execFileSync("git", ["write-tree"], {
+    cwd: repository,
+    encoding: "utf8",
+    env: indexEnvironment,
+  }).trim();
+  const expectedHead = git(repository, "rev-parse", "HEAD");
+  const newCommit = execFileSync("git", [
+    "commit-tree",
+    tree,
+    "-p",
+    expectedHead,
+    "-m",
+    "Installed marker fixture",
+  ], {
+    cwd: repository,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+    },
+  }).trim();
+  const oldIndex = readFileSync(indexPath);
+  const newIndex = readFileSync(temporaryIndex);
+  const digest = (value: Buffer): string => createHash("sha256")
+    .update(value)
+    .digest("hex");
+  const token = "8".repeat(64);
+  const journalPath = `${indexPath}.inertia-commit-transaction.json`;
+  const indexLockPath = `${indexPath}.lock`;
+  const headRef = git(repository, "symbolic-ref", "HEAD");
+  writeFileSync(journalPath, JSON.stringify({
+    expectedHead,
+    headRef,
+    headPath: git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "HEAD",
+    ),
+    refPath: git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      headRef,
+    ),
+    newCommit,
+    oldIndexHash: digest(oldIndex),
+    newIndexHash: digest(newIndex),
+    indexPath,
+    stagePath: `${indexPath}.inertia-stage-${"8".repeat(32)}`,
+    reservationToken: token,
+  }));
+  writeFileSync(
+    indexLockPath,
+    `inertia-reviewed-commit:index:${token}\n`,
+    { flag: "wx", mode: 0o600 },
+  );
+  git(repository, "update-ref", headRef, newCommit, expectedHead);
+  writeFileSync(indexPath, newIndex);
+  rmSync(temporaryIndex);
+  return { indexLockPath, journalPath };
+}
+
+function replaceRepositoryMetadata(
+  workspace: string,
+  repository: string,
+): void {
+  renameSync(join(repository, ".git"), join(workspace, "retained-old-git"));
+  git(repository, "init", "-q", "--initial-branch=main");
+  git(repository, "config", "user.email", "tests@inertia.invalid");
+  git(repository, "config", "user.name", "Inertia Tests");
+  git(repository, "add", "--", "README.md");
+  git(repository, "commit", "-q", "-m", "Replacement initial");
+}
+
+function secureFiles(options: {
+  generation?: () => string;
+  fixedIdentity?: { dev: string; ino: string };
+} = {}): RuntimeSecureFileBroker {
+  const rootGeneration = (root: string): string => options.generation?.()
+    ?? lstatSync(root, { bigint: true }).birthtimeNs.toString(10);
+  return {
+    authorizeRoot: vi.fn(async (root: string) => {
+      const canonical = realpathSync(root);
+      const info = lstatSync(canonical, { bigint: true });
+      return {
+        root: canonical,
+        identity: {
+          dev: options.fixedIdentity?.dev ?? info.dev.toString(10),
+          ino: options.fixedIdentity?.ino ?? info.ino.toString(10),
+        },
+        birthtimeNs: rootGeneration(canonical),
+      };
+    }),
+    verifyRoot: vi.fn(async (capability) => {
+      const info = lstatSync(capability.root, { bigint: true });
+      if (
+        (options.fixedIdentity?.dev ?? info.dev.toString(10)) !== capability.identity.dev
+        || (options.fixedIdentity?.ino ?? info.ino.toString(10)) !== capability.identity.ino
+        || rootGeneration(capability.root) !== capability.birthtimeNs
+      ) {
+        throw new Error("The secure root identity changed.");
+      }
+    }),
+    read: vi.fn(),
+    replace: vi.fn(),
+  };
+}
+
+async function issueCommitReview(
+  authorities: SecureFileAuthorityRegistry,
+  socket: WebSocket,
+  broker: RuntimeSecureFileBroker,
+  workspace: string,
+  repository: string,
+  metadataMarkerIdentity: string,
+  conversationId?: string,
+): Promise<{ authorityRef: string; fingerprint: string }> {
+  const review = await captureGitCommitReview(repository);
+  return {
+    authorityRef: await authorities.issue(
+      socket,
+      "git-commit-review",
+      [
+        projectId,
+        conversationId ?? "",
+        workspace,
+        "modules/alpha",
+        metadataMarkerIdentity,
+        review.fingerprint,
+      ],
+      await broker.authorizeRoot(repository),
+    ),
+    fingerprint: review.fingerprint,
+  };
+}
+
+async function nestedCommitHarness(
+  workspace: string,
+  repository: string,
+  broker: RuntimeSecureFileBroker,
+  message: string,
+  paths: readonly string[],
+  conversationId?: string,
+  workspaceRuns?: SourceControlCommandDependencies["workspaceRuns"],
+) {
+  const authorities = new SecureFileAuthorityRegistry(broker);
+  const socket = {} as WebSocket;
+  const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+    repository,
+  );
+  const authorityRef = await authorities.issue(
+    socket,
+    "git-repository",
+    [
+      projectId,
+      conversationId ?? "",
+      workspace,
+      "modules/alpha",
+      metadataMarkerIdentity,
+    ],
+    await broker.authorizeRoot(repository),
+  );
+  const reviewReceipt = await issueCommitReview(
+    authorities,
+    socket,
+    broker,
+    workspace,
+    repository,
+    metadataMarkerIdentity,
+    conversationId,
+  );
+  const trackSourceControl = workspaceRuns
+    ? vi.spyOn(workspaceRuns, "trackSourceControl")
+    : vi.fn(async (
+        _label: string,
+        _projectId: string,
+        _conversationId: string | undefined,
+        _cwd: string,
+        _requestId: string,
+        operation: () => Promise<unknown>,
+      ) => await operation());
+  const send = vi.fn();
+  const broadcastSnapshot = vi.fn();
+  const handler = createSourceControlCommandHandler({
+    workspacePath: vi.fn(() => workspace),
+    workspaceRuns: workspaceRuns ?? { trackSourceControl },
+    secureFiles: broker,
+    secureFileAuthorities: authorities,
+    send,
+    broadcastSnapshot,
+  } as unknown as SourceControlCommandDependencies);
+  const command = clientCommandSchema.parse({
+    type: "git.commit",
+    requestId: crypto.randomUUID(),
+    payload: {
+      projectId,
+      ...(conversationId ? { conversationId } : {}),
+      repositoryPath: "modules/alpha",
+      authorityRef,
+      message,
+      paths,
+      reviewReceipt,
+    },
+  });
+  return {
+    broadcastSnapshot,
+    command,
+    handler,
+    send,
+    socket,
+    trackSourceControl,
+  };
+}
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe("nested source-control command scope", () => {
+  it("recovers an installed reviewed index before a clean branch mutation", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    git(repository, "branch", "before-recovery");
+    writeFileSync(join(repository, "README.md"), "installed but unacknowledged\n");
+    const marker = leaveInstalledReviewedCommitMarker(repository);
+    expect(git(repository, "status", "--porcelain")).toBe("");
+    expect(existsSync(marker.indexLockPath)).toBe(true);
+    expect(existsSync(marker.journalPath)).toBe(true);
+
+    const activityStore = {
+      conversation: vi.fn(),
+      createWorkspaceRun: vi.fn(() => {
+        expect(existsSync(marker.indexLockPath)).toBe(false);
+        expect(existsSync(marker.journalPath)).toBe(false);
+        return { id: crypto.randomUUID() };
+      }),
+      updateWorkspaceRun: vi.fn(),
+      conversationWork: {
+        reserveCheckout: vi.fn(() => true),
+        release: vi.fn(),
+      },
+    };
+    const controller = new WorkspaceRunController(
+      activityStore as never,
+      {} as never,
+      vi.fn(),
+      () => false,
+      vi.fn(),
+    );
+
+    await expect(controller.trackSourceControl(
+      "Switch branch after recovery",
+      projectId,
+      undefined,
+      workspace,
+      crypto.randomUUID(),
+      async () => git(repository, "switch", "before-recovery"),
+      {
+        recoverReviewedCommit: true,
+        serializationRoot: repository,
+        verifyRepositoryIdentity: async () => undefined,
+      },
+    )).resolves.toBeDefined();
+
+    expect(git(repository, "branch", "--show-current")).toBe("before-recovery");
+    expect(existsSync(marker.indexLockPath)).toBe(false);
+    expect(existsSync(marker.journalPath)).toBe(false);
+    expect(activityStore.createWorkspaceRun).toHaveBeenCalledOnce();
+    expect(activityStore.conversationWork.release).toHaveBeenCalledOnce();
+  });
+
+  it("uses status-issued root authority when the project is below its repository root", async () => {
+    const repository = mkdtempSync(join(tmpdir(), "inertia-project-subdir-"));
+    roots.push(repository);
+    initializeRepository(repository);
+    const workspace = join(repository, "packages", "app");
+    mkdirSync(workspace, { recursive: true });
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = { readyState: WebSocket.OPEN } as WebSocket;
+    const trackSourceControl = vi.fn(async (
+      _label: string,
+      _projectId: string,
+      _conversationId: string | undefined,
+      _cwd: string,
+      _requestId: string,
+      operation: () => Promise<unknown>,
+    ) => await operation());
+    const send = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+      send,
+      broadcastSnapshot: vi.fn(),
+    } as unknown as SourceControlCommandDependencies);
+    const refreshRequestId = crypto.randomUUID();
+
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.refresh",
+      requestId: refreshRequestId,
+      payload: { projectId },
+    }))).resolves.toBe("handled");
+
+    const refreshed = send.mock.calls.find(
+      ([, event]) => event.requestId === refreshRequestId,
+    )?.[1];
+    if (
+      !refreshed
+      || refreshed.type !== "request.result"
+      || refreshed.result.kind !== "git.status"
+      || !refreshed.result.status.authorityRef
+    ) {
+      throw new Error("Expected status-issued root Git authority.");
+    }
+    const branch = `subdir-${crypto.randomUUID().slice(0, 8)}`;
+    const createRequestId = crypto.randomUUID();
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.branch.create",
+      requestId: createRequestId,
+      payload: {
+        projectId,
+        repositoryPath: ".",
+        authorityRef: refreshed.result.status.authorityRef,
+        name: branch,
+      },
+    }))).resolves.toBe("handled");
+
+    expect(git(repository, "branch", "--show-current")).toBe(branch);
+    expect(trackSourceControl).toHaveBeenCalledWith(
+      "Create branch",
+      projectId,
+      undefined,
+      workspace,
+      createRequestId,
+      expect.any(Function),
+      expect.objectContaining({
+        recoverReviewedCommit: true,
+        serializationRoot: realpathSync.native(repository),
+        verifyRepositoryIdentity: expect.any(Function),
+      }),
+    );
+
+    writeFileSync(join(repository, "README.md"), "reviewed from subdirectory\n");
+    const commitRefreshRequestId = crypto.randomUUID();
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.refresh",
+      requestId: commitRefreshRequestId,
+      payload: { projectId },
+    }))).resolves.toBe("handled");
+    const commitStatus = send.mock.calls.find(
+      ([, event]) => event.requestId === commitRefreshRequestId,
+    )?.[1];
+    if (
+      !commitStatus
+      || commitStatus.type !== "request.result"
+      || commitStatus.result.kind !== "git.status"
+      || !commitStatus.result.status.authorityRef
+    ) throw new Error("Expected fresh root authority for reviewed commit.");
+    const diffRequestId = crypto.randomUUID();
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.diff",
+      requestId: diffRequestId,
+      payload: {
+        projectId,
+        authorityRef: commitStatus.result.status.authorityRef,
+        ignoreWhitespace: false,
+        commitReview: true,
+      },
+    }))).resolves.toBe("handled");
+    const reviewed = send.mock.calls.find(
+      ([, event]) => event.requestId === diffRequestId,
+    )?.[1];
+    if (
+      !reviewed
+      || reviewed.type !== "request.result"
+      || reviewed.result.kind !== "git.diff"
+      || !reviewed.result.diff.commitReview
+    ) throw new Error("Expected complete root commit review.");
+    const commitRequestId = crypto.randomUUID();
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.commit",
+      requestId: commitRequestId,
+      payload: {
+        projectId,
+        repositoryPath: ".",
+        authorityRef: commitStatus.result.status.authorityRef,
+        message: "Commit from subdirectory project",
+        paths: ["README.md"],
+        reviewReceipt: reviewed.result.diff.commitReview,
+      },
+    }))).resolves.toBe("handled");
+
+    expect(git(repository, "log", "-1", "--pretty=%s"))
+      .toBe("Commit from subdirectory project");
+    expect(git(repository, "status", "--porcelain")).toBe("");
+    expect(trackSourceControl).toHaveBeenLastCalledWith(
+      "Commit changes",
+      projectId,
+      undefined,
+      workspace,
+      commitRequestId,
+      expect.any(Function),
+      expect.objectContaining({
+        recoverReviewedCommit: false,
+        serializationRoot: realpathSync.native(repository),
+      }),
+    );
+  });
+
+  it("commits in the selected nested repository while reserving its owning workspace", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    writeFileSync(join(repository, "README.md"), "after\n");
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = {} as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+      repository,
+    );
+    const discoveredRoot = await broker.authorizeRoot(repository);
+    const authorityRef = await authorities.issue(
+      socket,
+      "git-repository",
+      [
+        projectId,
+        "",
+        workspace,
+        "modules/alpha",
+        metadataMarkerIdentity,
+      ],
+      {
+        ...discoveredRoot,
+        root: `${discoveredRoot.root}${sep}.`,
+      },
+    );
+    const reviewReceipt = await issueCommitReview(
+      authorities,
+      socket,
+      broker,
+      workspace,
+      repository,
+      metadataMarkerIdentity,
+    );
+    const trackSourceControl = vi.fn(async (
+      _label: string,
+      _projectId: string,
+      _conversationId: string | undefined,
+      _cwd: string,
+      _requestId: string,
+      operation: () => Promise<unknown>,
+    ) => await operation());
+    const send = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+      send,
+      broadcastSnapshot: vi.fn(),
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type: "git.commit",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "modules/alpha",
+        authorityRef,
+        message: "Commit nested change",
+        paths: ["README.md"],
+        reviewReceipt,
+      },
+    });
+
+    await expect(handler(socket, command)).resolves.toBe("handled");
+
+    expect(trackSourceControl).toHaveBeenCalledWith(
+      "Commit changes",
+      projectId,
+      undefined,
+      workspace,
+      command.requestId,
+      expect.any(Function),
+      {
+        recoverReviewedCommit: false,
+        serializationRoot: realpathSync.native(repository),
+      },
+    );
+    expect(git(repository, "log", "-1", "--pretty=%s")).toBe(
+      "Commit nested change",
+    );
+    expect(git(repository, "status", "--porcelain")).toBe("");
+    expect(broker.authorizeRoot)
+      .toHaveBeenCalledWith(realpathSync.native(repository));
+    expect(broker.verifyRoot).toHaveBeenCalledTimes(13);
+    expect(vi.mocked(broker.verifyRoot).mock.calls.map(
+      ([root]) => realpathSync.native(root.root),
+    ))
+      .toEqual(Array.from(
+        { length: 13 },
+        () => realpathSync.native(repository),
+      ));
+    expect(send).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "request.result",
+        requestId: command.requestId,
+        result: expect.objectContaining({ kind: "git.action" }),
+      }),
+    );
+  });
+
+  it("acknowledges one commit when post-ref containment refresh fails", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    writeFileSync(join(repository, "README.md"), "after containment refresh\n");
+    const broker = secureFiles();
+    const baseVerify = vi.mocked(broker.verifyRoot).getMockImplementation();
+    if (!baseVerify) throw new Error("Expected secure-root verifier.");
+    vi.mocked(broker.verifyRoot).mockImplementation(async (capability, signal) => {
+      await baseVerify(capability, signal);
+      if (git(repository, "log", "-1", "--pretty=%s") === "Commit once") {
+        throw new Error("Injected post-commit containment refresh failure.");
+      }
+    });
+    const harness = await nestedCommitHarness(
+      workspace,
+      repository,
+      broker,
+      "Commit once",
+      ["README.md"],
+    );
+    const before = Number(git(repository, "rev-list", "--count", "HEAD"));
+
+    await expect(harness.handler(harness.socket, harness.command))
+      .resolves.toBe("handled");
+
+    expect(Number(git(repository, "rev-list", "--count", "HEAD")))
+      .toBe(before + 1);
+    expect(git(repository, "log", "-1", "--pretty=%s")).toBe("Commit once");
+    expect(harness.trackSourceControl).toHaveBeenCalledOnce();
+    expect(harness.send).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "request.result",
+        requestId: harness.command.requestId,
+        result: expect.objectContaining({
+          kind: "git.action",
+          message: expect.stringMatching(/Committed .*index recovery.*manual/iu),
+        }),
+      }),
+    );
+    expect(harness.broadcastSnapshot).toHaveBeenCalled();
+  });
+
+  it("acknowledges an advanced commit when run persistence and live broadcasts fail", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    writeFileSync(join(repository, "README.md"), "authoritative commit\n");
+    const activityStore = {
+      conversation: vi.fn(),
+      createWorkspaceRun: vi.fn(() => ({ id: crypto.randomUUID() })),
+      updateWorkspaceRun: vi.fn((
+        _runId: string,
+        update: { status?: string },
+      ) => {
+        if (update.status === "succeeded") {
+          throw new Error("Injected succeeded activity persistence failure.");
+        }
+      }),
+      conversationWork: {
+        reserveCheckout: vi.fn(() => true),
+        release: vi.fn(),
+      },
+    };
+    const controllerBroadcast = vi.fn(() => {
+      throw new Error("Injected live snapshot failure.");
+    });
+    const invalidated = vi.fn()
+      .mockImplementationOnce(() => {
+        throw new Error("Injected invalidation failure.");
+      });
+    const controller = new WorkspaceRunController(
+      activityStore as never,
+      {} as never,
+      controllerBroadcast,
+      () => false,
+      invalidated,
+    );
+    const harness = await nestedCommitHarness(
+      workspace,
+      repository,
+      secureFiles(),
+      "Commit despite projection failures",
+      ["README.md"],
+      undefined,
+      controller,
+    );
+    const before = Number(git(repository, "rev-list", "--count", "HEAD"));
+
+    await expect(harness.handler(harness.socket, harness.command))
+      .resolves.toBe("handled");
+
+    expect(Number(git(repository, "rev-list", "--count", "HEAD")))
+      .toBe(before + 1);
+    expect(harness.send).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "request.result",
+        requestId: harness.command.requestId,
+        result: expect.objectContaining({ kind: "git.action" }),
+      }),
+    );
+    await expect(controller.trackSourceControl(
+      "Follow-up mutation",
+      projectId,
+      undefined,
+      workspace,
+      crypto.randomUUID(),
+      async () => "follow-up",
+      { recoverReviewedCommit: false, serializationRoot: repository },
+    )).resolves.toBe("follow-up");
+    expect(invalidated).toHaveBeenCalledTimes(2);
+    expect(activityStore.conversationWork.release).toHaveBeenCalledTimes(2);
+  });
+
+  it("acknowledges one commit when post-commit review reconciliation fails", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    writeFileSync(join(repository, "README.md"), "after review refresh\n");
+    writeFileSync(join(repository, "left-untracked.txt"), "still pending\n");
+    const broker = secureFiles();
+    vi.mocked(broker.read).mockRejectedValue(
+      new Error("Injected review diff read failure."),
+    );
+    const harness = await nestedCommitHarness(
+      workspace,
+      repository,
+      broker,
+      "Commit reviewed path once",
+      ["README.md"],
+      "22222222-2222-4222-8222-222222222222",
+    );
+    const before = Number(git(repository, "rev-list", "--count", "HEAD"));
+
+    await expect(harness.handler(harness.socket, harness.command))
+      .resolves.toBe("handled");
+
+    expect(Number(git(repository, "rev-list", "--count", "HEAD")))
+      .toBe(before + 1);
+    expect(git(repository, "log", "-1", "--pretty=%s"))
+      .toBe("Commit reviewed path once");
+    expect(readFileSync(join(repository, "left-untracked.txt"), "utf8"))
+      .toBe("still pending\n");
+    if (harness.command.type !== "git.commit") {
+      throw new Error("Expected parsed Git commit command.");
+    }
+    expect(harness.command.payload.conversationId)
+      .toBe("22222222-2222-4222-8222-222222222222");
+    expect(broker.read).toHaveBeenCalled();
+    expect(harness.send).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "request.result",
+        requestId: harness.command.requestId,
+        result: expect.objectContaining({
+          kind: "git.action",
+          message: expect.stringMatching(/review state could not be refreshed/iu),
+        }),
+      }),
+    );
+    expect(harness.broadcastSnapshot).toHaveBeenCalled();
+  });
+
+  it("rejects a repository path that escapes the active workspace before reserving it", async () => {
+    const { workspace } = workspaceWithNestedRepository();
+    const trackSourceControl = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: secureFiles(),
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type: "git.push",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "../outside",
+        authorityRef: crypto.randomUUID(),
+      },
+    });
+
+    await expect(handler({} as WebSocket, command)).rejects.toThrow(
+      /repository path is invalid/iu,
+    );
+    expect(trackSourceControl).not.toHaveBeenCalled();
+  });
+
+  it("rejects a replaced repository at the same path before a mutation starts", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    writeFileSync(join(repository, "README.md"), "pending change\n");
+    const initialInfo = lstatSync(repository, { bigint: true });
+    let generation = initialInfo.birthtimeNs.toString(10);
+    const broker = secureFiles({
+      generation: () => generation,
+      fixedIdentity: {
+        dev: initialInfo.dev.toString(10),
+        ino: initialInfo.ino.toString(10),
+      },
+    });
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = {} as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+      repository,
+    );
+    const authorityRef = await authorities.issue(
+      socket,
+      "git-repository",
+      [
+        projectId,
+        "",
+        workspace,
+        "modules/alpha",
+        metadataMarkerIdentity,
+      ],
+      await broker.authorizeRoot(repository),
+    );
+    const reviewReceipt = await issueCommitReview(
+      authorities,
+      socket,
+      broker,
+      workspace,
+      repository,
+      metadataMarkerIdentity,
+    );
+    const trackSourceControl = vi.fn(async (
+      _label: string,
+      _projectId: string,
+      _conversationId: string | undefined,
+      _cwd: string,
+      _requestId: string,
+      operation: () => Promise<unknown>,
+    ) => {
+      rmSync(repository, { recursive: true, force: true });
+      initializeRepository(repository);
+      writeFileSync(join(repository, "README.md"), "replacement change\n");
+      generation = (initialInfo.birthtimeNs + 1n).toString(10);
+      return await operation();
+    });
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type: "git.commit",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "modules/alpha",
+        authorityRef,
+        message: "Must not reach replacement",
+        paths: ["README.md"],
+        reviewReceipt,
+      },
+    });
+
+    await expect(handler(socket, command)).rejects.toThrow(
+      /secure root identity changed/iu,
+    );
+    expect(trackSourceControl).toHaveBeenCalledOnce();
+    expect(git(repository, "log", "-1", "--pretty=%s")).toBe("Initial");
+    expect(git(repository, "status", "--porcelain")).toBe("M README.md");
+    expect(broker.verifyRoot).toHaveBeenCalled();
+  });
+
+  it("rejects replaced Git metadata before mutating the repository", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = {} as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+      repository,
+    );
+    const authorityRef = await authorities.issue(
+      socket,
+      "git-repository",
+      [
+        projectId,
+        "",
+        workspace,
+        "modules/alpha",
+        metadataMarkerIdentity,
+      ],
+      await broker.authorizeRoot(repository),
+    );
+    writeFileSync(join(repository, "README.md"), "pending change\n");
+    const reviewReceipt = await issueCommitReview(
+      authorities,
+      socket,
+      broker,
+      workspace,
+      repository,
+      metadataMarkerIdentity,
+    );
+    const trackSourceControl = vi.fn(async (
+      _label: string,
+      _projectId: string,
+      _conversationId: string | undefined,
+      _cwd: string,
+      _requestId: string,
+      operation: () => Promise<unknown>,
+    ) => {
+      replaceRepositoryMetadata(workspace, repository);
+      writeFileSync(join(repository, "README.md"), "replacement change\n");
+      return await operation();
+    });
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type: "git.commit",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "modules/alpha",
+        authorityRef,
+        message: "Must not mutate replacement metadata",
+        paths: ["README.md"],
+        reviewReceipt,
+      },
+    });
+
+    await expect(handler(socket, command)).rejects.toThrow(
+      /repository changed after its status was loaded/iu,
+    );
+    expect(trackSourceControl).toHaveBeenCalledOnce();
+    expect(git(repository, "log", "-1", "--pretty=%s")).toBe(
+      "Replacement initial",
+    );
+    expect(git(repository, "status", "--porcelain")).toBe("M README.md");
+  });
+
+  it("rejects a linked worktree when only its common Git directory changes", async () => {
+    const source = mkdtempSync(join(tmpdir(), "inertia-linked-source-"));
+    roots.push(source);
+    initializeRepository(source);
+    const workspace = mkdtempSync(join(tmpdir(), "inertia-linked-workspace-"));
+    roots.push(workspace);
+    const repository = join(workspace, "modules", "alpha");
+    mkdirSync(join(workspace, "modules"), { recursive: true });
+    git(source, "worktree", "add", "-q", "-b", "linked", repository);
+    writeFileSync(join(repository, "README.md"), "linked pending change\n");
+    const replacement = mkdtempSync(join(tmpdir(), "inertia-linked-replacement-"));
+    roots.push(replacement);
+    initializeRepository(replacement);
+
+    const gitDirectory = git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    );
+    const commonDirectory = git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    );
+    const replacementCommonDirectory = git(
+      replacement,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    );
+    const gitDirectoryInfo = lstatSync(gitDirectory, { bigint: true });
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = {} as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+      repository,
+    );
+    const issueRepositoryAuthority = async (): Promise<string> =>
+      await authorities.issue(
+        socket,
+        "git-repository",
+        [
+          projectId,
+          "",
+          workspace,
+          "modules/alpha",
+          metadataMarkerIdentity,
+        ],
+        await broker.authorizeRoot(repository),
+      );
+    const diffAuthorityRef = await issueRepositoryAuthority();
+    const commitAuthorityRef = await issueRepositoryAuthority();
+    const verifyCountBeforeReplacement = vi.mocked(broker.verifyRoot).mock.calls.length;
+    const linkedHead = git(source, "rev-parse", "refs/heads/linked");
+
+    expect(commonDirectory).not.toBe(replacementCommonDirectory);
+    writeFileSync(
+      join(gitDirectory, "commondir"),
+      `${replacementCommonDirectory}\n`,
+    );
+
+    expect(git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    )).toBe(gitDirectory);
+    const currentGitDirectoryInfo = lstatSync(gitDirectory, { bigint: true });
+    expect({
+      birthtimeNs: currentGitDirectoryInfo.birthtimeNs,
+      dev: currentGitDirectoryInfo.dev,
+      ino: currentGitDirectoryInfo.ino,
+    }).toEqual({
+      birthtimeNs: gitDirectoryInfo.birthtimeNs,
+      dev: gitDirectoryInfo.dev,
+      ino: gitDirectoryInfo.ino,
+    });
+    await expect(repositoryMetadataMarkerIdentity(repository)).resolves.not.toBe(
+      metadataMarkerIdentity,
+    );
+
+    const trackSourceControl = vi.fn();
+    const send = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+      send,
+    } as unknown as SourceControlCommandDependencies);
+    const diffCommand = clientCommandSchema.parse({
+      type: "git.workspace.diff",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "modules/alpha",
+        authorityRef: diffAuthorityRef,
+      },
+    });
+    const commitCommand = clientCommandSchema.parse({
+      type: "git.commit",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "modules/alpha",
+        authorityRef: commitAuthorityRef,
+        message: "Must not mutate redirected common metadata",
+        paths: ["README.md"],
+        reviewReceipt: {
+          authorityRef: crypto.randomUUID(),
+          fingerprint: "a".repeat(64),
+        },
+      },
+    });
+
+    await expect(handler(socket, diffCommand)).rejects.toThrow(
+      /filesystem authorization expired|refresh and try again/iu,
+    );
+    expect(broker.verifyRoot).toHaveBeenCalledTimes(
+      verifyCountBeforeReplacement,
+    );
+    await expect(handler(socket, commitCommand)).rejects.toThrow(
+      /filesystem authorization expired|refresh and try again/iu,
+    );
+
+    expect(trackSourceControl).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(broker.verifyRoot).toHaveBeenCalledTimes(
+      verifyCountBeforeReplacement + 1,
+    );
+    expect(git(source, "rev-parse", "refs/heads/linked")).toBe(linkedHead);
+    expect(readFileSync(join(repository, "README.md"), "utf8"))
+      .toBe("linked pending change\n");
+  });
+
+  it("rejects a queued root mutation when linked common metadata changes", async () => {
+    const source = mkdtempSync(join(tmpdir(), "inertia-root-linked-source-"));
+    roots.push(source);
+    initializeRepository(source);
+    const workspaceContainer = mkdtempSync(
+      join(tmpdir(), "inertia-root-linked-workspace-"),
+    );
+    roots.push(workspaceContainer);
+    const workspace = join(workspaceContainer, "checkout");
+    git(source, "worktree", "add", "-q", "-b", "root-linked", workspace);
+    const replacement = mkdtempSync(
+      join(tmpdir(), "inertia-root-linked-replacement-"),
+    );
+    roots.push(replacement);
+    initializeRepository(replacement);
+    const gitDirectory = git(
+      workspace,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    );
+    const replacementCommonDirectory = git(
+      replacement,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    );
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = {} as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+      workspace,
+    );
+    const authorityRef = await authorities.issue(
+      socket,
+      "git-repository",
+      [projectId, "", workspace, ".", metadataMarkerIdentity],
+      await broker.authorizeRoot(workspace),
+    );
+    const linkedHead = git(source, "rev-parse", "refs/heads/root-linked");
+    const trackSourceControl = vi.fn(async (
+      _label: string,
+      _projectId: string,
+      _conversationId: string | undefined,
+      _cwd: string,
+      _requestId: string,
+      operation: () => Promise<unknown>,
+    ) => {
+      writeFileSync(
+        join(gitDirectory, "commondir"),
+        `${replacementCommonDirectory}\n`,
+      );
+      return await operation();
+    });
+    const send = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+      send,
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type: "git.push",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: ".",
+        authorityRef,
+      },
+    });
+
+    await expect(handler(socket, command)).rejects.toThrow(
+      /repository changed after its status was loaded/iu,
+    );
+
+    expect(trackSourceControl).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(git(source, "rev-parse", "refs/heads/root-linked"))
+      .toBe(linkedHead);
+  });
+
+  it("rejects replaced Git metadata before reading its corrupt index", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = {} as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+      repository,
+    );
+    const authorityRef = await authorities.issue(
+      socket,
+      "git-repository",
+      [
+        projectId,
+        "",
+        workspace,
+        "modules/alpha",
+        metadataMarkerIdentity,
+      ],
+      await broker.authorizeRoot(repository),
+    );
+    replaceRepositoryMetadata(workspace, repository);
+    writeFileSync(join(repository, ".git", "index"), "not a Git index\n");
+    const trackSourceControl = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type: "git.commit",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "modules/alpha",
+        authorityRef,
+        message: "Must reject before status",
+        paths: ["README.md"],
+        reviewReceipt: {
+          authorityRef: crypto.randomUUID(),
+          fingerprint: "a".repeat(64),
+        },
+      },
+    });
+
+    await expect(handler(socket, command)).rejects.toThrow(
+      /filesystem authorization expired|refresh and try again/iu,
+    );
+    expect(trackSourceControl).not.toHaveBeenCalled();
+    expect(git(repository, "log", "-1", "--pretty=%s")).toBe(
+      "Replacement initial",
+    );
+  });
+
+  it("rejects an external core.worktree redirect before mutation", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    const outside = mkdtempSync(join(tmpdir(), "inertia-external-worktree-"));
+    roots.push(outside);
+    writeFileSync(join(outside, "README.md"), "outside\n");
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = {} as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+      repository,
+    );
+    const authorityRef = await authorities.issue(
+      socket,
+      "git-repository",
+      [
+        projectId,
+        "",
+        workspace,
+        "modules/alpha",
+        metadataMarkerIdentity,
+      ],
+      await broker.authorizeRoot(repository),
+    );
+    writeFileSync(join(repository, "README.md"), "pending change\n");
+    const reviewReceipt = await issueCommitReview(
+      authorities,
+      socket,
+      broker,
+      workspace,
+      repository,
+      metadataMarkerIdentity,
+    );
+    const trackSourceControl = vi.fn(async (
+      _label: string,
+      _projectId: string,
+      _conversationId: string | undefined,
+      _cwd: string,
+      _requestId: string,
+      operation: () => Promise<unknown>,
+    ) => {
+      git(repository, "config", "core.worktree", outside);
+      return await operation();
+    });
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type: "git.commit",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId,
+        repositoryPath: "modules/alpha",
+        authorityRef,
+        message: "Must not escape the selected worktree",
+        paths: ["README.md"],
+        reviewReceipt,
+      },
+    });
+
+    await expect(handler(socket, command)).rejects.toThrow(
+      /repository changed after its status was loaded/iu,
+    );
+    expect(trackSourceControl).toHaveBeenCalledOnce();
+    expect(readFileSync(join(outside, "README.md"), "utf8")).toBe("outside\n");
+  });
+});

@@ -10,7 +10,8 @@ const DEFAULT_AUTHORITY_TTL_MS = 60 * 60 * 1_000;
 const DEFAULT_MAX_AUTHORITIES = 512;
 
 export type SecureFileAuthorityPurpose =
-  | "git-diff"
+  | "git-repository"
+  | "git-commit-review"
   | "reversal-apply"
   | "reversal-undo"
   | "workspace-save";

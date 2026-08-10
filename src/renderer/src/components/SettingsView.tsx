@@ -25,7 +25,6 @@ import {
 import clsx from "clsx";
 
 import {
-  defaultSettings,
   type AppSettings,
   type Conversation,
   type DatabaseBackupStatus,
@@ -41,6 +40,7 @@ import {
   type ProviderMaintenanceProviderId,
   type ThemePreference,
 } from "@shared/contracts";
+import { defaultSettings } from "@shared/contracts/app";
 import type { AppHealthSnapshot, AppUpdateStatus } from "@shared/desktop";
 import { INERTIA_VERSION } from "@shared/version";
 import {

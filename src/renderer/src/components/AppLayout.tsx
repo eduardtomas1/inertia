@@ -8,6 +8,7 @@ import type {
   AppSettings,
   Conversation,
   GitBranchInfo,
+  GitDiffSnapshot,
   GitStatusSnapshot,
   Project,
   ProjectAction,
@@ -26,6 +27,7 @@ import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { ActivityRunSummary } from "../utils/activityCenter";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
+import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import type { CommitDialogProps } from "./CommitDialog";
@@ -45,8 +47,8 @@ import {
   scheduleFrequentSurfacePrefetch,
 } from "./lazySurfaceLoaders";
 
-const CommitDialog = lazy(async () => ({
-  default: (await loadCommitDialog()).CommitDialog,
+const RootCommitDialog = lazy(async () => ({
+  default: (await loadCommitDialog()).RootCommitDialog,
 }));
 const MultiSpawnDialog = lazy(async () => ({
   default: (await loadMultiSpawnDialog()).MultiSpawnDialog,
@@ -88,6 +90,9 @@ interface AppLayoutActions {
     name: string,
   ) => void;
   loadGit: () => Promise<void>;
+  loadCommitReview: () => Promise<GitDiffSnapshot | null>;
+  discardCommitReview: () => void;
+  commitReviewRevision: number;
   commit: (
     message: string,
     push: boolean,
@@ -138,9 +143,6 @@ interface AppLayoutProps {
   branches: GitBranchInfo[];
   projectActions: ProjectAction[];
   reviewStates: CommitDialogProps["reviewStates"];
-  structuredDiff: CommitDialogProps["diff"];
-  structuredDiffParsing: CommitDialogProps["diffParsing"];
-  structuredDiffError: CommitDialogProps["diffError"];
   multiSpawn: MultiSpawnController;
   scene: WorkspaceSceneProps;
   providerAuth: Parameters<typeof AppStatusOverlays>[0]["providerAuth"];
@@ -228,15 +230,14 @@ export function AppLayout({
   branches,
   projectActions,
   reviewStates,
-  structuredDiff,
-  structuredDiffParsing,
-  structuredDiffError,
   multiSpawn,
   scene,
   providerAuth,
   actions,
 }: AppLayoutProps): React.JSX.Element {
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  const rootRepository = rootGitMutationScope(gitStatus);
+  const commitReviewOwner = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const {
     sidebarOpen,
     setSidebarOpen,
@@ -543,15 +544,41 @@ export function AppLayout({
               })}
             onOpenPullRequest={() => {
               if (!project) return;
+              if (!rootRepository) {
+                setActionError(
+                  "Refresh repository status before opening a pull request.",
+                );
+                return;
+              }
               setPullRequestDialogOpen(true);
             }}
             onPull={() => {
               if (!project) return;
+              if (!rootRepository) {
+                setActionError("Refresh repository status before pulling.");
+                return;
+              }
               void actions.run("git.pull", {
                 type: "git.pull",
                 payload: {
                   projectId: project.id,
                   conversationId: conversation?.id,
+                  ...rootRepository,
+                },
+              }).catch(() => undefined);
+            }}
+            onPush={() => {
+              if (!project) return;
+              if (!rootRepository) {
+                setActionError("Refresh repository status before pushing.");
+                return;
+              }
+              void actions.run("git.push", {
+                type: "git.push",
+                payload: {
+                  projectId: project.id,
+                  conversationId: conversation?.id,
+                  ...rootRepository,
                 },
               }).catch(() => undefined);
             }}
@@ -573,25 +600,22 @@ export function AppLayout({
       </section>
 
       {commitDialogOpen && (
-        <Suspense fallback={null}>
-          <CommitDialog
-            open
-            repositoryPath="."
+        <Suspense fallback={<div role="status">Preparing commit review…</div>}>
+          <RootCommitDialog
+            owner={commitReviewOwner}
+            revision={actions.commitReviewRevision}
             status={gitStatus}
             reviewStates={reviewStates}
-            diff={structuredDiff}
-            diffParsing={structuredDiffParsing}
-            diffError={structuredDiffError}
             busy={busyAction === "git.commit" || busyAction === "git.push"}
+            loadReview={actions.loadCommitReview}
+            discardReview={actions.discardCommitReview}
             onClose={() => setCommitDialogOpen(false)}
-            onCommit={async (...args) => {
-              await actions.commit(...args);
-              setCommitDialogOpen(false);
-            }}
+            onError={setActionError}
+            onCommit={actions.commit}
           />
         </Suspense>
       )}
-      {pullRequestDialogOpen && project && (
+      {pullRequestDialogOpen && project && rootRepository && (
         <Suspense fallback={null}>
           <PullRequestDialog
             open
@@ -599,6 +623,8 @@ export function AppLayout({
             busy={busyAction === "git.pr.create" || busyAction === "git.pr.open"}
             projectId={project.id}
             conversationId={conversation?.id}
+            repositoryPath={rootRepository.repositoryPath}
+            authorityRef={rootRepository.authorityRef}
             forge={gitStatus?.pullRequest?.forge ?? "github"}
             run={actions.run}
             onClose={() => setPullRequestDialogOpen(false)}

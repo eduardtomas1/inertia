@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { BigIntStats } from "node:fs";
 import {
   lstat,
   realpath,
@@ -25,6 +26,12 @@ import { SecureFileError } from "../secure-files.js";
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_PENDING_REQUESTS = 64;
 
+type SecureRootInspector = (root: string) => Promise<BigIntStats>;
+
+async function inspectSecureRoot(root: string): Promise<BigIntStats> {
+  return await lstat(root, { bigint: true });
+}
+
 interface PendingRequest {
   operation: SecureFileRequest["operation"];
   timer: NodeJS.Timeout;
@@ -45,6 +52,16 @@ function missingPath(error: unknown): boolean {
     && error.code === "ENOENT";
 }
 
+function stableBirthtimeNs(birthtimeNs: bigint): string {
+  if (birthtimeNs <= 0n) {
+    throw new SecureFileError(
+      "unsafe",
+      "The secure file root does not expose a stable creation identity.",
+    );
+  }
+  return birthtimeNs.toString(10);
+}
+
 export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
   private readonly pending = new Map<string, PendingRequest>();
   private readonly timeoutMs: number;
@@ -53,6 +70,7 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
   constructor(
     private readonly post: (event: RuntimeWorkerEvent) => void,
     timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    private readonly inspectRoot: SecureRootInspector = inspectSecureRoot,
   ) {
     this.timeoutMs = Math.max(1, Math.min(Math.trunc(timeoutMs), 30_000));
   }
@@ -101,7 +119,7 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
   ): Promise<SecureFileRootCapability> {
     if (this.closed || signal?.aborted) throw unavailable();
     const canonicalRoot = await realpath(root);
-    const rootInfo = await lstat(canonicalRoot, { bigint: true });
+    const rootInfo = await this.inspectRoot(canonicalRoot);
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {
       throw new SecureFileError(
         "unsafe",
@@ -111,6 +129,7 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
     return {
       root: canonicalRoot,
       identity: this.identity(rootInfo),
+      birthtimeNs: stableBirthtimeNs(rootInfo.birthtimeNs),
     };
   }
 
@@ -119,11 +138,12 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
     signal?: AbortSignal,
   ): Promise<void> {
     if (this.closed || signal?.aborted) throw unavailable();
-    const rootInfo = await lstat(root.root, { bigint: true });
+    const rootInfo = await this.inspectRoot(root.root);
     if (
       !rootInfo.isDirectory()
       || rootInfo.isSymbolicLink()
       || !this.sameIdentity(this.identity(rootInfo), root.identity)
+      || stableBirthtimeNs(rootInfo.birthtimeNs) !== root.birthtimeNs
     ) {
       throw new SecureFileError(
         "unsafe",

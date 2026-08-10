@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync, statSync } from "node:fs";
 
 import type {
   Conversation,
@@ -6,6 +7,7 @@ import type {
   WorkspaceRun,
 } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
+import { recoverReviewedCommitTransaction } from "../git";
 import {
   projectActionCommand,
 } from "../runtime-commands";
@@ -48,6 +50,44 @@ export interface WorkspaceAction {
   label: string;
   command: string;
   preview: boolean;
+}
+
+export interface SourceControlSerializationIdentity {
+  canonicalPath: string;
+  dev: bigint;
+  ino: bigint;
+  birthtimeNs: bigint;
+}
+
+export type SourceControlSerializationIdentityResolver = (
+  root: string,
+) => SourceControlSerializationIdentity;
+
+export type ReviewedCommitRecovery = (
+  root: string,
+  verifyRepositoryIdentity?: () => void | Promise<void>,
+) => Promise<void>;
+
+function sourceControlSerializationIdentity(
+  root: string,
+): SourceControlSerializationIdentity {
+  const canonicalPath = realpathSync.native(root);
+  const info = statSync(canonicalPath, { bigint: true });
+  if (!info.isDirectory()) throw new Error("Source-control root is not a directory.");
+  return {
+    canonicalPath,
+    dev: info.dev,
+    ino: info.ino,
+    birthtimeNs: info.birthtimeNs,
+  };
+}
+
+function sourceControlSerializationKey(
+  identity: SourceControlSerializationIdentity,
+): string {
+  return identity.dev !== 0n && identity.ino !== 0n
+    ? `fs:${identity.dev}:${identity.ino}:${identity.birthtimeNs}`
+    : `path:${identity.canonicalPath}`;
 }
 
 export interface StartWorkspaceActionInput<Owner> {
@@ -102,6 +142,7 @@ function conversationDetail(conversation: Pick<Conversation, "providerId" | "tit
 export class WorkspaceRunController<Owner> {
   private readonly managedActions = new Map<string, { terminalId: string }>();
   private readonly sourceControlInFlight = new Map<string, number>();
+  private readonly sourceControlTails = new Map<string, Promise<void>>();
 
   constructor(
     private readonly store: WorkspaceRunStore,
@@ -113,6 +154,11 @@ export class WorkspaceRunController<Owner> {
       projectId: string,
       conversationId: string | null,
     ) => void,
+    private readonly resolveSourceControlSerializationIdentity:
+      SourceControlSerializationIdentityResolver
+      = sourceControlSerializationIdentity,
+    private readonly recoverReviewedCommit: ReviewedCommitRecovery
+      = recoverReviewedCommitTransaction,
   ) {}
 
   async listActions(cwd: string): Promise<WorkspaceAction[]> {
@@ -274,65 +320,144 @@ export class WorkspaceRunController<Owner> {
     label: string,
     projectId: string,
     conversationId: string | undefined,
-    cwd: string,
+    checkoutRoot: string,
     requestId: string,
     operation: () => Promise<T>,
+    options: {
+      recoverReviewedCommit?: boolean;
+      serializationRoot?: string;
+      verifyRepositoryIdentity?: () => void | Promise<void>;
+    } = {},
   ): Promise<T> {
-    const reservationId = `source-control:${requestId}`;
-    if (!this.store.conversationWork.reserveCheckout(
-      reservationId,
-      projectId,
-      cwd,
-    )) {
-      throw new RuntimeRequestError(
-        "End the resumed provider terminal before changing this workspace with Git.",
-      );
-    }
-    try {
-      const invalidationScope = `${projectId}:${conversationId ?? ""}`;
-      const detail = conversationId
-        ? conversationDetail(this.store.conversation(conversationId))
-        : "Started from the workspace";
-      const activity = this.store.createWorkspaceRun({
-        kind: "source-control",
+    // Multiple projects may point at different folders in one Git checkout.
+    // Reserve each project's checkout scope independently, but serialize every
+    // mutation sharing the repository root so only one recovery-journal
+    // publisher can own a Git index at a time.
+    const serializationRoot = options.serializationRoot ?? checkoutRoot;
+    return await this.withExclusiveSourceControl(serializationRoot, async () => {
+      const reservationId = `source-control:${requestId}`;
+      if (!this.store.conversationWork.reserveCheckout(
+        reservationId,
         projectId,
-        conversationId: conversationId ?? null,
-        label,
-        detail,
-        status: "running",
-        port: null,
-      });
-      this.sourceControlInFlight.set(
-        invalidationScope,
-        (this.sourceControlInFlight.get(invalidationScope) ?? 0) + 1,
-      );
-      this.broadcastSnapshot();
+        checkoutRoot,
+      )) {
+        throw new RuntimeRequestError(
+          "End the resumed provider terminal before changing this workspace with Git.",
+        );
+      }
       try {
-        const result = await operation();
-        this.store.updateWorkspaceRun(activity.id, { status: "succeeded" });
-        return result;
-      } catch (error) {
-        this.store.updateWorkspaceRun(activity.id, {
-          status: "failed",
-          detail: publicRuntimeError(error),
+        if (options.recoverReviewedCommit) {
+          if (!options.verifyRepositoryIdentity) {
+            throw new RuntimeRequestError(
+              "The repository identity could not be verified before recovery.",
+            );
+          }
+          await options.verifyRepositoryIdentity();
+          await this.recoverReviewedCommit(
+            serializationRoot,
+            options.verifyRepositoryIdentity,
+          );
+        }
+        const invalidationScope = `${projectId}:${conversationId ?? ""}`;
+        const detail = conversationId
+          ? conversationDetail(this.store.conversation(conversationId))
+          : "Started from the workspace";
+        const activity = this.store.createWorkspaceRun({
+          kind: "source-control",
+          projectId,
+          conversationId: conversationId ?? null,
+          label,
+          detail,
+          status: "running",
+          port: null,
         });
-        throw error;
-      } finally {
-        this.broadcastSnapshot();
+        this.sourceControlInFlight.set(
+          invalidationScope,
+          (this.sourceControlInFlight.get(invalidationScope) ?? 0) + 1,
+        );
+        try {
+          this.broadcastSnapshot();
+        } catch {
+          // A live projection failure must not prevent the authoritative Git operation.
+        }
+        const outcome = await Promise.resolve().then(operation).then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+        try {
+          this.store.updateWorkspaceRun(activity.id, outcome.ok
+            ? { status: "succeeded" }
+            : {
+                status: "failed",
+                detail: publicRuntimeError(outcome.error),
+              });
+        } catch {
+          // The Git result is authoritative even if activity persistence is unavailable.
+        }
+        try {
+          this.broadcastSnapshot();
+        } catch {
+          // A later snapshot or invalidation can repair this best-effort projection.
+        }
         const remaining = (this.sourceControlInFlight.get(invalidationScope) ?? 1) - 1;
         if (remaining > 0) {
           this.sourceControlInFlight.set(invalidationScope, remaining);
         } else {
           this.sourceControlInFlight.delete(invalidationScope);
-          this.broadcastGitInvalidated(
-            requestId,
-            projectId,
-            conversationId ?? null,
-          );
+          try {
+            this.broadcastGitInvalidated(
+              requestId,
+              projectId,
+              conversationId ?? null,
+            );
+          } catch {
+            // The completed request still truthfully acknowledges the Git result.
+          }
+        }
+        if (!outcome.ok) throw outcome.error;
+        return outcome.value;
+      } finally {
+        try {
+          this.store.conversationWork.release(reservationId);
+        } catch {
+          // Never erase an authoritative operation result during reservation cleanup.
         }
       }
+    });
+  }
+
+  private async withExclusiveSourceControl<T>(
+    serializationRoot: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    let key: string;
+    try {
+      key = sourceControlSerializationKey(
+        this.resolveSourceControlSerializationIdentity(serializationRoot),
+      );
+    } catch {
+      throw new RuntimeRequestError(
+        "The workspace is unavailable for this Git operation.",
+      );
+    }
+    const predecessor = this.sourceControlTails.get(key)
+      ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = predecessor.catch(() => undefined).then(async () => {
+      await current;
+    });
+    this.sourceControlTails.set(key, tail);
+    await predecessor.catch(() => undefined);
+    try {
+      return await operation();
     } finally {
-      this.store.conversationWork.release(reservationId);
+      release();
+      if (this.sourceControlTails.get(key) === tail) {
+        this.sourceControlTails.delete(key);
+      }
     }
   }
 }

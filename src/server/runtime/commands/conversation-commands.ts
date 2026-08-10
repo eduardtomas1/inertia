@@ -23,12 +23,16 @@ import {
   GitError,
   removeWorktree,
 } from "../../git";
+import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
-import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
+import {
+  pinWorktreeSourceIdentity,
+  verifyWorktreeSourceIdentity,
+} from "../worktree-source-identity";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -82,6 +86,9 @@ export interface ConversationCommandDependencies {
   broadcastSnapshot(): void;
   publicError(error: unknown): string;
   send(socket: WebSocket, event: ServerEvent): void;
+  testHooks?: {
+    afterIsolatedWorktreeCreate?: () => void | Promise<void>;
+  };
 }
 
 export function createConversationCommandHandler(
@@ -188,11 +195,16 @@ export function createConversationCommandHandler(
           return finishCreation(conversation.id);
         }
 
+        const worktreeSource = command.payload.useWorktree
+          ? await pinWorktreeSourceIdentity(repositoryPath)
+          : null;
         let projectStatus: Awaited<
           ReturnType<typeof getRepositoryStatus>
         > | null = null;
         try {
-          projectStatus = await getRepositoryStatus(repositoryPath);
+          projectStatus = await getRepositoryStatus(
+            worktreeSource?.root ?? repositoryPath,
+          );
         } catch (error) {
           if (
             !(error instanceof GitError && error.code === "not-repository")
@@ -221,13 +233,23 @@ export function createConversationCommandHandler(
           },
         );
         if (command.payload.useWorktree) {
+          const createdWorktreeReceipt: {
+            value: Awaited<ReturnType<typeof createWorktree>> | null;
+          } = { value: null };
+          let generatedBranch: string | null = null;
           try {
+            if (!worktreeSource) {
+              throw new RuntimeRequestError(
+                "The project repository identity is unavailable.",
+              );
+            }
             if (!projectStatus?.branch) {
               throw new RuntimeRequestError(
                 "Check out a branch before creating an isolated worktree.",
               );
             }
             const branch = `inertia/${conversation.id.slice(0, 8)}`;
+            generatedBranch = branch;
             const target = join(
               dependencies.dataDirectory,
               "worktrees",
@@ -237,29 +259,63 @@ export function createConversationCommandHandler(
               recursive: true,
               mode: 0o700,
             });
-            await dependencies.workspaceRuns.trackSourceControl(
+            const createdStatus = await dependencies.workspaceRuns.trackSourceControl(
               "Create worktree",
               command.payload.projectId,
               conversation.id,
-              repositoryPath,
+              worktreeSource.root,
               command.requestId,
-              async () => await createWorktree(
-                repositoryPath,
-                target,
-                {
-                  branch,
-                  createBranch: true,
-                  startPoint: projectStatus.branch!,
+              async () => {
+                const verifiedRoot = await verifyWorktreeSourceIdentity(
+                  repositoryPath,
+                  worktreeSource,
+                );
+                const created = await createWorktree(
+                  verifiedRoot,
+                  target,
+                  {
+                    branch,
+                    createBranch: true,
+                    startPoint: projectStatus.branch!,
+                  },
+                );
+                createdWorktreeReceipt.value = created;
+                dependencies.store.updateConversation(conversation.id, {
+                  worktreePath: created.root,
+                  branch: created.branch ?? branch,
+                });
+                await dependencies.testHooks?.afterIsolatedWorktreeCreate?.();
+                await verifyWorktreeSourceIdentity(
+                  repositoryPath,
+                  worktreeSource,
+                );
+                return created;
+              },
+              {
+                recoverReviewedCommit: true,
+                serializationRoot: worktreeSource.root,
+                verifyRepositoryIdentity: async () => {
+                  await verifyWorktreeSourceIdentity(
+                    repositoryPath,
+                    worktreeSource,
+                  );
                 },
-              ),
+              },
             );
-            const createdStatus = await getRepositoryStatus(target);
             dependencies.store.updateConversation(conversation.id, {
               worktreePath: createdStatus.root,
               branch: createdStatus.branch ?? branch,
             });
           } catch (error) {
-            dependencies.store.deleteConversation(conversation.id);
+            if (createdWorktreeReceipt.value) {
+              dependencies.store.updateConversation(conversation.id, {
+                worktreePath: createdWorktreeReceipt.value.root,
+                branch: createdWorktreeReceipt.value.branch ?? generatedBranch,
+              });
+              dependencies.broadcastSnapshot();
+            } else {
+              dependencies.store.deleteConversation(conversation.id);
+            }
             throw error;
           }
         }

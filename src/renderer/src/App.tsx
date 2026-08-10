@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  defaultSettings,
   type AgentApprovalDecision,
   type AgentApprovalRequest,
   type AgentInputRequest,
@@ -13,6 +12,7 @@ import {
   type SubagentTrace,
   type WorkspaceRun,
 } from "@shared/contracts";
+import { defaultSettings } from "@shared/contracts/app";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { AppLayout } from "./components/AppLayout";
 import type { WorkspacePanelTab, WorkspaceSceneProps } from "./components/WorkspaceScene";
@@ -449,9 +449,6 @@ export default function App(): React.JSX.Element {
   const {
     gitStatus,
     branches,
-    structuredDiff,
-    structuredDiffParsing,
-    structuredDiffError,
     reviewStates,
     loadGit,
     loadBranches,
@@ -1015,9 +1012,6 @@ export default function App(): React.JSX.Element {
       branches={branches}
       projectActions={projectActions}
       reviewStates={reviewStates}
-      structuredDiff={structuredDiff}
-      structuredDiffParsing={structuredDiffParsing}
-      structuredDiffError={structuredDiffError}
       multiSpawn={multiSpawn}
       scene={visibleWorkspaceScene}
       providerAuth={{
@@ -1046,6 +1040,9 @@ export default function App(): React.JSX.Element {
         loadBranches,
         mutateBranch,
         loadGit: () => loadGit({ authoritative: true }),
+        loadCommitReview: workspaceTools.loadCommitReview,
+        discardCommitReview: workspaceTools.discardCommitReview,
+        commitReviewRevision: workspaceTools.commitReviewRevision,
         commit,
         runProjectAction,
         activateActivityContext,

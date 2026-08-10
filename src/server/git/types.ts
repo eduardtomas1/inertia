@@ -136,6 +136,8 @@ export interface GitSnapshotComparison {
 
 export interface GitCommitResult extends GitMutationResult {
   commit: string;
+  /** The commit exists, but a non-authoritative post-commit refresh needs retry. */
+  refreshWarning?: string;
 }
 
 export interface CreateWorktreeOptions {

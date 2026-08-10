@@ -1,14 +1,17 @@
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
+import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 
 const temporaryDirectories: string[] = [];
+let storeTemplateDirectory: string | null = null;
+let storeTemplateDatabasePath: string | null = null;
 
 function migrateFixtureInPlace(databasePath: string): void {
   const database = new Database(databasePath);
@@ -21,11 +24,15 @@ function migrateFixtureInPlace(databasePath: string): void {
 }
 
 async function createStore(options: { withProject?: boolean } = {}): Promise<{ directory: string; databasePath: string; workspacePath: string; store: RuntimeStore }> {
+  if (!storeTemplateDatabasePath) {
+    throw new Error("The RuntimeStore test database template is unavailable.");
+  }
   const directory = await mkdtemp(join(tmpdir(), "inertia-store-test-"));
   const workspacePath = join(directory, "workspace");
   await mkdir(workspacePath);
   temporaryDirectories.push(directory);
   const databasePath = join(directory, "inertia.sqlite");
+  await copyFile(storeTemplateDatabasePath, databasePath);
   const store = new RuntimeStore(databasePath, workspacePath);
   if (options.withProject !== false) {
     const project = store.createProject("Test project", workspacePath);
@@ -34,8 +41,44 @@ async function createStore(options: { withProject?: boolean } = {}): Promise<{ d
   return { directory, databasePath, workspacePath, store };
 }
 
+beforeAll(async () => {
+  storeTemplateDirectory = await mkdtemp(
+    join(tmpdir(), "inertia-store-template-"),
+  );
+  storeTemplateDatabasePath = join(
+    storeTemplateDirectory,
+    "inertia.sqlite",
+  );
+  const database = new Database(storeTemplateDatabasePath);
+  try {
+    database.pragma("foreign_keys = ON");
+    migrateRuntimeDatabase(database);
+    const versions = database.prepare(
+      "SELECT version FROM schema_migrations ORDER BY version ASC",
+    ).all() as Array<{ version: number }>;
+    expect(versions.map(({ version }) => version)).toEqual(
+      Array.from(
+        { length: CURRENT_DATABASE_SCHEMA_VERSION },
+        (_, index) => index + 1,
+      ),
+    );
+    expect(database.pragma("quick_check", { simple: true })).toBe("ok");
+  } finally {
+    database.close();
+  }
+  expect(database.open).toBe(false);
+});
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
+
+afterAll(async () => {
+  if (storeTemplateDirectory) {
+    await rm(storeTemplateDirectory, { recursive: true, force: true });
+  }
+  storeTemplateDirectory = null;
+  storeTemplateDatabasePath = null;
 });
 
 describe("RuntimeStore conversation lifecycle", () => {

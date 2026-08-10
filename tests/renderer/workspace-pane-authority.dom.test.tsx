@@ -1,4 +1,11 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -11,6 +18,7 @@ import type {
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
+import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
 import { openWorkspaceEntry } from "../../src/renderer/src/hooks/useWorkspaceTools";
 import {
   useWorkspaceFiles,
@@ -149,6 +157,111 @@ function deferredWorkspaceGitRequests() {
 }
 
 describe("workspace pane authority", () => {
+  it("keeps ordinary complete Changes diffs reviewable without a commit receipt", () => {
+    const review = renderHook(() => useWorkspaceReview({
+      project: alpha,
+      conversation: alphaChat,
+      detail: null,
+      gitDiff: {
+        patch: [
+          "diff --git a/src/app.ts b/src/app.ts",
+          "--- a/src/app.ts",
+          "+++ b/src/app.ts",
+          "@@ -1 +1 @@",
+          "-before",
+          "+after",
+          "",
+        ].join("\n"),
+        truncated: false,
+        files: [],
+      },
+      ignoreWhitespace: true,
+      confirmDestructiveActions: false,
+      request: vi.fn(),
+      run: vi.fn(),
+      setGitDiff: vi.fn(),
+    }));
+
+    expect(review.result.current.structuredDiffError).toBeNull();
+    expect(review.result.current.structuredDiff.files).toHaveLength(1);
+  });
+
+  it("blocks root commit clicks and Enter when the complete diff is truncated", () => {
+    const review = renderHook(() => useWorkspaceReview({
+      project: alpha,
+      conversation: alphaChat,
+      detail: null,
+      gitDiff: {
+        patch: [
+          "diff --git a/src/app.ts b/src/app.ts",
+          "--- a/src/app.ts",
+          "+++ b/src/app.ts",
+          "@@ -1 +1 @@",
+          "-before",
+          "+after",
+          "",
+        ].join("\n"),
+        truncated: true,
+        files: [],
+      },
+      ignoreWhitespace: false,
+      confirmDestructiveActions: false,
+      request: vi.fn(),
+      run: vi.fn(),
+      setGitDiff: vi.fn(),
+    }));
+    const onCommit = vi.fn(async () => undefined);
+    render(
+      <CommitDialog
+        open
+        repositoryPath="."
+        status={{
+          isRepository: true,
+          root: "/workspace/inertia",
+          branch: "main",
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [{
+            path: "src/app.ts",
+            status: "modified",
+            insertions: 1,
+            deletions: 1,
+            untracked: false,
+            staged: false,
+            unstaged: true,
+            indexStatus: ".",
+            worktreeStatus: "M",
+          }],
+          insertions: 1,
+          deletions: 1,
+        }}
+        diff={review.result.current.structuredDiff}
+        diffParsing={review.result.current.structuredDiffParsing}
+        diffError={review.result.current.structuredDiffError}
+        reviewStates={[]}
+        busy={false}
+        onClose={vi.fn()}
+        onCommit={onCommit}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Diff truncated. Refresh before committing.",
+    );
+    const message = screen.getByRole("textbox", { name: "Commit message" });
+    fireEvent.change(message, { target: { value: "Must not commit" } });
+    const commit = screen.getByRole("button", { name: "Commit" });
+    const commitAndPush = screen.getByRole("button", { name: "Commit & push" });
+    expect(commit).toBeDisabled();
+    expect(commitAndPush).toBeDisabled();
+    fireEvent.click(commit);
+    fireEvent.click(commitAndPush);
+    fireEvent.keyDown(message, { key: "Enter" });
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it("routes actual directories to reveal and files to the internal preview", async () => {
     const openDirectory = vi.fn(async () => undefined);
     const openFile = vi.fn();
@@ -556,6 +669,86 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.gitDiff?.patch).toBe("BETA");
   });
 
+  it("does not apply a delayed commit review after its project owner changes", async () => {
+    let settleDiff!: (event: ServerEvent) => void;
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") {
+        return Promise.resolve(result({
+          kind: "git.status",
+          status: {
+            isRepository: true,
+            authorityRef: "66666666-6666-4666-8666-666666666666",
+            root: "/alpha",
+            branch: "main",
+            upstream: null,
+            ahead: 0,
+            behind: 0,
+            hasRemote: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
+        }));
+      }
+      if (command.type === "git.diff") {
+        return new Promise((resolve) => {
+          settleDiff = resolve;
+        });
+      }
+      return Promise.reject(new Error(`Unexpected ${command.type} command`));
+    });
+    const hook = renderHook((owner: {
+      project: Project;
+      conversation: Conversation;
+    }) => useWorkspaceGit({
+      ...owner,
+      enabled: true,
+      loadStatusOnMount: false,
+      loadWorkspaceOnMount: false,
+      online: true,
+      ignoreWhitespace: true,
+      refreshVersion: 0,
+      request,
+      run: async (_key, command) => await request(command),
+      subscribe: noopSubscribe,
+      setActionError: vi.fn(),
+    }), {
+      initialProps: { project: alpha, conversation: alphaChat },
+    });
+
+    let loaded!: Promise<unknown>;
+    act(() => {
+      loaded = hook.result.current.loadCommitReview();
+    });
+    await waitFor(() => expect(request).toHaveBeenCalledWith({
+      type: "git.diff",
+      payload: expect.objectContaining({
+        projectId: alpha.id,
+        conversationId: alphaChat.id,
+        ignoreWhitespace: true,
+        commitReview: true,
+      }),
+    }));
+    hook.rerender({ project: beta, conversation: betaChat });
+    await act(async () => {
+      settleDiff(result({
+        kind: "git.diff",
+        diff: {
+          patch: "ALPHA REVIEW",
+          truncated: false,
+          files: [],
+          commitReview: {
+            authorityRef: "77777777-7777-4777-8777-777777777777",
+            fingerprint: "a".repeat(64),
+          },
+        },
+      }));
+      await expect(loaded).resolves.toBeNull();
+    });
+
+    expect(hook.result.current.gitDiff).toBeNull();
+  });
+
   it("loads root Git status for shell actions without scanning nested repositories", async () => {
     const setActionError = vi.fn();
     const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
@@ -696,9 +889,116 @@ describe("workspace pane authority", () => {
       payload: {
         projectId: alpha.id,
         conversationId: alphaChat.id,
+        repositoryPath: ".",
+        authorityRef: "66666666-6666-4666-8666-666666666666",
         name: "feature/chat-checkout",
       },
     });
+  });
+
+  it("pins reviewed root authority and refreshes separately before an optional push", async () => {
+    const reviewedAuthority = "66666666-6666-4666-8666-666666666666";
+    const pushAuthority = "77777777-7777-4777-8777-777777777777";
+    let refreshes = 0;
+    const status = (authorityRef: string): ServerEvent => result({
+      kind: "git.status",
+      status: {
+        isRepository: true,
+        authorityRef,
+        root: "/alpha-worktree",
+        branch: "inertia/alpha-chat",
+        upstream: "origin/inertia/alpha-chat",
+        ahead: 1,
+        behind: 0,
+        hasRemote: true,
+        files: [],
+        insertions: 0,
+        deletions: 0,
+      },
+    });
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") {
+        refreshes += 1;
+        return Promise.resolve(status(
+          refreshes === 1 ? reviewedAuthority : pushAuthority,
+        ));
+      }
+      if (command.type === "git.diff") {
+        return Promise.resolve(result({
+          kind: "git.diff",
+          diff: {
+            patch: "",
+            truncated: false,
+            files: [],
+            commitReview: {
+              authorityRef: "88888888-8888-4888-8888-888888888888",
+              fingerprint: "a".repeat(64),
+            },
+          },
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected ${command.type} command`));
+    });
+    const run = vi.fn(async (
+      _key: string,
+      _command: CommandWithoutId,
+    ): Promise<ServerEvent> => result({
+      kind: "git.action",
+      message: "Done.",
+    }));
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: false,
+      loadStatusOnMount: false,
+      loadWorkspaceOnMount: false,
+      project: alpha,
+      conversation: alphaChat,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request,
+      run,
+      subscribe: noopSubscribe,
+      setActionError,
+    }));
+
+    await act(async () => {
+      expect(await hook.result.current.loadCommitReview()).not.toBeNull();
+      await hook.result.current.loadGit({ authoritative: true, scope: "status" });
+      await hook.result.current.commit(
+        "Commit then push",
+        true,
+        ["selected.txt"],
+      );
+    });
+
+    expect(run.mock.calls.filter(([, command]) => command.type === "git.commit"))
+      .toHaveLength(1);
+    expect(run).toHaveBeenCalledWith("git.commit", {
+      type: "git.commit",
+      payload: {
+        projectId: alpha.id,
+        conversationId: alphaChat.id,
+        repositoryPath: ".",
+        authorityRef: reviewedAuthority,
+        message: "Commit then push",
+        paths: ["selected.txt"],
+        reviewReceipt: {
+          authorityRef: "88888888-8888-4888-8888-888888888888",
+          fingerprint: "a".repeat(64),
+        },
+      },
+    });
+    expect(run).toHaveBeenCalledWith("git.push", {
+      type: "git.push",
+      payload: {
+        projectId: alpha.id,
+        conversationId: alphaChat.id,
+        repositoryPath: ".",
+        authorityRef: pushAuthority,
+      },
+    });
+    expect(setActionError).not.toHaveBeenCalled();
   });
 
   it("keeps the last Git projection visible while reconnect refreshes it", async () => {

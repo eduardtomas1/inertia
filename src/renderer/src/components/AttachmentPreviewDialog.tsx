@@ -9,10 +9,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import {
-  chatAttachmentTypeLabel,
-  type ChatAttachment,
-} from "@shared/contracts";
+import type { ChatAttachment } from "@shared/contracts";
+import { chatAttachmentTypeLabel } from "@shared/attachments";
 import {
   attachmentPreviewKind,
   attachmentPreviewUrl,

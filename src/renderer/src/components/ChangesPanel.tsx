@@ -33,6 +33,7 @@ export type ChangesPanelProps = {
   lastReversal?: DiffReversalOperation | null;
   fileNavigator?: ReactNode;
   compactFileNavigator?: ReactNode;
+  scopeNavigator?: ReactNode;
   notice?: ReactNode;
   headerMetrics?: { files: number; repositories?: number; insertions: number; deletions: number };
   emptyState?: { title: string; detail: string };
@@ -132,6 +133,7 @@ export function ChangesPanel({
   lastReversal = null,
   fileNavigator,
   compactFileNavigator,
+  scopeNavigator,
   notice,
   headerMetrics,
   emptyState,
@@ -358,6 +360,7 @@ export function ChangesPanel({
       </header>
 
       {notice}
+      {scopeNavigator}
       {activeSummary && <div className="diff-overall-summary"><Sparkles size={14} /><span><strong>Change summary</strong>{activeSummary.overall}<ClassificationHints hints={activeSummary.classifications} /></span></div>}
       {totalHunks > 0 && persistentReview && (
         <div className="diff-review-toolbar">

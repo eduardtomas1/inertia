@@ -1,29 +1,37 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   AlertTriangle,
+  Download,
   ExternalLink,
   FileCode2,
   FolderGit2,
   GitBranch,
+  GitCommitHorizontal,
+  GitPullRequest,
+  Info,
+  Upload,
 } from "lucide-react";
 
 import type {
   ChangedFile,
   DiffReviewNote,
   DiffReviewState,
+  GitForge,
   WorkspaceGitDiffSnapshot,
   WorkspaceGitRepositorySnapshot,
   WorkspaceGitSnapshot,
+  ServerEvent,
 } from "@shared/contracts";
+import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
+import type { CommandWithoutId } from "../lib/runtimeCommands";
+import { headerGitActions } from "../utils/headerGitActions";
 import {
-  firstWorkspaceGitFile,
   parseWorkspaceGitIdentity,
   workspaceGitFile,
   workspaceGitFilePath,
   workspaceGitIdentity,
   workspaceGitRepositoryLabel,
-  workspaceGitRepositoryPresentation,
   type WorkspaceGitFileIdentity,
 } from "../utils/workspaceGit";
 import {
@@ -32,6 +40,8 @@ import {
   type DiffSelection,
 } from "./ChangesPanel";
 import { IconButton } from "./ui";
+import { CommitDialog } from "./CommitDialog";
+import PullRequestDialog from "./PullRequestDialog";
 
 type ForwardedChangesProps = Omit<
   ChangesPanelProps,
@@ -41,6 +51,7 @@ type ForwardedChangesProps = Omit<
   | "loading"
   | "fileNavigator"
   | "compactFileNavigator"
+  | "scopeNavigator"
   | "notice"
   | "headerMetrics"
   | "emptyState"
@@ -60,8 +71,24 @@ export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
   onLoadRepositoryDiff: (
     repositoryPath: string,
     filePath?: string,
+    commitReview?: boolean,
   ) => Promise<WorkspaceGitDiffSnapshot>;
   onOpenWorkspaceFile: (path: string) => void;
+  projectId?: string;
+  conversationId?: string;
+  busyAction?: string | null;
+  run?: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  onActionError?: (message: string) => void;
+}
+
+interface PullRequestDialogScope {
+  projectId: string;
+  conversationId?: string;
+  repositoryPath: string;
+  actionRevision: string;
+  authorityRef: string;
+  initialTitle: string;
+  forge: GitForge;
 }
 
 function fileStatus(file: ChangedFile): string {
@@ -77,6 +104,33 @@ function repositoryStatus(repository: WorkspaceGitRepositorySnapshot): string {
   if (repository.state === "error") return "Unavailable";
   if (repository.clean) return "Clean";
   return `${repository.files.length} ${repository.files.length === 1 ? "file" : "files"}`;
+}
+
+function fileWorkingState(file: ChangedFile): string {
+  if (file.untracked) return "untracked";
+  if (file.staged && file.unstaged) return "staged + unstaged";
+  if (file.staged) return "staged";
+  return "unstaged";
+}
+
+function pullRequestActionRevision(
+  repository: WorkspaceGitRepositorySnapshot | null,
+): string | null {
+  if (!repository) return null;
+  return JSON.stringify([
+    repository.repositoryPath,
+    repository.state,
+    repository.truncated,
+    repository.branch,
+    repository.upstream,
+    repository.ahead,
+    repository.behind,
+    repository.hasRemote,
+    repository.pullRequest?.available ?? null,
+    repository.pullRequest?.remoteName ?? null,
+    repository.pullRequest?.forge ?? null,
+    repository.pullRequest?.unavailableReason ?? null,
+  ]);
 }
 
 function selectionWithRepository(
@@ -155,6 +209,11 @@ export function WorkspaceChangesPanel({
   onRefresh,
   onLoadRepositoryDiff,
   onOpenWorkspaceFile,
+  projectId,
+  conversationId,
+  busyAction = null,
+  run,
+  onActionError,
   summary,
   selectionAnswer,
   reviewStates = [],
@@ -169,17 +228,75 @@ export function WorkspaceChangesPanel({
   ...changesProps
 }: WorkspaceChangesPanelProps): React.JSX.Element {
   const [selected, setSelected] = useState<WorkspaceGitFileIdentity | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [selectedRepositoryPath, setSelectedRepositoryPath] = useState<string | null>(null);
   const [diff, setDiff] = useState<WorkspaceGitDiffSnapshot | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [pullRequestDialogScope, setPullRequestDialogScope] = useState<
+    PullRequestDialogScope | null
+  >(null);
+  const [commitDiff, setCommitDiff] = useState<WorkspaceGitDiffSnapshot | null>(null);
+  const [commitDiffLoading, setCommitDiffLoading] = useState(false);
+  const [commitDiffError, setCommitDiffError] = useState<string | null>(null);
+  const commitDiffRequestRef = useRef(0);
+  const parsedCommitDiff = useParsedUnifiedDiff(
+    commitDiff?.patch ?? "",
+    commitDiff,
+  );
 
-  const selectedEntry = snapshot ? workspaceGitFile(snapshot, selected) : null;
-  const firstSelection = snapshot ? firstWorkspaceGitFile(snapshot) : null;
-  const effectiveSelection = selectedEntry ? selected : firstSelection;
-  const effectiveEntry = snapshot ? workspaceGitFile(snapshot, effectiveSelection) : null;
-  const activeRepository = effectiveEntry?.repository ?? null;
+  const selectedEntry = useMemo(
+    () => snapshot ? workspaceGitFile(snapshot, selected) : null,
+    [selected, snapshot],
+  );
+  const requestedRepository = snapshot?.repositories.find(
+    (repository) => repository.repositoryPath === selectedRepositoryPath,
+  ) ?? null;
+  const activeRepository = requestedRepository
+    ?? selectedEntry?.repository
+    ?? snapshot?.repositories.find((repository) => repository.files.length > 0)
+    ?? snapshot?.repositories[0]
+    ?? null;
   const activeRepositoryPath = activeRepository?.repositoryPath ?? null;
+  const activeRepositoryAuthorityRef = activeRepository?.authorityRef ?? undefined;
+  const activePullRequestActionRevision = pullRequestActionRevision(
+    activeRepository,
+  );
+  const activeRepositoryActionRevision = activeRepository
+    ? JSON.stringify([
+        activeRepository.repositoryPath,
+        activeRepository.authorityRef ?? null,
+        activeRepository.state,
+        activeRepository.truncated,
+        activeRepository.branch,
+        activeRepository.upstream,
+        activeRepository.ahead,
+        activeRepository.behind,
+        activeRepository.files.map((file) => [
+          file.path,
+          file.status,
+          file.indexStatus,
+          file.worktreeStatus,
+          file.staged,
+          file.unstaged,
+          file.untracked,
+          file.insertions,
+          file.deletions,
+        ]),
+      ])
+    : null;
+  const effectiveSelection = useMemo<WorkspaceGitFileIdentity | null>(
+    () => selectedEntry
+      && selectedEntry.repository.repositoryPath === activeRepositoryPath
+      ? selected
+      : activeRepository?.files[0]
+        ? {
+            repositoryPath: activeRepository.repositoryPath,
+            filePath: activeRepository.files[0].path,
+          }
+        : null,
+    [activeRepository, activeRepositoryPath, selected, selectedEntry],
+  );
   const nestedRepository = activeRepositoryPath !== null && activeRepositoryPath !== ".";
   const activeFiles = activeRepository?.files ?? [];
   const activeReviewStates = reviewStates.filter(
@@ -200,23 +317,82 @@ export function WorkspaceChangesPanel({
     ),
     [notes, reviewStates, snapshot],
   );
+  const activeGitStatus = useMemo(() => activeRepository?.state === "ready"
+    ? {
+        isRepository: true,
+        authorityRef: activeRepository.authorityRef,
+        root: null,
+        branch: activeRepository.branch,
+        upstream: activeRepository.upstream,
+        ahead: activeRepository.ahead,
+        behind: activeRepository.behind,
+        hasRemote: activeRepository.hasRemote,
+        pullRequest: activeRepository.pullRequest,
+        files: activeRepository.files,
+        insertions: activeRepository.insertions,
+        deletions: activeRepository.deletions,
+      }
+    : null, [activeRepository]);
+  const nestedGitActions = useMemo(
+    () => headerGitActions(activeGitStatus, Boolean(busyAction)),
+    [activeGitStatus, busyAction],
+  );
+  const commitGitStatus = useMemo(() => activeGitStatus && commitDiff
+    ? {
+        ...activeGitStatus,
+        files: commitDiff.files,
+        insertions: commitDiff.files.reduce(
+          (total, file) => total + file.insertions,
+          0,
+        ),
+        deletions: commitDiff.files.reduce(
+          (total, file) => total + file.deletions,
+          0,
+        ),
+      }
+    : activeGitStatus, [activeGitStatus, commitDiff]);
 
   useEffect(() => {
-    if (!effectiveSelection) {
-      setDiff(null);
-      setDiffError(null);
-      return;
+    commitDiffRequestRef.current += 1;
+    setCommitDialogOpen(false);
+    setCommitDiff(null);
+    setCommitDiffLoading(false);
+    setCommitDiffError(null);
+  }, [activeRepositoryActionRevision, activeRepositoryPath]);
+
+  useEffect(() => {
+    setPullRequestDialogScope((current) => current
+      && current.projectId === projectId
+      && current.conversationId === conversationId
+      && current.repositoryPath === activeRepositoryPath
+      && current.actionRevision === activePullRequestActionRevision
+      ? current
+      : null);
+  }, [
+    activePullRequestActionRevision,
+    activeRepositoryPath,
+    conversationId,
+    projectId,
+  ]);
+
+  useEffect(() => {
+    if (!activeRepositoryPath) {
+      if (selectedRepositoryPath !== null) setSelectedRepositoryPath(null);
+      if (selected !== null) setSelected(null);
+    } else {
+      if (selectedRepositoryPath !== activeRepositoryPath) {
+        setSelectedRepositoryPath(activeRepositoryPath);
+      }
+      if (!effectiveSelection) {
+        if (selected !== null) setSelected(null);
+      } else if (
+        selected === null
+        || workspaceGitIdentity(selected) !== workspaceGitIdentity(effectiveSelection)
+      ) {
+        setSelected(effectiveSelection);
+      }
     }
-    if (selected === null || workspaceGitIdentity(selected) !== workspaceGitIdentity(effectiveSelection)) {
-      setSelected(effectiveSelection);
-    }
-    setExpanded((current) => {
-      if (current.has(effectiveSelection.repositoryPath)) return current;
-      const next = new Set(current);
-      next.add(effectiveSelection.repositoryPath);
-      return next;
-    });
-  }, [effectiveSelection, selected]);
+  }, [activeRepositoryPath, effectiveSelection, selected, selectedRepositoryPath]);
 
   useEffect(() => {
     for (const repositoryPath of missingReviewRepositories) {
@@ -236,9 +412,11 @@ export function WorkspaceChangesPanel({
     ) {
       setDiff(null);
       setDiffError(null);
+      setDiffLoading(false);
       return;
     }
     let cancelled = false;
+    setDiff(null);
     setDiffLoading(true);
     setDiffError(null);
     void onLoadRepositoryDiff(
@@ -275,104 +453,279 @@ export function WorkspaceChangesPanel({
     snapshot,
   ]);
 
+  const scopeNavigator = useMemo(() => {
+    if (!snapshot || !activeRepository) return undefined;
+    const label = workspaceGitRepositoryLabel(
+      projectName,
+      activeRepository.repositoryPath,
+    );
+    const nested = activeRepository.repositoryPath !== ".";
+    const canRunRepositoryActions = activeRepository.state === "ready"
+      && projectId
+      && run;
+    const authorityRef = activeRepository.authorityRef ?? undefined;
+    const commitAction = nestedGitActions.find(({ id }) => id === "commit");
+    const pullAction = nestedGitActions.find(({ id }) => id === "pull");
+    const pushAction = nestedGitActions.find(({ id }) => id === "push");
+    const pullRequestAction = nestedGitActions.find(
+      ({ id }) => id === "pull-request",
+    );
+    return (
+      <div className="workspace-repository-scope" aria-label="Git repository scope">
+        <span className="workspace-repository-scope-leading">
+          <FolderGit2 size={14} aria-hidden="true" />
+          {snapshot.repositories.length > 1 ? (
+            <select
+              aria-label="Repository scope"
+              value={activeRepository.repositoryPath}
+              onChange={(event) => {
+                const repository = snapshot.repositories.find(
+                  (candidate) => candidate.repositoryPath === event.currentTarget.value,
+                );
+                if (!repository) return;
+                setSelectedRepositoryPath(repository.repositoryPath);
+                setSelected(repository.files[0]
+                  ? {
+                      repositoryPath: repository.repositoryPath,
+                      filePath: repository.files[0].path,
+                    }
+                  : null);
+              }}
+            >
+              {snapshot.repositories.map((repository) => (
+                <option value={repository.repositoryPath} key={repository.repositoryPath}>
+                  {workspaceGitRepositoryLabel(projectName, repository.repositoryPath)} · {repositoryStatus(repository)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <strong title={label}>{label}</strong>
+          )}
+        </span>
+        <span className="workspace-repository-scope-meta">
+          {activeRepository.branch && (
+            <span className="workspace-repository-scope-branch" title={activeRepository.branch}>
+              <GitBranch size={11} aria-hidden="true" />{activeRepository.branch}
+            </span>
+          )}
+          <span className="workspace-repository-scope-status">
+            {repositoryStatus(activeRepository)}
+          </span>
+          {!activeRepository.clean && activeRepository.state === "ready" && (
+            <span
+              className="workspace-repository-scope-stats"
+              aria-label={`${activeRepository.insertions} insertions and ${activeRepository.deletions} deletions`}
+            >
+              <b>+{activeRepository.insertions}</b><i>−{activeRepository.deletions}</i>
+            </span>
+          )}
+          {nested && (
+            <span
+              className="workspace-repository-scope-boundary"
+              title="Review marks, notes, questions, prompt references, and selective revert stay with this nested repository. Agent summaries and revisions remain limited to the project-root checkout because recovery checkpoints cover that root."
+            >
+              <Info size={11} aria-hidden="true" />Nested repo
+              <span className="sr-only">Review marks, local notes, questions, prompt references, and selective revert keep this repository identity. Agent summaries and revisions remain available only for the project-root repository because their recovery checkpoints cover that root.</span>
+            </span>
+          )}
+        </span>
+        {canRunRepositoryActions && (
+          <span className="workspace-repository-scope-actions" aria-label={`Actions for ${label}`}>
+            <button
+              type="button"
+              disabled={
+                commitDiffLoading
+                || !authorityRef
+                || Boolean(commitAction?.disabled)
+                || activeRepository.truncated
+              }
+              title={!authorityRef
+                ? "Refresh this repository before changing it."
+                : activeRepository.truncated
+                ? "Refresh this repository before committing its complete change set."
+                : commitAction?.detail}
+              onClick={() => {
+                if (!authorityRef || commitDiffLoading) return;
+                const request = ++commitDiffRequestRef.current;
+                setCommitDiff(null);
+                setCommitDiffError(null);
+                setCommitDiffLoading(true);
+                setCommitDialogOpen(true);
+                void onLoadRepositoryDiff(
+                  activeRepository.repositoryPath,
+                  undefined,
+                  true,
+                )
+                  .then((repositoryDiff) => {
+                    if (request !== commitDiffRequestRef.current) return;
+                    if (repositoryDiff.repositoryPath !== activeRepository.repositoryPath) {
+                      throw new Error("The repository changed while its complete diff was loading.");
+                    }
+                    if (repositoryDiff.truncated) {
+                      throw new Error("The complete repository diff was truncated. Refresh this repository and try again before committing.");
+                    }
+                    if (!repositoryDiff.commitReview) {
+                      throw new Error("The complete reviewed repository state is unavailable. Refresh this repository and try again before committing.");
+                    }
+                    setCommitDiff(repositoryDiff);
+                  })
+                  .catch((error: unknown) => {
+                    if (request !== commitDiffRequestRef.current) return;
+                    setCommitDiffError(error instanceof Error
+                      ? error.message
+                      : "The complete repository diff could not be loaded.");
+                  })
+                  .finally(() => {
+                    if (request === commitDiffRequestRef.current) {
+                      setCommitDiffLoading(false);
+                    }
+                  });
+              }}
+            >
+              <GitCommitHorizontal size={12} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
+            </button>
+            <button
+              type="button"
+              disabled={!authorityRef || (pullAction?.disabled ?? true)}
+              title={!authorityRef ? "Refresh this repository before changing it." : pullAction?.detail}
+              onClick={() => {
+                void run("git.pull", {
+                  type: "git.pull",
+                  payload: {
+                    projectId,
+                    conversationId,
+                    repositoryPath: activeRepository.repositoryPath,
+                    authorityRef,
+                  },
+                }).then(onRefresh).catch(() => undefined);
+              }}
+            >
+              <Download size={12} aria-hidden="true" /><span>{pullAction?.label ?? "Pull"}</span>
+            </button>
+            <button
+              type="button"
+              disabled={!authorityRef || (pushAction?.disabled ?? true)}
+              title={!authorityRef ? "Refresh this repository before changing it." : pushAction?.detail}
+              onClick={() => {
+                void run("git.push", {
+                  type: "git.push",
+                  payload: {
+                    projectId,
+                    conversationId,
+                    repositoryPath: activeRepository.repositoryPath,
+                    authorityRef,
+                  },
+                }).then(onRefresh).catch(() => undefined);
+              }}
+            >
+              <Upload size={12} aria-hidden="true" /><span>{pushAction?.label ?? "Push"}</span>
+            </button>
+            <button
+              type="button"
+              disabled={!authorityRef || (pullRequestAction?.disabled ?? true)}
+              title={!authorityRef ? "Refresh this repository before changing it." : pullRequestAction?.detail}
+              onClick={() => {
+                if (!authorityRef) return;
+                setPullRequestDialogScope({
+                  projectId,
+                  conversationId,
+                  repositoryPath: activeRepository.repositoryPath,
+                  actionRevision: pullRequestActionRevision(activeRepository)!,
+                  authorityRef,
+                  initialTitle: activeRepository.branch ?? "Pull request",
+                  forge: activeRepository.pullRequest?.forge ?? "github",
+                });
+              }}
+            >
+              <GitPullRequest size={12} aria-hidden="true" /><span>PR</span>
+            </button>
+          </span>
+        )}
+      </div>
+    );
+  }, [
+    activeRepository,
+    commitDiffLoading,
+    conversationId,
+    nestedGitActions,
+    onLoadRepositoryDiff,
+    onRefresh,
+    projectId,
+    projectName,
+    run,
+    snapshot,
+  ]);
+
   const navigator = useMemo(() => {
-    if (!snapshot || snapshot.repositories.length === 0) return undefined;
+    if (
+      !snapshot
+      || !activeRepository
+      || activeRepository.state === "error"
+      || activeRepository.files.length === 0
+    ) {
+      return undefined;
+    }
+    const label = workspaceGitRepositoryLabel(
+      projectName,
+      activeRepository.repositoryPath,
+    );
+    const stagedFiles = activeRepository.files.filter(
+      (file) => file.staged && !file.unstaged,
+    );
+    const workingFiles = activeRepository.files.filter(
+      (file) => !file.staged || file.unstaged,
+    );
+    const groups = stagedFiles.length > 0
+      ? [
+          { label: "Staged", files: stagedFiles },
+          { label: "Changes", files: workingFiles },
+        ]
+      : [{ label: null, files: workingFiles }];
     return (
       <nav className="changes-file-list workspace-repository-list" aria-label="Git repositories and changed files">
-        <ul role="list">
-          {snapshot.repositories.map((repository) => {
-            const label = workspaceGitRepositoryLabel(projectName, repository.repositoryPath);
-            const presentation = workspaceGitRepositoryPresentation(
-              projectName,
-              repository.repositoryPath,
-            );
-            const isExpanded = expanded.has(repository.repositoryPath);
-            return (
-              <li className={clsx("workspace-repository-group", repository.state === "error" && "has-error")} key={repository.repositoryPath}>
-                <details
-                  aria-label={`${label} repository`}
-                  open={isExpanded}
-                  onToggle={(event) => {
-                    const open = event.currentTarget.open;
-                    setExpanded((current) => {
-                      const next = new Set(current);
-                      if (open) next.add(repository.repositoryPath);
-                      else next.delete(repository.repositoryPath);
-                      return next;
-                    });
-                  }}
-                >
-                  <summary>
-                    <span className="workspace-repository-name">
-                      <FolderGit2 size={15} aria-hidden="true" />
-                      <span>
-                        <strong className="workspace-repository-title" title={label}>
-                          {presentation.prefix && (
-                            <span className="workspace-repository-title-prefix">
-                              {presentation.prefix}
-                            </span>
-                          )}
-                          <span className="workspace-repository-title-suffix">
-                            {presentation.suffix}
-                          </span>
-                        </strong>
-                        <small title={presentation.location}>{presentation.location}</small>
-                      </span>
-                    </span>
-                    <span className="workspace-repository-summary">
-                      {repository.branch && <span><GitBranch size={11} aria-hidden="true" />{repository.branch}</span>}
-                      <span>{repositoryStatus(repository)}</span>
-                      {!repository.clean && repository.state === "ready" && (
-                        <span aria-label={`${repository.insertions} insertions and ${repository.deletions} deletions`}>
-                          <b>+{repository.insertions}</b><i>−{repository.deletions}</i>
-                        </span>
-                      )}
-                    </span>
-                  </summary>
-                  {repository.state === "error" ? (
-                    <p className="workspace-repository-error"><AlertTriangle size={13} />{repository.error}</p>
-                  ) : repository.files.length === 0 ? (
-                    <p className="workspace-repository-clean">No local changes</p>
-                  ) : (
-                    <ul className="workspace-repository-files" role="list">
-                      {repository.files.map((file) => {
-                        const identity = { repositoryPath: repository.repositoryPath, filePath: file.path };
-                        const identityKey = workspaceGitIdentity(identity);
-                        const isSelected = effectiveSelection
-                          ? workspaceGitIdentity(effectiveSelection) === identityKey
-                          : false;
-                        return (
-                          <li key={file.path}>
-                            <button
-                              type="button"
-                              className={clsx("workspace-repository-file", isSelected && "is-selected")}
-                              aria-current={isSelected ? "true" : undefined}
-                              onClick={() => setSelected(identity)}
-                            >
-                              <span className="change-file-leading"><FileCode2 size={14} /><span className="change-file-status">{fileStatus(file)}</span></span>
-                              <span className="workspace-repository-file-copy"><strong title={file.path}>{file.path.split("/").at(-1)}</strong><small>{file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : label}</small></span>
-                              <span className="workspace-repository-file-stats"><b>+{file.insertions}</b><i>−{file.deletions}</i></span>
-                            </button>
-                            <IconButton
-                              label={`Open ${file.path} from ${label}`}
-                              onClick={() => onOpenWorkspaceFile(workspaceGitFilePath(identity))}
-                            >
-                              <ExternalLink size={12} />
-                            </IconButton>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                  {repository.truncated && <p className="workspace-repository-warning">Status is truncated; some changed files are not shown.</p>}
-                </details>
-              </li>
-            );
-          })}
+        <ul className="workspace-repository-files workspace-repository-flat-files" role="list">
+          {groups.flatMap((group) => [
+            ...(group.label && group.files.length > 0
+              ? [<li className="workspace-change-section-heading" key={`heading:${group.label}`}>{group.label}<span>{group.files.length}</span></li>]
+              : []),
+            ...group.files.map((file) => {
+              const identity = {
+                repositoryPath: activeRepository.repositoryPath,
+                filePath: file.path,
+              };
+              const isSelected = effectiveSelection
+                ? workspaceGitIdentity(effectiveSelection) === workspaceGitIdentity(identity)
+                : false;
+              const parent = file.path.includes("/")
+                ? file.path.slice(0, file.path.lastIndexOf("/"))
+                : "";
+              return (
+                <li key={file.path}>
+                  <button
+                    type="button"
+                    className={clsx("workspace-repository-file", isSelected && "is-selected")}
+                    aria-current={isSelected ? "true" : undefined}
+                    onClick={() => setSelected(identity)}
+                  >
+                    <span className="change-file-leading"><FileCode2 size={14} /><span className="change-file-status">{fileStatus(file)}</span></span>
+                    <span className="workspace-repository-file-copy"><strong title={file.path}>{file.path.split("/").at(-1)}</strong>{parent && <small>{parent}</small>}</span>
+                    <span className="workspace-repository-file-stats"><small>{fileWorkingState(file)}</small><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
+                  </button>
+                  <IconButton
+                    label={`Open ${file.path} from ${label}`}
+                    onClick={() => onOpenWorkspaceFile(workspaceGitFilePath(identity))}
+                  >
+                    <ExternalLink size={12} />
+                  </IconButton>
+                </li>
+              );
+            }),
+          ])}
         </ul>
+        {activeRepository.truncated && <p className="workspace-repository-warning">Status is truncated; some changed files are not shown.</p>}
       </nav>
     );
-  }, [effectiveSelection, expanded, onOpenWorkspaceFile, projectName, snapshot]);
+  }, [activeRepository, effectiveSelection, onOpenWorkspaceFile, projectName, snapshot]);
 
   const compactNavigator = useMemo(() => {
     if (!snapshot || snapshot.files === 0 || !effectiveSelection) return undefined;
@@ -387,18 +740,18 @@ export function WorkspaceChangesPanel({
             if (identity) setSelected(identity);
           }}
         >
-          {snapshot.repositories.flatMap((repository) => repository.files.map((file) => {
-            const identity = { repositoryPath: repository.repositoryPath, filePath: file.path };
+          {activeRepository?.files.map((file) => {
+            const identity = { repositoryPath: activeRepository.repositoryPath, filePath: file.path };
             return (
               <option value={workspaceGitIdentity(identity)} key={workspaceGitIdentity(identity)}>
-                {workspaceGitRepositoryLabel(projectName, repository.repositoryPath)} — {fileStatus(file)} · {file.path}
+                {fileStatus(file)} · {file.path}
               </option>
             );
-          }))}
+          })}
         </select>
       </div>
     );
-  }, [effectiveSelection, projectName, snapshot]);
+  }, [activeRepository, effectiveSelection, snapshot]);
 
   const notice = (
     <>
@@ -420,12 +773,6 @@ export function WorkspaceChangesPanel({
           <AlertTriangle size={14} /><span><strong>Diff unavailable.</strong> {diffError}</span>
         </div>
       )}
-      {nestedRepository && (
-        <div className="panel-notice workspace-repository-notice">
-          <FolderGit2 size={14} />
-          <span><strong>Reviewing {activeRepositoryPath}.</strong> Questions, prompt references, review marks, local notes, and selective revert keep this repository identity. Agent summaries and revisions remain available only for the project-root repository because their recovery checkpoints cover that root.</span>
-        </div>
-      )}
     </>
   );
 
@@ -433,20 +780,28 @@ export function WorkspaceChangesPanel({
     selection,
     activeRepositoryPath ?? ".",
   );
-  const emptyState = !snapshot
-    ? { title: "Loading repositories", detail: "Looking for Git repositories inside this workspace." }
-    : snapshot.repositories.length === 0
-      ? { title: "No Git repositories found", detail: "No Git root was found at the project root or within the bounded module scan." }
-      : { title: "No local changes", detail: "The discovered repositories are clean." };
   const allRepositoriesClean = Boolean(
     snapshot?.repositories.length
     && snapshot.repositories.every(
       (repository) => repository.state === "ready" && repository.clean,
     ),
   );
+  const activeRepositoryLabel = activeRepository
+    ? workspaceGitRepositoryLabel(projectName, activeRepository.repositoryPath)
+    : null;
+  const emptyState = !snapshot
+    ? { title: "Loading repositories", detail: "Looking for Git repositories inside this workspace." }
+    : snapshot.repositories.length === 0
+      ? { title: "No Git repositories found", detail: "No Git root was found at the project root or within the bounded module scan." }
+      : activeRepository?.state === "error"
+        ? { title: "Repository unavailable", detail: activeRepository.error ?? "This repository could not be inspected." }
+        : activeRepository?.clean && !allRepositoriesClean
+          ? { title: `${activeRepositoryLabel ?? "Repository"} is clean`, detail: "Choose another repository scope to inspect its local changes." }
+          : { title: "No local changes", detail: "The discovered repositories are clean." };
 
   return (
-    <ChangesPanel
+    <>
+      <ChangesPanel
       {...changesProps}
       files={activeFiles}
       diff={diff}
@@ -464,6 +819,7 @@ export function WorkspaceChangesPanel({
       }
       fileNavigator={navigator}
       compactFileNavigator={compactNavigator}
+      scopeNavigator={scopeNavigator}
       notice={notice}
       headerMetrics={{
         files: snapshot?.files ?? 0,
@@ -500,6 +856,96 @@ export function WorkspaceChangesPanel({
         const label = workspaceGitRepositoryLabel(projectName, identified.repositoryPath ?? ".");
         onAddToPrompt({ ...identified, reference: `Repository: ${label}\n${identified.reference}` });
       }}
-    />
+      />
+      {commitDialogOpen && activeRepositoryPath && activeRepositoryAuthorityRef && commitGitStatus && run && projectId && (
+        <CommitDialog
+          open
+          repositoryPath={activeRepositoryPath}
+          status={commitGitStatus}
+          reviewStates={activeReviewStates}
+          diff={parsedCommitDiff.structured}
+          diffParsing={commitDiffLoading || parsedCommitDiff.parsing}
+          diffError={commitDiffError ?? parsedCommitDiff.error}
+          busy={busyAction === "git.commit" || busyAction === "git.push"}
+          onClose={() => {
+            commitDiffRequestRef.current += 1;
+            setCommitDialogOpen(false);
+            setCommitDiff(null);
+            setCommitDiffLoading(false);
+            setCommitDiffError(null);
+          }}
+          onCommit={async (message, push, paths) => {
+            if (!commitDiff?.commitReview) {
+              throw new Error("The complete reviewed repository state is unavailable. Refresh before committing.");
+            }
+            const reviewReceipt = commitDiff.commitReview;
+            setCommitDiff(null);
+            try {
+              await run("git.commit", {
+                type: "git.commit",
+                payload: {
+                  projectId,
+                  conversationId,
+                  repositoryPath: activeRepositoryPath,
+                  authorityRef: activeRepositoryAuthorityRef,
+                  message,
+                  paths,
+                  reviewReceipt,
+                },
+              });
+            } catch (error) {
+              setCommitDialogOpen(false);
+              setCommitDiffError(null);
+              throw error;
+            }
+            if (push) {
+              try {
+                await run("git.push", {
+                  type: "git.push",
+                  payload: {
+                    projectId,
+                    conversationId,
+                    repositoryPath: activeRepositoryPath,
+                    authorityRef: activeRepositoryAuthorityRef,
+                  },
+                });
+              } catch (error) {
+                const partialSuccess = "The commit was created, but push failed. Refresh the repository before retrying the push.";
+                setCommitDialogOpen(false);
+                setCommitDiffError(null);
+                onRefresh();
+                if (onActionError) {
+                  onActionError(partialSuccess);
+                  return;
+                }
+                throw new Error(partialSuccess, { cause: error });
+              }
+            }
+            setCommitDialogOpen(false);
+            setCommitDiffError(null);
+            onRefresh();
+          }}
+        />
+      )}
+      {pullRequestDialogScope
+        && pullRequestDialogScope.projectId === projectId
+        && pullRequestDialogScope.conversationId === conversationId
+        && pullRequestDialogScope.repositoryPath === activeRepositoryPath
+        && pullRequestDialogScope.actionRevision === activePullRequestActionRevision
+        && run && (
+        <PullRequestDialog
+          open
+          initialTitle={pullRequestDialogScope.initialTitle}
+          busy={busyAction === "git.pr.create" || busyAction === "git.pr.open"}
+          projectId={pullRequestDialogScope.projectId}
+          conversationId={pullRequestDialogScope.conversationId}
+          repositoryPath={pullRequestDialogScope.repositoryPath}
+          authorityRef={pullRequestDialogScope.authorityRef}
+          forge={pullRequestDialogScope.forge}
+          run={run}
+          onClose={() => setPullRequestDialogScope(null)}
+        />
+      )}
+    </>
   );
 }

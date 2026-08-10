@@ -117,7 +117,6 @@ describe("shared contracts boundary", () => {
       "git.branches",
       "git.branch.create",
       "git.branch.switch",
-      "git.worktree.create",
       "git.pull",
       "git.commit",
       "git.push",

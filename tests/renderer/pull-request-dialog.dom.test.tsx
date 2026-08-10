@@ -61,6 +61,85 @@ describe("PullRequestDialog", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("keeps a nested repository identity in the provider-hosted browser flow", async () => {
+    const url = "https://gitlab.com/example/project/-/merge_requests/new";
+    const openExternal = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { openExternal },
+    });
+    const projectId = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+    const run = vi.fn(async () => ({
+      type: "request.result" as const,
+      requestId: crypto.randomUUID(),
+      result: { kind: "external.url" as const, url, label: "Open merge request" },
+    }));
+    render(<PullRequestDialog
+      open
+      initialTitle="Nested change"
+      busy={false}
+      forge="gitlab"
+      projectId={projectId}
+      conversationId={conversationId}
+      repositoryPath="modules/alpha"
+      authorityRef="33333333-3333-4333-8333-333333333333"
+      run={run}
+      onClose={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open in GitLab" }));
+
+    await waitFor(() => expect(run).toHaveBeenCalledWith("git.pr.open", {
+      type: "git.pr.open",
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath: "modules/alpha",
+        authorityRef: "33333333-3333-4333-8333-333333333333",
+      },
+    }));
+    expect(openExternal).toHaveBeenCalledWith(url);
+  });
+
+  it("keeps the status-issued root identity in the create flow", async () => {
+    const projectId = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+    const authorityRef = "33333333-3333-4333-8333-333333333333";
+    const run = vi.fn(async () => new Promise<never>(() => undefined));
+    render(<PullRequestDialog
+      open
+      initialTitle="Root change"
+      busy={false}
+      projectId={projectId}
+      conversationId={conversationId}
+      repositoryPath="."
+      authorityRef={authorityRef}
+      run={run}
+      onClose={vi.fn()}
+    />);
+
+    await waitFor(() => expect(
+      screen.getByRole("textbox", { name: "Title" }),
+    ).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", {
+      name: "Create pull request",
+    }));
+
+    expect(run).toHaveBeenCalledWith("git.pr.create", {
+      type: "git.pr.create",
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath: ".",
+        authorityRef,
+        title: "Root change",
+        body: "",
+        draft: true,
+      },
+    });
+  });
+
   it("preserves an edited title across background title refreshes", async () => {
     const props = {
       open: true,

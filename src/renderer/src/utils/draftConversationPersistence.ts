@@ -1,4 +1,4 @@
-import { clientCommandSchema } from "@shared/contracts";
+import { conversationCreateCommandSchema } from "@shared/contracts/client-command/conversation-create";
 import type {
   ClientCommand,
   Conversation,
@@ -63,7 +63,7 @@ function readPersistedDraftRecord(): PersistedDraftConversation | null {
     window.localStorage.removeItem(STORAGE_KEY);
     return null;
   }
-  const parsed = clientCommandSchema.safeParse({
+  const parsed = conversationCreateCommandSchema.safeParse({
     requestId: crypto.randomUUID(),
     type: "conversation.create",
     payload: candidate.payload,
@@ -147,7 +147,7 @@ export function readPersistedMaterializedDraftConversation():
       window.localStorage.removeItem(MATERIALIZED_STORAGE_KEY);
       return null;
     }
-    const parsed = clientCommandSchema.safeParse({
+    const parsed = conversationCreateCommandSchema.safeParse({
       requestId: crypto.randomUUID(),
       type: "conversation.create",
       payload: candidate.payload,

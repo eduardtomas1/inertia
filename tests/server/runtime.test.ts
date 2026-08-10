@@ -33,66 +33,11 @@ import { RuntimeStore } from "../../src/server/database";
 import { getUnifiedDiff } from "../../src/server/git";
 import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
 import { removeTemporaryDirectory } from "../helpers/temporary-directory";
+import {
+  connectRuntime as connect,
+  RuntimeEventQueue as EventQueue,
+} from "../support/runtime-event-queue";
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
-
-class EventQueue {
-  private readonly events: ServerEvent[] = [];
-  private readonly listeners = new Set<() => void>();
-
-  constructor(socket: WebSocket) {
-    socket.on("message", (data) => {
-      const event = JSON.parse(data.toString()) as ServerEvent;
-      // Most runtime tests assert domain behavior. The transport-specific
-      // sequencing tests below use raw sockets and keep the envelope intact.
-      this.events.push(event.type === "runtime.event" ? event.event : event);
-      for (const listener of this.listeners) listener();
-    });
-  }
-
-  async next<T extends ServerEvent>(predicate: (event: ServerEvent) => event is T): Promise<T> {
-    const take = (): T | undefined => {
-      const index = this.events.findIndex(predicate);
-      if (index < 0) return undefined;
-      return this.events.splice(index, 1)[0] as T;
-    };
-    const existing = take();
-    if (existing) return existing;
-
-    return await new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.listeners.delete(check);
-        const pending = this.events.slice(-12).map((event) => event.type === "request.error" ? `${event.type}:${event.message}` : event.type).join(", ") || "none";
-        const latestSnapshot = [...this.events].reverse().find((event) => event.type === "snapshot.updated");
-        const providers = latestSnapshot?.type === "snapshot.updated"
-          ? latestSnapshot.snapshot.providers.map(({ id, installState, authState, canRun }) => ({ id, installState, authState, canRun }))
-          : [];
-        const turns = latestSnapshot?.type === "snapshot.updated"
-          ? latestSnapshot.snapshot.conversations.flatMap(({ latestTurn }) =>
-            latestTurn ? [{ id: latestTurn.id, status: latestTurn.status }] : [])
-          : [];
-        reject(new Error(`Timed out waiting for a server event. Pending event types: ${pending}. Providers: ${JSON.stringify(providers)}. Turns: ${JSON.stringify(turns)}.`));
-      }, 6_000);
-      const check = (): void => {
-        const event = take();
-        if (!event) return;
-        clearTimeout(timeout);
-        this.listeners.delete(check);
-        resolve(event);
-      };
-      this.listeners.add(check);
-    });
-  }
-}
-
-async function connect(url: string): Promise<{ socket: WebSocket; events: EventQueue }> {
-  const socket = new WebSocket(url, { origin: "http://localhost:5173" });
-  const events = new EventQueue(socket);
-  await new Promise<void>((resolve, reject) => {
-    socket.once("open", resolve);
-    socket.once("error", reject);
-  });
-  return { socket, events };
-}
 
 function send(socket: WebSocket, command: object): void {
   socket.send(JSON.stringify(command));
@@ -594,7 +539,11 @@ process.exit(child.status ?? 1);
 
   it("starts empty, mutates, and persists a deterministic app snapshot", async () => {
     const { data, workspace } = temporaryWorkspace({ withProject: false });
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: false,
+    });
     runtimes.push(runtime);
     expect(new URL(runtime.websocketUrl).hostname).toBe("127.0.0.1");
     expect(new URL(runtime.websocketUrl).pathname).toMatch(/^\/runtime\/[A-Za-z0-9_-]{40,}$/);
@@ -933,51 +882,6 @@ process.exit(child.status ?? 1);
       worktreePath: isolatedWorktree.worktreePath,
       providerSessionId: null,
     });
-
-    const currentBranch = (cwd: string): string => execFileSync(
-      "git", ["branch", "--show-current"], { cwd, encoding: "utf8" },
-    ).trim();
-    const gitRequest = async (
-      type: string,
-      payload: object,
-      kind: string,
-    ): Promise<Extract<ServerEvent, { type: "request.result" }>> => {
-      const requestId = randomUUID();
-      send(client.socket, { type, requestId, payload });
-      return await client.events.next(
-        (event): event is Extract<ServerEvent, { type: "request.result" }> =>
-          event.type === "request.result"
-          && event.requestId === requestId
-          && event.result.kind === kind,
-      );
-    };
-    const projectBranch = currentBranch(workspace);
-    const chatBranch = `regression/${randomUUID().slice(0, 8)}`;
-    const authority = {
-      projectId: project.id,
-      conversationId: isolatedWorktree.id,
-    };
-    await gitRequest(
-      "git.branch.create", { ...authority, name: chatBranch }, "git.action",
-    );
-    expect(currentBranch(isolatedWorktree.worktreePath!)).toBe(chatBranch);
-    expect(currentBranch(workspace)).toBe(projectBranch);
-
-    const listedBranches = await gitRequest(
-      "git.branches", authority, "git.branches",
-    );
-    expect(listedBranches.result).toMatchObject({
-      kind: "git.branches",
-      branches: expect.arrayContaining([
-        expect.objectContaining({ name: chatBranch, current: true }),
-      ]),
-    });
-
-    await gitRequest(
-      "git.branch.switch",
-      { ...authority, name: isolatedWorktree.branch },
-      "git.action",
-    );
 
     const deleteConversation = async (conversationId: string): Promise<void> => {
       const requestId = randomUUID();
@@ -1429,7 +1333,12 @@ process.exit(child.status ?? 1);
   it("invalidates reviewed targets and notes immediately after committing their change", async () => {
     const { data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: false,
+      secureFiles: new SecureFileTestBroker(),
+    });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(
@@ -1490,6 +1399,45 @@ process.exit(child.status ?? 1);
         stale: false,
       }));
 
+    const statusRequestId = randomUUID();
+    send(client.socket, {
+      type: "git.refresh",
+      requestId: statusRequestId,
+      payload: { projectId, conversationId },
+    });
+    const statusResult = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === statusRequestId
+        && event.result.kind === "git.status",
+    );
+    expect(statusResult.result.kind).toBe("git.status");
+    if (statusResult.result.kind !== "git.status") throw new Error("Expected Git status.");
+    const statusAuthorityRef = statusResult.result.status.authorityRef;
+    if (!statusAuthorityRef) throw new Error("Expected Git status authority.");
+    const diffRequestId = randomUUID();
+    send(client.socket, {
+      type: "git.diff",
+      requestId: diffRequestId,
+      payload: {
+        projectId,
+        conversationId,
+        authorityRef: statusAuthorityRef,
+        ignoreWhitespace: false,
+        commitReview: true,
+      },
+    });
+    const diffResult = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === diffRequestId
+        && event.result.kind === "git.diff",
+    );
+    expect(diffResult.result.kind).toBe("git.diff");
+    if (diffResult.result.kind !== "git.diff") throw new Error("Expected Git diff.");
+    const reviewReceipt = diffResult.result.diff.commitReview;
+    if (!reviewReceipt) throw new Error("Expected commit review receipt.");
+
     const commitRequestId = randomUUID();
     send(client.socket, {
       type: "git.commit",
@@ -1499,6 +1447,7 @@ process.exit(child.status ?? 1);
         conversationId,
         message: "Commit reviewed change",
         paths: [file.path],
+        reviewReceipt,
       },
     });
     await client.events.next(
@@ -1616,6 +1565,7 @@ process.exit(child.status ?? 1);
   });
 
   it("persists review metadata and safely reverts selections in a nested repository", async () => {
+    const requestDeadlineAt = Date.now() + 30_000;
     const { data, workspace } = temporaryWorkspace();
     const repositoryPath = "modules/example";
     const nested = join(workspace, repositoryPath);
@@ -1650,11 +1600,12 @@ process.exit(child.status ?? 1);
       requestId: workspaceRefreshRequestId,
       payload: { projectId, conversationId },
     });
-    const workspaceRefresh = await client.events.next(
+    const workspaceRefresh = await client.events.nextForRequest(
+      workspaceRefreshRequestId,
       (event): event is Extract<ServerEvent, { type: "request.result" }> =>
         event.type === "request.result"
-        && event.requestId === workspaceRefreshRequestId
         && event.result.kind === "git.workspace.status",
+      requestDeadlineAt,
     );
     if (workspaceRefresh.result.kind !== "git.workspace.status") {
       throw new Error("Expected a workspace repository refresh.");
@@ -1689,9 +1640,11 @@ process.exit(child.status ?? 1);
         reviewed: true,
       },
     });
-    await client.events.next(
+    await client.events.nextForRequest(
+      stateRequestId,
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok" && event.requestId === stateRequestId,
+        event.type === "request.ok",
+      requestDeadlineAt,
     );
 
     const noteRequestId = randomUUID();
@@ -1708,9 +1661,11 @@ process.exit(child.status ?? 1);
         body: "Nested repository note.",
       },
     });
-    await client.events.next(
+    await client.events.nextForRequest(
+      noteRequestId,
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok" && event.requestId === noteRequestId,
+        event.type === "request.ok",
+      requestDeadlineAt,
     );
 
     const detail = await loadConversationDetail(
@@ -1743,11 +1698,12 @@ process.exit(child.status ?? 1);
         path: file.path,
       },
     });
-    const selectedDiff = await client.events.next(
+    const selectedDiff = await client.events.nextForRequest(
+      selectedDiffRequestId,
       (event): event is Extract<ServerEvent, { type: "request.result" }> =>
         event.type === "request.result"
-        && event.requestId === selectedDiffRequestId
         && event.result.kind === "git.workspace.diff",
+      requestDeadlineAt,
     );
     if (selectedDiff.result.kind !== "git.workspace.diff") {
       throw new Error("Expected a selected nested diff.");
@@ -1770,11 +1726,12 @@ process.exit(child.status ?? 1);
         lineIds,
       },
     });
-    const inspected = await client.events.next(
+    const inspected = await client.events.nextForRequest(
+      inspectRequestId,
       (event): event is Extract<ServerEvent, { type: "request.result" }> =>
         event.type === "request.result"
-        && event.requestId === inspectRequestId
         && event.result.kind === "git.reversal.plan",
+      requestDeadlineAt,
     );
     if (inspected.result.kind !== "git.reversal.plan") {
       throw new Error("Expected a nested reversal plan.");
@@ -1796,11 +1753,12 @@ process.exit(child.status ?? 1);
         expected: inspected.result.plan.validation,
       },
     });
-    const reverted = await client.events.next(
+    const reverted = await client.events.nextForRequest(
+      revertRequestId,
       (event): event is Extract<ServerEvent, { type: "request.result" }> =>
         event.type === "request.result"
-        && event.requestId === revertRequestId
         && event.result.kind === "git.reversal",
+      requestDeadlineAt,
     );
     if (reverted.result.kind !== "git.reversal") {
       throw new Error("Expected a nested reversal result.");
@@ -1822,11 +1780,12 @@ process.exit(child.status ?? 1);
         path: file.path,
       },
     });
-    const refreshedDiff = await client.events.next(
+    const refreshedDiff = await client.events.nextForRequest(
+      refreshRequestId,
       (event): event is Extract<ServerEvent, { type: "request.result" }> =>
         event.type === "request.result"
-        && event.requestId === refreshRequestId
         && event.result.kind === "git.workspace.diff",
+      requestDeadlineAt,
     );
     if (refreshedDiff.result.kind !== "git.workspace.diff") {
       throw new Error("Expected a reconciled nested diff.");
@@ -1864,11 +1823,12 @@ process.exit(child.status ?? 1);
         authorityRef: reverted.result.operation.authorityRef,
       },
     });
-    await client.events.next(
+    await client.events.nextForRequest(
+      undoRequestId,
       (event): event is Extract<ServerEvent, { type: "request.result" }> =>
         event.type === "request.result"
-        && event.requestId === undoRequestId
         && event.result.kind === "git.diff",
+      requestDeadlineAt,
     );
     expect(readFileSync(join(nested, "review.ts"), "utf8")).toContain(
       "enabled = true",

@@ -12,6 +12,10 @@ import {
   getRepositoryStatus,
   type GitRepositoryStatus,
 } from "./git";
+import {
+  repositoryMetadataMarkerIdentity,
+  repositoryRoot,
+} from "./git/paths";
 import type {
   RuntimeSecureFileBroker,
   SecureFileRootCapability,
@@ -40,13 +44,19 @@ export interface WorkspaceGitDiscoveryOptions
   onRepositoryAuthorized?: (
     repositoryPath: string,
     root: SecureFileRootCapability,
+    metadataMarkerIdentity: string,
   ) => void;
 }
 
-export interface ResolvedWorkspaceRepository {
+export interface ResolvedWorkspaceRepositoryIdentity {
   root: string;
-  status: GitRepositoryStatus;
   secureRoot?: SecureFileRootCapability;
+  metadataMarkerIdentity: string;
+}
+
+export interface ResolvedWorkspaceRepository
+  extends ResolvedWorkspaceRepositoryIdentity {
+  status: GitRepositoryStatus;
 }
 
 interface DiscoveryCandidate {
@@ -434,6 +444,7 @@ export async function discoverWorkspaceGitRepositories(
         && (
           secureRoot.identity.dev !== candidateInfo.dev.toString(10)
           || secureRoot.identity.ino !== candidateInfo.ino.toString(10)
+          || secureRoot.birthtimeNs !== candidateInfo.birthtimeNs.toString(10)
         )
       ) {
         throw new GitError(
@@ -441,10 +452,30 @@ export async function discoverWorkspaceGitRepositories(
           "The repository folder changed while it was being inspected.",
         );
       }
+      const metadataMarkerIdentity = await beforeDiscoveryDeadline(
+        () => repositoryMetadataMarkerIdentity(
+          secureRoot?.root ?? candidate.absolutePath,
+          { deadlineAt: inputLimits.deadlineAt },
+        ),
+        inputLimits.deadlineAt,
+      );
       const status = await getRepositoryStatus(
         secureRoot?.root ?? candidate.absolutePath,
         { deadlineAt: inputLimits.deadlineAt },
       );
+      const verifiedMetadataMarkerIdentity = await beforeDiscoveryDeadline(
+        () => repositoryMetadataMarkerIdentity(
+          secureRoot?.root ?? candidate.absolutePath,
+          { deadlineAt: inputLimits.deadlineAt },
+        ),
+        inputLimits.deadlineAt,
+      );
+      if (metadataMarkerIdentity !== verifiedMetadataMarkerIdentity) {
+        throw new GitError(
+          "conflict",
+          "The Git repository identity changed while it was being inspected.",
+        );
+      }
       if (secureRoot) {
         await beforeDiscoveryDeadline(
           (signal) => inputLimits.secureFiles!.verifyRoot(secureRoot, signal),
@@ -460,6 +491,7 @@ export async function discoverWorkspaceGitRepositories(
         rootIdentity,
         repository: readyRepository(candidate.repositoryPath, status),
         secureRoot,
+        metadataMarkerIdentity,
       };
     } catch (error) {
       if (error instanceof GitError && error.code === "timeout") throw error;
@@ -469,6 +501,7 @@ export async function discoverWorkspaceGitRepositories(
         rootIdentity: null,
         repository: failedRepository(candidate.repositoryPath, error),
         secureRoot: null,
+        metadataMarkerIdentity: null,
       };
     }
   });
@@ -478,10 +511,11 @@ export async function discoverWorkspaceGitRepositories(
     if (result.rootIdentity && seenRoots.has(result.rootIdentity)) continue;
     if (result.rootIdentity) seenRoots.add(result.rootIdentity);
     repositories.push(result.repository);
-    if (result.secureRoot) {
+    if (result.secureRoot && result.metadataMarkerIdentity) {
       inputLimits.onRepositoryAuthorized?.(
         result.repository.repositoryPath,
         result.secureRoot,
+        result.metadataMarkerIdentity,
       );
     }
   }
@@ -529,11 +563,11 @@ function normalizedRepositoryPath(repositoryPath: string): string {
  * active workspace. Every segment is lstat'ed so a newly introduced symlink
  * cannot redirect a subsequent diff request outside the project.
  */
-export async function resolveWorkspaceGitRepository(
+export async function resolveWorkspaceGitRepositoryIdentity(
   workspacePath: string,
   repositoryPath: string,
   secureFiles?: RuntimeSecureFileBroker,
-): Promise<ResolvedWorkspaceRepository> {
+): Promise<ResolvedWorkspaceRepositoryIdentity> {
   const workspaceRoot = await requireWorkspaceDirectory(workspacePath);
   const normalized = normalizedRepositoryPath(repositoryPath);
   const segments = normalized === "." ? [] : normalized.split("/");
@@ -574,6 +608,7 @@ export async function resolveWorkspaceGitRepository(
     && (
       secureRoot.identity.dev !== canonicalInfo.dev.toString(10)
       || secureRoot.identity.ino !== canonicalInfo.ino.toString(10)
+      || secureRoot.birthtimeNs !== canonicalInfo.birthtimeNs.toString(10)
     )
   ) {
     throw new GitError(
@@ -581,12 +616,50 @@ export async function resolveWorkspaceGitRepository(
       "The repository folder changed while it was being inspected.",
     );
   }
-  const status = await getRepositoryStatus(secureRoot?.root ?? canonical);
+  const resolvedRepositoryRoot = await repositoryRoot(canonical);
+  if (
+    canonicalIdentity(resolvedRepositoryRoot)
+    !== canonicalIdentity(canonical)
+  ) {
+    throw new GitError(
+      "not-repository",
+      "The selected folder is not a distinct Git repository.",
+    );
+  }
+  const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+    secureRoot?.root ?? canonical,
+  );
   if (secureRoot) await secureFiles!.verifyRoot(secureRoot);
-  if (canonicalIdentity(status.root) !== canonicalIdentity(canonical)) {
+  return { root: secureRoot?.root ?? canonical, secureRoot, metadataMarkerIdentity };
+}
+
+export async function resolveWorkspaceGitRepository(
+  workspacePath: string,
+  repositoryPath: string,
+  secureFiles?: RuntimeSecureFileBroker,
+): Promise<ResolvedWorkspaceRepository> {
+  const repository = await resolveWorkspaceGitRepositoryIdentity(
+    workspacePath,
+    repositoryPath,
+    secureFiles,
+  );
+  const status = await getRepositoryStatus(repository.root);
+  const verifiedMetadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+    repository.root,
+  );
+  if (repository.metadataMarkerIdentity !== verifiedMetadataMarkerIdentity) {
+    throw new GitError(
+      "conflict",
+      "The Git repository identity changed while it was being inspected.",
+    );
+  }
+  if (repository.secureRoot) {
+    await secureFiles!.verifyRoot(repository.secureRoot);
+  }
+  if (canonicalIdentity(status.root) !== canonicalIdentity(repository.root)) {
     throw new GitError("not-repository", "The selected folder is not a distinct Git repository.");
   }
-  return { root: status.root, status, secureRoot };
+  return { ...repository, root: status.root, status };
 }
 
 export function workspaceGitFilePath(repositoryPath: string, filePath: string): string {

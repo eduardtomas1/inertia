@@ -7,13 +7,21 @@ import { clientCommandSchema } from "../../src/shared/contracts";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
+const reviewReceipt = {
+  authorityRef: "33333333-3333-4333-8333-333333333333",
+  fingerprint: "a".repeat(64),
+};
 
 describe("source-control command authority", () => {
   it.each([
     ["git.branch.create", { name: "feature/scoped" }],
     ["git.branch.switch", { name: "main" }],
     ["git.pull", {}],
-    ["git.commit", { message: "Scoped commit", paths: ["README.md"] }],
+    ["git.commit", {
+      message: "Scoped commit",
+      paths: ["README.md"],
+      reviewReceipt,
+    }],
     ["git.push", {}],
     ["git.pr.open", {}],
   ] as const)("validates chat ownership before tracking %s", async (
@@ -44,6 +52,45 @@ describe("source-control command authority", () => {
       authorityError,
     );
     expect(workspacePath).toHaveBeenCalledWith(projectId, conversationId);
+    expect(trackSourceControl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["git.branch.create", { name: "feature/scoped" }],
+    ["git.branch.switch", { name: "main" }],
+    ["git.pull", {}],
+    ["git.push", {}],
+    ["git.pr.open", {}],
+    ["git.pr.create", {
+      title: "Reviewed pull request",
+      body: "Body",
+      draft: false,
+    }],
+  ] as const)("requires refreshed root repository authority for %s", async (
+    type,
+    extra,
+  ) => {
+    const trackSourceControl = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => "/workspace"),
+      workspaceRuns: { trackSourceControl },
+      store: {
+        conversation: vi.fn(() => ({
+          id: conversationId,
+          projectId,
+          worktreePath: null,
+        })),
+      },
+    } as unknown as SourceControlCommandDependencies);
+    const command = clientCommandSchema.parse({
+      type,
+      requestId: crypto.randomUUID(),
+      payload: { projectId, ...extra },
+    });
+
+    await expect(handler({} as WebSocket, command)).rejects.toThrow(
+      /refresh repository status/iu,
+    );
     expect(trackSourceControl).not.toHaveBeenCalled();
   });
 });

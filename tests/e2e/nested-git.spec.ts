@@ -35,6 +35,7 @@ async function git(cwd: string, ...args: string[]): Promise<void> {
 async function createDirtyModule(
   repositoryPath: string,
   after: string,
+  branch: string,
 ): Promise<void> {
   const source = join(repositoryPath, "src", "Main.java");
   await mkdir(dirname(source), { recursive: true });
@@ -44,6 +45,7 @@ async function createDirtyModule(
   await writeFile(source, "class Main { static final String STATE = \"before\"; }\n");
   await git(repositoryPath, "add", "--", "src/Main.java");
   await git(repositoryPath, "commit", "-q", "-m", "Initial module");
+  await git(repositoryPath, "branch", "-m", branch);
   await writeFile(source, `class Main { static final String STATE = "${after}"; }\n`);
 }
 
@@ -62,10 +64,12 @@ test.beforeAll(async () => {
   await createDirtyModule(
     join(workspaceRoot, "modules", "org.openbravo.alpha"),
     "alpha after",
+    "feature/nested-alpha-change-review",
   );
   await createDirtyModule(
     join(workspaceRoot, "modules", "org.openbravo.beta"),
     "beta after",
+    "feature/nested-beta-change-review-with-a-long-name",
   );
   const dataDirectory = join(fixtureRoot, "data");
   await mkdir(dataDirectory, { recursive: true });
@@ -113,26 +117,23 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
   });
   await expect(repositoryList).toBeVisible();
   await expect(changes.getByText("2 files in 2 repositories", { exact: true })).toBeVisible();
-  const alphaGroup = repositoryList.getByRole("group", {
-    name: "modules/org.openbravo.alpha repository",
+  const repositoryScope = changes.getByRole("combobox", {
+    name: "Repository scope",
   });
-  const betaGroup = repositoryList.getByRole("group", {
-    name: "modules/org.openbravo.beta repository",
-  });
-  await expect(alphaGroup).toBeVisible();
-  await expect(alphaGroup.getByText("alpha", { exact: true })).toBeVisible();
-  await expect(betaGroup).toBeVisible();
-  await expect(betaGroup.getByText("beta", { exact: true })).toBeVisible();
+  await expect(repositoryScope).toBeVisible();
+  await expect(repositoryScope.getByRole("option", {
+    name: "modules/org.openbravo.alpha · 1 file",
+  })).toHaveCount(1);
+  await expect(repositoryScope.getByRole("option", {
+    name: "modules/org.openbravo.beta · 1 file",
+  })).toHaveCount(1);
 
-  const betaDisclosure = betaGroup.locator("summary");
-  await betaDisclosure.focus();
-  await page.keyboard.press("Enter");
-  await expect(betaGroup).toHaveAttribute("open", "");
-  await betaGroup.locator(".workspace-repository-file").click();
-  await expect(changes.getByText("Reviewing modules/org.openbravo.beta.")).toBeVisible();
+  await repositoryScope.selectOption("modules/org.openbravo.beta");
+  await expect(changes.locator(".workspace-repository-scope-boundary"))
+    .toContainText("Nested repo");
   await expect(changes.locator(".diff-line.is-addition").filter({ hasText: "beta after" })).toBeVisible();
   await expect(changes.locator(".diff-line.is-addition").filter({ hasText: "alpha after" })).toHaveCount(0);
-  await expect(betaGroup.getByRole("button", {
+  await expect(repositoryList.getByRole("button", {
     name: "Open src/Main.java from modules/org.openbravo.beta",
   })).toBeVisible();
 
@@ -144,6 +145,41 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
   await page.screenshot({ animations: "disabled", path: wideLight });
   expect((await page.locator("body").screenshot()).byteLength).toBeGreaterThan(1_000);
 
+  const workspaceBody = page.locator(".workspace-body");
+  const previousToolsWidth = await workspaceBody.evaluate((element) =>
+    element.style.getPropertyValue("--workspace-tools-width"));
+  await workspaceBody.evaluate((element) => {
+    element.style.setProperty("--workspace-tools-width", "300px");
+  });
+  await expect.poll(async () => await changes.locator(".workspace-repository-scope")
+    .evaluate((element) => ({
+      fits: element.scrollWidth <= element.clientWidth + 1,
+      width: element.clientWidth,
+    }))).toEqual({ fits: true, width: 300 });
+  const repositoryTypography = await changes.evaluate((element) => {
+    const root = getComputedStyle(document.documentElement);
+    const scope = element.querySelector<HTMLElement>(
+      ".workspace-repository-scope-meta",
+    );
+    const fileName = element.querySelector<HTMLElement>(
+      ".workspace-repository-file-copy strong",
+    );
+    return {
+      expectedMicro: Number.parseFloat(root.getPropertyValue("--ui-font-micro")),
+      expectedSecondary: Number.parseFloat(root.getPropertyValue("--ui-font-secondary")),
+      scope: scope ? Number.parseFloat(getComputedStyle(scope).fontSize) : 0,
+      fileName: fileName ? Number.parseFloat(getComputedStyle(fileName).fontSize) : 0,
+    };
+  });
+  expect(repositoryTypography.scope)
+    .toBeGreaterThanOrEqual(repositoryTypography.expectedMicro);
+  expect(repositoryTypography.fileName)
+    .toBeGreaterThanOrEqual(repositoryTypography.expectedSecondary);
+  await workspaceBody.evaluate((element, value) => {
+    if (value) element.style.setProperty("--workspace-tools-width", value);
+    else element.style.removeProperty("--workspace-tools-width");
+  }, previousToolsWidth);
+
   await resizeWindow(1040, 800);
   await page.evaluate(() => {
     document.documentElement.dataset.theme = "dark";
@@ -152,7 +188,7 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
   const picker = changes.getByRole("combobox", { name: "Repository and changed file" });
   await expect(picker).toBeVisible();
   await expect(picker.locator("option:checked")).toHaveText(
-    "modules/org.openbravo.beta — M · src/Main.java",
+    "M · src/Main.java",
   );
   await expect(repositoryList).toBeHidden();
   const narrowDark = testInfo.outputPath("nested-git-openbravo-narrow-dark.png");

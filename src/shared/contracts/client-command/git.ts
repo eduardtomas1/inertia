@@ -10,6 +10,23 @@ const projectWithOptionalConversation = {
   conversationId: z.string().uuid().optional(),
 };
 
+const projectWithOptionalConversationAndRepository = {
+  ...projectWithOptionalConversation,
+  repositoryPath: z.string().min(1).max(4096).optional(),
+  authorityRef: z.string().uuid().optional(),
+};
+
+function requireRepositoryAuthority(
+  payload: { repositoryPath?: string; authorityRef?: string },
+  context: z.RefinementCtx,
+): void {
+  if (Boolean(payload.repositoryPath) === Boolean(payload.authorityRef)) return;
+  context.addIssue({
+    code: "custom",
+    message: "A nested repository path and its authority must be provided together.",
+  });
+}
+
 export const gitCommandSchemas = [
   z
     .object({
@@ -28,6 +45,7 @@ export const gitCommandSchemas = [
           authorityRef: z.string().uuid(),
           path: z.string().max(512).optional(),
           ignoreWhitespace: z.boolean().optional(),
+          commitReview: z.boolean().optional(),
         })
         .strict(),
     })
@@ -50,6 +68,7 @@ export const gitCommandSchemas = [
           repositoryPath: z.string().min(1).max(4096),
           path: z.string().min(1).max(4096).optional(),
           ignoreWhitespace: z.boolean().optional(),
+          commitReview: z.boolean().optional(),
         })
         .strict(),
     })
@@ -227,41 +246,35 @@ export const gitCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("git.branch.create"),
-      payload: z.object({
-        ...projectWithOptionalConversation,
-        name: z.string().trim().min(1).max(255),
-      }).strict(),
+      payload: z
+        .object({
+          ...projectWithOptionalConversationAndRepository,
+          name: z.string().trim().min(1).max(255),
+        })
+        .strict()
+        .superRefine(requireRepositoryAuthority),
     })
     .strict(),
   z
     .object({
       ...requestBase,
       type: z.literal("git.branch.switch"),
-      payload: z.object({
-        ...projectWithOptionalConversation,
-        name: z.string().trim().min(1).max(255),
-      }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...requestBase,
-      type: z.literal("git.worktree.create"),
       payload: z
         .object({
-          projectId: z.string().uuid(),
-          conversationId: z.string().uuid(),
-          baseBranch: z.string().trim().min(1).max(255),
-          branch: z.string().trim().min(1).max(255),
+          ...projectWithOptionalConversationAndRepository,
+          name: z.string().trim().min(1).max(255),
         })
-        .strict(),
+        .strict()
+        .superRefine(requireRepositoryAuthority),
     })
     .strict(),
   z
     .object({
       ...requestBase,
       type: z.literal("git.pull"),
-      payload: z.object(projectWithOptionalConversation).strict(),
+      payload: z.object(projectWithOptionalConversationAndRepository)
+        .strict()
+        .superRefine(requireRepositoryAuthority),
     })
     .strict(),
   z
@@ -270,25 +283,34 @@ export const gitCommandSchemas = [
       type: z.literal("git.commit"),
       payload: z
         .object({
-          ...projectWithOptionalConversation,
+          ...projectWithOptionalConversationAndRepository,
           message: z.string().trim().min(1).max(10_000),
-          paths: z.array(z.string().min(1).max(512)).max(500).optional(),
+          paths: z.array(z.string().min(1).max(4096)).max(500).optional(),
+          reviewReceipt: z.object({
+            authorityRef: z.string().uuid(),
+            fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+          }).strict(),
         })
-        .strict(),
+        .strict()
+        .superRefine(requireRepositoryAuthority),
     })
     .strict(),
   z
     .object({
       ...requestBase,
       type: z.literal("git.push"),
-      payload: z.object(projectWithOptionalConversation).strict(),
+      payload: z.object(projectWithOptionalConversationAndRepository)
+        .strict()
+        .superRefine(requireRepositoryAuthority),
     })
     .strict(),
   z
     .object({
       ...requestBase,
       type: z.literal("git.pr.open"),
-      payload: z.object(projectWithOptionalConversation).strict(),
+      payload: z.object(projectWithOptionalConversationAndRepository)
+        .strict()
+        .superRefine(requireRepositoryAuthority),
     })
     .strict(),
   z
@@ -296,11 +318,11 @@ export const gitCommandSchemas = [
       ...requestBase,
       type: z.literal("git.pr.create"),
       payload: z.object({
-        ...projectWithOptionalConversation,
+        ...projectWithOptionalConversationAndRepository,
         title: z.string().trim().min(1).max(256),
         body: z.string().max(64 * 1024),
         draft: z.boolean(),
-      }).strict(),
+      }).strict().superRefine(requireRepositoryAuthority),
     })
     .strict(),
 ] as const;

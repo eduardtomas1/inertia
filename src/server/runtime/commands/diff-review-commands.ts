@@ -153,6 +153,10 @@ export function createDiffReviewCommandHandler(
             undefined,
             secureRoot,
           ),
+          {
+            recoverReviewedCommit: false,
+            serializationRoot: secureRoot.root,
+          },
         );
         if (command.payload.comment && command.payload.conversationId) {
           dependencies.store.createMessage(
@@ -287,6 +291,10 @@ export function createDiffReviewCommandHandler(
             dependencies.secureFiles,
             secureRoot,
           ),
+          {
+            recoverReviewedCommit: false,
+            serializationRoot: secureRoot.root,
+          },
         );
         const status = await getRepositoryStatus(secureRoot.root);
         await dependencies.secureFiles.verifyRoot(secureRoot);

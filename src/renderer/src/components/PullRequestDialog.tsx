@@ -13,6 +13,8 @@ export interface PullRequestDialogProps {
   busy: boolean;
   projectId: string;
   conversationId?: string;
+  repositoryPath?: string;
+  authorityRef?: string;
   forge?: GitForge;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   onClose: () => void;
@@ -24,6 +26,8 @@ export function PullRequestDialog({
   busy,
   projectId,
   conversationId,
+  repositoryPath,
+  authorityRef,
   forge = "github",
   run,
   onClose,
@@ -71,6 +75,8 @@ export function PullRequestDialog({
         payload: {
           projectId,
           conversationId,
+          repositoryPath,
+          authorityRef,
           title: title.trim(),
           body,
           draft,
@@ -112,7 +118,7 @@ export function PullRequestDialog({
     try {
       const event = resultEvent(await run("git.pr.open", {
         type: "git.pr.open",
-        payload: { projectId, conversationId },
+        payload: { projectId, conversationId, repositoryPath, authorityRef },
       }));
       if (event.result.kind !== "external.url") return;
       await window.inertia.openExternal(event.result.url);

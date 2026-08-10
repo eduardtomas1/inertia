@@ -31,6 +31,21 @@ export interface GitPathInspectionOptions {
   signal?: AbortSignal;
 }
 
+function canonicalPathIdentity(path: string): string {
+  return process.platform === "win32"
+    ? path.toLocaleLowerCase("en-US")
+    : path;
+}
+
+function terminalPathOutput(output: Buffer): string {
+  const value = output.toString("utf8");
+  return value.endsWith("\r\n")
+    ? value.slice(0, -2)
+    : value.endsWith("\n")
+      ? value.slice(0, -1)
+      : value;
+}
+
 function requirePathInspectionTime(
   options: GitPathInspectionOptions,
 ): void {
@@ -86,7 +101,7 @@ export async function repositoryRoot(
       failureMessage: "Unable to inspect this Git repository.",
     },
   );
-  const reported = result.stdout.toString("utf8").trim();
+  const reported = terminalPathOutput(result.stdout);
   if (!isAbsolute(reported)) {
     throw new GitError(
       "not-repository",
@@ -105,6 +120,92 @@ export async function repositoryRoot(
       "The selected folder is not a Git repository.",
     );
   }
+}
+
+/**
+ * Captures both the resolved per-worktree Git directory behind a checkout's
+ * `.git` marker and the resolved common Git directory that owns shared refs,
+ * objects, and configuration. The opaque value stays in the trusted runtime
+ * and binds a short-lived authority to the exact metadata graph inspected.
+ * This is a boundary receipt rather than an atomic filesystem lock, so
+ * callers revalidate it immediately before and after the operation.
+ */
+export async function repositoryMetadataMarkerIdentity(
+  repositoryPath: string,
+  options: GitPathInspectionOptions = {},
+): Promise<string> {
+  const root = await requireDirectory(repositoryPath, options);
+  requirePathInspectionTime(options);
+  const inspect = async (args: readonly string[]) => await runGitInspection(
+    root,
+    args,
+    {
+      deadlineAt: options.deadlineAt,
+      maxOutputBytes: MAX_PATH_LENGTH,
+      failureMessage: "Unable to inspect this Git repository identity.",
+    },
+  );
+  const directoryIdentity = async (
+    argument: "--git-dir" | "--git-common-dir",
+  ): Promise<string> => {
+    const result = await inspect([
+      "rev-parse",
+      "--path-format=absolute",
+      argument,
+    ]).catch(async () => await inspect(["rev-parse", argument]));
+    const reported = terminalPathOutput(result.stdout);
+    if (!reported || reported.includes("\0")) {
+      throw new GitError(
+        "conflict",
+        "The Git repository identity could not be verified.",
+      );
+    }
+    try {
+      requirePathInspectionTime(options);
+      const metadataPath = await realpath(
+        isAbsolute(reported) ? reported : resolve(root, reported),
+      );
+      requirePathInspectionTime(options);
+      const info = await lstat(metadataPath, { bigint: true });
+      requirePathInspectionTime(options);
+      if (
+        !info.isDirectory()
+        || info.isSymbolicLink()
+        || info.ino <= 0n
+        || info.birthtimeNs <= 0n
+      ) {
+        throw new Error();
+      }
+      return [
+        canonicalPathIdentity(metadataPath),
+        info.dev.toString(10),
+        info.ino.toString(10),
+        info.birthtimeNs.toString(10),
+      ].join("\0");
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw new GitError(
+        "conflict",
+        "The Git repository identity could not be verified.",
+      );
+    }
+  };
+  const [gitDirectoryResult, commonDirectoryResult] = await Promise.allSettled([
+    directoryIdentity("--git-dir"),
+    directoryIdentity("--git-common-dir"),
+  ]);
+  // Both inspections own Git children. Await both settlements even when one
+  // marker probe fails so no sibling process retains a Windows cwd handle
+  // after this identity inspection rejects.
+  if (gitDirectoryResult.status === "rejected") {
+    throw gitDirectoryResult.reason;
+  }
+  if (commonDirectoryResult.status === "rejected") {
+    throw commonDirectoryResult.reason;
+  }
+  const gitDirectory = gitDirectoryResult.value;
+  const commonDirectory = commonDirectoryResult.value;
+  return ["git-dir", gitDirectory, "git-common-dir", commonDirectory].join("\0");
 }
 
 export function validateName(value: string, label: string): string {

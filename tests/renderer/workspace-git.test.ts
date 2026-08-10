@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { WorkspaceGitSnapshot } from "../../src/shared/contracts";
 import {
-  firstWorkspaceGitFile,
   parseWorkspaceGitIdentity,
   workspaceGitFilePath,
   workspaceGitIdentity,
   workspaceGitRefreshIdentity,
   workspaceGitRepositoryLabel,
-  workspaceGitRepositoryPresentation,
 } from "../../src/renderer/src/utils/workspaceGit";
 import { commandRefreshesConversationDetail } from "../../src/renderer/src/lib/runtimeCommands";
 
@@ -81,28 +79,9 @@ describe("workspace Git renderer identity", () => {
     expect(workspaceGitFilePath(beta)).toBe("modules/beta/src/Main.java");
   });
 
-  it("chooses the first changed repository deterministically and labels the root safely", () => {
-    expect(firstWorkspaceGitFile(snapshot)).toEqual({
-      repositoryPath: "modules/alpha",
-      filePath: "src/Main.java",
-    });
+  it("labels the project-root repository safely", () => {
     expect(workspaceGitRepositoryLabel("Openbravo", ".")).toBe("Openbravo");
     expect(workspaceGitRepositoryLabel("Openbravo", "modules/alpha")).toBe("modules/alpha");
-    expect(workspaceGitRepositoryPresentation("Openbravo", ".")).toEqual({
-      prefix: "",
-      suffix: "Openbravo",
-      location: "project root",
-    });
-    expect(
-      workspaceGitRepositoryPresentation(
-        "Openbravo",
-        "modules/org.openbravo.client.application-alpha",
-      ),
-    ).toEqual({
-      prefix: "org.openbravo.client.application-",
-      suffix: "alpha",
-      location: "modules",
-    });
   });
 
   it("rejects stale or forged selection keys", () => {

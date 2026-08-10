@@ -1,11 +1,13 @@
 import { FileText, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import type {
+  ChatAttachment,
+} from "@shared/contracts";
 import {
   chatAttachmentKind,
   chatAttachmentTypeLabel,
-  type ChatAttachment,
-} from "@shared/contracts";
+} from "@shared/attachments";
 import {
   attachmentPreviewKind,
   attachmentPreviewUrl,

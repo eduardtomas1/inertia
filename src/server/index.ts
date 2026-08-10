@@ -662,6 +662,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     turns,
     dataDirectory,
     () => providerInfo,
+    { workspaceRuns },
   );
   duoLaunches = duoLaunchCoordinator;
   await duoLaunchCoordinator.resumeComparisons();
@@ -728,7 +729,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         turnGitArtifacts,
         secureFiles,
         secureFileAuthorities,
-        dataDirectory,
         workspacePath,
         broadcastSnapshot,
         send,

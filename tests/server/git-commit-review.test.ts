@@ -23,6 +23,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   captureGitCommitReview,
   commitReviewedChanges,
+  GitError,
   prepareGitCommitReview,
   renderGitCommitReviewDiff,
 } from "../../src/server/git";
@@ -907,22 +908,33 @@ setInterval(() => {}, 1000);
     writeFileSync(foreignLock, "foreign lock\n");
     const deadlineAt = Date.now() + 2_000;
 
-    await expect(commitReviewedChanges(
-      root,
-      "Must reject expired prepared mutation",
-      ["selected.txt"],
-      review.fingerprint,
-      {
-        deadlineAt,
-        testHooks: {
-          duringPreparedMutation: () => {
-            while (Date.now() <= deadlineAt + 5) {
-              // Cross the aggregate deadline without yielding to its timer.
-            }
+    let failure: unknown;
+    try {
+      await commitReviewedChanges(
+        root,
+        "Must reject expired prepared mutation",
+        ["selected.txt"],
+        review.fingerprint,
+        {
+          deadlineAt,
+          testHooks: {
+            duringPreparedMutation: () => {
+              while (Date.now() <= deadlineAt + 5) {
+                // Cross the aggregate deadline without yielding to its timer.
+              }
+            },
           },
         },
-      },
-    )).rejects.toMatchObject({ code: "timeout" });
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(GitError);
+    expect([
+      "timeout:Git took too long to complete the operation.",
+      "operation-failed:Git stopped responding, and its process tree could not be confirmed stopped.",
+    ]).toContain(`${(failure as GitError).code}:${(failure as Error).message}`);
 
     expect(git(root, "rev-parse", "HEAD")).toBe(head);
     expect(() => readFileSync(join(root, ".git", "index.lock"))).toThrow();

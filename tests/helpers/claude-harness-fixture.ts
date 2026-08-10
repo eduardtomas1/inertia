@@ -43,7 +43,11 @@ export function writeClaudeSkill(
     "",
     body,
   ].join("\n"));
-  return realpathSync(path);
+  // Match the promise-based realpath used by production discovery. On
+  // Windows the legacy synchronous resolver can retain an 8.3 parent alias
+  // (for example RUNNER~1) while fs/promises resolves the same file through
+  // its long path, which makes an otherwise valid capability look replaced.
+  return realpathSync.native(path);
 }
 
 export async function waitForImmediateCondition(

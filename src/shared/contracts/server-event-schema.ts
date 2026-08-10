@@ -708,6 +708,8 @@ function duoPrepared(value: UnknownRecord): boolean {
 function duoStatus(value: UnknownRecord): boolean {
   return stringField(value, "launchId")
     && oneOf(value, "state", DUO_LAUNCH_STATES)
+    && (value.cancelRequested === undefined
+      || typeof value.cancelRequested === "boolean")
     && nullableStringField(value, "error")
     && Array.isArray(value.sides)
     && value.sides.length === 2

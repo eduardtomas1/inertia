@@ -65,6 +65,7 @@ import {
 import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
+import type { FinalAnswerAutoScrollEvent } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 
@@ -309,6 +310,7 @@ export function ChatWorkspace({
   const navigationRef = useRef(activeNavigation);
   navigationRef.current = activeNavigation;
   const readerIntentRef = useRef(false);
+  const finalAnswerAutoScrollOwnerRef = useRef<string | null>(null);
   const showJump = activeNavigation.mode === "reading-history";
   const pendingInputRequest = inputRequests.at(-1) ?? null;
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
@@ -325,7 +327,10 @@ export function ChatWorkspace({
   const performScrollToLatest = useCallback((
     behavior: ScrollBehavior = "smooth",
   ): void => {
-    if (readerIntentRef.current) return;
+    if (
+      readerIntentRef.current
+      || finalAnswerAutoScrollOwnerRef.current !== null
+    ) return;
     const element = scrollRef.current;
     if (!element) return;
     element.scrollTo({ top: element.scrollHeight, behavior });
@@ -337,7 +342,11 @@ export function ChatWorkspace({
       followCorrectionFrameRef.current = window.requestAnimationFrame(() => {
         followCorrectionFrameRef.current = null;
         const current = scrollRef.current;
-        if (!current || readerIntentRef.current) return;
+        if (
+          !current
+          || readerIntentRef.current
+          || finalAnswerAutoScrollOwnerRef.current !== null
+        ) return;
         if (!transcriptNavigationFollowsContent(navigationRef.current)) {
           if (remainingFrames > 1) {
             correctMeasuredBottom(remainingFrames - 1);
@@ -372,21 +381,33 @@ export function ChatWorkspace({
   }, [clearReaderIntent, conversationId, performScrollToLatest]);
 
   const onFinalAnswerAutoScroll = useCallback((
-    followsLatest: boolean | null,
+    event: FinalAnswerAutoScrollEvent,
   ): void => {
-    readerIntentRef.current = true;
-    if (followCorrectionFrameRef.current !== null) {
-      window.cancelAnimationFrame(followCorrectionFrameRef.current);
-      followCorrectionFrameRef.current = null;
+    const owner = `${event.conversationId}\u0000${event.answerId}`;
+    if (event.status === "started") {
+      if (navigationRef.current.conversationId !== event.conversationId) return;
+      finalAnswerAutoScrollOwnerRef.current = owner;
+      if (followCorrectionFrameRef.current !== null) {
+        window.cancelAnimationFrame(followCorrectionFrameRef.current);
+        followCorrectionFrameRef.current = null;
+      }
+      return;
     }
-    if (followsLatest === null || !conversationId) return;
+    if (finalAnswerAutoScrollOwnerRef.current !== owner) return;
+    finalAnswerAutoScrollOwnerRef.current = null;
+    if (
+      event.status === "cancelled"
+      || navigationRef.current.conversationId !== event.conversationId
+    ) return;
+
+    readerIntentRef.current = true;
     dispatchNavigation({
       type: "reader.scrolled",
-      conversationId,
-      followsLatest,
+      conversationId: event.conversationId,
+      followsLatest: event.followsLatest,
       intentional: true,
     });
-    onLatestContentVisibilityChange?.(followsLatest);
+    onLatestContentVisibilityChange?.(event.followsLatest);
     if (readerIntentReleaseTimerRef.current !== null) {
       window.clearTimeout(readerIntentReleaseTimerRef.current);
     }
@@ -394,7 +415,7 @@ export function ChatWorkspace({
       readerIntentRef.current = false;
       readerIntentReleaseTimerRef.current = null;
     }, READER_INTENT_GUARD_MS);
-  }, [conversationId, onLatestContentVisibilityChange]);
+  }, [onLatestContentVisibilityChange]);
 
   const revealPendingInput = useCallback((): void => {
     if (!pendingInputRequest) return;
@@ -413,6 +434,7 @@ export function ChatWorkspace({
   }, [pendingInputRequest, scrollToLatest]);
 
   useLayoutEffect(() => {
+    finalAnswerAutoScrollOwnerRef.current = null;
     clearReaderIntent();
     dispatchNavigation({
       type: "conversation.changed",
@@ -493,6 +515,10 @@ export function ChatWorkspace({
     const element = scrollRef.current;
     if (!element) return;
     const follows = shouldFollowTimeline(element.scrollTop, element.clientHeight, element.scrollHeight);
+    if (finalAnswerAutoScrollOwnerRef.current !== null) {
+      onLatestContentVisibilityChange?.(follows);
+      return;
+    }
     const intentional = readerIntentRef.current;
     if (follows) clearReaderIntent();
     dispatchNavigation({

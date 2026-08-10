@@ -69,6 +69,7 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
         workspaceDirectory,
         { recoverInterruptedRuns: false },
       );
+      store.updateSettings({ autoScrollToFinalAnswer: false });
       const snapshot = store.shellSnapshot();
       const conversationId = snapshot.activeConversationId;
       if (!conversationId) throw new Error("Turn anchor fixture has no conversation.");
@@ -190,6 +191,40 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
       }));
       element.scrollTop = Math.max(0, element.scrollTop - element.clientHeight);
     });
+    await expect(page.getByRole("button", { name: "Jump to latest" }))
+      .toBeVisible();
+    expect(app.rendererErrors).toEqual([]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("positions a completed answer at the viewport start by default", async () => {
+  const app = await createAppFixture({
+    name: "completed-answer-anchor",
+    initialState: "conversation",
+    codexAppServerSource: delayedAnchorAppServer,
+  });
+
+  try {
+    await app.resizeWindow(1440, 920);
+    const { page } = app;
+    const composer = page.getByRole("region", { name: "Message composer" });
+    await composer.getByRole("textbox", { name: "Message" })
+      .fill("Position this completed answer for reading.");
+    await composer.getByRole("button", { name: "Send message" }).click();
+
+    const finalAnswer = page.locator(
+      '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
+    ).last();
+    await expect(finalAnswer).toBeVisible({ timeout: 10_000 });
+    await expect.poll(() => finalAnswer.evaluate((answer) => {
+      const viewport = answer.closest<HTMLElement>(".message-scroll")
+        ?.getBoundingClientRect();
+      return viewport
+        ? Math.abs(answer.getBoundingClientRect().top - viewport.top - 8)
+        : Number.POSITIVE_INFINITY;
+    })).toBeLessThanOrEqual(4);
     await expect(page.getByRole("button", { name: "Jump to latest" }))
       .toBeVisible();
     expect(app.rendererErrors).toEqual([]);

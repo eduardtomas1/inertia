@@ -3,12 +3,13 @@ import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
 import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 
 function turn(index: number): AgentTurn {
-  const at = `2026-08-01T10:00:0${index}.000Z`;
+  const at = `2026-08-01T10:00:${String(index).padStart(2, "0")}.000Z`;
   const id = `turn-${index}`;
   return {
     id,
@@ -68,7 +69,7 @@ function message(index: number): ChatMessage {
     role: "user",
     content: `Request ${index}`,
     attachments: [],
-    createdAt: `2026-08-01T10:00:0${index}.000Z`,
+    createdAt: `2026-08-01T10:00:${String(index).padStart(2, "0")}.000Z`,
   };
 }
 
@@ -316,13 +317,14 @@ describe("accepted turn viewport anchoring", () => {
 describe("completed answer positioning", () => {
   function renderAnswerTimeline(
     enabled: boolean,
-    onFinalAnswerAutoScroll: (followsLatest: boolean | null) => void,
+    onFinalAnswerAutoScroll: (event: FinalAnswerAutoScrollEvent) => void,
     settledInitially = false,
+    count = 1,
   ) {
     const scrollElementRef = createRef<HTMLDivElement>();
     const timelineElementRef = createRef<HTMLDivElement>();
     const runningTurn: AgentTurn = {
-      ...turn(1),
+      ...turn(count),
       completedAt: null,
       status: "running",
       terminalReason: null,
@@ -337,15 +339,30 @@ describe("completed answer positioning", () => {
       createdAt: "2026-08-01T10:00:02.000Z",
     };
     const settledTurn: AgentTurn = {
-      ...turn(1),
+      ...turn(count),
       terminalAssistantMessageId: answer.id,
     };
+    const historicalTurns = Array.from(
+      { length: Math.max(0, count - 1) },
+      (_, index) => turn(index + 1),
+    );
+    const historicalMessages = Array.from(
+      { length: Math.max(0, count - 1) },
+      (_, index) => message(index + 1),
+    );
     const scene = (settled: boolean): React.JSX.Element => (
-      <div ref={scrollElementRef}>
+      <div ref={scrollElementRef} className="anchor-test-scroll">
         <div ref={timelineElementRef}>
           <ResponseTimeline
-            turns={[settled ? settledTurn : runningTurn]}
-            messages={settled ? [message(1), answer] : [message(1)]}
+            turns={[
+              ...historicalTurns,
+              settled ? settledTurn : runningTurn,
+            ]}
+            messages={[
+              ...historicalMessages,
+              message(count),
+              ...(settled ? [answer] : []),
+            ]}
             activities={[]}
             reasonings={[]}
             plans={[]}
@@ -384,6 +401,7 @@ describe("completed answer positioning", () => {
       scrollElementRef,
       timelineElementRef,
       settle: () => view.rerender(scene(true)),
+      unmount: () => view.unmount(),
     };
   }
 
@@ -410,11 +428,6 @@ describe("completed answer positioning", () => {
       },
     });
     scroll.getBoundingClientRect = () => rect(100, 400);
-    scroll.scrollTo = vi.fn((options?: ScrollToOptions | number) => {
-      if (typeof options !== "number" && options?.top !== undefined) {
-        scrollTop = options.top;
-      }
-    });
 
     harness.settle();
     const answer = harness.timelineElementRef.current!
@@ -424,12 +437,149 @@ describe("completed answer positioning", () => {
       while (frames.length > 0) frames.shift()!(performance.now());
     });
 
-    expect(scroll.scrollTo).toHaveBeenCalledWith({
-      top: 1_992,
-      behavior: "auto",
-    });
     expect(scrollTop).toBe(1_992);
-    expect(positioned.mock.calls).toEqual([[null], [false]]);
+    expect(positioned.mock.calls).toEqual([
+      [{
+        status: "started",
+        conversationId,
+        answerId: harness.answer.id,
+      }],
+      [{
+        status: "positioned",
+        conversationId,
+        answerId: harness.answer.id,
+        followsLatest: false,
+      }],
+    ]);
+  });
+
+  it("cancels a pending final-answer anchor for fresh reader intent", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const harness = renderAnswerTimeline(true, positioned);
+
+    harness.settle();
+    fireEvent.wheel(harness.scrollElementRef.current!);
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started", "cancelled"]);
+  });
+
+  it("cancels cleanup without reporting a false positioned answer", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const harness = renderAnswerTimeline(true, positioned);
+
+    harness.settle();
+    harness.unmount();
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(positioned.mock.calls).toEqual([
+      [{
+        status: "started",
+        conversationId,
+        answerId: harness.answer.id,
+      }],
+      [{
+        status: "cancelled",
+        conversationId,
+        answerId: harness.answer.id,
+      }],
+    ]);
+  });
+
+  it("waits for a delayed final answer while the transcript stays virtualized", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("anchor-test-scroll") ? 600 : 120;
+      });
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const scroll = this.closest<HTMLElement>(".anchor-test-scroll");
+        if (this.dataset.terminalAnswerId === "answer-1") {
+          return rect(408 - (scroll?.scrollTop ?? 0), 1_200);
+        }
+        return rect(0, this.classList.contains("anchor-test-scroll") ? 600 : 120);
+      });
+    vi.spyOn(HTMLElement.prototype, "scrollTo")
+      .mockImplementation(function (
+        this: HTMLElement,
+        options?: ScrollToOptions | number,
+        y?: number,
+      ) {
+        this.scrollTop = typeof options === "number"
+          ? y ?? 0
+          : options?.top ?? this.scrollTop;
+        this.dispatchEvent(new Event("scroll"));
+      });
+    const positioned = vi.fn();
+    const harness = renderAnswerTimeline(true, positioned, false, 16);
+    Object.defineProperties(harness.scrollElementRef.current!, {
+      clientHeight: { configurable: true, value: 600 },
+      scrollHeight: { configurable: true, value: 5_000 },
+    });
+
+    await act(async () => {
+      harness.settle();
+      await Promise.resolve();
+    });
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started"]);
+    const answer = harness.timelineElementRef.current!
+      .querySelector<HTMLElement>('[data-terminal-answer-id="answer-1"]')!;
+    answer.removeAttribute("data-terminal-answer-id");
+    await act(async () => {
+      let remaining = 4;
+      while (frames.length > 0 && remaining > 0) {
+        frames.shift()!(performance.now());
+        remaining -= 1;
+        await Promise.resolve();
+      }
+    });
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started"]);
+
+    answer.dataset.terminalAnswerId = "answer-1";
+    await act(async () => {
+      let remaining = 100;
+      while (frames.length > 0 && remaining > 0) {
+        frames.shift()!(performance.now());
+        remaining -= 1;
+        await Promise.resolve();
+      }
+    });
+
+    const virtualWindow = harness.timelineElementRef.current!
+      .querySelector<HTMLElement>(".response-virtual-window");
+    expect(virtualWindow).not.toBeNull();
+    expect(virtualWindow!.querySelectorAll(".response-virtual-item").length)
+      .toBeLessThan(16);
+    expect(harness.scrollElementRef.current!.scrollTop).toBe(400);
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started", "positioned"]);
   });
 
   it("does not reposition disabled or already-loaded answers", async () => {

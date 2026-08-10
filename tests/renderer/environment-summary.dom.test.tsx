@@ -84,6 +84,7 @@ function HeaderHarness({
         onCommit={vi.fn()}
         onOpenPullRequest={vi.fn()}
         onPull={vi.fn()}
+        onPush={vi.fn()}
         onRunAction={vi.fn()}
         onToggleActivity={vi.fn()}
       />

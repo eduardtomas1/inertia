@@ -50,6 +50,7 @@ describe("selected review context", () => {
       authorizeRoot: (trustedRoot) => Promise.resolve({
         root: trustedRoot,
         identity: { dev: "1", ino: "1" },
+        birthtimeNs: "1",
       }),
       verifyRoot: () => Promise.resolve(),
       read: (trustedRoot, path, maxBytes) => {

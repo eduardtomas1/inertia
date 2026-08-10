@@ -1,4 +1,11 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -11,6 +18,7 @@ import type {
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
+import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
 import { openWorkspaceEntry } from "../../src/renderer/src/hooks/useWorkspaceTools";
 import {
   useWorkspaceFiles,
@@ -149,6 +157,82 @@ function deferredWorkspaceGitRequests() {
 }
 
 describe("workspace pane authority", () => {
+  it("blocks root commit clicks and Enter when the complete diff is truncated", () => {
+    const review = renderHook(() => useWorkspaceReview({
+      project: alpha,
+      conversation: alphaChat,
+      detail: null,
+      gitDiff: {
+        patch: [
+          "diff --git a/src/app.ts b/src/app.ts",
+          "--- a/src/app.ts",
+          "+++ b/src/app.ts",
+          "@@ -1 +1 @@",
+          "-before",
+          "+after",
+          "",
+        ].join("\n"),
+        truncated: true,
+        files: [],
+      },
+      ignoreWhitespace: false,
+      confirmDestructiveActions: false,
+      request: vi.fn(),
+      run: vi.fn(),
+      setGitDiff: vi.fn(),
+    }));
+    const onCommit = vi.fn(async () => undefined);
+    render(
+      <CommitDialog
+        open
+        repositoryPath="."
+        status={{
+          isRepository: true,
+          root: "/workspace/inertia",
+          branch: "main",
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [{
+            path: "src/app.ts",
+            status: "modified",
+            insertions: 1,
+            deletions: 1,
+            untracked: false,
+            staged: false,
+            unstaged: true,
+            indexStatus: ".",
+            worktreeStatus: "M",
+          }],
+          insertions: 1,
+          deletions: 1,
+        }}
+        diff={review.result.current.structuredDiff}
+        diffParsing={review.result.current.structuredDiffParsing}
+        diffError={review.result.current.structuredDiffError}
+        reviewStates={[]}
+        busy={false}
+        onClose={vi.fn()}
+        onCommit={onCommit}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Diff truncated. Refresh before committing.",
+    );
+    const message = screen.getByRole("textbox", { name: "Commit message" });
+    fireEvent.change(message, { target: { value: "Must not commit" } });
+    const commit = screen.getByRole("button", { name: "Commit" });
+    const commitAndPush = screen.getByRole("button", { name: "Commit & push" });
+    expect(commit).toBeDisabled();
+    expect(commitAndPush).toBeDisabled();
+    fireEvent.click(commit);
+    fireEvent.click(commitAndPush);
+    fireEvent.keyDown(message, { key: "Enter" });
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it("routes actual directories to reveal and files to the internal preview", async () => {
     const openDirectory = vi.fn(async () => undefined);
     const openFile = vi.fn();

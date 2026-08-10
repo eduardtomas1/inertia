@@ -58,6 +58,16 @@ function themeTokens(theme: "light" | "dark"): Map<string, string> {
 }
 
 describe("visual contrast system", () => {
+  it("uses the readable application typography scale for Git file metadata", () => {
+    for (const selector of [
+      ".change-file-status",
+      ".change-file-path, .file-entry-path",
+      ".change-file-stats",
+    ]) {
+      expect(cssBlock(selector)).toContain("font-size: var(--ui-font-micro)");
+    }
+  });
+
   it.each(["light", "dark"] as const)(
     "keeps %s primary, secondary, metadata, and semantic text readable",
     (theme) => {
@@ -208,7 +218,24 @@ describe("visual contrast system", () => {
       /\.message-scroll:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--focus-ring\)/su,
     );
     expect(css).toMatch(
-      /\.workspace-repository-group > details > summary:focus-visible,\s*\.workspace-repository-file:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su,
+      /\.workspace-repository-file:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su,
+    );
+  });
+
+  it("keeps the repository scope and file navigator on shared readability tokens", () => {
+    expect(cssBlock(".workspace-repository-scope-leading strong,\n.workspace-repository-scope-leading select"))
+      .toContain("font-size: var(--ui-font-secondary)");
+    expect(cssBlock(".workspace-repository-scope-meta"))
+      .toContain("font-size: var(--ui-font-micro)");
+    expect(cssBlock(".workspace-repository-file-copy strong"))
+      .toContain("font-size: var(--ui-font-secondary)");
+    expect(css).toMatch(
+      /\.workspace-repository-file-copy small\s*\{[^}]*font-size:\s*var\(--ui-font-micro\)/su,
+    );
+    expect(cssBlock(".workspace-repository-file-stats"))
+      .toContain("font: var(--ui-font-micro)/1.2");
+    expect(css).toMatch(
+      /@container \(max-width: 460px\)\s*\{[\s\S]*?\.workspace-repository-scope\s*\{[^}]*flex-direction:\s*column;/u,
     );
   });
 

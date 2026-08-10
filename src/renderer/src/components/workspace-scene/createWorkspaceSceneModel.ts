@@ -549,6 +549,10 @@ export function createWorkspaceSceneModel({
       } : null,
       changes: {
         projectName: project.name,
+        projectId: project.id,
+        conversationId: persistedConversation?.id,
+        busyAction,
+        run: actions.run,
         snapshot: workspaceTools.workspaceGitStatus,
         loading: workspaceTools.toolsLoading,
         summary: workspaceTools.reviewSummary,

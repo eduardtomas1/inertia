@@ -36,6 +36,16 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
       if (previous?.isConnected) previous.focus();
     };
   }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || busy) return;
+      event.preventDefault();
+      onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [busy, onClose, open]);
   const unreviewedHunks = useMemo(
     () => unreviewedCommitHunks(
       diff,
@@ -64,11 +74,6 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
         aria-modal="true"
         aria-labelledby="commit-dialog-title"
         onKeyDown={(event) => {
-          if (event.key === "Escape" && !busy) {
-            event.preventDefault();
-            onClose();
-            return;
-          }
           if (event.key !== "Tab") return;
           const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')];
           const first = focusable[0];

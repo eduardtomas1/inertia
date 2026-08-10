@@ -82,6 +82,8 @@ async function verifiedHandle(
     || rootInfo.isSymbolicLink()
     || rootInfo.dev.toString(10) !== root.identity.dev
     || rootInfo.ino.toString(10) !== root.identity.ino
+    || rootInfo.birthtimeNs <= 0n
+    || rootInfo.birthtimeNs.toString(10) !== root.birthtimeNs
   ) {
     throw new SecureFileError("unsafe", "The secure file root is unsafe.");
   }
@@ -195,7 +197,12 @@ export class SecureFileTestBroker implements RuntimeSecureFileBroker {
     try {
       const canonicalRoot = await realpath(root);
       const info = await lstat(canonicalRoot, { bigint: true });
-      if (!info.isDirectory() || info.isSymbolicLink() || info.ino <= 0n) {
+      if (
+        !info.isDirectory()
+        || info.isSymbolicLink()
+        || info.ino <= 0n
+        || info.birthtimeNs <= 0n
+      ) {
         throw new SecureFileError(
           "unsafe",
           "The secure file root is unsafe.",
@@ -207,6 +214,7 @@ export class SecureFileTestBroker implements RuntimeSecureFileBroker {
           dev: info.dev.toString(10),
           ino: info.ino.toString(10),
         },
+        birthtimeNs: info.birthtimeNs.toString(10),
       };
     } catch (error) {
       throw mappedFileError(error);
@@ -225,6 +233,8 @@ export class SecureFileTestBroker implements RuntimeSecureFileBroker {
         || info.isSymbolicLink()
         || info.dev.toString(10) !== root.identity.dev
         || info.ino.toString(10) !== root.identity.ino
+        || info.birthtimeNs <= 0n
+        || info.birthtimeNs.toString(10) !== root.birthtimeNs
       ) {
         throw new SecureFileError(
           "unsafe",

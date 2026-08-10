@@ -36,6 +36,8 @@ export class SecureFileError extends Error {
 export interface SecureFileRootCapability {
   root: string;
   identity: SecureFileIdentity;
+  /** Stable directory creation identity, retained outside renderer contracts. */
+  birthtimeNs: string;
 }
 
 export interface RuntimeSecureFileBroker {

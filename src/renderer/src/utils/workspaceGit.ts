@@ -43,37 +43,6 @@ export function workspaceGitRepositoryLabel(projectName: string, repositoryPath:
   return repositoryPath === "." ? projectName : repositoryPath;
 }
 
-export interface WorkspaceGitRepositoryPresentation {
-  prefix: string;
-  suffix: string;
-  location: string;
-}
-
-export function workspaceGitRepositoryPresentation(
-  projectName: string,
-  repositoryPath: string,
-): WorkspaceGitRepositoryPresentation {
-  if (repositoryPath === ".") {
-    return { prefix: "", suffix: projectName, location: "project root" };
-  }
-
-  const separator = repositoryPath.lastIndexOf("/");
-  const leaf = repositoryPath.slice(separator + 1);
-  const location = separator >= 0 ? repositoryPath.slice(0, separator) : "nested repository";
-  const qualifier = Math.max(leaf.lastIndexOf("."), leaf.lastIndexOf("-"));
-  return qualifier > 0 && qualifier < leaf.length - 1
-    ? { prefix: leaf.slice(0, qualifier + 1), suffix: leaf.slice(qualifier + 1), location }
-    : { prefix: "", suffix: leaf, location };
-}
-
-export function firstWorkspaceGitFile(snapshot: WorkspaceGitSnapshot): WorkspaceGitFileIdentity | null {
-  for (const repository of snapshot.repositories) {
-    const file = repository.files[0];
-    if (file) return { repositoryPath: repository.repositoryPath, filePath: file.path };
-  }
-  return null;
-}
-
 export function workspaceGitFile(
   snapshot: WorkspaceGitSnapshot,
   identity: WorkspaceGitFileIdentity | null,

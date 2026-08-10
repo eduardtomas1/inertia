@@ -75,9 +75,13 @@ export function useWorkspaceReview({
 
   const {
     structured: structuredDiff,
-    parsing: structuredDiffParsing,
-    error: structuredDiffError,
+    parsing: parsedDiffParsing,
+    error: parsedDiffError,
   } = useParsedUnifiedDiff(gitDiff?.patch ?? "", gitDiff);
+  const structuredDiffParsing = parsedDiffParsing && !gitDiff?.truncated;
+  const structuredDiffError = gitDiff?.truncated
+    ? "Diff truncated. Refresh before committing."
+    : parsedDiffError;
 
   useEffect(() => {
     setSelectionReviewAnswer((current) => (

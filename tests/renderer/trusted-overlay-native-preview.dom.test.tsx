@@ -109,6 +109,7 @@ describe("trusted overlay native preview suspension", () => {
   });
 
   it("owns the commit dialog lifecycle", async () => {
+    const onClose = vi.fn();
     const view = render(
       <CommitDialog
         open
@@ -119,13 +120,15 @@ describe("trusted overlay native preview suspension", () => {
         diffError={null}
         reviewStates={[]}
         busy={false}
-        onClose={vi.fn()}
+        onClose={onClose}
         onCommit={vi.fn()}
       />,
     );
 
     expect(screen.getByRole("dialog", { name: "Commit changes" }))
       .toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
     await expectSuspended();
 
     view.rerender(

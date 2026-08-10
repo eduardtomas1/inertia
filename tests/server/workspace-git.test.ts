@@ -20,6 +20,7 @@ import {
   workspaceGitFilePath,
 } from "../../src/server/workspace-git";
 import { getRepositoryStatus, getUnifiedDiff } from "../../src/server/git";
+import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
 import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
 import { issueAuthorityForLiveOwner } from "../../src/server/runtime/live-authority";
 import { discoverFreshWorkspaceGitRepositories } from "../../src/server/runtime/commands/source-control-commands";
@@ -83,6 +84,24 @@ afterEach(() => {
 });
 
 describe("workspace Git repository discovery", () => {
+  it.skipIf(process.platform === "win32")(
+    "preserves whitespace in a resolved Git metadata path",
+    async () => {
+      const root = temporaryRoot("metadata-whitespace");
+      const repository = join(root, " repository\nwith-space ");
+      initializeRepository(repository, "tracked.txt");
+
+      const identity = await repositoryMetadataMarkerIdentity(repository);
+      const resolved = await resolveWorkspaceGitRepository(
+        root,
+        " repository\nwith-space ",
+      );
+
+      expect(identity.split("\0")[0]).toBe(realpathSync(join(repository, ".git")));
+      expect(resolved.root).toBe(realpathSync(repository));
+    },
+  );
+
   it("stops discovery at its aggregate deadline", async () => {
     const root = temporaryRoot("workspace-deadline");
 
@@ -273,6 +292,23 @@ describe("workspace Git repository discovery", () => {
       state: "ready",
       branch: "module-worktree",
     });
+    const originalIdentity = await repositoryMetadataMarkerIdentity(worktree);
+    const secondWorktree = join(workspace, "second-worktree");
+    git(
+      source,
+      "worktree",
+      "add",
+      "-q",
+      "-b",
+      "second-worktree",
+      secondWorktree,
+    );
+    const secondMetadata = git(secondWorktree, "rev-parse", "--git-dir");
+    writeFileSync(join(worktree, ".git"), `gitdir: ${secondMetadata}\n`);
+
+    await expect(repositoryMetadataMarkerIdentity(worktree)).resolves.not.toBe(
+      originalIdentity,
+    );
   });
 
   it("never follows directory symlinks outside the project", async () => {

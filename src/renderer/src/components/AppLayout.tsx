@@ -555,6 +555,16 @@ export function AppLayout({
                 },
               }).catch(() => undefined);
             }}
+            onPush={() => {
+              if (!project) return;
+              void actions.run("git.push", {
+                type: "git.push",
+                payload: {
+                  projectId: project.id,
+                  conversationId: conversation?.id,
+                },
+              }).catch(() => undefined);
+            }}
           />
 
           <div

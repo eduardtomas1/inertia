@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  lstat,
   mkdtemp,
   mkdir,
   rename,
@@ -23,6 +24,66 @@ afterEach(async () => {
 });
 
 describe("runtime secure file broker client", () => {
+  it("rejects a changed creation identity even when device and inode are reused", async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), "inertia-secure-client-identity-"),
+    );
+    roots.push(root);
+    const actual = await lstat(root, { bigint: true });
+    let birthtimeNs = 100n;
+    const inspectRoot = vi.fn(async () => ({
+      dev: actual.dev,
+      ino: actual.ino,
+      birthtimeNs,
+      isDirectory: () => true,
+      isSymbolicLink: () => false,
+    }) as typeof actual);
+    const client = new RuntimeSecureFileBrokerClient(
+      vi.fn(),
+      20_000,
+      inspectRoot,
+    );
+    const authority = await client.authorizeRoot(root);
+
+    birthtimeNs = 101n;
+
+    await expect(client.verifyRoot(authority)).rejects.toMatchObject({
+      code: "unsafe",
+    });
+    expect(authority).toMatchObject({
+      identity: {
+        dev: actual.dev.toString(10),
+        ino: actual.ino.toString(10),
+      },
+      birthtimeNs: "100",
+    });
+    client.close();
+  });
+
+  it("fails closed when the filesystem exposes no stable creation identity", async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), "inertia-secure-client-no-identity-"),
+    );
+    roots.push(root);
+    const actual = await lstat(root, { bigint: true });
+    const client = new RuntimeSecureFileBrokerClient(
+      vi.fn(),
+      20_000,
+      async () => ({
+        dev: actual.dev,
+        ino: actual.ino,
+        birthtimeNs: 0n,
+        isDirectory: () => true,
+        isSymbolicLink: () => false,
+      }) as typeof actual,
+    );
+
+    await expect(client.authorizeRoot(root)).rejects.toMatchObject({
+      code: "unsafe",
+    });
+    client.close();
+  });
+
   it("requests recovery before reminting authority for a missing target", async () => {
     const root = await mkdtemp(
       join(tmpdir(), "inertia-secure-client-recovery-"),
@@ -32,6 +93,7 @@ describe("runtime secure file broker client", () => {
     const post = vi.fn<(event: RuntimeWorkerEvent) => void>();
     const client = new RuntimeSecureFileBrokerClient(post);
     const authority = await client.authorizeRoot(root);
+    expect(authority.birthtimeNs).toMatch(/^[1-9][0-9]*$/u);
 
     const pending = client.read(authority, "example.ts", 1_024);
     await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));

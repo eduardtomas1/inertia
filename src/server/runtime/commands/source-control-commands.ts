@@ -37,9 +37,14 @@ import {
   type TurnGitArtifactManager,
 } from "../../turn-git-artifacts";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
-import { repositoryRoot } from "../../git/paths";
+import {
+  repositoryMetadataMarkerIdentity,
+  repositoryRoot,
+} from "../../git/paths";
 import {
   discoverWorkspaceGitRepositories,
+  resolveWorkspaceGitRepository,
+  resolveWorkspaceGitRepositoryIdentity,
   type WorkspaceGitDiscoveryOptions,
 } from "../../workspace-git";
 import type { SecureFileAuthorityRegistry } from "../secure-file-authorities";
@@ -67,9 +72,109 @@ export interface SourceControlCommandDependencies {
   send(socket: WebSocket, event: ServerEvent): void;
 }
 
+function repositoryAuthorityBinding(
+  projectId: string,
+  conversationId: string | undefined,
+  workspaceRoot: string,
+  repositoryPath: string,
+  metadataMarkerIdentity: string,
+): readonly string[] {
+  return [
+    projectId,
+    conversationId ?? "",
+    workspaceRoot,
+    repositoryPath,
+    metadataMarkerIdentity,
+  ];
+}
+
+function sameCanonicalPath(left: string, right: string): boolean {
+  return process.platform === "win32"
+    ? left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US")
+    : left === right;
+}
+
 export function createSourceControlCommandHandler(
   dependencies: SourceControlCommandDependencies,
 ): RuntimeCommandHandler {
+  const resolveCommandRepository = async (socket: WebSocket, payload: {
+    projectId: string;
+    conversationId?: string;
+    repositoryPath?: string;
+    authorityRef?: string;
+  }) => {
+    const workspaceRoot = dependencies.workspacePath(
+      payload.projectId,
+      payload.conversationId,
+    );
+    if (!payload.repositoryPath) {
+      return {
+        workspaceRoot,
+        repositoryRoot: workspaceRoot,
+        secureRoot: null,
+        metadataMarkerIdentity: null,
+      };
+    }
+    if (!payload.authorityRef) {
+      throw new RuntimeRequestError(
+        "Refresh repository status before changing this nested repository.",
+      );
+    }
+    const repository = await resolveWorkspaceGitRepositoryIdentity(
+      workspaceRoot,
+      payload.repositoryPath,
+      dependencies.secureFiles,
+    );
+    const issuedRoot = await dependencies.secureFileAuthorities.resolve(
+      socket,
+      payload.authorityRef,
+      "git-repository",
+      repositoryAuthorityBinding(
+        payload.projectId,
+        payload.conversationId,
+        workspaceRoot,
+        payload.repositoryPath,
+        repository.metadataMarkerIdentity,
+      ),
+    );
+    if (
+      repository.root !== issuedRoot.root
+      || !repository.secureRoot
+      || repository.secureRoot.identity.dev !== issuedRoot.identity.dev
+      || repository.secureRoot.identity.ino !== issuedRoot.identity.ino
+      || repository.secureRoot.birthtimeNs !== issuedRoot.birthtimeNs
+    ) {
+      throw new RuntimeRequestError(
+        "This repository changed after its status was loaded. Refresh and try again.",
+      );
+    }
+    return {
+      workspaceRoot,
+      repositoryRoot: issuedRoot.root,
+      secureRoot: issuedRoot,
+      metadataMarkerIdentity: repository.metadataMarkerIdentity,
+    };
+  };
+  const verifyCommandRepository = async (
+    secureRoot: Awaited<ReturnType<typeof resolveWorkspaceGitRepository>>["secureRoot"] | null,
+    metadataMarkerIdentity: string | null,
+    options: { deadlineAt?: number; signal?: AbortSignal } = {},
+  ): Promise<void> => {
+    if (!secureRoot || !metadataMarkerIdentity) return;
+    await dependencies.secureFiles.verifyRoot(secureRoot, options.signal);
+    if (
+      !sameCanonicalPath(
+        await repositoryRoot(secureRoot.root, options),
+        secureRoot.root,
+      )
+      || await repositoryMetadataMarkerIdentity(secureRoot.root, options)
+        !== metadataMarkerIdentity
+    ) {
+      throw new RuntimeRequestError(
+        "This repository changed after its status was loaded. Refresh and try again.",
+      );
+    }
+  };
   const issueLiveAuthority = async (
     socket: WebSocket,
     purpose: Parameters<SecureFileAuthorityRegistry["issue"]>[1],
@@ -124,11 +229,27 @@ export function createSourceControlCommandHandler(
             async (signal) =>
               await dependencies.secureFiles.authorizeRoot(root, signal),
           );
+          const metadataMarkerIdentity = await deadline.run(
+            async () => await repositoryMetadataMarkerIdentity(root, {
+              deadlineAt,
+            }),
+          );
           const inspected = await deadline.run(
             async () => await getRepositoryStatus(secureRoot.root, {
               deadlineAt,
             }),
           );
+          const verifiedMetadataMarkerIdentity = await deadline.run(
+            async () => await repositoryMetadataMarkerIdentity(root, {
+              deadlineAt,
+            }),
+          );
+          if (metadataMarkerIdentity !== verifiedMetadataMarkerIdentity) {
+            throw new GitError(
+              "conflict",
+              "The Git repository identity changed while it was being inspected.",
+            );
+          }
           await deadline.run(
             async (signal) =>
               await dependencies.secureFiles.verifyRoot(secureRoot, signal),
@@ -137,13 +258,14 @@ export function createSourceControlCommandHandler(
             await deadline.run(
               async (signal) => await issueLiveAuthority(
                 socket,
-                "git-diff",
-                [
+                "git-repository",
+                repositoryAuthorityBinding(
                   command.payload.projectId,
-                  command.payload.conversationId ?? "",
+                  command.payload.conversationId,
                   path,
                   ".",
-                ],
+                  metadataMarkerIdentity,
+                ),
                 secureRoot,
                 signal,
               ),
@@ -175,20 +297,33 @@ export function createSourceControlCommandHandler(
           command.payload.conversationId,
         );
         try {
+          const metadataMarkerIdentity = await deadline.run(
+            async () => await repositoryMetadataMarkerIdentity(path, {
+              deadlineAt,
+            }),
+          );
           const secureRoot = await deadline.run(
             async (signal) =>
               await dependencies.secureFileAuthorities.resolve(
                 socket,
                 command.payload.authorityRef,
-                "git-diff",
-                [
+                "git-repository",
+                repositoryAuthorityBinding(
                   command.payload.projectId,
-                  command.payload.conversationId ?? "",
+                  command.payload.conversationId,
                   path,
                   ".",
-                ],
+                  metadataMarkerIdentity,
+                ),
                 { signal },
               ),
+          );
+          await deadline.run(
+            async (signal) => await verifyCommandRepository(
+              secureRoot,
+              metadataMarkerIdentity,
+              { deadlineAt, signal },
+            ),
           );
           const [diff, status] = await deadline.run(
             async (signal) => await Promise.all([
@@ -206,8 +341,11 @@ export function createSourceControlCommandHandler(
             ]),
           );
           await deadline.run(
-            async (signal) =>
-              await dependencies.secureFiles.verifyRoot(secureRoot, signal),
+            async (signal) => await verifyCommandRepository(
+              secureRoot,
+              metadataMarkerIdentity,
+              { deadlineAt, signal },
+            ),
           );
           if (
             command.payload.conversationId
@@ -273,23 +411,24 @@ export function createSourceControlCommandHandler(
             4,
             deadline,
             async (repository, signal) => {
-              const secureRoot = discovered.secureRoots.get(
+              const authority = discovered.repositoryAuthorities.get(
                 repository.repositoryPath,
               );
-              if (!secureRoot || repository.state !== "ready") {
+              if (!authority || repository.state !== "ready") {
                 return { ...repository, authorityRef: null };
               }
               const authorityRef =
                 await issueLiveAuthority(
                   socket,
-                  "git-diff",
-                  [
+                  "git-repository",
+                  repositoryAuthorityBinding(
                     command.payload.projectId,
-                    command.payload.conversationId ?? "",
+                    command.payload.conversationId,
                     path,
                     repository.repositoryPath,
-                  ],
-                  secureRoot,
+                    authority.metadataMarkerIdentity,
+                  ),
+                  authority.secureRoot,
                   signal,
                 );
               if (authorityRef) issuedAuthorityRefs.push(authorityRef);
@@ -325,20 +464,34 @@ export function createSourceControlCommandHandler(
           command.payload.conversationId,
         );
         try {
+          const repository = await deadline.run(
+            async () => await resolveWorkspaceGitRepositoryIdentity(
+              path,
+              command.payload.repositoryPath,
+            ),
+          );
           const secureRoot = await deadline.run(
             async (signal) =>
               await dependencies.secureFileAuthorities.resolve(
                 socket,
                 command.payload.authorityRef,
-                "git-diff",
-                [
+                "git-repository",
+                repositoryAuthorityBinding(
                   command.payload.projectId,
-                  command.payload.conversationId ?? "",
+                  command.payload.conversationId,
                   path,
                   command.payload.repositoryPath,
-                ],
+                  repository.metadataMarkerIdentity,
+                ),
                 { signal },
               ),
+          );
+          await deadline.run(
+            async (signal) => await verifyCommandRepository(
+              secureRoot,
+              repository.metadataMarkerIdentity,
+              { deadlineAt, signal },
+            ),
           );
           const [diff, repositoryStatus] = await deadline.run(
             async (signal) => await Promise.all([
@@ -356,8 +509,11 @@ export function createSourceControlCommandHandler(
             ]),
           );
           await deadline.run(
-            async (signal) =>
-              await dependencies.secureFiles.verifyRoot(secureRoot, signal),
+            async (signal) => await verifyCommandRepository(
+              secureRoot,
+              repository.metadataMarkerIdentity,
+              { deadlineAt, signal },
+            ),
           );
           const reviewMetadataChanged = Boolean(
             command.payload.conversationId
@@ -612,17 +768,25 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.pull": {
-        const path = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
-        );
+        const repository = await resolveCommandRepository(socket, command.payload);
         await dependencies.workspaceRuns.trackSourceControl(
           "Pull changes",
           command.payload.projectId,
           command.payload.conversationId,
-          path,
+          repository.workspaceRoot,
           command.requestId,
-          async () => await pullRepository(path),
+          async () => {
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            const result = await pullRepository(repository.repositoryRoot);
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            return result;
+          },
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -635,34 +799,44 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.commit": {
-        const path = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
-        );
+        const repository = await resolveCommandRepository(socket, command.payload);
         const result = await dependencies.workspaceRuns.trackSourceControl(
           "Commit changes",
           command.payload.projectId,
           command.payload.conversationId,
-          path,
+          repository.workspaceRoot,
           command.requestId,
-          async () => await commitChanges(
-            path,
-            command.payload.message,
-            command.payload.paths,
-          ),
+          async () => {
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            const committed = await commitChanges(
+              repository.repositoryRoot,
+              command.payload.message,
+              command.payload.paths,
+            );
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            return committed;
+          },
         );
         if (command.payload.conversationId) {
           const current = await getUnifiedDiff(
-            path,
+            repository.repositoryRoot,
             {},
             undefined,
             dependencies.secureFiles,
+            repository.secureRoot ?? undefined,
           );
           if (!current.truncated) {
             reconcileReviews(
               dependencies.store,
               command.payload.conversationId,
               current.text,
+              command.payload.repositoryPath ?? ".",
             );
           }
         }
@@ -678,17 +852,25 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.push": {
-        const path = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
-        );
+        const repository = await resolveCommandRepository(socket, command.payload);
         await dependencies.workspaceRuns.trackSourceControl(
           "Push branch",
           command.payload.projectId,
           command.payload.conversationId,
-          path,
+          repository.workspaceRoot,
           command.requestId,
-          async () => await pushCurrentBranch(path),
+          async () => {
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            const result = await pushCurrentBranch(repository.repositoryRoot);
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            return result;
+          },
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -701,17 +883,25 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.pr.open": {
-        const path = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
-        );
+        const repository = await resolveCommandRepository(socket, command.payload);
         const url = await dependencies.workspaceRuns.trackSourceControl(
           "Prepare pull request",
           command.payload.projectId,
           command.payload.conversationId,
-          path,
+          repository.workspaceRoot,
           command.requestId,
-          async () => await getPullRequestCreateUrl(path),
+          async () => {
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            const result = await getPullRequestCreateUrl(repository.repositoryRoot);
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            return result;
+          },
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -725,17 +915,28 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.pr.create": {
-        const path = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
-        );
+        const repository = await resolveCommandRepository(socket, command.payload);
         const url = await dependencies.workspaceRuns.trackSourceControl(
           "Create pull request",
           command.payload.projectId,
           command.payload.conversationId,
-          path,
+          repository.workspaceRoot,
           command.requestId,
-          async () => await createGitHubPullRequest(path, command.payload),
+          async () => {
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            const result = await createGitHubPullRequest(
+              repository.repositoryRoot,
+              command.payload,
+            );
+            await verifyCommandRepository(
+              repository.secureRoot,
+              repository.metadataMarkerIdentity,
+            );
+            return result;
+          },
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -760,15 +961,27 @@ export async function discoverFreshWorkspaceGitRepositories(
   discover: typeof discoverWorkspaceGitRepositories =
     discoverWorkspaceGitRepositories,
 ) {
-  const secureRoots = new Map<string, Awaited<
-    ReturnType<RuntimeSecureFileBroker["authorizeRoot"]>
-  >>();
+  const repositoryAuthorities = new Map<string, {
+    secureRoot: Awaited<ReturnType<RuntimeSecureFileBroker["authorizeRoot"]>>;
+    metadataMarkerIdentity: string;
+  }>();
   const snapshot = await discover(path, {
     ...options,
-    onRepositoryAuthorized: (repositoryPath, secureRoot) => {
-      secureRoots.set(repositoryPath, secureRoot);
-      options.onRepositoryAuthorized?.(repositoryPath, secureRoot);
+    onRepositoryAuthorized: (
+      repositoryPath,
+      secureRoot,
+      metadataMarkerIdentity,
+    ) => {
+      repositoryAuthorities.set(repositoryPath, {
+        secureRoot,
+        metadataMarkerIdentity,
+      });
+      options.onRepositoryAuthorized?.(
+        repositoryPath,
+        secureRoot,
+        metadataMarkerIdentity,
+      );
     },
   });
-  return { snapshot, secureRoots };
+  return { snapshot, repositoryAuthorities };
 }

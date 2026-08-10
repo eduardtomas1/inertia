@@ -64,7 +64,7 @@ describe("SecureFileAuthorityRegistry", () => {
     const controller = new AbortController();
     const issuing = registry.issue(
       owner,
-      "git-diff",
+      "git-repository",
       ["project", "."],
       root,
       { signal: controller.signal },
@@ -78,7 +78,7 @@ describe("SecureFileAuthorityRegistry", () => {
     await expect(registry.resolve(
       owner,
       reference,
-      "git-diff",
+      "git-repository",
       ["project", "."],
     )).rejects.toThrow(/authorization expired/i);
   });
@@ -104,7 +104,7 @@ describe("SecureFileAuthorityRegistry", () => {
     await expect(registry.resolve(
       owner,
       reference,
-      "git-diff",
+      "git-repository",
       ["project", "file.ts", "digest"],
     )).rejects.toThrow(/authorization expired/i);
     await expect(registry.resolve(
@@ -131,7 +131,7 @@ describe("SecureFileAuthorityRegistry", () => {
     const owner = {};
     const reference = await registry.issue(
       owner,
-      "git-diff",
+      "git-repository",
       ["project", "."],
       root,
     );
@@ -140,7 +140,7 @@ describe("SecureFileAuthorityRegistry", () => {
     await expect(restartedRegistry.resolve(
       owner,
       reference,
-      "git-diff",
+      "git-repository",
       ["project", "."],
     )).rejects.toThrow(/authorization expired/i);
 
@@ -153,7 +153,7 @@ describe("SecureFileAuthorityRegistry", () => {
     await expect(registry.resolve(
       owner,
       reference,
-      "git-diff",
+      "git-repository",
       ["project", "."],
     )).rejects.toThrow(/authorization expired/i);
   });
@@ -165,19 +165,19 @@ describe("SecureFileAuthorityRegistry", () => {
     });
     const root = await secureFiles.authorizeRoot(await temporaryRoot());
     const owner = {};
-    const first = await registry.issue(owner, "git-diff", ["first"], root);
-    const second = await registry.issue(owner, "git-diff", ["second"], root);
+    const first = await registry.issue(owner, "git-repository", ["first"], root);
+    const second = await registry.issue(owner, "git-repository", ["second"], root);
 
     await expect(registry.resolve(
       owner,
       first,
-      "git-diff",
+      "git-repository",
       ["first"],
     )).rejects.toThrow(/authorization expired/i);
     await expect(registry.resolve(
       owner,
       second,
-      "git-diff",
+      "git-repository",
       ["second"],
     )).resolves.toEqual(root);
   });

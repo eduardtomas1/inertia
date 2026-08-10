@@ -140,7 +140,7 @@ function renderWorkspaceChanges(status: WorkspaceGitSnapshot): string {
   }));
 }
 
-describe("workspace repository-grouped Changes panel", () => {
+describe("workspace repository-scoped Changes panel", () => {
   it("renders a repository-scoped summary while displaying a selected-file diff", () => {
     const selectedPatch = [
       "diff --git a/README.md b/README.md",
@@ -247,21 +247,19 @@ describe("workspace repository-grouped Changes panel", () => {
     );
   });
 
-  it("renders compact native repository disclosures without flattening duplicate file paths", () => {
+  it("renders one flat repository scope without flattening repository identity", () => {
     const html = renderWorkspaceChanges(snapshot());
 
-    expect(html).toContain("<details");
-    expect(html).toContain("<summary");
+    expect(html).not.toContain("<details");
+    expect(html).toContain('aria-label="Repository scope"');
     expect(html).toContain("Openbravo");
-    expect(html).toContain("project root");
     expect(html).toContain("modules/org.openbravo.alpha");
     expect(html).toContain("modules/org.openbravo.beta");
-    expect((html.match(/Main\.java/gu) ?? []).length).toBeGreaterThanOrEqual(4);
-    expect(html).toContain("No local changes");
+    expect(html).toContain("README.md");
+    expect(html).not.toContain("Main.java");
     expect(html).toContain("3 files in 4 repositories");
     expect(html).toContain("aria-label=\"Git repositories and changed files\"");
-    expect(html).toContain("Open src/Main.java from modules/org.openbravo.alpha");
-    expect(html).toContain("Open src/Main.java from modules/org.openbravo.beta");
+    expect(html).toContain("Open README.md from Openbravo");
   });
 
   it("announces bounded discovery honestly while preserving visible repository results", () => {
@@ -271,6 +269,20 @@ describe("workspace repository-grouped Changes panel", () => {
     expect(html).toContain("Repository discovery was bounded.");
     expect(html).toContain("Scanned 19 folders");
     expect(html).toContain("modules/org.openbravo.alpha");
+  });
+
+  it("separates fully staged files from working-tree changes", () => {
+    const current = snapshot();
+    current.repositories[0]!.files = [
+      { ...changedFile("staged.ts"), staged: true, unstaged: false },
+      changedFile("working.ts"),
+    ];
+    const html = renderWorkspaceChanges(current);
+
+    expect(html).toContain("Staged");
+    expect(html).toContain("Changes");
+    expect(html).toContain("staged.ts");
+    expect(html).toContain("working.ts");
   });
 
   it("changes the selected diff revision when a refresh keeps the file count stable", () => {
@@ -344,8 +356,8 @@ describe("workspace repository-grouped Changes panel", () => {
     nested.files = 2;
     const html = renderWorkspaceChanges(nested);
 
-    expect(html).toContain("Reviewing modules/org.openbravo.alpha.");
-    expect(html).toContain("review marks, local notes, and selective revert keep this repository identity");
+    expect(html).toContain("Nested repo");
+    expect(html).toContain("Review marks, local notes, questions, prompt references, and selective revert keep this repository identity");
     expect(html).toContain("Agent summaries and revisions remain available only for the project-root repository");
     expect(html).toContain("recovery checkpoints cover that root");
   });

@@ -31,6 +31,21 @@ export interface GitPathInspectionOptions {
   signal?: AbortSignal;
 }
 
+function canonicalPathIdentity(path: string): string {
+  return process.platform === "win32"
+    ? path.toLocaleLowerCase("en-US")
+    : path;
+}
+
+function terminalPathOutput(output: Buffer): string {
+  const value = output.toString("utf8");
+  return value.endsWith("\r\n")
+    ? value.slice(0, -2)
+    : value.endsWith("\n")
+      ? value.slice(0, -1)
+      : value;
+}
+
 function requirePathInspectionTime(
   options: GitPathInspectionOptions,
 ): void {
@@ -86,7 +101,7 @@ export async function repositoryRoot(
       failureMessage: "Unable to inspect this Git repository.",
     },
   );
-  const reported = result.stdout.toString("utf8").trim();
+  const reported = terminalPathOutput(result.stdout);
   if (!isAbsolute(reported)) {
     throw new GitError(
       "not-repository",
@@ -103,6 +118,71 @@ export async function repositoryRoot(
     throw new GitError(
       "not-repository",
       "The selected folder is not a Git repository.",
+    );
+  }
+}
+
+/**
+ * Captures the resolved Git metadata directory behind a checkout's `.git`
+ * marker. The value stays in the trusted runtime and is suitable for binding
+ * a short-lived authority to the exact repository metadata inspected. This
+ * is a boundary receipt rather than an atomic filesystem lock, so mutation
+ * callers revalidate it immediately before and after the operation.
+ */
+export async function repositoryMetadataMarkerIdentity(
+  repositoryPath: string,
+  options: GitPathInspectionOptions = {},
+): Promise<string> {
+  const root = await requireDirectory(repositoryPath, options);
+  requirePathInspectionTime(options);
+  const inspect = async (args: readonly string[]) => await runGitInspection(
+    root,
+    args,
+    {
+      deadlineAt: options.deadlineAt,
+      maxOutputBytes: MAX_PATH_LENGTH,
+      failureMessage: "Unable to inspect this Git repository identity.",
+    },
+  );
+  const result = await inspect([
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-dir",
+  ]).catch(async () => await inspect(["rev-parse", "--git-dir"]));
+  const reported = terminalPathOutput(result.stdout);
+  if (!reported || reported.includes("\0")) {
+    throw new GitError(
+      "conflict",
+      "The Git repository identity could not be verified.",
+    );
+  }
+  try {
+    requirePathInspectionTime(options);
+    const metadataPath = await realpath(
+      isAbsolute(reported) ? reported : resolve(root, reported),
+    );
+    requirePathInspectionTime(options);
+    const info = await lstat(metadataPath, { bigint: true });
+    requirePathInspectionTime(options);
+    if (
+      !info.isDirectory()
+      || info.isSymbolicLink()
+      || info.ino <= 0n
+      || info.birthtimeNs <= 0n
+    ) {
+      throw new Error();
+    }
+    return [
+      canonicalPathIdentity(metadataPath),
+      info.dev.toString(10),
+      info.ino.toString(10),
+      info.birthtimeNs.toString(10),
+    ].join("\0");
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    throw new GitError(
+      "conflict",
+      "The Git repository identity could not be verified.",
     );
   }
 }

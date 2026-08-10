@@ -677,6 +677,8 @@ setInterval(() => {}, 1000);
       oldIndexHash: "1".repeat(64),
       newIndexHash: createHash("sha256").update(currentIndex).digest("hex"),
       indexPath,
+      stagePath: `${indexPath}.inertia-stage-${"a".repeat(32)}`,
+      reservationToken: "1".repeat(64),
     }));
 
     await expect(commitReviewedChanges(
@@ -730,6 +732,8 @@ setInterval(() => {}, 1000);
       oldIndexHash: createHash("sha256").update(currentIndex).digest("hex"),
       newIndexHash: createHash("sha256").update(currentIndex).digest("hex"),
       indexPath,
+      stagePath: `${indexPath}.inertia-stage-${"b".repeat(32)}`,
+      reservationToken: "2".repeat(64),
     }));
 
     await expect(commitReviewedChanges(
@@ -827,48 +831,6 @@ setInterval(() => {}, 1000);
       .toBe(true);
     expect(readFileSync(join(root, ".git", "index.lock")).length)
       .toBeGreaterThan(0);
-  });
-
-  it("preserves a replacement index lock before installing the reviewed index", async () => {
-    const root = repository();
-    writeFileSync(join(root, "selected.txt"), "reviewed replacement-lock source\n");
-    const review = await captureGitCommitReview(root);
-    const originalHead = git(root, "rev-parse", "HEAD");
-    const originalIndex = readFileSync(join(root, ".git", "index"));
-    const lockPath = join(root, ".git", "index.lock");
-    const retainedOwnedLockPath = join(
-      root,
-      ".git",
-      "retained-inertia-index.lock",
-    );
-    const journalPath = join(
-      root,
-      ".git",
-      "index.inertia-commit-transaction.json",
-    );
-    const foreignLock = Buffer.from("foreign replacement lock\n");
-
-    const result = await commitReviewedChanges(
-      root,
-      "Commit without overwriting a foreign lock",
-      ["selected.txt"],
-      review.fingerprint,
-      {
-        testHooks: {
-          beforeIndexInstall: () => {
-            renameSync(lockPath, retainedOwnedLockPath);
-            writeFileSync(lockPath, foreignLock);
-          },
-        },
-      },
-    );
-
-    expect(git(root, "rev-parse", "HEAD")).not.toBe(originalHead);
-    expect(result.refreshWarning).toMatch(/index recovery.*manual/iu);
-    expect(readFileSync(join(root, ".git", "index"))).toEqual(originalIndex);
-    expect(readFileSync(lockPath)).toEqual(foreignLock);
-    expect(readFileSync(retainedOwnedLockPath)).not.toEqual(foreignLock);
-    expect(readFileSync(journalPath, "utf8")).toContain(result.commit);
   });
 
   it("rechecks signing policy inside the prepared reference transaction", async () => {
@@ -1119,6 +1081,8 @@ setInterval(() => {}, 1000);
       newIndexHash: createHash("sha256")
         .update(readFileSync(indexPath)).digest("hex"),
       indexPath,
+      stagePath: `${indexPath}.inertia-stage-${"c".repeat(32)}`,
+      reservationToken: "3".repeat(64),
     }));
 
     await expect(commitReviewedChanges(

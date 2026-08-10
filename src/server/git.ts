@@ -60,7 +60,16 @@ export {
   type WorktreeFilesystemReceipt,
   worktreeFilesystemIdentitiesEqual,
 } from "./worktree-filesystem-identity";
-export { commitChanges } from "./git/commits";
+export { commitChanges, commitReviewedChanges } from "./git/commits";
+export {
+  captureGitCommitReview,
+  prepareGitCommitReview,
+  renderGitCommitReviewDiff,
+  gitCommitReviewFingerprintsEqual,
+  gitCommitReviewStatusMatches,
+  requireGitCommitReviewFingerprint,
+  type GitCommitReviewCapture,
+} from "./git/commit-review";
 export {
   getPullRequestCreateUrl,
   pullRepository,

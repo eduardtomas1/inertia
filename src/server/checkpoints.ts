@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 
 import { runGit as runBoundedGit } from "./git/runner";
 import { GitError } from "./git/types";
+import { hasHead } from "./git/status";
 
 export class CheckpointError extends Error {}
 
@@ -99,6 +100,7 @@ async function checkpointEnvironment(
   checkpointId: string,
   environment: NodeJS.ProcessEnv,
   deadlineAt?: number,
+  isolateNewObjects = false,
 ): Promise<{
   environment: NodeJS.ProcessEnv;
   metadataDirectory: string;
@@ -159,7 +161,7 @@ async function checkpointEnvironment(
       1024 * 1024,
       deadlineAt,
     )
-  ).stdout.toString("utf8").trim();
+  ).stdout.toString("utf8").replace(/(?:\r\n|\n)$/u, "");
   if (
     (objectFormat !== "sha1" && objectFormat !== "sha256")
     || !objectDirectory
@@ -199,9 +201,103 @@ async function checkpointEnvironment(
       ...isolatedConfiguration,
       GIT_DIR: metadataDirectory,
       GIT_WORK_TREE: resolve(repositoryPath),
-      GIT_OBJECT_DIRECTORY: objectDirectory,
+      GIT_OBJECT_DIRECTORY: isolateNewObjects
+        ? resolve(metadataDirectory, "objects")
+        : objectDirectory,
+      ...(isolateNewObjects
+        ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(objectDirectory) }
+        : {}),
     },
   };
+}
+
+/**
+ * Produces a raw worktree tree without evaluating repository-provided clean
+ * filters or attributes. The temporary Git metadata carries Inertia's
+ * all-raw attributes. New review objects stay in the temporary object store;
+ * the canonical repository objects are available only through a quoted,
+ * read-only alternate path.
+ */
+export async function captureRawWorktreeTree(
+  repositoryPath: string,
+  paths: Buffer,
+  options: CheckpointOperationOptions = {},
+): Promise<{ head: string | null; tree: string }> {
+  const storageDirectory = await mkdtemp(
+    join(tmpdir(), "inertia-commit-review-"),
+  );
+  const captureId = randomUUID();
+  const indexPath = resolve(storageDirectory, `${captureId}.index`);
+  const baseEnvironment = { GIT_INDEX_FILE: indexPath };
+  let isolated: Awaited<ReturnType<typeof checkpointEnvironment>> | null = null;
+  try {
+    const hasCurrentHead = await hasHead(repositoryPath, {
+      deadlineAt: options.deadlineAt,
+    });
+    const head = hasCurrentHead
+      ? (
+          await runGit(
+            repositoryPath,
+            checkpointGitArguments(["rev-parse", "--verify", "HEAD"]),
+            {},
+            undefined,
+            1024,
+            options.deadlineAt,
+          )
+        ).stdout.toString("utf8").trim()
+      : null;
+    isolated = await checkpointEnvironment(
+      repositoryPath,
+      storageDirectory,
+      captureId,
+      baseEnvironment,
+      options.deadlineAt,
+      true,
+    );
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments(
+        head ? ["read-tree", head] : ["read-tree", "--empty"],
+      ),
+      isolated.environment,
+      undefined,
+      1024,
+      options.deadlineAt,
+    );
+    if (paths.length > 0) {
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments([
+          "--literal-pathspecs",
+          "add",
+          "-A",
+          "--pathspec-from-file=-",
+          "--pathspec-file-nul",
+        ]),
+        isolated.environment,
+        paths,
+        1024,
+        options.deadlineAt,
+      );
+    }
+    const tree = (
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments(["write-tree"]),
+        isolated.environment,
+        undefined,
+        1024,
+        options.deadlineAt,
+      )
+    ).stdout.toString("utf8").trim();
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(tree)) {
+      throw new CheckpointError("Git returned an invalid reviewed tree.");
+    }
+    return { head, tree };
+  } finally {
+    await rm(storageDirectory, { force: true, recursive: true })
+      .catch(() => undefined);
+  }
 }
 
 export async function createCheckpoint(

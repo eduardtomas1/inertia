@@ -16,7 +16,6 @@ import {
 import clsx from "clsx";
 
 import {
-  modelSelectionSchema,
   type BackendModelDefinition,
   type ModelBackendDefault,
   type ModelBackendProfileDetail,
@@ -25,6 +24,7 @@ import {
   type ModelSelection,
   type Project,
 } from "@shared/contracts";
+import { modelSelectionSchema } from "@shared/model-routing";
 import {
   backendProfileSemanticUpdate,
   backendProfileIsReady,

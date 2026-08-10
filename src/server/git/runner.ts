@@ -37,6 +37,17 @@ export interface GitRunnerDependencies {
   terminateProcessTree?: ProcessTreeTerminator;
 }
 
+export interface PreparedGitRefUpdateContext {
+  readonly signal: AbortSignal;
+  assertActive(): void;
+  /**
+   * Runs the only mutation permitted from a prepared-ref callback. The
+   * operation must be synchronous: once the context is revoked, a delayed
+   * read-only callback can no longer enqueue filesystem work.
+   */
+  mutate(operation: () => undefined): void;
+}
+
 function inspectionArguments(args: readonly string[]): string[] {
   const [command, ...rest] = args;
   if (!command || command.startsWith("-")) {
@@ -301,4 +312,168 @@ export function runGitInspection(
   options: RunGitInspectionOptions,
 ): Promise<GitProcessResult> {
   return runGit(cwd, inspectionArguments(args), options);
+}
+
+/**
+ * Uses Git's own reference transaction so the target branch remains locked
+ * while a caller prepares related filesystem state. Callers must verify the
+ * symbolic HEAD separately because Git does not lock it with the branch ref.
+ */
+export function withPreparedGitRefUpdate(
+  cwd: string,
+  ref: string,
+  newOid: string,
+  expectedOid: string,
+  options: Pick<RunGitOptions, "deadlineAt" | "failureMessage"> & {
+    testHooks?: { afterCommitAcknowledged?: () => void | Promise<void> };
+  },
+  onPrepared: (context: PreparedGitRefUpdateContext) => void | Promise<void>,
+): Promise<void> {
+  const deadlineTimeoutMs = options.deadlineAt === undefined
+    ? LOCAL_TIMEOUT_MS
+    : Math.floor(options.deadlineAt - Date.now());
+  if (deadlineTimeoutMs <= 0) {
+    return Promise.reject(new GitError(
+      "timeout",
+      "Git took too long to complete the operation.",
+    ));
+  }
+  const timeoutMs = Math.min(LOCAL_TIMEOUT_MS, deadlineTimeoutMs);
+  const expiresAt = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", ["update-ref", "--stdin"], {
+      cwd,
+      shell: false,
+      detached: process.platform !== "win32",
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: gitProcessEnvironment(process.env),
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let outputBytes = 0;
+    let settled = false;
+    let prepared = false;
+    let committed = false;
+    let callbackError: unknown;
+    let termination: Promise<void> | null = null;
+    let finishing = false;
+    const callbackAbort = new AbortController();
+    const preparedContext: PreparedGitRefUpdateContext = {
+      signal: callbackAbort.signal,
+      assertActive: () => {
+        if (callbackAbort.signal.aborted || Date.now() >= expiresAt) {
+          throw new GitError(
+            "timeout",
+            "Git took too long to complete the operation.",
+          );
+        }
+      },
+      mutate: (operation) => {
+        preparedContext.assertActive();
+        const result = operation();
+        if (result !== undefined) {
+          throw new GitError(
+            "operation-failed",
+            "The prepared Git mutation must complete synchronously.",
+          );
+        }
+        preparedContext.assertActive();
+      },
+    };
+
+    const finish = (error?: unknown): void => {
+      if (settled || finishing) return;
+      finishing = true;
+      clearTimeout(timer);
+      callbackAbort.abort();
+      settled = true;
+      if (error) reject(error);
+      else resolve();
+    };
+    const terminate = (error: GitError): void => {
+      if (settled || finishing || termination) return;
+      callbackAbort.abort();
+      termination = requireProcessTreeTermination(
+        terminateProcessTreeAndWait,
+        child,
+        true,
+        "Git reference transaction",
+      );
+      void termination.then(
+        () => finish(error),
+        () => finish(new GitError(
+          "operation-failed",
+          "Git stopped responding, and its process tree could not be confirmed stopped.",
+        )),
+      );
+    };
+    const timer = setTimeout(() => terminate(new GitError(
+      "timeout",
+      "Git took too long to complete the operation.",
+    )), timeoutMs);
+    timer.unref();
+    child.stdin.on("error", () => undefined);
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (outputBytes + chunk.length > 4_096) {
+        terminate(new GitError(
+          "output-limit",
+          "Git returned more data than this application can safely process.",
+        ));
+        return;
+      }
+      outputBytes += chunk.length;
+      stdout.push(chunk);
+      const text = Buffer.concat(stdout).toString("utf8");
+      if (!prepared && /(?:^|\r?\n)prepare: ok\r?\n/u.test(text)) {
+        prepared = true;
+        void Promise.resolve()
+          .then(() => onPrepared(preparedContext))
+          .then(
+            () => {
+              child.stdin.end("commit\n");
+            },
+            (error: unknown) => {
+              callbackError = error;
+              child.stdin.end("abort\n");
+            },
+          );
+      }
+      if (/(?:^|\r?\n)commit: ok\r?\n/u.test(text)) committed = true;
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      const remaining = STDERR_BYTES - Buffer.concat(stderr).length;
+      if (remaining > 0) stderr.push(chunk.subarray(0, remaining));
+    });
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      if (termination) return;
+      finish(error.code === "ENOENT"
+        ? new GitError(
+            "git-unavailable",
+            "Git is not installed or could not be started.",
+          )
+        : new GitError("operation-failed", options.failureMessage));
+    });
+    child.on("close", (code) => {
+      if (termination) return;
+      if (callbackError) {
+        finish(callbackError);
+      } else if (code === 0 && committed) {
+        void Promise.resolve()
+          .then(options.testHooks?.afterCommitAcknowledged)
+          .then(() => finish(), (error: unknown) => finish(error));
+      } else {
+        finish(classifyFailure(
+          Buffer.concat(stderr).toString("utf8"),
+          options.failureMessage,
+        ));
+      }
+    });
+    child.stdin.write([
+      "start",
+      `update ${ref} ${newOid} ${expectedOid}`,
+      "prepare",
+      "",
+    ].join("\n"));
+  });
 }

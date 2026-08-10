@@ -118,6 +118,11 @@ export function WorkspaceHeader({
   const canCreateIsolatedWorktree = Boolean(gitStatus?.branch);
   const primaryGitAction = primaryHeaderGitAction(gitStatus);
   const runGitAction = (action: HeaderGitActionId): void => {
+    if (menu === "git") {
+      headerActionsRef.current?.querySelector<HTMLElement>(
+        '[data-header-menu="git"] [aria-controls="workspace-header-git-menu"]',
+      )?.focus();
+    }
     setMenu(null);
     if (action === "commit") onCommit();
     else if (action === "pull") onPull();

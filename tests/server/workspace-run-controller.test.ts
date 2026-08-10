@@ -198,14 +198,19 @@ describe("workspace run controller", () => {
       const gitGate = new Promise<void>((resolve) => {
         finishGit = resolve;
       });
+      let gitStarted = false;
       const gitOperation = runtime.controller.trackSourceControl(
         "Switch branch",
         runtime.project.id,
         undefined,
         runtime.workspace,
         "77777777-7777-4777-8777-777777777777",
-        async () => await gitGate,
+        async () => {
+          gitStarted = true;
+          await gitGate;
+        },
       );
+      await vi.waitFor(() => expect(gitStarted).toBe(true));
       expect(runtime.store.conversationWork.reserve(sibling.id)).toBe(false);
       finishGit();
       await gitOperation;
@@ -375,7 +380,56 @@ describe("workspace run controller", () => {
     }
   });
 
-  it("publishes one authoritative invalidation after overlapping Git mutations settle", async () => {
+  it("preserves successful Git results when activity projections fail and releases in-flight state", async () => {
+    const runtime = await fixture();
+    const updateWorkspaceRun = runtime.store.updateWorkspaceRun.bind(runtime.store);
+    let rejectSucceededUpdate = true;
+    vi.spyOn(runtime.store, "updateWorkspaceRun").mockImplementation(
+      (runId, input) => {
+        if (rejectSucceededUpdate && input.status === "succeeded") {
+          rejectSucceededUpdate = false;
+          throw new Error("Injected activity persistence failure.");
+        }
+        return updateWorkspaceRun(runId, input);
+      },
+    );
+    runtime.broadcastSnapshot.mockImplementation(() => {
+      throw new Error("Injected snapshot broadcast failure.");
+    });
+    runtime.broadcastGitInvalidated.mockImplementationOnce(() => {
+      throw new Error("Injected invalidation broadcast failure.");
+    });
+    try {
+      await expect(runtime.controller.trackSourceControl(
+        "Commit changes",
+        runtime.project.id,
+        runtime.conversation.id,
+        runtime.workspace,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        async () => "first-commit",
+      )).resolves.toBe("first-commit");
+
+      runtime.broadcastSnapshot.mockImplementation(() => undefined);
+      runtime.broadcastGitInvalidated.mockImplementation(() => undefined);
+      await expect(runtime.controller.trackSourceControl(
+        "Commit follow-up",
+        runtime.project.id,
+        runtime.conversation.id,
+        runtime.workspace,
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        async () => "second-commit",
+      )).resolves.toBe("second-commit");
+
+      expect(runtime.broadcastGitInvalidated).toHaveBeenCalledTimes(2);
+      expect(runtime.store.shellSnapshot().runs.find(
+        (run) => run.label === "Commit follow-up",
+      )).toMatchObject({ status: "succeeded" });
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("serializes Git mutations and publishes each authoritative result", async () => {
     const runtime = await fixture();
     try {
       let finishFirst!: () => void;
@@ -386,13 +440,17 @@ describe("workspace run controller", () => {
       const secondGate = new Promise<void>((resolve) => {
         finishSecond = resolve;
       });
+      const started: string[] = [];
       const first = runtime.controller.trackSourceControl(
         "Switch first branch",
         runtime.project.id,
         runtime.conversation.id,
         runtime.workspace,
         "33333333-3333-4333-8333-333333333333",
-        async () => await firstGate,
+        async () => {
+          started.push("first");
+          await firstGate;
+        },
       );
       const second = runtime.controller.trackSourceControl(
         "Switch final branch",
@@ -400,17 +458,27 @@ describe("workspace run controller", () => {
         runtime.conversation.id,
         runtime.workspace,
         "44444444-4444-4444-8444-444444444444",
-        async () => await secondGate,
+        async () => {
+          started.push("second");
+          await secondGate;
+        },
       );
 
+      await vi.waitFor(() => expect(started).toEqual(["first"]));
       finishFirst();
       await first;
-      expect(runtime.broadcastGitInvalidated).not.toHaveBeenCalled();
+      expect(runtime.broadcastGitInvalidated).toHaveBeenCalledTimes(1);
+      expect(runtime.broadcastGitInvalidated).toHaveBeenLastCalledWith(
+        "33333333-3333-4333-8333-333333333333",
+        runtime.project.id,
+        runtime.conversation.id,
+      );
 
+      await vi.waitFor(() => expect(started).toEqual(["first", "second"]));
       finishSecond();
       await second;
-      expect(runtime.broadcastGitInvalidated).toHaveBeenCalledTimes(1);
-      expect(runtime.broadcastGitInvalidated).toHaveBeenCalledWith(
+      expect(runtime.broadcastGitInvalidated).toHaveBeenCalledTimes(2);
+      expect(runtime.broadcastGitInvalidated).toHaveBeenLastCalledWith(
         "44444444-4444-4444-8444-444444444444",
         runtime.project.id,
         runtime.conversation.id,

@@ -1,7 +1,5 @@
-import {
-  clientCommandSchema,
-  type ClientCommand,
-} from "@shared/contracts";
+import type { ClientCommand } from "@shared/contracts";
+import { workspaceFileWriteCommandSchema } from "@shared/contracts/client-command/workspace-file-write";
 import { serializeRuntimeClientCommand } from "@shared/runtime-websocket";
 
 type WorkspaceFileWriteCommand = Extract<
@@ -30,7 +28,7 @@ export function workspaceFileWriteFitsRuntimeFrame(
   identity: WorkspaceFileWriteIdentity,
   content: string,
 ): boolean {
-  const parsed = clientCommandSchema.safeParse({
+  const parsed = workspaceFileWriteCommandSchema.safeParse({
     ...workspaceFileWriteCommand(identity, content),
     requestId: PREFLIGHT_REQUEST_ID,
   });

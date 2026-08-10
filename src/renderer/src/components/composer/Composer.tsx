@@ -12,7 +12,7 @@ import clsx from "clsx";
 import type {
   ChatAttachment,
 } from "@shared/contracts";
-import { MAX_CHAT_ATTACHMENTS } from "@shared/contracts";
+import { MAX_CHAT_ATTACHMENTS } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import {
   legacyProviderIdForHarness,

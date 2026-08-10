@@ -19,7 +19,7 @@ import type {
   ThreadUsageSnapshot,
   UsageDisplayMode,
 } from "@shared/contracts";
-import { MAX_CHAT_ATTACHMENTS } from "@shared/contracts";
+import { MAX_CHAT_ATTACHMENTS } from "@shared/attachments";
 import type {
   ComposerFollowUpState,
   ComposerPrimaryActionState,

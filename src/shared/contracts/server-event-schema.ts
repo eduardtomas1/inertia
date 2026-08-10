@@ -767,9 +767,11 @@ function gitStatus(value: unknown): boolean {
 function gitDiff(value: unknown): boolean {
   return recordWithStrings(value, "patch")
     && booleanField(value, "truncated")
-    && arrayOf(value.files, changedFile);
+    && arrayOf(value.files, changedFile)
+    && (value.commitReview === undefined || value.commitReview === null || (recordWithStrings(value.commitReview, "authorityRef", "fingerprint")
+      && Object.keys(value.commitReview).length === 2 && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value.commitReview.authorityRef as string)
+      && /^[0-9a-f]{64}$/u.test(value.commitReview.fingerprint as string)));
 }
-
 function workspaceGitRepository(value: unknown): boolean {
   return recordWithStrings(value, "repositoryPath")
     && optionalNullableStringField(value, "authorityRef")
@@ -789,7 +791,6 @@ function workspaceGitRepository(value: unknown): boolean {
     && booleanField(value, "clean")
     && booleanField(value, "truncated");
 }
-
 function workspaceGitStatus(value: unknown): boolean {
   return record(value)
     && arrayOf(value.repositories, workspaceGitRepository)
@@ -1234,8 +1235,7 @@ export function parseServerEvent(value: unknown): ServerEvent {
 
 export const serverEventSchema = Object.freeze({
   parse: parseServerEvent,
-  safeParse(value: unknown):
-    | { success: true; data: ServerEvent }
+  safeParse(value: unknown): | { success: true; data: ServerEvent }
     | { success: false; error: Error } {
     try {
       return { success: true, data: parseServerEvent(value) };

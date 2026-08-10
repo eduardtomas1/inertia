@@ -1,9 +1,11 @@
+import type {
+  ChatAttachment,
+} from "@shared/contracts";
 import {
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentKind,
-  type ChatAttachment,
-} from "@shared/contracts";
+} from "@shared/attachments";
 
 export interface AttachmentMergeResult {
   readonly attachments: ChatAttachment[];

@@ -8,6 +8,7 @@ import type {
   AppSettings,
   Conversation,
   GitBranchInfo,
+  GitDiffSnapshot,
   GitStatusSnapshot,
   Project,
   ProjectAction,
@@ -45,8 +46,8 @@ import {
   scheduleFrequentSurfacePrefetch,
 } from "./lazySurfaceLoaders";
 
-const CommitDialog = lazy(async () => ({
-  default: (await loadCommitDialog()).CommitDialog,
+const RootCommitDialog = lazy(async () => ({
+  default: (await loadCommitDialog()).RootCommitDialog,
 }));
 const MultiSpawnDialog = lazy(async () => ({
   default: (await loadMultiSpawnDialog()).MultiSpawnDialog,
@@ -88,6 +89,9 @@ interface AppLayoutActions {
     name: string,
   ) => void;
   loadGit: () => Promise<void>;
+  loadCommitReview: () => Promise<GitDiffSnapshot | null>;
+  discardCommitReview: () => void;
+  commitReviewRevision: number;
   commit: (
     message: string,
     push: boolean,
@@ -138,9 +142,6 @@ interface AppLayoutProps {
   branches: GitBranchInfo[];
   projectActions: ProjectAction[];
   reviewStates: CommitDialogProps["reviewStates"];
-  structuredDiff: CommitDialogProps["diff"];
-  structuredDiffParsing: CommitDialogProps["diffParsing"];
-  structuredDiffError: CommitDialogProps["diffError"];
   multiSpawn: MultiSpawnController;
   scene: WorkspaceSceneProps;
   providerAuth: Parameters<typeof AppStatusOverlays>[0]["providerAuth"];
@@ -228,15 +229,13 @@ export function AppLayout({
   branches,
   projectActions,
   reviewStates,
-  structuredDiff,
-  structuredDiffParsing,
-  structuredDiffError,
   multiSpawn,
   scene,
   providerAuth,
   actions,
 }: AppLayoutProps): React.JSX.Element {
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  const commitReviewOwner = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const {
     sidebarOpen,
     setSidebarOpen,
@@ -583,21 +582,18 @@ export function AppLayout({
       </section>
 
       {commitDialogOpen && (
-        <Suspense fallback={null}>
-          <CommitDialog
-            open
-            repositoryPath="."
+        <Suspense fallback={<div role="status">Preparing commit review…</div>}>
+          <RootCommitDialog
+            owner={commitReviewOwner}
+            revision={actions.commitReviewRevision}
             status={gitStatus}
             reviewStates={reviewStates}
-            diff={structuredDiff}
-            diffParsing={structuredDiffParsing}
-            diffError={structuredDiffError}
             busy={busyAction === "git.commit" || busyAction === "git.push"}
+            loadReview={actions.loadCommitReview}
+            discardReview={actions.discardCommitReview}
             onClose={() => setCommitDialogOpen(false)}
-            onCommit={async (...args) => {
-              await actions.commit(...args);
-              setCommitDialogOpen(false);
-            }}
+            onError={setActionError}
+            onCommit={actions.commit}
           />
         </Suspense>
       )}

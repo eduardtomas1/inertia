@@ -1,10 +1,14 @@
 import { mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { runGit } from "../../src/server/git/runner";
+import {
+  runGit,
+  withPreparedGitRefUpdate,
+} from "../../src/server/git/runner";
 import { gitProcessEnvironment } from "../../src/server/git/environment";
 import { GitError } from "../../src/server/git/types";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
@@ -113,6 +117,98 @@ process.stdout.write(JSON.stringify({
     } satisfies Partial<GitError>);
 
     expect(terminateProcessTree).not.toHaveBeenCalled();
+  });
+
+  it("settles a ref-update timeout when a prepared callback never settles", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-timeout-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "update-ref", `
+process.stdin.once("data", () => {
+  process.stdout.write("start: ok\\nprepare: ok\\n");
+});
+setInterval(() => {}, 1000);
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    let callbackStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      callbackStarted = resolve;
+    });
+    try {
+      const running = withPreparedGitRefUpdate(
+        directory,
+        "refs/heads/main",
+        "1".repeat(40),
+        "0".repeat(40),
+        {
+          deadlineAt: Date.now() + 250,
+          failureMessage: "Git ref update failed.",
+        },
+        async () => {
+          callbackStarted();
+          await new Promise<void>(() => undefined);
+        },
+      );
+      await started;
+
+      await expect(running).rejects.toMatchObject({ code: "timeout" });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("revokes delayed prepared mutations after a ref-update timeout", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-revoked-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "update-ref", `
+process.stdin.once("data", () => {
+  process.stdout.write("start: ok\\nprepare: ok\\n");
+});
+setInterval(() => {}, 1000);
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    let releaseCallback!: () => void;
+    const callbackGate = new Promise<void>((resolve) => {
+      releaseCallback = resolve;
+    });
+    let callbackStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      callbackStarted = resolve;
+    });
+    let mutated = false;
+    try {
+      const running = withPreparedGitRefUpdate(
+        directory,
+        "refs/heads/main",
+        "1".repeat(40),
+        "0".repeat(40),
+        {
+          deadlineAt: Date.now() + 250,
+          failureMessage: "Git ref update failed.",
+        },
+        async (context) => {
+          callbackStarted();
+          await callbackGate;
+          context.mutate(() => {
+            mutated = true;
+            return undefined;
+          });
+        },
+      );
+      await started;
+
+      await expect(running).rejects.toMatchObject({ code: "timeout" });
+      releaseCallback();
+      await delay(40);
+      expect(mutated).toBe(false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   });
 
   it("strips ambient routing and secrets while preserving explicit Git state", () => {

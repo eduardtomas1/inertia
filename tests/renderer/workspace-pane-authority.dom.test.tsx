@@ -157,6 +157,35 @@ function deferredWorkspaceGitRequests() {
 }
 
 describe("workspace pane authority", () => {
+  it("keeps ordinary complete Changes diffs reviewable without a commit receipt", () => {
+    const review = renderHook(() => useWorkspaceReview({
+      project: alpha,
+      conversation: alphaChat,
+      detail: null,
+      gitDiff: {
+        patch: [
+          "diff --git a/src/app.ts b/src/app.ts",
+          "--- a/src/app.ts",
+          "+++ b/src/app.ts",
+          "@@ -1 +1 @@",
+          "-before",
+          "+after",
+          "",
+        ].join("\n"),
+        truncated: false,
+        files: [],
+      },
+      ignoreWhitespace: true,
+      confirmDestructiveActions: false,
+      request: vi.fn(),
+      run: vi.fn(),
+      setGitDiff: vi.fn(),
+    }));
+
+    expect(review.result.current.structuredDiffError).toBeNull();
+    expect(review.result.current.structuredDiff.files).toHaveLength(1);
+  });
+
   it("blocks root commit clicks and Enter when the complete diff is truncated", () => {
     const review = renderHook(() => useWorkspaceReview({
       project: alpha,
@@ -638,6 +667,86 @@ describe("workspace pane authority", () => {
 
     expect(hook.result.current.gitStatus?.root).toBe("/beta");
     expect(hook.result.current.gitDiff?.patch).toBe("BETA");
+  });
+
+  it("does not apply a delayed commit review after its project owner changes", async () => {
+    let settleDiff!: (event: ServerEvent) => void;
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") {
+        return Promise.resolve(result({
+          kind: "git.status",
+          status: {
+            isRepository: true,
+            authorityRef: "66666666-6666-4666-8666-666666666666",
+            root: "/alpha",
+            branch: "main",
+            upstream: null,
+            ahead: 0,
+            behind: 0,
+            hasRemote: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
+        }));
+      }
+      if (command.type === "git.diff") {
+        return new Promise((resolve) => {
+          settleDiff = resolve;
+        });
+      }
+      return Promise.reject(new Error(`Unexpected ${command.type} command`));
+    });
+    const hook = renderHook((owner: {
+      project: Project;
+      conversation: Conversation;
+    }) => useWorkspaceGit({
+      ...owner,
+      enabled: true,
+      loadStatusOnMount: false,
+      loadWorkspaceOnMount: false,
+      online: true,
+      ignoreWhitespace: true,
+      refreshVersion: 0,
+      request,
+      run: async (_key, command) => await request(command),
+      subscribe: noopSubscribe,
+      setActionError: vi.fn(),
+    }), {
+      initialProps: { project: alpha, conversation: alphaChat },
+    });
+
+    let loaded!: Promise<unknown>;
+    act(() => {
+      loaded = hook.result.current.loadCommitReview();
+    });
+    await waitFor(() => expect(request).toHaveBeenCalledWith({
+      type: "git.diff",
+      payload: expect.objectContaining({
+        projectId: alpha.id,
+        conversationId: alphaChat.id,
+        ignoreWhitespace: true,
+        commitReview: true,
+      }),
+    }));
+    hook.rerender({ project: beta, conversation: betaChat });
+    await act(async () => {
+      settleDiff(result({
+        kind: "git.diff",
+        diff: {
+          patch: "ALPHA REVIEW",
+          truncated: false,
+          files: [],
+          commitReview: {
+            authorityRef: "77777777-7777-4777-8777-777777777777",
+            fingerprint: "a".repeat(64),
+          },
+        },
+      }));
+      await expect(loaded).resolves.toBeNull();
+    });
+
+    expect(hook.result.current.gitDiff).toBeNull();
   });
 
   it("loads root Git status for shell actions without scanning nested repositories", async () => {

@@ -58,6 +58,13 @@ export interface GitDiffSnapshot {
   patch: string;
   truncated: boolean;
   files: ChangedFile[];
+  /** Opaque, runtime-authenticated receipt for this complete repository state. */
+  commitReview?: GitCommitReviewReceipt | null;
+}
+
+export interface GitCommitReviewReceipt {
+  authorityRef: string;
+  fingerprint: string;
 }
 
 export type WorkspaceGitRepositoryState = "ready" | "error";

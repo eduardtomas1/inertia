@@ -11,6 +11,7 @@ const DEFAULT_MAX_AUTHORITIES = 512;
 
 export type SecureFileAuthorityPurpose =
   | "git-repository"
+  | "git-commit-review"
   | "reversal-apply"
   | "reversal-undo"
   | "workspace-save";

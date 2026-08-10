@@ -5,12 +5,14 @@ import {
   RotateCcw,
 } from "lucide-react";
 import clsx from "clsx";
+import type {
+  ChatMessage,
+  SubagentTrace,
+} from "@shared/contracts";
 import {
   chatAttachmentKind,
   chatAttachmentTypeLabel,
-  type ChatMessage,
-  type SubagentTrace,
-} from "@shared/contracts";
+} from "@shared/attachments";
 import { formatClockTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";

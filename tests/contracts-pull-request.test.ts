@@ -4,6 +4,11 @@ import { describe, expect, it } from "vitest";
 
 import { clientCommandSchema } from "../src/shared/contracts";
 
+const reviewReceipt = {
+  authorityRef: "33333333-3333-4333-8333-333333333333",
+  fingerprint: "a".repeat(64),
+};
+
 describe("pull request command contract", () => {
   it("accepts a bounded explicit GitHub PR request and rejects extra fields", () => {
     const command = {
@@ -59,6 +64,7 @@ describe("pull request command contract", () => {
           authorityRef,
           message: "Nested change",
           paths: ["README.md"],
+          reviewReceipt,
         },
       },
       { type: "git.push", payload: { projectId, repositoryPath, authorityRef } },
@@ -103,6 +109,7 @@ describe("pull request command contract", () => {
         projectId: randomUUID(),
         message: "Commit a deeply nested path",
         paths: [path],
+        reviewReceipt,
       },
     });
 
@@ -116,6 +123,47 @@ describe("pull request command contract", () => {
       payload: {
         ...command("README.md").payload,
         paths: Array.from({ length: 501 }, () => "README.md"),
+      },
+    }).success).toBe(false);
+  });
+
+  it("requires an exact server-issued commit review receipt", () => {
+    const command = {
+      type: "git.commit",
+      requestId: randomUUID(),
+      payload: {
+        projectId: randomUUID(),
+        message: "Commit reviewed content",
+        paths: ["README.md"],
+        reviewReceipt,
+      },
+    } as const;
+
+    expect(clientCommandSchema.safeParse(command).success).toBe(true);
+    const { reviewReceipt: _receipt, ...withoutReceipt } = command.payload;
+    expect(clientCommandSchema.safeParse({
+      ...command,
+      payload: withoutReceipt,
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...command,
+      payload: {
+        ...command.payload,
+        reviewReceipt: { ...reviewReceipt, authorityRef: "not-a-uuid" },
+      },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...command,
+      payload: {
+        ...command.payload,
+        reviewReceipt: { ...reviewReceipt, fingerprint: "a".repeat(63) },
+      },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...command,
+      payload: {
+        ...command.payload,
+        reviewReceipt: { ...reviewReceipt, unexpected: true },
       },
     }).success).toBe(false);
   });

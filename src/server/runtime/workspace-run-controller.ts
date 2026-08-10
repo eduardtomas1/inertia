@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 
 import type {
   Conversation,
@@ -102,6 +103,7 @@ function conversationDetail(conversation: Pick<Conversation, "providerId" | "tit
 export class WorkspaceRunController<Owner> {
   private readonly managedActions = new Map<string, { terminalId: string }>();
   private readonly sourceControlInFlight = new Map<string, number>();
+  private readonly sourceControlTails = new Map<string, Promise<void>>();
 
   constructor(
     private readonly store: WorkspaceRunStore,
@@ -278,61 +280,119 @@ export class WorkspaceRunController<Owner> {
     requestId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const reservationId = `source-control:${requestId}`;
-    if (!this.store.conversationWork.reserveCheckout(
-      reservationId,
-      projectId,
-      cwd,
-    )) {
-      throw new RuntimeRequestError(
-        "End the resumed provider terminal before changing this workspace with Git.",
-      );
-    }
-    try {
-      const invalidationScope = `${projectId}:${conversationId ?? ""}`;
-      const detail = conversationId
-        ? conversationDetail(this.store.conversation(conversationId))
-        : "Started from the workspace";
-      const activity = this.store.createWorkspaceRun({
-        kind: "source-control",
+    return await this.withExclusiveSourceControl(cwd, async () => {
+      const reservationId = `source-control:${requestId}`;
+      if (!this.store.conversationWork.reserveCheckout(
+        reservationId,
         projectId,
-        conversationId: conversationId ?? null,
-        label,
-        detail,
-        status: "running",
-        port: null,
-      });
-      this.sourceControlInFlight.set(
-        invalidationScope,
-        (this.sourceControlInFlight.get(invalidationScope) ?? 0) + 1,
-      );
-      this.broadcastSnapshot();
+        cwd,
+      )) {
+        throw new RuntimeRequestError(
+          "End the resumed provider terminal before changing this workspace with Git.",
+        );
+      }
       try {
-        const result = await operation();
-        this.store.updateWorkspaceRun(activity.id, { status: "succeeded" });
-        return result;
-      } catch (error) {
-        this.store.updateWorkspaceRun(activity.id, {
-          status: "failed",
-          detail: publicRuntimeError(error),
+        const invalidationScope = `${projectId}:${conversationId ?? ""}`;
+        const detail = conversationId
+          ? conversationDetail(this.store.conversation(conversationId))
+          : "Started from the workspace";
+        const activity = this.store.createWorkspaceRun({
+          kind: "source-control",
+          projectId,
+          conversationId: conversationId ?? null,
+          label,
+          detail,
+          status: "running",
+          port: null,
         });
-        throw error;
-      } finally {
-        this.broadcastSnapshot();
+        this.sourceControlInFlight.set(
+          invalidationScope,
+          (this.sourceControlInFlight.get(invalidationScope) ?? 0) + 1,
+        );
+        try {
+          this.broadcastSnapshot();
+        } catch {
+          // A live projection failure must not prevent the authoritative Git operation.
+        }
+        const outcome = await Promise.resolve().then(operation).then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+        try {
+          this.store.updateWorkspaceRun(activity.id, outcome.ok
+            ? { status: "succeeded" }
+            : {
+                status: "failed",
+                detail: publicRuntimeError(outcome.error),
+              });
+        } catch {
+          // The Git result is authoritative even if activity persistence is unavailable.
+        }
+        try {
+          this.broadcastSnapshot();
+        } catch {
+          // A later snapshot or invalidation can repair this best-effort projection.
+        }
         const remaining = (this.sourceControlInFlight.get(invalidationScope) ?? 1) - 1;
         if (remaining > 0) {
           this.sourceControlInFlight.set(invalidationScope, remaining);
         } else {
           this.sourceControlInFlight.delete(invalidationScope);
-          this.broadcastGitInvalidated(
-            requestId,
-            projectId,
-            conversationId ?? null,
-          );
+          try {
+            this.broadcastGitInvalidated(
+              requestId,
+              projectId,
+              conversationId ?? null,
+            );
+          } catch {
+            // The completed request still truthfully acknowledges the Git result.
+          }
+        }
+        if (!outcome.ok) throw outcome.error;
+        return outcome.value;
+      } finally {
+        try {
+          this.store.conversationWork.release(reservationId);
+        } catch {
+          // Never erase an authoritative operation result during reservation cleanup.
         }
       }
+    });
+  }
+
+  private async withExclusiveSourceControl<T>(
+    cwd: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    let canonical: string;
+    try {
+      canonical = realpathSync.native(cwd);
+    } catch {
+      throw new RuntimeRequestError(
+        "The workspace is unavailable for this Git operation.",
+      );
+    }
+    const key = process.platform === "win32"
+      ? canonical.toLocaleLowerCase("en-US")
+      : canonical;
+    const predecessor = this.sourceControlTails.get(key)
+      ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = predecessor.catch(() => undefined).then(async () => {
+      await current;
+    });
+    this.sourceControlTails.set(key, tail);
+    await predecessor.catch(() => undefined);
+    try {
+      return await operation();
     } finally {
-      this.store.conversationWork.release(reservationId);
+      release();
+      if (this.sourceControlTails.get(key) === tail) {
+        this.sourceControlTails.delete(key);
+      }
     }
   }
 }

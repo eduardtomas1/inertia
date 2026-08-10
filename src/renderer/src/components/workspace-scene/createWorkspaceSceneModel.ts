@@ -553,6 +553,7 @@ export function createWorkspaceSceneModel({
         conversationId: persistedConversation?.id,
         busyAction,
         run: actions.run,
+        onActionError: setActionError,
         snapshot: workspaceTools.workspaceGitStatus,
         loading: workspaceTools.toolsLoading,
         summary: workspaceTools.reviewSummary,

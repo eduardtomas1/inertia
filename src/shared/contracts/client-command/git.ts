@@ -45,6 +45,7 @@ export const gitCommandSchemas = [
           authorityRef: z.string().uuid(),
           path: z.string().max(512).optional(),
           ignoreWhitespace: z.boolean().optional(),
+          commitReview: z.boolean().optional(),
         })
         .strict(),
     })
@@ -67,6 +68,7 @@ export const gitCommandSchemas = [
           repositoryPath: z.string().min(1).max(4096),
           path: z.string().min(1).max(4096).optional(),
           ignoreWhitespace: z.boolean().optional(),
+          commitReview: z.boolean().optional(),
         })
         .strict(),
     })
@@ -292,6 +294,10 @@ export const gitCommandSchemas = [
           ...projectWithOptionalConversationAndRepository,
           message: z.string().trim().min(1).max(10_000),
           paths: z.array(z.string().min(1).max(4096)).max(500).optional(),
+          reviewReceipt: z.object({
+            authorityRef: z.string().uuid(),
+            fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+          }).strict(),
         })
         .strict()
         .superRefine(requireRepositoryAuthority),

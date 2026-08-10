@@ -71,12 +71,14 @@ export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
   onLoadRepositoryDiff: (
     repositoryPath: string,
     filePath?: string,
+    commitReview?: boolean,
   ) => Promise<WorkspaceGitDiffSnapshot>;
   onOpenWorkspaceFile: (path: string) => void;
   projectId?: string;
   conversationId?: string;
   busyAction?: string | null;
   run?: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  onActionError?: (message: string) => void;
 }
 
 interface PullRequestDialogScope {
@@ -211,6 +213,7 @@ export function WorkspaceChangesPanel({
   conversationId,
   busyAction = null,
   run,
+  onActionError,
   summary,
   selectionAnswer,
   reviewStates = [],
@@ -530,20 +533,29 @@ export function WorkspaceChangesPanel({
           <span className="workspace-repository-scope-actions" aria-label={`Actions for ${label}`}>
             <button
               type="button"
-              disabled={!authorityRef || Boolean(commitAction?.disabled) || activeRepository.truncated}
+              disabled={
+                commitDiffLoading
+                || !authorityRef
+                || Boolean(commitAction?.disabled)
+                || activeRepository.truncated
+              }
               title={!authorityRef
                 ? "Refresh this repository before changing it."
                 : activeRepository.truncated
                 ? "Refresh this repository before committing its complete change set."
                 : commitAction?.detail}
               onClick={() => {
-                if (!authorityRef) return;
+                if (!authorityRef || commitDiffLoading) return;
                 const request = ++commitDiffRequestRef.current;
                 setCommitDiff(null);
                 setCommitDiffError(null);
                 setCommitDiffLoading(true);
                 setCommitDialogOpen(true);
-                void onLoadRepositoryDiff(activeRepository.repositoryPath)
+                void onLoadRepositoryDiff(
+                  activeRepository.repositoryPath,
+                  undefined,
+                  true,
+                )
                   .then((repositoryDiff) => {
                     if (request !== commitDiffRequestRef.current) return;
                     if (repositoryDiff.repositoryPath !== activeRepository.repositoryPath) {
@@ -551,6 +563,9 @@ export function WorkspaceChangesPanel({
                     }
                     if (repositoryDiff.truncated) {
                       throw new Error("The complete repository diff was truncated. Refresh this repository and try again before committing.");
+                    }
+                    if (!repositoryDiff.commitReview) {
+                      throw new Error("The complete reviewed repository state is unavailable. Refresh this repository and try again before committing.");
                     }
                     setCommitDiff(repositoryDiff);
                   })
@@ -567,7 +582,7 @@ export function WorkspaceChangesPanel({
                   });
               }}
             >
-              <GitCommitHorizontal size={12} aria-hidden="true" /><span>{commitAction?.label ?? "Commit"}</span>
+              <GitCommitHorizontal size={12} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
             </button>
             <button
               type="button"
@@ -630,6 +645,7 @@ export function WorkspaceChangesPanel({
     );
   }, [
     activeRepository,
+    commitDiffLoading,
     conversationId,
     nestedGitActions,
     onLoadRepositoryDiff,
@@ -851,31 +867,62 @@ export function WorkspaceChangesPanel({
           diffParsing={commitDiffLoading || parsedCommitDiff.parsing}
           diffError={commitDiffError ?? parsedCommitDiff.error}
           busy={busyAction === "git.commit" || busyAction === "git.push"}
-          onClose={() => setCommitDialogOpen(false)}
+          onClose={() => {
+            commitDiffRequestRef.current += 1;
+            setCommitDialogOpen(false);
+            setCommitDiff(null);
+            setCommitDiffLoading(false);
+            setCommitDiffError(null);
+          }}
           onCommit={async (message, push, paths) => {
-            await run("git.commit", {
-              type: "git.commit",
-              payload: {
-                projectId,
-                conversationId,
-                repositoryPath: activeRepositoryPath,
-                authorityRef: activeRepositoryAuthorityRef,
-                message,
-                paths,
-              },
-            });
-            if (push) {
-              await run("git.push", {
-                type: "git.push",
+            if (!commitDiff?.commitReview) {
+              throw new Error("The complete reviewed repository state is unavailable. Refresh before committing.");
+            }
+            const reviewReceipt = commitDiff.commitReview;
+            setCommitDiff(null);
+            try {
+              await run("git.commit", {
+                type: "git.commit",
                 payload: {
                   projectId,
                   conversationId,
                   repositoryPath: activeRepositoryPath,
                   authorityRef: activeRepositoryAuthorityRef,
+                  message,
+                  paths,
+                  reviewReceipt,
                 },
               });
+            } catch (error) {
+              setCommitDialogOpen(false);
+              setCommitDiffError(null);
+              throw error;
+            }
+            if (push) {
+              try {
+                await run("git.push", {
+                  type: "git.push",
+                  payload: {
+                    projectId,
+                    conversationId,
+                    repositoryPath: activeRepositoryPath,
+                    authorityRef: activeRepositoryAuthorityRef,
+                  },
+                });
+              } catch (error) {
+                const partialSuccess = "The commit was created, but push failed. Refresh the repository before retrying the push.";
+                setCommitDialogOpen(false);
+                setCommitDiffError(null);
+                onRefresh();
+                if (onActionError) {
+                  onActionError(partialSuccess);
+                  return;
+                }
+                throw new Error(partialSuccess, { cause: error });
+              }
             }
             setCommitDialogOpen(false);
+            setCommitDiffError(null);
             onRefresh();
           }}
         />

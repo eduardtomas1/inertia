@@ -4,6 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkspaceChangesPanel } from "../../src/renderer/src/components/WorkspaceChangesPanel";
 import type { ChangedFile, ServerEvent, WorkspaceGitSnapshot } from "../../src/shared/contracts";
 
+const reviewReceipt = {
+  authorityRef: "33333333-3333-4333-8333-333333333333",
+  fingerprint: "a".repeat(64),
+};
+
 function changedFile(path: string): ChangedFile {
   return {
     path,
@@ -16,6 +21,18 @@ function changedFile(path: string): ChangedFile {
     indexStatus: ".",
     worktreeStatus: "M",
   };
+}
+
+function patchFor(path: string): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    "@@ -1 +1 @@",
+    "-before",
+    "+after",
+    "",
+  ].join("\n");
 }
 
 const snapshot: WorkspaceGitSnapshot = {
@@ -330,6 +347,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
     const onLoadRepositoryDiff = vi.fn(async (
       repositoryPath: string,
       filePath?: string,
+      commitReview?: boolean,
     ) => {
       const files = filePath
         ? [changedFile(filePath)]
@@ -341,6 +359,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
         patch: files.map(({ path }) => patchFor(path)).join("\n"),
         truncated: false,
         files,
+        ...(commitReview ? { commitReview: reviewReceipt } : {}),
       };
     });
     const panel = (nextSnapshot: WorkspaceGitSnapshot) => (
@@ -381,7 +400,11 @@ describe("WorkspaceChangesPanel repository scope", () => {
     const dialog = await screen.findByRole("dialog", { name: "Commit changes" });
     expect(await within(dialog).findByText("2 selected hunks are unreviewed."))
       .toBeInTheDocument();
-    expect(onLoadRepositoryDiff).toHaveBeenCalledWith("modules/alpha");
+    expect(onLoadRepositoryDiff).toHaveBeenCalledWith(
+      "modules/alpha",
+      undefined,
+      true,
+    );
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Commit message" }), {
       target: { value: "Commit nested work" },
     });
@@ -399,6 +422,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
         authorityRef: nested.authorityRef,
         message: "Commit nested work",
         paths: ["src/Main.java", "src/Other.java"],
+        reviewReceipt,
       },
     }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
@@ -543,6 +567,138 @@ describe("WorkspaceChangesPanel repository scope", () => {
       name: "Commit changes",
     })).not.toBeInTheDocument());
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("closes a nested review after commit failure so its one-shot receipt cannot be retried", async () => {
+    const initial = structuredClone(snapshot);
+    const nested = initial.repositories.find(
+      ({ repositoryPath }) => repositoryPath === "modules/alpha",
+    )!;
+    nested.authorityRef = reviewReceipt.authorityRef;
+    const run = vi.fn(async (): Promise<ServerEvent> => {
+      throw new Error("The reviewed repository changed.");
+    });
+    render(
+      <WorkspaceChangesPanel
+        projectName="Inertia"
+        projectId={crypto.randomUUID()}
+        snapshot={initial}
+        summary={null}
+        onRefresh={vi.fn()}
+        run={run}
+        onLoadRepositoryDiff={vi.fn(async (
+          repositoryPath: string,
+          filePath?: string,
+          commitReview?: boolean,
+        ) => ({
+          repositoryPath,
+          patch: patchFor(filePath ?? "src/Main.java"),
+          truncated: false as const,
+          files: [changedFile(filePath ?? "src/Main.java")],
+          ...(commitReview ? { commitReview: reviewReceipt } : {}),
+        }))}
+        onOpenWorkspaceFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "Repository scope" }), {
+      target: { value: "modules/alpha" },
+    });
+    fireEvent.click(within(await screen.findByLabelText(
+      "Actions for modules/alpha",
+    )).getByRole("button", { name: "Commit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Commit changes" });
+    const message = within(dialog).getByRole("textbox", { name: "Commit message" });
+    fireEvent.change(message, { target: { value: "Attempt once" } });
+    await waitFor(() => expect(within(dialog).getByRole("button", {
+      name: "Commit",
+    })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Commit" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", {
+      name: "Commit changes",
+    })).not.toBeInTheDocument());
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces nested commit-and-push partial success and cannot commit twice", async () => {
+    const initial = structuredClone(snapshot);
+    const nested = initial.repositories.find(
+      ({ repositoryPath }) => repositoryPath === "modules/alpha",
+    )!;
+    nested.authorityRef = reviewReceipt.authorityRef;
+    nested.upstream = "origin/feature/alpha";
+    nested.hasRemote = true;
+    const onActionError = vi.fn();
+    const run = vi.fn(async (
+      _key: string,
+      command: { type: string },
+    ): Promise<ServerEvent> => {
+      if (command.type === "git.push") throw new Error("remote rejected push");
+      return { type: "request.ok", requestId: crypto.randomUUID() };
+    });
+    render(
+      <WorkspaceChangesPanel
+        projectName="Inertia"
+        projectId={crypto.randomUUID()}
+        snapshot={initial}
+        summary={null}
+        onRefresh={vi.fn()}
+        run={run}
+        onActionError={onActionError}
+        onLoadRepositoryDiff={vi.fn(async (
+          repositoryPath: string,
+          filePath?: string,
+          commitReview?: boolean,
+        ) => ({
+          repositoryPath,
+          patch: patchFor(filePath ?? "src/Main.java"),
+          truncated: false as const,
+          files: [changedFile(filePath ?? "src/Main.java")],
+          ...(commitReview ? { commitReview: reviewReceipt } : {}),
+        }))}
+        onOpenWorkspaceFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "Repository scope" }), {
+      target: { value: "modules/alpha" },
+    });
+    fireEvent.click(within(await screen.findByLabelText(
+      "Actions for modules/alpha",
+    )).getByRole("button", { name: "Commit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Commit changes" });
+    fireEvent.change(within(dialog).getByRole("textbox", {
+      name: "Commit message",
+    }), { target: { value: "Commit then push" } });
+    await waitFor(() => expect(within(dialog).getByRole("button", {
+      name: "Commit & push",
+    })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Commit & push" }));
+
+    await waitFor(() => expect(onActionError).toHaveBeenCalledWith(
+      "The commit was created, but push failed. Refresh the repository before retrying the push.",
+    ));
+    expect(screen.queryByRole("dialog", { name: "Commit changes" }))
+      .not.toBeInTheDocument();
+    expect(run.mock.calls.filter(([, command]) => command.type === "git.commit"))
+      .toHaveLength(1);
   });
 
   it("does not allow a commit when the complete repository diff is truncated", async () => {

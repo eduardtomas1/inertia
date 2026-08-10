@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import WebSocket from "ws";
@@ -13,13 +14,17 @@ import {
 } from "../../../shared/runtime-command-timeouts";
 import type { RuntimeStore } from "../../database";
 import {
-  commitChanges,
+  commitReviewedChanges,
   createBranch,
   createGitHubPullRequest,
   createWorktree,
   getPullRequestCreateUrl,
   getRepositoryStatus,
   getUnifiedDiff,
+  gitCommitReviewFingerprintsEqual,
+  gitCommitReviewStatusMatches,
+  prepareGitCommitReview,
+  renderGitCommitReviewDiff,
   GitError,
   listBranches,
   pullRepository,
@@ -85,6 +90,24 @@ function repositoryAuthorityBinding(
     workspaceRoot,
     repositoryPath,
     metadataMarkerIdentity,
+  ];
+}
+
+function commitReviewAuthorityBinding(
+  projectId: string,
+  conversationId: string | undefined,
+  workspaceRoot: string,
+  repositoryPath: string,
+  metadataMarkerIdentity: string,
+  fingerprint: string,
+): readonly string[] {
+  return [
+    projectId,
+    conversationId ?? "",
+    workspaceRoot,
+    repositoryPath,
+    metadataMarkerIdentity,
+    fingerprint,
   ];
 }
 
@@ -325,21 +348,84 @@ export function createSourceControlCommandHandler(
               { deadlineAt, signal },
             ),
           );
-          const [diff, status] = await deadline.run(
-            async (signal) => await Promise.all([
-              getUnifiedDiff(secureRoot.root, {
-                deadlineAt,
-                signal,
-                ...(
-                  command.payload.path
-                    ? { paths: [command.payload.path] }
-                    : {}
+          let commitReview: { authorityRef: string; fingerprint: string } | null = null;
+          let diff;
+          let status;
+          if (command.payload.commitReview && !command.payload.path) {
+            const before = await deadline.run(
+              async () => await prepareGitCommitReview(
+                secureRoot.root,
+                { deadlineAt },
+              ),
+            );
+            try {
+              const text = await deadline.run(
+                async () => await renderGitCommitReviewDiff(
+                  secureRoot.root,
+                  before,
+                  { deadlineAt },
                 ),
-                ignoreWhitespace: command.payload.ignoreWhitespace,
-              }, undefined, dependencies.secureFiles, secureRoot),
-              getRepositoryStatus(secureRoot.root, { deadlineAt }),
-            ]),
-          );
+              );
+              const after = await deadline.run(
+                async () => await prepareGitCommitReview(
+                  secureRoot.root,
+                  { deadlineAt },
+                ),
+              );
+              try {
+                status = before.capture.status;
+                diff = { text, truncated: false };
+                if (
+                  gitCommitReviewFingerprintsEqual(
+                    before.capture.fingerprint,
+                    after.capture.fingerprint,
+                  )
+                  && gitCommitReviewStatusMatches(before.capture, status)
+                  && gitCommitReviewStatusMatches(after.capture, status)
+                ) {
+                  const authorityRef = await deadline.run(
+                    async (signal) => await issueLiveAuthority(
+                      socket,
+                      "git-commit-review",
+                      commitReviewAuthorityBinding(
+                        command.payload.projectId,
+                        command.payload.conversationId,
+                        path,
+                        ".",
+                        metadataMarkerIdentity,
+                        after.capture.fingerprint,
+                      ),
+                      secureRoot,
+                      signal,
+                    ),
+                  );
+                  if (!authorityRef) return "handled";
+                  commitReview = {
+                    authorityRef,
+                    fingerprint: after.capture.fingerprint,
+                  };
+                }
+              } finally {
+                await after.selection.dispose().catch(() => undefined);
+              }
+            } finally {
+              await before.selection.dispose().catch(() => undefined);
+            }
+          } else {
+            [diff, status] = await deadline.run(
+              async (signal) => await Promise.all([
+                getUnifiedDiff(secureRoot.root, {
+                  deadlineAt,
+                  signal,
+                  ...(command.payload.path
+                    ? { paths: [command.payload.path] }
+                    : {}),
+                  ignoreWhitespace: command.payload.ignoreWhitespace,
+                }, undefined, dependencies.secureFiles, secureRoot),
+                getRepositoryStatus(secureRoot.root, { deadlineAt }),
+              ]),
+            );
+          }
           await deadline.run(
             async (signal) => await verifyCommandRepository(
               secureRoot,
@@ -367,6 +453,7 @@ export function createSourceControlCommandHandler(
                 patch: diff.text,
                 truncated: diff.truncated,
                 files: changedFiles(status),
+                commitReview,
               },
             },
           });
@@ -493,21 +580,90 @@ export function createSourceControlCommandHandler(
               { deadlineAt, signal },
             ),
           );
-          const [diff, repositoryStatus] = await deadline.run(
-            async (signal) => await Promise.all([
-              getUnifiedDiff(secureRoot.root, {
-                deadlineAt,
-                signal,
-                ...(
-                  command.payload.path
-                    ? { paths: [command.payload.path] }
-                    : {}
+          let commitReview: { authorityRef: string; fingerprint: string } | null = null;
+          let diff;
+          let repositoryStatus;
+          if (command.payload.commitReview && !command.payload.path) {
+            const before = await deadline.run(
+              async () => await prepareGitCommitReview(
+                secureRoot.root,
+                { deadlineAt },
+              ),
+            );
+            try {
+              const text = await deadline.run(
+                async () => await renderGitCommitReviewDiff(
+                  secureRoot.root,
+                  before,
+                  { deadlineAt },
                 ),
-                ignoreWhitespace: command.payload.ignoreWhitespace,
-              }, undefined, dependencies.secureFiles, secureRoot),
-              getRepositoryStatus(secureRoot.root, { deadlineAt }),
-            ]),
-          );
+              );
+              const after = await deadline.run(
+                async () => await prepareGitCommitReview(
+                  secureRoot.root,
+                  { deadlineAt },
+                ),
+              );
+              try {
+                repositoryStatus = before.capture.status;
+                diff = { text, truncated: false };
+                if (
+                  gitCommitReviewFingerprintsEqual(
+                    before.capture.fingerprint,
+                    after.capture.fingerprint,
+                  )
+                  && gitCommitReviewStatusMatches(
+                    before.capture,
+                    repositoryStatus,
+                  )
+                  && gitCommitReviewStatusMatches(
+                    after.capture,
+                    repositoryStatus,
+                  )
+                ) {
+                  const authorityRef = await deadline.run(
+                    async (signal) => await issueLiveAuthority(
+                      socket,
+                      "git-commit-review",
+                      commitReviewAuthorityBinding(
+                        command.payload.projectId,
+                        command.payload.conversationId,
+                        path,
+                        command.payload.repositoryPath,
+                        repository.metadataMarkerIdentity,
+                        after.capture.fingerprint,
+                      ),
+                      secureRoot,
+                      signal,
+                    ),
+                  );
+                  if (!authorityRef) return "handled";
+                  commitReview = {
+                    authorityRef,
+                    fingerprint: after.capture.fingerprint,
+                  };
+                }
+              } finally {
+                await after.selection.dispose().catch(() => undefined);
+              }
+            } finally {
+              await before.selection.dispose().catch(() => undefined);
+            }
+          } else {
+            [diff, repositoryStatus] = await deadline.run(
+              async (signal) => await Promise.all([
+                getUnifiedDiff(secureRoot.root, {
+                  deadlineAt,
+                  signal,
+                  ...(command.payload.path
+                    ? { paths: [command.payload.path] }
+                    : {}),
+                  ignoreWhitespace: command.payload.ignoreWhitespace,
+                }, undefined, dependencies.secureFiles, secureRoot),
+                getRepositoryStatus(secureRoot.root, { deadlineAt }),
+              ]),
+            );
+          }
           await deadline.run(
             async (signal) => await verifyCommandRepository(
               secureRoot,
@@ -537,6 +693,7 @@ export function createSourceControlCommandHandler(
                 patch: diff.text,
                 truncated: diff.truncated,
                 files: changedFiles(repositoryStatus),
+                commitReview,
               },
             },
           });
@@ -811,33 +968,110 @@ export function createSourceControlCommandHandler(
               repository.secureRoot,
               repository.metadataMarkerIdentity,
             );
-            const committed = await commitChanges(
+            const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
               repository.repositoryRoot,
+            );
+            const reviewRoot = await dependencies.secureFileAuthorities.resolve(
+              socket,
+              command.payload.reviewReceipt.authorityRef,
+              "git-commit-review",
+              commitReviewAuthorityBinding(
+                command.payload.projectId,
+                command.payload.conversationId,
+                repository.workspaceRoot,
+                command.payload.repositoryPath ?? ".",
+                metadataMarkerIdentity,
+                command.payload.reviewReceipt.fingerprint,
+              ),
+              { consume: true },
+            );
+            if (
+              !sameCanonicalPath(
+                reviewRoot.root,
+                await realpath(repository.repositoryRoot),
+              )
+              || (
+                repository.secureRoot
+                && (
+                  reviewRoot.identity.dev !== repository.secureRoot.identity.dev
+                  || reviewRoot.identity.ino !== repository.secureRoot.identity.ino
+                  || reviewRoot.birthtimeNs !== repository.secureRoot.birthtimeNs
+                )
+              )
+            ) {
+              throw new RuntimeRequestError(
+                "This repository changed after its complete diff was reviewed. Refresh and try again.",
+              );
+            }
+            const verifyReviewedRepository = async (
+              signal?: AbortSignal,
+            ): Promise<void> => {
+              await dependencies.secureFiles.verifyRoot(reviewRoot, signal);
+              if (
+                !sameCanonicalPath(
+                  await repositoryRoot(reviewRoot.root, { signal }),
+                  reviewRoot.root,
+                )
+                || await repositoryMetadataMarkerIdentity(reviewRoot.root, {
+                  signal,
+                })
+                  !== metadataMarkerIdentity
+              ) {
+                throw new RuntimeRequestError(
+                  "This repository changed after its complete diff was reviewed. Refresh and try again.",
+                );
+              }
+            };
+            const committed = await commitReviewedChanges(
+              reviewRoot.root,
               command.payload.message,
-              command.payload.paths,
+              command.payload.paths ?? [],
+              command.payload.reviewReceipt.fingerprint,
+              {
+                deadlineAt: Date.now() + GIT_READ_OPERATION_TIMEOUT_MS,
+                verifyRepositoryIdentity: verifyReviewedRepository,
+              },
             );
-            await verifyCommandRepository(
-              repository.secureRoot,
-              repository.metadataMarkerIdentity,
-            );
-            return committed;
+            try {
+              await verifyCommandRepository(
+                repository.secureRoot,
+                repository.metadataMarkerIdentity,
+              );
+              await verifyReviewedRepository();
+              return committed;
+            } catch {
+              return {
+                ...committed,
+                refreshWarning: committed.refreshWarning
+                  ?? "The commit was created, but repository identity could not be refreshed yet.",
+              };
+            }
           },
         );
+        let refreshWarning = result.refreshWarning;
         if (command.payload.conversationId) {
-          const current = await getUnifiedDiff(
-            repository.repositoryRoot,
-            {},
-            undefined,
-            dependencies.secureFiles,
-            repository.secureRoot ?? undefined,
-          );
-          if (!current.truncated) {
-            reconcileReviews(
-              dependencies.store,
-              command.payload.conversationId,
-              current.text,
-              command.payload.repositoryPath ?? ".",
+          try {
+            const current = await getUnifiedDiff(
+              repository.repositoryRoot,
+              {},
+              undefined,
+              dependencies.secureFiles,
+              repository.secureRoot ?? undefined,
             );
+            if (!current.truncated) {
+              reconcileReviews(
+                dependencies.store,
+                command.payload.conversationId,
+                current.text,
+                command.payload.repositoryPath ?? ".",
+              );
+            } else {
+              refreshWarning ??=
+                "The commit was created, but its review state could not be refreshed yet.";
+            }
+          } catch {
+            refreshWarning ??=
+              "The commit was created, but its review state could not be refreshed yet.";
           }
         }
         dependencies.send(socket, {
@@ -845,7 +1079,9 @@ export function createSourceControlCommandHandler(
           requestId: command.requestId,
           result: {
             kind: "git.action",
-            message: `Committed ${result.commit.slice(0, 7)}.`,
+            message: refreshWarning
+              ? `Committed ${result.commit.slice(0, 7)}. ${refreshWarning}`
+              : `Committed ${result.commit.slice(0, 7)}.`,
           },
         });
         dependencies.broadcastSnapshot();

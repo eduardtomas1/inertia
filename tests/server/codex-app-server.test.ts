@@ -313,6 +313,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     const params = process.env.INERTIA_APP_SERVER_SCENARIO === "unsupported-decisions"
       ? { threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: ["acceptForSession"] }
+      : process.env.INERTIA_APP_SERVER_SCENARIO === "nullable-decisions"
+        ? { threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: null }
+      : process.env.INERTIA_APP_SERVER_SCENARIO === "mixed-decisions"
+        ? { threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: ["accept", "acceptForSession", { acceptWithExecpolicyAmendment: { execpolicy_amendment: ["prefix_rule(allow = [npm, test])"] } }, "decline", "cancel"] }
       : approvalMethod === "execCommandApproval"
         ? { conversationId: approvalThreadId, callId: "command-1", command: ["npm", "test"], parsedCmd: [], cwd: process.cwd(), reason: "Validate the change" }
       : approvalMethod === "applyPatchApproval"
@@ -1637,6 +1641,88 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const messages = captured(fake.capturePath);
     expect(messages.find(({ id }) => id === "approval-rpc")).toMatchObject({ error: { code: -32602 } });
     expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(true);
+    await manager.disposeAll();
+  });
+
+  it("treats schema-native null approval decisions as the default one-turn choices", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "nullable-decisions";
+    const manager = trackedManager(fake.command);
+    const approvals: ProviderApprovalEvent["request"][] = [];
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-null-decisions",
+      cwd: fake.root,
+      prompt: "Try a command",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (event) => {
+        approvals.push(event.request);
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+        )).toBe(true);
+      },
+      onInput: (event) => expect(manager.respondToInput(
+        event.conversationId,
+        event.request.requestId,
+        { choice: ["Safe"] },
+      )).toBe(true),
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(approvals).toEqual([expect.objectContaining({
+      kind: "command",
+      availableDecisions: ["approve", "deny", "cancel"],
+    })]);
+    expect(captured(fake.capturePath).find(({ id }) =>
+      id === "approval-rpc"
+    )).toMatchObject({ result: { decision: "accept" } });
+    await manager.disposeAll();
+  });
+
+  it("keeps safe one-turn choices when Codex also advertises unsupported persistent approval", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "mixed-decisions";
+    const manager = trackedManager(fake.command);
+    const approvals: ProviderApprovalEvent["request"][] = [];
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-mixed-decisions",
+      cwd: fake.root,
+      prompt: "Try a command",
+      interactionMode: "build",
+      access: "auto-edit",
+    }), {
+      onApproval: (event) => {
+        approvals.push(event.request);
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+        )).toBe(true);
+      },
+      onInput: (event) => expect(manager.respondToInput(
+        event.conversationId,
+        event.request.requestId,
+        { choice: ["Safe"] },
+      )).toBe(true),
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(approvals).toEqual([expect.objectContaining({
+      kind: "command",
+      availableDecisions: ["approve", "deny", "cancel"],
+    })]);
+    expect(captured(fake.capturePath).find(({ id }) =>
+      id === "approval-rpc"
+    )).toMatchObject({ result: { decision: "accept" } });
     await manager.disposeAll();
   });
 

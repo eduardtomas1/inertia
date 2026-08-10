@@ -1200,6 +1200,29 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.pendingActionId).toBeNull();
   });
 
+  it("drops a pending provider resume instead of replaying it after a project switch", () => {
+    const hook = renderHook((project: Project) => useActivityActions({
+      project,
+      conversationId: project.id === alpha.id ? alphaChat.id : betaChat.id,
+      snapshot: null,
+      request: vi.fn(),
+      run: vi.fn(),
+      setActiveTool: vi.fn(),
+      setActivityOpen: vi.fn(),
+      setActionError: vi.fn(),
+      activateContext: vi.fn(),
+      openProjectPath: vi.fn(),
+      navigatePreview: vi.fn(),
+    }), { initialProps: alpha });
+
+    act(() => hook.result.current.requestProviderResume(alphaChat.id));
+    expect(hook.result.current.pendingResumeConversationId).toBe(alphaChat.id);
+    hook.rerender(beta);
+    expect(hook.result.current.pendingResumeConversationId).toBeNull();
+    hook.rerender(alpha);
+    expect(hook.result.current.pendingResumeConversationId).toBeNull();
+  });
+
   it("waits for the target pane owner before navigating an activity preview", async () => {
     const activateContext = vi.fn();
     const navigateAlphaPreview = vi.fn();

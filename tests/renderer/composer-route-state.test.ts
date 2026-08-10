@@ -150,7 +150,7 @@ describe("exact composer route state", () => {
     });
   });
 
-  it("blocks concrete native routes on stale catalogs without claiming removal", () => {
+  it("keeps a concrete native route ready while its known catalog entry is stale", () => {
     const selection = nativeModelSelection({
       providerId: "codex",
       modelId: "gpt-current",
@@ -164,12 +164,30 @@ describe("exact composer route state", () => {
     });
 
     expect(state.model?.id).toBe("gpt-current");
+    expect(state.readiness).toEqual({ ready: true });
+    expect(state.historical).toBe(false);
+  });
+
+  it("still requires refresh for an unknown model when the native catalog is stale", () => {
+    const stale = provider("stale");
+    stale.models = [];
+    const state = resolveComposerRouteState({
+      conversationProviderId: "codex",
+      selection: nativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-unknown",
+        alias: "GPT Unknown",
+      }),
+      providers: [stale],
+      profiles: [],
+    });
+
+    expect(state.model).toBeUndefined();
     expect(state.readiness).toMatchObject({
       ready: false,
       badge: "Refresh needed",
       action: "refresh",
     });
-    expect(state.readiness).not.toMatchObject({ badge: "Model removed" });
   });
 
   it("blocks a removed model only when a fresh catalog proves removal", () => {

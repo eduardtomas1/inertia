@@ -2067,13 +2067,14 @@ textarea {
   container-type: size;
 }
 
-.chat-workspace[data-reasoning-effort="ultra"]::after {
+.chat-workspace[data-reasoning-effort="ultra"] .composer::after {
   position: absolute;
-  z-index: 40;
-  inset: 0;
+  z-index: 1;
+  inset: -1px;
   padding: 1px;
   pointer-events: none;
   content: "";
+  border-radius: calc(var(--radius-composer) + 1px);
   background: linear-gradient(
     105deg,
     color-mix(in srgb, var(--accent) 24%, transparent),
@@ -2097,7 +2098,7 @@ textarea {
 }
 
 .app-shell[data-document-active="false"]
-  .chat-workspace[data-reasoning-effort="ultra"]::after {
+  .chat-workspace[data-reasoning-effort="ultra"] .composer::after {
   animation-play-state: paused;
 }
 
@@ -2107,7 +2108,7 @@ textarea {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-workspace[data-reasoning-effort="ultra"]::after {
+  .chat-workspace[data-reasoning-effort="ultra"] .composer::after {
     animation: none;
     background-position: 50% 50%;
   }
@@ -2890,59 +2891,81 @@ textarea {
   padding: 7px clamp(18px, 4vw, 54px) var(--composer-bottom-breathing-room);
 }
 
-.chat-goal-control {
+.chat-goal-control,
+.chat-command-surface {
   position: relative;
   width: 100%;
   overflow: hidden;
   border-bottom: 1px solid var(--panel-border);
   border-radius: calc(var(--radius-composer) - 1px) calc(var(--radius-composer) - 1px) 0 0;
-  background: color-mix(in srgb, var(--accent-soft) 10%, transparent);
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--accent-soft) 22%, transparent),
+      transparent 78%
+    ),
+    color-mix(in srgb, var(--surface-strong) 62%, transparent);
 }
 
-.chat-goal-inline {
+.chat-goal-inline,
+.chat-command-inline {
   width: 100%;
   max-height: min(430px, calc(100dvh - 180px), calc(100cqh - 130px));
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 7px;
+  padding: 10px 11px 11px;
   color: var(--text);
 }
 
 .chat-goal-inline > header,
 .chat-goal-inline > header > span,
-.chat-goal-inline > header > span > span {
+.chat-goal-inline > header > span > span,
+.chat-command-inline > header,
+.chat-command-inline > header > span,
+.chat-command-inline > header > span > span {
   display: flex;
   min-width: 0;
 }
 
-.chat-goal-inline > header {
+.chat-goal-inline > header,
+.chat-command-inline > header {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 3px 3px 7px 5px;
+  padding: 0 0 10px;
 }
 
-.chat-goal-inline > header > span {
+.chat-goal-inline > header > span,
+.chat-command-inline > header > span {
   align-items: center;
-  gap: 7px;
+  gap: 9px;
 }
 
-.chat-goal-inline > header > span > svg {
+/* The icon reads as a deliberate badge rather than a loose glyph. */
+.chat-goal-inline > header > span > svg,
+.chat-command-inline > header > span > svg {
+  box-sizing: content-box;
   flex: 0 0 auto;
+  padding: 6px;
+  border-radius: 9px;
   color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 58%, transparent);
 }
 
-.chat-goal-inline > header > span > span {
+.chat-goal-inline > header > span > span,
+.chat-command-inline > header > span > span {
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
-.chat-goal-inline > header strong {
+.chat-goal-inline > header strong,
+.chat-command-inline > header strong {
   font-size: var(--ui-font-secondary);
   font-weight: 670;
+  letter-spacing: -0.01em;
 }
 
-.chat-goal-inline > header small {
+.chat-goal-inline > header small,
+.chat-command-inline > header small {
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
 }
@@ -2968,8 +2991,8 @@ textarea {
 
 .chat-goal-current p,
 .chat-goal-current small,
-.chat-goal-form small,
-.chat-goal-form p,
+.chat-goal-notes small,
+.chat-goal-notes p,
 .chat-goal-unavailable p,
 .chat-goal-warning,
 .chat-goal-separate-note {
@@ -2983,8 +3006,8 @@ textarea {
 }
 
 .chat-goal-current small,
-.chat-goal-form small,
-.chat-goal-form p,
+.chat-goal-notes small,
+.chat-goal-notes p,
 .chat-goal-unavailable p,
 .chat-goal-warning,
 .chat-goal-separate-note {
@@ -3024,8 +3047,7 @@ textarea {
 
 .chat-goal-actions button:focus-visible,
 .chat-goal-form > button:focus-visible,
-.chat-goal-unavailable button:focus-visible,
-.chat-goal-form textarea:focus-visible {
+.chat-goal-unavailable button:focus-visible {
   outline: 2px solid var(--composer-setting-focus);
   outline-offset: 1px;
 }
@@ -3047,32 +3069,85 @@ textarea {
 .chat-goal-unavailable {
   display: grid;
   gap: 7px;
-  padding: 9px;
-  border-top: 1px solid var(--panel-border);
+  padding: 0;
+  border-top: 0;
 }
 
 .chat-goal-form label {
-  color: var(--text-soft);
+  color: var(--text-muted);
   font-size: var(--ui-font-micro);
-  font-weight: 650;
+  font-weight: 680;
+  letter-spacing: .06em;
+  text-transform: uppercase;
 }
 
-.chat-goal-form textarea {
+/*
+ * `.composer textarea` strips the border, padding and resize affordance from
+ * every textarea inside the composer, and it used to win here on equal
+ * specificity purely by source order, leaving the objective field frameless.
+ * The extra class restores a real field without weakening the composer rule.
+ */
+.chat-goal-control .chat-goal-form textarea {
+  display: block;
   width: 100%;
-  min-height: 64px;
+  min-height: 74px;
+  max-height: 210px;
   resize: vertical;
-  padding: 7px 8px;
+  padding: 9px 10px;
+  overflow-y: auto;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 9px;
   outline: 0;
   color: var(--text);
   background: var(--surface);
   font: inherit;
   font-size: var(--ui-font-secondary);
-  line-height: 1.45;
+  line-height: 1.5;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
 }
 
-.chat-goal-form > button,
+.chat-goal-control .chat-goal-form textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.chat-goal-control .chat-goal-form textarea:hover:not(:disabled) {
+  border-color: var(--interactive-border-hover);
+}
+
+.chat-goal-control .chat-goal-form textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border-strong));
+  box-shadow: 0 0 0 3px var(--focus-ring-soft);
+}
+
+/*
+ * The provenance and capability notes were reading as stray debug output. One
+ * quiet block behind a single accent edge groups them as guidance and separates
+ * them from the field they describe.
+ */
+.chat-goal-notes {
+  display: grid;
+  gap: 3px;
+  padding: 6px 0 6px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.chat-goal-form > button {
+  min-height: 30px;
+  justify-self: start;
+  margin-top: 2px;
+  padding: 0 12px;
+  color: var(--accent-text);
+  background: var(--accent);
+  font-weight: 660;
+}
+
+.chat-goal-form > button:not(:disabled):hover {
+  color: var(--accent-text);
+  background: var(--accent-strong);
+}
+
 .chat-goal-unavailable button {
   width: fit-content;
 }
@@ -7380,6 +7455,7 @@ html.is-resizing-horizontal,
 html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none !important; }
 
 .terminal-panel {
+  container-type: size;
   display: flex;
   width: auto;
   min-width: 0;
@@ -7472,22 +7548,285 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   display: inline-flex;
   min-width: min(330px, 100%);
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   color: var(--text-soft);
   font-weight: 620;
 }
 
-.terminal-resume-picker select {
+.terminal-resume-picker-caption {
+  flex: 0 0 auto;
+}
+
+.terminal-resume-anchor {
+  position: relative;
+  display: inline-flex;
   min-width: 0;
-  max-width: 260px;
-  height: 26px;
-  padding: 0 24px 0 7px;
+}
+
+.terminal-resume-trigger {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 280px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 7px 4px 9px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text);
   background: var(--surface);
   font: inherit;
-  font-weight: 520;
+  text-align: left;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
+}
+
+.terminal-resume-trigger:not(:disabled):hover {
+  border-color: var(--interactive-border-hover);
+  background: var(--surface-hover);
+}
+
+.terminal-resume-trigger:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.terminal-resume-trigger:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.terminal-resume-trigger-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.terminal-resume-trigger-copy strong,
+.terminal-resume-trigger-copy small {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-resume-trigger-copy strong { font-weight: 640; }
+.terminal-resume-trigger-copy small { color: var(--text-muted); }
+
+.terminal-resume-trigger > svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.terminal-resume-anchor.is-open .terminal-resume-trigger > svg {
+  rotate: 180deg;
+}
+
+.terminal-resume-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  display: block;
+  width: min(380px, 74vw);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+
+/* Searchable resume picker, shared by the composer surface and the terminal. */
+.resume-picker {
+  display: grid;
+  min-width: 0;
+  gap: 0;
+  text-align: left;
+}
+
+.resume-picker-search {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.resume-picker-search:focus-within {
+  background: color-mix(in srgb, var(--accent-soft) 18%, transparent);
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+.resume-picker-search > label {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.resume-picker-search input {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--ui-font-secondary);
+}
+
+.resume-picker-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.resume-picker-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.resume-picker-list {
+  display: grid;
+  max-height: min(268px, 42vh);
+  gap: 2px;
+  margin: 0;
+  padding: 5px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.terminal-resume-popover .resume-picker-list {
+  max-height: clamp(48px, calc(100cqh - 126px), 268px);
+}
+
+.resume-picker-list > li {
+  min-width: 0;
+}
+
+.resume-picker-list button {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 3px 9px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.resume-picker-list button[data-active="true"] {
+  background: var(--surface-hover);
+}
+
+.resume-picker-list button[data-selected="true"] .resume-picker-option-copy strong {
+  color: var(--accent-strong);
+}
+
+.resume-picker-list button[data-unavailable="true"] {
+  cursor: not-allowed;
+}
+
+.resume-picker-list button[data-unavailable="true"] .resume-picker-option-copy strong,
+.resume-picker-list button[data-unavailable="true"] code {
+  color: var(--text-muted);
+}
+
+.resume-picker-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.resume-picker-option-copy strong {
+  overflow: hidden;
+  font-size: var(--ui-font-secondary);
+  font-weight: 640;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-picker-option-copy small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.resume-picker-option-note {
+  color: var(--warning);
+  font-size: var(--ui-font-micro);
+  font-style: normal;
+}
+
+.resume-picker-list code {
+  max-width: 132px;
+  overflow: hidden;
+  padding: 2px 5px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: var(--ui-font-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-picker-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 16px 12px 18px;
+}
+
+.resume-picker-empty > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--text-muted);
+}
+
+.resume-picker-empty > span {
+  display: grid;
+  gap: 2px;
+}
+
+.resume-picker-empty strong { font-size: var(--ui-font-secondary); }
+
+.resume-picker-empty small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.45;
+}
+
+.resume-picker-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 11px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--panel-border);
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.resume-picker-footer kbd {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-muted);
+  font-family: inherit;
+  font-size: var(--ui-font-micro);
+}
+
+/* Inside the composer the picker is already framed by the command surface. */
+.chat-command-inline .resume-picker {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.chat-command-inline .resume-picker-footer {
+  background: color-mix(in srgb, var(--surface-muted) 50%, transparent);
 }
 
 .terminal-resume-status code {
@@ -9563,32 +9902,53 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .timeline-minimap {
   position: absolute;
   left: var(--timeline-minimap-left);
-  display: flex;
-  width: 12px;
-  max-height: min(58vh, 320px);
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  padding: 5px 3px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 76%, transparent);
-  box-shadow: var(--shadow-soft);
-  opacity: 0.62;
+  width: 24px;
+  max-height: min(320px, calc(100cqh - 24px));
   pointer-events: auto;
   transform: translateY(-50%);
-  transition: opacity var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
 
-.timeline-minimap:hover,
-.timeline-minimap:focus-within {
-  background: color-mix(in srgb, var(--surface-strong) 90%, transparent);
+/* Preserve 24px targets in short stacked panes; the rail scrolls instead. */
+.timeline-minimap-track {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  max-height: inherit;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.timeline-minimap-track::-webkit-scrollbar {
+  display: none;
+}
+
+.timeline-minimap::before {
+  position: absolute;
+  z-index: 0;
+  inset: -4px -8px;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-strong) 84%, transparent);
+  box-shadow: var(--shadow-soft);
+  content: "";
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.timeline-minimap:hover::before,
+.timeline-minimap:focus-within::before {
   opacity: 1;
 }
 
 .timeline-minimap button {
   position: relative;
+  z-index: 1;
   width: 24px;
   min-width: 24px;
   height: 24px;
@@ -9599,27 +9959,38 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: transparent;
 }
 
+.timeline-minimap button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -4px;
+}
+
 .timeline-minimap button::before {
   position: absolute;
   top: 50%;
   left: 50%;
   z-index: 0;
-  width: 6px;
-  height: 3px;
+  width: 8px;
+  height: 2px;
   border-radius: 999px;
-  background: var(--border-strong);
+  background: color-mix(in srgb, var(--text-muted) 52%, transparent);
   content: "";
   translate: -50% -50%;
   transition:
+    width var(--motion-fast) var(--motion-ease),
+    height var(--motion-fast) var(--motion-ease),
     background var(--motion-fast) var(--motion-ease),
-    box-shadow var(--motion-fast) var(--motion-ease),
-    transform var(--motion-fast) var(--motion-ease);
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.timeline-minimap:hover button::before,
+.timeline-minimap:focus-within button::before {
+  background: color-mix(in srgb, var(--text-muted) 82%, transparent);
 }
 
 .timeline-minimap-preview {
   position: absolute;
   top: 50%;
-  left: 16px;
+  left: 30px;
   z-index: 2;
   display: block;
   width: max-content;
@@ -9640,20 +10011,49 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   white-space: normal;
 }
 
-.timeline-minimap button[data-emphasized="true"]::before {
-  background: var(--text-soft);
-  box-shadow: 0 0 0 2px var(--focus-ring-soft);
-  transform: scale(2.6, 2);
+.timeline-minimap button[aria-current="true"]::before {
+  width: 14px;
+  background: var(--accent);
+  box-shadow: 0 0 8px -2px color-mix(in srgb, var(--accent) 72%, transparent);
 }
 
-.timeline-minimap button[aria-current="true"]::before {
-  background: var(--accent);
-  transform: scaleX(1.34);
+/*
+ * Dock-style magnification. The pointed-at marker grows most and the swell
+ * falls off across its two nearest neighbours on each side, so the rail reads
+ * as one continuous curve instead of a single marker popping out of a flat
+ * column. `data-emphasized` already tracks hover and keyboard focus together,
+ * so the same falloff serves both. `:has()` supplies the preceding-sibling
+ * direction that sibling combinators cannot express, and the levels are
+ * ordered far-to-near so the nearer rule wins on equal specificity.
+ */
+.timeline-minimap button[data-emphasized="true"] + button + button::before,
+.timeline-minimap button:has(+ button + button[data-emphasized="true"])::before {
+  width: 11px;
+  height: 3px;
+}
+
+.timeline-minimap button[data-emphasized="true"] + button::before,
+.timeline-minimap button:has(+ button[data-emphasized="true"])::before {
+  width: 15px;
+  height: 4px;
+}
+
+.timeline-minimap button[data-emphasized="true"]::before {
+  width: 22px;
+  height: 5px;
+  background: var(--text-soft);
 }
 
 .timeline-minimap button[aria-current="true"][data-emphasized="true"]::before {
-  box-shadow: 0 0 0 2px var(--focus-ring-soft);
-  transform: scale(2.6, 2);
+  background: var(--accent-strong);
+  box-shadow: 0 0 10px -2px color-mix(in srgb, var(--accent) 82%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-minimap::before,
+  .timeline-minimap button::before {
+    transition: none;
+  }
 }
 
 .response-turn > .message,

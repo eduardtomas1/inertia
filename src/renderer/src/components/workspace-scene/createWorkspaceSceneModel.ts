@@ -466,6 +466,8 @@ export function createWorkspaceSceneModel({
       onOpenProviderSetup: actions.openProviderSetup,
       onOpenBackendSetup: actions.openBackendSetup,
       onOpenResume: () => setActiveTool("terminal"),
+      resumeOptions: terminalResumeOptions,
+      onResumeConversation: activityActions.requestProviderResume,
       onProbeBackendProfile: async (profileId, modelId) => {
         await backendProfileActions.probeBackendProfile(profileId, modelId);
       },
@@ -628,6 +630,8 @@ export function createWorkspaceSceneModel({
         providerResumes: terminalResumeOptions,
         actionId: activityActions.pendingActionId,
         onActionStarted: activityActions.clearPendingAction,
+        resumeRequestConversationId: activityActions.pendingResumeConversationId,
+        onResumeRequestHandled: activityActions.clearPendingResume,
         onClose: () => setActiveTool(null),
       },
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,

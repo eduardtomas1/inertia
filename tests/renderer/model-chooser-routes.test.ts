@@ -130,6 +130,33 @@ function customProfile(
   };
 }
 
+function nativeProfile(): ModelBackendProfileView {
+  return {
+    ...customProfile(),
+    id: "builtin:openai",
+    displayName: "OpenAI",
+    protocol: "openai-responses",
+    authenticationMode: "harness-managed",
+    source: "built-in",
+    configurationRevision: 0,
+    endpointIdentity: null,
+    preset: "native",
+    models: provider().models.map((model) => ({
+      id: model.id,
+      displayName: model.label,
+      contextWindowTokens: null,
+      reasoningOptions: model.reasoningOptions,
+      capabilities: [],
+    })),
+    routing: { mode: "simple", primaryModelId: "alpha" },
+    endpointHost: null,
+    authState: "harness-managed",
+    connectionState: "connected",
+    canDelete: false,
+    canDisable: false,
+  };
+}
+
 describe("composer model chooser route projection", () => {
   it("builds exact native routes and preserves the active selection settings", () => {
     const current = nativeModelSelection({
@@ -166,12 +193,12 @@ describe("composer model chooser route projection", () => {
     )[1]?.providerLabel).toBe("Work Codex");
   });
 
-  it("keeps Provider default selectable while marking stale concrete catalog routes unavailable", () => {
+  it("keeps known concrete catalog routes selectable while metadata refreshes", () => {
     const staleProvider = provider();
     staleProvider.metadataState.models.freshness = "stale";
     const routes = buildComposerModelRoutes(
       [staleProvider],
-      [],
+      [nativeProfile()],
       nativeModelSelection({ providerId: "codex", modelId: "alpha" }),
     );
 
@@ -179,8 +206,8 @@ describe("composer model chooser route projection", () => {
       .toMatchObject({ selectable: true, unavailableReason: null });
     expect(routes.find(({ modelId }) => modelId === "alpha"))
       .toMatchObject({
-        selectable: false,
-        unavailableReason: "Refresh provider models before selecting this exact route.",
+        selectable: true,
+        unavailableReason: null,
       });
   });
 

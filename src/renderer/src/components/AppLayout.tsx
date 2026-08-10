@@ -613,6 +613,7 @@ export function AppLayout({
             settings={settings}
             submitting={multiSpawn.submitting}
             cancelling={multiSpawn.cancelling}
+            launchBlocked={multiSpawn.launchBlocked}
             error={multiSpawn.error}
             recoveryGuidance={multiSpawn.recoveryGuidance}
             recoveryStatus={multiSpawn.recoveryStatus}

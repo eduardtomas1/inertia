@@ -1,11 +1,17 @@
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderInfo } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import {
+  continuationIdentityForSelection,
+  modelSelectionSchema,
+  nativeBackendProfile,
+  nativeModelSelection,
+  resolveHarnessBackendCompatibility,
+} from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
 import type {
@@ -76,7 +82,7 @@ describe("provider-default turn resolution", () => {
     const providers = {
       resolveModelRoute: resolveNativeModelRoute,
       harnessIdFor: (input: ProviderRunInput) => input.harnessId,
-    } as TurnProviderRuntime;
+    } as unknown as TurnProviderRuntime;
     const hooks = {
       broadcast: () => undefined,
       broadcastSnapshot: () => undefined,
@@ -123,6 +129,128 @@ describe("provider-default turn resolution", () => {
     });
     expect(store.conversation(conversation.id).modelSelection.modelId)
       .toBe("provider-default");
+    store.close();
+  });
+
+  it("rejects scanned pages when the exact provider-default catalog loses image support", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-provider-image-"));
+    directories.push(directory);
+    const workspace = join(directory, "workspace");
+    await mkdir(workspace);
+    const image = join(workspace, "scan.jpg");
+    await writeFile(image, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const store = new RuntimeStore(join(directory, "runtime.sqlite"), workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Provider default", workspace);
+    const conversation = store.createConversation(project.id, "Default route", {
+      modelSelection: nativeModelSelection({ providerId: "codex" }),
+    });
+    const providers = {
+      resolveModelRoute: resolveNativeModelRoute,
+      harnessIdFor: (input: ProviderRunInput) => input.harnessId,
+    } as unknown as TurnProviderRuntime;
+
+    expect(() => resolveTurnRequest({
+      store,
+      providers,
+      hooks: {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [provider("gpt-default", "GPT Default")],
+      },
+      id: () => "exact-provider-image",
+      now: () => "2030-01-01T00:00:00.000Z",
+      clock: () => new Date("2030-01-01T00:00:00.000Z"),
+    }, {
+      conversationId: conversation.id,
+      content: "Inspect this scan.",
+      imagePaths: [image],
+      generatedAttachmentPaths: [image],
+    })).toThrow("cannot inspect scanned PDF page images");
+    expect(store.agentTurnsForConversation(conversation.id)).toEqual([]);
+    store.close();
+  });
+
+  it.each([
+    { state: "verified" as const, accepted: true },
+    { state: "unknown" as const, accepted: false },
+  ])("uses exact external '$state' image evidence instead of a native catalog ID collision", async ({
+    state,
+    accepted,
+  }) => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-external-image-"));
+    directories.push(directory);
+    const workspace = join(directory, "workspace");
+    await mkdir(workspace);
+    const image = join(workspace, "scan.jpg");
+    await writeFile(image, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const customProfile = {
+      ...nativeBackendProfile("codex"),
+      id: `custom:${state}`,
+      displayName: `Custom ${state}`,
+      source: "custom" as const,
+      configurationRevision: 1,
+      endpointIdentity: `endpoint:${state}`,
+    };
+    const selection = modelSelectionSchema.parse({
+      ...nativeModelSelection({ providerId: "codex", modelId: "gpt-collision" }),
+      backendProfileId: customProfile.id,
+      backendProfileDisplayName: customProfile.displayName,
+      backendConfigurationRevision: 1,
+      capabilities: [{
+        id: "images",
+        state,
+        provenance: state === "verified" ? "probe" : "unknown",
+        detail: null,
+      }],
+    });
+    const store = new RuntimeStore(join(directory, "runtime.sqlite"), workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("External", workspace);
+    const conversation = store.createConversation(project.id, "External route", {
+      modelSelection: selection,
+    });
+    const compatibility = resolveHarnessBackendCompatibility(
+      "codex-app-server",
+      customProfile,
+    );
+    const providers = {
+      resolveModelRoute: () => ({
+        providerId: "codex" as const,
+        harnessId: "codex-app-server" as const,
+        backendProfile: customProfile,
+        compatibility,
+        continuationIdentity: continuationIdentityForSelection(
+          selection,
+          customProfile.endpointIdentity,
+          !compatibility.allowsModelSwitchWithinSession,
+        ),
+      }),
+      harnessIdFor: (input: ProviderRunInput) => input.harnessId,
+    } as unknown as TurnProviderRuntime;
+    const resolve = () => resolveTurnRequest({
+      store,
+      providers,
+      hooks: {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [provider("gpt-collision", "Native collision")],
+        validateModelSelection: () => selection,
+      },
+      id: () => `exact-external-${state}`,
+      now: () => "2030-01-01T00:00:00.000Z",
+      clock: () => new Date("2030-01-01T00:00:00.000Z"),
+    }, {
+      conversationId: conversation.id,
+      content: "Inspect this external scan.",
+      imagePaths: [image],
+      generatedAttachmentPaths: [image],
+    });
+
+    if (accepted) expect(resolve).not.toThrow();
+    else expect(resolve).toThrow("cannot inspect scanned PDF page images");
     store.close();
   });
 });

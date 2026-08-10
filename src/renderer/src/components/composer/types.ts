@@ -17,6 +17,7 @@ import type {
 } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { ChatGoalControlProps } from "../ChatGoalControl";
+import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
 
 export interface ComposerProps {
   conversation: Conversation;
@@ -76,6 +77,8 @@ export interface ComposerProps {
   onProbeBackendProfile: (profileId: string, modelId: string) => Promise<void>;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onOpenResume: () => void;
+  resumeOptions?: readonly ProviderTerminalResumeOption[];
+  onResumeConversation?: (conversationId: string) => void;
   onStop: () => Promise<void>;
   onClearPromptContext?: () => void;
 }

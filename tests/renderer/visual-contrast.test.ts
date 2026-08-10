@@ -248,18 +248,22 @@ describe("visual contrast system", () => {
     );
   });
 
-  it("animates only active ultra chat frames and honors reduced motion", () => {
+  it("animates only active ultra composer frames and honors reduced motion", () => {
     const ultraFrame = cssBlock(
-      '.chat-workspace[data-reasoning-effort="ultra"]::after',
+      '.chat-workspace[data-reasoning-effort="ultra"] .composer::after',
     );
     expect(ultraFrame).toContain("pointer-events: none");
     expect(ultraFrame).toContain("animation: ultra-reasoning-frame-flow 6s linear infinite");
     expect(ultraFrame).toContain("mask-composite: exclude");
-    expect(css).toMatch(
-      /\.app-shell\[data-document-active="false"\][\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\]::after\s*\{[^}]*animation-play-state:\s*paused;/u,
+    expect(ultraFrame).toContain("border-radius: calc(var(--radius-composer) + 1px)");
+    expect(css).not.toMatch(
+      /\.chat-workspace\[data-reasoning-effort="ultra"\]::after/u,
     );
     expect(css).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\]::after\s*\{[^}]*animation:\s*none;/u,
+      /\.app-shell\[data-document-active="false"\][\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\] \.composer::after\s*\{[^}]*animation-play-state:\s*paused;/u,
+    );
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\] \.composer::after\s*\{[^}]*animation:\s*none;/u,
     );
   });
 });

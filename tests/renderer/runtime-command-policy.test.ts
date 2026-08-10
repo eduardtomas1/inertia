@@ -82,6 +82,10 @@ describe("runtime command delivery policy", () => {
       timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "ambiguous",
     });
+    expect(runtimeCommandPolicy("duo.acknowledge")).toEqual({
+      timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
+      timeoutDelivery: "ambiguous",
+    });
     expect(runtimeCommandPolicy("duo.status")).toEqual({
       timeoutMs: 15_000,
       timeoutDelivery: "rejected",
@@ -95,7 +99,7 @@ describe("runtime command delivery policy", () => {
       timeoutDelivery: "ambiguous",
     });
     expect(runtimeCommandPolicy("duo.comparison.cancel")).toEqual({
-      timeoutMs: 15_000,
+      timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "ambiguous",
     });
   });

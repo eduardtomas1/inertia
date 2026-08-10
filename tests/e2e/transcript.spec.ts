@@ -261,6 +261,9 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     );
     await expect(firstMinimapMarker).not.toHaveAttribute("title");
     const markerBoundsBeforeHover = await firstMinimapMarker.boundingBox();
+    const markerWidthBeforeHover = await firstMinimapMarker.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element, "::before").width));
+    expect(markerWidthBeforeHover).toBeGreaterThan(0);
     await firstMinimapMarker.hover();
     await expect(firstMinimapMarker).toHaveAttribute(
       "data-emphasized",
@@ -273,8 +276,11 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     );
     await expect(minimapPreview).toHaveAttribute("aria-hidden", "true");
     await expect(firstMinimapMarker).not.toHaveAttribute("aria-describedby");
+    // Hover has to enlarge the marker itself without shifting the 24px pointer
+    // target that keeps twelve markers reachable.
     await expect.poll(() => firstMinimapMarker.evaluate((element) =>
-      getComputedStyle(element, "::before").transform)).not.toBe("none");
+      Number.parseFloat(getComputedStyle(element, "::before").width)))
+      .toBeGreaterThan(markerWidthBeforeHover);
     expect(await firstMinimapMarker.boundingBox()).toEqual(
       markerBoundsBeforeHover,
     );

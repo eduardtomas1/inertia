@@ -4,6 +4,7 @@ import {
   resolveContinuationDecision,
 } from "../../../shared/continuation-policy";
 import {
+  nativeBackendProfile,
   nativeModelSelection,
   modelSelectionSchema,
 } from "../../../shared/model-routing";
@@ -80,14 +81,19 @@ export function resolveTurnRequest(
   });
   const runId = dependencies.id();
   const turnId = dependencies.id();
-  const selectedProvider = dependencies.hooks.providerInfo()
-    .find(({ id }) => id === conversation.providerId);
+  const providerInfo = dependencies.hooks.providerInfo();
+  const selectedProvider = providerInfo.find(
+    ({ id }) => id === conversation.providerId,
+  );
   const requestedModelId = conversation.modelSelection.modelId;
   const selectedModel = requestedModelId !== "provider-default"
     ? selectedProvider?.models.find(({ id }) => id === requestedModelId)
     : selectedProvider?.models.find(({ isDefault }) => isDefault)
       ?? selectedProvider?.models[0];
-  const routeSelection = modelSelectionSchema.parse(conversation.modelSelection);
+  const parsedSelection = modelSelectionSchema.parse(conversation.modelSelection);
+  const routeSelection = dependencies.hooks.validateModelSelection?.(
+    parsedSelection,
+  ) ?? parsedSelection;
   const modelSelection = requestedModelId === "provider-default" && selectedModel
     ? nativeModelSelection({
         providerId: conversation.providerId,
@@ -101,6 +107,28 @@ export function resolveTurnRequest(
       })
     : routeSelection;
   const route = dependencies.providers.resolveModelRoute(routeSelection);
+  if ((request.generatedAttachmentPaths?.length ?? 0) > 0) {
+    const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
+    const exactModel = routeSelection.modelId === "provider-default"
+      ? exactProvider?.models.find(({ isDefault }) => isDefault)
+        ?? exactProvider?.models[0]
+      : exactProvider?.models.find(({ id }) => id === routeSelection.modelId);
+    const usesNativeCatalog = route.backendProfile.source === "built-in"
+      && route.backendProfile.id === nativeBackendProfile(route.providerId).id;
+    const externalImageCapability = routeSelection.capabilities.find(
+      ({ id }) => id === "images",
+    );
+    const supportsImages = usesNativeCatalog
+      ? exactModel?.inputModalities.includes("image") === true
+      : externalImageCapability !== undefined
+        && externalImageCapability.state !== "unknown"
+        && externalImageCapability.state !== "unavailable";
+    if (!supportsImages) {
+      throw new Error(
+        "The selected model cannot inspect scanned PDF page images.",
+      );
+    }
+  }
   const latestTurn = dependencies.store.latestAgentTurnForConversation(
     conversation.id,
   );
@@ -197,6 +225,7 @@ export function resolveTurnRequest(
           conversation,
           providerInput,
           attachmentIds: attachments.map(({ id }) => id),
+          generatedAttachmentPaths: [...(request.generatedAttachmentPaths ?? [])],
           checkpointId: request.checkpointId ?? null,
           rendererOwnerId: request.rendererOwnerId ?? null,
           structuredContext,

@@ -18,6 +18,7 @@ import {
   type TurnInteractionCommandDependencies,
 } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
+import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const execFileAsync = promisify(execFile);
@@ -61,6 +62,64 @@ function messageCommand(
   };
 }
 
+function blankPdf(): Uint8Array {
+  const stream = "BT /F1 22 Tf 72 720 Td (Page 1 of 1) Tj ET";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf, "ascii"));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(pdf, "ascii");
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  pdf += offsets.map((offset) =>
+    `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(pdf, "ascii");
+}
+
+function providerWithImages(supportsImages: boolean): ProviderInfo {
+  return {
+    id: "codex",
+    canRun: true,
+    statusMessage: null,
+    models: [{
+      id: "gpt-test",
+      isDefault: true,
+      inputModalities: supportsImages ? ["text", "image"] : ["text"],
+    }],
+  } as unknown as ProviderInfo;
+}
+
+function externalSelection(
+  imageState: "verified" | "unknown",
+) {
+  return {
+    harnessId: "codex-app-server" as const,
+    backendProfileId: "custom:test",
+    backendProfileDisplayName: "Custom test",
+    modelId: "gpt-test",
+    alias: null,
+    reasoningEffort: null,
+    contextWindowOverride: null,
+    providerOptions: {},
+    capabilities: [{
+      id: "images" as const,
+      state: imageState,
+      provenance: imageState === "verified" ? "probe" as const : "unknown" as const,
+      detail: null,
+    }],
+    backendConfigurationRevision: 1,
+  };
+}
+
 function dependencies(options: {
   queue: ReturnType<typeof vi.fn>;
   relinquishAll: ReturnType<typeof vi.fn>;
@@ -77,8 +136,19 @@ function dependencies(options: {
   checkpointCount?: Mock<() => number>;
   providerTerminalResumeActive?: boolean;
   providerTerminalResumeAcquire?: boolean;
+  enableProviders?: boolean;
+  generatedAttachments?: PrivateGeneratedAttachmentStore;
+  provider?: ProviderInfo;
+  resolvedPayloads?: Array<{
+    attachment: ChatAttachment;
+    bytes: Uint8Array;
+  }>;
+  validatedSelection?: ReturnType<
+    TurnInteractionCommandDependencies["backendProfileController"]["validateSelection"]
+  >;
+  externalSelection?: boolean;
 }): TurnInteractionCommandDependencies {
-  const provider = {
+  const provider = options.provider ?? {
     id: "codex",
     canRun: true,
     statusMessage: null,
@@ -99,6 +169,9 @@ function dependencies(options: {
           modelId: "gpt-test",
           alias: null,
           reasoningEffort: null,
+          contextWindowOverride: null,
+          providerOptions: {},
+          capabilities: [],
           backendConfigurationRevision: 0,
         },
       })),
@@ -107,9 +180,13 @@ function dependencies(options: {
       addCheckpoint: vi.fn(() => ({
         id: "55555555-5555-4555-8555-555555555555",
       })),
+      createMessage: vi.fn(() => ({ id: "message-id" })),
+      updateConversation: vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["store"],
     backendProfileController: {
-      validateSelection: vi.fn(),
+      validateSelection: vi.fn((selection) =>
+        options.validatedSelection ?? selection),
+      isExternalSelection: vi.fn(() => options.externalSelection ?? false),
       readiness: options.readiness ?? vi.fn(async () => null),
     } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
     turns: {
@@ -126,9 +203,9 @@ function dependencies(options: {
     pendingApprovals: new Map(),
     pendingInputs: new Map(),
     dataDirectory: tmpdir(),
-    enableProviders: true,
+    enableProviders: options.enableProviders ?? true,
     attachmentResolver: {
-      resolvePayloads: vi.fn(async () => [{
+      resolvePayloads: vi.fn(async () => options.resolvedPayloads ?? [{
         attachment: trustedAttachment,
         bytes: new Uint8Array([
           0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -136,6 +213,9 @@ function dependencies(options: {
       }]),
       relinquishAll: options.relinquishAll,
     } as unknown as TurnInteractionCommandDependencies["attachmentResolver"],
+    generatedAttachments: options.generatedAttachments ?? {
+      release: vi.fn(async () => undefined),
+    } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
     workflows: {
       resolveTurnSkills: vi.fn(async (
         selectedConversationId: string,
@@ -163,6 +243,193 @@ function dependencies(options: {
 }
 
 describe("message attachment ownership transfer", () => {
+  it.each([
+    { label: "model rejection", queueRejects: false, supportsImages: false },
+    { label: "queue rejection", queueRejects: true, supportsImages: true },
+  ])("cleans scanned PDF pages after $label", async ({
+    queueRejects,
+    supportsImages,
+  }) => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-command-scan-"));
+    try {
+      const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
+        directory,
+      );
+      const pdf = {
+        ...trustedAttachment,
+        name: "Informe-escanejat-amb-accents.pdf",
+        path: join(directory, "22222222-2222-4222-8222-222222222222.pdf"),
+        mimeType: "application/pdf" as const,
+      };
+      const bytes = blankPdf();
+      const queue = queueRejects
+        ? vi.fn(() => { throw new Error("queue rejected"); })
+        : vi.fn();
+      const handlerDependencies = dependencies({
+        queue,
+        relinquishAll: vi.fn(async () => undefined),
+        generatedAttachments,
+        provider: providerWithImages(supportsImages),
+        resolvedPayloads: [{ attachment: pdf, bytes }],
+      });
+      const command = messageCommand();
+      command.payload.attachments = [pdf];
+
+      await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        command,
+      )).rejects.toThrow(
+        queueRejects ? "queue rejected" : "cannot inspect scanned PDF",
+      );
+      expect(generatedAttachments.usage()).toEqual({ bytes: 0, records: 0 });
+      expect(queue).toHaveBeenCalledTimes(queueRejects ? 1 : 0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("cleans a generated page when aggregate preparation times out after the private write", async () => {
+    vi.useFakeTimers();
+    const directory = await mkdtemp(join(tmpdir(), "inertia-command-late-scan-"));
+    try {
+      const backingStore = await PrivateGeneratedAttachmentStore.create(directory);
+      let releaseWrite!: () => void;
+      const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+      let notifyWritten!: () => void;
+      const written = new Promise<void>((resolve) => { notifyWritten = resolve; });
+      const delayedStore = {
+        writeJpeg: async (bytes: Uint8Array) => {
+          const path = await backingStore.writeJpeg(bytes);
+          notifyWritten();
+          await writeGate;
+          return path;
+        },
+        release: (paths: readonly string[]) => backingStore.release(paths),
+      } as unknown as PrivateGeneratedAttachmentStore;
+      const pdf = {
+        ...trustedAttachment,
+        path: join(directory, "22222222-2222-4222-8222-222222222222.pdf"),
+        mimeType: "application/pdf" as const,
+      };
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+        generatedAttachments: delayedStore,
+        provider: providerWithImages(true),
+        resolvedPayloads: [{ attachment: pdf, bytes: blankPdf() }],
+      });
+      const command = messageCommand();
+      command.payload.attachments = [pdf];
+      const handling = createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        command,
+      );
+      const rejection = expect(handling).rejects.toThrow(
+        /Document extraction exceeded|Preparing this message took too long/u,
+      );
+      await written;
+
+      await vi.advanceTimersByTimeAsync(MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
+      await rejection;
+      expect(backingStore.usage().records).toBe(1);
+      releaseWrite();
+      await vi.waitFor(() => expect(backingStore.usage()).toEqual({
+        bytes: 0,
+        records: 0,
+      }));
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("cleans scanned pages in transcript-only provider-disabled mode", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-command-disabled-"));
+    try {
+      const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
+        directory,
+      );
+      const pdf = {
+        ...trustedAttachment,
+        path: join(directory, "22222222-2222-4222-8222-222222222222.pdf"),
+        mimeType: "application/pdf" as const,
+      };
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+        generatedAttachments,
+        enableProviders: false,
+        resolvedPayloads: [{ attachment: pdf, bytes: blankPdf() }],
+      });
+      const command = messageCommand();
+      command.payload.attachments = [pdf];
+
+      await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        command,
+      )).resolves.toBe("handled");
+      expect(generatedAttachments.usage()).toEqual({ bytes: 0, records: 0 });
+      expect(handlerDependencies.store.createMessage).toHaveBeenCalledOnce();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it.each([
+    { state: "verified" as const, accepted: true },
+    { state: "unknown" as const, accepted: false },
+  ])("uses normalized external image capability '$state' instead of a colliding native catalog model", async ({
+    state,
+    accepted,
+  }) => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-command-external-"));
+    try {
+      const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
+        directory,
+      );
+      const pdf = {
+        ...trustedAttachment,
+        path: join(directory, "22222222-2222-4222-8222-222222222222.pdf"),
+        mimeType: "application/pdf" as const,
+      };
+      let queuedGenerated: readonly string[] = [];
+      const queue = vi.fn((request) => {
+        queuedGenerated = request.generatedAttachmentPaths;
+        return queuedTurn();
+      });
+      const handlerDependencies = dependencies({
+        queue,
+        relinquishAll: vi.fn(async () => undefined),
+        generatedAttachments,
+        provider: providerWithImages(false),
+        resolvedPayloads: [{ attachment: pdf, bytes: blankPdf() }],
+        validatedSelection: externalSelection(state),
+        externalSelection: true,
+      });
+      const command = messageCommand();
+      command.payload.attachments = [pdf];
+      const handling = createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        command,
+      );
+
+      if (accepted) {
+        await expect(handling).resolves.toBe("handled");
+        expect(queue).toHaveBeenCalledOnce();
+        await generatedAttachments.release(queuedGenerated);
+      } else {
+        await expect(handling).rejects.toThrow(
+          "cannot inspect scanned PDF page images",
+        );
+        expect(queue).not.toHaveBeenCalled();
+      }
+      expect(generatedAttachments.usage()).toEqual({ bytes: 0, records: 0 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   it("surfaces a judge reservation rejected by the shared turn queue", async () => {
     const queue = vi.fn(() => {
       throw new Error(

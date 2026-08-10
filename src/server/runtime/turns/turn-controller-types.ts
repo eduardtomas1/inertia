@@ -129,7 +129,9 @@ export interface TurnControllerHooks {
   captureGitBefore?(input: TurnGitArtifactHookInput): void | Promise<void>;
   captureGitArtifacts?(input: TurnGitArtifactHookInput): void | Promise<void>;
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
+  validateModelSelection?(selection: ModelSelection): ModelSelection;
   releaseTurnAttachments?(input: TurnAttachmentReleaseHookInput): void | Promise<void>;
+  releaseGeneratedAttachments?(paths: readonly string[]): void | Promise<void>;
   onTurnSettled?(turn: AgentTurn): void | Promise<void>;
   /** Benchmark-only stage attribution; absent in ordinary runtime instances. */
   testOnlyStreamingTrace?: StreamingTrace;
@@ -142,6 +144,8 @@ export interface QueueTurnRequest {
   content: string;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];
+  /** Private raster derivatives owned only until exact provider cleanup. */
+  generatedAttachmentPaths?: readonly string[];
   /** Server-derived only. Renderer commands never provide extracted document text. */
   documentContexts?: readonly DocumentAttachmentContext[];
   context?: TurnRequestContext;
@@ -185,6 +189,7 @@ export interface ActiveTurn {
   conversation: Conversation;
   providerInput: ProviderRunInput;
   attachmentIds: readonly string[];
+  generatedAttachmentPaths: readonly string[];
   checkpointId: string | null;
   rendererOwnerId: string | null;
   structuredContext: unknown;

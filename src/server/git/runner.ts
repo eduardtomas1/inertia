@@ -14,6 +14,7 @@ import { gitProcessEnvironment } from "./environment";
 import { GitError } from "./types";
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
+const PREPARED_ABORT_CLEANUP_MS = 500;
 
 export interface GitProcessResult {
   stdout: Buffer;
@@ -367,6 +368,8 @@ function runPreparedGitRefTransaction(
     let callbackError: unknown;
     let termination: Promise<void> | null = null;
     let finishing = false;
+    let abortRequested = false;
+    let abortCleanupTimer: NodeJS.Timeout | undefined;
     const callbackAbort = new AbortController();
     const preparedContext: PreparedGitRefUpdateContext = {
       signal: callbackAbort.signal,
@@ -395,6 +398,7 @@ function runPreparedGitRefTransaction(
       if (settled || finishing) return;
       finishing = true;
       clearTimeout(timer);
+      if (abortCleanupTimer) clearTimeout(abortCleanupTimer);
       callbackAbort.abort();
       settled = true;
       if (error) reject(error);
@@ -417,10 +421,35 @@ function runPreparedGitRefTransaction(
         )),
       );
     };
-    const timer = setTimeout(() => terminate(new GitError(
+    const timeoutError = (): GitError => new GitError(
       "timeout",
       "Git took too long to complete the operation.",
-    )), timeoutMs);
+    );
+    const requestAbort = (): void => {
+      if (abortRequested) return;
+      abortRequested = true;
+      callbackAbort.abort();
+      child.stdin.end("abort\n");
+      abortCleanupTimer = setTimeout(() => terminate(
+        callbackError instanceof GitError
+          ? callbackError
+          : new GitError(
+              "operation-failed",
+              "Git did not acknowledge the aborted reference transaction.",
+            ),
+      ), PREPARED_ABORT_CLEANUP_MS);
+      abortCleanupTimer.unref();
+    };
+    const timer = setTimeout(() => {
+      callbackAbort.abort();
+      if (abortRequested) {
+        // The reviewed mutation deadline is already final. Give only Git's
+        // already-requested abort handshake a bounded cleanup window so a
+        // forced termination does not strand its native reference locks.
+        return;
+      }
+      terminate(timeoutError());
+    }, timeoutMs);
     timer.unref();
     child.stdin.on("error", () => undefined);
     child.stdout.on("data", (chunk: Buffer) => {
@@ -440,15 +469,20 @@ function runPreparedGitRefTransaction(
           .then(() => onPrepared(preparedContext))
           .then(
             () => {
+              try {
+                preparedContext.assertActive();
+              } catch (error) {
+                callbackError = error;
+                requestAbort();
+                return;
+              }
               callbackAbort.abort();
-              child.stdin.end(options.completion === "abort"
-                ? "abort\n"
-                : "commit\n");
+              if (options.completion === "abort") requestAbort();
+              else child.stdin.end("commit\n");
             },
             (error: unknown) => {
               callbackError = error;
-              callbackAbort.abort();
-              child.stdin.end("abort\n");
+              requestAbort();
             },
           );
       }
@@ -515,7 +549,10 @@ export function withPreparedGitRefUpdate(
   newOid: string,
   expectedOid: string,
   options: Pick<RunGitOptions, "deadlineAt" | "failureMessage"> & {
-    testHooks?: { afterCommitAcknowledged?: () => void | Promise<void> };
+    testHooks?: {
+      afterCommitAcknowledged?: () => void | Promise<void>;
+      afterFailedCallbackAbortAcknowledged?: () => void | Promise<void>;
+    };
   },
   onPrepared: (context: PreparedGitRefUpdateContext) => void | Promise<void>,
 ): Promise<void> {

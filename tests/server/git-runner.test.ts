@@ -212,6 +212,111 @@ setInterval(() => {}, 1000);
     }
   });
 
+  it("cleans up an expired prepared callback through Git's abort handshake", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-expired-abort-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "update-ref", `
+let input = "";
+let prepared = false;
+process.stdin.on("data", (chunk) => {
+  input += chunk.toString("utf8");
+  if (!prepared && input.includes("prepare\\n")) {
+    prepared = true;
+    process.stdout.write("start: ok\\nprepare: ok\\n");
+  }
+  if (prepared && input.includes("abort\\n")) {
+    setTimeout(() => {
+      process.stdout.write("abort: ok\\n", () => process.exit(0));
+    }, 40);
+  }
+});
+setInterval(() => {}, 1000);
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    const deadlineAt = Date.now() + 500;
+    let abortAcknowledged = false;
+    try {
+      await expect(withPreparedGitRefUpdate(
+        directory,
+        "refs/heads/main",
+        "1".repeat(40),
+        "0".repeat(40),
+        {
+          deadlineAt,
+          failureMessage: "Git ref update failed.",
+          testHooks: {
+            afterFailedCallbackAbortAcknowledged: () => {
+              abortAcknowledged = true;
+            },
+          },
+        },
+        () => {
+          while (Date.now() <= deadlineAt + 5) {
+            // Cross the deadline without yielding to its timer.
+          }
+        },
+      )).rejects.toMatchObject({ code: "timeout" });
+      expect(abortAcknowledged).toBe(true);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("allows only cleanup time for an intentional prepared reservation abort", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-clean-abort-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "update-ref", `
+let input = "";
+let prepared = false;
+process.stdin.on("data", (chunk) => {
+  input += chunk.toString("utf8");
+  if (!prepared && input.includes("prepare\\n")) {
+    prepared = true;
+    process.stdout.write("start: ok\\nprepare: ok\\n");
+  }
+  if (prepared && input.includes("abort\\n")) {
+    setTimeout(() => {
+      process.stdout.write("abort: ok\\n", () => process.exit(0));
+    }, 40);
+  }
+});
+setInterval(() => {}, 1000);
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    const deadlineAt = Date.now() + 500;
+    let abortAcknowledged = false;
+    try {
+      await expect(withPreparedGitRefReservation(
+        directory,
+        "refs/heads/main",
+        "1".repeat(40),
+        {
+          deadlineAt,
+          failureMessage: "Git reservation failed.",
+          testHooks: {
+            afterAbortAcknowledged: () => {
+              abortAcknowledged = true;
+            },
+          },
+        },
+        () => {
+          while (Date.now() < deadlineAt - 10) {
+            // Leave only enough operation time to request the clean abort.
+          }
+        },
+      )).resolves.toBeUndefined();
+      expect(abortAcknowledged).toBe(true);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
   it.each([
     ["commit only", "commit: ok\\n"],
     ["commit and abort", "commit: ok\\nabort: ok\\n"],

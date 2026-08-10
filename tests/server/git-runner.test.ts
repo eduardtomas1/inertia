@@ -288,6 +288,10 @@ setInterval(() => {}, 1000);
 `);
     const previousPath = process.env.PATH;
     process.env.PATH = directory;
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout"],
+    });
+    vi.setSystemTime(10_000);
     const deadlineAt = Date.now() + 500;
     let abortAcknowledged = false;
     try {
@@ -305,13 +309,19 @@ setInterval(() => {}, 1000);
           },
         },
         () => {
-          while (Date.now() < deadlineAt - 100) {
-            // Leave only enough operation time to request the clean abort.
-          }
+          vi.advanceTimersByTime(deadlineAt - Date.now() - 1);
+          // The synchronous completion requests its cleanup-only abort first;
+          // then only the original operation timer expires. The child owns
+          // its real delayed ack while the cleanup timer retains 499ms.
+          queueMicrotask(() => {
+            vi.advanceTimersByTime(1);
+          });
         },
       )).resolves.toBeUndefined();
       expect(abortAcknowledged).toBe(true);
+      expect(Date.now()).toBe(deadlineAt);
     } finally {
+      vi.useRealTimers();
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
     }

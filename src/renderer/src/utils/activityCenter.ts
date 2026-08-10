@@ -15,7 +15,7 @@ export interface ActivityRunActions {
   failureDetails: boolean;
 }
 
-export type ActivityRunSectionId = "attention" | "active" | "recent";
+export type ActivityRunSectionId = "recent" | "yesterday" | "earlier";
 
 export interface ActivityRunSection {
   id: ActivityRunSectionId;
@@ -42,8 +42,12 @@ export interface ActivityRunPresentation {
 
 const VISIBLE_AGENT_OPERATIONS = 3;
 
-function compareStartedAtDescending(a: WorkspaceRun, b: WorkspaceRun): number {
-  return b.startedAt.localeCompare(a.startedAt);
+function runActivityAt(run: WorkspaceRun): string {
+  return run.finishedAt ?? run.startedAt;
+}
+
+function compareActivityAtDescending(a: WorkspaceRun, b: WorkspaceRun): number {
+  return runActivityAt(b).localeCompare(runActivityAt(a));
 }
 
 function compareStartedAtAscending(a: WorkspaceRun, b: WorkspaceRun): number {
@@ -54,24 +58,63 @@ export function activityRunNeedsAttention(run: WorkspaceRun, _now = Date.now()):
   return workspaceRunAttentionView(run).needsAttention;
 }
 
-function sectionsForRuns(runs: readonly WorkspaceRun[]): ActivityRunSection[] {
+function calendarDayOffset(value: string, now: number): number {
+  const date = new Date(value);
+  const current = new Date(now);
+  if (!Number.isFinite(date.getTime()) || !Number.isFinite(current.getTime())) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const dateDay = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  ).getTime();
+  const currentDay = new Date(
+    current.getFullYear(),
+    current.getMonth(),
+    current.getDate(),
+  ).getTime();
+  return Math.round((currentDay - dateDay) / 86_400_000);
+}
+
+function sectionsForRuns(
+  runs: readonly WorkspaceRun[],
+  now: number,
+): ActivityRunSection[] {
   const attention = runs
     .filter((run) => workspaceRunAttentionView(run).bucket === "attention")
-    .sort((a, b) => {
-      const waitingFirst = Number(b.status === "waiting") - Number(a.status === "waiting");
-      return waitingFirst || compareStartedAtDescending(a, b);
-    });
+    .sort(compareActivityAtDescending);
   const active = runs
     .filter((run) => workspaceRunAttentionView(run).bucket === "active")
-    .sort(compareStartedAtDescending);
+    .sort(compareActivityAtDescending);
   const recent = runs
     .filter((run) => workspaceRunAttentionView(run).bucket === "recent")
-    .sort(compareStartedAtDescending);
+    .sort(compareActivityAtDescending)
+    .slice(0, 12);
+
+  const visible = new Map<string, WorkspaceRun>();
+  for (const run of [...attention, ...active, ...recent]) visible.set(run.id, run);
+  const chronological = [...visible.values()].sort(compareActivityAtDescending);
 
   const sections: ActivityRunSection[] = [
-    { id: "attention", label: "Needs attention", runs: attention },
-    { id: "active", label: "In progress", runs: active },
-    { id: "recent", label: "Recent", runs: recent.slice(0, 12) },
+    {
+      id: "recent",
+      label: "Recent",
+      runs: chronological.filter((run) =>
+        calendarDayOffset(runActivityAt(run), now) <= 0),
+    },
+    {
+      id: "yesterday",
+      label: "Yesterday",
+      runs: chronological.filter((run) =>
+        calendarDayOffset(runActivityAt(run), now) === 1),
+    },
+    {
+      id: "earlier",
+      label: "Earlier",
+      runs: chronological.filter((run) =>
+        calendarDayOffset(runActivityAt(run), now) > 1),
+    },
   ];
   return sections.filter(({ runs: sectionRuns }) => sectionRuns.length > 0);
 }
@@ -123,11 +166,11 @@ function operationGroup(operations: WorkspaceRun[]): ActivityRunOperationGroup {
  */
 export function activityRunPresentation(
   runs: readonly WorkspaceRun[],
-  _now = Date.now(),
+  now = Date.now(),
 ): ActivityRunPresentation {
   const agentRuns = runs
     .filter(({ kind }) => kind === "agent")
-    .sort(compareStartedAtDescending);
+    .sort(compareActivityAtDescending);
   const groupedIds = new Set<string>();
   const grouped = new Map<string, WorkspaceRun[]>();
 
@@ -142,7 +185,7 @@ export function activityRunPresentation(
 
   const primaryRuns = runs.filter(({ id }) => !groupedIds.has(id));
   return {
-    sections: sectionsForRuns(primaryRuns),
+    sections: sectionsForRuns(primaryRuns, now),
     operationsByAgentRun: new Map(
       [...grouped].map(([runId, operations]) => [
         runId,

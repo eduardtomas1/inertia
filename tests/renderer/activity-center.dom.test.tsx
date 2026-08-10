@@ -71,6 +71,37 @@ function run(overrides: Partial<WorkspaceRun>): WorkspaceRun {
 }
 
 describe("ActivityCenter agent operation disclosure", () => {
+  it("uses the conversation provider icon and compact project and branch metadata", () => {
+    render(
+      <ActivityCenter
+        open
+        now={Date.parse("2026-07-28T08:00:10.000Z")}
+        runs={[run({})]}
+        projects={[project]}
+        conversations={[conversation]}
+        providerIdentityLabels={{ codex: "OpenAI" }}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+        onOpenLocation={vi.fn()}
+        onOpenTerminal={vi.fn()}
+        onOpenPreview={vi.fn()}
+        onStop={vi.fn()}
+        onRerun={vi.fn()}
+        onMarkSeen={vi.fn()}
+        onAcknowledge={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByText("Quota and activity").closest("article");
+    expect(row).not.toBeNull();
+    expect(row?.querySelector('[data-provider-id="codex"]')).not.toBeNull();
+    expect(row).toHaveTextContent("OpenAI");
+    expect(row).toHaveTextContent("Inertia");
+    expect(row).toHaveTextContent("main");
+    expect(row).toHaveTextContent("Running · 10s");
+  });
+
   it("owns its elapsed clock only while the activity center is visible", async () => {
     vi.useFakeTimers();
     vi.setSystemTime("2026-07-28T08:00:10.000Z");

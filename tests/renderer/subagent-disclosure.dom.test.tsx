@@ -1,4 +1,9 @@
-import { render, screen, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -158,23 +163,17 @@ describe("delegated-agent timeline disclosure", () => {
     );
 
     const disclosure = screen.getByText(
-      "4 delegated tasks · 4 active",
+      "4 delegated tasks · 4 working",
     ).closest("details");
     expect(disclosure).toHaveAttribute("open");
-    expect(screen.getByText("Claude · Agent SDK · Running · 10s")).toHaveAttribute(
-      "title",
-      "Exact provider state: running",
-    );
-    expect(screen.getByText("Claude · Agent SDK · Waiting (paused) · 10s")).toHaveAttribute(
-      "title",
-      "Exact provider state: paused",
-    );
-    expect(screen.getByText("Codex · App Server · Queued (pendingInit) · 10s")).toHaveAttribute(
-      "title",
-      "Exact provider state: pendingInit",
-    );
-    expect(screen.getByText("Claude · Agent SDK · Unknown (futureState) · 10s"))
-      .toHaveAttribute("title", "Exact provider state: futureState");
+    expect(screen.getByTitle("Exact provider state: running"))
+      .toHaveTextContent("Claude · Agent SDK · Running · 10s");
+    expect(screen.getByTitle("Exact provider state: paused"))
+      .toHaveTextContent("Claude · Agent SDK · Waiting · 10s");
+    expect(screen.getByTitle("Exact provider state: pendingInit"))
+      .toHaveTextContent("Codex · App Server · Queued · 10s");
+    expect(screen.getByTitle("Exact provider state: futureState"))
+      .toHaveTextContent("Claude · Agent SDK · Unknown (futureState) · 10s");
     expect(screen.getByText("Child of Evidence scout")).toBeInTheDocument();
     expect(screen.queryByRole("button", {
       name: "Stop Build verifier",
@@ -237,16 +236,193 @@ describe("delegated-agent timeline disclosure", () => {
       />,
     );
 
-    const summary = screen.getByText("1 delegated task").closest("summary");
+    const summary = screen.getByText(
+      "1 delegated task · 1 settled",
+    ).closest("summary");
     const disclosure = summary?.closest("details");
     expect(disclosure).not.toHaveAttribute("open");
     summary?.focus();
     await user.keyboard("{Enter}");
     expect(disclosure).toHaveAttribute("open");
-    expect(screen.getByText("Codex · App Server · Completed · 7s"))
-      .toBeInTheDocument();
+    expect(screen.getByTitle("Exact provider state: completed"))
+      .toHaveTextContent("Codex · App Server · Completed · 7s");
     expect(screen.getByText("All checks passed.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Stop /u }))
       .not.toBeInTheDocument();
+  });
+
+  it("keeps the roster open when live work settles into a reviewable failure", () => {
+    const active = trace({ providerName: "Lifecycle audit" });
+    const view = render(
+      <SubagentDisclosure
+        subagents={[active]}
+        turns={[turn()]}
+        now={NOW}
+      />,
+    );
+    const disclosure = screen.getByText(
+      "1 delegated task · 1 working",
+    ).closest("details");
+    expect(disclosure).toHaveAttribute("open");
+
+    view.rerender(
+      <SubagentDisclosure
+        subagents={[trace({
+          providerName: "Lifecycle audit",
+          providerStatus: "failed",
+          status: "failed",
+          isLive: false,
+          progress: null,
+          result: "The provider rejected the child task.",
+          sequence: 2,
+        })]}
+        turns={[turn({ status: "failed" })]}
+        now={NOW}
+      />,
+    );
+
+    expect(disclosure).toHaveAttribute("open");
+    expect(disclosure).toHaveAttribute("data-needs-review", "true");
+    expect(screen.getByText(
+      "1 delegated task · 1 needs review",
+    )).toBeInTheDocument();
+    expect(screen.getByText("The provider rejected the child task."))
+      .toBeInTheDocument();
+  });
+
+  it("bounds a large live roster until the user explicitly asks for all rows", async () => {
+    const user = userEvent.setup();
+    const onBeforeToggle = vi.fn();
+    const onAfterToggle = vi.fn();
+    const traces = Array.from({ length: 8 }, (_, index) => trace({
+      id: `trace-${index}`,
+      providerTaskId: `task-${index}`,
+      providerAgentId: `agent-${index}`,
+      providerName: `Worker ${index}`,
+      sequence: index + 1,
+    }));
+    render(
+      <SubagentDisclosure
+        subagents={traces}
+        turns={[turn()]}
+        now={NOW}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />,
+    );
+
+    const tree = screen.getByRole("list", { name: "Delegated agent tree" });
+    expect(tree.children).toHaveLength(6);
+    expect(screen.getByText("Worker 7")).toBeInTheDocument();
+    const toggle = screen.getByRole("button", {
+      name: "Show 2 more delegated tasks",
+    });
+    await user.click(toggle);
+    expect(onBeforeToggle).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onAfterToggle).toHaveBeenCalledTimes(1));
+    expect(tree.children).toHaveLength(8);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("reserves compact roster slots for separate urgent branches", () => {
+    const deepBranch = Array.from({ length: 11 }, (_, index) => trace({
+      id: `deep-${index}`,
+      providerTaskId: `deep-task-${index}`,
+      providerAgentId: `deep-agent-${index}`,
+      parentTraceId: index === 0 ? null : `deep-${index - 1}`,
+      providerName: `Deep worker ${index}`,
+      providerStatus: index % 2 === 0 ? "running" : "completed",
+      status: index % 2 === 0 ? "running" : "completed",
+      isLive: index % 2 === 0,
+      sequence: index + 2,
+    }));
+    const failedSibling = trace({
+      id: "failed-sibling",
+      providerTaskId: "failed-task",
+      providerAgentId: "failed-agent",
+      providerName: "Failed sibling",
+      providerStatus: "failed",
+      status: "failed",
+      isLive: false,
+      sequence: 1,
+    });
+    render(
+      <SubagentDisclosure
+        subagents={[failedSibling, ...deepBranch]}
+        turns={[turn()]}
+        now={NOW}
+      />,
+    );
+
+    const tree = screen.getByRole("list", { name: "Delegated agent tree" });
+    expect(tree.children).toHaveLength(6);
+    expect(screen.getByText("Failed sibling")).toBeInTheDocument();
+    expect(screen.getByText("Deep worker 10")).toBeInTheDocument();
+  });
+
+  it("ticks live elapsed text without requiring a parent state update", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:10.000Z"));
+    try {
+      render(
+        <SubagentDisclosure
+          subagents={[trace()]}
+          turns={[turn()]}
+        />,
+      );
+      expect(screen.getByText("10s")).toBeInTheDocument();
+      vi.advanceTimersByTime(1_000);
+      expect(screen.getByText("11s")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shares one elapsed clock across live delegated rows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:10.000Z"));
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    try {
+      const view = render(
+        <SubagentDisclosure
+          subagents={[
+            trace(),
+            trace({
+              id: "trace-second",
+              providerTaskId: "task-second",
+              providerAgentId: "agent-second",
+              providerName: "Second worker",
+            }),
+          ]}
+          turns={[turn()]}
+        />,
+      );
+      expect(screen.getAllByText("10s")).toHaveLength(2);
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1_000);
+      expect(screen.getAllByText("11s")).toHaveLength(2);
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      setIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps disclosure relationships instance-scoped across split panes", () => {
+    const item = trace({ status: "completed", isLive: false });
+    const { container } = render(
+      <>
+        <SubagentDisclosure subagents={[item]} turns={[turn()]} now={NOW} />
+        <SubagentDisclosure subagents={[item]} turns={[turn()]} now={NOW} />
+      </>,
+    );
+    const ids = [...container.querySelectorAll<HTMLElement>("[id]")]
+      .map(({ id }) => id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const controls = [...container.querySelectorAll<HTMLElement>(
+      "[aria-controls]",
+    )].map((control) => control.getAttribute("aria-controls"));
+    expect(new Set(controls).size).toBe(controls.length);
   });
 });

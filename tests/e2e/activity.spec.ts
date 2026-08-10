@@ -389,9 +389,12 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     await resizeWindow(1440, 920);
 
     const disclosure = page.locator(".subagent-disclosure");
-    await expect(disclosure.getByText("3 delegated tasks · 1 active", {
+    await expect(disclosure.getByText(
+      "3 delegated tasks · 1 working · 1 needs review · 1 settled",
+      {
       exact: true,
-    })).toBeVisible();
+      },
+    )).toBeVisible();
     await expect(disclosure).toHaveAttribute("open");
     const delegatedWork = disclosure.getByRole("list", {
       name: "Delegated agent tree",

@@ -24,17 +24,20 @@ import type {
   AgentWorkflowState,
   SubagentTrace,
 } from "@shared/contracts";
+import { compactSubagentDisclosureRows } from "../utils/subagentCompactRows";
 import {
-  isLiveSubagentTrace,
-  subagentElapsedMs,
   subagentDisclosureRows,
+  subagentDisclosureStats,
+  subagentHasNestedParent,
   subagentRelationshipLabel,
   subagentRouteLabel,
+  subagentStatsLabel,
   subagentStatusLabel,
   subagentTraceLabel,
   subagentTraceSummary,
 } from "../utils/subagentDisclosure";
 import { formatElapsed } from "../utils/responseTimeline";
+import { SubagentElapsed } from "./SubagentElapsed";
 import { SubagentTraceDetails } from "./SubagentTraceDetails";
 import { MAX_SELECTED_SKILLS } from "./composer/config";
 
@@ -426,7 +429,7 @@ function SubagentsSection({
   | "canStopSubagent"
   | "onStopSubagent"
 > & {
-  now: number;
+  now?: number;
   headingId: string;
   listId: string;
 }): React.JSX.Element {
@@ -438,7 +441,12 @@ function SubagentsSection({
   const [stoppingTraceIds, setStoppingTraceIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const compactRows = useMemo(() => compactSubagentRows(rows), [rows]);
+  const compactRows = useMemo(
+    () => compactSubagentDisclosureRows(rows, MAX_COMPACT_SUBAGENTS),
+    [rows],
+  );
+  const stats = subagentDisclosureStats(subagents);
+  const statsLabel = subagentStatsLabel(stats);
   const visibleRows = showAll
     ? rows.map((row) => ({ ...row, omittedAncestors: 0 }))
     : compactRows;
@@ -450,7 +458,11 @@ function SubagentsSection({
           <Network size={14} aria-hidden="true" />
           <h3 id={headingId}>Delegated work</h3>
         </div>
-        <span>{subagents.length}</span>
+        <span aria-label={`${subagents.length} delegated tasks${statsLabel
+          ? `, ${statsLabel}`
+          : ""}`}>
+          {statsLabel || subagents.length}
+        </span>
       </header>
       {rows.length === 0 ? (
         <div className="goal-panel-empty-row">
@@ -469,7 +481,6 @@ function SubagentsSection({
             omittedAncestors,
           }) => {
             const detail = subagentTraceSummary(trace);
-            const duration = subagentElapsedMs(trace, now);
             const mayFollowUp = Boolean(
               onFollowUpSubagent && canFollowUpSubagent?.(trace),
             );
@@ -489,11 +500,12 @@ function SubagentsSection({
             const status = subagentStatusLabel(trace);
             const expanded = expandedTraceIds.has(trace.id);
             const stopping = stoppingTraceIds.has(trace.id);
-            const detailId = `goal-subagent-${trace.id}-details`;
+            const detailId = `${listId}-${trace.id}-details`;
             return (
               <li
                 key={trace.id}
                 data-status={trace.status}
+                data-depth={depth}
                 aria-label={`${label}, ${route}, ${status}`}
                 style={{ "--goal-subagent-depth": depth } as React.CSSProperties}
               >
@@ -509,10 +521,10 @@ function SubagentsSection({
                         ? `Exact provider state: ${trace.providerStatus}`
                         : undefined}
                     >
-                      {route} · {formatElapsed(duration)}
+                      {route} · <SubagentElapsed trace={trace} now={now} />
                     </small>
                   </span>
-                  {trace.parentTraceId && (
+                  {subagentHasNestedParent(trace) && (
                     <small>{subagentRelationshipLabel(trace, subagents)}</small>
                   )}
                   {omittedAncestors > 0 && (
@@ -604,10 +616,10 @@ function SubagentsSection({
           onClick={() => setShowAll((current) => !current)}
         >
           {showAll
-            ? "Show recent delegated work"
-            : `Show ${hiddenCount} earlier delegated ${
-                hiddenCount === 1 ? "task" : "tasks"
-              }`}
+            ? "Show compact delegated work"
+            : `Show ${hiddenCount} more delegated ${
+              hiddenCount === 1 ? "task" : "tasks"
+            }`}
         </button>
       )}
     </section>
@@ -615,121 +627,6 @@ function SubagentsSection({
 }
 
 const MAX_COMPACT_SUBAGENTS = 6;
-const RECENT_COMPACT_SUBAGENTS = 6;
-
-type SubagentDisclosureRow = ReturnType<
-  typeof subagentDisclosureRows
->[number];
-
-interface CompactSubagentDisclosureRow extends SubagentDisclosureRow {
-  omittedAncestors: number;
-}
-
-function compactSubagentRows(
-  rows: readonly SubagentDisclosureRow[],
-): CompactSubagentDisclosureRow[] {
-  if (rows.length <= MAX_COMPACT_SUBAGENTS) {
-    return rows.map((row) => ({ ...row, omittedAncestors: 0 }));
-  }
-  const byId = new Map(rows.map((row) => [row.trace.id, row]));
-  const included = new Set<string>();
-  const parentRow = (
-    row: SubagentDisclosureRow,
-  ): SubagentDisclosureRow | undefined => row.trace.parentTraceId
-    ? byId.get(row.trace.parentTraceId)
-    : undefined;
-
-  const includeWithAncestors = (candidate: SubagentDisclosureRow): void => {
-    const chain: SubagentDisclosureRow[] = [];
-    const seen = new Set<string>();
-    let current: SubagentDisclosureRow | undefined = candidate;
-    while (current && !seen.has(current.trace.id)) {
-      seen.add(current.trace.id);
-      chain.unshift(current);
-      current = parentRow(current);
-    }
-    const missing = chain.filter(({ trace }) => !included.has(trace.id));
-    if (included.size + missing.length > MAX_COMPACT_SUBAGENTS) return;
-    for (const { trace } of missing) included.add(trace.id);
-  };
-
-  const newestFirst = rows
-    .map((row, index) => ({ row, index }))
-    .sort((left, right) =>
-      right.row.trace.sequence - left.row.trace.sequence
-      || right.index - left.index)
-    .map(({ row }) => row);
-  const important = newestFirst.filter(({ trace }) =>
-    isLiveSubagentTrace(trace)
-    || trace.status === "failed"
-    || trace.status === "lost");
-  const importantIds = new Set(important.map(({ trace }) => trace.id));
-  const importantParents = new Set(important.flatMap(({ trace }) =>
-    trace.parentTraceId && importantIds.has(trace.parentTraceId)
-      ? [trace.parentTraceId]
-      : []));
-  const criticalLeaves = important.filter(({ trace }) =>
-    !importantParents.has(trace.id));
-  const reserved = (criticalLeaves.length > 0 ? criticalLeaves : important)
-    .slice(0, MAX_COMPACT_SUBAGENTS);
-
-  // Reserve the newest critical branch endpoints before adding context. This
-  // prevents one deep live branch from hiding every competing live branch.
-  for (const { trace } of reserved) included.add(trace.id);
-  const frontiers = reserved.map((row) => parentRow(row));
-  const frontierSeen = reserved.map(() => new Set<string>());
-  while (included.size < MAX_COMPACT_SUBAGENTS) {
-    let advanced = false;
-    for (let index = 0; index < frontiers.length; index += 1) {
-      let frontier = frontiers[index];
-      while (frontier && included.has(frontier.trace.id)) {
-        if (frontierSeen[index]?.has(frontier.trace.id)) {
-          frontier = undefined;
-          break;
-        }
-        frontierSeen[index]?.add(frontier.trace.id);
-        frontier = parentRow(frontier);
-      }
-      if (frontier && frontierSeen[index]?.has(frontier.trace.id)) {
-        frontier = undefined;
-      }
-      if (frontier) frontierSeen[index]?.add(frontier.trace.id);
-      frontiers[index] = frontier ? parentRow(frontier) : undefined;
-      if (!frontier) continue;
-      included.add(frontier.trace.id);
-      advanced = true;
-      if (included.size >= MAX_COMPACT_SUBAGENTS) break;
-    }
-    if (!advanced) break;
-  }
-
-  for (const row of newestFirst.slice(0, RECENT_COMPACT_SUBAGENTS)) {
-    includeWithAncestors(row);
-  }
-  for (const row of newestFirst) includeWithAncestors(row);
-
-  const omittedAncestorCount = (row: SubagentDisclosureRow): number => {
-    let count = 0;
-    let current = parentRow(row);
-    const seen = new Set<string>();
-    while (
-      current
-      && !included.has(current.trace.id)
-      && !seen.has(current.trace.id)
-    ) {
-      seen.add(current.trace.id);
-      count += 1;
-      current = parentRow(current);
-    }
-    return count;
-  };
-  return rows
-    .filter(({ trace }) => included.has(trace.id))
-    .map((row) => ({
-      ...row,
-      omittedAncestors: omittedAncestorCount(row),
-    }));
-}
 
 export function GoalPanel({
   workflow,
@@ -737,7 +634,7 @@ export function GoalPanel({
   subagents,
   turns,
   selectedSkillIds = [],
-  now = Date.now(),
+  now,
   busy = false,
   error = null,
   onRetry,

@@ -10,8 +10,25 @@ export interface SubagentDisclosureRow {
   canStop: boolean;
 }
 
+export interface SubagentDisclosureStats {
+  total: number;
+  active: number;
+  completed: number;
+  stopped: number;
+  needsReview: number;
+}
+
 export function isLiveSubagentTrace(trace: SubagentTrace): boolean {
   return trace.isLive;
+}
+
+export function subagentNeedsReview(trace: SubagentTrace): boolean {
+  return !trace.isLive && (
+    trace.status === "failed"
+    || trace.status === "interrupted"
+    || trace.status === "lost"
+    || trace.status === "unknown"
+  );
 }
 
 export function canStopSubagentTrace(
@@ -97,10 +114,38 @@ const LIVE_PROVIDER_STATUSES = new Set([
   "queued",
   "spawned",
   "running",
-  "in_progress",
+  "inprogress",
   "paused",
   "waiting",
+  "started",
+  "interacted",
+  "asynclaunched",
 ]);
+
+const EQUIVALENT_PROVIDER_STATUSES: Readonly<
+  Record<SubagentTrace["status"], ReadonlySet<string>>
+> = {
+  queued: new Set(["pending", "pendinginit", "queued"]),
+  spawned: new Set(["spawned", "starting"]),
+  running: new Set([
+    "running",
+    "inprogress",
+    "started",
+    "interacted",
+    "asynclaunched",
+  ]),
+  waiting: new Set(["paused", "waiting"]),
+  completed: new Set(["completed", "success", "succeeded"]),
+  failed: new Set(["error", "failed"]),
+  cancelled: new Set(["canceled", "cancelled", "killed", "shutdown", "stopped"]),
+  interrupted: new Set(["interrupted"]),
+  lost: new Set(["lost"]),
+  unknown: new Set(),
+};
+
+function normalizedProviderStatus(status: string): string {
+  return status.toLowerCase().replaceAll(/[-_\s]/gu, "");
+}
 
 export function subagentStatusLabel(trace: SubagentTrace): string {
   const normalized = trace.status === "queued"
@@ -123,11 +168,17 @@ export function subagentStatusLabel(trace: SubagentTrace): string {
                     ? "Lost"
                     : "Unknown";
   const providerStatus = trace.providerStatus?.trim();
+  const providerStatusKey = providerStatus
+    ? normalizedProviderStatus(providerStatus)
+    : null;
   const contradictsTerminalState = !trace.isLive
-    && providerStatus
-    && LIVE_PROVIDER_STATUSES.has(providerStatus.toLowerCase());
+    && providerStatusKey
+    && LIVE_PROVIDER_STATUSES.has(providerStatusKey);
+  const repeatsNormalizedState = providerStatusKey
+    ? EQUIVALENT_PROVIDER_STATUSES[trace.status].has(providerStatusKey)
+    : false;
   return providerStatus
-    && providerStatus !== trace.status
+    && !repeatsNormalizedState
     && !contradictsTerminalState
     ? `${normalized} (${trace.providerStatus})`
     : normalized;
@@ -154,9 +205,23 @@ export function subagentRelationshipLabel(
   const parent = trace.parentTraceId
     ? traces.find(({ id }) => id === trace.parentTraceId)
     : undefined;
-  return parent
-    ? `Child of ${subagentTraceLabel(parent)}`
-    : "Delegated by this parent turn";
+  if (parent) return `Child of ${subagentTraceLabel(parent)}`;
+  if (
+    trace.parentTraceId
+    || trace.parentProviderAgentId
+    || trace.parentProviderToolUseId
+  ) {
+    return "Nested delegated task · parent unavailable";
+  }
+  return "Delegated by parent agent";
+}
+
+export function subagentHasNestedParent(trace: SubagentTrace): boolean {
+  return Boolean(
+    trace.parentTraceId
+    || trace.parentProviderAgentId
+    || trace.parentProviderToolUseId,
+  );
 }
 
 export function subagentElapsedMs(
@@ -205,12 +270,58 @@ export function subagentDisclosureRows(
   return rows;
 }
 
+export function urgentSubagentBranchEndpoints(
+  rows: readonly SubagentDisclosureRow[],
+): SubagentDisclosureRow[] {
+  const byId = new Map(rows.map((row) => [row.trace.id, row]));
+  const urgent = rows.filter(({ trace }) =>
+    isLiveSubagentTrace(trace) || subagentNeedsReview(trace));
+  const urgentIds = new Set(urgent.map(({ trace }) => trace.id));
+  const urgentAncestors = new Set<string>();
+  for (const { trace } of urgent) {
+    let parentId = trace.parentTraceId;
+    const visited = new Set<string>();
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      if (urgentIds.has(parentId)) urgentAncestors.add(parentId);
+      parentId = byId.get(parentId)?.trace.parentTraceId ?? null;
+    }
+  }
+  return urgent.filter(({ trace }) => !urgentAncestors.has(trace.id));
+}
+
+export function subagentDisclosureStats(
+  traces: readonly SubagentTrace[],
+): SubagentDisclosureStats {
+  let active = 0;
+  let completed = 0;
+  let stopped = 0;
+  let needsReview = 0;
+  for (const trace of traces) {
+    if (isLiveSubagentTrace(trace)) active += 1;
+    else if (trace.status === "completed") completed += 1;
+    else if (trace.status === "cancelled") stopped += 1;
+    else if (subagentNeedsReview(trace)) needsReview += 1;
+  }
+  return { total: traces.length, active, completed, stopped, needsReview };
+}
+
+export function subagentStatsLabel(stats: SubagentDisclosureStats): string {
+  const labels: string[] = [];
+  if (stats.active > 0) labels.push(`${stats.active} working`);
+  if (stats.needsReview > 0) labels.push(`${stats.needsReview} needs review`);
+  const settled = stats.completed + stats.stopped;
+  if (settled > 0) labels.push(`${settled} settled`);
+  return labels.join(" · ");
+}
+
 export function subagentDisclosureSummary(
   traces: readonly SubagentTrace[],
 ): string {
-  const live = traces.filter(isLiveSubagentTrace).length;
+  const stats = subagentDisclosureStats(traces);
   const noun = traces.length === 1 ? "delegated task" : "delegated tasks";
-  return live > 0
-    ? `${traces.length} ${noun} · ${live} active`
+  const state = subagentStatsLabel(stats);
+  return state
+    ? `${traces.length} ${noun} · ${state}`
     : `${traces.length} ${noun}`;
 }

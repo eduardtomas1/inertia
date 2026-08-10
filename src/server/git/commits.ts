@@ -11,9 +11,8 @@ import {
   access,
   lstat,
   open,
-  unlink,
 } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { NETWORK_TIMEOUT_MS } from "./constants";
@@ -24,6 +23,7 @@ import {
 import {
   runGit,
   runGitInspection,
+  withPreparedGitRefReservation,
   withPreparedGitRefUpdate,
 } from "./runner";
 import { getRepositoryStatus, hasHead } from "./status";
@@ -39,20 +39,22 @@ import {
   type GitCommitResult,
 } from "./types";
 import {
-  acquireIndexReservationSync,
+  assertPreparedReferenceLocksSync,
   commitLockIdentity,
   createPrivateIndexStagePath,
   installPrivateIndexStageSync,
-  isOwnedReservation,
-  parseCommitTransactionJournal,
+  publishCommitTransactionJournal,
+  removeOwnedCommitTransactionJournal,
   releaseOwnedIndexReservation,
   removeVerifiedStageSync,
   reservationBytes,
   sameCommitLockIdentity,
   type CommitLockIdentity,
+  type OwnedCommitTransactionJournal,
   type CommitTransactionJournal,
 } from "./commit-transaction";
 import { prepareReconciledIndex, readIndexSync } from "./commit-index";
+import { recoverCommitTransaction } from "./commit-recovery";
 
 const MAX_INDEX_BYTES = 256 * 1024 * 1024;
 const REFERENCE_LOCK_RELEASE_GRACE_MS = 500;
@@ -121,9 +123,10 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function waitForReferenceLocksToRelease(
+export async function waitForReferenceLocksToRelease(
   headLockPath: string,
   refLockPath: string,
+  beforeFinalObservation?: () => void | Promise<void>,
 ): Promise<boolean> {
   // Git for Windows can close the prepared update process just before its
   // reference-lock deletions become observable. This is a cleanup-only grace;
@@ -131,7 +134,10 @@ async function waitForReferenceLocksToRelease(
   const expiresAt = Date.now() + REFERENCE_LOCK_RELEASE_GRACE_MS;
   while (await pathExists(headLockPath) || await pathExists(refLockPath)) {
     const remaining = expiresAt - Date.now();
-    if (remaining <= 0) return false;
+    if (remaining <= 0) {
+      await beforeFinalObservation?.();
+      return !await pathExists(headLockPath) && !await pathExists(refLockPath);
+    }
     await delay(Math.min(REFERENCE_LOCK_POLL_MS, remaining));
   }
   return true;
@@ -226,8 +232,26 @@ async function optionalGitValue(
 
 async function ensureReviewedCommitPolicy(
   root: string,
-  options: { deadlineAt?: number } = {},
+  options: { deadlineAt?: number; gitVersionForTests?: string } = {},
 ): Promise<void> {
+  const version = options.gitVersionForTests ?? stripTerminalEol((
+    await runGitInspection(root, ["version"], {
+      deadlineAt: options.deadlineAt,
+      maxOutputBytes: 256,
+      failureMessage: "Unable to verify the installed Git version.",
+    })
+  ).stdout.toString("utf8"));
+  const versionMatch = /^git version (\d+)\.(\d+)(?:\.|$)/u.exec(version);
+  if (
+    !versionMatch
+    || Number(versionMatch[1]) < 2
+    || (Number(versionMatch[1]) === 2 && Number(versionMatch[2]) < 31)
+  ) {
+    throw new GitError(
+      "conflict",
+      "Reviewed commits require Git 2.31 or newer for atomic path and reference transactions.",
+    );
+  }
   let referenceFormat = "unsupported";
   try {
     referenceFormat = stripTerminalEol((await runGitInspection(root, [
@@ -250,6 +274,22 @@ async function ensureReviewedCommitPolicy(
     throw new GitError(
       "conflict",
       "Reviewed commits currently require Git's files reference format.",
+    );
+  }
+  const gitDirectory = stripTerminalEol((await runGitInspection(root, [
+    "rev-parse",
+    "--absolute-git-dir",
+  ], {
+    deadlineAt: options.deadlineAt,
+    maxOutputBytes: 4_096,
+    failureMessage: "Unable to locate the repository Git directory.",
+  })).stdout.toString("utf8"));
+  const headPath = join(gitDirectory, "HEAD");
+  const headInfo = await lstat(headPath).catch(() => null);
+  if (!headInfo?.isFile()) {
+    throw new GitError(
+      "conflict",
+      "Reviewed commits require a regular Git HEAD file; symlink reference mode is not supported.",
     );
   }
   for (const name of [
@@ -390,269 +430,6 @@ async function referenceOid(root: string, ref: string): Promise<string | null> {
   return value;
 }
 
-async function recoverCommitTransaction(
-  root: string,
-  options: {
-    ownedIndexLockIdentity?: CommitLockIdentity | null;
-    reservationWasNeverAcquired?: boolean;
-    beforeReservationAcquire?: () => void | Promise<void>;
-    afterStageValidation?: () => void | Promise<void>;
-    beforeStageRename?: () => void;
-    afterStageHash?: () => void;
-    beforeStageUnlink?: () => void | Promise<void>;
-    beforeReservationUnlink?: () => void;
-  } = {},
-): Promise<void> {
-  const indexPath = await commitIndexPath(root);
-  const lockPath = `${indexPath}.lock`;
-  const journalPath = `${indexPath}.inertia-commit-transaction.json`;
-  const journalBytes = await readRegularFile(journalPath);
-  if (journalBytes.length === 0) return;
-  if (journalBytes.length > 4_096) {
-    throw new GitError("conflict", "The reviewed commit recovery journal is invalid.");
-  }
-  const journal = parseCommitTransactionJournal(journalBytes, indexPath);
-  try {
-    await runGitInspection(root, ["check-ref-format", journal.headRef], {
-      maxOutputBytes: 1_024,
-      failureMessage: "Unable to verify the reviewed branch recovery reference.",
-    });
-  } catch {
-    throw new GitError("conflict", "The reviewed commit recovery journal is invalid.");
-  }
-  if (
-    journal.headPath !== await commitHeadPath(root)
-    || journal.refPath !== await commitRefPath(root, journal.headRef)
-  ) {
-    throw new GitError(
-      "conflict",
-      "The reviewed commit recovery journal does not belong to this repository.",
-    );
-  }
-  const current = await headState(root);
-  const currentHeadContent = await readOptionalRegularFile(journal.headPath);
-  if (
-    current.headRef !== journal.headRef
-    || currentHeadContent === null
-    || stripTerminalEol(currentHeadContent.toString("utf8"))
-      !== `ref: ${journal.headRef}`
-  ) {
-    throw new GitError(
-      "conflict",
-      "A reviewed commit recovery found that the checked-out branch changed. Inspect it before continuing.",
-    );
-  }
-  const lock = await readOptionalRegularFile(lockPath);
-  const stage = await readOptionalRegularFile(journal.stagePath);
-  const observedLockIdentity = lock === null
-    ? null
-    : await commitLockIdentity(lockPath);
-  const observedStageIdentity = stage === null
-    ? null
-    : await commitLockIdentity(journal.stagePath);
-  const lockIsOwned = isOwnedReservation(
-    lock,
-    observedLockIdentity,
-    journal.reservationToken,
-    options.ownedIndexLockIdentity,
-  );
-  const stageIsIndex = stage !== null
-    && digest(stage) === journal.newIndexHash;
-  const headLockPath = `${journal.headPath}.lock`;
-  const headLock = await readOptionalRegularFile(headLockPath);
-  const refLock = await readOptionalRegularFile(`${journal.refPath}.lock`);
-  const requireReferenceLocksFree = (): void => {
-    if (headLock !== null || refLock !== null) {
-      throw new GitError(
-        "conflict",
-        "A reviewed commit recovery found a Git lock owned by another operation. Inspect it before continuing.",
-      );
-    }
-  };
-  const removeJournal = async (): Promise<void> => {
-    await unlink(journalPath);
-    await syncDirectory(journalPath);
-  };
-  const requireValidStage = (): void => {
-    if (stage !== null && !stageIsIndex) {
-      throw new GitError(
-        "conflict",
-        "A reviewed commit recovery found an invalid private index stage. Inspect it before continuing.",
-      );
-    }
-  };
-  const requireOwnedOrAbsentLock = (): void => {
-    if (lock !== null && !lockIsOwned) {
-      throw new GitError(
-        "conflict",
-        "A reviewed commit recovery found a Git lock owned by another operation. Inspect it before continuing.",
-      );
-    }
-  };
-  const removeVerifiedArtifacts = async (): Promise<void> => {
-    requireReferenceLocksFree();
-    requireValidStage();
-    requireOwnedOrAbsentLock();
-    if (stageIsIndex) {
-      await options.beforeStageUnlink?.();
-      removeVerifiedStageSync(
-        journal.stagePath,
-        observedStageIdentity!,
-      );
-      await syncDirectory(journal.stagePath);
-    }
-    await releaseOwnedIndexReservation(
-      lockPath,
-      journal.stagePath,
-      journal.reservationToken,
-      options.ownedIndexLockIdentity ?? observedLockIdentity,
-      options.beforeReservationUnlink,
-    );
-  };
-  if (current.head === journal.expectedHead) {
-    if (digest(await readRegularFile(indexPath)) !== journal.oldIndexHash) {
-      throw new GitError(
-        "conflict",
-        "A reviewed commit recovery found that the repository index changed. Inspect it before continuing.",
-      );
-    }
-    if (options.reservationWasNeverAcquired && lock !== null && !lockIsOwned) {
-      requireReferenceLocksFree();
-      requireValidStage();
-      if (!stageIsIndex) {
-        throw new GitError(
-          "conflict",
-          "A reviewed commit recovery requires manual Git inspection before continuing.",
-        );
-      }
-      await options.beforeStageUnlink?.();
-      removeVerifiedStageSync(
-        journal.stagePath,
-        observedStageIdentity!,
-      );
-      await syncDirectory(journal.stagePath);
-    } else {
-      await removeVerifiedArtifacts();
-    }
-    await removeJournal();
-    return;
-  }
-  if (current.head !== journal.newCommit) {
-    throw new GitError(
-      "conflict",
-      "A reviewed commit recovery requires manual Git inspection before continuing.",
-    );
-  }
-  const currentIndex = await readRegularFile(indexPath);
-  if (digest(currentIndex) === journal.newIndexHash) {
-    await removeVerifiedArtifacts();
-    await removeJournal();
-    return;
-  }
-  if (digest(currentIndex) !== journal.oldIndexHash) {
-    throw new GitError(
-      "conflict",
-      "A reviewed commit recovery requires manual Git inspection before continuing.",
-    );
-  }
-  requireReferenceLocksFree();
-  if (!stageIsIndex) {
-    throw new GitError(
-      "conflict",
-      "A reviewed commit recovery requires manual Git inspection before continuing.",
-    );
-  }
-  let recoveryLockIdentity = observedLockIdentity;
-  if (lock === null) {
-    await options.beforeReservationAcquire?.();
-    try {
-      recoveryLockIdentity = acquireIndexReservationSync(
-        lockPath,
-        journal.reservationToken,
-      );
-    } catch {
-      throw new GitError(
-        "conflict",
-        "A reviewed commit recovery could not reserve the repository index. Inspect it before continuing.",
-      );
-    }
-  } else if (!lockIsOwned) {
-    throw new GitError(
-      "conflict",
-      "A reviewed commit recovery found a Git lock owned by another operation. Inspect it before continuing.",
-    );
-  }
-  const reservedIndex = await readRegularFile(indexPath);
-  const reservedStage = await readOptionalRegularFile(journal.stagePath);
-  const reservedStageIdentity = reservedStage === null
-    ? null
-    : await commitLockIdentity(journal.stagePath);
-  const reservedHeadContent = await readOptionalRegularFile(journal.headPath);
-  const reservedHead = await headState(root);
-  const reservedRef = await referenceOid(root, journal.headRef);
-  const reservedHeadLock = await readOptionalRegularFile(
-    `${journal.headPath}.lock`,
-  );
-  const reservedRefLock = await readOptionalRegularFile(
-    `${journal.refPath}.lock`,
-  );
-  if (
-    digest(reservedIndex) !== journal.oldIndexHash
-    || reservedStage === null
-    || digest(reservedStage) !== journal.newIndexHash
-    || reservedStageIdentity === null
-    || !sameCommitLockIdentity(
-      observedStageIdentity!,
-      reservedStageIdentity,
-    )
-    || reservedHead.head !== journal.newCommit
-    || reservedHead.headRef !== journal.headRef
-    || reservedRef !== journal.newCommit
-    || reservedHeadContent === null
-    || stripTerminalEol(reservedHeadContent.toString("utf8"))
-      !== `ref: ${journal.headRef}`
-    || reservedHeadLock !== null
-    || reservedRefLock !== null
-  ) {
-    await releaseOwnedIndexReservation(
-      lockPath,
-      journal.stagePath,
-      journal.reservationToken,
-      recoveryLockIdentity,
-      options.beforeReservationUnlink,
-      true,
-    ).catch(() => undefined);
-    throw new GitError(
-      "conflict",
-      "A reviewed commit recovery found repository drift after reserving the index. Inspect it before continuing.",
-    );
-  }
-  await options.afterStageValidation?.();
-  installPrivateIndexStageSync({
-    stagePath: journal.stagePath,
-    indexPath,
-    lockPath,
-    headPath: journal.headPath,
-    refPath: journal.refPath,
-    headRef: journal.headRef,
-    newCommit: journal.newCommit,
-    token: journal.reservationToken,
-    stageIdentity: reservedStageIdentity,
-    stageHash: journal.newIndexHash,
-    lockIdentity: recoveryLockIdentity!,
-    beforeFinalValidation: options.beforeStageRename,
-    afterStageHash: options.afterStageHash,
-  });
-  await syncDirectory(indexPath);
-  await releaseOwnedIndexReservation(
-    lockPath,
-    journal.stagePath,
-    journal.reservationToken,
-    recoveryLockIdentity,
-    options.beforeReservationUnlink,
-  );
-  await removeJournal();
-}
 
 async function reviewedCommitResult(
   root: string,
@@ -740,6 +517,15 @@ export async function commitReviewedChanges(
         stagePath: string,
       ) => void | Promise<void>;
       beforeRecoveryReservationAcquire?: () => void | Promise<void>;
+      beforeRefReservationAcquire?: () => void | Promise<void>;
+      beforeHeadReservationAcquire?: () => void | Promise<void>;
+      gitVersionForTests?: string;
+      beforeJournalLink?: (temporaryPath: string, journalPath: string) => void;
+      afterJournalLink?: (temporaryPath: string, journalPath: string) => void;
+      beforeJournalUnlink?: () => void;
+      afterSecondReferenceAbort?: () => void | Promise<void>;
+      afterSecondReferenceAbortAcknowledged?: () => void | Promise<void>;
+      beforeFinalRecoveryReferenceLockObservation?: () => void | Promise<void>;
       duringPreparedMutation?: () => void;
       afterReferenceCommit?: () => void | Promise<void>;
       beforeIndexInstall?: () => void | Promise<void>;
@@ -771,6 +557,16 @@ export async function commitReviewedChanges(
   await recoverCommitTransaction(root, {
     beforeReservationAcquire:
       options.testHooks?.beforeRecoveryReservationAcquire,
+    beforeRefReservationAcquire:
+      options.testHooks?.beforeRefReservationAcquire,
+    beforeHeadReservationAcquire:
+      options.testHooks?.beforeHeadReservationAcquire,
+    afterSecondReferenceAbort:
+      options.testHooks?.afterSecondReferenceAbort,
+    afterSecondReferenceAbortAcknowledged:
+      options.testHooks?.afterSecondReferenceAbortAcknowledged,
+    beforeFinalReferenceLockObservation:
+      options.testHooks?.beforeFinalRecoveryReferenceLockObservation,
     afterStageValidation:
       options.testHooks?.afterPrivateIndexStageValidation,
     beforeStageRename:
@@ -781,8 +577,13 @@ export async function commitReviewedChanges(
       options.testHooks?.beforePrivateIndexStageUnlink,
     beforeReservationUnlink:
       options.testHooks?.beforeIndexReservationUnlink,
+    beforeJournalUnlink:
+      options.testHooks?.beforeJournalUnlink,
   });
-  await ensureReviewedCommitPolicy(root, options);
+  await ensureReviewedCommitPolicy(root, {
+    deadlineAt: options.deadlineAt,
+    gitVersionForTests: options.testHooks?.gitVersionForTests,
+  });
   const selected = await validatedPaths(root, paths, options);
   const expected = requireGitCommitReviewFingerprint(
     expectedReviewFingerprint,
@@ -932,19 +733,18 @@ export async function commitReviewedChanges(
       reservationToken,
     };
     await options.verifyRepositoryIdentity?.();
-    const journalHandle = await open(journalPath, "wx", 0o600).catch(() => {
+    let ownedJournal: OwnedCommitTransactionJournal;
+    try {
+      ownedJournal = await publishCommitTransactionJournal(journalPath, journal, {
+        beforeLink: options.testHooks?.beforeJournalLink,
+        afterLink: options.testHooks?.afterJournalLink,
+      });
+    } catch {
       throw new GitError(
         "conflict",
-        "A reviewed commit recovery is already pending.",
+        "A reviewed commit recovery is already pending or could not be published safely.",
       );
-    });
-    try {
-      await journalHandle.writeFile(JSON.stringify(journal));
-      await journalHandle.sync();
-    } finally {
-      await journalHandle.close();
     }
-    await syncDirectory(journalPath);
     let stageCreated = false;
     let ownedStageIdentity: CommitLockIdentity | null = null;
     try {
@@ -988,8 +788,11 @@ export async function commitReviewedChanges(
           );
         }
       }
-      await unlink(journalPath).catch(() => undefined);
-      await syncDirectory(journalPath);
+      await removeOwnedCommitTransactionJournal(
+        journalPath,
+        ownedJournal,
+        options.testHooks?.beforeJournalUnlink,
+      );
       throw new GitError(
         "conflict",
         "Unable to reserve a private index stage for the reviewed commit.",
@@ -1020,7 +823,10 @@ export async function commitReviewedChanges(
           context.assertActive();
           await options.verifyRepositoryIdentity?.(context.signal);
           context.assertActive();
-          await ensureReviewedCommitPolicy(root, options);
+          await ensureReviewedCommitPolicy(root, {
+            deadlineAt: options.deadlineAt,
+            gitVersionForTests: options.testHooks?.gitVersionForTests,
+          });
           context.assertActive();
           const lockedHead = await readOptionalRegularFile(headPath);
           context.assertActive();
@@ -1065,7 +871,7 @@ export async function commitReviewedChanges(
                   "The repository index changed before the reviewed commit. Refresh and try again.",
                 );
               }
-              writeFileSync(lock, reservationBytes(reservationToken));
+              writeFileSync(lock, reservationBytes(reservationToken, "index"));
               fsyncSync(lock);
               closeSync(lock);
               lock = null;
@@ -1086,51 +892,90 @@ export async function commitReviewedChanges(
         },
       );
       committed = true;
-      await options.verifyRepositoryIdentity?.();
-      const committedHead = await readOptionalRegularFile(headPath);
-      if (
-        committedHead === null
-        || stripTerminalEol(committedHead.toString("utf8"))
-          !== `ref: ${journal.headRef}`
-      ) {
+      if (options.testHooks?.beforeRefReservationAcquire)
+        await options.testHooks.beforeRefReservationAcquire();
+      await withPreparedGitRefReservation(
+        root,
+        journal.headRef,
+        commit,
+        {
+          deadlineAt: options.deadlineAt,
+          failureMessage: "Unable to reserve the reviewed branch while installing its index.",
+          testHooks: {
+            afterAbortAcknowledged:
+              options.testHooks?.afterSecondReferenceAbortAcknowledged,
+            afterFailedCallbackAbortAcknowledged:
+              options.testHooks?.afterSecondReferenceAbort,
+          },
+        },
+        async (context) => {
+          context.assertActive();
+          if (options.testHooks?.beforeHeadReservationAcquire)
+            await options.testHooks.beforeHeadReservationAcquire();
+          context.assertActive();
+          await options.verifyRepositoryIdentity?.(context.signal);
+          context.assertActive();
+          const committedHead = await readOptionalRegularFile(headPath);
+          const committedRef = await referenceOid(root, journal.headRef);
+          context.assertActive();
+          if (
+            committedHead === null
+            || stripTerminalEol(committedHead.toString("utf8"))
+              !== `ref: ${journal.headRef}`
+            || committedRef !== commit
+          ) {
+            throw new GitError(
+              "conflict",
+              "The checked-out branch changed after the reviewed commit. Inspect it before continuing.",
+            );
+          }
+          await options.testHooks?.beforeIndexInstall?.();
+          const installStageIdentity = await commitLockIdentity(stagePath);
+          const installStageContent = await readOptionalRegularFile(stagePath);
+          context.assertActive();
+          if (
+            !ownedIndexLockIdentity
+            || !ownedStageIdentity
+            || !installStageIdentity
+            || !sameCommitLockIdentity(ownedStageIdentity, installStageIdentity)
+            || installStageContent === null
+            || digest(installStageContent) !== journal.newIndexHash
+          ) {
+            throw new GitError(
+              "conflict",
+              "Another Git operation replaced the reviewed commit reservation. Inspect it manually before continuing.",
+            );
+          }
+          await options.testHooks?.afterPrivateIndexStageValidation?.();
+          context.mutate(() => {
+            assertPreparedReferenceLocksSync(headPath, refPath);
+            installPrivateIndexStageSync({
+              stagePath,
+              indexPath,
+              lockPath,
+              headPath,
+              headRef: journal.headRef,
+              token: reservationToken,
+              stageIdentity: ownedStageIdentity!,
+              stageHash: journal.newIndexHash,
+              lockIdentity: ownedIndexLockIdentity!,
+              beforeFinalValidation:
+                options.testHooks?.beforePrivateIndexStageRename,
+              afterStageHash: options.testHooks?.afterPrivateIndexStageHash,
+            });
+            return undefined;
+          });
+        },
+      );
+      if (!await waitForReferenceLocksToRelease(
+        `${headPath}.lock`,
+        `${refPath}.lock`,
+      )) {
         throw new GitError(
           "conflict",
-          "The checked-out branch changed after the reviewed commit. Inspect it before continuing.",
+          "Git did not release the prepared branch transaction locks.",
         );
       }
-      await options.testHooks?.beforeIndexInstall?.();
-      const installStageIdentity = await commitLockIdentity(stagePath);
-      const installStageContent = await readOptionalRegularFile(stagePath);
-      if (
-        !ownedIndexLockIdentity
-        || !ownedStageIdentity
-        || !installStageIdentity
-        || !sameCommitLockIdentity(ownedStageIdentity, installStageIdentity)
-        || installStageContent === null
-        || digest(installStageContent) !== journal.newIndexHash
-      ) {
-        throw new GitError(
-          "conflict",
-          "Another Git operation replaced the reviewed commit reservation. Inspect it manually before continuing.",
-        );
-      }
-      await options.testHooks?.afterPrivateIndexStageValidation?.();
-      installPrivateIndexStageSync({
-        stagePath,
-        indexPath,
-        lockPath,
-        headPath,
-        refPath,
-        headRef: journal.headRef,
-        newCommit: journal.newCommit,
-        token: reservationToken,
-        stageIdentity: ownedStageIdentity,
-        stageHash: journal.newIndexHash,
-        lockIdentity: ownedIndexLockIdentity,
-        beforeFinalValidation:
-          options.testHooks?.beforePrivateIndexStageRename,
-        afterStageHash: options.testHooks?.afterPrivateIndexStageHash,
-      });
       await syncDirectory(indexPath);
       await options.testHooks?.afterIndexInstallBeforeReservationRelease?.();
       await releaseOwnedIndexReservation(
@@ -1140,8 +985,11 @@ export async function commitReviewedChanges(
         ownedIndexLockIdentity,
         options.testHooks?.beforeIndexReservationUnlink,
       );
-      await unlink(journalPath);
-      await syncDirectory(journalPath);
+      await removeOwnedCommitTransactionJournal(
+        journalPath,
+        ownedJournal,
+        options.testHooks?.beforeJournalUnlink,
+      );
     } catch (error) {
       if (lock !== null) {
         try {
@@ -1187,14 +1035,27 @@ export async function commitReviewedChanges(
           );
         }
         await recoverCommitTransaction(root, {
+          ownedJournal,
           ownedIndexLockIdentity: ownsLock
             ? ownedIndexLockIdentity
             : null,
           reservationWasNeverAcquired: !ownsLock,
+          beforeRefReservationAcquire:
+            options.testHooks?.beforeRefReservationAcquire,
+          beforeHeadReservationAcquire:
+            options.testHooks?.beforeHeadReservationAcquire,
+          afterSecondReferenceAbort:
+            options.testHooks?.afterSecondReferenceAbort,
+          afterSecondReferenceAbortAcknowledged:
+            options.testHooks?.afterSecondReferenceAbortAcknowledged,
+          beforeFinalReferenceLockObservation:
+            options.testHooks?.beforeFinalRecoveryReferenceLockObservation,
           beforeStageUnlink:
             options.testHooks?.beforePrivateIndexStageUnlink,
           beforeReservationUnlink:
             options.testHooks?.beforeIndexReservationUnlink,
+          beforeJournalUnlink:
+            options.testHooks?.beforeJournalUnlink,
           beforeStageRename:
             options.testHooks?.beforePrivateIndexStageRename,
           afterStageHash:
@@ -1203,13 +1064,26 @@ export async function commitReviewedChanges(
       } else {
         try {
           await recoverCommitTransaction(root, {
+            ownedJournal,
             ownedIndexLockIdentity: ownsLock
               ? ownedIndexLockIdentity
               : null,
+            beforeRefReservationAcquire:
+              options.testHooks?.beforeRefReservationAcquire,
+            beforeHeadReservationAcquire:
+              options.testHooks?.beforeHeadReservationAcquire,
+            afterSecondReferenceAbort:
+              options.testHooks?.afterSecondReferenceAbort,
+            afterSecondReferenceAbortAcknowledged:
+              options.testHooks?.afterSecondReferenceAbortAcknowledged,
+            beforeFinalReferenceLockObservation:
+              options.testHooks?.beforeFinalRecoveryReferenceLockObservation,
             beforeStageUnlink:
               options.testHooks?.beforePrivateIndexStageUnlink,
             beforeReservationUnlink:
               options.testHooks?.beforeIndexReservationUnlink,
+            beforeJournalUnlink:
+              options.testHooks?.beforeJournalUnlink,
             beforeStageRename:
               options.testHooks?.beforePrivateIndexStageRename,
             afterStageHash:

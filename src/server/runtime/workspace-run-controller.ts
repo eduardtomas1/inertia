@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 
 import type {
   Conversation,
@@ -49,6 +49,39 @@ export interface WorkspaceAction {
   label: string;
   command: string;
   preview: boolean;
+}
+
+export interface SourceControlSerializationIdentity {
+  canonicalPath: string;
+  dev: bigint;
+  ino: bigint;
+  birthtimeNs: bigint;
+}
+
+export type SourceControlSerializationIdentityResolver = (
+  root: string,
+) => SourceControlSerializationIdentity;
+
+function sourceControlSerializationIdentity(
+  root: string,
+): SourceControlSerializationIdentity {
+  const canonicalPath = realpathSync.native(root);
+  const info = statSync(canonicalPath, { bigint: true });
+  if (!info.isDirectory()) throw new Error("Source-control root is not a directory.");
+  return {
+    canonicalPath,
+    dev: info.dev,
+    ino: info.ino,
+    birthtimeNs: info.birthtimeNs,
+  };
+}
+
+function sourceControlSerializationKey(
+  identity: SourceControlSerializationIdentity,
+): string {
+  return identity.dev !== 0n && identity.ino !== 0n
+    ? `fs:${identity.dev}:${identity.ino}:${identity.birthtimeNs}`
+    : `path:${identity.canonicalPath}`;
 }
 
 export interface StartWorkspaceActionInput<Owner> {
@@ -115,6 +148,9 @@ export class WorkspaceRunController<Owner> {
       projectId: string,
       conversationId: string | null,
     ) => void,
+    private readonly resolveSourceControlSerializationIdentity:
+      SourceControlSerializationIdentityResolver
+      = sourceControlSerializationIdentity,
   ) {}
 
   async listActions(cwd: string): Promise<WorkspaceAction[]> {
@@ -276,16 +312,22 @@ export class WorkspaceRunController<Owner> {
     label: string,
     projectId: string,
     conversationId: string | undefined,
-    cwd: string,
+    checkoutRoot: string,
     requestId: string,
     operation: () => Promise<T>,
+    options: { serializationRoot?: string } = {},
   ): Promise<T> {
-    return await this.withExclusiveSourceControl(cwd, async () => {
+    // Multiple projects may point at different folders in one Git checkout.
+    // Reserve each project's checkout scope independently, but serialize every
+    // mutation sharing the repository root so only one recovery-journal
+    // publisher can own a Git index at a time.
+    const serializationRoot = options.serializationRoot ?? checkoutRoot;
+    return await this.withExclusiveSourceControl(serializationRoot, async () => {
       const reservationId = `source-control:${requestId}`;
       if (!this.store.conversationWork.reserveCheckout(
         reservationId,
         projectId,
-        cwd,
+        checkoutRoot,
       )) {
         throw new RuntimeRequestError(
           "End the resumed provider terminal before changing this workspace with Git.",
@@ -361,20 +403,19 @@ export class WorkspaceRunController<Owner> {
   }
 
   private async withExclusiveSourceControl<T>(
-    cwd: string,
+    serializationRoot: string,
     operation: () => Promise<T>,
   ): Promise<T> {
-    let canonical: string;
+    let key: string;
     try {
-      canonical = realpathSync.native(cwd);
+      key = sourceControlSerializationKey(
+        this.resolveSourceControlSerializationIdentity(serializationRoot),
+      );
     } catch {
       throw new RuntimeRequestError(
         "The workspace is unavailable for this Git operation.",
       );
     }
-    const key = process.platform === "win32"
-      ? canonical.toLocaleLowerCase("en-US")
-      : canonical;
     const predecessor = this.sourceControlTails.get(key)
       ?? Promise.resolve();
     let release!: () => void;

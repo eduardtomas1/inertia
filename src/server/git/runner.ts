@@ -316,17 +316,25 @@ export function runGitInspection(
 
 /**
  * Uses Git's own reference transaction so the target branch remains locked
- * while a caller prepares related filesystem state. Callers must verify the
- * symbolic HEAD separately because Git does not lock it with the branch ref.
+ * while a caller prepares related filesystem state. Reviewed-commit callers
+ * additionally validate the files-backend branch and symbolic-HEAD locks.
  */
-export function withPreparedGitRefUpdate(
+interface PreparedGitRefTransactionOptions
+  extends Pick<RunGitOptions, "deadlineAt" | "failureMessage"> {
+  completion: "commit" | "abort";
+  testHooks?: {
+    afterCommitAcknowledged?: () => void | Promise<void>;
+    afterAbortAcknowledged?: () => void | Promise<void>;
+    afterFailedCallbackAbortAcknowledged?: () => void | Promise<void>;
+  };
+}
+
+function runPreparedGitRefTransaction(
   cwd: string,
   ref: string,
   newOid: string,
   expectedOid: string,
-  options: Pick<RunGitOptions, "deadlineAt" | "failureMessage"> & {
-    testHooks?: { afterCommitAcknowledged?: () => void | Promise<void> };
-  },
+  options: PreparedGitRefTransactionOptions,
   onPrepared: (context: PreparedGitRefUpdateContext) => void | Promise<void>,
 ): Promise<void> {
   const deadlineTimeoutMs = options.deadlineAt === undefined
@@ -355,6 +363,7 @@ export function withPreparedGitRefUpdate(
     let settled = false;
     let prepared = false;
     let committed = false;
+    let aborted = false;
     let callbackError: unknown;
     let termination: Promise<void> | null = null;
     let finishing = false;
@@ -431,15 +440,20 @@ export function withPreparedGitRefUpdate(
           .then(() => onPrepared(preparedContext))
           .then(
             () => {
-              child.stdin.end("commit\n");
+              callbackAbort.abort();
+              child.stdin.end(options.completion === "abort"
+                ? "abort\n"
+                : "commit\n");
             },
             (error: unknown) => {
               callbackError = error;
+              callbackAbort.abort();
               child.stdin.end("abort\n");
             },
           );
       }
       if (/(?:^|\r?\n)commit: ok\r?\n/u.test(text)) committed = true;
+      if (/(?:^|\r?\n)abort: ok\r?\n/u.test(text)) aborted = true;
     });
     child.stderr.on("data", (chunk: Buffer) => {
       const remaining = STDERR_BYTES - Buffer.concat(stderr).length;
@@ -456,11 +470,28 @@ export function withPreparedGitRefUpdate(
     });
     child.on("close", (code) => {
       if (termination) return;
-      if (callbackError) {
-        finish(callbackError);
-      } else if (code === 0 && committed) {
+      if (callbackError && code === 0 && aborted && !committed) {
         void Promise.resolve()
-          .then(options.testHooks?.afterCommitAcknowledged)
+          .then(options.testHooks?.afterFailedCallbackAbortAcknowledged)
+          .then(
+            () => finish(callbackError),
+            (error: unknown) => finish(error),
+          );
+      } else if (callbackError) {
+        finish(classifyFailure(
+          Buffer.concat(stderr).toString("utf8"),
+          "Git did not acknowledge the aborted reference transaction.",
+        ));
+      } else if (
+        code === 0
+        && (options.completion === "commit"
+          ? committed && !aborted
+          : aborted && !committed)
+      ) {
+        void Promise.resolve()
+          .then(options.completion === "abort"
+            ? options.testHooks?.afterAbortAcknowledged
+            : options.testHooks?.afterCommitAcknowledged)
           .then(() => finish(), (error: unknown) => finish(error));
       } else {
         finish(classifyFailure(
@@ -476,4 +507,46 @@ export function withPreparedGitRefUpdate(
       "",
     ].join("\n"));
   });
+}
+
+export function withPreparedGitRefUpdate(
+  cwd: string,
+  ref: string,
+  newOid: string,
+  expectedOid: string,
+  options: Pick<RunGitOptions, "deadlineAt" | "failureMessage"> & {
+    testHooks?: { afterCommitAcknowledged?: () => void | Promise<void> };
+  },
+  onPrepared: (context: PreparedGitRefUpdateContext) => void | Promise<void>,
+): Promise<void> {
+  return runPreparedGitRefTransaction(
+    cwd,
+    ref,
+    newOid,
+    expectedOid,
+    { ...options, completion: "commit" },
+    onPrepared,
+  );
+}
+
+export function withPreparedGitRefReservation(
+  cwd: string,
+  ref: string,
+  oid: string,
+  options: Pick<RunGitOptions, "deadlineAt" | "failureMessage"> & {
+    testHooks?: {
+      afterAbortAcknowledged?: () => void | Promise<void>;
+      afterFailedCallbackAbortAcknowledged?: () => void | Promise<void>;
+    };
+  },
+  onPrepared: (context: PreparedGitRefUpdateContext) => void | Promise<void>,
+): Promise<void> {
+  return runPreparedGitRefTransaction(
+    cwd,
+    ref,
+    oid,
+    oid,
+    { ...options, completion: "abort" },
+    onPrepared,
+  );
 }

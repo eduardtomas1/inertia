@@ -26,6 +26,7 @@ import {
   prepareGitCommitReview,
   renderGitCommitReviewDiff,
 } from "../../src/server/git";
+import { waitForReferenceLocksToRelease } from "../../src/server/git/commits";
 import { runGit } from "../../src/server/git/runner";
 import {
   portableNodeExecutable,
@@ -886,6 +887,27 @@ setInterval(() => {}, 1000);
     expect(git(root, "rev-parse", "HEAD")).toBe(head);
     expect(() => readFileSync(join(root, ".git", "index.lock"))).toThrow();
     expect(readFileSync(foreignLock, "utf8")).toBe("foreign lock\n");
+  });
+
+  it("accepts native locks released at the cleanup-grace boundary", async () => {
+    const root = repository();
+    const headLock = join(root, ".git", "HEAD.lock");
+    const refLock = join(root, ".git", "refs", "heads", "main.lock");
+    writeFileSync(headLock, "delayed HEAD lock\n");
+    writeFileSync(refLock, "delayed branch lock\n");
+    let finalObservation = false;
+
+    await expect(waitForReferenceLocksToRelease(
+      headLock,
+      refLock,
+      () => {
+        finalObservation = true;
+        rmSync(headLock);
+        rmSync(refLock);
+      },
+    )).resolves.toBe(true);
+
+    expect(finalObservation).toBe(true);
   });
 
   it("rejects replacement Git metadata at the final reviewed boundary", async () => {

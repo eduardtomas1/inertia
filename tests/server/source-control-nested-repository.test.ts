@@ -285,6 +285,7 @@ describe("nested source-control command scope", () => {
       workspace,
       createRequestId,
       expect.any(Function),
+      { serializationRoot: realpathSync(repository) },
     );
   });
 
@@ -360,6 +361,7 @@ describe("nested source-control command scope", () => {
       workspace,
       command.requestId,
       expect.any(Function),
+      { serializationRoot: realpathSync(repository) },
     );
     expect(git(repository, "log", "-1", "--pretty=%s")).toBe(
       "Commit nested change",

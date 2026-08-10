@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   runGit,
+  withPreparedGitRefReservation,
   withPreparedGitRefUpdate,
 } from "../../src/server/git/runner";
 import { gitProcessEnvironment } from "../../src/server/git/environment";
@@ -205,6 +206,50 @@ setInterval(() => {}, 1000);
       releaseCallback();
       await delay(40);
       expect(mutated).toBe(false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it.each([
+    ["commit only", "commit: ok\\n"],
+    ["commit and abort", "commit: ok\\nabort: ok\\n"],
+  ])("rejects %s acknowledgements for an abort-only reservation", async (
+    _label,
+    acknowledgement,
+  ) => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-wrong-ack-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "update-ref", `
+let input = "";
+let prepared = false;
+process.stdin.on("data", (chunk) => {
+  input += chunk.toString("utf8");
+  if (!prepared && input.includes("prepare\\n")) {
+    prepared = true;
+    process.stdout.write("start: ok\\nprepare: ok\\n");
+  }
+  if (prepared && input.includes("abort\\n")) {
+    process.stdout.write(${JSON.stringify(acknowledgement)}, () => process.exit(0));
+  }
+});
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    let callbackRan = false;
+    try {
+      await expect(withPreparedGitRefReservation(
+        directory,
+        "refs/heads/main",
+        "1".repeat(40),
+        { failureMessage: "Git reservation failed." },
+        () => {
+          callbackRan = true;
+        },
+      )).rejects.toMatchObject({ code: "operation-failed" });
+      expect(callbackRan).toBe(true);
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;

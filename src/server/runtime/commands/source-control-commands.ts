@@ -148,9 +148,11 @@ export function createSourceControlCommandHandler(
       if (options.requireAuthority) {
         throw new RuntimeRequestError("Refresh repository status before changing this repository.");
       }
+      const canonicalWorkspace = await realpath(workspaceRoot);
       return {
         workspaceRoot,
         repositoryRoot: workspaceRoot,
+        serializationRoot: await repositoryRoot(canonicalWorkspace),
         secureRoot: null,
         metadataMarkerIdentity: null,
       };
@@ -209,6 +211,7 @@ export function createSourceControlCommandHandler(
     return {
       workspaceRoot,
       repositoryRoot: issuedRoot.root,
+      serializationRoot: await realpath(issuedRoot.root),
       secureRoot: issuedRoot,
       metadataMarkerIdentity: repository.metadataMarkerIdentity,
     };
@@ -874,6 +877,7 @@ export function createSourceControlCommandHandler(
             repository,
             async (root) => await createBranch(root, command.payload.name),
           ),
+          { serializationRoot: repository.serializationRoot },
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -902,6 +906,7 @@ export function createSourceControlCommandHandler(
             repository,
             async (root) => await switchBranch(root, command.payload.name),
           ),
+          { serializationRoot: repository.serializationRoot },
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -930,6 +935,7 @@ export function createSourceControlCommandHandler(
             repository,
             pullRepository,
           ),
+          { serializationRoot: repository.serializationRoot },
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -1033,6 +1039,7 @@ export function createSourceControlCommandHandler(
               };
             }
           },
+          { serializationRoot: repository.serializationRoot },
         );
         let refreshWarning = result.refreshWarning;
         if (command.payload.conversationId) {
@@ -1089,6 +1096,7 @@ export function createSourceControlCommandHandler(
             repository,
             pushCurrentBranch,
           ),
+          { serializationRoot: repository.serializationRoot },
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -1116,6 +1124,7 @@ export function createSourceControlCommandHandler(
             repository,
             getPullRequestCreateUrl,
           ),
+          { serializationRoot: repository.serializationRoot },
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -1144,6 +1153,7 @@ export function createSourceControlCommandHandler(
             repository,
             async (root) => await createGitHubPullRequest(root, command.payload),
           ),
+          { serializationRoot: repository.serializationRoot },
         );
         dependencies.send(socket, {
           type: "request.result",

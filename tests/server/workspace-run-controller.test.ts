@@ -9,6 +9,7 @@ import {
   WorkspaceRunController,
   workspaceActionKind,
   workspaceServicePort,
+  type SourceControlSerializationIdentityResolver,
   type WorkspaceActionTerminalManager,
 } from "../../src/server/runtime/workspace-run-controller";
 
@@ -68,7 +69,9 @@ class FakeTerminals implements WorkspaceActionTerminalManager<object> {
 
 const temporaryDirectories: string[] = [];
 
-async function fixture() {
+async function fixture(
+  serializationIdentity?: SourceControlSerializationIdentityResolver,
+) {
   const root = await mkdtemp(join(tmpdir(), "inertia-workspace-runs-"));
   temporaryDirectories.push(root);
   const workspace = join(root, "workspace");
@@ -93,6 +96,7 @@ async function fixture() {
     broadcastSnapshot,
     () => false,
     broadcastGitInvalidated,
+    serializationIdentity,
   );
   return {
     root,
@@ -483,6 +487,210 @@ describe("workspace run controller", () => {
         runtime.project.id,
         runtime.conversation.id,
       );
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("serializes nested project roots sharing one repository identity", async () => {
+    const runtime = await fixture();
+    const nestedWorkspace = join(runtime.workspace, "nested-project");
+    await mkdir(nestedWorkspace);
+    try {
+      let finishFirst!: () => void;
+      let finishSecond!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      });
+      const secondGate = new Promise<void>((resolve) => {
+        finishSecond = resolve;
+      });
+      const started: string[] = [];
+      const first = runtime.controller.trackSourceControl(
+        "Commit repository root",
+        runtime.project.id,
+        runtime.conversation.id,
+        runtime.workspace,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        async () => {
+          started.push("root");
+          await firstGate;
+        },
+        { serializationRoot: runtime.workspace },
+      );
+      const second = runtime.controller.trackSourceControl(
+        "Commit nested project",
+        runtime.project.id,
+        runtime.conversation.id,
+        nestedWorkspace,
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        async () => {
+          started.push("nested");
+          await secondGate;
+        },
+        { serializationRoot: runtime.workspace },
+      );
+
+      await vi.waitFor(() => expect(started).toEqual(["root"]));
+      finishFirst();
+      await first;
+      await vi.waitFor(() => expect(started).toEqual(["root", "nested"]));
+      finishSecond();
+      await second;
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("allows distinct repository identities to mutate concurrently", async () => {
+    const runtime = await fixture();
+    const firstRepository = join(runtime.workspace, "repository-one");
+    const secondRepository = join(runtime.workspace, "repository-two");
+    await Promise.all([mkdir(firstRepository), mkdir(secondRepository)]);
+    try {
+      let finishFirst!: () => void;
+      let finishSecond!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      });
+      const secondGate = new Promise<void>((resolve) => {
+        finishSecond = resolve;
+      });
+      const started: string[] = [];
+      const first = runtime.controller.trackSourceControl(
+        "Commit first repository",
+        runtime.project.id,
+        runtime.conversation.id,
+        firstRepository,
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        async () => {
+          started.push("first");
+          await firstGate;
+        },
+        { serializationRoot: firstRepository },
+      );
+      const second = runtime.controller.trackSourceControl(
+        "Commit second repository",
+        runtime.project.id,
+        runtime.conversation.id,
+        secondRepository,
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        async () => {
+          started.push("second");
+          await secondGate;
+        },
+        { serializationRoot: secondRepository },
+      );
+
+      await vi.waitFor(() => expect(started).toEqual(["first", "second"]));
+      finishFirst();
+      finishSecond();
+      await Promise.all([first, second]);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("serializes distinct aliases that resolve to the same filesystem identity", async () => {
+    const sharedIdentity = {
+      canonicalPath: "C:/Repo",
+      dev: 7n,
+      ino: 11n,
+      birthtimeNs: 13n,
+    };
+    const runtime = await fixture(() => sharedIdentity);
+    const firstCheckout = join(runtime.workspace, "alias-one");
+    const secondCheckout = join(runtime.workspace, "alias-two");
+    await Promise.all([mkdir(firstCheckout), mkdir(secondCheckout)]);
+    try {
+      let finishFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      });
+      const started: string[] = [];
+      const first = runtime.controller.trackSourceControl(
+        "Commit first alias",
+        runtime.project.id,
+        runtime.conversation.id,
+        firstCheckout,
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        async () => {
+          started.push("first");
+          await firstGate;
+        },
+        { serializationRoot: "C:/Repo" },
+      );
+      const second = runtime.controller.trackSourceControl(
+        "Commit second alias",
+        runtime.project.id,
+        runtime.conversation.id,
+        secondCheckout,
+        "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        async () => {
+          started.push("second");
+        },
+        { serializationRoot: "c:/repo" },
+      );
+
+      await vi.waitFor(() => expect(started).toEqual(["first"]));
+      finishFirst();
+      await first;
+      await second;
+      expect(started).toEqual(["first", "second"]);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("keeps case-distinct roots concurrent when their identities differ", async () => {
+    const runtime = await fixture((root) => ({
+      canonicalPath: root,
+      dev: 7n,
+      ino: root === "C:/Repo" ? 17n : 19n,
+      birthtimeNs: 23n,
+    }));
+    const firstCheckout = join(runtime.workspace, "case-upper");
+    const secondCheckout = join(runtime.workspace, "case-lower");
+    await Promise.all([mkdir(firstCheckout), mkdir(secondCheckout)]);
+    try {
+      let finishFirst!: () => void;
+      let finishSecond!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      });
+      const secondGate = new Promise<void>((resolve) => {
+        finishSecond = resolve;
+      });
+      const started: string[] = [];
+      const first = runtime.controller.trackSourceControl(
+        "Commit case-sensitive upper root",
+        runtime.project.id,
+        runtime.conversation.id,
+        firstCheckout,
+        "11111111-aaaa-4111-8111-aaaaaaaaaaaa",
+        async () => {
+          started.push("upper");
+          await firstGate;
+        },
+        { serializationRoot: "C:/Repo" },
+      );
+      const second = runtime.controller.trackSourceControl(
+        "Commit case-sensitive lower root",
+        runtime.project.id,
+        runtime.conversation.id,
+        secondCheckout,
+        "22222222-bbbb-4222-8222-bbbbbbbbbbbb",
+        async () => {
+          started.push("lower");
+          await secondGate;
+        },
+        { serializationRoot: "C:/repo" },
+      );
+
+      await vi.waitFor(() => expect(started).toEqual(["upper", "lower"]));
+      finishFirst();
+      finishSecond();
+      await Promise.all([first, second]);
     } finally {
       runtime.store.close();
     }

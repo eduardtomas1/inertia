@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -109,7 +111,7 @@ writeFileSync(journalPath, JSON.stringify({
 }));
 renameSync(temporaryIndex, stagePath);
 if (createReservation) {
-  writeFileSync(indexPath + ".lock", token + "\\n", { flag: "wx", mode: 0o600 });
+  writeFileSync(indexPath + ".lock", "inertia-reviewed-commit:index:" + token + "\\n", { flag: "wx", mode: 0o600 });
 }
 execFileSync("git", ["update-ref", "refs/heads/main", commit, oldHead], { cwd: root });
 `);
@@ -123,6 +125,431 @@ afterEach(() => {
 });
 
 describe("reviewed commit transaction recovery", () => {
+  it("clears a durable journal left before private-stage creation", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed after pre-stage crash\n");
+    const review = await captureGitCommitReview(root);
+    const indexPath = git(
+      root,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "index",
+    );
+    const journalPath = `${indexPath}.inertia-commit-transaction.json`;
+    const head = git(root, "rev-parse", "HEAD");
+    const digest = (value: Buffer): string => createHash("sha256")
+      .update(value)
+      .digest("hex");
+    writeFileSync(journalPath, JSON.stringify({
+      expectedHead: head,
+      headRef: "refs/heads/main",
+      headPath: git(
+        root,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-path",
+        "HEAD",
+      ),
+      refPath: git(
+        root,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-path",
+        "refs/heads/main",
+      ),
+      newCommit: head,
+      oldIndexHash: digest(readFileSync(indexPath)),
+      newIndexHash: "1".repeat(64),
+      indexPath,
+      stagePath: `${indexPath}.inertia-stage-${"e".repeat(32)}`,
+      reservationToken: "2".repeat(64),
+    }));
+
+    const result = await commitReviewedChanges(
+      root,
+      "Recover the pre-stage crash window",
+      ["selected.txt"],
+      review.fingerprint,
+    );
+
+    expect(git(root, "show", "HEAD:selected.txt"))
+      .toBe("reviewed after pre-stage crash");
+    expect(result.refreshWarning).toBeUndefined();
+    expect(existsSync(journalPath)).toBe(false);
+  });
+
+  it("rejects a zero-byte published recovery journal", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed zero journal\n");
+    const review = await captureGitCommitReview(root);
+    const journalPath = join(
+      root,
+      ".git",
+      "index.inertia-commit-transaction.json",
+    );
+    writeFileSync(journalPath, "");
+
+    await expect(commitReviewedChanges(
+      root,
+      "Reject zero recovery journal",
+      ["selected.txt"],
+      review.fingerprint,
+    )).rejects.toThrow(/recovery journal is invalid/iu);
+
+    expect(readFileSync(journalPath)).toHaveLength(0);
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+  });
+
+  it("rejects unsupported Git before publishing recovery artifacts", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed old Git\n");
+    const review = await captureGitCommitReview(root);
+    const head = git(root, "rev-parse", "HEAD");
+
+    await expect(commitReviewedChanges(
+      root,
+      "Reject unsupported Git",
+      ["selected.txt"],
+      review.fingerprint,
+      { testHooks: { gitVersionForTests: "git version 2.30.2.windows.1" } },
+    )).rejects.toThrow(/Git 2\.31 or newer/iu);
+
+    expect(git(root, "rev-parse", "HEAD")).toBe(head);
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+    expect(existsSync(join(
+      root,
+      ".git",
+      "index.inertia-commit-transaction.json",
+    ))).toBe(false);
+    expect(readdirSync(join(root, ".git")))
+      .not.toContainEqual(expect.stringContaining("index.inertia-stage-"));
+  });
+
+  it("rejects a symlink HEAD before publishing recovery artifacts", async () => {
+    const root = repository();
+    git(root, "config", "core.preferSymlinkRefs", "true");
+    git(root, "symbolic-ref", "HEAD", "refs/heads/main");
+    const headPath = join(root, ".git", "HEAD");
+    if (!lstatSync(headPath).isSymbolicLink()) return;
+    writeFileSync(join(root, "selected.txt"), "reviewed symlink HEAD\n");
+    const review = await captureGitCommitReview(root);
+
+    await expect(commitReviewedChanges(
+      root,
+      "Reject symlink HEAD",
+      ["selected.txt"],
+      review.fingerprint,
+    )).rejects.toThrow(/regular Git HEAD file|symlink reference mode/iu);
+
+    expect(existsSync(join(
+      root,
+      ".git",
+      "index.inertia-commit-transaction.json",
+    ))).toBe(false);
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+  });
+
+  it("fails safely when atomic journal publication is unsupported", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed journal failure\n");
+    const review = await captureGitCommitReview(root);
+    const head = git(root, "rev-parse", "HEAD");
+    const journalPath = join(
+      root,
+      ".git",
+      "index.inertia-commit-transaction.json",
+    );
+    let temporaryPath: string | undefined;
+
+    await expect(commitReviewedChanges(
+      root,
+      "Reject unsafe journal publication",
+      ["selected.txt"],
+      review.fingerprint,
+      {
+        testHooks: {
+          beforeJournalLink: (temporary) => {
+            temporaryPath = temporary;
+            throw Object.assign(new Error("hard links unsupported"), {
+              code: "ENOTSUP",
+            });
+          },
+        },
+      },
+    )).rejects.toThrow(/could not be published safely/iu);
+
+    expect(git(root, "rev-parse", "HEAD")).toBe(head);
+    expect(temporaryPath).toBeDefined();
+    expect(existsSync(temporaryPath!)).toBe(false);
+    expect(existsSync(journalPath)).toBe(false);
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+  });
+
+  it("rejects a replaced journal alias before repository mutation", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed alias replacement\n");
+    const review = await captureGitCommitReview(root);
+    const head = git(root, "rev-parse", "HEAD");
+    const journalPath = join(
+      root,
+      ".git",
+      "index.inertia-commit-transaction.json",
+    );
+    const foreignJournal = Buffer.from("foreign journal\n");
+    let temporaryPath: string | undefined;
+
+    await expect(commitReviewedChanges(
+      root,
+      "Reject replaced journal alias",
+      ["selected.txt"],
+      review.fingerprint,
+      {
+        testHooks: {
+          afterJournalLink: (temporary, published) => {
+            temporaryPath = temporary;
+            rmSync(published);
+            writeFileSync(published, foreignJournal, { flag: "wx" });
+          },
+        },
+      },
+    )).rejects.toThrow(/could not be published safely/iu);
+
+    expect(git(root, "rev-parse", "HEAD")).toBe(head);
+    expect(temporaryPath).toBeDefined();
+    expect(existsSync(temporaryPath!)).toBe(true);
+    expect(readFileSync(journalPath)).toEqual(foreignJournal);
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+  });
+
+  it("holds Git-native branch and HEAD locks through installation", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed three-lock commit\n");
+    const review = await captureGitCommitReview(root);
+    const refPath = join(root, ".git", "refs", "heads", "main");
+    const refLockPath = `${refPath}.lock`;
+    const headLockPath = join(root, ".git", "HEAD.lock");
+    const originalHead = git(root, "rev-parse", "HEAD");
+    const headReflogCount = git(root, "reflog", "show", "--format=%H", "HEAD")
+      .split("\n").filter(Boolean).length;
+    const branchReflogCount = git(
+      root,
+      "reflog",
+      "show",
+      "--format=%H",
+      "refs/heads/main",
+    ).split("\n").filter(Boolean).length;
+    let preparedHeadReflog: Buffer | undefined;
+    let preparedBranchReflog: Buffer | undefined;
+    let observedReservations = false;
+
+    const result = await commitReviewedChanges(
+      root,
+      "Hold all reviewed commit reservations",
+      ["selected.txt"],
+      review.fingerprint,
+      {
+        testHooks: {
+          beforeRefReservationAcquire: () => {
+            preparedHeadReflog = readFileSync(join(root, ".git", "logs", "HEAD"));
+            preparedBranchReflog = readFileSync(join(root, ".git", "logs", "refs", "heads", "main"));
+          },
+          beforePrivateIndexStageRename: () => {
+            expect(readFileSync(join(root, ".git", "index.lock"), "utf8"))
+              .toMatch(/^inertia-reviewed-commit:index:/u);
+            expect(existsSync(refLockPath)).toBe(true);
+            expect(existsSync(headLockPath)).toBe(true);
+            const current = git(root, "rev-parse", "HEAD");
+            expect(() => git(
+              root,
+              "update-ref",
+              "refs/heads/main",
+              `${current}^`,
+              current,
+            )).toThrow(/cannot lock ref|File exists/iu);
+            expect(() => git(
+              root,
+              "symbolic-ref",
+              "HEAD",
+              "refs/heads/other",
+            )).toThrow(/cannot lock ref|File exists/iu);
+            const looseRef = readFileSync(refPath);
+            git(root, "pack-refs", "--all");
+            expect(readFileSync(refPath)).toEqual(looseRef);
+            observedReservations = true;
+          },
+        },
+      },
+    );
+
+    expect(observedReservations).toBe(true);
+    expect(result.refreshWarning).toBeUndefined();
+    expect(git(root, "show", "HEAD:selected.txt"))
+      .toBe("reviewed three-lock commit");
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+    expect(existsSync(refLockPath)).toBe(false);
+    expect(existsSync(headLockPath)).toBe(false);
+    expect(git(root, "reflog", "show", "--format=%H", "HEAD")
+      .split("\n").filter(Boolean)).toHaveLength(headReflogCount + 1);
+    expect(git(root, "reflog", "show", "--format=%H", "refs/heads/main")
+      .split("\n").filter(Boolean)).toHaveLength(branchReflogCount + 1);
+    expect(git(root, "rev-parse", "HEAD@{1}")).toBe(originalHead);
+    expect(readFileSync(join(root, ".git", "logs", "HEAD"))).toEqual(preparedHeadReflog);
+    expect(readFileSync(join(root, ".git", "logs", "refs", "heads", "main"))).toEqual(preparedBranchReflog);
+  });
+
+  it("preserves recovery when Git wins the second transaction gap", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed HEAD gap\n");
+    const review = await captureGitCommitReview(root);
+    const originalIndex = readFileSync(join(root, ".git", "index"));
+    const refLockPath = join(root, ".git", "refs", "heads", "main.lock");
+    const journalPath = join(
+      root,
+      ".git",
+      "index.inertia-commit-transaction.json",
+    );
+    const foreignRefLock = Buffer.from("normal Git reference reservation\n");
+
+    const result = await commitReviewedChanges(
+      root,
+      "Preserve the branch acquisition winner",
+      ["selected.txt"],
+      review.fingerprint,
+      {
+        testHooks: {
+          beforeRefReservationAcquire: () => {
+            writeFileSync(refLockPath, foreignRefLock, { flag: "wx" });
+          },
+        },
+      },
+    );
+
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
+      stagePath: string;
+    };
+    expect(result.refreshWarning).toMatch(/index recovery.*manual/iu);
+    expect(readFileSync(join(root, ".git", "index"))).toEqual(originalIndex);
+    expect(readFileSync(refLockPath)).toEqual(foreignRefLock);
+    expect(existsSync(journal.stagePath)).toBe(true);
+  });
+
+  it("recovers through a native transaction after refs are packed", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed packed restart\n");
+    const staleReview = await captureGitCommitReview(root);
+    const originalHead = git(root, "rev-parse", "HEAD");
+    const headReflogCount = git(root, "reflog", "show", "--format=%H", "HEAD")
+      .split("\n").filter(Boolean).length;
+    const branchReflogCount = git(
+      root,
+      "reflog",
+      "show",
+      "--format=%H",
+      "refs/heads/main",
+    ).split("\n").filter(Boolean).length;
+    leaveRestartTransaction(root, true);
+    const preparedHeadReflog = readFileSync(join(root, ".git", "logs", "HEAD"));
+    const preparedBranchReflog = readFileSync(join(root, ".git", "logs", "refs", "heads", "main"));
+    const journalPath = join(
+      root,
+      ".git",
+      "index.inertia-commit-transaction.json",
+    );
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
+      refPath: string;
+    };
+    git(root, "pack-refs", "--all", "--prune");
+    expect(existsSync(journal.refPath)).toBe(false);
+
+    await expect(commitReviewedChanges(
+      root,
+      "Stale request after packed recovery",
+      ["selected.txt"],
+      staleReview.fingerprint,
+    )).rejects.toThrow(/no changes to review|no longer part|changed after.*reviewed/iu);
+
+    expect(git(root, "show", "HEAD:selected.txt"))
+      .toBe("reviewed packed restart");
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+    expect(existsSync(journalPath)).toBe(false);
+    expect(git(root, "reflog", "show", "--format=%H", "HEAD")
+      .split("\n").filter(Boolean)).toHaveLength(headReflogCount + 1);
+    expect(git(root, "reflog", "show", "--format=%H", "refs/heads/main")
+      .split("\n").filter(Boolean)).toHaveLength(branchReflogCount + 1);
+    expect(git(root, "rev-parse", "HEAD@{1}")).toBe(originalHead);
+    expect(readFileSync(join(root, ".git", "logs", "HEAD"))).toEqual(preparedHeadReflog);
+    expect(readFileSync(join(root, ".git", "logs", "refs", "heads", "main"))).toEqual(preparedBranchReflog);
+  });
+
+  it("packs a nested branch before the second transaction", async () => {
+    const root = repository();
+    git(root, "checkout", "-q", "-b", "nested/direct");
+    writeFileSync(join(root, "selected.txt"), "reviewed packed direct\n");
+    const review = await captureGitCommitReview(root);
+    const refPath = join(root, ".git", "refs", "heads", "nested", "direct");
+
+    const result = await commitReviewedChanges(
+      root,
+      "Install after packing the branch",
+      ["selected.txt"],
+      review.fingerprint,
+      {
+        testHooks: {
+          beforeRefReservationAcquire: () => {
+            git(root, "pack-refs", "--all", "--prune");
+            expect(existsSync(refPath)).toBe(false);
+          },
+        },
+      },
+    );
+
+    expect(git(root, "show", "HEAD:selected.txt"))
+      .toBe("reviewed packed direct");
+    expect(result.refreshWarning).toBeUndefined();
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+  });
+
+  it("accepts native locks released at the recovery cleanup boundary", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed delayed release\n");
+    const review = await captureGitCommitReview(root);
+    const headLockPath = join(root, ".git", "HEAD.lock");
+    const refLockPath = join(root, ".git", "refs", "heads", "main.lock");
+    let abortOnce = true;
+
+    const result = await commitReviewedChanges(
+      root,
+      "Wait for native lock visibility",
+      ["selected.txt"],
+      review.fingerprint,
+      {
+        testHooks: {
+          beforePrivateIndexStageRename: () => {
+            if (!abortOnce) return;
+            abortOnce = false;
+            throw new Error("Abort the first install transaction.");
+          },
+          afterSecondReferenceAbort: () => {
+            writeFileSync(headLockPath, "delayed HEAD lock\n", { flag: "wx" });
+            writeFileSync(refLockPath, "delayed ref lock\n", { flag: "wx" });
+          },
+          beforeFinalRecoveryReferenceLockObservation: () => {
+            rmSync(headLockPath, { force: true });
+            rmSync(refLockPath, { force: true });
+          },
+        },
+      },
+    );
+
+    expect(result.refreshWarning).toBeUndefined();
+    expect(git(root, "show", "HEAD:selected.txt"))
+      .toBe("reviewed delayed release");
+    expect(existsSync(headLockPath)).toBe(false);
+    expect(existsSync(refLockPath)).toBe(false);
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+  });
+
   it("preserves a colliding private stage without advancing the commit", async () => {
     const root = repository();
     writeFileSync(join(root, "selected.txt"), "reviewed stage collision\n");
@@ -207,7 +634,7 @@ describe("reviewed commit transaction recovery", () => {
     expect(readFileSync(journalPath, "utf8")).toContain(result.commit);
   });
 
-  it("recovers the exact stage after an install acknowledgement failure", async () => {
+  it("recovers the installed marker after abort acknowledgement loss", async () => {
     const root = repository();
     writeFileSync(join(root, "selected.txt"), "reviewed recovery-lock source\n");
     const review = await captureGitCommitReview(root);
@@ -225,8 +652,8 @@ describe("reviewed commit transaction recovery", () => {
       review.fingerprint,
       {
         testHooks: {
-          beforeIndexInstall: () => {
-            throw new Error("Simulated lost private-index install acknowledgement.");
+          afterSecondReferenceAbortAcknowledged: () => {
+            throw new Error("Simulated lost abort acknowledgement.");
           },
         },
       },
@@ -340,7 +767,8 @@ describe("reviewed commit transaction recovery", () => {
 
     expect(git(root, "diff", "--cached", "--name-only"))
       .toContain("other.txt");
-    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+    expect(readFileSync(join(root, ".git", "index.lock"), "utf8"))
+      .toMatch(/^inertia-reviewed-commit:index:/u);
     expect(existsSync(journal.stagePath)).toBe(true);
     expect(existsSync(journalPath)).toBe(true);
   });
@@ -415,6 +843,27 @@ describe("reviewed commit transaction recovery", () => {
       .toBe("reviewed unlink failure");
     expect(existsSync(join(root, ".git", "index.lock"))).toBe(true);
     expect(existsSync(journalPath)).toBe(true);
+
+    const foreignCommit = git(
+      root,
+      "commit-tree",
+      `${result.commit}^{tree}`,
+      "-p",
+      result.commit,
+      "-m",
+      "Legitimate later ref move",
+    );
+    git(root, "update-ref", "refs/heads/main", foreignCommit, result.commit);
+    await expect(commitReviewedChanges(
+      root,
+      "Stale request after installed-marker cleanup",
+      ["selected.txt"],
+      review.fingerprint,
+    )).rejects.toThrow();
+
+    expect(git(root, "rev-parse", "HEAD")).toBe(foreignCommit);
+    expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+    expect(existsSync(journalPath)).toBe(false);
   });
 
   it("retains the stage and journal when Windows cannot install the index", async () => {
@@ -682,7 +1131,7 @@ describe("reviewed commit transaction recovery", () => {
     expect(existsSync(join(root, ".git", "index.lock"))).toBe(true);
   });
 
-  it("rejects a ref-only move at the final restart install boundary", async () => {
+  it("blocks a ref-only move at the final restart install boundary", async () => {
     const root = repository();
     writeFileSync(join(root, "selected.txt"), "reviewed final ref binding\n");
     const staleReview = await captureGitCommitReview(root);
@@ -697,6 +1146,7 @@ describe("reviewed commit transaction recovery", () => {
       stagePath: string;
     };
     let foreignCommit: string | undefined;
+    let updateWasBlocked = false;
 
     await expect(commitReviewedChanges(
       root,
@@ -716,23 +1166,25 @@ describe("reviewed commit transaction recovery", () => {
               "-m",
               "Foreign ref-only move",
             );
-            git(
+            expect(() => git(
               root,
               "update-ref",
               "refs/heads/main",
-              foreignCommit,
+              foreignCommit!,
               current,
-            );
+            )).toThrow(/cannot lock ref|File exists/iu);
+            updateWasBlocked = true;
           },
         },
       },
-    )).rejects.toThrow(/replaced the reviewed commit reservation/iu);
+    )).rejects.toThrow();
 
     expect(foreignCommit).toBeDefined();
-    expect(git(root, "rev-parse", "HEAD")).toBe(foreignCommit);
-    expect(readFileSync(join(root, ".git", "index"))).toEqual(originalIndex);
-    expect(existsSync(journal.stagePath)).toBe(true);
-    expect(existsSync(journalPath)).toBe(true);
+    expect(updateWasBlocked).toBe(true);
+    expect(git(root, "rev-parse", "HEAD")).not.toBe(foreignCommit);
+    expect(readFileSync(join(root, ".git", "index"))).not.toEqual(originalIndex);
+    expect(existsSync(journal.stagePath)).toBe(false);
+    expect(existsSync(journalPath)).toBe(false);
   });
 
   it("commits safely when the files backend starts from a packed ref", async () => {

@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 
-import type WebSocket from "ws";
+import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -219,6 +219,75 @@ afterEach(() => {
 });
 
 describe("nested source-control command scope", () => {
+  it("uses status-issued root authority when the project is below its repository root", async () => {
+    const repository = mkdtempSync(join(tmpdir(), "inertia-project-subdir-"));
+    roots.push(repository);
+    initializeRepository(repository);
+    const workspace = join(repository, "packages", "app");
+    mkdirSync(workspace, { recursive: true });
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = { readyState: WebSocket.OPEN } as WebSocket;
+    const trackSourceControl = vi.fn(async (
+      _label: string,
+      _projectId: string,
+      _conversationId: string | undefined,
+      _cwd: string,
+      _requestId: string,
+      operation: () => Promise<unknown>,
+    ) => await operation());
+    const send = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => workspace),
+      workspaceRuns: { trackSourceControl },
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+      send,
+      broadcastSnapshot: vi.fn(),
+    } as unknown as SourceControlCommandDependencies);
+    const refreshRequestId = crypto.randomUUID();
+
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.refresh",
+      requestId: refreshRequestId,
+      payload: { projectId },
+    }))).resolves.toBe("handled");
+
+    const refreshed = send.mock.calls.find(
+      ([, event]) => event.requestId === refreshRequestId,
+    )?.[1];
+    if (
+      !refreshed
+      || refreshed.type !== "request.result"
+      || refreshed.result.kind !== "git.status"
+      || !refreshed.result.status.authorityRef
+    ) {
+      throw new Error("Expected status-issued root Git authority.");
+    }
+    const branch = `subdir-${crypto.randomUUID().slice(0, 8)}`;
+    const createRequestId = crypto.randomUUID();
+    await expect(handler(socket, clientCommandSchema.parse({
+      type: "git.branch.create",
+      requestId: createRequestId,
+      payload: {
+        projectId,
+        repositoryPath: ".",
+        authorityRef: refreshed.result.status.authorityRef,
+        name: branch,
+      },
+    }))).resolves.toBe("handled");
+
+    expect(git(repository, "branch", "--show-current")).toBe(branch);
+    expect(trackSourceControl).toHaveBeenCalledWith(
+      "Create branch",
+      projectId,
+      undefined,
+      workspace,
+      createRequestId,
+      expect.any(Function),
+    );
+  });
+
   it("commits in the selected nested repository while reserving its owning workspace", async () => {
     const { workspace, repository } = workspaceWithNestedRepository();
     writeFileSync(join(repository, "README.md"), "after\n");

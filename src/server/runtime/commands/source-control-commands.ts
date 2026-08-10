@@ -41,6 +41,7 @@ import {
 } from "../../turn-git-artifacts";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
 import {
+  isContained,
   repositoryMetadataMarkerIdentity,
   repositoryRoot,
 } from "../../git/paths";
@@ -159,11 +160,26 @@ export function createSourceControlCommandHandler(
         "Refresh repository status before changing this nested repository.",
       );
     }
-    const repository = await resolveWorkspaceGitRepositoryIdentity(
-      workspaceRoot,
-      payload.repositoryPath,
-      dependencies.secureFiles,
-    );
+    const repository = payload.repositoryPath === "."
+      ? await (async () => {
+          const canonicalWorkspace = await realpath(workspaceRoot);
+          const owningRoot = await repositoryRoot(canonicalWorkspace);
+          if (!isContained(owningRoot, canonicalWorkspace)) {
+            throw new RuntimeRequestError(
+              "The project workspace no longer belongs to its Git repository. Refresh and try again.",
+            );
+          }
+          return await resolveWorkspaceGitRepositoryIdentity(
+            owningRoot,
+            ".",
+            dependencies.secureFiles,
+          );
+        })()
+      : await resolveWorkspaceGitRepositoryIdentity(
+          workspaceRoot,
+          payload.repositoryPath,
+          dependencies.secureFiles,
+        );
     const issuedRoot = await dependencies.secureFileAuthorities.resolve(
       socket,
       payload.authorityRef,

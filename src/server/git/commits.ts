@@ -709,6 +709,7 @@ export async function commitReviewedChanges(
       beforeTransactionLock?: () => void | Promise<void>;
       duringPreparedMutation?: () => void;
       afterReferenceCommit?: () => void | Promise<void>;
+      beforeIndexInstall?: () => void | Promise<void>;
       beforePostCommitStatus?: () => void | Promise<void>;
     };
   } = {},
@@ -989,6 +990,18 @@ export async function commitReviewedChanges(
         throw new GitError(
           "conflict",
           "The checked-out branch changed after the reviewed commit. Inspect it before continuing.",
+        );
+      }
+      await options.testHooks?.beforeIndexInstall?.();
+      const installLockIdentity = await lockIdentity(lockPath);
+      if (
+        !ownedIndexLockIdentity
+        || !installLockIdentity
+        || !sameLockIdentity(ownedIndexLockIdentity, installLockIdentity)
+      ) {
+        throw new GitError(
+          "conflict",
+          "Another Git operation replaced the reviewed commit index lock. Inspect it manually before continuing.",
         );
       }
       await rename(lockPath, indexPath);

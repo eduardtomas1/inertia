@@ -281,7 +281,7 @@ process.stdin.on("data", (chunk) => {
   if (prepared && input.includes("abort\\n")) {
     setTimeout(() => {
       process.stdout.write("abort: ok\\n", () => process.exit(0));
-    }, 40);
+    }, 150);
   }
 });
 setInterval(() => {}, 1000);
@@ -305,12 +305,139 @@ setInterval(() => {}, 1000);
           },
         },
         () => {
-          while (Date.now() < deadlineAt - 10) {
+          while (Date.now() < deadlineAt - 100) {
             // Leave only enough operation time to request the clean abort.
           }
         },
       )).resolves.toBeUndefined();
       expect(abortAcknowledged).toBe(true);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("captures a synchronous prepared result before queued microtasks cross its deadline", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-sync-deadline-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "update-ref", `
+let input = "";
+let prepared = false;
+process.stdin.on("data", (chunk) => {
+  input += chunk.toString("utf8");
+  if (!prepared && input.includes("prepare\\n")) {
+    prepared = true;
+    process.stdout.write("start: ok\\nprepare: ok\\n");
+  }
+  if (prepared && input.includes("abort\\n")) {
+    process.stdout.write("abort: ok\\n", () => process.exit(0));
+  }
+});
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    let now = 10_000;
+    const deadlineAt = now + 500;
+    const dateNow = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      await expect(withPreparedGitRefReservation(
+        directory,
+        "refs/heads/main",
+        "1".repeat(40),
+        { deadlineAt, failureMessage: "Git reservation failed." },
+        () => {
+          queueMicrotask(() => {
+            now = deadlineAt;
+          });
+        },
+      )).resolves.toBeUndefined();
+    } finally {
+      dateNow.mockRestore();
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("lets a queued abort acknowledgement beat cleanup after an event-loop stall", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-abort-turn-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "update-ref", `
+let input = "";
+let prepared = false;
+process.stdin.on("data", (chunk) => {
+  input += chunk.toString("utf8");
+  if (!prepared && input.includes("prepare\\n")) {
+    prepared = true;
+    process.stdout.write("start: ok\\nprepare: ok\\n");
+  }
+  if (prepared && input.includes("abort\\n")) {
+    setTimeout(() => {
+      process.stdout.write("abort: ok\\n", () => process.exit(0));
+    }, 480);
+  }
+});
+setInterval(() => {}, 1000);
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    let stall: NodeJS.Timeout | undefined;
+    try {
+      await expect(withPreparedGitRefReservation(
+        directory,
+        "refs/heads/main",
+        "1".repeat(40),
+        {
+          deadlineAt: Date.now() + 2_000,
+          failureMessage: "Git reservation failed.",
+        },
+        () => {
+          stall = setTimeout(() => {
+            const releaseAt = Date.now() + 250;
+            while (Date.now() < releaseAt) {
+              // Queue the child's abort acknowledgement behind the due
+              // cleanup timer, reproducing the Windows timers/poll race.
+            }
+          }, 400);
+        },
+      )).resolves.toBeUndefined();
+    } finally {
+      if (stall) clearTimeout(stall);
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("terminates a Git process that acknowledges abort but does not close", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-abort-hang-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "update-ref", `
+let input = "";
+let prepared = false;
+process.stdin.on("data", (chunk) => {
+  input += chunk.toString("utf8");
+  if (!prepared && input.includes("prepare\\n")) {
+    prepared = true;
+    process.stdout.write("start: ok\\nprepare: ok\\n");
+  }
+  if (prepared && input.includes("abort\\n")) {
+    process.stdout.write("abort: ok\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    try {
+      await expect(withPreparedGitRefReservation(
+        directory,
+        "refs/heads/main",
+        "1".repeat(40),
+        { failureMessage: "Git reservation failed." },
+        () => undefined,
+      )).rejects.toMatchObject({ code: "operation-failed" });
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;

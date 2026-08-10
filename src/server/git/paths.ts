@@ -190,10 +190,21 @@ export async function repositoryMetadataMarkerIdentity(
       );
     }
   };
-  const [gitDirectory, commonDirectory] = await Promise.all([
+  const [gitDirectoryResult, commonDirectoryResult] = await Promise.allSettled([
     directoryIdentity("--git-dir"),
     directoryIdentity("--git-common-dir"),
   ]);
+  // Both inspections own Git children. Await both settlements even when one
+  // marker probe fails so no sibling process retains a Windows cwd handle
+  // after this identity inspection rejects.
+  if (gitDirectoryResult.status === "rejected") {
+    throw gitDirectoryResult.reason;
+  }
+  if (commonDirectoryResult.status === "rejected") {
+    throw commonDirectoryResult.reason;
+  }
+  const gitDirectory = gitDirectoryResult.value;
+  const commonDirectory = commonDirectoryResult.value;
   return ["git-dir", gitDirectory, "git-common-dir", commonDirectory].join("\0");
 }
 

@@ -370,6 +370,7 @@ function runPreparedGitRefTransaction(
     let finishing = false;
     let abortRequested = false;
     let abortCleanupTimer: NodeJS.Timeout | undefined;
+    let abortCleanupFinalizer: NodeJS.Immediate | undefined;
     const callbackAbort = new AbortController();
     const preparedContext: PreparedGitRefUpdateContext = {
       signal: callbackAbort.signal,
@@ -399,6 +400,7 @@ function runPreparedGitRefTransaction(
       finishing = true;
       clearTimeout(timer);
       if (abortCleanupTimer) clearTimeout(abortCleanupTimer);
+      if (abortCleanupFinalizer) clearImmediate(abortCleanupFinalizer);
       callbackAbort.abort();
       settled = true;
       if (error) reject(error);
@@ -430,14 +432,37 @@ function runPreparedGitRefTransaction(
       abortRequested = true;
       callbackAbort.abort();
       child.stdin.end("abort\n");
-      abortCleanupTimer = setTimeout(() => terminate(
-        callbackError instanceof GitError
-          ? callbackError
-          : new GitError(
-              "operation-failed",
-              "Git did not acknowledge the aborted reference transaction.",
-            ),
-      ), PREPARED_ABORT_CLEANUP_MS);
+      abortCleanupTimer = setTimeout(() => {
+        abortCleanupTimer = undefined;
+        // A native abort acknowledgement and close can already be queued in
+        // the poll phase when this timer becomes due. Give that I/O exactly
+        // one turn to settle before forcing the owned tree; this is not a new
+        // time window and never re-enables the expired mutation context.
+        abortCleanupFinalizer = setImmediate(() => {
+          abortCleanupFinalizer = undefined;
+          if (settled || finishing) return;
+          // ChildProcess close callbacks run after the check phase. Install
+          // the force decision for the next check so an already-queued close
+          // can authoritatively settle and cancel it in between. A live child
+          // receives no extra millisecond grace and reaches this next check.
+          abortCleanupFinalizer = setImmediate(() => {
+            abortCleanupFinalizer = undefined;
+            if (settled || finishing) return;
+            terminate(
+              callbackError instanceof GitError
+                ? callbackError
+                : new GitError(
+                    "operation-failed",
+                    aborted
+                      ? "Git did not close after acknowledging the aborted reference transaction."
+                      : "Git did not acknowledge the aborted reference transaction.",
+                  ),
+            );
+          });
+          abortCleanupFinalizer.unref();
+        });
+        abortCleanupFinalizer.unref();
+      }, PREPARED_ABORT_CLEANUP_MS);
       abortCleanupTimer.unref();
     };
     const timer = setTimeout(() => {
@@ -465,26 +490,36 @@ function runPreparedGitRefTransaction(
       const text = Buffer.concat(stdout).toString("utf8");
       if (!prepared && /(?:^|\r?\n)prepare: ok\r?\n/u.test(text)) {
         prepared = true;
-        void Promise.resolve()
-          .then(() => onPrepared(preparedContext))
-          .then(
-            () => {
-              try {
-                preparedContext.assertActive();
-              } catch (error) {
-                callbackError = error;
-                requestAbort();
-                return;
-              }
-              callbackAbort.abort();
-              if (options.completion === "abort") requestAbort();
-              else child.stdin.end("commit\n");
-            },
-            (error: unknown) => {
-              callbackError = error;
-              requestAbort();
-            },
-          );
+        const failPrepared = (error: unknown): void => {
+          callbackError = error;
+          requestAbort();
+        };
+        const completePrepared = (): void => {
+          try {
+            preparedContext.assertActive();
+          } catch (error) {
+            failPrepared(error);
+            return;
+          }
+          callbackAbort.abort();
+          if (options.completion === "abort") requestAbort();
+          else child.stdin.end("commit\n");
+        };
+        try {
+          const callbackResult = onPrepared(preparedContext);
+          if (callbackResult === undefined) {
+            // A synchronous prepared mutation is active at its exact return;
+            // do not let a later promise microtask manufacture a timeout.
+            completePrepared();
+          } else {
+            void Promise.resolve(callbackResult).then(
+              completePrepared,
+              failPrepared,
+            );
+          }
+        } catch (error) {
+          failPrepared(error);
+        }
       }
       if (/(?:^|\r?\n)commit: ok\r?\n/u.test(text)) committed = true;
       if (/(?:^|\r?\n)abort: ok\r?\n/u.test(text)) aborted = true;

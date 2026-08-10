@@ -248,7 +248,8 @@ describe("conversation isolated-worktree source identity", () => {
     });
     const retainedPath = updateConversation.mock.lastCall?.[1]?.worktreePath;
     expect(typeof retainedPath).toBe("string");
-    expect(realpathSync(retainedPath as string)).toBe(realpathSync(target));
+    expect(realpathSync.native(retainedPath as string))
+      .toBe(realpathSync.native(target));
     expect(existsSync(target)).toBe(true);
     expect(git(
       fixture.source,

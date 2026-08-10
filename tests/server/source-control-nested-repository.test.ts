@@ -430,7 +430,7 @@ describe("nested source-control command scope", () => {
       expect.any(Function),
       expect.objectContaining({
         recoverReviewedCommit: true,
-        serializationRoot: realpathSync(repository),
+        serializationRoot: realpathSync.native(repository),
         verifyRepositoryIdentity: expect.any(Function),
       }),
     );
@@ -510,19 +510,23 @@ describe("nested source-control command scope", () => {
       expect.any(Function),
       {
         recoverReviewedCommit: false,
-        serializationRoot: realpathSync(repository),
+        serializationRoot: realpathSync.native(repository),
       },
     );
     expect(git(repository, "log", "-1", "--pretty=%s")).toBe(
       "Commit nested change",
     );
     expect(git(repository, "status", "--porcelain")).toBe("");
-    expect(broker.authorizeRoot).toHaveBeenCalledWith(realpathSync(repository));
+    expect(broker.authorizeRoot)
+      .toHaveBeenCalledWith(realpathSync.native(repository));
     expect(broker.verifyRoot).toHaveBeenCalledTimes(13);
     expect(vi.mocked(broker.verifyRoot).mock.calls.map(
-      ([root]) => realpathSync(root.root),
+      ([root]) => realpathSync.native(root.root),
     ))
-      .toEqual(Array.from({ length: 13 }, () => realpathSync(repository)));
+      .toEqual(Array.from(
+        { length: 13 },
+        () => realpathSync.native(repository),
+      ));
     expect(send).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

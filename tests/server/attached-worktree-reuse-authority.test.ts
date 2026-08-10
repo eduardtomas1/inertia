@@ -7,7 +7,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,6 +26,7 @@ import {
 } from "../../src/server/runtime/commands/conversation-commands";
 import { DuoLaunchCoordinator } from "../../src/server/runtime/duo/duo-launch-coordinator";
 import type { TurnController } from "../../src/server/runtime/turns/turn-controller";
+import { removeTemporaryDirectory } from "../helpers/temporary-directory";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const temporaryDirectories: string[] = [];
@@ -107,22 +108,153 @@ function replaceWorktree(
   writeFileSync(fixture.sentinel, "untouched");
 }
 
-function selection() {
+function selection(modelId = "gpt-test") {
   return modelSelectionSchema.parse(nativeModelSelection({
     providerId: "codex",
-    modelId: "gpt-test",
-    alias: "GPT Test",
+    modelId,
+    alias: modelId,
     reasoningEffort: "high",
   }));
 }
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(
-    async (directory) => await rm(directory, { recursive: true, force: true }),
+    removeTemporaryDirectory,
   ));
 });
 
 describe("attached worktree reuse authority", () => {
+  it("waits for every side and comparison preflight before rejecting", async () => {
+    let announceSideEntered!: () => void;
+    let announceComparisonEntered!: () => void;
+    let announceFirstFailure!: () => void;
+    let announceSideFinished!: () => void;
+    let announceComparisonFinished!: () => void;
+    let releaseSide!: () => void;
+    let releaseComparison!: () => void;
+    const sideEntered = new Promise<void>((resolve) => {
+      announceSideEntered = resolve;
+    });
+    const comparisonEntered = new Promise<void>((resolve) => {
+      announceComparisonEntered = resolve;
+    });
+    const firstFailure = new Promise<void>((resolve) => {
+      announceFirstFailure = resolve;
+    });
+    const sideFinished = new Promise<void>((resolve) => {
+      announceSideFinished = resolve;
+    });
+    const comparisonFinished = new Promise<void>((resolve) => {
+      announceComparisonFinished = resolve;
+    });
+    const sideGate = new Promise<void>((resolve) => {
+      releaseSide = resolve;
+    });
+    const comparisonGate = new Promise<void>((resolve) => {
+      releaseComparison = resolve;
+    });
+    const fixture = await reuseFixture();
+    let retrying = false;
+    let readinessCalls = 0;
+    const launches = new DuoLaunchCoordinator(
+      fixture.store,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {
+        validateSelection: (value: unknown) => value,
+        readiness: async (value: { modelId: string }) => {
+          readinessCalls += 1;
+          if (retrying) {
+            return { ready: false, message: "retry preflight reached" };
+          }
+          if (value.modelId === "gated-side") {
+            announceSideEntered();
+            await sideGate;
+            announceSideFinished();
+            return { ready: false, message: "gated side rejected" };
+          }
+          if (value.modelId === "gated-comparison") {
+            announceComparisonEntered();
+            await comparisonGate;
+            announceComparisonFinished();
+            return { ready: false, message: "gated comparison rejected" };
+          }
+          await Promise.all([sideEntered, comparisonEntered]);
+          announceFirstFailure();
+          return { ready: false, message: "first preflight rejected" };
+        },
+      } as never,
+      {} as TurnController,
+      fixture.dataDirectory,
+      () => [{ id: "codex", canRun: true }] as never,
+    );
+    const payload: Parameters<DuoLaunchCoordinator["prepare"]>[0] = {
+      launchId: randomUUID(),
+      prompt: "Settle every preflight before rejecting.",
+      sides: [
+        {
+          projectId: fixture.projectId,
+          title: "First failure",
+          modelSelection: selection("first-failure"),
+          interactionMode: "plan",
+          accessMode: "supervised",
+          activate: false,
+          useWorktree: false,
+        },
+        {
+          projectId: fixture.projectId,
+          title: "Gated side",
+          modelSelection: selection("gated-side"),
+          interactionMode: "build",
+          accessMode: "full",
+          activate: false,
+          useWorktree: false,
+        },
+      ],
+      comparison: {
+        projectId: fixture.projectId,
+        title: "Gated comparison",
+        modelSelection: selection("gated-comparison"),
+        interactionMode: "plan",
+        accessMode: "supervised",
+        activate: false,
+      },
+    };
+    let preparationSettled = false;
+    const preparation = launches.prepare(payload);
+    void preparation.then(
+      () => { preparationSettled = true; },
+      () => { preparationSettled = true; },
+    );
+
+    try {
+      await firstFailure;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(preparationSettled).toBe(false);
+      releaseComparison();
+      await comparisonFinished;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(preparationSettled).toBe(false);
+      releaseSide();
+      await sideFinished;
+
+      await expect(preparation).rejects.toThrow("first preflight rejected");
+      expect(fixture.store.findPairedLaunch(payload.launchId)).toBeNull();
+      expect(fixture.store.shellSnapshot().conversations).toHaveLength(1);
+      const firstAttemptCalls = readinessCalls;
+      retrying = true;
+      await expect(launches.prepare(payload)).rejects.toThrow(
+        "retry preflight reached",
+      );
+      expect(readinessCalls).toBe(firstAttemptCalls + 3);
+      expect(() => fixture.store.removeProject(fixture.projectId)).not.toThrow();
+    } finally {
+      releaseComparison();
+      releaseSide();
+      await preparation.catch(() => undefined);
+      fixture.store.close();
+    }
+  });
+
   it.each(["directory", "symlink"] as const)(
     "rejects a %s replacement through conversation.create",
     async (replacement) => {

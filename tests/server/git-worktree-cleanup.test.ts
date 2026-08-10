@@ -82,6 +82,14 @@ function expectSamePath(actual: string, expected: string): void {
   });
 }
 
+function expectWorktreeRegistered(root: string, path: string): void {
+  const registeredPaths = git(root, "worktree", "list", "--porcelain")
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => realpathSync.native(line.slice("worktree ".length)));
+  expect(registeredPaths).toContain(realpathSync.native(path));
+}
+
 function linuxBirthtimeProbe(
   mode:
     | "valid"
@@ -409,6 +417,24 @@ describe("launch-owned Git cleanup", () => {
     )).rejects.toMatchObject({ code: "not-found" });
   });
 
+  it("matches a registered worktree through an alternate native path spelling", async () => {
+    const root = repository();
+    const path = ownedPath(root, "aliased registered path");
+    await createWorktree(root, path, {
+      branch: "inertia/aliased-registered",
+      createBranch: true,
+      startPoint: "main",
+    });
+    const aliasParent = join(root, "worktree parent alias");
+    symlinkSync(
+      dirname(path),
+      aliasParent,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    expectWorktreeRegistered(root, join(aliasParent, basename(path)));
+  });
+
   it("confirms unacknowledged creation absent only after both artifacts are gone", async () => {
     const root = repository();
     const path = ownedPath(root, "unacknowledged creation path");
@@ -480,7 +506,7 @@ describe("launch-owned Git cleanup", () => {
       ownership.filesystemReceipt,
     )).resolves.toBe("retained");
     expect(readFileSync(sentinel, "utf8")).toBe("valuable owned data\n");
-    expect(git(root, "worktree", "list", "--porcelain")).toContain(path);
+    expectWorktreeRegistered(root, path);
   });
 
   it("retains a moved registered worktree and reports the receipt conflict", async () => {
@@ -504,7 +530,7 @@ describe("launch-owned Git cleanup", () => {
       ownership.filesystemReceipt,
     )).resolves.toBe("conflict");
     expect(readFileSync(sentinel, "utf8")).toBe("valuable moved data\n");
-    expect(git(root, "worktree", "list", "--porcelain")).toContain(movedPath);
+    expectWorktreeRegistered(root, movedPath);
   });
 
   it("retains a registered worktree switched to another branch", async () => {
@@ -558,7 +584,7 @@ describe("launch-owned Git cleanup", () => {
         ownership.filesystemReceipt,
       )).resolves.toBe("conflict");
       expect(readFileSync(sentinel, "utf8")).toBe(`valuable ${state} data\n`);
-      expect(git(root, "worktree", "list", "--porcelain")).toContain(path);
+      expectWorktreeRegistered(root, path);
     },
   );
 
@@ -592,7 +618,7 @@ describe("launch-owned Git cleanup", () => {
     )).resolves.toBe("conflict");
     expect(swapped).toBe(true);
     expect(readFileSync(sentinel, "utf8")).toBe("valuable replacement data\n");
-    expect(git(root, "worktree", "list", "--porcelain")).toContain(path);
+    expectWorktreeRegistered(root, path);
   });
 
   it("never removes a replacement installed after final validation", async () => {
@@ -626,7 +652,7 @@ describe("launch-owned Git cleanup", () => {
     expect(swapped).toBe(true);
     expect(readFileSync(sentinel, "utf8"))
       .toBe("valuable final replacement data\n");
-    expect(git(root, "worktree", "list", "--porcelain")).toContain(path);
+    expectWorktreeRegistered(root, path);
   });
 
   it("treats an absent exact branch as absent while preserving descendants", async () => {

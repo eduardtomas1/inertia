@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -96,6 +97,20 @@ function expectOwnedReceipt(
   } finally {
     database.close();
   }
+}
+
+function expectWorktreeRegistered(
+  repositoryPath: string,
+  worktreePath: string,
+): void {
+  const registeredPaths = execFileSync(
+    "git",
+    ["worktree", "list", "--porcelain"],
+    { cwd: repositoryPath, encoding: "utf8" },
+  ).split(/\r?\n/u)
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => realpathSync.native(line.slice("worktree ".length)));
+  expect(registeredPaths).toContain(realpathSync.native(worktreePath));
 }
 
 describe("ordinary conversation worktree ownership", () => {
@@ -455,11 +470,7 @@ describe("ordinary conversation worktree ownership", () => {
       expect(store.snapshot().projects.some(({ id }) => id === externalProject.id))
         .toBe(false);
       expect(existsSync(externalSentinel)).toBe(true);
-      expect(execFileSync(
-        "git",
-        ["worktree", "list", "--porcelain"],
-        { cwd: workspace, encoding: "utf8" },
-      )).toContain(externalPath);
+      expectWorktreeRegistered(workspace, externalPath);
     } finally {
       store.close();
     }
@@ -641,11 +652,7 @@ describe("ordinary conversation worktree ownership", () => {
         event.type === "request.ok" && event.requestId === requestId,
     )).toMatchObject({ type: "request.ok" });
     expect(existsSync(sentinel)).toBe(true);
-    expect(execFileSync(
-      "git",
-      ["worktree", "list", "--porcelain"],
-      { cwd: workspace, encoding: "utf8" },
-    )).toContain(externalPath);
+    expectWorktreeRegistered(workspace, externalPath);
     client.socket.close();
   });
 
@@ -749,11 +756,7 @@ describe("ordinary conversation worktree ownership", () => {
     });
     expect(existsSync(sentinel)).toBe(true);
     expectOwnedReceipt(join(data, "inertia.sqlite"), retained.id, "creating");
-    expect(execFileSync(
-      "git",
-      ["worktree", "list", "--porcelain"],
-      { cwd: workspace, encoding: "utf8" },
-    )).toContain(retainedPath);
+    expectWorktreeRegistered(workspace, retainedPath);
     execFileSync(
       "git",
       ["worktree", "remove", "--force", "--", retainedPath],

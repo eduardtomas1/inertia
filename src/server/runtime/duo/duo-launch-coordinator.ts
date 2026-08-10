@@ -527,15 +527,40 @@ export class DuoLaunchCoordinator {
   private async prepareFresh(
     payload: DuoPreparePayload,
   ): Promise<PreparedDuoLaunch> {
-    const [sides, comparison] = await Promise.all([
-      Promise.all([
-        this.preflightSide(payload.sides[0], 0),
-        this.preflightSide(payload.sides[1], 1),
-      ]),
-      payload.comparison
+    // Preflights can own Git or provider resources, so a sibling failure must
+    // not return to callers until every concurrent preflight has settled.
+    let firstFailure: PromiseRejectedResult | null = null;
+    const observeFailure = async <T>(preflight: Promise<T>): Promise<T> => {
+      try {
+        return await preflight;
+      } catch (reason) {
+        firstFailure ??= { status: "rejected", reason };
+        throw reason;
+      }
+    };
+    const [firstSide, secondSide, comparisonResult] = await Promise.allSettled([
+      observeFailure(this.preflightSide(payload.sides[0], 0)),
+      observeFailure(this.preflightSide(payload.sides[1], 1)),
+      observeFailure(payload.comparison
         ? this.preflightComparison(payload.comparison)
-        : Promise.resolve(null),
-    ]);
+        : Promise.resolve(null)),
+    ] as const);
+    const rejected = [firstSide, secondSide, comparisonResult].find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (rejected) throw (firstFailure ?? rejected).reason;
+    if (
+      firstSide.status !== "fulfilled"
+      || secondSide.status !== "fulfilled"
+      || comparisonResult.status !== "fulfilled"
+    ) {
+      throw new Error("Duo preflight settlement was incomplete.");
+    }
+    const sides: [PreflightSide, PreflightSide] = [
+      firstSide.value,
+      secondSide.value,
+    ];
+    const comparison = comparisonResult.value;
     const prepareReserved = async (): Promise<PreparedDuoLaunch> => {
       const now = new Date().toISOString();
       this.store.createPairedLaunch(payload.launchId, [

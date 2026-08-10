@@ -1,4 +1,4 @@
-import type { Conversation, WorkspaceRun } from "@shared/contracts";
+import type { Conversation, ProviderId, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
 
 export type ActivityWaitingKind = "approval" | "input" | "generic";
@@ -15,7 +15,7 @@ export interface ActivityRunActions {
   failureDetails: boolean;
 }
 
-export type ActivityRunSectionId = "attention" | "active" | "recent";
+export type ActivityRunSectionId = "recent" | "yesterday" | "earlier";
 
 export interface ActivityRunSection {
   id: ActivityRunSectionId;
@@ -42,8 +42,49 @@ export interface ActivityRunPresentation {
 
 const VISIBLE_AGENT_OPERATIONS = 3;
 
-function compareStartedAtDescending(a: WorkspaceRun, b: WorkspaceRun): number {
-  return b.startedAt.localeCompare(a.startedAt);
+const CANONICAL_PROVIDER_LABELS: ReadonlyArray<readonly [ProviderId, string]> = [
+  ["codex", "Codex"],
+  ["claude", "Claude"],
+  ["cursor", "Cursor"],
+  ["opencode", "OpenCode"],
+];
+
+function providerIdFromCanonicalProjection(value: string | null): ProviderId | null {
+  if (!value) return null;
+  const normalized = value.trim();
+  for (const [providerId, label] of CANONICAL_PROVIDER_LABELS) {
+    if (normalized === label || normalized.startsWith(`${label} · `)) {
+      return providerId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Workspace runs do not persist a provider column. Attribute only the two
+ * producer-owned projections whose canonical prefix is captured when work is
+ * created. Never infer historical identity from the mutable conversation
+ * route.
+ */
+export function activityRunProviderId(run: WorkspaceRun): ProviderId | null {
+  if (run.kind === "agent") {
+    return providerIdFromCanonicalProjection(run.label);
+  }
+  if (
+    (run.kind === "check" || run.kind === "service")
+    && run.actionId === null
+  ) {
+    return providerIdFromCanonicalProjection(run.detail);
+  }
+  return null;
+}
+
+function runActivityAt(run: WorkspaceRun): string {
+  return run.finishedAt ?? run.startedAt;
+}
+
+function compareActivityAtDescending(a: WorkspaceRun, b: WorkspaceRun): number {
+  return runActivityAt(b).localeCompare(runActivityAt(a));
 }
 
 function compareStartedAtAscending(a: WorkspaceRun, b: WorkspaceRun): number {
@@ -54,24 +95,63 @@ export function activityRunNeedsAttention(run: WorkspaceRun, _now = Date.now()):
   return workspaceRunAttentionView(run).needsAttention;
 }
 
-function sectionsForRuns(runs: readonly WorkspaceRun[]): ActivityRunSection[] {
+function calendarDayOffset(value: string, now: number): number {
+  const date = new Date(value);
+  const current = new Date(now);
+  if (!Number.isFinite(date.getTime()) || !Number.isFinite(current.getTime())) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const dateDay = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  ).getTime();
+  const currentDay = new Date(
+    current.getFullYear(),
+    current.getMonth(),
+    current.getDate(),
+  ).getTime();
+  return Math.round((currentDay - dateDay) / 86_400_000);
+}
+
+function sectionsForRuns(
+  runs: readonly WorkspaceRun[],
+  now: number,
+): ActivityRunSection[] {
   const attention = runs
     .filter((run) => workspaceRunAttentionView(run).bucket === "attention")
-    .sort((a, b) => {
-      const waitingFirst = Number(b.status === "waiting") - Number(a.status === "waiting");
-      return waitingFirst || compareStartedAtDescending(a, b);
-    });
+    .sort(compareActivityAtDescending);
   const active = runs
     .filter((run) => workspaceRunAttentionView(run).bucket === "active")
-    .sort(compareStartedAtDescending);
+    .sort(compareActivityAtDescending);
   const recent = runs
     .filter((run) => workspaceRunAttentionView(run).bucket === "recent")
-    .sort(compareStartedAtDescending);
+    .sort(compareActivityAtDescending)
+    .slice(0, 12);
+
+  const visible = new Map<string, WorkspaceRun>();
+  for (const run of [...attention, ...active, ...recent]) visible.set(run.id, run);
+  const chronological = [...visible.values()].sort(compareActivityAtDescending);
 
   const sections: ActivityRunSection[] = [
-    { id: "attention", label: "Needs attention", runs: attention },
-    { id: "active", label: "In progress", runs: active },
-    { id: "recent", label: "Recent", runs: recent.slice(0, 12) },
+    {
+      id: "recent",
+      label: "Recent",
+      runs: chronological.filter((run) =>
+        calendarDayOffset(runActivityAt(run), now) <= 0),
+    },
+    {
+      id: "yesterday",
+      label: "Yesterday",
+      runs: chronological.filter((run) =>
+        calendarDayOffset(runActivityAt(run), now) === 1),
+    },
+    {
+      id: "earlier",
+      label: "Earlier",
+      runs: chronological.filter((run) =>
+        calendarDayOffset(runActivityAt(run), now) > 1),
+    },
   ];
   return sections.filter(({ runs: sectionRuns }) => sectionRuns.length > 0);
 }
@@ -123,11 +203,11 @@ function operationGroup(operations: WorkspaceRun[]): ActivityRunOperationGroup {
  */
 export function activityRunPresentation(
   runs: readonly WorkspaceRun[],
-  _now = Date.now(),
+  now = Date.now(),
 ): ActivityRunPresentation {
   const agentRuns = runs
     .filter(({ kind }) => kind === "agent")
-    .sort(compareStartedAtDescending);
+    .sort(compareActivityAtDescending);
   const groupedIds = new Set<string>();
   const grouped = new Map<string, WorkspaceRun[]>();
 
@@ -142,7 +222,7 @@ export function activityRunPresentation(
 
   const primaryRuns = runs.filter(({ id }) => !groupedIds.has(id));
   return {
-    sections: sectionsForRuns(primaryRuns),
+    sections: sectionsForRuns(primaryRuns, now),
     operationsByAgentRun: new Map(
       [...grouped].map(([runId, operations]) => [
         runId,
@@ -203,8 +283,7 @@ export function activityStatusLabel(
   now: number,
   waitingKind: ActivityWaitingKind | null,
 ): string {
-  const end = run.finishedAt ? Date.parse(run.finishedAt) : now;
-  const seconds = Math.max(0, Math.floor((end - Date.parse(run.startedAt)) / 1_000));
+  const seconds = Math.max(0, Math.floor((now - Date.parse(run.startedAt)) / 1_000));
   const elapsed = seconds < 60
     ? `${seconds}s`
     : seconds < 3_600
@@ -219,7 +298,24 @@ export function activityStatusLabel(
         : "Waiting";
     return `${reason} · ${elapsed}`;
   }
-  if (run.status === "succeeded") return `Completed · ${elapsed}`;
-  if (run.status === "cancelled") return `Stopped · ${elapsed}`;
-  return `Failed · ${elapsed}`;
+  const occurredAt = Date.parse(run.finishedAt ?? run.startedAt);
+  const ageSeconds = Number.isFinite(occurredAt)
+    ? Math.max(0, Math.floor((now - occurredAt) / 1_000))
+    : 0;
+  const age = ageSeconds < 5
+    ? "now"
+    : ageSeconds < 60
+      ? `${ageSeconds}s ago`
+      : ageSeconds < 3_600
+        ? `${Math.floor(ageSeconds / 60)}m ago`
+        : ageSeconds < 86_400
+          ? `${Math.floor(ageSeconds / 3_600)}h ago`
+          : ageSeconds < 2_592_000
+            ? `${Math.floor(ageSeconds / 86_400)}d ago`
+            : ageSeconds < 31_536_000
+              ? `${Math.floor(ageSeconds / 2_592_000)}mo ago`
+              : `${Math.floor(ageSeconds / 31_536_000)}y ago`;
+  if (run.status === "succeeded") return `Completed · ${age}`;
+  if (run.status === "cancelled") return `Stopped · ${age}`;
+  return `Failed · ${age}`;
 }

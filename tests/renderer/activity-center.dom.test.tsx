@@ -71,6 +71,125 @@ function run(overrides: Partial<WorkspaceRun>): WorkspaceRun {
 }
 
 describe("ActivityCenter agent operation disclosure", () => {
+  it("uses the immutable run projection for provider icon and compact metadata", () => {
+    render(
+      <ActivityCenter
+        open
+        now={Date.parse("2026-07-28T08:00:10.000Z")}
+        runs={[run({})]}
+        projects={[project]}
+        conversations={[conversation]}
+        providerIdentityLabels={{ codex: "OpenAI" }}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+        onOpenLocation={vi.fn()}
+        onOpenTerminal={vi.fn()}
+        onOpenPreview={vi.fn()}
+        onStop={vi.fn()}
+        onRerun={vi.fn()}
+        onMarkSeen={vi.fn()}
+        onAcknowledge={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByText("Quota and activity").closest("article");
+    expect(row).not.toBeNull();
+    expect(row?.querySelector('[data-provider-id="codex"]')).not.toBeNull();
+    expect(row).toHaveTextContent("OpenAI");
+    expect(row).toHaveTextContent("Inertia");
+    expect(row).toHaveTextContent("main");
+    expect(row).toHaveTextContent("Running · 10s");
+  });
+
+  it("keeps historical provider identity after route changes or conversation deletion", () => {
+    const historicalRun = run({
+      status: "succeeded",
+      canStop: false,
+      finishedAt: "2026-07-28T08:00:05.000Z",
+    });
+    const switchedConversation: Conversation = {
+      ...conversation,
+      providerId: "claude",
+      modelSelection: nativeModelSelection({ providerId: "claude" }),
+    };
+    const props = {
+      open: true,
+      now: Date.parse("2026-07-28T08:01:05.000Z"),
+      runs: [historicalRun],
+      projects: [project],
+      providerIdentityLabels: { codex: "OpenAI", claude: "Anthropic" },
+      onClose: vi.fn(),
+      onOpenThread: vi.fn(),
+      onOpenLocation: vi.fn(),
+      onOpenTerminal: vi.fn(),
+      onOpenPreview: vi.fn(),
+      onStop: vi.fn(),
+      onRerun: vi.fn(),
+      onMarkSeen: vi.fn(),
+      onAcknowledge: vi.fn(),
+      onDismiss: vi.fn(),
+    };
+    const view = render(
+      <ActivityCenter {...props} conversations={[switchedConversation]} />,
+    );
+
+    let row = screen.getByText("Quota and activity").closest("article");
+    expect(row?.querySelector('[data-provider-id="codex"]')).not.toBeNull();
+    expect(row?.querySelector('[data-provider-id="claude"]')).toBeNull();
+    expect(row).toHaveTextContent("OpenAI");
+    expect(row).not.toHaveTextContent("Anthropic");
+    expect(row?.querySelector("time")).toHaveAttribute(
+      "datetime",
+      historicalRun.finishedAt,
+    );
+    expect(row).toHaveTextContent("Completed · 1m ago");
+
+    view.rerender(<ActivityCenter {...props} conversations={[]} />);
+    row = screen.getByText("Quota and activity").closest("article");
+    expect(row?.querySelector('[data-provider-id="codex"]')).not.toBeNull();
+    expect(row).toHaveTextContent("OpenAI");
+  });
+
+  it("moves unchanged completed work to Yesterday across local midnight", async () => {
+    vi.useFakeTimers();
+    const beforeMidnight = new Date(2026, 6, 28, 23, 59, 59, 500);
+    vi.setSystemTime(beforeMidnight);
+    const view = render(
+      <ActivityCenter
+        open
+        runs={[run({
+          status: "succeeded",
+          canStop: false,
+          startedAt: new Date(2026, 6, 28, 23, 59, 45).toISOString(),
+          finishedAt: new Date(2026, 6, 28, 23, 59, 50).toISOString(),
+        })]}
+        projects={[project]}
+        conversations={[conversation]}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+        onOpenLocation={vi.fn()}
+        onOpenTerminal={vi.fn()}
+        onOpenPreview={vi.fn()}
+        onStop={vi.fn()}
+        onRerun={vi.fn()}
+        onMarkSeen={vi.fn()}
+        onAcknowledge={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Recent" })).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(screen.getByRole("heading", { name: "Yesterday" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Recent" })).not.toBeInTheDocument();
+
+    view.unmount();
+    vi.useRealTimers();
+  });
+
   it("owns its elapsed clock only while the activity center is visible", async () => {
     vi.useFakeTimers();
     vi.setSystemTime("2026-07-28T08:00:10.000Z");

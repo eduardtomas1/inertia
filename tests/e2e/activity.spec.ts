@@ -71,6 +71,141 @@ test("opens and dismisses the prioritized Runs surface accessibly", async () => 
   expect(rendererErrors).toEqual([]);
 });
 
+test("presents chronological activity with provider, project, and branch identity", async ({ browserName: _browserName }, testInfo) => {
+  await resizeWindow(1440, 920);
+  const databasePath = join(testDirectory, "data", "inertia.sqlite");
+  const store = new RuntimeStore(databasePath, workspaceDirectory, {
+    recoverInterruptedRuns: false,
+  });
+  let snapshot = store.shellSnapshot();
+  const project = snapshot.projects.find(
+    ({ id }) => id === snapshot.activeProjectId,
+  ) ?? snapshot.projects[0] ?? store.createProject("Inertia", workspaceDirectory);
+  snapshot = store.shellSnapshot();
+  const conversation = store.createConversation(
+    project.id,
+    "Review provider activity",
+  );
+  store.updateConversation(conversation.id, { branch: "codex/activity-list" });
+  store.close();
+
+  const recent = new Date();
+  const yesterday = new Date(recent);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const earlier = new Date(recent);
+  earlier.setDate(earlier.getDate() - 3);
+  const database = new Database(databasePath);
+  const insertRun = database.prepare(`
+    INSERT INTO workspace_runs (
+      id, kind, project_id, conversation_id, action_id, label, detail,
+      status, attention_state, port, started_at, finished_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'succeeded', 'acknowledged', NULL, ?, ?)
+  `);
+  insertRun.run(
+    randomUUID(),
+    "agent",
+    project.id,
+    conversation.id,
+    null,
+    "Codex · GPT-5",
+    conversation.title,
+    new Date(recent.getTime() - 5_000).toISOString(),
+    recent.toISOString(),
+  );
+  insertRun.run(
+    randomUUID(),
+    "check",
+    project.id,
+    conversation.id,
+    "typecheck",
+    "Typecheck workspace",
+    "npm run typecheck",
+    new Date(yesterday.getTime() - 5_000).toISOString(),
+    yesterday.toISOString(),
+  );
+  insertRun.run(
+    randomUUID(),
+    "source-control",
+    project.id,
+    conversation.id,
+    null,
+    "Publish reviewed branch",
+    "Push completed",
+    new Date(earlier.getTime() - 5_000).toISOString(),
+    earlier.toISOString(),
+  );
+  database.close();
+
+  await page.reload();
+  await page.getByRole("button", { name: /^Open runs/u }).click();
+  const center = page.getByRole("dialog", { name: "Runs" });
+  await expect(center.getByRole("heading", { name: "Recent" })).toBeVisible();
+  await expect(center.getByRole("heading", { name: "Yesterday" })).toBeVisible();
+  await expect(center.getByRole("heading", { name: "Earlier" })).toBeVisible();
+  const providerIcon = center.locator('[data-provider-id="codex"]').first();
+  const providerRun = providerIcon.locator("..").locator("..");
+  await expect(providerIcon).toBeVisible();
+  await expect(providerRun).toContainText("Codex");
+  await expect(providerRun).toContainText("Inertia");
+  await expect(providerRun).toContainText("codex/activity-list");
+  await expectNoViewportOverflow();
+
+  const screenshotPath = testInfo.outputPath("activity-list-wide.png");
+  await page.screenshot({ animations: "disabled", path: screenshotPath });
+  await testInfo.attach("activity-list-wide", {
+    path: screenshotPath,
+    contentType: "image/png",
+  });
+
+  const panelWidth = await center.evaluate((panel) => panel.getBoundingClientRect().width);
+  expect(panelWidth).toBeGreaterThanOrEqual(400);
+  expect(panelWidth).toBeLessThanOrEqual(421);
+  const narrowProviderRun = center.locator(
+    '.activity-run:has([data-provider-id="codex"])',
+  );
+  await expect(narrowProviderRun.locator(".activity-run-provider-meta")).toBeVisible();
+  await expect(narrowProviderRun.locator(".activity-run-project-meta")).toBeVisible();
+  await expect(narrowProviderRun.locator(".activity-run-branch-meta")).toBeVisible();
+  expect(await narrowProviderRun.evaluate((row) => {
+    const panel = row.closest(".activity-center")?.getBoundingClientRect();
+    const essential = [
+      ".activity-run-provider-meta",
+      ".activity-run-project-meta",
+      ".activity-run-branch-meta",
+    ].map((selector) => row.querySelector(selector)?.getBoundingClientRect());
+    return Boolean(panel && essential.every((rect) => (
+      rect && rect.width > 0 && rect.left >= panel.left && rect.right <= panel.right
+    )));
+  })).toBe(true);
+  const narrowCheckRun = center.locator(".activity-run").filter({
+    hasText: "Typecheck workspace",
+  });
+  await expect(narrowCheckRun.locator(".activity-run-provider-meta")).toBeVisible();
+  await expect(narrowCheckRun.locator(".activity-run-project-meta")).toBeVisible();
+  await expect(narrowCheckRun.locator(".activity-run-branch-meta")).toBeVisible();
+  await expect(narrowCheckRun.locator(".activity-run-context-meta")).toBeHidden();
+  expect(await narrowCheckRun.evaluate((row) => {
+    const provider = row.querySelector<HTMLElement>(".activity-run-provider-meta");
+    const projectMeta = row.querySelector<HTMLElement>(".activity-run-project-meta");
+    const branch = row.querySelector<HTMLElement>(".activity-run-branch-meta");
+    return Boolean(
+      provider && provider.clientWidth >= provider.scrollWidth
+      && projectMeta && projectMeta.clientWidth >= projectMeta.scrollWidth
+      && branch && branch.clientWidth > 0,
+    );
+  })).toBe(true);
+  await expectNoViewportOverflow();
+
+  const narrowScreenshotPath = testInfo.outputPath("activity-list-420px-panel.png");
+  await page.screenshot({ animations: "disabled", path: narrowScreenshotPath });
+  await testInfo.attach("activity-list-420px-panel", {
+    path: narrowScreenshotPath,
+    contentType: "image/png",
+  });
+  await page.keyboard.press("Escape");
+  expect(rendererErrors).toEqual([]);
+});
+
 test("keeps seen distinct from explicit acknowledgement and preserves dismissed run history", async () => {
   const runId = randomUUID();
   const databasePath = join(testDirectory, "data", "inertia.sqlite");

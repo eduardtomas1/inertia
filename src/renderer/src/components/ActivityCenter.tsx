@@ -9,23 +9,36 @@ import {
 } from "react";
 import {
   Activity,
+  Bot,
   Check,
   CheckCircle2,
   ChevronDown,
   CircleDot,
+  Code2,
+  Command,
   ExternalLink,
   FolderOpen,
+  GitBranch,
   MessageSquare,
+  MousePointer2,
   RotateCcw,
   Square,
   TerminalSquare,
   Trash2,
   TriangleAlert,
   X,
+  type LucideIcon,
 } from "lucide-react";
-import type { Conversation, Project, WorkspaceRun } from "@shared/contracts";
+import type {
+  Conversation,
+  Project,
+  ProviderId,
+  WorkspaceRun,
+} from "@shared/contracts";
+import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import {
   activityRunActions,
+  activityRunProviderId,
   activityRunPresentation,
   activityStatusLabel,
   activityWaitingKind,
@@ -33,6 +46,7 @@ import {
   type ActivityRunOperationGroup,
 } from "../utils/activityCenter";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { agentRequestProviderName } from "../utils/agentInput";
 import { IconButton } from "./ui";
 
 type ActivityCenterProps = {
@@ -42,6 +56,7 @@ type ActivityCenterProps = {
   runs: WorkspaceRun[];
   projects: Project[];
   conversations: Conversation[];
+  providerIdentityLabels?: ProviderIdentityLabels;
   onClose: () => void;
   onOpenThread: (conversation: Conversation) => void;
   onOpenLocation: (run: WorkspaceRun) => void;
@@ -85,6 +100,42 @@ function ActivityClockProvider({
   );
 }
 
+function millisecondsUntilNextLocalDay(now: number): number {
+  const nextDay = new Date(now);
+  nextDay.setHours(24, 0, 0, 25);
+  return Math.max(1, nextDay.getTime() - now);
+}
+
+function localDayStart(now: number): number {
+  const date = new Date(now);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function useActivitySectionClock(
+  active: boolean,
+  providedNow?: number,
+): number {
+  const [calendarNow, setCalendarNow] = useState(() => localDayStart(Date.now()));
+  useEffect(() => {
+    if (providedNow !== undefined || !active) return;
+    let timeout: number | null = null;
+    const scheduleNextDay = () => {
+      const now = Date.now();
+      timeout = window.setTimeout(() => {
+        setCalendarNow(localDayStart(Date.now()));
+        scheduleNextDay();
+      }, millisecondsUntilNextLocalDay(now));
+    };
+    scheduleNextDay();
+    return () => {
+      if (timeout !== null) window.clearTimeout(timeout);
+    };
+  }, [active, providedNow]);
+  return providedNow ?? (
+    active ? Math.max(calendarNow, localDayStart(Date.now())) : calendarNow
+  );
+}
+
 function ActivityRunTime({
   run,
   waitingKind,
@@ -93,8 +144,11 @@ function ActivityRunTime({
   waitingKind: ActivityWaitingKind | null;
 }): React.JSX.Element {
   const now = useContext(ActivityClockContext);
+  const occurredAt = run.status === "running" || run.status === "waiting"
+    ? run.startedAt
+    : run.finishedAt ?? run.startedAt;
   return (
-    <time dateTime={run.startedAt}>
+    <time dateTime={occurredAt} title={new Date(occurredAt).toLocaleString()}>
       {activityStatusLabel(run, now, waitingKind)}
     </time>
   );
@@ -104,6 +158,38 @@ function RunState({ run }: { run: WorkspaceRun }): React.JSX.Element {
   if (run.status === "failed") return <TriangleAlert size={13} aria-hidden="true" />;
   if (run.status === "succeeded") return <CheckCircle2 size={13} aria-hidden="true" />;
   return <CircleDot size={13} aria-hidden="true" />;
+}
+
+const activityProviderIcons: Readonly<Record<ProviderId, LucideIcon>> = {
+  codex: Command,
+  claude: Bot,
+  cursor: MousePointer2,
+  opencode: Code2,
+};
+
+function RunIdentityIcon({
+  run,
+  providerId,
+}: {
+  run: WorkspaceRun;
+  providerId: ProviderId | null;
+}): React.JSX.Element {
+  const IdentityIcon = providerId
+    ? activityProviderIcons[providerId]
+    : run.kind === "source-control"
+      ? GitBranch
+      : run.kind === "check"
+        ? TerminalSquare
+        : Activity;
+  return (
+    <span
+      className={`activity-run-identity${providerId ? " is-provider" : ""}`}
+      data-provider-id={providerId ?? undefined}
+      aria-hidden="true"
+    >
+      <IdentityIcon size={14} strokeWidth={1.9} />
+    </span>
+  );
 }
 
 function runKindLabel(kind: WorkspaceRun["kind"]): string {
@@ -179,6 +265,7 @@ export function ActivityCenter({
   runs,
   projects,
   conversations,
+  providerIdentityLabels = {},
   onClose,
   onOpenThread,
   onOpenLocation,
@@ -198,6 +285,7 @@ export function ActivityCenter({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   useNativePreviewSuspension(open);
+  const sectionNow = useActivitySectionClock(open, providedNow);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -244,8 +332,8 @@ export function ActivityCenter({
   }, [open]);
 
   const presentation = useMemo(
-    () => activityRunPresentation(runs),
-    [runs],
+    () => activityRunPresentation(runs, sectionNow),
+    [runs, sectionNow],
   );
   const { sections, summary } = presentation;
   if (!open) return null;
@@ -279,10 +367,7 @@ export function ActivityCenter({
           </span>
           <IconButton label="Close runs" onClick={onClose}><X size={15} /></IconButton>
         </header>
-        <ActivityClockProvider
-          active={summary.activeCount > 0}
-          now={providedNow}
-        >
+        <ActivityClockProvider active={open} now={providedNow}>
           <div className="activity-center-content">
             {sections.length === 0 ? (
               <div className="activity-empty" role="status">
@@ -292,12 +377,17 @@ export function ActivityCenter({
               </div>
             ) : sections.map((section) => (
               <section className={`activity-category is-${section.id}`} key={section.id}>
-                <h2>{section.label}<span>{section.runs.length}</span></h2>
+                <h2>{section.label}</h2>
                 {section.runs.map((run) => {
                   const project = projectById.get(run.projectId);
                   const conversation = run.conversationId ? conversationById.get(run.conversationId) : undefined;
                   const actions = activityRunActions(run);
                   const waitingKind = activityWaitingKind(run, conversations);
+                  const providerId = activityRunProviderId(run);
+                  const providerLabel = providerId
+                    ? providerIdentityLabels[providerId]
+                      ?? agentRequestProviderName(providerId)
+                    : null;
                   const waitingClass = waitingKind ? ` is-waiting-${waitingKind}` : "";
                   const detailOpen = expandedFailure === run.id;
                   const toggleFailureDetails = () => {
@@ -323,27 +413,52 @@ export function ActivityCenter({
                             run: toggleFailureDetails,
                           }
                         : null;
-                  const context = [conversation?.title, project?.name].filter(Boolean).join(" · ")
-                    || run.detail
-                    || "Workspace";
+                  const primaryTitle = run.kind === "agent"
+                    ? conversation?.title ?? run.detail ?? run.label
+                    : run.label;
+                  const contextTitle = run.kind === "agent"
+                    ? null
+                    : conversation?.title;
                   const operationGroup =
                     presentation.operationsByAgentRun.get(run.id);
                   const operationsExpanded = expandedOperations.has(run.id);
                   return (
                     <article className={`activity-run is-${run.status}${waitingClass}${run.attentionState === "unseen" ? " is-unseen" : ""}`} key={run.id}>
                       <div className="activity-run-summary">
-                        <RunState run={run} />
-                        <span>
-                          <strong>{run.label}</strong>
-                          <small>
-                            {runKindLabel(run.kind)} · {context}
+                        <RunIdentityIcon run={run} providerId={providerId} />
+                        <span className="activity-run-copy">
+                          <strong title={primaryTitle}>{primaryTitle}</strong>
+                          <small className="activity-run-metadata">
+                            <span className="activity-run-provider-meta">
+                              {providerLabel ?? runKindLabel(run.kind)}
+                            </span>
+                            {project && (
+                              <span className="activity-run-project-meta" title={project.path}>
+                                <FolderOpen size={10} aria-hidden="true" />
+                                {project.name}
+                              </span>
+                            )}
+                            {conversation?.branch && (
+                              <span className="activity-run-branch-meta" title={`Branch ${conversation.branch}`}>
+                                <GitBranch size={10} aria-hidden="true" />
+                                {conversation.branch}
+                              </span>
+                            )}
+                            {contextTitle && (
+                              <span className="activity-run-context-meta" title={contextTitle}>
+                                {contextTitle}
+                              </span>
+                            )}
                             {run.attentionState === "unseen" && <span className="activity-unread-state">New</span>}
                           </small>
                         </span>
-                        <ActivityRunTime
-                          run={run}
-                          waitingKind={waitingKind}
-                        />
+                        <span className="activity-run-state">
+                          <RunState run={run} />
+                          <ActivityRunTime
+                            run={run}
+                            waitingKind={waitingKind}
+                          />
+                        </span>
                       </div>
                       {operationGroup && operationGroup.all.length > 0 && (
                         <RunOperations
@@ -360,7 +475,7 @@ export function ActivityCenter({
                           }}
                         />
                       )}
-                      <div className="activity-run-controls">
+                      <div className={`activity-run-controls${primaryAction ? " has-primary" : ""}`}>
                         {primaryAction && (
                           <button type="button" className="activity-primary-action" onClick={primaryAction.run}>
                             {primaryAction.label}

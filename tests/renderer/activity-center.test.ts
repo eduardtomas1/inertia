@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   activityRunActions,
+  activityRunProviderId,
   activityRunPresentation,
   activityRunSections,
   activityRunSummary,
@@ -57,7 +58,7 @@ function conversation(attentionKind: Conversation["attentionKind"]): Conversatio
 }
 
 describe("Runs control model", () => {
-  it("prioritizes attention, then active work, then bounded recent history", () => {
+  it("groups visible work chronologically while preserving status priority signals", () => {
     const sections = activityRunSections([
       run({
         id: "11111111-1111-4111-8111-111111111101",
@@ -84,12 +85,25 @@ describe("Runs control model", () => {
         attentionState: "unseen",
         startedAt: "2026-07-23T10:03:00.000Z",
       }),
+      run({
+        id: "11111111-1111-4111-8111-111111111105",
+        status: "succeeded",
+        startedAt: "2026-07-22T10:00:00.000Z",
+        finishedAt: "2026-07-22T10:00:05.000Z",
+      }),
+      run({
+        id: "11111111-1111-4111-8111-111111111106",
+        status: "succeeded",
+        startedAt: "2026-07-20T10:00:00.000Z",
+        finishedAt: "2026-07-20T10:00:05.000Z",
+      }),
     ], Date.parse("2026-07-23T10:04:00.000Z"));
 
-    expect(sections.map(({ id }) => id)).toEqual(["attention", "active", "recent"]);
-    expect(sections[0]?.runs.map(({ status }) => status)).toEqual(["waiting", "failed"]);
-    expect(sections[1]?.runs.map(({ status }) => status)).toEqual(["running"]);
-    expect(sections[2]?.runs.map(({ status }) => status)).toEqual(["succeeded"]);
+    expect(sections.map(({ id }) => id)).toEqual(["recent", "yesterday", "earlier"]);
+    expect(sections[0]?.runs.map(({ status }) => status))
+      .toEqual(["waiting", "failed", "running", "succeeded"]);
+    expect(sections[1]?.runs).toHaveLength(1);
+    expect(sections[2]?.runs).toHaveLength(1);
   });
 
   it("omits empty sections and summarizes attention separately from active work", () => {
@@ -97,14 +111,15 @@ describe("Runs control model", () => {
       status: "succeeded",
       finishedAt: "2026-07-23T10:00:05.000Z",
     });
-    expect(activityRunSections([completed]).map(({ id }) => id)).toEqual(["recent"]);
+    const now = Date.parse("2026-07-23T10:01:00.000Z");
+    expect(activityRunSections([completed], now).map(({ id }) => id)).toEqual(["recent"]);
     const history = Array.from({ length: 14 }, (_, index) => run({
       id: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
       status: "succeeded",
       startedAt: `2026-07-23T10:${String(index).padStart(2, "0")}:00.000Z`,
       finishedAt: `2026-07-23T10:${String(index).padStart(2, "0")}:05.000Z`,
     }));
-    expect(activityRunSections(history)[0]?.runs).toHaveLength(12);
+    expect(activityRunSections(history, now)[0]?.runs).toHaveLength(12);
     expect(activityRunSections([])).toEqual([]);
     expect(activityRunSummary([
       completed,
@@ -116,7 +131,7 @@ describe("Runs control model", () => {
         canStop: false,
         finishedAt: "2026-07-23T10:00:05.000Z",
       }),
-    ], Date.parse("2026-07-23T10:01:00.000Z"))).toEqual({ attentionCount: 2, activeCount: 1 });
+    ], now)).toEqual({ attentionCount: 2, activeCount: 1 });
   });
 
   it("keeps historical failures visible until explicit acknowledgement", () => {
@@ -128,11 +143,11 @@ describe("Runs control model", () => {
       finishedAt: "2026-07-20T10:00:05.000Z",
     });
     const now = Date.parse("2026-07-23T10:00:00.000Z");
-    expect(activityRunSections([historicalFailure], now).map(({ id }) => id)).toEqual(["attention"]);
+    expect(activityRunSections([historicalFailure], now).map(({ id }) => id)).toEqual(["earlier"]);
     expect(activityRunSummary([historicalFailure], now)).toEqual({ attentionCount: 1, activeCount: 0 });
 
     const acknowledged = { ...historicalFailure, attentionState: "acknowledged" as const };
-    expect(activityRunSections([acknowledged], now).map(({ id }) => id)).toEqual(["recent"]);
+    expect(activityRunSections([acknowledged], now).map(({ id }) => id)).toEqual(["earlier"]);
     expect(activityRunSummary([acknowledged], now)).toEqual({ attentionCount: 0, activeCount: 0 });
     expect(activityRunSections([{ ...historicalFailure, attentionState: "dismissed" }], now)).toEqual([]);
   });
@@ -145,7 +160,10 @@ describe("Runs control model", () => {
       canStop: false,
       finishedAt: "2026-07-23T10:00:05.000Z",
     });
-    expect(activityRunSections([completed]).map(({ id }) => id)).toEqual(["recent"]);
+    expect(activityRunSections(
+      [completed],
+      Date.parse("2026-07-23T10:01:00.000Z"),
+    ).map(({ id }) => id)).toEqual(["recent"]);
     expect(activityRunSummary([completed])).toEqual({ attentionCount: 0, activeCount: 0 });
     expect(activityRunSummary([{ ...completed, finishedAt: null }])).toEqual({
       attentionCount: 0,
@@ -210,6 +228,47 @@ describe("Runs control model", () => {
     expect(activityWaitingKind(waiting, [conversation("input")])).toBe("input");
     expect(activityStatusLabel(waiting, Date.parse("2026-07-23T10:00:08.000Z"), "input"))
       .toBe("Waiting for input · 8s");
+  });
+
+  it("attributes only canonical provider-owned run projections", () => {
+    expect(activityRunProviderId(run({
+      kind: "agent",
+      label: "Codex · GPT-5.6-Sol",
+    }))).toBe("codex");
+    expect(activityRunProviderId(run({
+      kind: "check",
+      actionId: null,
+      detail: "Claude · Historical chat",
+    }))).toBe("claude");
+    expect(activityRunProviderId(run({
+      kind: "check",
+      actionId: "typecheck",
+      detail: "Codex · user-authored command",
+    }))).toBeNull();
+    expect(activityRunProviderId(run({
+      kind: "source-control",
+      actionId: null,
+      detail: "Codex · pushed branch",
+    }))).toBeNull();
+    expect(activityRunProviderId(run({
+      kind: "agent",
+      label: "Codexical review",
+    }))).toBeNull();
+  });
+
+  it("uses occurrence age for settled work instead of execution duration", () => {
+    const now = Date.parse("2026-07-23T10:10:00.000Z");
+    const completed = run({
+      status: "succeeded",
+      canStop: false,
+      startedAt: "2026-07-23T09:00:00.000Z",
+      finishedAt: "2026-07-23T10:08:30.000Z",
+    });
+    expect(activityStatusLabel(completed, now, null)).toBe("Completed · 1m ago");
+    expect(activityStatusLabel({ ...completed, status: "cancelled" }, now, null))
+      .toBe("Stopped · 1m ago");
+    expect(activityStatusLabel({ ...completed, status: "failed" }, now, null))
+      .toBe("Failed · 1m ago");
   });
 
   it("groups only bounded, action-less operations under their owning agent", () => {
@@ -277,7 +336,7 @@ describe("Runs control model", () => {
     const presentation = activityRunPresentation([agent, sourceControl]);
 
     expect(presentation.operationsByAgentRun.get(agent.id)).toBeUndefined();
-    expect(presentation.sections.find(({ id }) => id === "active")?.runs)
+    expect(presentation.sections.flatMap(({ runs }) => runs))
       .toEqual([sourceControl, agent]);
     expect(presentation.summary).toEqual({
       attentionCount: 0,
@@ -304,8 +363,10 @@ describe("Runs control model", () => {
     const presentation = activityRunPresentation([agent, failure]);
     expect(presentation.operationsByAgentRun.get(agent.id)).toBeUndefined();
     expect(presentation.sections[0]).toMatchObject({
-      id: "attention",
-      runs: [expect.objectContaining({ id: failure.id })],
+      id: "earlier",
+      runs: expect.arrayContaining([
+        expect.objectContaining({ id: failure.id }),
+      ]),
     });
     expect(presentation.summary).toEqual({
       attentionCount: 1,

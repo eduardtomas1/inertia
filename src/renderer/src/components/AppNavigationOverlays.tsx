@@ -95,6 +95,7 @@ export function AppNavigationOverlays({
             runs={snapshot?.runs ?? []}
             projects={projects}
             conversations={conversations}
+            providerIdentityLabels={snapshot?.settings.providerIdentityLabels}
             onClose={() => setActivityOpen(false)}
             onOpenThread={(thread) => {
               selectConversation(thread);

@@ -397,7 +397,10 @@ export function useSplitWorkspaceScene({
     workflow,
     detailLoading: Boolean(
       splitConversation
-      && projection.detailState?.state === "loading"
+      && (
+        projection.detailState?.conversationId !== splitConversation.id
+        || projection.detailState.state === "loading"
+      )
     ),
     selectedMaintenanceStatus: splitConversation
       ? providerMaintenance.statuses.get(

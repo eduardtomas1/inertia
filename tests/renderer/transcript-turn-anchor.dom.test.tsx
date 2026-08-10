@@ -601,4 +601,94 @@ describe("completed answer positioning", () => {
     expect(disabled).not.toHaveBeenCalled();
     expect(historical).not.toHaveBeenCalled();
   });
+
+  it("does not reposition historical detail that hydrates after a conversation switch", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const scrollElementRef = createRef<HTMLDivElement>();
+    const timelineElementRef = createRef<HTMLDivElement>();
+    const nextConversationId = "22222222-2222-4222-8222-222222222222";
+    const scene = (
+      targetConversationId: string,
+      hydrated: boolean,
+    ): React.JSX.Element => {
+      const request: ChatMessage = {
+        ...message(1),
+        id: `${targetConversationId}-request`,
+        conversationId: targetConversationId,
+      };
+      const answer: ChatMessage = {
+        id: `${targetConversationId}-answer`,
+        conversationId: targetConversationId,
+        turnId: `${targetConversationId}-turn`,
+        role: "assistant",
+        content: "Already completed before this conversation was opened",
+        attachments: [],
+        createdAt: "2026-08-01T10:00:02.000Z",
+      };
+      const settledTurn: AgentTurn = {
+        ...turn(1),
+        id: `${targetConversationId}-turn`,
+        conversationId: targetConversationId,
+        userMessageId: request.id,
+        terminalAssistantMessageId: answer.id,
+      };
+      return (
+        <div ref={scrollElementRef} className="anchor-test-scroll">
+          <div ref={timelineElementRef}>
+            <ResponseTimeline
+              turns={hydrated ? [settledTurn] : []}
+              messages={hydrated ? [request, answer] : []}
+              activities={[]}
+              reasonings={[]}
+              plans={[]}
+              checkpoints={[]}
+              projectRoot="/workspace"
+              projectId="project-1"
+              conversationId={targetConversationId}
+              streamingText=""
+              streamingReasoning=""
+              approvals={[]}
+              inputRequests={[]}
+              showTimestamps={false}
+              showThinking={false}
+              defaultCodeWrap={false}
+              autoCollapseWorkLog
+              showChangedFileSummaries={false}
+              autoScrollToFinalAnswer
+              detailLoading={!hydrated}
+              checkpointRestoreDisabled={false}
+              scrollElementRef={scrollElementRef}
+              timelineElementRef={timelineElementRef}
+              onFinalAnswerAutoScroll={positioned}
+              onRespondToApproval={async () => undefined}
+              onRespondToInput={async () => undefined}
+              onRevertCheckpoint={() => undefined}
+              onOpenTurnDiff={() => undefined}
+              onCompareTurnArtifacts={() => undefined}
+              onOpenTurnFile={() => undefined}
+              onStop={() => undefined}
+            />
+          </div>
+        </div>
+      );
+    };
+
+    const view = render(scene(conversationId, false));
+    await act(async () => {
+      view.rerender(scene(nextConversationId, false));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      view.rerender(scene(nextConversationId, true));
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(positioned).not.toHaveBeenCalled();
+  });
 });

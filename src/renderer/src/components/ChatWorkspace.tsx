@@ -666,6 +666,7 @@ export function ChatWorkspace({
               showChangedFileSummaries={showChangedFileSummaries}
               autoScrollToFinalAnswer={autoScrollToFinalAnswer
                 && transcriptNavigationFollowsContent(activeNavigation)}
+              detailLoading={loading}
               turnAnchorId={turnAnchorId}
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}

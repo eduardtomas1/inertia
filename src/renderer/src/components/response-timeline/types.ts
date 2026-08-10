@@ -37,6 +37,7 @@ export interface ResponseTimelineProps {
   autoCollapseWorkLog: boolean;
   showChangedFileSummaries: boolean;
   autoScrollToFinalAnswer?: boolean;
+  detailLoading?: boolean;
   checkpointRestoreDisabled: boolean;
   turnAnchorId?: string | null;
   scrollElementRef?: RefObject<HTMLDivElement | null>;

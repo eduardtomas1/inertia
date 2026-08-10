@@ -430,6 +430,9 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     conversationId: props.conversationId,
     answerId: finalAnswerId,
   });
+  const hydratingConversationRef = useRef(
+    props.detailLoading ? props.conversationId : null,
+  );
   const timelineRef = useRef(timeline);
   timelineRef.current = timeline;
   const previousComparableTurn = useMemo(() => {
@@ -573,7 +576,18 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
 
   useEffect(() => {
     const observed = observedFinalAnswerRef.current;
-    const newFinalAnswer = observed.conversationId === props.conversationId
+    const completingHydration = !props.detailLoading
+      && hydratingConversationRef.current === props.conversationId;
+    if (props.detailLoading) {
+      hydratingConversationRef.current = props.conversationId;
+    } else if (completingHydration) {
+      hydratingConversationRef.current = null;
+    } else if (hydratingConversationRef.current !== props.conversationId) {
+      hydratingConversationRef.current = null;
+    }
+    const newFinalAnswer = !props.detailLoading
+      && !completingHydration
+      && observed.conversationId === props.conversationId
       && finalAnswerId !== null
       && observed.answerId !== finalAnswerId;
     observedFinalAnswerRef.current = {
@@ -613,6 +627,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     finalAnswerId,
     props.autoScrollToFinalAnswer,
     props.conversationId,
+    props.detailLoading,
     onFinalAnswerAutoScroll,
     props.scrollElementRef,
     props.timelineElementRef,

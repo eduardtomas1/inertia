@@ -38,6 +38,7 @@ import type {
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import {
   activityRunActions,
+  activityRunProviderId,
   activityRunPresentation,
   activityStatusLabel,
   activityWaitingKind,
@@ -143,8 +144,11 @@ function ActivityRunTime({
   waitingKind: ActivityWaitingKind | null;
 }): React.JSX.Element {
   const now = useContext(ActivityClockContext);
+  const occurredAt = run.status === "running" || run.status === "waiting"
+    ? run.startedAt
+    : run.finishedAt ?? run.startedAt;
   return (
-    <time dateTime={run.startedAt}>
+    <time dateTime={occurredAt} title={new Date(occurredAt).toLocaleString()}>
       {activityStatusLabel(run, now, waitingKind)}
     </time>
   );
@@ -162,15 +166,6 @@ const activityProviderIcons: Readonly<Record<ProviderId, LucideIcon>> = {
   cursor: MousePointer2,
   opencode: Code2,
 };
-
-function runProvider(
-  run: WorkspaceRun,
-  conversation: Conversation | undefined,
-): ProviderId | null {
-  if (!conversation || run.kind === "source-control") return null;
-  if (run.kind === "agent") return conversation.providerId;
-  return run.actionId === null ? conversation.providerId : null;
-}
 
 function RunIdentityIcon({
   run,
@@ -372,10 +367,7 @@ export function ActivityCenter({
           </span>
           <IconButton label="Close runs" onClick={onClose}><X size={15} /></IconButton>
         </header>
-        <ActivityClockProvider
-          active={summary.activeCount > 0}
-          now={providedNow}
-        >
+        <ActivityClockProvider active={open} now={providedNow}>
           <div className="activity-center-content">
             {sections.length === 0 ? (
               <div className="activity-empty" role="status">
@@ -391,7 +383,7 @@ export function ActivityCenter({
                   const conversation = run.conversationId ? conversationById.get(run.conversationId) : undefined;
                   const actions = activityRunActions(run);
                   const waitingKind = activityWaitingKind(run, conversations);
-                  const providerId = runProvider(run, conversation);
+                  const providerId = activityRunProviderId(run);
                   const providerLabel = providerId
                     ? providerIdentityLabels[providerId]
                       ?? agentRequestProviderName(providerId)
@@ -421,8 +413,8 @@ export function ActivityCenter({
                             run: toggleFailureDetails,
                           }
                         : null;
-                  const primaryTitle = run.kind === "agent" && conversation
-                    ? conversation.title
+                  const primaryTitle = run.kind === "agent"
+                    ? conversation?.title ?? run.detail ?? run.label
                     : run.label;
                   const contextTitle = run.kind === "agent"
                     ? null
@@ -437,20 +429,26 @@ export function ActivityCenter({
                         <span className="activity-run-copy">
                           <strong title={primaryTitle}>{primaryTitle}</strong>
                           <small className="activity-run-metadata">
-                            <span>{providerLabel ?? runKindLabel(run.kind)}</span>
+                            <span className="activity-run-provider-meta">
+                              {providerLabel ?? runKindLabel(run.kind)}
+                            </span>
                             {project && (
-                              <span title={project.path}>
+                              <span className="activity-run-project-meta" title={project.path}>
                                 <FolderOpen size={10} aria-hidden="true" />
                                 {project.name}
                               </span>
                             )}
                             {conversation?.branch && (
-                              <span title={`Branch ${conversation.branch}`}>
+                              <span className="activity-run-branch-meta" title={`Branch ${conversation.branch}`}>
                                 <GitBranch size={10} aria-hidden="true" />
                                 {conversation.branch}
                               </span>
                             )}
-                            {contextTitle && <span title={contextTitle}>{contextTitle}</span>}
+                            {contextTitle && (
+                              <span className="activity-run-context-meta" title={contextTitle}>
+                                {contextTitle}
+                              </span>
+                            )}
                             {run.attentionState === "unseen" && <span className="activity-unread-state">New</span>}
                           </small>
                         </span>

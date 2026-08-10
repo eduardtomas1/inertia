@@ -156,6 +156,52 @@ test("presents chronological activity with provider, project, and branch identit
     path: screenshotPath,
     contentType: "image/png",
   });
+
+  const panelWidth = await center.evaluate((panel) => panel.getBoundingClientRect().width);
+  expect(panelWidth).toBeGreaterThanOrEqual(400);
+  expect(panelWidth).toBeLessThanOrEqual(421);
+  const narrowProviderRun = center.locator(
+    '.activity-run:has([data-provider-id="codex"])',
+  );
+  await expect(narrowProviderRun.locator(".activity-run-provider-meta")).toBeVisible();
+  await expect(narrowProviderRun.locator(".activity-run-project-meta")).toBeVisible();
+  await expect(narrowProviderRun.locator(".activity-run-branch-meta")).toBeVisible();
+  expect(await narrowProviderRun.evaluate((row) => {
+    const panel = row.closest(".activity-center")?.getBoundingClientRect();
+    const essential = [
+      ".activity-run-provider-meta",
+      ".activity-run-project-meta",
+      ".activity-run-branch-meta",
+    ].map((selector) => row.querySelector(selector)?.getBoundingClientRect());
+    return Boolean(panel && essential.every((rect) => (
+      rect && rect.width > 0 && rect.left >= panel.left && rect.right <= panel.right
+    )));
+  })).toBe(true);
+  const narrowCheckRun = center.locator(".activity-run").filter({
+    hasText: "Typecheck workspace",
+  });
+  await expect(narrowCheckRun.locator(".activity-run-provider-meta")).toBeVisible();
+  await expect(narrowCheckRun.locator(".activity-run-project-meta")).toBeVisible();
+  await expect(narrowCheckRun.locator(".activity-run-branch-meta")).toBeVisible();
+  await expect(narrowCheckRun.locator(".activity-run-context-meta")).toBeHidden();
+  expect(await narrowCheckRun.evaluate((row) => {
+    const provider = row.querySelector<HTMLElement>(".activity-run-provider-meta");
+    const projectMeta = row.querySelector<HTMLElement>(".activity-run-project-meta");
+    const branch = row.querySelector<HTMLElement>(".activity-run-branch-meta");
+    return Boolean(
+      provider && provider.clientWidth >= provider.scrollWidth
+      && projectMeta && projectMeta.clientWidth >= projectMeta.scrollWidth
+      && branch && branch.clientWidth > 0,
+    );
+  })).toBe(true);
+  await expectNoViewportOverflow();
+
+  const narrowScreenshotPath = testInfo.outputPath("activity-list-420px-panel.png");
+  await page.screenshot({ animations: "disabled", path: narrowScreenshotPath });
+  await testInfo.attach("activity-list-420px-panel", {
+    path: narrowScreenshotPath,
+    contentType: "image/png",
+  });
   await page.keyboard.press("Escape");
   expect(rendererErrors).toEqual([]);
 });

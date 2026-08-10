@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   activityRunActions,
+  activityRunProviderId,
   activityRunPresentation,
   activityRunSections,
   activityRunSummary,
@@ -227,6 +228,47 @@ describe("Runs control model", () => {
     expect(activityWaitingKind(waiting, [conversation("input")])).toBe("input");
     expect(activityStatusLabel(waiting, Date.parse("2026-07-23T10:00:08.000Z"), "input"))
       .toBe("Waiting for input · 8s");
+  });
+
+  it("attributes only canonical provider-owned run projections", () => {
+    expect(activityRunProviderId(run({
+      kind: "agent",
+      label: "Codex · GPT-5.6-Sol",
+    }))).toBe("codex");
+    expect(activityRunProviderId(run({
+      kind: "check",
+      actionId: null,
+      detail: "Claude · Historical chat",
+    }))).toBe("claude");
+    expect(activityRunProviderId(run({
+      kind: "check",
+      actionId: "typecheck",
+      detail: "Codex · user-authored command",
+    }))).toBeNull();
+    expect(activityRunProviderId(run({
+      kind: "source-control",
+      actionId: null,
+      detail: "Codex · pushed branch",
+    }))).toBeNull();
+    expect(activityRunProviderId(run({
+      kind: "agent",
+      label: "Codexical review",
+    }))).toBeNull();
+  });
+
+  it("uses occurrence age for settled work instead of execution duration", () => {
+    const now = Date.parse("2026-07-23T10:10:00.000Z");
+    const completed = run({
+      status: "succeeded",
+      canStop: false,
+      startedAt: "2026-07-23T09:00:00.000Z",
+      finishedAt: "2026-07-23T10:08:30.000Z",
+    });
+    expect(activityStatusLabel(completed, now, null)).toBe("Completed · 1m ago");
+    expect(activityStatusLabel({ ...completed, status: "cancelled" }, now, null))
+      .toBe("Stopped · 1m ago");
+    expect(activityStatusLabel({ ...completed, status: "failed" }, now, null))
+      .toBe("Failed · 1m ago");
   });
 
   it("groups only bounded, action-less operations under their owning agent", () => {

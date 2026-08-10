@@ -616,10 +616,10 @@ function SubagentsSection({
           onClick={() => setShowAll((current) => !current)}
         >
           {showAll
-            ? "Show recent delegated work"
-            : `Show ${hiddenCount} earlier delegated ${
-                hiddenCount === 1 ? "task" : "tasks"
-              }`}
+            ? "Show compact delegated work"
+            : `Show ${hiddenCount} more delegated ${
+              hiddenCount === 1 ? "task" : "tasks"
+            }`}
         </button>
       )}
     </section>

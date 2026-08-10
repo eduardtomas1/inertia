@@ -315,13 +315,46 @@ describe("delegated-agent timeline disclosure", () => {
     expect(tree.children).toHaveLength(6);
     expect(screen.getByText("Worker 7")).toBeInTheDocument();
     const toggle = screen.getByRole("button", {
-      name: "Show 2 earlier delegated tasks",
+      name: "Show 2 more delegated tasks",
     });
     await user.click(toggle);
     expect(onBeforeToggle).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(onAfterToggle).toHaveBeenCalledTimes(1));
     expect(tree.children).toHaveLength(8);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("reserves compact roster slots for separate urgent branches", () => {
+    const deepBranch = Array.from({ length: 6 }, (_, index) => trace({
+      id: `deep-${index}`,
+      providerTaskId: `deep-task-${index}`,
+      providerAgentId: `deep-agent-${index}`,
+      parentTraceId: index === 0 ? null : `deep-${index - 1}`,
+      providerName: `Deep worker ${index}`,
+      sequence: index + 2,
+    }));
+    const failedSibling = trace({
+      id: "failed-sibling",
+      providerTaskId: "failed-task",
+      providerAgentId: "failed-agent",
+      providerName: "Failed sibling",
+      providerStatus: "failed",
+      status: "failed",
+      isLive: false,
+      sequence: 1,
+    });
+    render(
+      <SubagentDisclosure
+        subagents={[failedSibling, ...deepBranch]}
+        turns={[turn()]}
+        now={NOW}
+      />,
+    );
+
+    const tree = screen.getByRole("list", { name: "Delegated agent tree" });
+    expect(tree.children).toHaveLength(6);
+    expect(screen.getByText("Failed sibling")).toBeInTheDocument();
+    expect(screen.getByText("Deep worker 5")).toBeInTheDocument();
   });
 
   it("ticks live elapsed text without requiring a parent state update", () => {

@@ -420,7 +420,7 @@ describe("GoalPanel", () => {
     expect(screen.queryByText("Completed 0")).not.toBeInTheDocument();
     expect(screen.getByText("Completed 7")).toBeInTheDocument();
     const disclosure = screen.getByRole("button", {
-      name: "Show 2 earlier delegated tasks",
+      name: "Show 2 more delegated tasks",
     });
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     await user.click(disclosure);
@@ -672,7 +672,7 @@ describe("GoalPanel", () => {
       />,
     );
     await user.click(screen.getByRole("button", {
-      name: "Show 2 earlier delegated tasks",
+      name: "Show 2 more delegated tasks",
     }));
     expect(screen.getByText("Completed 0")).toBeInTheDocument();
 
@@ -689,7 +689,7 @@ describe("GoalPanel", () => {
     );
     expect(screen.queryByText("Completed 0")).not.toBeInTheDocument();
     expect(screen.getByRole("button", {
-      name: "Show 2 earlier delegated tasks",
+      name: "Show 2 more delegated tasks",
     })).toHaveAttribute("aria-expanded", "false");
   });
 });

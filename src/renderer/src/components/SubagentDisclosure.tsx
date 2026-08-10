@@ -41,7 +41,7 @@ function compactInlineRows(
     return rows.map((row) => ({ ...row, omittedAncestors: 0 }));
   }
   const byId = new Map(rows.map((row) => [row.trace.id, row]));
-  const selected = new Set(rows
+  const prioritized = rows
     .map((row, index) => ({ row, index }))
     .sort((left, right) => {
       const leftUrgent = Number(
@@ -56,8 +56,23 @@ function compactInlineRows(
         || right.row.trace.sequence - left.row.trace.sequence
         || right.index - left.index;
     })
+    .map(({ row }) => row);
+  const urgent = prioritized.filter(({ trace }) =>
+    isLiveSubagentTrace(trace) || subagentNeedsReview(trace));
+  const urgentIds = new Set(urgent.map(({ trace }) => trace.id));
+  const urgentParents = new Set(urgent.flatMap(({ trace }) =>
+    trace.parentTraceId && urgentIds.has(trace.parentTraceId)
+      ? [trace.parentTraceId]
+      : []));
+  const urgentLeaves = urgent.filter(({ trace }) =>
+    !urgentParents.has(trace.id));
+  const selected = new Set(urgentLeaves
     .slice(0, MAX_INLINE_SUBAGENTS)
-    .map(({ row }) => row.trace.id));
+    .map(({ trace }) => trace.id));
+  for (const { trace } of prioritized) {
+    if (selected.size >= MAX_INLINE_SUBAGENTS) break;
+    selected.add(trace.id);
+  }
   const visibleDepth = new Map<string, number>();
   return rows
     .filter(({ trace }) => selected.has(trace.id))
@@ -300,8 +315,8 @@ export function SubagentDisclosure({
           }}
         >
           {showAll
-            ? "Show recent delegated work"
-            : `Show ${hiddenCount} earlier delegated ${hiddenCount === 1
+            ? "Show compact delegated work"
+            : `Show ${hiddenCount} more delegated ${hiddenCount === 1
               ? "task"
               : "tasks"}`}
         </button>

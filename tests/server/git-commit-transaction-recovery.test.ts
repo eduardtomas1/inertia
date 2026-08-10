@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   captureGitCommitReview,
   commitReviewedChanges,
+  recoverReviewedCommitTransaction,
 } from "../../src/server/git";
 
 const roots: string[] = [];
@@ -863,6 +864,64 @@ describe("reviewed commit transaction recovery", () => {
 
     expect(git(root, "rev-parse", "HEAD")).toBe(foreignCommit);
     expect(existsSync(join(root, ".git", "index.lock"))).toBe(false);
+    expect(existsSync(journalPath)).toBe(false);
+  });
+
+  it("cleans an installed marker after a later different-tree ref move", async () => {
+    const root = repository();
+    writeFileSync(join(root, "selected.txt"), "reviewed drift source\n");
+    const review = await captureGitCommitReview(root);
+    const lockPath = join(root, ".git", "index.lock");
+    const journalPath = join(
+      root,
+      ".git",
+      "index.inertia-commit-transaction.json",
+    );
+    const unlinkFailure = Object.assign(new Error("sharing violation"), {
+      code: "EPERM",
+    });
+
+    const result = await commitReviewedChanges(
+      root,
+      "Retain recovery across different-tree drift",
+      ["selected.txt"],
+      review.fingerprint,
+      {
+        testHooks: {
+          beforeIndexReservationUnlink: () => {
+            throw unlinkFailure;
+          },
+        },
+      },
+    );
+
+    expect(result.refreshWarning).toMatch(/index recovery.*manual/iu);
+    expect(existsSync(lockPath)).toBe(true);
+    expect(existsSync(journalPath)).toBe(true);
+
+    const foreignCommit = git(
+      root,
+      "commit-tree",
+      `${result.commit}^1^{tree}`,
+      "-p",
+      result.commit,
+      "-m",
+      "Different-tree ref move",
+    );
+    git(root, "update-ref", "refs/heads/main", foreignCommit, result.commit);
+    expect(git(root, "rev-parse", "HEAD^{tree}"))
+      .not.toBe(git(root, "rev-parse", `${result.commit}^{tree}`));
+    const movedStatus = git(root, "status", "--short");
+    const installedIndex = readFileSync(join(root, ".git", "index"));
+    expect(movedStatus).toBe("M  selected.txt");
+
+    await expect(recoverReviewedCommitTransaction(root))
+      .resolves.toBeUndefined();
+
+    expect(git(root, "rev-parse", "HEAD")).toBe(foreignCommit);
+    expect(readFileSync(join(root, ".git", "index"))).toEqual(installedIndex);
+    expect(git(root, "status", "--short")).toBe(movedStatus);
+    expect(existsSync(lockPath)).toBe(false);
     expect(existsSync(journalPath)).toBe(false);
   });
 

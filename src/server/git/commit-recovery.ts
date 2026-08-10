@@ -389,6 +389,9 @@ export async function recoverCommitTransaction(
     );
   };
   if (digest(index) === journal.newIndexHash && stage === null) {
+    // This exact installed index plus a consumed stage is the durable
+    // completion witness established while Git held native HEAD/ref locks.
+    // A later ref-only move owns any resulting index/HEAD delta.
     await releaseReservations(false);
     await removeJournal();
     return;

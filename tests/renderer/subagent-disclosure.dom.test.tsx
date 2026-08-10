@@ -325,12 +325,15 @@ describe("delegated-agent timeline disclosure", () => {
   });
 
   it("reserves compact roster slots for separate urgent branches", () => {
-    const deepBranch = Array.from({ length: 6 }, (_, index) => trace({
+    const deepBranch = Array.from({ length: 11 }, (_, index) => trace({
       id: `deep-${index}`,
       providerTaskId: `deep-task-${index}`,
       providerAgentId: `deep-agent-${index}`,
       parentTraceId: index === 0 ? null : `deep-${index - 1}`,
       providerName: `Deep worker ${index}`,
+      providerStatus: index % 2 === 0 ? "running" : "completed",
+      status: index % 2 === 0 ? "running" : "completed",
+      isLive: index % 2 === 0,
       sequence: index + 2,
     }));
     const failedSibling = trace({
@@ -354,7 +357,7 @@ describe("delegated-agent timeline disclosure", () => {
     const tree = screen.getByRole("list", { name: "Delegated agent tree" });
     expect(tree.children).toHaveLength(6);
     expect(screen.getByText("Failed sibling")).toBeInTheDocument();
-    expect(screen.getByText("Deep worker 5")).toBeInTheDocument();
+    expect(screen.getByText("Deep worker 10")).toBeInTheDocument();
   });
 
   it("ticks live elapsed text without requiring a parent state update", () => {

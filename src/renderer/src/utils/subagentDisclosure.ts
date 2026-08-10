@@ -270,6 +270,26 @@ export function subagentDisclosureRows(
   return rows;
 }
 
+export function urgentSubagentBranchEndpoints(
+  rows: readonly SubagentDisclosureRow[],
+): SubagentDisclosureRow[] {
+  const byId = new Map(rows.map((row) => [row.trace.id, row]));
+  const urgent = rows.filter(({ trace }) =>
+    isLiveSubagentTrace(trace) || subagentNeedsReview(trace));
+  const urgentIds = new Set(urgent.map(({ trace }) => trace.id));
+  const urgentAncestors = new Set<string>();
+  for (const { trace } of urgent) {
+    let parentId = trace.parentTraceId;
+    const visited = new Set<string>();
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      if (urgentIds.has(parentId)) urgentAncestors.add(parentId);
+      parentId = byId.get(parentId)?.trace.parentTraceId ?? null;
+    }
+  }
+  return urgent.filter(({ trace }) => !urgentAncestors.has(trace.id));
+}
+
 export function subagentDisclosureStats(
   traces: readonly SubagentTrace[],
 ): SubagentDisclosureStats {

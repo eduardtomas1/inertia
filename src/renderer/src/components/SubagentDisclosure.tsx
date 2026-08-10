@@ -17,6 +17,7 @@ import {
   subagentStatusLabel,
   subagentTraceLabel,
   subagentTraceSummary,
+  urgentSubagentBranchEndpoints,
 } from "../utils/subagentDisclosure";
 import type { SubagentDisclosureRow } from "../utils/subagentDisclosure";
 import { SubagentElapsed } from "./SubagentElapsed";
@@ -57,16 +58,7 @@ function compactInlineRows(
         || right.index - left.index;
     })
     .map(({ row }) => row);
-  const urgent = prioritized.filter(({ trace }) =>
-    isLiveSubagentTrace(trace) || subagentNeedsReview(trace));
-  const urgentIds = new Set(urgent.map(({ trace }) => trace.id));
-  const urgentParents = new Set(urgent.flatMap(({ trace }) =>
-    trace.parentTraceId && urgentIds.has(trace.parentTraceId)
-      ? [trace.parentTraceId]
-      : []));
-  const urgentLeaves = urgent.filter(({ trace }) =>
-    !urgentParents.has(trace.id));
-  const selected = new Set(urgentLeaves
+  const selected = new Set(urgentSubagentBranchEndpoints(prioritized)
     .slice(0, MAX_INLINE_SUBAGENTS)
     .map(({ trace }) => trace.id));
   for (const { trace } of prioritized) {

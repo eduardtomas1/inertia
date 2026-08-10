@@ -2,6 +2,7 @@ import type { SubagentDisclosureRow } from "./subagentDisclosure";
 import {
   isLiveSubagentTrace,
   subagentNeedsReview,
+  urgentSubagentBranchEndpoints,
 } from "./subagentDisclosure";
 
 export interface CompactSubagentDisclosureRow extends SubagentDisclosureRow {
@@ -30,15 +31,11 @@ export function compactSubagentDisclosureRows(
     .map(({ row }) => row);
   const important = newestFirst.filter(({ trace }) =>
     isLiveSubagentTrace(trace) || subagentNeedsReview(trace));
-  const importantIds = new Set(important.map(({ trace }) => trace.id));
-  const importantParents = new Set(important.flatMap(({ trace }) =>
-    trace.parentTraceId && importantIds.has(trace.parentTraceId)
-      ? [trace.parentTraceId]
-      : []));
-  const importantLeaves = important.filter(({ trace }) =>
-    !importantParents.has(trace.id));
-  const reserved = (importantLeaves.length > 0 ? importantLeaves : important)
-    .slice(0, maxRows);
+  const endpoints = urgentSubagentBranchEndpoints(newestFirst);
+  const reserved = (endpoints.length > 0 ? endpoints : important).slice(
+    0,
+    maxRows,
+  );
 
   // Keep urgent branch endpoints represented before spending remaining rows
   // on context. Deep work must not hide a competing live or failed branch.

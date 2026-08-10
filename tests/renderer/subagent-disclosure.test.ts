@@ -253,6 +253,33 @@ describe("inline delegated-agent disclosure", () => {
     );
   });
 
+  it("deduplicates urgent branch endpoints through settled intermediaries", () => {
+    const lineage = Array.from({ length: 11 }, (_, index) => trace({
+      id: `lineage-${index}`,
+      parentTraceId: index === 0 ? null : `lineage-${index - 1}`,
+      providerStatus: index % 2 === 0 ? "running" : "completed",
+      status: index % 2 === 0 ? "running" : "completed",
+      isLive: index % 2 === 0,
+      sequence: index + 2,
+    }));
+    const failedSibling = trace({
+      id: "failed-sibling",
+      providerStatus: "failed",
+      status: "failed",
+      isLive: false,
+      sequence: 1,
+    });
+    const compact = compactSubagentDisclosureRows(
+      subagentDisclosureRows([failedSibling, ...lineage], [turn()]),
+      6,
+    );
+
+    expect(compact.map(({ trace: item }) => item.id)).toContain(
+      "failed-sibling",
+    );
+    expect(compact.map(({ trace: item }) => item.id)).toContain("lineage-10");
+  });
+
   it("does not mislabel an unresolved nested provider parent as the host turn", () => {
     const orphan = trace({
       parentTraceId: null,

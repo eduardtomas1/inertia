@@ -293,7 +293,11 @@ export function SubagentDisclosure({
           className="subagent-history-toggle"
           aria-controls={listId}
           aria-expanded={showAll}
-          onClick={() => setShowAll((current) => !current)}
+          onClick={() => {
+            onBeforeToggle?.();
+            setShowAll((current) => !current);
+            finishToggle();
+          }}
         >
           {showAll
             ? "Show recent delegated work"

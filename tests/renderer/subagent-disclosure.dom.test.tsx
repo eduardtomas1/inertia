@@ -1,4 +1,9 @@
-import { render, screen, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -287,6 +292,8 @@ describe("delegated-agent timeline disclosure", () => {
 
   it("bounds a large live roster until the user explicitly asks for all rows", async () => {
     const user = userEvent.setup();
+    const onBeforeToggle = vi.fn();
+    const onAfterToggle = vi.fn();
     const traces = Array.from({ length: 8 }, (_, index) => trace({
       id: `trace-${index}`,
       providerTaskId: `task-${index}`,
@@ -299,6 +306,8 @@ describe("delegated-agent timeline disclosure", () => {
         subagents={traces}
         turns={[turn()]}
         now={NOW}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
       />,
     );
 
@@ -309,6 +318,8 @@ describe("delegated-agent timeline disclosure", () => {
       name: "Show 2 earlier delegated tasks",
     });
     await user.click(toggle);
+    expect(onBeforeToggle).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onAfterToggle).toHaveBeenCalledTimes(1));
     expect(tree.children).toHaveLength(8);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
   });

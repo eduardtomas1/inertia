@@ -82,6 +82,37 @@ describe("architecture checker", () => {
     );
   });
 
+  it("keeps renderer runtime values out of the broad shared contracts facade", () => {
+    const root = fixture({
+      "src/shared/contracts.ts": [
+        'export { runtimeValue } from "./value";',
+        'export type { SharedValue } from "./value";',
+        "",
+      ].join("\n"),
+      "src/shared/value.ts": [
+        "export const runtimeValue = true;",
+        "export interface SharedValue { id: string }",
+        "",
+      ].join("\n"),
+      "src/renderer/runtime.ts": [
+        'import { runtimeValue } from "@shared/contracts";',
+        "export const value = runtimeValue;",
+        "",
+      ].join("\n"),
+      "src/renderer/types.ts": [
+        'import type { SharedValue } from "@shared/contracts";',
+        "export const value: SharedValue = { id: \"value\" };",
+        "",
+      ].join("\n"),
+    });
+
+    const error = rejectedCheck(root);
+    expect(error).toContain(
+      "src/renderer/runtime.ts:1 imports runtime values through the broad shared contracts facade",
+    );
+    expect(error).not.toContain("src/renderer/types.ts");
+  });
+
   it("finds cycles that cross aliases and runtime JavaScript suffixes", () => {
     const root = fixture({
       "src/shared/alpha.ts": [

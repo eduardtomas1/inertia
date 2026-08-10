@@ -9,12 +9,12 @@ import {
   type RefObject,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import {
-  isAgentTurnTerminalStatus,
-  type InterfaceScale,
-  type ResponseDensity,
-  type SubagentTrace,
+import type {
+  InterfaceScale,
+  ResponseDensity,
+  SubagentTrace,
 } from "@shared/contracts";
+import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../utils/interfaceScale";
 import {
   isTimelineFocusDetail,

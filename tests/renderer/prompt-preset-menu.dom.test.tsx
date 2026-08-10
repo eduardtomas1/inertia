@@ -314,6 +314,40 @@ describe("PromptPresetMenu", () => {
       .not.toHaveTextContent("stale failure");
   });
 
+  it("keeps a reopened draft when an earlier save resolves", async () => {
+    let resolveCreate: () => void = () => undefined;
+    const onCreate = vi.fn(() => new Promise<void>((resolve) => {
+      resolveCreate = resolve;
+    }));
+    render(<Harness onCreate={onCreate} />);
+    const trigger = screen.getByRole("button", {
+      name: "Prompt presets, 2 saved",
+    });
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+    expect(onCreate).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", {
+      name: "Prompt presets",
+    })).not.toBeInTheDocument());
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "New draft" },
+    });
+    fireEvent.change(screen.getByLabelText("Prompt text"), {
+      target: { value: "Keep this reopened draft." },
+    });
+
+    await act(async () => resolveCreate());
+
+    expect(screen.getByLabelText("Name")).toHaveValue("New draft");
+    expect(screen.getByLabelText("Prompt text"))
+      .toHaveValue("Keep this reopened draft.");
+  });
+
   it("requires a second, clearly named delete action", async () => {
     const onDelete = vi.fn(() => Promise.resolve());
     render(<Harness onDelete={onDelete} />);

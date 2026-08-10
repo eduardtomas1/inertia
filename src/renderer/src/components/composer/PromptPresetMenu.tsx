@@ -158,7 +158,7 @@ export function PromptPresetMenu({
     setError(null);
     try {
       await operation();
-      return true;
+      return operationGenerationRef.current === generation;
     } catch (caught) {
       if (operationGenerationRef.current === generation) {
         setError(caught instanceof Error

@@ -405,6 +405,91 @@ describe("completed answer positioning", () => {
     };
   }
 
+  type HydrationSceneState = "loading" | "running" | "settled";
+
+  function hydrationScene(
+    targetConversationId: string,
+    state: HydrationSceneState,
+    scrollElementRef: React.RefObject<HTMLDivElement | null>,
+    timelineElementRef: React.RefObject<HTMLDivElement | null>,
+    onFinalAnswerAutoScroll: (event: FinalAnswerAutoScrollEvent) => void,
+  ): React.JSX.Element {
+    const turnId = `${targetConversationId}-turn`;
+    const request: ChatMessage = {
+      ...message(1),
+      id: `${targetConversationId}-request`,
+      conversationId: targetConversationId,
+      turnId,
+    };
+    const answer: ChatMessage = {
+      id: `${targetConversationId}-answer`,
+      conversationId: targetConversationId,
+      turnId,
+      role: "assistant",
+      content: "A completed answer owned by the hydrated conversation",
+      attachments: [],
+      createdAt: "2026-08-01T10:00:02.000Z",
+    };
+    const settledTurn: AgentTurn = {
+      ...turn(1),
+      id: turnId,
+      conversationId: targetConversationId,
+      userMessageId: request.id,
+      terminalAssistantMessageId: answer.id,
+    };
+    const runningTurn: AgentTurn = {
+      ...settledTurn,
+      completedAt: null,
+      status: "running",
+      terminalReason: null,
+      terminalAssistantMessageId: null,
+    };
+    const hasTurn = state !== "loading";
+    return (
+      <div ref={scrollElementRef} className="anchor-test-scroll">
+        <div ref={timelineElementRef}>
+          <ResponseTimeline
+            turns={hasTurn
+              ? [state === "running" ? runningTurn : settledTurn]
+              : []}
+            messages={hasTurn
+              ? [request, ...(state === "settled" ? [answer] : [])]
+              : []}
+            activities={[]}
+            reasonings={[]}
+            plans={[]}
+            checkpoints={[]}
+            projectRoot="/workspace"
+            projectId="project-1"
+            conversationId={targetConversationId}
+            streamingText=""
+            streamingReasoning=""
+            approvals={[]}
+            inputRequests={[]}
+            showTimestamps={false}
+            showThinking={false}
+            defaultCodeWrap={false}
+            autoCollapseWorkLog
+            showChangedFileSummaries={false}
+            autoScrollToFinalAnswer
+            detailLoading={state !== "settled"}
+            checkpointRestoreDisabled={false}
+            scrollElementRef={scrollElementRef}
+            timelineElementRef={timelineElementRef}
+            onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
+            onRespondToApproval={async () => undefined}
+            onRespondToInput={async () => undefined}
+            onRevertCheckpoint={() => undefined}
+            onOpenTurnDiff={() => undefined}
+            onCompareTurnArtifacts={() => undefined}
+            onOpenTurnFile={() => undefined}
+            onStop={() => undefined}
+          />
+        </div>
+      </div>
+    );
+  }
+
   it("places a newly persisted final answer at the viewport top", async () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -613,82 +698,80 @@ describe("completed answer positioning", () => {
     const scrollElementRef = createRef<HTMLDivElement>();
     const timelineElementRef = createRef<HTMLDivElement>();
     const nextConversationId = "22222222-2222-4222-8222-222222222222";
-    const scene = (
-      targetConversationId: string,
-      hydrated: boolean,
-    ): React.JSX.Element => {
-      const request: ChatMessage = {
-        ...message(1),
-        id: `${targetConversationId}-request`,
-        conversationId: targetConversationId,
-      };
-      const answer: ChatMessage = {
-        id: `${targetConversationId}-answer`,
-        conversationId: targetConversationId,
-        turnId: `${targetConversationId}-turn`,
-        role: "assistant",
-        content: "Already completed before this conversation was opened",
-        attachments: [],
-        createdAt: "2026-08-01T10:00:02.000Z",
-      };
-      const settledTurn: AgentTurn = {
-        ...turn(1),
-        id: `${targetConversationId}-turn`,
-        conversationId: targetConversationId,
-        userMessageId: request.id,
-        terminalAssistantMessageId: answer.id,
-      };
-      return (
-        <div ref={scrollElementRef} className="anchor-test-scroll">
-          <div ref={timelineElementRef}>
-            <ResponseTimeline
-              turns={hydrated ? [settledTurn] : []}
-              messages={hydrated ? [request, answer] : []}
-              activities={[]}
-              reasonings={[]}
-              plans={[]}
-              checkpoints={[]}
-              projectRoot="/workspace"
-              projectId="project-1"
-              conversationId={targetConversationId}
-              streamingText=""
-              streamingReasoning=""
-              approvals={[]}
-              inputRequests={[]}
-              showTimestamps={false}
-              showThinking={false}
-              defaultCodeWrap={false}
-              autoCollapseWorkLog
-              showChangedFileSummaries={false}
-              autoScrollToFinalAnswer
-              detailLoading={!hydrated}
-              checkpointRestoreDisabled={false}
-              scrollElementRef={scrollElementRef}
-              timelineElementRef={timelineElementRef}
-              onFinalAnswerAutoScroll={positioned}
-              onRespondToApproval={async () => undefined}
-              onRespondToInput={async () => undefined}
-              onRevertCheckpoint={() => undefined}
-              onOpenTurnDiff={() => undefined}
-              onCompareTurnArtifacts={() => undefined}
-              onOpenTurnFile={() => undefined}
-              onStop={() => undefined}
-            />
-          </div>
-        </div>
-      );
-    };
-
-    const view = render(scene(conversationId, false));
+    const view = render(hydrationScene(
+      conversationId,
+      "settled",
+      scrollElementRef,
+      timelineElementRef,
+      positioned,
+    ));
     await act(async () => {
-      view.rerender(scene(nextConversationId, false));
+      view.rerender(hydrationScene(
+        nextConversationId,
+        "loading",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+      ));
       await Promise.resolve();
     });
     await act(async () => {
-      view.rerender(scene(nextConversationId, true));
+      view.rerender(hydrationScene(
+        nextConversationId,
+        "settled",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+      ));
       while (frames.length > 0) frames.shift()!(performance.now());
     });
 
     expect(positioned).not.toHaveBeenCalled();
+  });
+
+  it("positions a subscribed running turn that settles with hydration", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const scrollElementRef = createRef<HTMLDivElement>();
+    const timelineElementRef = createRef<HTMLDivElement>();
+    const targetConversationId = "33333333-3333-4333-8333-333333333333";
+    const view = render(hydrationScene(
+      targetConversationId,
+      "loading",
+      scrollElementRef,
+      timelineElementRef,
+      positioned,
+    ));
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "running",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+      ));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "settled",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+      ));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started", "positioned"]);
   });
 });

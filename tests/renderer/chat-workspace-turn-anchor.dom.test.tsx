@@ -151,6 +151,7 @@ function workspaceProps(
     defaultCodeWrap: false,
     autoCollapseWorkLog: true,
     showChangedFileSummaries: false,
+    autoScrollToFinalAnswer: true,
     loading: false,
     sending: false,
     onAddProject: () => undefined,

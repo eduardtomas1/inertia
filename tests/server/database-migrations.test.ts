@@ -285,6 +285,9 @@ describe("published database fixtures", () => {
       expect((inspection.prepare(
         "SELECT auto_open_plan AS autoOpenPlan FROM app_state WHERE id = 1",
       ).get() as { autoOpenPlan: number }).autoOpenPlan).toBe(0);
+      expect((inspection.prepare(
+        "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
+      ).get() as { enabled: number }).enabled).toBe(1);
       expect(inspection.pragma("foreign_key_check")).toEqual([]);
       inspection.close();
 

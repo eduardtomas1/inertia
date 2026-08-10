@@ -293,6 +293,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     defaultCodeWrap: state.default_code_wrap === 1,
     autoCollapseWorkLog: state.auto_collapse_work_log === 1,
     showChangedFileSummaries: state.show_changed_file_summaries === 1,
+    autoScrollToFinalAnswer: state.auto_scroll_to_final_answer === 1,
     sidebarMode: state.sidebar_mode,
     projectGrouping: state.project_grouping,
     autoOpenPlan: state.auto_open_plan === 1,

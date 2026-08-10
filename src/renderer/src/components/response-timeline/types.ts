@@ -36,12 +36,14 @@ export interface ResponseTimelineProps {
   defaultCodeWrap: boolean;
   autoCollapseWorkLog: boolean;
   showChangedFileSummaries: boolean;
+  autoScrollToFinalAnswer?: boolean;
   checkpointRestoreDisabled: boolean;
   turnAnchorId?: string | null;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
   timelineElementRef?: RefObject<HTMLDivElement | null>;
   onTurnAnchorSettled?: (turnId: string) => void;
   onTurnAnchorCancelled?: (turnId: string) => void;
+  onFinalAnswerAutoScroll?: (followsLatest: boolean | null) => void;
   onRespondToApproval: (
     request: AgentApprovalRequest,
     decision: AgentApprovalDecision,

@@ -262,6 +262,7 @@ export const configurationCommandSchemas = [
           defaultCodeWrap: z.boolean().optional(),
           autoCollapseWorkLog: z.boolean().optional(),
           showChangedFileSummaries: z.boolean().optional(),
+          autoScrollToFinalAnswer: z.boolean().optional(),
           sidebarMode: z.enum(["classic", "activity"]).optional(),
           projectGrouping: z.enum(["repository", "repository-path", "separate"]).optional(),
           autoOpenPlan: z.boolean().optional(),

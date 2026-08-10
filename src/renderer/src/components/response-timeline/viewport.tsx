@@ -70,6 +70,16 @@ function findTurnElement(
     .find((element) => element.dataset.turnId === turnId) ?? null;
 }
 
+function latestFinalAnswerId(timeline: ResponseTimelineItem[]): string | null {
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const item = timeline[index];
+    if (item?.kind === "turn") {
+      return item.turn.terminalAssistantMessage?.id ?? null;
+    }
+  }
+  return null;
+}
+
 function currentPlainTimelineIndex(
   root: HTMLElement | null | undefined,
   scrollElement: HTMLElement | null | undefined,
@@ -401,6 +411,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     ? timeline.findIndex((item) =>
         item.kind === "turn" && item.turn.id === props.turnAnchorId)
     : -1, [props.turnAnchorId, timeline]);
+  const finalAnswerId = latestFinalAnswerId(timeline);
+  const observedFinalAnswerRef = useRef({
+    conversationId: props.conversationId,
+    answerId: finalAnswerId,
+  });
   const timelineRef = useRef(timeline);
   timelineRef.current = timeline;
   const previousComparableTurn = useMemo(() => {
@@ -522,10 +537,13 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const manuallyAdjustedRows = useRef(new Set<string>());
   const layoutAnchorActive = useRef(false);
   const turnAnchorActive = useRef(false);
+  const finalAnswerAnchorActive = useRef(false);
   const onTurnAnchorSettledRef = useRef(props.onTurnAnchorSettled);
   const onTurnAnchorCancelledRef = useRef(props.onTurnAnchorCancelled);
+  const onFinalAnswerAutoScrollRef = useRef(props.onFinalAnswerAutoScroll);
   onTurnAnchorSettledRef.current = props.onTurnAnchorSettled;
   onTurnAnchorCancelledRef.current = props.onTurnAnchorCancelled;
+  onFinalAnswerAutoScrollRef.current = props.onFinalAnswerAutoScroll;
   const cancelLayoutAnchorRestoration = useRef<(() => void) | null>(null);
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
     shouldAdjustTimelineScrollPosition({
@@ -536,8 +554,92 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       scrollDirection: instance.scrollDirection,
       manuallyAnchored: layoutAnchorActive.current
         || turnAnchorActive.current
+        || finalAnswerAnchorActive.current
         || manuallyAdjustedRows.current.has(String(item.key)),
     });
+
+  useEffect(() => {
+    const observed = observedFinalAnswerRef.current;
+    const newFinalAnswer = observed.conversationId === props.conversationId
+      && finalAnswerId !== null
+      && observed.answerId !== finalAnswerId;
+    observedFinalAnswerRef.current = {
+      conversationId: props.conversationId,
+      answerId: observed.conversationId === props.conversationId
+        && finalAnswerId === null
+        ? observed.answerId
+        : finalAnswerId,
+    };
+    if (!newFinalAnswer || !props.autoScrollToFinalAnswer) return;
+
+    let finished = false;
+    let frame = 0;
+    let retriedAfterMount = false;
+    finalAnswerAnchorActive.current = true;
+    onFinalAnswerAutoScrollRef.current?.(null);
+    const finish = (followsLatest: boolean): void => {
+      if (finished) return;
+      finished = true;
+      finalAnswerAnchorActive.current = false;
+      onFinalAnswerAutoScrollRef.current?.(followsLatest);
+    };
+    const reveal = (): void => {
+      const scrollElement = props.scrollElementRef?.current;
+      const root = props.timelineElementRef?.current;
+      if (!scrollElement || !root) {
+        finish(true);
+        return;
+      }
+      const answer = [...root.querySelectorAll<HTMLElement>(
+        "[data-terminal-answer-id]",
+      )].find((element) =>
+        element.dataset.terminalAnswerId === finalAnswerId) ?? null;
+      if (!answer && !retriedAfterMount) {
+        retriedAfterMount = true;
+        if (virtualized && timeline.length > 0) {
+          virtualizer.scrollToIndex(timeline.length - 1, {
+            align: "end",
+            behavior: "auto",
+          });
+        }
+        frame = window.requestAnimationFrame(reveal);
+        return;
+      }
+      if (!answer) {
+        finish(true);
+        return;
+      }
+      scrollElement.scrollTo({
+        top: Math.max(
+          0,
+          scrollElement.scrollTop
+            + answer.getBoundingClientRect().top
+            - scrollElement.getBoundingClientRect().top
+            - 8,
+        ),
+        behavior: "auto",
+      });
+      finish(shouldFollowTimeline(
+        scrollElement.scrollTop,
+        scrollElement.clientHeight,
+        scrollElement.scrollHeight,
+      ));
+    };
+    frame = window.requestAnimationFrame(reveal);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      finish(true);
+    };
+  }, [
+    finalAnswerId,
+    props.autoScrollToFinalAnswer,
+    props.conversationId,
+    props.scrollElementRef,
+    props.timelineElementRef,
+    timeline.length,
+    virtualized,
+    virtualizer,
+  ]);
 
   useEffect(() => {
     const turnId = props.turnAnchorId;

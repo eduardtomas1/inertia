@@ -135,6 +135,7 @@ export interface AppSettings {
   defaultCodeWrap: boolean;
   autoCollapseWorkLog: boolean;
   showChangedFileSummaries: boolean;
+  autoScrollToFinalAnswer: boolean;
   sidebarMode: SidebarMode;
   projectGrouping: ProjectGroupingMode;
   autoOpenPlan: boolean;
@@ -278,6 +279,7 @@ export const defaultSettings: AppSettings = {
   defaultCodeWrap: false,
   autoCollapseWorkLog: true,
   showChangedFileSummaries: true,
+  autoScrollToFinalAnswer: true,
   sidebarMode: "classic",
   projectGrouping: "separate",
   autoOpenPlan: false,

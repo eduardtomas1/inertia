@@ -312,3 +312,143 @@ describe("accepted turn viewport anchoring", () => {
     expect(cancelled).not.toHaveBeenCalled();
   });
 });
+
+describe("completed answer positioning", () => {
+  function renderAnswerTimeline(
+    enabled: boolean,
+    onFinalAnswerAutoScroll: (followsLatest: boolean | null) => void,
+    settledInitially = false,
+  ) {
+    const scrollElementRef = createRef<HTMLDivElement>();
+    const timelineElementRef = createRef<HTMLDivElement>();
+    const runningTurn: AgentTurn = {
+      ...turn(1),
+      completedAt: null,
+      status: "running",
+      terminalReason: null,
+    };
+    const answer: ChatMessage = {
+      id: "answer-1",
+      conversationId,
+      turnId: runningTurn.id,
+      role: "assistant",
+      content: "A long final answer",
+      attachments: [],
+      createdAt: "2026-08-01T10:00:02.000Z",
+    };
+    const settledTurn: AgentTurn = {
+      ...turn(1),
+      terminalAssistantMessageId: answer.id,
+    };
+    const scene = (settled: boolean): React.JSX.Element => (
+      <div ref={scrollElementRef}>
+        <div ref={timelineElementRef}>
+          <ResponseTimeline
+            turns={[settled ? settledTurn : runningTurn]}
+            messages={settled ? [message(1), answer] : [message(1)]}
+            activities={[]}
+            reasonings={[]}
+            plans={[]}
+            checkpoints={[]}
+            projectRoot="/workspace"
+            projectId="project-1"
+            conversationId={conversationId}
+            streamingText=""
+            streamingReasoning=""
+            approvals={[]}
+            inputRequests={[]}
+            showTimestamps={false}
+            showThinking={false}
+            defaultCodeWrap={false}
+            autoCollapseWorkLog
+            showChangedFileSummaries={false}
+            autoScrollToFinalAnswer={enabled}
+            checkpointRestoreDisabled={false}
+            scrollElementRef={scrollElementRef}
+            timelineElementRef={timelineElementRef}
+            onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
+            onRespondToApproval={async () => undefined}
+            onRespondToInput={async () => undefined}
+            onRevertCheckpoint={() => undefined}
+            onOpenTurnDiff={() => undefined}
+            onCompareTurnArtifacts={() => undefined}
+            onOpenTurnFile={() => undefined}
+            onStop={() => undefined}
+          />
+        </div>
+      </div>
+    );
+    const view = render(scene(settledInitially));
+    return {
+      answer,
+      scrollElementRef,
+      timelineElementRef,
+      settle: () => view.rerender(scene(true)),
+    };
+  }
+
+  it("places a newly persisted final answer at the viewport top", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const harness = renderAnswerTimeline(true, positioned);
+    const scroll = harness.scrollElementRef.current!;
+    let scrollTop = 1_500;
+    Object.defineProperties(scroll, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 5_000 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+        },
+      },
+    });
+    scroll.getBoundingClientRect = () => rect(100, 400);
+    scroll.scrollTo = vi.fn((options?: ScrollToOptions | number) => {
+      if (typeof options !== "number" && options?.top !== undefined) {
+        scrollTop = options.top;
+      }
+    });
+
+    harness.settle();
+    const answer = harness.timelineElementRef.current!
+      .querySelector<HTMLElement>(`[data-terminal-answer-id="${harness.answer.id}"]`)!;
+    answer.getBoundingClientRect = () => rect(2_100 - scrollTop, 2_400);
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(scroll.scrollTo).toHaveBeenCalledWith({
+      top: 1_992,
+      behavior: "auto",
+    });
+    expect(scrollTop).toBe(1_992);
+    expect(positioned.mock.calls).toEqual([[null], [false]]);
+  });
+
+  it("does not reposition disabled or already-loaded answers", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const disabled = vi.fn();
+    const disabledHarness = renderAnswerTimeline(false, disabled);
+    disabledHarness.settle();
+    const historical = vi.fn();
+    renderAnswerTimeline(true, historical, true);
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(disabled).not.toHaveBeenCalled();
+    expect(historical).not.toHaveBeenCalled();
+  });
+});

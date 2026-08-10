@@ -110,6 +110,7 @@ type ChatWorkspaceProps = {
   defaultCodeWrap: boolean;
   autoCollapseWorkLog: boolean;
   showChangedFileSummaries: boolean;
+  autoScrollToFinalAnswer: boolean;
   promptContext?: string | null;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
@@ -197,6 +198,7 @@ export function ChatWorkspace({
   defaultCodeWrap,
   autoCollapseWorkLog,
   showChangedFileSummaries,
+  autoScrollToFinalAnswer,
   promptContext,
   previewContextUrl,
   providerIdentityLabels,
@@ -363,6 +365,31 @@ export function ChatWorkspace({
     });
     performScrollToLatest(behavior);
   }, [clearReaderIntent, conversationId, performScrollToLatest]);
+
+  const onFinalAnswerAutoScroll = useCallback((
+    followsLatest: boolean | null,
+  ): void => {
+    readerIntentRef.current = true;
+    if (followCorrectionFrameRef.current !== null) {
+      window.cancelAnimationFrame(followCorrectionFrameRef.current);
+      followCorrectionFrameRef.current = null;
+    }
+    if (followsLatest === null || !conversationId) return;
+    dispatchNavigation({
+      type: "reader.scrolled",
+      conversationId,
+      followsLatest,
+      intentional: true,
+    });
+    onLatestContentVisibilityChange?.(followsLatest);
+    if (readerIntentReleaseTimerRef.current !== null) {
+      window.clearTimeout(readerIntentReleaseTimerRef.current);
+    }
+    readerIntentReleaseTimerRef.current = window.setTimeout(() => {
+      readerIntentRef.current = false;
+      readerIntentReleaseTimerRef.current = null;
+    }, READER_INTENT_GUARD_MS);
+  }, [conversationId, onLatestContentVisibilityChange]);
 
   const revealPendingInput = useCallback((): void => {
     if (!pendingInputRequest) return;
@@ -606,9 +633,12 @@ export function ChatWorkspace({
               defaultCodeWrap={defaultCodeWrap}
               autoCollapseWorkLog={autoCollapseWorkLog}
               showChangedFileSummaries={showChangedFileSummaries}
+              autoScrollToFinalAnswer={autoScrollToFinalAnswer
+                && transcriptNavigationFollowsContent(activeNavigation)}
               turnAnchorId={turnAnchorId}
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}
+              onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
               scrollElementRef={scrollRef}
               timelineElementRef={timelineRef}
               checkpointRestoreDisabled={turns.some(({ status }) =>

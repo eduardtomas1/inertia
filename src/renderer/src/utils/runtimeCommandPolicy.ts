@@ -163,6 +163,11 @@ export const RUNTIME_COMMAND_POLICIES = {
   "project.remove": shortMutation,
   "project.select": shortMutation,
   "project.update": shortMutation,
+  "prompt-preset.create": shortMutation,
+  "prompt-preset.delete": shortMutation,
+  "prompt-preset.duplicate": shortMutation,
+  "prompt-preset.reorder": shortMutation,
+  "prompt-preset.update": shortMutation,
   "provider.auth.start": shortMutation,
   "provider.maintenance.cancel": shortMutation,
   "provider.maintenance.refresh": {

@@ -34,6 +34,11 @@ export function createSettingsBackendCommandHandler(
 ): RuntimeCommandHandler {
   return defineRuntimeCommandHandler([
     "settings.update",
+    "prompt-preset.create",
+    "prompt-preset.update",
+    "prompt-preset.duplicate",
+    "prompt-preset.delete",
+    "prompt-preset.reorder",
     "backend.profile.get",
     "backend.profile.create",
     "backend.profile.update",
@@ -82,6 +87,42 @@ export function createSettingsBackendCommandHandler(
         }
         return "mutation";
       }
+      case "prompt-preset.create":
+        dependencies.store.promptPresets.create(
+          command.payload,
+        );
+        return "mutation";
+      case "prompt-preset.update": {
+        const {
+          presetId,
+          expectedRevision,
+          ...update
+        } = command.payload;
+        dependencies.store.promptPresets.update(
+          presetId,
+          expectedRevision,
+          update,
+        );
+        return "mutation";
+      }
+      case "prompt-preset.duplicate":
+        dependencies.store.promptPresets.duplicate(
+          command.payload.presetId,
+          command.payload.expectedRevision,
+        );
+        return "mutation";
+      case "prompt-preset.delete":
+        dependencies.store.promptPresets.delete(
+          command.payload.presetId,
+          command.payload.expectedRevision,
+        );
+        return "mutation";
+      case "prompt-preset.reorder":
+        dependencies.store.promptPresets.reorder(
+          command.payload.expectedPresetIds,
+          command.payload.presetIds,
+        );
+        return "mutation";
       case "backend.profile.get":
         dependencies.send(socket, {
           type: "request.result",

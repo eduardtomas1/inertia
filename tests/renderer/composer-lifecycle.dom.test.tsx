@@ -5,6 +5,7 @@ import {
   renderHook,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +13,7 @@ import type {
   ChatAttachment,
   Conversation,
   ProviderInfo,
+  PromptPreset,
   ServerEvent,
 } from "../../src/shared/contracts";
 import {
@@ -24,6 +26,7 @@ import {
   DRAFT_PERSISTENCE_MAX_WAIT_MS,
 } from "../../src/renderer/src/components/composer/Composer";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
+import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
 
 const provider: ProviderInfo = {
   id: "codex",
@@ -93,6 +96,19 @@ function attachment(id: string): ChatAttachment {
     path: `/private/tmp/${id}.png`,
     mimeType: "image/png",
     size: 128,
+  };
+}
+
+function promptPreset(id: string, position = 0): PromptPreset {
+  return {
+    id,
+    name: "Lifecycle review",
+    body: "Review this change for lifecycle races.",
+    route: null,
+    position,
+    revision: 1,
+    createdAt: "2026-08-10T10:00:00.000Z",
+    updatedAt: "2026-08-10T10:00:00.000Z",
   };
 }
 
@@ -837,4 +853,87 @@ describe("composer asynchronous ownership", () => {
       expect(screen.getByRole("button", { name: "Stop agent" })).toBeTruthy();
     },
   );
+
+  it("applies a reusable preset without sending or consuming the scratch stash", async () => {
+    const current = conversation("67676767-6767-4767-8767-676767676767");
+    const onSend = vi.fn(() => Promise.resolve());
+    const preset = promptPreset("77777777-7777-4777-8777-777777777777");
+    render(<Composer {...composerProps(current, {
+      promptPresets: [preset],
+      onSend,
+      onChooseAttachments: async () => [attachment("kept")],
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "Temporary unfinished draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scratch prompts" }));
+    fireEvent.click(screen.getByRole("menuitem", {
+      name: /Save current prompt/u,
+    }));
+    expect(input).toHaveValue("");
+    expect(readPromptStash(window.localStorage)).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach images or documents",
+    }));
+    await screen.findByText("kept.png");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Prompt presets, 1 saved",
+    }));
+    fireEvent.click(await screen.findByTitle("Insert Lifecycle review"));
+    await waitFor(() => expect(input).toHaveValue(preset.body));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("kept.png")).toBeVisible();
+    expect(readPromptStash(window.localStorage)[0]?.content)
+      .toBe("Temporary unfinished draft");
+  });
+
+  it("keeps preset insertion owned by the selected split composer", async () => {
+    const primary = conversation("78787878-7878-4787-8787-787878787878");
+    const secondary = conversation("89898989-8989-4898-8898-898989898989");
+    const preset = promptPreset("99999999-9999-4999-8999-999999999999");
+    const primarySend = vi.fn(() => Promise.resolve());
+    const secondarySend = vi.fn(() => Promise.resolve());
+    render(
+      <>
+        <section aria-label="Primary pane">
+          <Composer {...composerProps(primary, {
+            promptPresets: [preset],
+            onSend: primarySend,
+          })} />
+        </section>
+        <section aria-label="Secondary pane">
+          <Composer {...composerProps(secondary, {
+            promptPresets: [preset],
+            onSend: secondarySend,
+          })} />
+        </section>
+      </>,
+    );
+    const primaryPane = screen.getByRole("region", { name: "Primary pane" });
+    const secondaryPane = screen.getByRole("region", { name: "Secondary pane" });
+    const primaryInput = within(primaryPane).getByRole("textbox", {
+      name: "Message",
+    });
+    const secondaryInput = within(secondaryPane).getByRole("textbox", {
+      name: "Message",
+    });
+    fireEvent.change(primaryInput, { target: { value: "Primary draft" } });
+    fireEvent.change(secondaryInput, { target: { value: "Secondary draft" } });
+
+    fireEvent.click(within(secondaryPane).getByRole("button", {
+      name: "Prompt presets, 1 saved",
+    }));
+    const dialog = await within(secondaryPane).findByRole("dialog", {
+      name: "Prompt presets",
+    });
+    fireEvent.click(within(dialog).getByTitle("Insert Lifecycle review"));
+
+    expect(primaryInput).toHaveValue("Primary draft");
+    await waitFor(() => expect(secondaryInput).toHaveValue(
+      `Secondary draft\n\n${preset.body}`,
+    ));
+    expect(primarySend).not.toHaveBeenCalled();
+    expect(secondarySend).not.toHaveBeenCalled();
+  });
 });

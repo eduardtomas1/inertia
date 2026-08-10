@@ -31,6 +31,57 @@ describe("runtime boundary helpers", () => {
     });
   });
 
+  it("accepts bounded prompt preset commands at the runtime boundary", () => {
+    const command = {
+      requestId: "11111111-1111-4111-8111-111111111111",
+      type: "prompt-preset.create",
+      payload: {
+        name: "Review",
+        body: "Review this patch.",
+        route: null,
+      },
+    };
+    expect(parseRuntimeCommand(
+      Buffer.from(JSON.stringify(command)),
+      false,
+    ).command).toEqual(command);
+    expect(parseRuntimeCommand(Buffer.from(JSON.stringify({
+      ...command,
+      payload: { ...command.payload, attachmentPath: "/private/file" },
+    })), false).error).toMatchObject({ message: "Invalid command." });
+
+    const escapedOverflowRoute = {
+      harnessId: "h".repeat(200),
+      backendProfileId: "b".repeat(200),
+      modelId: "m".repeat(300),
+      reasoningEffort: "\u0001".repeat(43),
+    };
+    for (const overflowCommand of [
+      {
+        ...command,
+        payload: { ...command.payload, route: escapedOverflowRoute },
+      },
+      {
+        requestId: command.requestId,
+        type: "prompt-preset.update",
+        payload: {
+          presetId: "22222222-2222-4222-8222-222222222222",
+          expectedRevision: 1,
+          route: escapedOverflowRoute,
+        },
+      },
+    ]) {
+      expect(parseRuntimeCommand(
+        Buffer.from(JSON.stringify(overflowCommand)),
+        false,
+      ).error).toMatchObject({
+        type: "request.error",
+        requestId: command.requestId,
+        message: "Invalid command.",
+      });
+    }
+  });
+
   it("allows a legitimate large hydration frame to drain before later events", () => {
     vi.useFakeTimers();
     let bufferedAmount = 0;

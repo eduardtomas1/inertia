@@ -1,8 +1,8 @@
-import { conversationCreateCommandSchema } from "@shared/contracts/client-command/conversation-create";
 import type {
   ClientCommand,
   Conversation,
 } from "@shared/contracts";
+import { conversationCreateCommandSchema } from "@shared/contracts/client-command/conversation-create";
 
 import { buildDraftConversation } from "../lib/newConversation";
 
@@ -68,7 +68,7 @@ function readPersistedDraftRecord(): PersistedDraftConversation | null {
     type: "conversation.create",
     payload: candidate.payload,
   });
-  if (!parsed.success || parsed.data.type !== "conversation.create") {
+  if (!parsed.success) {
     window.localStorage.removeItem(STORAGE_KEY);
     return null;
   }
@@ -154,7 +154,6 @@ export function readPersistedMaterializedDraftConversation():
     });
     if (
       !parsed.success
-      || parsed.data.type !== "conversation.create"
       || parsed.data.payload.projectId !== candidate.projectId
     ) {
       window.localStorage.removeItem(MATERIALIZED_STORAGE_KEY);

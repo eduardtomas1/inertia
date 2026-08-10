@@ -428,6 +428,7 @@ export function createWorkspaceSceneModel({
       selectedSkillIds: workflow.selectedSkillIds,
       skillsLoading: workflow.loading,
       skillsError: workflow.error,
+      promptPresets: connection.snapshot?.promptPresets ?? [],
       goal: persistedConversation ? {
         workflow: currentWorkflow,
         loading: workflow.loading,
@@ -467,6 +468,7 @@ export function createWorkspaceSceneModel({
       onListSkills: actions.listSkills,
       onToggleSkill: actions.toggleSkill,
       onClearSelectedSkills: actions.clearSelectedSkills,
+      onPromptPresetCommand: actions.run,
       onRespondToApproval: actions.respondToApproval,
       onRespondToInput: actions.respondToInput,
       onUpdateConversation: actions.updateConversation,

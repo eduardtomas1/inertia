@@ -10,12 +10,14 @@ import type {
   ProjectAction,
   ProviderId,
   ProviderInfo,
+  PromptPreset,
   ThreadUsageSnapshot,
   TurnRequestContext,
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
+import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import type { ChatGoalControlProps } from "../ChatGoalControl";
 import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
 
@@ -50,6 +52,8 @@ export interface ComposerProps {
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onToggleSkill: (skill: AgentSkillSummary) => void;
   onClearSelectedSkills: () => void;
+  promptPresets?: readonly PromptPreset[];
+  onPromptPresetCommand?: PromptPresetCommandRunner;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -83,12 +87,22 @@ export interface ComposerProps {
   onClearPromptContext?: () => void;
 }
 
+export type PromptPresetCommand = Extract<
+  CommandWithoutId,
+  { type: `prompt-preset.${string}` }
+>;
+export type PromptPresetCommandRunner = (
+  key: PromptPresetCommand["type"],
+  command: PromptPresetCommand,
+) => Promise<unknown>;
+
 export type ComposerMenu =
   | "reasoning"
   | "mode"
   | "access"
   | "action"
   | "skills"
+  | "presets"
   | "stash"
   | "more";
 export type MoreSection = "actions" | "reasoning" | "mode" | "access";

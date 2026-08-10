@@ -56,6 +56,7 @@ const REQUIRED_TABLES_BY_SCHEMA_VERSION = [
     "conversation_path_authorities",
     "workspace_path_authority_enrollment",
   ]],
+  [54, ["prompt_presets"]],
 ] as const;
 
 export interface DatabaseRecoveryReport {
@@ -402,6 +403,41 @@ function validateOpenDatabase(
       enrollment.length !== 1
       || enrollment[0]?.id !== 1
       || ![0, 1].includes(enrollment[0].completed)
+    ) return "corrupt";
+  }
+  if (version >= 54) {
+    const promptPresetColumns = new Set(
+      (database.prepare("PRAGMA table_info(prompt_presets)").all() as Array<{
+        name: string;
+      }>).map(({ name }) => name),
+    );
+    if ([
+      "id",
+      "name",
+      "body",
+      "route_json",
+      "position",
+      "revision",
+      "created_at",
+      "updated_at",
+    ].some((column) => !promptPresetColumns.has(column))) return "corrupt";
+    const promptPresetIndex = database.prepare(`
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'index' AND name = 'prompt_presets_position_idx'
+    `).get();
+    if (!promptPresetIndex) return "corrupt";
+    const promptPresetTrigger = database.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'trigger' AND name = 'prompt_presets_count_limit'
+    `).get() as { sql: unknown } | undefined;
+    const normalizedPromptPresetTrigger =
+      typeof promptPresetTrigger?.sql === "string"
+        ? promptPresetTrigger.sql.replace(/\s+/gu, " ").toLowerCase()
+        : "";
+    if (
+      !normalizedPromptPresetTrigger.includes("before insert on prompt_presets")
+      || !normalizedPromptPresetTrigger.includes("count(*) from prompt_presets")
+      || !/raise\s*\(\s*abort/u.test(normalizedPromptPresetTrigger)
     ) return "corrupt";
   }
   return "valid-current";

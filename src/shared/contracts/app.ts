@@ -17,6 +17,7 @@ import {
   type AppKeybindings,
 } from "../keybindings";
 import type { AgentTurnStatus } from "../turn-lifecycle";
+import type { PromptPreset } from "../prompt-presets";
 
 export type { ProviderId } from "../provider";
 
@@ -250,6 +251,8 @@ export interface AppSnapshot {
   /** Automatic full-database backup status; absent from legacy fixtures. */
   databaseBackup?: DatabaseBackupStatus;
   settings: AppSettings;
+  /** Present on authoritative snapshots; optional only for legacy fixtures. */
+  promptPresets?: PromptPreset[];
   activeProjectId: string | null;
   activeConversationId: string | null;
   /** Present on authoritative runtime snapshots; optional for legacy fixtures. */

@@ -373,6 +373,8 @@ export class RuntimeStore {
     return this.snapshotRepository.snapshot(providers);
   }
 
+  get promptPresets() { return this.snapshotRepository.promptPresets; }
+
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
     return {
       ...this.snapshotRepository.shellSnapshot(providers),

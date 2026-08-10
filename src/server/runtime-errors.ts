@@ -9,6 +9,7 @@ import { WorkspaceError } from "./workspace";
 import { BackendProfileControllerError } from "./runtime/backends/backend-profile-controller";
 import { ProviderMaintenanceError } from "./provider/maintenance-controller";
 import { WorkspacePathAuthorityError } from "./workspace-path-authority";
+import { PromptPresetRepositoryError } from "./persistence/prompt-preset-repository";
 
 export class RuntimeRequestError extends Error {}
 
@@ -26,6 +27,7 @@ export function publicRuntimeError(error: unknown): string {
     || error instanceof BackendProfileControllerError
     || error instanceof ProviderMaintenanceError
     || error instanceof WorkspacePathAuthorityError
+    || error instanceof PromptPresetRepositoryError
   ) return error.message;
   return "The request could not be completed.";
 }

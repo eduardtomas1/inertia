@@ -41,6 +41,7 @@ import type {
   ProjectAction,
   ProviderId,
   ProviderInfo,
+  PromptPreset,
   ProviderMaintenanceOperation,
   ProviderMaintenanceStatus,
   ResponseDensity,
@@ -64,6 +65,7 @@ import {
 } from "../utils/transcriptNavigation";
 import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
+import type { PromptPresetCommandRunner } from "./composer/types";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import type { FinalAnswerAutoScrollEvent } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
@@ -74,6 +76,7 @@ const ResponseTimeline = lazy(async () => ({
 }));
 
 const READER_INTENT_GUARD_MS = 750;
+const EMPTY_PROMPT_PRESETS: readonly PromptPreset[] = [];
 
 function recordsOwnedByConversation<T extends { conversationId: string }>(
   records: T[],
@@ -106,6 +109,7 @@ type ChatWorkspaceProps = {
   selectedSkillIds: readonly string[];
   skillsLoading: boolean;
   skillsError: string | null;
+  promptPresets?: readonly PromptPreset[];
   goal?: ChatGoalControlProps | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
@@ -140,6 +144,7 @@ type ChatWorkspaceProps = {
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onToggleSkill: (skill: AgentSkillSummary) => void;
   onClearSelectedSkills: () => void;
+  onPromptPresetCommand?: PromptPresetCommandRunner;
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => Promise<void>;
@@ -197,6 +202,7 @@ export function ChatWorkspace({
   selectedSkillIds,
   skillsLoading,
   skillsError,
+  promptPresets = EMPTY_PROMPT_PRESETS,
   goal,
   approvals,
   inputRequests,
@@ -226,6 +232,7 @@ export function ChatWorkspace({
   onListSkills,
   onToggleSkill,
   onClearSelectedSkills,
+  onPromptPresetCommand,
   onRespondToApproval,
   onRespondToInput,
   onUpdateConversation,
@@ -790,6 +797,8 @@ export function ChatWorkspace({
           onListSkills={onListSkills}
           onToggleSkill={onToggleSkill}
           onClearSelectedSkills={onClearSelectedSkills}
+          promptPresets={promptPresets}
+          onPromptPresetCommand={onPromptPresetCommand}
           onUpdateConversation={onUpdateConversation}
           onCreateConversationForSelection={onCreateConversationForSelection}
           onChooseAttachments={onChooseAttachments}

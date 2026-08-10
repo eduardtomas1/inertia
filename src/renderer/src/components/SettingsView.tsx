@@ -786,7 +786,7 @@ export function SettingsView({
               <div className="codex-binary-path runtime-log-setting">
                 <span>
                   <strong>Full local database backup</strong>
-                  <small>Automatic validated copies of the complete SQLite database include provider-session references, execution context, Git artifacts, and attachment records. Credential secrets and separately stored attachment bytes remain outside SQLite.</small>
+                  <small>Automatic validated copies of the complete SQLite database include prompt presets, provider-session references, execution context, Git artifacts, and attachment records. Credential secrets and separately stored attachment bytes remain outside SQLite.</small>
                   <small>
                     {databaseBackup?.lastValidatedAt
                       ? <>Last validated backup: <time dateTime={databaseBackup.lastValidatedAt} title={databaseBackup.lastValidatedAt}>{new Date(databaseBackup.lastValidatedAt).toLocaleString()}</time>.</>
@@ -797,7 +797,7 @@ export function SettingsView({
               <div className="codex-binary-path runtime-log-setting">
                 <span>
                   <strong>Portable conversation recovery export</strong>
-                  <small>Exports contain project paths and conversation messages only. They exclude attachments, provider sessions, execution context, Git artifacts, credentials, secret references, and vault data. Imports always create new identities with supervised access.</small>
+                  <small>Exports contain project paths and conversation messages only. They exclude prompt presets, attachments, provider sessions, execution context, Git artifacts, credentials, secret references, and vault data. Imports always create new identities with supervised access.</small>
                 </span>
                 <div>
                   <button type="button" className="secondary-button" disabled={disabled || recoveryOperation !== null} onClick={() => { void exportRecoveryData(); }}><Download size={14} />{recoveryOperation === "export" ? "Exporting…" : "Export recovery file"}</button>

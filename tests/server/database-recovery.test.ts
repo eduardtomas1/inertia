@@ -979,7 +979,7 @@ describe("database backup and startup recovery", () => {
     recovered.close();
   });
 
-  it.each(["agent_turns", "workspace_runs"] as const)(
+  it.each(["agent_turns", "workspace_runs", "prompt_presets"] as const)(
     "restores a valid backup when a current-schema primary lost %s",
     async (missingTable) => {
       const directory = temporaryDirectory();
@@ -1199,6 +1199,24 @@ describe("database backup and startup recovery", () => {
         database.exec(
           "DROP TRIGGER conversation_worktree_ownership_project_delete",
         );
+      },
+    },
+    {
+      label: "a required prompt preset column",
+      mutate: (database: Database.Database) => {
+        database.exec("ALTER TABLE prompt_presets DROP COLUMN route_json");
+      },
+    },
+    {
+      label: "the prompt preset ordering index",
+      mutate: (database: Database.Database) => {
+        database.exec("DROP INDEX prompt_presets_position_idx");
+      },
+    },
+    {
+      label: "the prompt preset count trigger",
+      mutate: (database: Database.Database) => {
+        database.exec("DROP TRIGGER prompt_presets_count_limit");
       },
     },
   ])("skips a current-schema backup missing $label", async ({ mutate }) => {

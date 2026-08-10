@@ -22,6 +22,7 @@ import { durableDataMigrationDefinitions } from "./durable-data";
 import { protectCancellingDuoDeletion, protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
+import { promptPresetMigrationDefinition } from "./prompt-presets";
 import { persistFinalAnswerAutoScroll, roadmapSettingsMigrationDefinitions } from "./roadmap-settings";
 import { quotedSqlIdentifier } from "./sql-identifiers";
 import { ensureTurnAssociationColumns } from "./turn-association-columns";
@@ -1203,6 +1204,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
       persistFinalAnswerAutoScroll,
       conversationWorktreeOwnershipMigration,
       workspacePathAuthoritiesMigration,
+      promptPresetMigrationDefinition,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

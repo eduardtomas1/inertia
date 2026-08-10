@@ -47,6 +47,7 @@ import type {
   WorkspaceRunRow,
 } from "./rows";
 import type { RuntimeStoreSnapshot } from "./types";
+import { PromptPresetRepository } from "./prompt-preset-repository";
 import {
   MESSAGE_PROJECTION_COLUMNS,
   REASONING_PROJECTION_COLUMNS,
@@ -55,7 +56,11 @@ import {
 type SnapshotPersistenceContext = Pick<PersistenceContext, "database">;
 
 export class SnapshotRepository {
-  constructor(private readonly context: SnapshotPersistenceContext) {}
+  readonly promptPresets: PromptPresetRepository;
+
+  constructor(private readonly context: SnapshotPersistenceContext) {
+    this.promptPresets = new PromptPresetRepository(context.database);
+  }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
     const state = this.state();
@@ -100,6 +105,7 @@ export class SnapshotRepository {
       reviewNotes: (this.context.database.prepare("SELECT * FROM diff_review_notes ORDER BY created_at ASC").all() as DiffReviewNoteRow[]).map(reviewNoteFromRow),
       runs: (this.context.database.prepare("SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200").all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
+      promptPresets: this.promptPresets.list(),
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,
@@ -137,6 +143,7 @@ export class SnapshotRepository {
         "SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200",
       ).all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
+      promptPresets: this.promptPresets.list(),
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,

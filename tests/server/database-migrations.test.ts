@@ -1470,6 +1470,7 @@ describe("runtime migration catalog", () => {
       DROP TABLE workspace_path_authority_enrollment;
       DROP TRIGGER conversation_worktree_ownership_project_delete;
       DROP TABLE conversation_worktree_ownership;
+      DROP TABLE prompt_presets;
       ALTER TABLE app_state DROP COLUMN auto_scroll_to_final_answer;
       DELETE FROM schema_migrations WHERE version >= 51;
     `);
@@ -1485,10 +1486,14 @@ describe("runtime migration catalog", () => {
       { version: 51 },
       { version: 52 },
       { version: 53 },
+      { version: 54 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
     ).get() as { enabled: number }).enabled).toBe(1);
+    expect(migrated.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'prompt_presets'",
+    ).get()).toEqual({ name: "prompt_presets" });
     migrated.close();
   });
 });

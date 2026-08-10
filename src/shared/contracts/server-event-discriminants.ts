@@ -22,6 +22,13 @@ import type {
   ProviderMaintenanceVersionStatus,
 } from "../provider-maintenance";
 import { legacyProviderIdForHarness, type ModelSelection } from "../model-routing";
+import {
+  MAX_PROMPT_PRESETS,
+  MAX_PROMPT_PRESETS_SERIALIZED_BYTES,
+  promptPresetSchema,
+  promptPresetsSerializedBytes,
+  type PromptPreset,
+} from "../prompt-presets";
 
 function exhaustiveOptions<T extends string>(
   options: Record<T, true>,
@@ -100,6 +107,21 @@ type IdentityRecord = Record<string, unknown>;
 
 function uniqueIdentity(entries: IdentityRecord[], key = "id"): boolean {
   return new Set(entries.map((entry) => entry[key])).size === entries.length;
+}
+
+function promptPresetCollectionCoherent(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > MAX_PROMPT_PRESETS) return false;
+  const parsed = value.map((entry) => promptPresetSchema.safeParse(entry));
+  if (parsed.some((result) => !result.success)) return false;
+  const presets = parsed.flatMap((result) => result.success
+    ? [result.data]
+    : []);
+  return new Set(presets.map(({ id }) => id)).size === presets.length
+    && new Set(presets.map(({ position }) => position)).size === presets.length
+    && presets.every(({ position }, index) => position === index)
+    && promptPresetsSerializedBytes(presets as PromptPreset[])
+      <= MAX_PROMPT_PRESETS_SERIALIZED_BYTES;
 }
 
 const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [
@@ -202,7 +224,8 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
     && defaults.every((entry) => entry.scope !== "project" || projectIds.has(entry.projectId))
     && (value.activeProjectId === null || projectIds.has(value.activeProjectId))
     && (value.activeConversationId === null
-      || conversationProjects.get(value.activeConversationId) === value.activeProjectId);
+      || conversationProjects.get(value.activeConversationId) === value.activeProjectId)
+    && promptPresetCollectionCoherent(value.promptPresets);
 }
 
 export function pullRequestCapabilityStateCoherent(

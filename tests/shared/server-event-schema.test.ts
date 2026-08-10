@@ -986,6 +986,16 @@ describe("server event remaining discriminant and identity boundary", () => {
     selection,
     updatedAt: checkedAt,
   };
+  const promptPreset = {
+    id: "11111111-1111-4111-8111-111111111111",
+    name: "Review",
+    body: "Review this patch.",
+    route: null,
+    position: 0,
+    revision: 1,
+    createdAt: checkedAt,
+    updatedAt: checkedAt,
+  };
   const snapshot = (overrides: Record<string, unknown> = {}): unknown => ({
     projects: [project],
     conversations: [],
@@ -1242,6 +1252,23 @@ describe("server event remaining discriminant and identity boundary", () => {
       { projects: [project, { ...project, id: "project-2" }], conversations: [conversationShell], activeProjectId: "project-2", activeConversationId: conversation.id },
     ];
     for (const active of invalidActiveStates) expect(() => parseServerEvent({ type: "snapshot.updated", snapshot: snapshot(active) })).toThrow("Malformed server event");
+  });
+  it("accepts only ordered, unique, structurally safe prompt presets", () => {
+    const parsePresets = (promptPresets: unknown[]): unknown => parseServerEvent({
+      type: "snapshot.updated",
+      snapshot: snapshot({ promptPresets }),
+    });
+    expect(parsePresets([promptPreset])).toBeTruthy();
+    expect(() => parsePresets([
+      promptPreset,
+      { ...promptPreset, position: 1 },
+    ])).toThrow("Malformed server event");
+    expect(() => parsePresets([{ ...promptPreset, position: 1 }]))
+      .toThrow("Malformed server event");
+    expect(() => parsePresets([{
+      ...promptPreset,
+      filesystemPath: "/private/context.txt",
+    }])).toThrow("Malformed server event");
   });
   it("rejects mismatched and duplicate event-local identities", () => {
     const skill = workflow.skills[0]; const attachment = conversationDetail.messages[0].attachments[0];

@@ -16,6 +16,7 @@ import type {
   ModelBackendProfileView,
   ProjectAction,
   ProviderInfo,
+  PromptPreset,
   ThreadUsageSnapshot,
   UsageDisplayMode,
 } from "@shared/contracts";
@@ -40,10 +41,14 @@ import {
   type ComposerSettingsModel,
 } from "./ComposerSettings";
 import type { ComposerMenuController } from "./useComposerMenus";
+import type { PromptPresetCommandRunner } from "./types";
 import type { PromptStashEntry } from "../../utils/promptStash";
 
 const PromptStashMenu = lazy(async () => ({
   default: (await import("./PromptStashMenu")).PromptStashMenu,
+}));
+const PromptPresetMenu = lazy(async () => ({
+  default: (await import("./PromptPresetMenu")).PromptPresetMenu,
 }));
 const ComposerSkillsMenu = lazy(async () => ({
   default: (await import("./ComposerSkillsMenu")).ComposerSkillsMenu,
@@ -64,6 +69,10 @@ export interface ComposerToolbarProps {
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onToggleSkill: (skill: AgentSkillSummary) => void;
   onClearSelectedSkills: () => void;
+  promptPresets: readonly PromptPreset[];
+  currentPrompt: string;
+  onApplyPromptPreset: (preset: PromptPreset) => Promise<boolean>;
+  onPromptPresetCommand: PromptPresetCommandRunner;
   promptStash: readonly PromptStashEntry[];
   canStashPrompt: boolean;
   promptStashBlockedReason: string | null;
@@ -120,6 +129,10 @@ export function ComposerToolbar({
   onListSkills,
   onToggleSkill,
   onClearSelectedSkills,
+  promptPresets,
+  currentPrompt,
+  onApplyPromptPreset,
+  onPromptPresetCommand,
   promptStash,
   canStashPrompt,
   promptStashBlockedReason,
@@ -174,6 +187,21 @@ export function ComposerToolbar({
         >
           <Paperclip size={16} />
         </IconButton>
+        <Suspense fallback={null}>
+          <PromptPresetMenu
+            presets={promptPresets}
+            currentMessage={currentPrompt}
+            currentRoute={{
+              harnessId: conversation.modelSelection.harnessId,
+              backendProfileId: conversation.modelSelection.backendProfileId,
+              modelId: conversation.modelSelection.modelId,
+              reasoningEffort: conversation.modelSelection.reasoningEffort,
+            }}
+            menuController={menuController}
+            onApply={onApplyPromptPreset}
+            onCommand={onPromptPresetCommand}
+          />
+        </Suspense>
         <Suspense fallback={null}>
           <PromptStashMenu
             entries={promptStash}

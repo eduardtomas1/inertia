@@ -11,6 +11,7 @@ import {
 import clsx from "clsx";
 import type {
   ChatAttachment,
+  PromptPreset,
 } from "@shared/contracts";
 import { MAX_CHAT_ATTACHMENTS } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
@@ -75,6 +76,8 @@ export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // ordinary lifecycle boundaries still flush the exact pending owner/value.
 export const DRAFT_PERSISTENCE_MAX_WAIT_MS = 1_000;
 
+const ignorePromptPresetMutation = (): Promise<void> => Promise.resolve();
+
 export const Composer = memo(function Composer({
   conversation,
   providers,
@@ -101,6 +104,8 @@ export const Composer = memo(function Composer({
   onListSkills,
   onToggleSkill,
   onClearSelectedSkills,
+  promptPresets = [],
+  onPromptPresetCommand = ignorePromptPresetMutation,
   onUpdateConversation,
   onCreateConversationForSelection,
   onChooseAttachments,
@@ -963,6 +968,26 @@ export const Composer = memo(function Composer({
     updateMessage(entry.content);
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
+  const applyPromptPreset = async (preset: PromptPreset): Promise<boolean> => {
+    const textarea = textareaRef.current;
+    const { insertPromptPreset } = await import("../../utils/promptPresets");
+    const insertion = insertPromptPreset(
+      message,
+      preset.body,
+      textarea?.selectionStart ?? message.length,
+      textarea?.selectionEnd ?? message.length,
+    );
+    if (!insertion) return false;
+    updateMessage(insertion.value);
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(
+        insertion.selectionStart,
+        insertion.selectionEnd,
+      );
+    });
+    return true;
+  };
   const dismissPendingRoute = (): void => {
     setPendingRoute(null);
     setRouteCreationError(null);
@@ -1122,6 +1147,10 @@ export const Composer = memo(function Composer({
           onListSkills={onListSkills}
           onToggleSkill={onToggleSkill}
           onClearSelectedSkills={onClearSelectedSkills}
+          promptPresets={promptPresets}
+          currentPrompt={message}
+          onApplyPromptPreset={applyPromptPreset}
+          onPromptPresetCommand={onPromptPresetCommand}
           promptStash={promptStash}
           canStashPrompt={Boolean(message.trim()) && attachments.length === 0}
           promptStashBlockedReason={

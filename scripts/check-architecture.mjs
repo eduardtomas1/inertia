@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -25,8 +25,22 @@ const isE2eScenarioFile = (file) => {
 };
 
 const graph = analyzeSourceArchitecture({ workspaceRoot });
+const rendererDirectory = resolve(workspaceRoot, "src/renderer");
+const sharedContractsFacade = resolve(workspaceRoot, "src/shared/contracts.ts");
+const rendererFacadeFailures = graph.edges
+  .filter((edge) => (
+    !edge.typeOnly
+    && edge.to === sharedContractsFacade
+    && edge.from.startsWith(`${rendererDirectory}${sep}`)
+  ))
+  .map((edge) => (
+    `${relative(workspaceRoot, edge.from).replaceAll("\\", "/")}:${edge.line} `
+    + "imports runtime values through the broad shared "
+    + "contracts facade; import the owning shared domain module directly."
+  ));
 const failures = [
   ...graph.failures,
+  ...rendererFacadeFailures,
   ...lineCeilingFailures({
     workspaceRoot,
     directory: "src",

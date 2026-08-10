@@ -63,6 +63,19 @@ export class ConversationWorkAuthority {
     );
   }
 
+  reserveAtCheckout(
+    reservationId: string,
+    projectId: string,
+    checkoutPath: string,
+  ): boolean {
+    return this.reserveIdentity(
+      reservationId,
+      projectId,
+      checkoutPath,
+      "provider",
+    );
+  }
+
   reserveCheckout(
     reservationId: string,
     projectId: string,

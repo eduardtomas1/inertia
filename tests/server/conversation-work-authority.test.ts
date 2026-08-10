@@ -56,6 +56,18 @@ describe("conversation work authority", () => {
     authority.release("project-action");
     expect(authority.reserve("conversation-b")).toBe(false);
     authority.release("source-control");
+    expect(authority.reserveAtCheckout(
+      "conversation-deletion",
+      "project",
+      alias,
+    )).toBe(true);
+    expect(authority.reserveCheckout(
+      "source-control-after-deletion",
+      "project",
+      checkout,
+    )).toBe(false);
+    expect(authority.reserve("conversation-b")).toBe(false);
+    authority.release("conversation-deletion");
     expect(authority.reserve("conversation-b")).toBe(true);
   });
 

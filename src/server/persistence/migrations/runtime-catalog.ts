@@ -24,21 +24,13 @@ import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
 import { persistFinalAnswerAutoScroll, roadmapSettingsMigrationDefinitions } from "./roadmap-settings";
 import { quotedSqlIdentifier } from "./sql-identifiers";
+import { ensureTurnAssociationColumns } from "./turn-association-columns";
 import { workspacePathAuthoritiesMigration } from "./workspace-path-authorities";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
 const MODEL_SELECTION_COLUMNS = [
   "model_selection_json",
   "continuation_identity_json",
 ] as const;
-const TURN_ASSOCIATION_TABLES = [
-  "messages",
-  "activities",
-  "agent_reasonings",
-  "agent_plans",
-  "thread_usage",
-  "checkpoints",
-] as const;
-const TURN_ASSOCIATION_COLUMNS = ["turn_id"] as const;
 export function migrateRuntimeDatabase(database: Database.Database): void {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
       (sql, index) => {
@@ -1231,24 +1223,4 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         }
       },
     });
-  }
-function ensureTurnAssociationColumns(database: Database.Database): void {
-    const associations = [
-      ["messages", "turn_id"],
-      ["activities", "turn_id"],
-      ["agent_reasonings", "turn_id"],
-      ["agent_plans", "turn_id"],
-      ["thread_usage", "turn_id"],
-      ["checkpoints", "turn_id"],
-    ] as const;
-    for (const [table, column] of associations) {
-      const tableSql = quotedSqlIdentifier(table, TURN_ASSOCIATION_TABLES);
-      const columnSql = quotedSqlIdentifier(
-        column,
-        TURN_ASSOCIATION_COLUMNS,
-      );
-      const columns = database.prepare(`PRAGMA table_info(${tableSql})`).all() as Array<{ name: string }>;
-      if (columns.some(({ name }) => name === column)) continue;
-      database.exec(`ALTER TABLE ${tableSql} ADD COLUMN ${columnSql} TEXT REFERENCES agent_turns(id) ON DELETE SET NULL`);
-    }
   }

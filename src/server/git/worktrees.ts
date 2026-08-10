@@ -81,6 +81,7 @@ export interface OwnedWorktreeInspectionDependencies {
 
 export interface OwnedWorktreeRemovalDependencies
   extends OwnedWorktreeInspectionDependencies {
+  afterFinalValidation?(): Promise<void> | void;
   afterInitialInspection?(): Promise<void> | void;
 }
 
@@ -99,7 +100,7 @@ export type OwnedWorktreeCleanupInspection =
   | { state: "conflict" }
   | { state: "registered"; identity: RegisteredWorktreeRegistration };
 
-export type OwnedWorktreeRemovalOutcome = "absent" | "conflict" | "removed";
+export type OwnedWorktreeRemovalOutcome = "absent" | "conflict" | "retained";
 
 export type UnacknowledgedWorktreeCreationInspection = "absent" | "retained";
 
@@ -1105,6 +1106,8 @@ export async function removeOwnedWorktree(
   dependencies: OwnedWorktreeRemovalDependencies = {},
 ): Promise<OwnedWorktreeRemovalOutcome> {
   const root = await repositoryRoot(repositoryPath);
+  const canonicalExpectedPath = await realpath(worktreePath).catch(() =>
+    resolve(worktreePath));
   const inspect = async (): Promise<OwnedWorktreeCleanupInspection> =>
     await inspectOwnedWorktreeCleanupState(
       root,
@@ -1117,15 +1120,29 @@ export async function removeOwnedWorktree(
       expectedFilesystemReceipt,
       dependencies,
     );
+  const matchesExpectedTopology = (
+    inspection: OwnedWorktreeCleanupInspection,
+  ): inspection is Extract<
+    OwnedWorktreeCleanupInspection,
+    { state: "registered" }
+  > => inspection.state === "registered"
+    && pathsEqual(inspection.identity.path, canonicalExpectedPath)
+    && inspection.identity.branch === expectedBranch
+    && inspection.identity.head === expectedHead;
   const initial = await inspect();
   if (initial.state !== "registered") return initial.state;
+  if (!matchesExpectedTopology(initial)) return "conflict";
   await dependencies.afterInitialInspection?.();
   const atUse = await inspect();
   if (atUse.state !== "registered") return atUse.state;
-  await runGit(root, ["worktree", "remove", "--", atUse.identity.path], {
-    failureMessage: "Unable to remove the worktree.",
-  });
-  return "removed";
+  if (!matchesExpectedTopology(atUse)) return "conflict";
+  await dependencies.afterFinalValidation?.();
+  // Git cannot atomically bind `worktree remove` to the identity inspected
+  // above. A same-user process can replace the registration between the
+  // check and Git's own path lookup, so every registered checkout is retained
+  // for explicit manual removal. Once Git reports it absent, the owning chat
+  // can be deleted safely without touching filesystem content.
+  return "retained";
 }
 
 export async function removeWorktree(

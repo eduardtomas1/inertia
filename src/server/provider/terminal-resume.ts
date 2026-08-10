@@ -14,6 +14,11 @@ export interface ProviderTerminalResumeLaunch {
 
 export interface ProviderTerminalResumeAuthority {
   reserve(conversationId: string): boolean;
+  reserveAtCheckout(
+    reservationId: string,
+    projectId: string,
+    checkoutPath: string,
+  ): boolean;
   release(conversationId: string): void;
 }
 
@@ -33,6 +38,24 @@ export class ProviderTerminalResumeRegistry {
     if (this.authority && !this.authority.reserve(conversationId)) {
       return false;
     }
+    this.conversationIds.add(conversationId);
+    return true;
+  }
+
+  acquireAtCheckout(
+    conversationId: string,
+    projectId: string,
+    checkoutPath: string,
+  ): boolean {
+    if (this.conversationIds.has(conversationId)) return false;
+    if (
+      this.authority
+      && !this.authority.reserveAtCheckout(
+        conversationId,
+        projectId,
+        checkoutPath,
+      )
+    ) return false;
     this.conversationIds.add(conversationId);
     return true;
   }

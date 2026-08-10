@@ -50,8 +50,8 @@ const REQUIRED_TABLES_BY_SCHEMA_VERSION = [
   [38, ["paired_launches", "paired_launch_sides"]],
   [42, ["message_content_chunks", "reasoning_content_chunks"]],
   [43, ["recovery_import_receipts", "recovery_import_journals"]],
-  [50, ["conversation_worktree_ownership"]],
-  [51, [
+  [52, ["conversation_worktree_ownership"]],
+  [53, [
     "project_path_authorities",
     "conversation_path_authorities",
     "workspace_path_authority_enrollment",
@@ -338,7 +338,7 @@ function validateOpenDatabase(
     );
     if (!stateColumns.has("keybindings_json")) return "corrupt";
   }
-  if (version >= 50) {
+  if (version >= 52) {
     const ownershipColumns = new Set(
       (database.prepare(
         "PRAGMA table_info(conversation_worktree_ownership)",
@@ -356,8 +356,21 @@ function validateOpenDatabase(
       "filesystem_identity_json",
       "branch_head",
     ].some((column) => !ownershipColumns.has(column))) return "corrupt";
+    const ownershipTrigger = database.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name = 'conversation_worktree_ownership_project_delete'
+    `).get() as { sql: unknown } | undefined;
+    const normalizedOwnershipTrigger = typeof ownershipTrigger?.sql === "string"
+      ? ownershipTrigger.sql.replace(/\s+/gu, " ").toLowerCase()
+      : "";
+    if (
+      !normalizedOwnershipTrigger.includes("before delete on projects")
+      || !normalizedOwnershipTrigger.includes("ownership.owns_worktree = 1")
+      || !/raise\s*\(\s*abort/u.test(normalizedOwnershipTrigger)
+    ) return "corrupt";
   }
-  if (version >= 51) {
+  if (version >= 53) {
     for (const table of [
       "project_path_authorities",
       "conversation_path_authorities",

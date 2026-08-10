@@ -322,11 +322,12 @@ describe("published database fixtures", () => {
 
     const legacy = new Database(databasePath);
     legacy.exec("DROP TABLE conversation_worktree_ownership");
-    legacy.prepare("DELETE FROM schema_migrations WHERE version = 50").run();
+    legacy.prepare("DELETE FROM schema_migrations WHERE version >= 52").run();
     legacy.close();
 
     migrateFixtureInPlace(databasePath);
-    const migrated = new Database(databasePath, { readonly: true });
+    const migrated = new Database(databasePath);
+    migrated.pragma("foreign_keys = ON");
     expect(migrated.prepare(`
       SELECT conversation_id, path, branch, owns_worktree, creation_state,
         ownership_token, worktree_id, repository_identity,
@@ -350,7 +351,48 @@ describe("published database fixtures", () => {
       CURRENT_DATABASE_SCHEMA_VERSION,
     );
     expect(migrated.pragma("foreign_key_check")).toEqual([]);
+    expect(migrated.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name = 'conversation_worktree_ownership_project_delete'
+    `).get()).toEqual({
+      name: "conversation_worktree_ownership_project_delete",
+    });
+    migrated.prepare(`
+      UPDATE conversation_worktree_ownership
+      SET owns_worktree = 1, creation_state = 'creating',
+        ownership_token = ?
+      WHERE conversation_id = ?
+    `).run(randomUUID(), conversation.id);
+    expect(() => migrated.prepare("DELETE FROM projects WHERE id = ?").run(
+      project.id,
+    )).toThrow(/isolated chat worktrees.*Delete each affected chat/isu);
     migrated.close();
+
+    const reopened = new Database(databasePath);
+    reopened.pragma("foreign_keys = ON");
+    expect(reopened.prepare(`
+      SELECT owns_worktree, creation_state
+      FROM conversation_worktree_ownership
+      WHERE conversation_id = ?
+    `).get(conversation.id)).toEqual({
+      owns_worktree: 1,
+      creation_state: "creating",
+    });
+    reopened.prepare(`
+      UPDATE conversation_worktree_ownership
+      SET owns_worktree = 0, creation_state = 'external',
+        ownership_token = NULL
+      WHERE conversation_id = ?
+    `).run(conversation.id);
+    expect(reopened.prepare("DELETE FROM projects WHERE id = ?").run(
+      project.id,
+    ).changes).toBe(1);
+    expect(reopened.prepare(
+      "SELECT id FROM conversations WHERE id = ?",
+    ).get(conversation.id)).toBeUndefined();
+    expect(reopened.pragma("foreign_key_check")).toEqual([]);
+    reopened.close();
   });
 
   it("backfills typed non-repository artifact absence for legacy persisted rows", async () => {
@@ -1422,8 +1464,15 @@ describe("runtime migration catalog", () => {
     store.close();
 
     const schema50 = new Database(databasePath);
-    schema50.exec("ALTER TABLE app_state DROP COLUMN auto_scroll_to_final_answer");
-    schema50.prepare("DELETE FROM schema_migrations WHERE version = 51").run();
+    schema50.exec(`
+      DROP TABLE conversation_path_authorities;
+      DROP TABLE project_path_authorities;
+      DROP TABLE workspace_path_authority_enrollment;
+      DROP TRIGGER conversation_worktree_ownership_project_delete;
+      DROP TABLE conversation_worktree_ownership;
+      ALTER TABLE app_state DROP COLUMN auto_scroll_to_final_answer;
+      DELETE FROM schema_migrations WHERE version >= 51;
+    `);
     schema50.close();
 
     migrateFixtureInPlace(databasePath);
@@ -1431,7 +1480,12 @@ describe("runtime migration catalog", () => {
     const migrated = new Database(databasePath, { readonly: true });
     expect(migrated.prepare(
       "SELECT version FROM schema_migrations WHERE version >= 50 ORDER BY version",
-    ).all()).toEqual([{ version: 50 }, { version: 51 }]);
+    ).all()).toEqual([
+      { version: 50 },
+      { version: 51 },
+      { version: 52 },
+      { version: 53 },
+    ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
     ).get() as { enabled: number }).enabled).toBe(1);

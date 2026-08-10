@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { ConversationWorktreeRemovalError } from "../../src/server/persistence/conversation-worktree-repository";
 import { publicRuntimeError } from "../../src/server/runtime-errors";
 
 const directories: string[] = [];
@@ -16,6 +17,12 @@ afterEach(async () => {
 });
 
 describe("runtime persistence failure injection", () => {
+  it("surfaces owned-worktree project-removal guidance", () => {
+    const guidance = "Delete each isolated chat and remove its retained worktree manually.";
+    expect(publicRuntimeError(new ConversationWorktreeRemovalError(guidance)))
+      .toBe(guidance);
+  });
+
   it("surfaces SQLite busy safely without a partial mutation and remains usable after the lock clears", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-sqlite-busy-"));
     directories.push(directory);

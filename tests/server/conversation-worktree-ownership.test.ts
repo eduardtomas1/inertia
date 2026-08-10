@@ -9,11 +9,16 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { startRuntime, type RunningRuntime } from "../../src/server";
 import { RuntimeStore } from "../../src/server/database";
+import {
+  createWorktreeWithOwnershipReceipt,
+  removeOwnedWorktree,
+} from "../../src/server/git";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
 import type { ConversationShell, ServerEvent } from "../../src/shared/contracts";
 import { removeTemporaryDirectory } from "../helpers/temporary-directory";
@@ -73,6 +78,26 @@ async function connect(
   return { socket, events };
 }
 
+function expectOwnedReceipt(
+  databasePath: string,
+  conversationId: string,
+  state: "creating" | "created",
+): void {
+  const database = new Database(databasePath, { readonly: true });
+  try {
+    expect(database.prepare(`
+      SELECT owns_worktree, creation_state
+      FROM conversation_worktree_ownership
+      WHERE conversation_id = ?
+    `).get(conversationId)).toEqual({
+      owns_worktree: 1,
+      creation_state: state,
+    });
+  } finally {
+    database.close();
+  }
+}
+
 describe("ordinary conversation worktree ownership", () => {
   const directories: string[] = [];
   const runtimes: RunningRuntime[] = [];
@@ -82,7 +107,7 @@ describe("ordinary conversation worktree ownership", () => {
     await Promise.all(directories.splice(0).map(removeTemporaryDirectory));
   });
 
-  it("deletes the exact receipt and preserves a same-path, same-branch ABA replacement", async () => {
+  it("requires manual removal for exact receipts and preserves ABA replacements", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-owned-worktree-"));
     directories.push(root);
     const data = join(root, "data");
@@ -109,10 +134,6 @@ describe("ordinary conversation worktree ownership", () => {
       "Owned worktrees",
       workspace,
       await inspectProjectIdentity(workspace),
-    );
-    const manuallyIsolated = seeded.createConversation(
-      project.id,
-      "Manual isolated checkout",
     );
     seeded.close();
     const runtime = await startRuntime({
@@ -164,34 +185,46 @@ describe("ordinary conversation worktree ownership", () => {
     };
 
     const exact = await createIsolated("Exact owned checkout");
-    expect((await deleteConversation(exact.id)).type).toBe("request.ok");
-    expect(existsSync(exact.worktreePath!)).toBe(false);
-
-    const manualRequestId = randomUUID();
-    client.socket.send(JSON.stringify({
-      type: "git.worktree.create",
-      requestId: manualRequestId,
-      payload: {
-        projectId: project.id,
-        conversationId: manuallyIsolated.id,
-        baseBranch: "main",
-        branch: "inertia/manual-owned",
-      },
-    }));
-    const manualResult = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
-        event.type === "request.result"
-        && event.requestId === manualRequestId
-        && event.result.kind === "worktree.created",
+    const exactSentinel = join(exact.worktreePath!, "ignored-sentinel.bin");
+    writeFileSync(exactSentinel, "valuable exact owned data\n");
+    expect(await deleteConversation(exact.id)).toMatchObject({
+      type: "request.error",
+      message: expect.stringMatching(/registered.*remove.*manually/iu),
+    });
+    expect(existsSync(exactSentinel)).toBe(true);
+    expectOwnedReceipt(join(data, "inertia.sqlite"), exact.id, "created");
+    execFileSync(
+      "git",
+      ["worktree", "remove", "--force", "--", exact.worktreePath!],
+      { cwd: workspace },
     );
-    if (manualResult.result.kind !== "worktree.created") {
-      throw new Error("Expected a worktree creation result.");
+    const pathVerifier = new RuntimeStore(
+      join(data, "inertia.sqlite"),
+      workspace,
+      { recoverInterruptedRuns: false },
+    );
+    const exactOwnership = pathVerifier.conversationWorktrees.get(exact.id);
+    if (
+      !exactOwnership?.ownsWorktree
+      || exactOwnership.creationState !== "created"
+    ) {
+      throw new Error("Expected the exact owned receipt to remain.");
     }
-    expect(existsSync(manualResult.result.path)).toBe(true);
-    expect((await deleteConversation(manuallyIsolated.id)).type).toBe(
-      "request.ok",
-    );
-    expect(existsSync(manualResult.result.path)).toBe(false);
+    await expect(removeOwnedWorktree(
+      pathVerifier.projectPath(project.id),
+      exactOwnership.path,
+      exactOwnership.branch,
+      exactOwnership.branchHead,
+      exactOwnership.worktreeId,
+      exactOwnership.repositoryIdentity,
+      exactOwnership.ownershipToken,
+      exactOwnership.filesystemReceipt,
+    )).resolves.toBe("absent");
+    pathVerifier.close();
+    expect(await deleteConversation(exact.id)).toMatchObject({
+      type: "request.ok",
+    });
+    expect(existsSync(exact.worktreePath!)).toBe(false);
 
     const replaced = await createIsolated("Replaced owned checkout");
     const replacedPath = replaced.worktreePath!;
@@ -224,6 +257,7 @@ describe("ordinary conversation worktree ownership", () => {
       message: expect.stringMatching(/replaced|changed ownership/iu),
     });
     expect(existsSync(sentinel)).toBe(true);
+    expectOwnedReceipt(join(data, "inertia.sqlite"), replaced.id, "created");
     const detailRequestId = randomUUID();
     client.socket.send(JSON.stringify({
       type: "conversation.detail.load",
@@ -239,6 +273,308 @@ describe("ordinary conversation worktree ownership", () => {
       result: { kind: "conversation.detail", state: "ready" },
     });
     client.socket.close();
+  });
+
+  it("blocks project removal until every owned chat worktree is resolved", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-project-owned-worktree-"));
+    directories.push(root);
+    const data = join(root, "data");
+    const workspace = join(root, "workspace");
+    mkdirSync(data);
+    mkdirSync(workspace);
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: workspace });
+    execFileSync("git", ["config", "user.email", "runtime@example.invalid"], {
+      cwd: workspace,
+    });
+    execFileSync("git", ["config", "user.name", "Runtime Test"], {
+      cwd: workspace,
+    });
+    writeFileSync(join(workspace, "tracked.txt"), "tracked\n");
+    execFileSync("git", ["add", "tracked.txt"], { cwd: workspace });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd: workspace });
+
+    const store = new RuntimeStore(join(data, "inertia.sqlite"), workspace);
+    const identity = await inspectProjectIdentity(workspace);
+    const createOwned = async (
+      projectId: string,
+      title: string,
+      suffix: string,
+    ) => {
+      const conversation = store.createConversation(projectId, title);
+      const path = join(data, "worktrees", suffix);
+      mkdirSync(join(data, "worktrees"), { recursive: true });
+      const branch = `inertia/${suffix}`;
+      await createWorktreeWithOwnershipReceipt(
+        workspace,
+        path,
+        { branch, createBranch: true, startPoint: "main" },
+        {
+          beforeAdd: (ownershipToken) => {
+            store.conversationWorktrees.beginCreation(
+              conversation.id,
+              path,
+              branch,
+              ownershipToken,
+            );
+          },
+          notAdded: () => {
+            store.conversationWorktrees.rejectCreation(conversation.id);
+          },
+          added: (receipt) => {
+            store.conversationWorktrees.recordCreation(
+              conversation.id,
+              path,
+              branch,
+              receipt,
+            );
+          },
+        },
+      );
+      return { conversation, path, branch };
+    };
+    const expectBlocked = (projectId: string): void => {
+      expect(() => store.removeProject(projectId)).toThrow(
+        /isolated chat worktrees.*Delete each affected chat.*manually/isu,
+      );
+      expect(store.snapshot().projects.some(({ id }) => id === projectId))
+        .toBe(true);
+    };
+
+    try {
+      const createdProject = store.createProject("Created", workspace, identity);
+      const created = await createOwned(
+        createdProject.id,
+        "Created owned checkout",
+        "project-created",
+      );
+      expectBlocked(createdProject.id);
+      expect(store.conversationWorktrees.get(created.conversation.id))
+        .toMatchObject({ ownsWorktree: true, creationState: "created" });
+      expect(existsSync(created.path)).toBe(true);
+
+      const interruptedProject = store.createProject(
+        "Interrupted",
+        workspace,
+        identity,
+      );
+      const interrupted = store.createConversation(
+        interruptedProject.id,
+        "Interrupted creation",
+      );
+      const interruptedPath = join(data, "worktrees", "project-interrupted");
+      store.conversationWorktrees.beginCreation(
+        interrupted.id,
+        interruptedPath,
+        "inertia/project-interrupted",
+        randomUUID(),
+      );
+      expectBlocked(interruptedProject.id);
+      expect(store.conversationWorktrees.get(interrupted.id)).toMatchObject({
+        ownsWorktree: true,
+        creationState: "creating",
+        path: interruptedPath,
+      });
+
+      const movedProject = store.createProject("Moved", workspace, identity);
+      const moved = await createOwned(
+        movedProject.id,
+        "Moved owned checkout",
+        "project-moved",
+      );
+      const movedPath = join(data, "worktrees", "project-moved-by-user");
+      execFileSync("git", ["worktree", "move", "--", moved.path, movedPath], {
+        cwd: workspace,
+      });
+      const movedSentinel = join(movedPath, "valuable-moved.bin");
+      writeFileSync(movedSentinel, "valuable moved project data\n");
+      expectBlocked(movedProject.id);
+      expect(existsSync(movedSentinel)).toBe(true);
+      expect(store.conversationWorktrees.get(moved.conversation.id))
+        .toMatchObject({
+          ownsWorktree: true,
+          creationState: "created",
+          path: expect.stringContaining("project-moved"),
+        });
+
+      const conflictingProject = store.createProject(
+        "Conflicting",
+        workspace,
+        identity,
+      );
+      const conflicting = await createOwned(
+        conflictingProject.id,
+        "Conflicting owned checkout",
+        "project-conflicting",
+      );
+      execFileSync(
+        "git",
+        ["worktree", "remove", "--force", "--", conflicting.path],
+        { cwd: workspace },
+      );
+      const replacementStage = join(data, "worktrees", "replacement-stage");
+      execFileSync(
+        "git",
+        ["worktree", "add", "--", replacementStage, conflicting.branch],
+        { cwd: workspace },
+      );
+      execFileSync(
+        "git",
+        ["worktree", "move", "--", replacementStage, conflicting.path],
+        { cwd: workspace },
+      );
+      const conflictingSentinel = join(conflicting.path, "valuable-conflict.bin");
+      writeFileSync(conflictingSentinel, "valuable conflicting project data\n");
+      expectBlocked(conflictingProject.id);
+      expect(existsSync(conflictingSentinel)).toBe(true);
+      expect(store.conversationWorktrees.get(conflicting.conversation.id))
+        .toMatchObject({
+          ownsWorktree: true,
+          creationState: "created",
+          path: expect.stringContaining("project-conflicting"),
+        });
+
+      const externalPath = join(data, "worktrees", "project-external");
+      execFileSync(
+        "git",
+        ["worktree", "add", "-b", "external/project", "--", externalPath, "main"],
+        { cwd: workspace },
+      );
+      const externalSentinel = join(externalPath, "valuable-external.bin");
+      writeFileSync(externalSentinel, "valuable external project data\n");
+      const externalProject = store.createProject("External", workspace, identity);
+      const external = store.createConversation(
+        externalProject.id,
+        "External checkout",
+        { branch: "external/project", worktreePath: externalPath },
+      );
+      expect(store.conversationWorktrees.get(external.id)).toMatchObject({
+        ownsWorktree: false,
+        creationState: "external",
+      });
+      expect(() => store.removeProject(externalProject.id)).not.toThrow();
+      expect(store.snapshot().projects.some(({ id }) => id === externalProject.id))
+        .toBe(false);
+      expect(existsSync(externalSentinel)).toBe(true);
+      expect(execFileSync(
+        "git",
+        ["worktree", "list", "--porcelain"],
+        { cwd: workspace, encoding: "utf8" },
+      )).toContain(externalPath);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("blocks direct SQL project deletion atomically for every owned receipt", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-owned-project-trigger-"));
+    directories.push(root);
+    const data = join(root, "data");
+    const workspace = join(root, "workspace");
+    const databasePath = join(data, "inertia.sqlite");
+    mkdirSync(data);
+    mkdirSync(workspace);
+    const store = new RuntimeStore(databasePath, workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const records = (["creating", "created", "external"] as const).map(
+      (state) => {
+        const project = store.createProject(`Direct ${state}`, workspace);
+        const conversation = store.createConversation(
+          project.id,
+          `Direct ${state} chat`,
+        );
+        const path = join(root, `${state}-artifact`);
+        mkdirSync(path);
+        const sentinel = join(path, "valuable.bin");
+        writeFileSync(sentinel, `valuable ${state} data\n`);
+        return { state, project, conversation, path, sentinel };
+      },
+    );
+    store.close();
+
+    const seeded = new Database(databasePath);
+    seeded.pragma("foreign_keys = ON");
+    const insert = seeded.prepare(`
+      INSERT INTO conversation_worktree_ownership (
+        conversation_id, path, branch, owns_worktree, creation_state,
+        ownership_token, worktree_id, repository_identity,
+        filesystem_identity_json, branch_head
+      ) VALUES (
+        @conversationId, @path, @branch, @ownsWorktree, @creationState,
+        @ownershipToken, @worktreeId, @repositoryIdentity,
+        @filesystemIdentity, @branchHead
+      )
+    `);
+    for (const record of records) {
+      const owned = record.state !== "external";
+      const created = record.state === "created";
+      insert.run({
+        conversationId: record.conversation.id,
+        path: record.path,
+        branch: owned ? `inertia/direct-${record.state}` : "external/direct",
+        ownsWorktree: owned ? 1 : 0,
+        creationState: record.state,
+        ownershipToken: owned ? randomUUID() : null,
+        worktreeId: created ? `direct-${record.state}` : null,
+        repositoryIdentity: created ? "a".repeat(64) : null,
+        filesystemIdentity: created
+          ? JSON.stringify({
+              version: 1,
+              worktreesDirectory: {
+                device: "1",
+                inode: "2",
+                birthtimeNs: "3",
+              },
+              adminDirectory: {
+                device: "1",
+                inode: "4",
+                birthtimeNs: "5",
+              },
+            })
+          : null,
+        branchHead: created ? "b".repeat(40) : null,
+      });
+    }
+    seeded.close();
+
+    for (const record of records.filter(({ state }) => state !== "external")) {
+      const deletion = new Database(databasePath);
+      deletion.pragma("foreign_keys = ON");
+      expect(() => deletion.prepare("DELETE FROM projects WHERE id = ?").run(
+        record.project.id,
+      )).toThrow(/isolated chat worktrees.*Delete each affected chat/isu);
+      deletion.close();
+
+      const reopened = new RuntimeStore(databasePath, workspace, {
+        recoverInterruptedRuns: false,
+      });
+      expect(reopened.project(record.project.id)).toMatchObject({
+        id: record.project.id,
+      });
+      expect(reopened.conversationWorktrees.get(record.conversation.id))
+        .toMatchObject({
+          ownsWorktree: true,
+          creationState: record.state,
+        });
+      reopened.close();
+      expect(existsSync(record.sentinel)).toBe(true);
+    }
+
+    const external = records.find(({ state }) => state === "external")!;
+    const deletion = new Database(databasePath);
+    deletion.pragma("foreign_keys = ON");
+    expect(deletion.prepare("DELETE FROM projects WHERE id = ?").run(
+      external.project.id,
+    ).changes).toBe(1);
+    deletion.close();
+    const reopened = new RuntimeStore(databasePath, workspace, {
+      recoverInterruptedRuns: false,
+    });
+    expect(reopened.snapshot().projects.some(
+      ({ id }) => id === external.project.id,
+    )).toBe(false);
+    reopened.close();
+    expect(existsSync(external.sentinel)).toBe(true);
   });
 
   it("never auto-deletes an externally attached worktree", async () => {
@@ -394,8 +730,10 @@ describe("ordinary conversation worktree ownership", () => {
         payload: { conversationId },
       }));
       return await client.events.next(
-        (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-          event.type === "request.ok" && event.requestId === requestId,
+        (event): event is Extract<ServerEvent, {
+          type: "request.ok" | "request.error";
+        }> => (event.type === "request.ok" || event.type === "request.error")
+          && event.requestId === requestId,
       );
     };
 
@@ -404,14 +742,37 @@ describe("ordinary conversation worktree ownership", () => {
     });
     expect(existsSync(absentPath)).toBe(false);
     await expect(deleteConversation(retained.id)).resolves.toMatchObject({
-      type: "request.ok",
+      type: "request.error",
+      message: expect.stringMatching(
+        /interrupted.*preserved.*worktree.*branch.*manually/isu,
+      ),
     });
     expect(existsSync(sentinel)).toBe(true);
+    expectOwnedReceipt(join(data, "inertia.sqlite"), retained.id, "creating");
     expect(execFileSync(
       "git",
       ["worktree", "list", "--porcelain"],
       { cwd: workspace, encoding: "utf8" },
     )).toContain(retainedPath);
+    execFileSync(
+      "git",
+      ["worktree", "remove", "--force", "--", retainedPath],
+      { cwd: workspace },
+    );
+    await expect(deleteConversation(retained.id)).resolves.toMatchObject({
+      type: "request.error",
+      message: expect.stringMatching(/branch.*manually/isu),
+    });
+    expectOwnedReceipt(join(data, "inertia.sqlite"), retained.id, "creating");
+    execFileSync(
+      "git",
+      ["branch", "-D", "--", "inertia/interrupted"],
+      { cwd: workspace },
+    );
+    await expect(deleteConversation(retained.id)).resolves.toMatchObject({
+      type: "request.ok",
+    });
+    expect(existsSync(retainedPath)).toBe(false);
     client.socket.close();
   });
 });

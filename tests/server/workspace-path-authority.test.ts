@@ -147,7 +147,7 @@ function resetWorkspaceAuthorityMigration(database: Database.Database): void {
     DROP TABLE conversation_path_authorities;
     DROP TABLE project_path_authorities;
     DROP TABLE workspace_path_authority_enrollment;
-    DELETE FROM schema_migrations WHERE version = 51;
+    DELETE FROM schema_migrations WHERE version >= 53;
   `);
 }
 
@@ -184,6 +184,14 @@ function operationHarness(
     { id: randomUUID },
   );
   const workspacePath = workspaceResolver(fixture.store);
+  const sourceControlWorkspacePath = (
+    projectId: string,
+    conversationId?: string,
+  ): string => {
+    const path = workspacePath(projectId, conversationId);
+    writeFileSync(markers.git, "touched");
+    return path;
+  };
   const projectHandler = createProjectWorkspaceCommandHandler({
     store: fixture.store,
     workspacePath,
@@ -203,7 +211,7 @@ function operationHarness(
   } as unknown as ProjectWorkspaceCommandDependencies);
   const sourceControlHandler = createSourceControlCommandHandler({
     store: fixture.store,
-    workspacePath,
+    workspacePath: sourceControlWorkspacePath,
     workspaceRuns: {
       trackSourceControl: async () => {
         writeFileSync(markers.git, "touched");
@@ -244,12 +252,11 @@ function operationHarness(
       },
     }),
     runGit: async () => await sourceControlHandler(socket, {
-      type: "git.branch.create",
+      type: "git.refresh",
       requestId: randomUUID(),
       payload: {
         projectId: fixture.projectId,
         conversationId: fixture.conversationId,
-        name: "authority-test",
       },
     }),
   };
@@ -368,7 +375,7 @@ describe("durable workspace path authority", () => {
     fixture.store.close();
   });
 
-  it("does not re-enroll an unavailable legacy path during the v50-to-v51 upgrade", async () => {
+  it("does not re-enroll an unavailable legacy path during the v52-to-v53 upgrade", async () => {
     const fixture = await authorityFixture();
     fixture.store.close();
     const database = new Database(fixture.databasePath);
@@ -390,7 +397,7 @@ describe("durable workspace path authority", () => {
     reopened.close();
   });
 
-  it("resumes legacy enrollment after a crash immediately after v51 commits", async () => {
+  it("resumes legacy enrollment after a crash immediately after v53 commits", async () => {
     const fixture = await authorityFixture();
     fixture.store.close();
     const database = new Database(fixture.databasePath);

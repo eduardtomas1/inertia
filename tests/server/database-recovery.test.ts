@@ -1193,6 +1193,14 @@ describe("database backup and startup recovery", () => {
         `);
       },
     },
+    {
+      label: "the owned-worktree project deletion trigger",
+      mutate: (database: Database.Database) => {
+        database.exec(
+          "DROP TRIGGER conversation_worktree_ownership_project_delete",
+        );
+      },
+    },
   ])("skips a current-schema backup missing $label", async ({ mutate }) => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

@@ -466,7 +466,101 @@ describe("launch-owned Git cleanup", () => {
     expectSamePath(inspected.path, path);
     expect(git(root, "for-each-ref", "--format=%(refname)", `refs/heads/${branch}`))
       .toBe(`refs/heads/${branch}`);
+
+    const sentinel = join(path, "ignored-owned-data.bin");
+    writeFileSync(sentinel, "valuable owned data\n");
+    await expect(removeOwnedWorktree(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+    )).resolves.toBe("retained");
+    expect(readFileSync(sentinel, "utf8")).toBe("valuable owned data\n");
+    expect(git(root, "worktree", "list", "--porcelain")).toContain(path);
   });
+
+  it("retains a moved registered worktree and reports the receipt conflict", async () => {
+    const root = repository();
+    const path = ownedPath(root, "owned path before move");
+    const movedPath = ownedPath(root, "user moved owned path");
+    const branch = "inertia/moved-owned";
+    const ownership = await createOwnedWorktree(root, path, branch);
+    git(root, "worktree", "move", "--", path, movedPath);
+    const sentinel = join(movedPath, "valuable-moved-data.bin");
+    writeFileSync(sentinel, "valuable moved data\n");
+
+    await expect(removeOwnedWorktree(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+    )).resolves.toBe("conflict");
+    expect(readFileSync(sentinel, "utf8")).toBe("valuable moved data\n");
+    expect(git(root, "worktree", "list", "--porcelain")).toContain(movedPath);
+  });
+
+  it("retains a registered worktree switched to another branch", async () => {
+    const root = repository();
+    const path = ownedPath(root, "switched owned path");
+    const branch = "inertia/original-owned";
+    const ownership = await createOwnedWorktree(root, path, branch);
+    git(path, "checkout", "-q", "-b", "user/switched-owned");
+    const sentinel = join(path, "valuable-switched-data.bin");
+    writeFileSync(sentinel, "valuable switched data\n");
+
+    await expect(removeOwnedWorktree(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+    )).resolves.toBe("conflict");
+    expect(readFileSync(sentinel, "utf8")).toBe("valuable switched data\n");
+    expect(git(path, "branch", "--show-current")).toBe("user/switched-owned");
+  });
+
+  it.each(["advanced", "detached"] as const)(
+    "retains a registered worktree with an %s HEAD",
+    async (state) => {
+      const root = repository();
+      const path = ownedPath(root, `${state} owned path`);
+      const branch = `inertia/${state}-owned`;
+      const ownership = await createOwnedWorktree(root, path, branch);
+      if (state === "advanced") {
+        writeFileSync(join(path, "new-commit.txt"), "user commit\n");
+        git(path, "add", "new-commit.txt");
+        git(path, "commit", "-q", "-m", "User-owned progress");
+      } else {
+        git(path, "checkout", "-q", "--detach", ownership.head);
+      }
+      const sentinel = join(path, "valuable-head-data.bin");
+      writeFileSync(sentinel, `valuable ${state} data\n`);
+
+      await expect(removeOwnedWorktree(
+        root,
+        path,
+        branch,
+        ownership.head,
+        ownership.worktreeId,
+        ownership.repositoryIdentity,
+        ownership.ownershipToken,
+        ownership.filesystemReceipt,
+      )).resolves.toBe("conflict");
+      expect(readFileSync(sentinel, "utf8")).toBe(`valuable ${state} data\n`);
+      expect(git(root, "worktree", "list", "--porcelain")).toContain(path);
+    },
+  );
 
   it("revalidates the receipt at deletion time after a post-inspection ABA swap", async () => {
     const root = repository();
@@ -498,6 +592,40 @@ describe("launch-owned Git cleanup", () => {
     )).resolves.toBe("conflict");
     expect(swapped).toBe(true);
     expect(readFileSync(sentinel, "utf8")).toBe("valuable replacement data\n");
+    expect(git(root, "worktree", "list", "--porcelain")).toContain(path);
+  });
+
+  it("never removes a replacement installed after final validation", async () => {
+    const root = repository();
+    const path = ownedPath(root, "post-validation replacement path");
+    const branch = "inertia/post-validation-replacement";
+    const ownership = await createOwnedWorktree(root, path, branch);
+    const staging = ownedPath(root, "post-validation replacement staging");
+    const sentinel = join(path, "valuable-final-replacement.bin");
+    let swapped = false;
+
+    await expect(removeOwnedWorktree(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+      {
+        afterFinalValidation: () => {
+          swapped = true;
+          git(root, "worktree", "remove", "--force", "--", path);
+          git(root, "worktree", "add", "--", staging, branch);
+          git(root, "worktree", "move", "--", staging, path);
+          writeFileSync(sentinel, "valuable final replacement data\n");
+        },
+      },
+    )).resolves.toBe("retained");
+    expect(swapped).toBe(true);
+    expect(readFileSync(sentinel, "utf8"))
+      .toBe("valuable final replacement data\n");
     expect(git(root, "worktree", "list", "--porcelain")).toContain(path);
   });
 

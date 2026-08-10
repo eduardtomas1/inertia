@@ -29,6 +29,8 @@ function validWorktreePlan(path: string, branch: string, token: string): boolean
     && UUID_PATTERN.test(token);
 }
 
+export class ConversationWorktreeRemovalError extends Error {}
+
 export class ConversationWorktreeRepository {
   private readonly pathAuthority: WorkspacePathAuthority;
 
@@ -48,6 +50,29 @@ export class ConversationWorktreeRepository {
       WHERE conversation_id = ?
     `).get(conversationId) as ConversationWorktreeOwnershipRow | undefined;
     return row ? conversationWorktreeOwnershipFromRow(row) : null;
+  }
+
+  assertProjectRemovalAllowed(projectId: string): void {
+    const blocking = this.database.prepare(`
+      SELECT ownership.conversation_id AS conversation_id,
+        ownership.creation_state AS creation_state
+      FROM conversation_worktree_ownership AS ownership
+      JOIN conversations
+        ON conversations.id = ownership.conversation_id
+      WHERE conversations.project_id = ?
+        AND ownership.owns_worktree = 1
+      LIMIT 1
+    `).get(projectId) as {
+      conversation_id: string;
+      creation_state: "creating" | "created";
+    } | undefined;
+    if (!blocking) return;
+    throw new ConversationWorktreeRemovalError(
+      "Resolve this project's isolated chat worktrees before removing it. "
+      + "Delete each affected chat individually; if Inertia preserves a "
+      + "registered worktree, remove it manually with Git and retry that "
+      + "chat deletion.",
+    );
   }
 
   beginCreation(
@@ -81,26 +106,6 @@ export class ConversationWorktreeRepository {
     if (result.changes !== 1) {
       throw new Error(
         "The rejected conversation worktree did not match its durable plan.",
-      );
-    }
-  }
-
-  retainInterruptedCreation(conversationId: string): void {
-    const result = this.database.prepare(`
-      UPDATE conversation_worktree_ownership
-      SET owns_worktree = 0, creation_state = 'external',
-        ownership_token = NULL
-      WHERE conversation_id = ?
-        AND owns_worktree = 1
-        AND creation_state = 'creating'
-        AND worktree_id IS NULL
-        AND repository_identity IS NULL
-        AND filesystem_identity_json IS NULL
-        AND branch_head IS NULL
-    `).run(conversationId);
-    if (result.changes !== 1) {
-      throw new Error(
-        "The interrupted conversation worktree did not match its durable plan.",
       );
     }
   }

@@ -412,6 +412,7 @@ export class RuntimeStore {
   }
 
   removeProject(projectId: string): void {
+    this.conversationWorktrees.assertProjectRemovalAllowed(projectId);
     this.projectRepository.remove(projectId);
   }
 

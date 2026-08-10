@@ -49,9 +49,10 @@ export function writeClaudeSkill(
 export async function waitForImmediateCondition(
   condition: () => boolean,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const deadlineAt = Date.now() + 2_000;
+  while (Date.now() < deadlineAt) {
     if (condition()) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   expect(condition()).toBe(true);
 }

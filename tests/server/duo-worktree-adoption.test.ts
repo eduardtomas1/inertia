@@ -50,7 +50,7 @@ afterEach(async () => {
 });
 
 describe("Duo worktree ownership adoption", () => {
-  it("promotes an adopted receipt so ordinary conversation deletion removes it", async () => {
+  it("promotes an adopted receipt and requires manual worktree removal", async () => {
     const root = await mkdtemp(join(tmpdir(), "inertia-duo-adoption-"));
     temporaryDirectories.push(root);
     const workspace = join(root, "workspace");
@@ -152,10 +152,27 @@ describe("Duo worktree ownership adoption", () => {
       rememberDeletedConversation: () => undefined,
       forgetRemoteTranscript: () => undefined,
     } as unknown as ConversationCommandDependencies);
-    await expect(handler({} as never, {
+    const deletion = {
       type: "conversation.delete",
       requestId: randomUUID(),
       payload: { conversationId },
+    } as const;
+    await expect(handler({} as never, deletion)).rejects.toThrow(
+      /registered.*remove.*manually/iu,
+    );
+    expect(existsSync(worktreePath)).toBe(true);
+    expect(store.conversationWorktrees.get(conversationId)).toMatchObject({
+      ownsWorktree: true,
+      creationState: "created",
+    });
+
+    execFileSync(
+      "git",
+      ["-C", workspace, "worktree", "remove", "--force", "--", worktreePath],
+    );
+    await expect(handler({} as never, {
+      ...deletion,
+      requestId: randomUUID(),
     })).resolves.toBe("mutation");
     expect(existsSync(worktreePath)).toBe(false);
     expect(store.shellSnapshot().conversations.some(

@@ -38,6 +38,22 @@ function git(cwd: string, ...args: string[]): string {
   }).trim();
 }
 
+function conversationWorktreeRepositoryFixture() {
+  let ownsWorktree = false;
+  return {
+    beginCreation: vi.fn(() => {
+      ownsWorktree = true;
+    }),
+    get: vi.fn(() => ownsWorktree ? { ownsWorktree: true } : null),
+    recordCreation: vi.fn(() => {
+      ownsWorktree = true;
+    }),
+    rejectCreation: vi.fn(() => {
+      ownsWorktree = false;
+    }),
+  };
+}
+
 function linkedWorkspace(): {
   data: string;
   gitDirectory: string;
@@ -93,6 +109,7 @@ afterEach(() => {
 describe("conversation isolated-worktree source identity", () => {
   it("rejects a queued linked-root common-directory replacement before mutation", async () => {
     const fixture = linkedWorkspace();
+    const conversationWorktrees = conversationWorktreeRepositoryFixture();
     const deleteConversation = vi.fn();
     const trackSourceControl = vi.fn(async (
       _label: string,
@@ -120,6 +137,7 @@ describe("conversation isolated-worktree source identity", () => {
         })),
         projectPath: vi.fn(() => fixture.workspace),
         createConversation,
+        conversationWorktrees,
         deleteConversation,
       },
       providers: {
@@ -169,6 +187,7 @@ describe("conversation isolated-worktree source identity", () => {
 
   it("retains a durable conversation receipt when source metadata changes after creation", async () => {
     const fixture = linkedWorkspace();
+    const conversationWorktrees = conversationWorktreeRepositoryFixture();
     const deleteConversation = vi.fn();
     const updateConversation = vi.fn((
       _id: string,
@@ -186,6 +205,7 @@ describe("conversation isolated-worktree source identity", () => {
         })),
         projectPath: vi.fn(() => fixture.workspace),
         createConversation: vi.fn(() => ({ id: conversationId })),
+        conversationWorktrees,
         updateConversation,
         deleteConversation,
       },

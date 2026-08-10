@@ -299,8 +299,7 @@ function isKnownPersistentApprovalDecision(value: unknown): boolean {
     return amendment.execpolicy_amendment.every((part) =>
       typeof part === "string"
       && part.length <= 2_000
-      && !CONTROL_CHARACTERS.test(part)
-      && !UNSAFE_APPROVAL_FORMATTING.test(part)
+      && isSafeApprovalDisplayText(part)
     );
   }
   if (!hasOnlyKeys(decision, ["applyNetworkPolicyAmendment"])) return false;

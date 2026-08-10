@@ -126,6 +126,12 @@ function worktrees(
 
 async function runtime(): Promise<{
   dataDirectory: string;
+  linked: {
+    gitDirectory: string;
+    replacement: string;
+    replacementCommonDirectory: string;
+    source: string;
+  };
   projectId: string;
   store: RuntimeStore;
   workspace: string;
@@ -133,12 +139,13 @@ async function runtime(): Promise<{
   const directory = await mkdtemp(join(tmpdir(), "inertia-duo-source-"));
   temporaryDirectories.push(directory);
   const workspace = join(directory, "workspace");
-  await mkdir(workspace);
+  const linked = await replaceableLinkedWorkspace(workspace);
   const store = new RuntimeStore(join(directory, "inertia.sqlite"), workspace, {
     recoverInterruptedRuns: false,
   });
   return {
     dataDirectory: join(directory, "data"),
+    linked,
     projectId: store.createProject("Duo project", workspace).id,
     store,
     workspace,
@@ -255,7 +262,7 @@ describe("Duo isolated-worktree source identity", () => {
   it("rejects linked-root metadata replacement before launch or mutation", async () => {
     const context = await runtime();
     try {
-      const fixture = await replaceableLinkedWorkspace(context.workspace);
+      const fixture = context.linked;
       const create = vi.fn(worktrees().create);
       const trackSourceControl = vi.fn(async (
         _label: string,
@@ -298,7 +305,7 @@ describe("Duo isolated-worktree source identity", () => {
   it("retains recovery ownership after post-create metadata replacement", async () => {
     const context = await runtime();
     try {
-      const fixture = await replaceableLinkedWorkspace(context.workspace);
+      const fixture = context.linked;
       const create = vi.fn(async (
         _repositoryPath: string,
         worktreePath: string,

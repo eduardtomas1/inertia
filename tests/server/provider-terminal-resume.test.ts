@@ -98,6 +98,7 @@ describe("provider terminal resume mapping", () => {
   it("mirrors acquire and release into the shared conversation-work authority", () => {
     const authority = {
       reserve: vi.fn(() => true),
+      reserveAtCheckout: vi.fn(() => true),
       release: vi.fn(),
     };
     const registry = new ProviderTerminalResumeRegistry(authority);
@@ -108,6 +109,19 @@ describe("provider terminal resume mapping", () => {
     registry.release("conversation-1");
     registry.release("conversation-1");
     expect(authority.release).toHaveBeenCalledOnce();
+
+    expect(registry.acquireAtCheckout(
+      "conversation-2",
+      "project-1",
+      "/workspace/missing-owned-chat",
+    )).toBe(true);
+    expect(authority.reserveAtCheckout).toHaveBeenCalledWith(
+      "conversation-2",
+      "project-1",
+      "/workspace/missing-owned-chat",
+    );
+    registry.release("conversation-2");
+    expect(authority.release).toHaveBeenCalledTimes(2);
   });
 
   it("uses exact interactive CLI argv for every native provider", () => {

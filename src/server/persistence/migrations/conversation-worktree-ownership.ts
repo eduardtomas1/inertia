@@ -71,5 +71,21 @@ export const conversationWorktreeOwnershipMigration = {
     SELECT id, worktree_path, branch, 0, 'external'
     FROM conversations
     WHERE worktree_path IS NOT NULL;
+    CREATE TRIGGER IF NOT EXISTS conversation_worktree_ownership_project_delete
+    BEFORE DELETE ON projects
+    BEGIN
+      SELECT RAISE(
+        ABORT,
+        'Resolve this project''s isolated chat worktrees before removing it. Delete each affected chat individually; if Inertia preserves a registered worktree, remove it manually with Git and retry that chat deletion.'
+      )
+      WHERE EXISTS (
+        SELECT 1
+        FROM conversation_worktree_ownership AS ownership
+        JOIN conversations
+          ON conversations.id = ownership.conversation_id
+        WHERE conversations.project_id = OLD.id
+          AND ownership.owns_worktree = 1
+      );
+    END;
   `,
 } satisfies DatabaseMigrationDefinition;

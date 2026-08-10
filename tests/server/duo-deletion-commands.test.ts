@@ -18,7 +18,7 @@ import {
 
 const sideEffects = vi.hoisted(() => ({
   deleteCheckpoints: vi.fn(async () => undefined),
-  removeOwnedWorktree: vi.fn(async () => "removed"),
+  removeOwnedWorktree: vi.fn(async () => "absent"),
   removeWorktree: vi.fn(async () => undefined),
   restoreCheckpoint: vi.fn(async () => undefined),
 }));
@@ -99,7 +99,7 @@ function conversationDependencies(
     workspaceRuns: {} as never,
     providerTerminalResumes: {
       isActive: vi.fn(() => false),
-      acquire: vi.fn(() => true),
+      acquireAtCheckout: vi.fn(() => true),
       release: vi.fn(),
     } as never,
     runtimeSync: {} as never,
@@ -139,6 +139,7 @@ describe("Duo deletion command preflights", () => {
     sideEffects.removeOwnedWorktree.mockClear();
     sideEffects.removeWorktree.mockClear();
     sideEffects.restoreCheckpoint.mockClear();
+    sideEffects.removeOwnedWorktree.mockResolvedValue("absent");
   });
 
   it("rejects a live paired chat before worktree, checkpoint, or cache effects", async () => {
@@ -229,10 +230,38 @@ describe("Duo deletion command preflights", () => {
     );
   });
 
+  it("preserves a registered owned worktree and its chat for manual removal", async () => {
+    sideEffects.removeOwnedWorktree.mockResolvedValueOnce("retained");
+    const deleteConversation = vi.fn();
+    const store: Partial<RuntimeStore> = {
+      conversation: vi.fn(() => conversation),
+      hasActiveWorkspaceRunForConversation: vi.fn(() => false),
+      hasRecordedActiveWorkspaceRunForConversation: vi.fn(() => false),
+      assertConversationDeletionAllowed: vi.fn(),
+      conversationWorktrees: {
+        get: vi.fn(() => ownedWorktree),
+      } as never,
+      projectPath: vi.fn(() => "/workspace"),
+      shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as AppSnapshot),
+      deleteConversation,
+    };
+    const dependencies = conversationDependencies(store);
+
+    await expect(createConversationCommandHandler(dependencies)(
+      {} as never,
+      conversationDelete,
+    )).rejects.toThrow(/registered.*remove.*manually/iu);
+
+    expect(sideEffects.deleteCheckpoints).not.toHaveBeenCalled();
+    expect(deleteConversation).not.toHaveBeenCalled();
+    expect(dependencies.rememberDeletedConversation).not.toHaveBeenCalled();
+    expect(dependencies.forgetRemoteTranscript).not.toHaveBeenCalled();
+  });
+
   it("holds the resume reservation while asynchronous worktree deletion runs", async () => {
     let finishRemoval!: () => void;
-    sideEffects.removeOwnedWorktree.mockImplementationOnce(() => new Promise<"removed">((resolve) => {
-      finishRemoval = () => resolve("removed");
+    sideEffects.removeOwnedWorktree.mockImplementationOnce(() => new Promise<"absent">((resolve) => {
+      finishRemoval = () => resolve("absent");
     }));
     const store: Partial<RuntimeStore> = {
       conversation: vi.fn(() => conversation),
@@ -308,11 +337,15 @@ describe("Duo deletion command preflights", () => {
       archiveConversation: vi.fn(),
       settleConversation: vi.fn(),
       deleteConversation: vi.fn(),
+      conversationWorktrees: {
+        get: vi.fn(() => null),
+      } as never,
     };
     const dependencies = conversationDependencies(store);
     dependencies.providerTerminalResumes = {
       isActive: vi.fn(() => true),
       acquire: vi.fn(() => false),
+      acquireAtCheckout: vi.fn(() => false),
       release: vi.fn(),
     } as never;
     const handler = createConversationCommandHandler(dependencies);

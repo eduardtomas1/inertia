@@ -883,21 +883,36 @@ process.exit(child.status ?? 1);
       providerSessionId: null,
     });
 
-    const deleteConversation = async (conversationId: string): Promise<void> => {
+    const deleteConversation = async (conversationId: string) => {
       const requestId = randomUUID();
       send(client.socket, {
         type: "conversation.delete",
         requestId,
         payload: { conversationId },
       });
-      await client.events.next(
-        (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-          event.type === "request.ok" && event.requestId === requestId,
+      return await client.events.next(
+        (event): event is Extract<ServerEvent, {
+          type: "request.ok" | "request.error";
+        }> => (event.type === "request.ok" || event.type === "request.error")
+          && event.requestId === requestId,
       );
     };
-    await deleteConversation(isolatedWorktree.id);
+    expect(await deleteConversation(isolatedWorktree.id)).toMatchObject({
+      type: "request.ok",
+    });
     expect(existsSync(isolatedWorktree.worktreePath!)).toBe(true);
-    await deleteConversation(reusedWorktree.id);
+    expect(await deleteConversation(reusedWorktree.id)).toMatchObject({
+      type: "request.error",
+      message: expect.stringMatching(/registered.*remove.*manually/iu),
+    });
+    execFileSync(
+      "git",
+      ["worktree", "remove", "--force", "--", isolatedWorktree.worktreePath!],
+      { cwd: workspace },
+    );
+    expect(await deleteConversation(reusedWorktree.id)).toMatchObject({
+      type: "request.ok",
+    });
     expect(existsSync(isolatedWorktree.worktreePath!)).toBe(false);
 
     const rejectedRequestId = randomUUID();

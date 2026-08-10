@@ -337,6 +337,8 @@ export function createConversationCommandHandler(
               .conversationWorktrees.get(conversation.id);
             if (!ownership?.ownsWorktree) {
               dependencies.store.deleteConversation(conversation.id);
+            } else {
+              dependencies.broadcastSnapshot();
             }
             throw error;
           }
@@ -598,7 +600,17 @@ export function createConversationCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
-        if (!dependencies.providerTerminalResumes.acquire(conversation.id)) {
+        let ownership = dependencies.store.conversationWorktrees.get(
+          conversation.id,
+        );
+        const checkoutPath = conversation.worktreePath
+          ?? ownership?.path
+          ?? dependencies.store.projectPath(conversation.projectId);
+        if (!dependencies.providerTerminalResumes.acquireAtCheckout(
+          conversation.id,
+          conversation.projectId,
+          checkoutPath,
+        )) {
           throw new RuntimeRequestError(
             "End the resumed provider terminal before deleting this thread.",
           );
@@ -624,9 +636,6 @@ export function createConversationCommandHandler(
             ) throw new RuntimeRequestError(error.message);
             throw error;
           }
-          let ownership = dependencies.store.conversationWorktrees.get(
-            conversation.id,
-          );
           if (ownership?.creationState === "creating") {
             const creation = await inspectUnacknowledgedWorktreeCreation(
               dependencies.store.projectPath(conversation.projectId),
@@ -639,9 +648,9 @@ export function createConversationCommandHandler(
               );
               ownership = null;
             } else {
-              dependencies.store.conversationWorktrees
-                .retainInterruptedCreation(conversation.id);
-              ownership = null;
+              throw new RuntimeRequestError(
+                "Worktree creation was interrupted and Git artifacts remain. Inertia preserved this thread and its ownership receipt. Remove the retained linked worktree and generated branch manually with Git, then delete the thread again.",
+              );
             }
           }
           if (ownership?.ownsWorktree) {
@@ -683,6 +692,11 @@ export function createConversationCommandHandler(
               if (removal === "conflict") {
                 throw new RuntimeRequestError(
                   "The isolated worktree was replaced or changed ownership, so it was preserved.",
+                );
+              }
+              if (removal === "retained") {
+                throw new RuntimeRequestError(
+                  "The isolated worktree is still registered. Inertia preserved it because Git cannot atomically verify ownership during removal. Remove this linked worktree manually with Git, then delete the thread again.",
                 );
               }
             }

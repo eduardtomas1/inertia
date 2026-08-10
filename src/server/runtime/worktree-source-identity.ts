@@ -113,6 +113,16 @@ export async function withWorktreeSourceReservations<Result>(
       source.identity.root,
       `duo-worktree:${launchId}:${source.ordinal}`,
       async () => await runReserved(index + 1),
+      {
+        recoverReviewedCommit: true,
+        serializationRoot: source.identity.root,
+        verifyRepositoryIdentity: async () => {
+          await verifyWorktreeSourceIdentity(
+            source.workspacePath,
+            source.identity,
+          );
+        },
+      },
     );
   };
   return await runReserved(0);

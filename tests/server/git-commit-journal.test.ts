@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -8,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   commitTransactionJournalAliasPath,
@@ -18,6 +20,10 @@ import {
   removeOwnedCommitTransactionJournalAlias,
   type CommitTransactionJournal,
 } from "../../src/server/git/commit-transaction";
+import {
+  pendingReviewedCommitJournalPath,
+  recoverReviewedCommitTransaction,
+} from "../../src/server/git/commit-recovery";
 
 const roots: string[] = [];
 
@@ -54,6 +60,40 @@ afterEach(() => {
 });
 
 describe("reviewed commit journal ownership", () => {
+  it("probes for absent journals without requiring path-format support", async () => {
+    const { directory } = fixture();
+    mkdirSync(join(directory, ".git"));
+    const inspect = vi.fn(async (
+      _root: string,
+      args: readonly string[],
+    ) => {
+      expect(args).toEqual(["rev-parse", "--git-path", "index"]);
+      expect(args).not.toContain("--path-format=absolute");
+      return { stdout: Buffer.from(".git/index\n") } as never;
+    });
+
+    await expect(pendingReviewedCommitJournalPath(
+      directory,
+      inspect as never,
+    )).resolves.toBeNull();
+    expect(inspect).toHaveBeenCalledOnce();
+  });
+
+  it("delegates a pending journal to fail-safe recovery", async () => {
+    const { directory } = fixture();
+    execFileSync("git", ["init", "-q"], { cwd: directory });
+    const journalPath = join(
+      directory,
+      ".git",
+      "index.inertia-commit-transaction.json",
+    );
+    writeFileSync(journalPath, "invalid recovery journal");
+
+    await expect(recoverReviewedCommitTransaction(directory))
+      .rejects.toThrow(/recovery journal is invalid/iu);
+    expect(readFileSync(journalPath, "utf8")).toBe("invalid recovery journal");
+  });
+
   it("rejects an in-place journal mutation after publication", async () => {
     const { journal, journalPath } = fixture();
     const aliasPath = commitTransactionJournalAliasPath(

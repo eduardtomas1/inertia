@@ -1,5 +1,8 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
+  copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -60,6 +63,95 @@ function initializeRepository(repository: string): void {
   writeFileSync(join(repository, "README.md"), "before\n");
   git(repository, "add", "--", "README.md");
   git(repository, "commit", "-q", "-m", "Initial");
+}
+
+function leaveInstalledReviewedCommitMarker(repository: string): {
+  indexLockPath: string;
+  journalPath: string;
+} {
+  const indexPath = git(
+    repository,
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-path",
+    "index",
+  );
+  const temporaryIndex = `${indexPath}.integration-reconciled`;
+  copyFileSync(indexPath, temporaryIndex);
+  const indexEnvironment = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_INDEX_FILE: temporaryIndex,
+    GIT_TERMINAL_PROMPT: "0",
+  };
+  execFileSync("git", ["add", "--", "README.md"], {
+    cwd: repository,
+    env: indexEnvironment,
+  });
+  const tree = execFileSync("git", ["write-tree"], {
+    cwd: repository,
+    encoding: "utf8",
+    env: indexEnvironment,
+  }).trim();
+  const expectedHead = git(repository, "rev-parse", "HEAD");
+  const newCommit = execFileSync("git", [
+    "commit-tree",
+    tree,
+    "-p",
+    expectedHead,
+    "-m",
+    "Installed marker fixture",
+  ], {
+    cwd: repository,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+    },
+  }).trim();
+  const oldIndex = readFileSync(indexPath);
+  const newIndex = readFileSync(temporaryIndex);
+  const digest = (value: Buffer): string => createHash("sha256")
+    .update(value)
+    .digest("hex");
+  const token = "8".repeat(64);
+  const journalPath = `${indexPath}.inertia-commit-transaction.json`;
+  const indexLockPath = `${indexPath}.lock`;
+  const headRef = git(repository, "symbolic-ref", "HEAD");
+  writeFileSync(journalPath, JSON.stringify({
+    expectedHead,
+    headRef,
+    headPath: git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "HEAD",
+    ),
+    refPath: git(
+      repository,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      headRef,
+    ),
+    newCommit,
+    oldIndexHash: digest(oldIndex),
+    newIndexHash: digest(newIndex),
+    indexPath,
+    stagePath: `${indexPath}.inertia-stage-${"8".repeat(32)}`,
+    reservationToken: token,
+  }));
+  writeFileSync(
+    indexLockPath,
+    `inertia-reviewed-commit:index:${token}\n`,
+    { flag: "wx", mode: 0o600 },
+  );
+  git(repository, "update-ref", headRef, newCommit, expectedHead);
+  writeFileSync(indexPath, newIndex);
+  rmSync(temporaryIndex);
+  return { indexLockPath, journalPath };
 }
 
 function replaceRepositoryMetadata(
@@ -219,6 +311,57 @@ afterEach(() => {
 });
 
 describe("nested source-control command scope", () => {
+  it("recovers an installed reviewed index before a clean branch mutation", async () => {
+    const { workspace, repository } = workspaceWithNestedRepository();
+    git(repository, "branch", "before-recovery");
+    writeFileSync(join(repository, "README.md"), "installed but unacknowledged\n");
+    const marker = leaveInstalledReviewedCommitMarker(repository);
+    expect(git(repository, "status", "--porcelain")).toBe("");
+    expect(existsSync(marker.indexLockPath)).toBe(true);
+    expect(existsSync(marker.journalPath)).toBe(true);
+
+    const activityStore = {
+      conversation: vi.fn(),
+      createWorkspaceRun: vi.fn(() => {
+        expect(existsSync(marker.indexLockPath)).toBe(false);
+        expect(existsSync(marker.journalPath)).toBe(false);
+        return { id: crypto.randomUUID() };
+      }),
+      updateWorkspaceRun: vi.fn(),
+      conversationWork: {
+        reserveCheckout: vi.fn(() => true),
+        release: vi.fn(),
+      },
+    };
+    const controller = new WorkspaceRunController(
+      activityStore as never,
+      {} as never,
+      vi.fn(),
+      () => false,
+      vi.fn(),
+    );
+
+    await expect(controller.trackSourceControl(
+      "Switch branch after recovery",
+      projectId,
+      undefined,
+      workspace,
+      crypto.randomUUID(),
+      async () => git(repository, "switch", "before-recovery"),
+      {
+        recoverReviewedCommit: true,
+        serializationRoot: repository,
+        verifyRepositoryIdentity: async () => undefined,
+      },
+    )).resolves.toBeDefined();
+
+    expect(git(repository, "branch", "--show-current")).toBe("before-recovery");
+    expect(existsSync(marker.indexLockPath)).toBe(false);
+    expect(existsSync(marker.journalPath)).toBe(false);
+    expect(activityStore.createWorkspaceRun).toHaveBeenCalledOnce();
+    expect(activityStore.conversationWork.release).toHaveBeenCalledOnce();
+  });
+
   it("uses status-issued root authority when the project is below its repository root", async () => {
     const repository = mkdtempSync(join(tmpdir(), "inertia-project-subdir-"));
     roots.push(repository);
@@ -285,7 +428,11 @@ describe("nested source-control command scope", () => {
       workspace,
       createRequestId,
       expect.any(Function),
-      { serializationRoot: realpathSync(repository) },
+      expect.objectContaining({
+        recoverReviewedCommit: true,
+        serializationRoot: realpathSync(repository),
+        verifyRepositoryIdentity: expect.any(Function),
+      }),
     );
   });
 
@@ -361,7 +508,10 @@ describe("nested source-control command scope", () => {
       workspace,
       command.requestId,
       expect.any(Function),
-      { serializationRoot: realpathSync(repository) },
+      {
+        recoverReviewedCommit: false,
+        serializationRoot: realpathSync(repository),
+      },
     );
     expect(git(repository, "log", "-1", "--pretty=%s")).toBe(
       "Commit nested change",
@@ -418,7 +568,7 @@ describe("nested source-control command scope", () => {
         requestId: harness.command.requestId,
         result: expect.objectContaining({
           kind: "git.action",
-          message: expect.stringMatching(/Committed .*repository identity.*refreshed/iu),
+          message: expect.stringMatching(/Committed .*index recovery.*manual/iu),
         }),
       }),
     );
@@ -489,6 +639,7 @@ describe("nested source-control command scope", () => {
       workspace,
       crypto.randomUUID(),
       async () => "follow-up",
+      { recoverReviewedCommit: false, serializationRoot: repository },
     )).resolves.toBe("follow-up");
     expect(invalidated).toHaveBeenCalledTimes(2);
     expect(activityStore.conversationWork.release).toHaveBeenCalledTimes(2);

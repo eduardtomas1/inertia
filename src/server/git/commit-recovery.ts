@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
@@ -44,6 +44,7 @@ interface ReservationState {
 }
 
 export interface CommitRecoveryHooks {
+  verifyRepositoryIdentity?: (signal?: AbortSignal) => void | Promise<void>;
   ownedJournal?: OwnedCommitTransactionJournal;
   ownedIndexLockIdentity?: CommitLockIdentity | null;
   reservationWasNeverAcquired?: boolean;
@@ -283,6 +284,7 @@ export async function recoverCommitTransaction(
   const journalPath = `${indexPath}.inertia-commit-transaction.json`;
   const observedJournal = observeCommitTransactionJournalSync(journalPath);
   if (observedJournal === null) return;
+  await options.verifyRepositoryIdentity?.();
   const journalBytes = observedJournal.content;
   if (journalBytes.length === 0) {
     throw new GitError("conflict", "The reviewed commit recovery journal is invalid.");
@@ -325,6 +327,17 @@ export async function recoverCommitTransaction(
       "The reviewed commit recovery journal changed after publication cleanup.",
     );
   }
+  const verifyRepositoryIdentity = async (signal?: AbortSignal): Promise<void> => {
+    await options.verifyRepositoryIdentity?.(signal);
+  };
+  const removeJournal = async (): Promise<void> => {
+    await verifyRepositoryIdentity();
+    await removeOwnedCommitTransactionJournal(
+      journalPath,
+      reboundJournal,
+      options.beforeJournalUnlink,
+    );
+  };
   try {
     await runGitInspection(root, ["check-ref-format", journal.headRef], {
       maxOutputBytes: 1_024,
@@ -365,6 +378,7 @@ export async function recoverCommitTransaction(
       );
     }
     requireOwnedOrAbsent(indexLock);
+    await verifyRepositoryIdentity();
     await releaseOwnedIndexReservation(
       indexLockPath,
       journal.stagePath,
@@ -376,11 +390,7 @@ export async function recoverCommitTransaction(
   };
   if (digest(index) === journal.newIndexHash && stage === null) {
     await releaseReservations(false);
-    await removeOwnedCommitTransactionJournal(
-      journalPath,
-      reboundJournal,
-      options.beforeJournalUnlink,
-    );
+    await removeJournal();
     return;
   }
   const current = await headState(root);
@@ -406,11 +416,7 @@ export async function recoverCommitTransaction(
     if (stage === null) {
       requireOwnedOrAbsent(indexLock);
       await releaseReservations(false);
-      await removeOwnedCommitTransactionJournal(
-        journalPath,
-        reboundJournal,
-        options.beforeJournalUnlink,
-      );
+      await removeJournal();
       return;
     }
     if (!stageIsIndex) {
@@ -425,21 +431,19 @@ export async function recoverCommitTransaction(
       && !indexLock.owned
     ) {
       await options.beforeStageUnlink?.();
+      await verifyRepositoryIdentity();
       removeVerifiedStageSync(journal.stagePath, stageIdentity!);
       await syncDirectory(journal.stagePath);
     } else {
       if (stageIsIndex) {
         await options.beforeStageUnlink?.();
+        await verifyRepositoryIdentity();
         removeVerifiedStageSync(journal.stagePath, stageIdentity!);
         await syncDirectory(journal.stagePath);
       }
       await releaseReservations(false);
     }
-    await removeOwnedCommitTransactionJournal(
-      journalPath,
-      reboundJournal,
-      options.beforeJournalUnlink,
-    );
+    await removeJournal();
     return;
   }
   if (
@@ -466,9 +470,13 @@ export async function recoverCommitTransaction(
     indexLock,
     indexLockPath,
     journal.reservationToken,
-    options.beforeReservationAcquire,
+    async () => {
+      await options.beforeReservationAcquire?.();
+      await verifyRepositoryIdentity();
+    },
   );
   await options.beforeRefReservationAcquire?.();
+  await verifyRepositoryIdentity();
   await withPreparedGitRefReservation(
     root,
     journal.headRef,
@@ -494,6 +502,7 @@ export async function recoverCommitTransaction(
       const reservedHead = await headState(root);
       const reservedHeadContent = await readOptionalRegularFile(journal.headPath);
       const reservedRef = await referenceOid(root, journal.headRef);
+      await verifyRepositoryIdentity(context.signal);
       context.assertActive();
       if (
         digest(reservedIndex) !== journal.oldIndexHash
@@ -514,6 +523,8 @@ export async function recoverCommitTransaction(
         );
       }
       await options.afterStageValidation?.();
+      await verifyRepositoryIdentity(context.signal);
+      context.assertActive();
       context.mutate(() => {
         assertPreparedReferenceLocksSync(journal.headPath, journal.refPath);
         installPrivateIndexStageSync({
@@ -543,6 +554,7 @@ export async function recoverCommitTransaction(
       "Git did not release the prepared branch recovery locks.",
     );
   }
+  await verifyRepositoryIdentity();
   await syncDirectory(indexPath);
   await releaseOwnedIndexReservation(
     indexLockPath,
@@ -551,9 +563,31 @@ export async function recoverCommitTransaction(
     indexIdentity,
     options.beforeReservationUnlink,
   );
-  await removeOwnedCommitTransactionJournal(
-    journalPath,
-    reboundJournal,
-    options.beforeJournalUnlink,
-  );
+  await removeJournal();
+}
+
+export async function pendingReviewedCommitJournalPath(
+  root: string,
+  inspect: typeof runGitInspection = runGitInspection,
+): Promise<string | null> {
+  const output = stripTerminalEol((await inspect(root, [
+    "rev-parse",
+    "--git-path",
+    "index",
+  ], {
+    maxOutputBytes: 4_096,
+    failureMessage: "Unable to locate the repository index.",
+  })).stdout.toString("utf8"));
+  const indexPath = isAbsolute(output) ? output : resolve(root, output);
+  const journalPath = `${indexPath}.inertia-commit-transaction.json`;
+  return await pathExists(journalPath) ? journalPath : null;
+}
+
+/** Recover an interrupted reviewed commit without exposing test-only seams. */
+export async function recoverReviewedCommitTransaction(
+  root: string,
+  verifyRepositoryIdentity?: (signal?: AbortSignal) => void | Promise<void>,
+): Promise<void> {
+  if (await pendingReviewedCommitJournalPath(root) === null) return;
+  await recoverCommitTransaction(root, { verifyRepositoryIdentity });
 }

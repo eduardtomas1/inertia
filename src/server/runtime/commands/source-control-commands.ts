@@ -245,6 +245,29 @@ export function createSourceControlCommandHandler(
     await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity);
     return result;
   };
+  const trackedRepositoryOptions = (
+    repository: Awaited<ReturnType<typeof resolveCommandRepository>>,
+    recoverReviewedCommit = true,
+  ) => {
+    if (
+      !recoverReviewedCommit
+      || !repository.secureRoot
+      || !repository.metadataMarkerIdentity
+    ) {
+      return {
+        recoverReviewedCommit: false,
+        serializationRoot: repository.serializationRoot,
+      };
+    }
+    return {
+      recoverReviewedCommit: true,
+      serializationRoot: repository.serializationRoot,
+      verifyRepositoryIdentity: async () => await verifyCommandRepository(
+        repository.secureRoot,
+        repository.metadataMarkerIdentity,
+      ),
+    };
+  };
   const issueLiveAuthority = async (
     socket: WebSocket,
     purpose: Parameters<SecureFileAuthorityRegistry["issue"]>[1],
@@ -877,7 +900,7 @@ export function createSourceControlCommandHandler(
             repository,
             async (root) => await createBranch(root, command.payload.name),
           ),
-          { serializationRoot: repository.serializationRoot },
+          trackedRepositoryOptions(repository),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -906,7 +929,7 @@ export function createSourceControlCommandHandler(
             repository,
             async (root) => await switchBranch(root, command.payload.name),
           ),
-          { serializationRoot: repository.serializationRoot },
+          trackedRepositoryOptions(repository),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -935,7 +958,7 @@ export function createSourceControlCommandHandler(
             repository,
             pullRepository,
           ),
-          { serializationRoot: repository.serializationRoot },
+          trackedRepositoryOptions(repository),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -1039,7 +1062,7 @@ export function createSourceControlCommandHandler(
               };
             }
           },
-          { serializationRoot: repository.serializationRoot },
+          trackedRepositoryOptions(repository, false),
         );
         let refreshWarning = result.refreshWarning;
         if (command.payload.conversationId) {
@@ -1096,7 +1119,7 @@ export function createSourceControlCommandHandler(
             repository,
             pushCurrentBranch,
           ),
-          { serializationRoot: repository.serializationRoot },
+          trackedRepositoryOptions(repository),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -1124,7 +1147,7 @@ export function createSourceControlCommandHandler(
             repository,
             getPullRequestCreateUrl,
           ),
-          { serializationRoot: repository.serializationRoot },
+          trackedRepositoryOptions(repository),
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -1153,7 +1176,7 @@ export function createSourceControlCommandHandler(
             repository,
             async (root) => await createGitHubPullRequest(root, command.payload),
           ),
-          { serializationRoot: repository.serializationRoot },
+          trackedRepositoryOptions(repository),
         );
         dependencies.send(socket, {
           type: "request.result",

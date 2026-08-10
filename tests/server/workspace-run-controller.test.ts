@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import {
   WorkspaceRunController,
   workspaceActionKind,
   workspaceServicePort,
+  type ReviewedCommitRecovery,
   type SourceControlSerializationIdentityResolver,
   type WorkspaceActionTerminalManager,
 } from "../../src/server/runtime/workspace-run-controller";
@@ -71,6 +72,7 @@ const temporaryDirectories: string[] = [];
 
 async function fixture(
   serializationIdentity?: SourceControlSerializationIdentityResolver,
+  recoverReviewedCommit: ReviewedCommitRecovery = async () => undefined,
 ) {
   const root = await mkdtemp(join(tmpdir(), "inertia-workspace-runs-"));
   temporaryDirectories.push(root);
@@ -97,6 +99,7 @@ async function fixture(
     () => false,
     broadcastGitInvalidated,
     serializationIdentity,
+    recoverReviewedCommit,
   );
   return {
     root,
@@ -490,6 +493,88 @@ describe("workspace run controller", () => {
     } finally {
       runtime.store.close();
     }
+  });
+
+  it("rejects queued metadata replacement before recovery touches it", async () => {
+    const recover = vi.fn(async (root: string) => {
+      await rm(join(root, ".git", "index.lock"), { force: true });
+      await rm(
+        join(root, ".git", "index.inertia-commit-transaction.json"),
+        { force: true },
+      );
+    });
+    const runtime = await fixture(undefined, recover);
+    const gitPath = join(runtime.workspace, ".git");
+    const retainedGitPath = join(runtime.workspace, ".git-retained");
+    const replacementGitPath = join(runtime.workspace, ".git-replacement");
+    await mkdir(gitPath);
+    const expected = await stat(gitPath, { bigint: true });
+    let finishFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    });
+    let firstStarted = false;
+    const first = runtime.controller.trackSourceControl(
+      "Hold repository queue",
+      runtime.project.id,
+      runtime.conversation.id,
+      runtime.workspace,
+      "99999999-9999-4999-8999-999999999999",
+      async () => {
+        firstStarted = true;
+        await firstGate;
+      },
+      {
+        recoverReviewedCommit: true,
+        serializationRoot: runtime.workspace,
+        verifyRepositoryIdentity: async () => undefined,
+      },
+    );
+    await vi.waitFor(() => expect(firstStarted).toBe(true));
+
+    let secondRan = false;
+    const second = runtime.controller.trackSourceControl(
+      "Reject replacement repository",
+      runtime.project.id,
+      runtime.conversation.id,
+      runtime.workspace,
+      "88888888-8888-4888-8888-888888888888",
+      async () => {
+        secondRan = true;
+      },
+      {
+        recoverReviewedCommit: true,
+        serializationRoot: runtime.workspace,
+        verifyRepositoryIdentity: async () => {
+          const current = await stat(gitPath, { bigint: true });
+          if (current.dev !== expected.dev || current.ino !== expected.ino) {
+            throw new Error("Repository metadata identity changed.");
+          }
+        },
+      },
+    ).then(() => null, (error: unknown) => error);
+    await mkdir(replacementGitPath);
+    await writeFile(join(replacementGitPath, "index.lock"), "replacement lock");
+    await writeFile(
+      join(replacementGitPath, "index.inertia-commit-transaction.json"),
+      "replacement journal",
+    );
+    await rename(gitPath, retainedGitPath);
+    await rename(replacementGitPath, gitPath);
+    finishFirst();
+    await first;
+
+    await expect(second).resolves.toEqual(expect.objectContaining({
+      message: "Repository metadata identity changed.",
+    }));
+    expect(secondRan).toBe(false);
+    expect(recover).toHaveBeenCalledOnce();
+    await expect(stat(join(gitPath, "index.lock"))).resolves.toBeDefined();
+    await expect(stat(join(
+      gitPath,
+      "index.inertia-commit-transaction.json",
+    ))).resolves.toBeDefined();
+    runtime.store.close();
   });
 
   it("serializes nested project roots sharing one repository identity", async () => {

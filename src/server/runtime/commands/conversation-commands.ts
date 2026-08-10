@@ -291,6 +291,16 @@ export function createConversationCommandHandler(
                 );
                 return created;
               },
+              {
+                recoverReviewedCommit: true,
+                serializationRoot: worktreeSource.root,
+                verifyRepositoryIdentity: async () => {
+                  await verifyWorktreeSourceIdentity(
+                    repositoryPath,
+                    worktreeSource,
+                  );
+                },
+              },
             );
             dependencies.store.updateConversation(conversation.id, {
               worktreePath: createdStatus.root,

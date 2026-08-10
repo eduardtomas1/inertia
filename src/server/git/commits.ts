@@ -555,6 +555,7 @@ export async function commitReviewedChanges(
     throw new GitError("invalid-input", "Select at least one path to commit.");
   }
   await recoverCommitTransaction(root, {
+    verifyRepositoryIdentity: options.verifyRepositoryIdentity,
     beforeReservationAcquire:
       options.testHooks?.beforeRecoveryReservationAcquire,
     beforeRefReservationAcquire:
@@ -1035,6 +1036,7 @@ export async function commitReviewedChanges(
           );
         }
         await recoverCommitTransaction(root, {
+          verifyRepositoryIdentity: options.verifyRepositoryIdentity,
           ownedJournal,
           ownedIndexLockIdentity: ownsLock
             ? ownedIndexLockIdentity
@@ -1064,6 +1066,7 @@ export async function commitReviewedChanges(
       } else {
         try {
           await recoverCommitTransaction(root, {
+            verifyRepositoryIdentity: options.verifyRepositoryIdentity,
             ownedJournal,
             ownedIndexLockIdentity: ownsLock
               ? ownedIndexLockIdentity

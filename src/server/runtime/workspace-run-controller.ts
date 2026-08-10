@@ -7,6 +7,7 @@ import type {
   WorkspaceRun,
 } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
+import { recoverReviewedCommitTransaction } from "../git";
 import {
   projectActionCommand,
 } from "../runtime-commands";
@@ -61,6 +62,11 @@ export interface SourceControlSerializationIdentity {
 export type SourceControlSerializationIdentityResolver = (
   root: string,
 ) => SourceControlSerializationIdentity;
+
+export type ReviewedCommitRecovery = (
+  root: string,
+  verifyRepositoryIdentity?: () => void | Promise<void>,
+) => Promise<void>;
 
 function sourceControlSerializationIdentity(
   root: string,
@@ -151,6 +157,8 @@ export class WorkspaceRunController<Owner> {
     private readonly resolveSourceControlSerializationIdentity:
       SourceControlSerializationIdentityResolver
       = sourceControlSerializationIdentity,
+    private readonly recoverReviewedCommit: ReviewedCommitRecovery
+      = recoverReviewedCommitTransaction,
   ) {}
 
   async listActions(cwd: string): Promise<WorkspaceAction[]> {
@@ -315,7 +323,11 @@ export class WorkspaceRunController<Owner> {
     checkoutRoot: string,
     requestId: string,
     operation: () => Promise<T>,
-    options: { serializationRoot?: string } = {},
+    options: {
+      recoverReviewedCommit?: boolean;
+      serializationRoot?: string;
+      verifyRepositoryIdentity?: () => void | Promise<void>;
+    } = {},
   ): Promise<T> {
     // Multiple projects may point at different folders in one Git checkout.
     // Reserve each project's checkout scope independently, but serialize every
@@ -334,6 +346,18 @@ export class WorkspaceRunController<Owner> {
         );
       }
       try {
+        if (options.recoverReviewedCommit) {
+          if (!options.verifyRepositoryIdentity) {
+            throw new RuntimeRequestError(
+              "The repository identity could not be verified before recovery.",
+            );
+          }
+          await options.verifyRepositoryIdentity();
+          await this.recoverReviewedCommit(
+            serializationRoot,
+            options.verifyRepositoryIdentity,
+          );
+        }
         const invalidationScope = `${projectId}:${conversationId ?? ""}`;
         const detail = conversationId
           ? conversationDetail(this.store.conversation(conversationId))

@@ -61,6 +61,7 @@ export {
   worktreeFilesystemIdentitiesEqual,
 } from "./worktree-filesystem-identity";
 export { commitChanges, commitReviewedChanges } from "./git/commits";
+export { recoverReviewedCommitTransaction } from "./git/commit-recovery";
 export {
   captureGitCommitReview,
   prepareGitCommitReview,

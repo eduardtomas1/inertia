@@ -112,9 +112,25 @@ function commitReviewAuthorityBinding(
 }
 
 function sameCanonicalPath(left: string, right: string): boolean {
+  const normalizedLeft = resolve(left);
+  const normalizedRight = resolve(right);
   return process.platform === "win32"
-    ? left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US")
-    : left === right;
+    ? normalizedLeft.toLocaleLowerCase("en-US")
+      === normalizedRight.toLocaleLowerCase("en-US")
+    : normalizedLeft === normalizedRight;
+}
+
+async function sameFilesystemPath(left: string, right: string): Promise<boolean> {
+  if (sameCanonicalPath(left, right)) return true;
+  try {
+    const [canonicalLeft, canonicalRight] = await Promise.all([
+      realpath(left),
+      realpath(right),
+    ]);
+    return sameCanonicalPath(canonicalLeft, canonicalRight);
+  } catch {
+    return false;
+  }
 }
 
 export function createSourceControlCommandHandler(
@@ -160,9 +176,12 @@ export function createSourceControlCommandHandler(
         repository.metadataMarkerIdentity,
       ),
     );
+    // Windows may report the same directory through case or 8.3 aliases on
+    // separate realpath calls. The broker's retained filesystem identity and
+    // creation time are the authority; the freshly resolved path is still
+    // independently contained and bound to the exact Git metadata marker.
     if (
-      repository.root !== issuedRoot.root
-      || !repository.secureRoot
+      !repository.secureRoot
       || repository.secureRoot.identity.dev !== issuedRoot.identity.dev
       || repository.secureRoot.identity.ino !== issuedRoot.identity.ino
       || repository.secureRoot.birthtimeNs !== issuedRoot.birthtimeNs
@@ -186,7 +205,7 @@ export function createSourceControlCommandHandler(
     if (!secureRoot || !metadataMarkerIdentity) return;
     await dependencies.secureFiles.verifyRoot(secureRoot, options.signal);
     if (
-      !sameCanonicalPath(
+      !await sameFilesystemPath(
         await repositoryRoot(secureRoot.root, options),
         secureRoot.root,
       )
@@ -986,7 +1005,7 @@ export function createSourceControlCommandHandler(
               { consume: true },
             );
             if (
-              !sameCanonicalPath(
+              !await sameFilesystemPath(
                 reviewRoot.root,
                 await realpath(repository.repositoryRoot),
               )
@@ -1008,7 +1027,7 @@ export function createSourceControlCommandHandler(
             ): Promise<void> => {
               await dependencies.secureFiles.verifyRoot(reviewRoot, signal);
               if (
-                !sameCanonicalPath(
+                !await sameFilesystemPath(
                   await repositoryRoot(reviewRoot.root, { signal }),
                   reviewRoot.root,
                 )

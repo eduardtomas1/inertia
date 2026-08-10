@@ -52,6 +52,12 @@ function gitPreservingWhitespace(cwd: string, ...args: string[]): string {
   }).replace(/(?:\r\n|\n)$/u, "");
 }
 
+function nodeFilterCommand(path: string): string {
+  const executable = process.execPath.replaceAll("\\", "/");
+  const script = path.replaceAll("\\", "/");
+  return `"${executable}" "${script}"`;
+}
+
 function repository(): string {
   const root = mkdtempSync(join(tmpdir(), "inertia-commit-review-"));
   roots.push(root);
@@ -231,14 +237,16 @@ describe("Git commit review receipts", () => {
 
   it("renders and commits the normal filtered prospective content", async () => {
     const root = repository();
-    const filter = join(root, "uppercase-filter.cjs");
+    const filterDirectory = join(root, "filter helpers");
+    mkdirSync(filterDirectory);
+    const filter = join(filterDirectory, "uppercase filter.cjs");
     writeFileSync(filter, [
       "const chunks = [];",
       "process.stdin.on('data', (chunk) => chunks.push(chunk));",
       "process.stdin.on('end', () => process.stdout.write(Buffer.concat(chunks).toString('utf8').toUpperCase()));",
       "",
     ].join("\n"));
-    git(root, "config", "filter.upper.clean", `${process.execPath} ${filter}`);
+    git(root, "config", "filter.upper.clean", nodeFilterCommand(filter));
     git(root, "config", "filter.upper.required", "true");
     writeFileSync(join(root, ".gitattributes"), "*.upper filter=upper\n");
     writeFileSync(join(root, "new.upper"), "reviewed lowercase\n");

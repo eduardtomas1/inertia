@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
-);
+).replace(/\r\n?/gu, "\n");
 
 type Rgb = readonly [number, number, number];
 

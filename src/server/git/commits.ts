@@ -16,6 +16,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { dirname } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { NETWORK_TIMEOUT_MS } from "./constants";
 import {
@@ -41,6 +42,8 @@ import {
 } from "./types";
 
 const MAX_INDEX_BYTES = 256 * 1024 * 1024;
+const REFERENCE_LOCK_RELEASE_GRACE_MS = 500;
+const REFERENCE_LOCK_POLL_MS = 10;
 const COMMIT_POLICY_HOOKS = [
   "pre-commit",
   "prepare-commit-msg",
@@ -131,6 +134,22 @@ async function pathExists(path: string): Promise<boolean> {
     ) return false;
     throw error;
   }
+}
+
+async function waitForReferenceLocksToRelease(
+  headLockPath: string,
+  refLockPath: string,
+): Promise<boolean> {
+  // Git for Windows can close the prepared update process just before its
+  // reference-lock deletions become observable. This is a cleanup-only grace;
+  // the operation deadline has already revoked every reviewed mutation.
+  const expiresAt = Date.now() + REFERENCE_LOCK_RELEASE_GRACE_MS;
+  while (await pathExists(headLockPath) || await pathExists(refLockPath)) {
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) return false;
+    await delay(Math.min(REFERENCE_LOCK_POLL_MS, remaining));
+  }
+  return true;
 }
 
 function sameLockIdentity(
@@ -958,6 +977,15 @@ export async function commitReviewedChanges(
         lock = null;
       }
       if (!committed) {
+        if (!await waitForReferenceLocksToRelease(
+          `${headPath}.lock`,
+          `${refPath}.lock`,
+        )) {
+          throw new GitError(
+            "conflict",
+            "The reviewed commit transaction stopped with Git locks still present. Inspect it manually before continuing.",
+          );
+        }
         let observedRef: string | null;
         try {
           observedRef = await referenceOid(root, currentHead.headRef);
@@ -973,14 +1001,6 @@ export async function commitReviewedChanges(
           throw new GitError(
             "conflict",
             "The reviewed branch changed during commit. Inspect it manually before continuing.",
-          );
-        } else if (
-          await readOptionalRegularFile(`${headPath}.lock`) !== null
-          || await readOptionalRegularFile(`${refPath}.lock`) !== null
-        ) {
-          throw new GitError(
-            "conflict",
-            "The reviewed commit transaction stopped with Git locks still present. Inspect it manually before continuing.",
           );
         }
       }

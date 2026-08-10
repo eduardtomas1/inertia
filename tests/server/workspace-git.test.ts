@@ -292,21 +292,34 @@ describe("workspace Git repository discovery", () => {
       state: "ready",
       branch: "module-worktree",
     });
-    const originalIdentity = await repositoryMetadataMarkerIdentity(worktree);
-    const secondWorktree = join(workspace, "second-worktree");
-    git(
-      source,
-      "worktree",
-      "add",
-      "-q",
-      "-b",
-      "second-worktree",
-      secondWorktree,
-    );
-    const secondMetadata = git(secondWorktree, "rev-parse", "--git-dir");
-    writeFileSync(join(worktree, ".git"), `gitdir: ${secondMetadata}\n`);
+  });
 
-    await expect(repositoryMetadataMarkerIdentity(worktree)).resolves.not.toBe(
+  it("changes identity when an ordinary Git marker target is replaced", async () => {
+    const first = temporaryRoot("marker-first");
+    const second = temporaryRoot("marker-second");
+    initializeRepository(first);
+    initializeRepository(second);
+    const checkout = temporaryRoot("marker-checkout");
+    const marker = join(checkout, ".git");
+    const firstMetadata = git(
+      first,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    );
+    const secondMetadata = git(
+      second,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    );
+    writeFileSync(marker, `gitdir: ${firstMetadata}\n`);
+    const originalIdentity = await repositoryMetadataMarkerIdentity(checkout);
+
+    rmSync(marker, { force: true });
+    writeFileSync(marker, `gitdir: ${secondMetadata}\n`);
+
+    await expect(repositoryMetadataMarkerIdentity(checkout)).resolves.not.toBe(
       originalIdentity,
     );
   });

@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -228,6 +228,7 @@ describe("nested source-control command scope", () => {
     const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
       repository,
     );
+    const discoveredRoot = await broker.authorizeRoot(repository);
     const authorityRef = await authorities.issue(
       socket,
       "git-repository",
@@ -238,7 +239,10 @@ describe("nested source-control command scope", () => {
         "modules/alpha",
         metadataMarkerIdentity,
       ],
-      await broker.authorizeRoot(repository),
+      {
+        ...discoveredRoot,
+        root: `${discoveredRoot.root}${sep}.`,
+      },
     );
     const reviewReceipt = await issueCommitReview(
       authorities,
@@ -294,7 +298,9 @@ describe("nested source-control command scope", () => {
     expect(git(repository, "status", "--porcelain")).toBe("");
     expect(broker.authorizeRoot).toHaveBeenCalledWith(realpathSync(repository));
     expect(broker.verifyRoot).toHaveBeenCalledTimes(13);
-    expect(vi.mocked(broker.verifyRoot).mock.calls.map(([root]) => root.root))
+    expect(vi.mocked(broker.verifyRoot).mock.calls.map(
+      ([root]) => realpathSync(root.root),
+    ))
       .toEqual(Array.from({ length: 13 }, () => realpathSync(repository)));
     expect(send).toHaveBeenCalledWith(
       expect.anything(),

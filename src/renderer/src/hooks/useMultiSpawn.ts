@@ -623,8 +623,7 @@ export function useMultiSpawn({
       } else {
         setError(null);
       }
-      const blocked = retained.length > 0;
-      return blocked ? "blocked" : "clear";
+      return retained.length > 0 ? "blocked" : "clear";
     } catch {
       if (!isCurrent()) return "stale";
       setError(
@@ -1032,8 +1031,9 @@ export function useMultiSpawn({
     status: DuoStatusResult,
   ): void => {
     setRecoveryStatus(status);
-    const retained = launchRetainsRecoveryIdentity(status);
-    if (!retained) clearPendingMultiSpawnLaunchId(window.localStorage);
+    if (!launchRetainsRecoveryIdentity(status)) {
+      clearPendingMultiSpawnLaunchId(window.localStorage);
+    }
     setError(launchStatusMessage(status));
   }, [setRecoveryStatus]);
 
@@ -1070,35 +1070,43 @@ export function useMultiSpawn({
     watchComparisonStatus,
   ]);
 
-  const retryComparison = useCallback(async (): Promise<void> => {
+  const mutateComparison = useCallback(async (
+    kind: "retry" | "cancel",
+  ): Promise<void> => {
+    const comparison = recoveryStatus?.comparison;
+    if (!comparison || retryingComparison || cancellingComparison) return;
     if (
-      !recoveryStatus?.comparison
-      || (
-        recoveryStatus.comparison.state !== "failed"
-        && recoveryStatus.comparison.state !== "interrupted"
-      )
-      || retryingComparison
-      || cancellingComparison
+      kind === "retry"
+        ? comparison.state !== "failed" && comparison.state !== "interrupted"
+        : comparison.state === "completed" || comparison.state === "cancelled"
     ) return;
     const generation = operationGenerationRef.current;
     const launchId = recoveryStatus.launchId;
     const mutation: ComparisonMutationIntent = {
       launchId,
-      kind: "retry",
-      baselineAttempt: recoveryStatus.comparison.attempt,
-      baselineState: recoveryStatus.comparison.state,
+      kind,
+      baselineAttempt: comparison.attempt,
+      baselineState: comparison.state,
     };
     comparisonMutationsRef.current[launchId] = mutation;
     // A close invalidates foreground mutation callbacks. Keep an independent
     // watch alive so its eventual authoritative state is still surfaced.
     watchComparisonStatus({ ...recoveryStatus });
-    setRetryingComparison(true);
+    const setBusy = kind === "retry"
+      ? setRetryingComparison
+      : setCancellingComparison;
+    setBusy(true);
     setError(null);
     try {
-      const event = resultEvent(await run("multi-spawn:comparison:retry", {
-        type: "duo.comparison.retry",
-        payload: { launchId },
-      }));
+      const event = resultEvent(await (kind === "retry"
+        ? run("multi-spawn:comparison:retry", {
+            type: "duo.comparison.retry",
+            payload: { launchId },
+          })
+        : run("multi-spawn:comparison:cancel", {
+            type: "duo.comparison.cancel",
+            payload: { launchId },
+          })));
       if (event.result.kind !== "duo.status") {
         throw new Error(INVALID_DUO_RESPONSE);
       }
@@ -1112,64 +1120,12 @@ export function useMultiSpawn({
       }
       delete comparisonMutationsRef.current[launchId];
       if (operationGenerationRef.current !== generation) return;
-      setError(`The third-model judge could not be retried. ${errorMessage(caught)}`);
+      setError(kind === "retry"
+        ? `The third-model judge could not be retried. ${errorMessage(caught)}`
+        : `The third-model comparison could not be cancelled. ${errorMessage(caught)}`);
     } finally {
       if (operationGenerationRef.current === generation) {
-        setRetryingComparison(false);
-      }
-    }
-  }, [
-    applyComparisonMutationStatus,
-    cancellingComparison,
-    recoveryStatus,
-    retryingComparison,
-    reconcileAmbiguousComparisonMutation,
-    run,
-    watchComparisonStatus,
-  ]);
-
-  const cancelComparison = useCallback(async (): Promise<void> => {
-    if (
-      !recoveryStatus?.comparison
-      || recoveryStatus.comparison.state === "completed"
-      || recoveryStatus.comparison.state === "cancelled"
-      || retryingComparison
-      || cancellingComparison
-    ) return;
-    const generation = operationGenerationRef.current;
-    const launchId = recoveryStatus.launchId;
-    const mutation: ComparisonMutationIntent = {
-      launchId,
-      kind: "cancel",
-      baselineAttempt: recoveryStatus.comparison.attempt,
-      baselineState: recoveryStatus.comparison.state,
-    };
-    comparisonMutationsRef.current[launchId] = mutation;
-    watchComparisonStatus({ ...recoveryStatus });
-    setCancellingComparison(true);
-    setError(null);
-    try {
-      const event = resultEvent(await run("multi-spawn:comparison:cancel", {
-        type: "duo.comparison.cancel",
-        payload: { launchId },
-      }));
-      if (event.result.kind !== "duo.status") {
-        throw new Error(INVALID_DUO_RESPONSE);
-      }
-      delete comparisonMutationsRef.current[launchId];
-      if (operationGenerationRef.current !== generation) return;
-      applyComparisonMutationStatus(event.result);
-    } catch (caught) {
-      if (runtimeCommandDelivery(caught) === "ambiguous") {
-        await reconcileAmbiguousComparisonMutation(mutation, generation);
-        return;
-      }
-      delete comparisonMutationsRef.current[launchId];
-      if (operationGenerationRef.current !== generation) return;
-      setError(`The third-model comparison could not be cancelled. ${errorMessage(caught)}`);
-    } finally {
-      if (operationGenerationRef.current === generation) {
-        setCancellingComparison(false);
+        setBusy(false);
       }
     }
   }, [
@@ -1202,7 +1158,7 @@ export function useMultiSpawn({
     submit,
     recheckRecovery,
     acknowledgeRecovery,
-    retryComparison,
-    cancelComparison,
+    retryComparison: () => mutateComparison("retry"),
+    cancelComparison: () => mutateComparison("cancel"),
   };
 }

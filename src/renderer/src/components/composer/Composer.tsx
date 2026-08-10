@@ -49,7 +49,6 @@ import {
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
-import { ChatGoalControl } from "../ChatGoalControl";
 import type { ComposerProps, PendingModelRoute } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
@@ -65,6 +64,9 @@ import {
  */
 const ChatResumeControl = lazy(async () => ({
   default: (await import("../ChatResumeControl")).ChatResumeControl,
+}));
+const ChatGoalControl = lazy(async () => ({
+  default: (await import("../ChatGoalControl")).ChatGoalControl,
 }));
 
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
@@ -992,11 +994,13 @@ export const Composer = memo(function Composer({
         onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
       >
         {goal && (
-          <ChatGoalControl
-            {...goal}
-            open={commandSurface === "goal"}
-            onDismiss={dismissCommandSurface}
-          />
+          <Suspense fallback={null}>
+            <ChatGoalControl
+              {...goal}
+              open={commandSurface === "goal"}
+              onDismiss={dismissCommandSurface}
+            />
+          </Suspense>
         )}
         {commandSurface === "resume" && resumeOptions && resumeOptions.length > 0 && (
           <Suspense fallback={null}>

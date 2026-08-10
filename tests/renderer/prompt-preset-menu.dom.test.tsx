@@ -124,13 +124,19 @@ describe("PromptPresetMenu", () => {
     })).not.toBeInTheDocument());
 
     fireEvent.click(trigger);
+    const blockedRouteLabel = [
+      "Harness codex-app-server",
+      "backend builtin:openai",
+      "model gpt-5.6-sol",
+      "reasoning high",
+    ].join(" · ");
     const blocked = await screen.findByTitle(
-      "Available on gpt-5.6-sol with high",
+      `Available on ${blockedRouteLabel}`,
     );
     expect(blocked).toHaveAttribute("aria-disabled", "true");
     expect(blocked).toHaveAttribute(
       "title",
-      "Available on gpt-5.6-sol with high",
+      `Available on ${blockedRouteLabel}`,
     );
     blocked.focus();
     expect(blocked).toHaveFocus();
@@ -178,6 +184,15 @@ describe("PromptPresetMenu", () => {
     fireEvent.click(await screen.findByRole("button", {
       name: "Edit prompt preset: Route audit",
     }));
+    const routeToggle = screen.getByRole("checkbox", {
+      name: /Bound to saved model route/u,
+    });
+    expect(routeToggle).toBeChecked();
+    expect(routeToggle).toHaveAccessibleName(
+      /Harness codex-app-server · backend builtin:openai · model gpt-5\.6-sol · reasoning high/u,
+    );
+    expect(screen.getByText(/Saved route differs from this chat/u))
+      .toBeVisible();
     const name = screen.getByLabelText("Name");
     fireEvent.change(name, { target: { value: "Route review" } });
     fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
@@ -201,6 +216,63 @@ describe("PromptPresetMenu", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Duplicate" }));
     await waitFor(() => expect(onDuplicate).toHaveBeenCalledWith(presets[1]));
+  });
+
+  it("distinguishes backend routes and explicitly rebinds off then on", async () => {
+    const alternateRoutePreset: PromptPreset = {
+      ...presets[1]!,
+      id: "33333333-3333-4333-8333-333333333333",
+      name: "Alternate backend",
+      route: {
+        ...route,
+        harnessId: "claude-agent-sdk",
+        backendProfileId: "custom:anthropic",
+      },
+      position: 0,
+    };
+    const onUpdate = vi.fn(() => Promise.resolve());
+    render(<Harness entries={[alternateRoutePreset]} onUpdate={onUpdate} />);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Prompt presets, 1 saved",
+    }));
+    const storedRouteLabel = [
+      "Harness claude-agent-sdk",
+      "backend custom:anthropic",
+      "model gpt-5.6-sol",
+      "reasoning xhigh",
+    ].join(" · ");
+    expect(await screen.findByTitle(`Available on ${storedRouteLabel}`))
+      .toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Edit prompt preset: Alternate backend",
+    }));
+    const routeToggle = screen.getByRole("checkbox", {
+      name: /Bound to saved model route/u,
+    });
+    expect(routeToggle).toHaveAccessibleName(new RegExp(storedRouteLabel, "u"));
+    fireEvent.click(routeToggle);
+    expect(routeToggle).not.toBeChecked();
+    expect(routeToggle).toHaveAccessibleName(
+      /Limit to current model route Harness codex-app-server · backend builtin:openai · model gpt-5\.6-sol · reasoning xhigh/u,
+    );
+    fireEvent.click(routeToggle);
+    expect(routeToggle).toBeChecked();
+    expect(routeToggle).toHaveAccessibleName(
+      /Bound to saved model route Harness codex-app-server · backend builtin:openai · model gpt-5\.6-sol · reasoning xhigh/u,
+    );
+    expect(screen.queryByText(/Saved route differs from this chat/u))
+      .not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(
+      alternateRoutePreset,
+      {
+        name: alternateRoutePreset.name,
+        body: alternateRoutePreset.body,
+        route,
+      },
+    ));
   });
 
   it("returns focus to the preset list after cancelling an edit", async () => {

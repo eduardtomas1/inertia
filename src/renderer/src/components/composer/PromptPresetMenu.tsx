@@ -43,6 +43,15 @@ function normalizedSearch(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
+function routeIdentityLabel(route: PromptPresetRoute): string {
+  return [
+    `Harness ${route.harnessId}`,
+    `backend ${route.backendProfileId}`,
+    `model ${route.modelId}`,
+    `reasoning ${route.reasoningEffort ?? "provider default"}`,
+  ].join(" · ");
+}
+
 export function PromptPresetMenu({
   presets,
   currentMessage,
@@ -78,6 +87,11 @@ export function PromptPresetMenu({
   const editorFocusIdentity = editor
     ? `${editor.kind}:${editor.preset?.id ?? "new"}`
     : null;
+  const displayedEditorRoute = editor?.route ?? currentRoute;
+  const displayedEditorRouteLabel = routeIdentityLabel(displayedEditorRoute);
+  const editorRouteDiffers = editor?.route !== null
+    && editor?.route !== undefined
+    && !promptPresetRouteMatches(currentRoute, editor.route);
 
   useEffect(() => {
     if (menu === "presets") return;
@@ -305,10 +319,18 @@ export function PromptPresetMenu({
                   })}
                 />
                 <span>
-                  <strong>Only on this model route</strong>
-                  <small>{currentRoute.modelId}{currentRoute.reasoningEffort
-                    ? ` · ${currentRoute.reasoningEffort}`
-                    : ""}</small>
+                  <strong>{editor.route
+                    ? "Bound to saved model route"
+                    : "Limit to current model route"}</strong>
+                  <small title={displayedEditorRouteLabel}>
+                    {displayedEditorRouteLabel}
+                  </small>
+                  {editorRouteDiffers && (
+                    <small className="prompt-preset-route-rebind-note">
+                      Saved route differs from this chat. Turn this off, then
+                      on again to bind to the current route.
+                    </small>
+                  )}
                 </span>
               </label>
               <small className="prompt-preset-safety-note">
@@ -419,9 +441,7 @@ export function PromptPresetMenu({
                     const routeBlocked = preset.route !== null
                       && !promptPresetRouteMatches(currentRoute, preset.route);
                     const blockedReason = routeBlocked
-                      ? `Available on ${preset.route!.modelId} with ${
-                          preset.route!.reasoningEffort ?? "provider-default reasoning"
-                        }`
+                      ? `Available on ${routeIdentityLabel(preset.route!)}`
                       : null;
                     return (
                       <div className="prompt-preset-row" key={preset.id}>

@@ -177,6 +177,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.prompt-preset-route-toggle .prompt-preset-route-rebind-note {
+  overflow: visible;
+  color: var(--warning-accent);
+  text-overflow: clip;
+  white-space: normal;
+}
 .prompt-preset-safety-note {
   padding: 0 2px;
   color: var(--text-muted);

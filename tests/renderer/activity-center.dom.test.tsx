@@ -102,6 +102,45 @@ describe("ActivityCenter agent operation disclosure", () => {
     expect(row).toHaveTextContent("Running · 10s");
   });
 
+  it("moves unchanged completed work to Yesterday across local midnight", async () => {
+    vi.useFakeTimers();
+    const beforeMidnight = new Date(2026, 6, 28, 23, 59, 59, 500);
+    vi.setSystemTime(beforeMidnight);
+    const view = render(
+      <ActivityCenter
+        open
+        runs={[run({
+          status: "succeeded",
+          canStop: false,
+          startedAt: new Date(2026, 6, 28, 23, 59, 45).toISOString(),
+          finishedAt: new Date(2026, 6, 28, 23, 59, 50).toISOString(),
+        })]}
+        projects={[project]}
+        conversations={[conversation]}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+        onOpenLocation={vi.fn()}
+        onOpenTerminal={vi.fn()}
+        onOpenPreview={vi.fn()}
+        onStop={vi.fn()}
+        onRerun={vi.fn()}
+        onMarkSeen={vi.fn()}
+        onAcknowledge={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Recent" })).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(screen.getByRole("heading", { name: "Yesterday" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Recent" })).not.toBeInTheDocument();
+
+    view.unmount();
+    vi.useRealTimers();
+  });
+
   it("owns its elapsed clock only while the activity center is visible", async () => {
     vi.useFakeTimers();
     vi.setSystemTime("2026-07-28T08:00:10.000Z");

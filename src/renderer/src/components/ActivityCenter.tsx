@@ -99,6 +99,42 @@ function ActivityClockProvider({
   );
 }
 
+function millisecondsUntilNextLocalDay(now: number): number {
+  const nextDay = new Date(now);
+  nextDay.setHours(24, 0, 0, 25);
+  return Math.max(1, nextDay.getTime() - now);
+}
+
+function localDayStart(now: number): number {
+  const date = new Date(now);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function useActivitySectionClock(
+  active: boolean,
+  providedNow?: number,
+): number {
+  const [calendarNow, setCalendarNow] = useState(() => localDayStart(Date.now()));
+  useEffect(() => {
+    if (providedNow !== undefined || !active) return;
+    let timeout: number | null = null;
+    const scheduleNextDay = () => {
+      const now = Date.now();
+      timeout = window.setTimeout(() => {
+        setCalendarNow(localDayStart(Date.now()));
+        scheduleNextDay();
+      }, millisecondsUntilNextLocalDay(now));
+    };
+    scheduleNextDay();
+    return () => {
+      if (timeout !== null) window.clearTimeout(timeout);
+    };
+  }, [active, providedNow]);
+  return providedNow ?? (
+    active ? Math.max(calendarNow, localDayStart(Date.now())) : calendarNow
+  );
+}
+
 function ActivityRunTime({
   run,
   waitingKind,
@@ -254,6 +290,7 @@ export function ActivityCenter({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   useNativePreviewSuspension(open);
+  const sectionNow = useActivitySectionClock(open, providedNow);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -300,8 +337,8 @@ export function ActivityCenter({
   }, [open]);
 
   const presentation = useMemo(
-    () => activityRunPresentation(runs, providedNow ?? Date.now()),
-    [providedNow, runs],
+    () => activityRunPresentation(runs, sectionNow),
+    [runs, sectionNow],
   );
   const { sections, summary } = presentation;
   if (!open) return null;

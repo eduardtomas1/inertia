@@ -71,7 +71,7 @@ test("opens and dismisses the prioritized Runs surface accessibly", async () => 
   expect(rendererErrors).toEqual([]);
 });
 
-test("presents chronological activity with provider, project, and branch identity", async (_fixtures, testInfo) => {
+test("presents chronological activity with provider, project, and branch identity", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspaceDirectory, {

@@ -1490,7 +1490,7 @@ describe("multi-spawn", () => {
     act(() => hook.result.current.openDialog());
     await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
     expect(hook.result.current.open).toBe(true);
-    expect(hook.result.current.error).toBeNull();
+    await waitFor(() => expect(hook.result.current.error).toBeNull());
     releaseLookup();
     await act(async () => submission);
 

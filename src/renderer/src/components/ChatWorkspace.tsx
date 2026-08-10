@@ -64,6 +64,7 @@ import {
 } from "../utils/transcriptNavigation";
 import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
+import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 
@@ -148,6 +149,8 @@ type ChatWorkspaceProps = {
   onCancelProviderUpdate: (operationId: string) => Promise<void>;
   onOpenProviderUpdateInstructions: (url: string) => void;
   onOpenResume: () => void;
+  resumeOptions?: readonly ProviderTerminalResumeOption[];
+  onResumeConversation?: (conversationId: string) => void;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onStop: () => Promise<void>;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
@@ -227,6 +230,8 @@ export function ChatWorkspace({
   onCancelProviderUpdate,
   onOpenProviderUpdateInstructions,
   onOpenResume,
+  resumeOptions,
+  onResumeConversation,
   onUsageDisplayModeChange,
   onStop,
   onFollowUpSubagent,
@@ -707,6 +712,8 @@ export function ChatWorkspace({
           onOpenBackendSetup={onOpenBackendSetup}
           onProbeBackendProfile={onProbeBackendProfile}
           onOpenResume={onOpenResume}
+          resumeOptions={resumeOptions}
+          onResumeConversation={onResumeConversation}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           onStop={onStop}
           onClearPromptContext={onClearPromptContext}

@@ -210,9 +210,13 @@ describe("Duo comparison navigation", () => {
     }));
 
     await act(async () => hook.result.current.submit(draft()));
+    expect(hook.result.current.open).toBe(false);
+    expect(hook.result.current.launchBlocked).toBe(false);
     await act(async () => vi.advanceTimersByTimeAsync(750));
 
     expect(request).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.open).toBe(false);
+    expect(hook.result.current.launchBlocked).toBe(false);
     expect(run.mock.calls.some(([, command]) => command.type === "duo.status"))
       .toBe(false);
   });

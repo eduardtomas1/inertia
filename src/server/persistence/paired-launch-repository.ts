@@ -213,6 +213,7 @@ export class PairedLaunchRepository {
           'preparing', 'prepared', 'dispatching', 'interrupted',
           'recovery-required'
         )
+        OR (launch.status = 'running' AND launch.cancel_requested = 1)
         OR launch.comparison_state IN (
           'waiting', 'dispatching', 'running', 'failed', 'interrupted'
         )
@@ -256,9 +257,10 @@ export class PairedLaunchRepository {
           WHERE conversation_side.launch_id = launch.id
             AND conversation_side.conversation_id = ?
         )
-      )
+        )
         AND (
-          launch.status IN (
+          (launch.status = 'running' AND launch.cancel_requested = 1)
+          OR launch.status IN (
             'preparing', 'prepared', 'dispatching', 'interrupted',
             'recovery-required'
           )
@@ -310,9 +312,10 @@ export class PairedLaunchRepository {
           WHERE comparison_conversation.id = launch.comparison_conversation_id
             AND comparison_conversation.project_id = ?
         )
-      )
+        )
         AND (
-          launch.status IN (
+          (launch.status = 'running' AND launch.cancel_requested = 1)
+          OR launch.status IN (
             'preparing', 'prepared', 'dispatching', 'interrupted',
             'recovery-required'
           )
@@ -751,6 +754,8 @@ export class PairedLaunchRepository {
         !launch.comparison
         || !launch.comparison.conversationId
         || launch.cancelRequested
+        || launch.state !== "running"
+        || launch.sides.some(({ dispatchState }) => dispatchState !== "started")
         || (
           retry
             ? launch.comparison.state !== "failed"
@@ -918,6 +923,17 @@ export class PairedLaunchRepository {
         : started.some(Boolean)
           ? "interrupted"
           : "failed";
+      if (state !== "running") {
+        this.database.prepare(`
+          UPDATE paired_launches
+          SET comparison_state = 'cancelled',
+            comparison_failure_message = NULL, updated_at = ?
+          WHERE id = ?
+            AND comparison_state IN (
+              'waiting', 'dispatching', 'running', 'failed', 'interrupted'
+            )
+        `).run(now, launchId);
+      }
       this.touch(launchId, state, failure, now);
       return this.get(launchId);
     })();
@@ -951,6 +967,37 @@ export class PairedLaunchRepository {
     })();
   }
 
+  recoverRequestedCancellations(now: string): StoredPairedLaunch[] {
+    const ids = this.database.prepare(`
+      SELECT id FROM paired_launches
+      WHERE status = 'running' AND cancel_requested = 1
+      ORDER BY created_at ASC, id ASC
+    `).all() as Array<{ id: string }>;
+    this.database.transaction(() => {
+      for (const { id } of ids) {
+        /*
+         * Turn recovery runs before Duo recovery, so no provider remains
+         * attached after restart. Complete the durable cancellation that was
+         * interrupted while its provider-cleanup barrier was still pending.
+         */
+        this.database.prepare(`
+          UPDATE paired_launch_sides SET dispatch_state = 'cancelled'
+          WHERE launch_id = ? AND dispatch_state IN ('pending', 'claimed')
+        `).run(id);
+        this.database.prepare(`
+          UPDATE paired_launches
+          SET comparison_state = 'cancelled', comparison_failure_message = NULL
+          WHERE id = ?
+            AND comparison_state IN (
+              'waiting', 'dispatching', 'running', 'failed', 'interrupted'
+            )
+        `).run(id);
+        this.touch(id, "cancelled", null, now);
+      }
+    })();
+    return ids.map(({ id }) => this.get(id));
+  }
+
   fail(
     launchId: string,
     state: Extract<DuoLaunchState, "failed" | "interrupted" | "recovery-required">,
@@ -981,6 +1028,22 @@ export class PairedLaunchRepository {
       if (current.state !== "interrupted") {
         throw new Error("Only an interrupted Duo launch can be acknowledged.");
       }
+      /*
+       * A launch interrupted before its sources ran leaves the comparison at
+       * "waiting", which is not retryable and blocks conversation and project
+       * deletion as well as judge reconfiguration. Acknowledgement is the only
+       * action offered for an interrupted launch, so it has to release that
+       * lock the way finishCancellation does, or the lock outlives every
+       * affordance the user has.
+       */
+      this.database.prepare(`
+        UPDATE paired_launches
+        SET comparison_state = 'cancelled', comparison_failure_message = NULL
+        WHERE id = ?
+          AND comparison_state IN (
+            'waiting', 'dispatching', 'running', 'failed', 'interrupted'
+          )
+      `).run(launchId);
       this.touch(
         launchId,
         "failed",

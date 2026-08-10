@@ -1,5 +1,7 @@
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -56,6 +58,15 @@ import {
   type ComposerPrefillDetail,
 } from "../../utils/composerPrefill";
 
+/*
+ * The resume surface only matters once /resume runs, and the composer sits in
+ * the entry chunk. Loading it on demand keeps the picker and its list rendering
+ * out of first paint.
+ */
+const ChatResumeControl = lazy(async () => ({
+  default: (await import("../ChatResumeControl")).ChatResumeControl,
+}));
+
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // The first non-empty edit is synchronous. During uninterrupted typing, a
 // force-terminated renderer can lose at most this much newer draft history;
@@ -102,6 +113,8 @@ export const Composer = memo(function Composer({
   onProbeBackendProfile,
   onUsageDisplayModeChange,
   onOpenResume,
+  resumeOptions,
+  onResumeConversation,
   onStop,
   onClearPromptContext,
 }: ComposerProps): React.JSX.Element {
@@ -148,7 +161,7 @@ export const Composer = memo(function Composer({
   const [routeRepairing, setRouteRepairing] = useState(false);
   const [conversationUpdatePending, setConversationUpdatePending] = useState(false);
   const [conversationUpdateError, setConversationUpdateError] = useState<string | null>(null);
-  const [commandSurface, setCommandSurface] = useState<"goal" | null>(null);
+  const [commandSurface, setCommandSurface] = useState<"goal" | "resume" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
@@ -985,6 +998,19 @@ export const Composer = memo(function Composer({
             onDismiss={dismissCommandSurface}
           />
         )}
+        {commandSurface === "resume" && resumeOptions && resumeOptions.length > 0 && (
+          <Suspense fallback={null}>
+            <ChatResumeControl
+              options={resumeOptions}
+              open
+              onDismiss={dismissCommandSurface}
+              onResume={(resumeConversationId) => {
+                onResumeConversation?.(resumeConversationId);
+                onOpenResume();
+              }}
+            />
+          </Suspense>
+        )}
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
@@ -1062,7 +1088,11 @@ export const Composer = memo(function Composer({
           }}
           onOpenResume={() => {
             updateMessage("");
-            onOpenResume();
+            // Only the in-chat picker can offer a choice. With nothing
+            // resumable to choose between, fall back to opening the terminal so
+            // its own banner explains why.
+            if (resumeOptions && resumeOptions.length > 0) setCommandSurface("resume");
+            else onOpenResume();
           }}
           onUpdateConversation={updateConversation}
         />

@@ -172,6 +172,10 @@ export class TurnController {
     return this.activeByConversation.has(conversationId);
   }
 
+  isClosing(): boolean {
+    return this.closing;
+  }
+
   hasActiveCheckout(checkoutPath: string): boolean {
     const conversationIds = new Set([
       ...this.activeByConversation.keys(),
@@ -182,6 +186,26 @@ export class TurnController {
         conversationId,
         checkoutPath,
       ));
+  }
+
+  /**
+   * Wait for exact conversations whose provider processes are still detaching.
+   * Yield once before inspecting the barriers because a terminal hook runs
+   * during settlement, immediately before that settlement registers its own
+   * cleanup barrier.
+   */
+  async waitForProviderCleanup(
+    conversationIds: readonly string[],
+  ): Promise<void> {
+    const expected = new Set(conversationIds);
+    await Promise.resolve();
+    while (true) {
+      const barriers = [...this.providerCleanupBarriers.entries()]
+        .filter(([conversationId]) => expected.has(conversationId))
+        .map(([, barrier]) => barrier);
+      if (barriers.length === 0) return;
+      await Promise.allSettled(barriers);
+    }
   }
 
   activeConversationIds(): string[] {
@@ -576,7 +600,12 @@ export class TurnController {
           );
         },
       ).finally(() => {
-        this.track(this.releaseTurnAttachments(active));
+        // Cancellation owns an exact stop barrier which releases attachments
+        // only after the provider process has detached. The provider promise
+        // may settle before stopOwned(), so it must not race that barrier.
+        if (!this.providerCleanupBarriers.has(active.conversation.id)) {
+          this.track(this.releaseTurnAttachmentsWithRetry(active));
+        }
       })
         .catch(() => undefined);
     } catch (error) {
@@ -884,7 +913,7 @@ export class TurnController {
     );
     if (wasSettled) return settled;
     if (!active.providerRunStarted) {
-      this.track(this.releaseTurnAttachments(active));
+      this.track(this.releaseTurnAttachmentsWithRetry(active));
     } else if (this.requiresOwnedProviderStop(cause)) {
       this.stopOwnedProviderAndRelease(active);
     }
@@ -907,7 +936,7 @@ export class TurnController {
           turnId: active.turn.id,
         });
       } finally {
-        await this.releaseTurnAttachments(active);
+        await this.releaseTurnAttachmentsWithRetry(active);
       }
     })();
     const barrier = task.finally(() => {
@@ -920,12 +949,31 @@ export class TurnController {
   }
 
   private async releaseTurnAttachments(active: ActiveTurn): Promise<void> {
-    if (active.attachmentsReleased || active.attachmentIds.length === 0) return;
+    if (
+      active.attachmentsReleased
+      || (
+        active.attachmentIds.length === 0
+        && active.generatedAttachmentPaths.length === 0
+      )
+    ) return;
     if (active.attachmentRelease) return await active.attachmentRelease;
-    const release = Promise.resolve(this.hooks.releaseTurnAttachments?.({
-      turn: active.turn,
-      attachmentIds: active.attachmentIds,
-    })).then(() => {
+    const release = Promise.all([
+      active.attachmentIds.length > 0
+        ? Promise.resolve(this.hooks.releaseTurnAttachments?.({
+            turn: active.turn,
+            attachmentIds: active.attachmentIds,
+          }))
+        : Promise.resolve(),
+      active.generatedAttachmentPaths.length > 0
+        ? Promise.resolve(
+            this.hooks.releaseGeneratedAttachments?.(
+              active.generatedAttachmentPaths,
+            ) ?? Promise.reject(
+              new Error("Generated attachment cleanup is unavailable."),
+            ),
+          )
+        : Promise.resolve(),
+    ]).then(() => {
       active.attachmentsReleased = true;
     });
     active.attachmentRelease = release;
@@ -935,6 +983,17 @@ export class TurnController {
       if (active.attachmentRelease === release) {
         active.attachmentRelease = null;
       }
+    }
+  }
+
+  private async releaseTurnAttachmentsWithRetry(active: ActiveTurn): Promise<void> {
+    try {
+      await this.releaseTurnAttachments(active);
+    } catch {
+      // Release hooks are required to be idempotent. One whole-set retry
+      // closes partial multi-path failures without releasing before provider
+      // detachment or silently dropping the failed lease.
+      await this.releaseTurnAttachments(active);
     }
   }
 

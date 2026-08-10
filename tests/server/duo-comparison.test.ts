@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AgentApprovalDecision,
@@ -21,6 +21,7 @@ import type {
 } from "../../src/server/provider/contracts";
 import {
   DuoLaunchCoordinator,
+  reconcileInterruptedDuoLaunches,
 } from "../../src/server/runtime/duo/duo-launch-coordinator";
 import {
   TurnController,
@@ -70,10 +71,13 @@ class PairProvider implements TurnProviderRuntime {
   readonly inputs: ProviderRunInput[] = [];
   readonly cancellations: string[] = [];
   readonly callbacks: ProviderRunCallbacks[] = [];
+  readonly ownedStopResolvers = new Map<string, () => void>();
   readonly completions: Array<{
     input: ProviderRunInput;
     resolve: (result: ProviderRunResult) => void;
   }> = [];
+  deferOwnedStops = false;
+  synchronousResults: string[] = [];
   throwOnRun: number | null = null;
   rejectOnRun: number | null = null;
 
@@ -96,6 +100,18 @@ class PairProvider implements TurnProviderRuntime {
       return Promise.reject(new Error("backend launch rejected before harness start"));
     }
     callbacks.onStarted?.();
+    const synchronousResult = this.synchronousResults.shift();
+    if (synchronousResult !== undefined) {
+      return Promise.resolve({
+        providerId: input.providerId,
+        conversationId: input.conversationId ?? input.threadId,
+        status: "completed",
+        text: synchronousResult,
+        textTruncated: false,
+        exitCode: 0,
+        signal: null,
+      });
+    }
     return new Promise((resolve) => {
       this.completions.push({ input, resolve });
     });
@@ -120,8 +136,18 @@ class PairProvider implements TurnProviderRuntime {
     return true;
   }
 
-  stopOwned(): Promise<"settled"> {
-    return Promise.resolve("settled");
+  stopOwned(conversationId: string): Promise<"settled"> {
+    if (!this.deferOwnedStops) return Promise.resolve("settled");
+    return new Promise((resolve) => {
+      this.ownedStopResolvers.set(conversationId, () => {
+        this.ownedStopResolvers.delete(conversationId);
+        resolve("settled");
+      });
+    });
+  }
+
+  resolveOwnedStop(conversationId: string): void {
+    this.ownedStopResolvers.get(conversationId)?.();
   }
 
   isRunning(): boolean {
@@ -375,6 +401,540 @@ describe("Duo third-model comparison", () => {
     runtime.store.close();
   });
 
+  it("still dispatches the judge when both source turns settle in one tick", async () => {
+    // Production wires onTurnSettled straight into the coordinator, and both
+    // agents finishing together is ordinary rather than exotic. Driving the real
+    // hook keeps the settlement interleaving authentic instead of serialising it
+    // with an await between the two sides.
+    let launches!: DuoLaunchCoordinator;
+    const runtime = await createRuntime({
+      onTurnSettled: (turn) => launches.onTurnSettled(turn),
+    });
+    launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    expect(runtime.provider.completions).toHaveLength(2);
+
+    const [first, second] = runtime.provider.completions.splice(0, 2) as [
+      (typeof runtime.provider.completions)[number],
+      (typeof runtime.provider.completions)[number],
+    ];
+    for (const [index, completion] of [first, second].entries()) {
+      completion.resolve({
+        providerId: completion.input.providerId,
+        conversationId: completion.input.conversationId
+          ?? completion.input.threadId,
+        status: "completed",
+        text: `Source ${index === 0 ? "A" : "B"} settled together`,
+        textTruncated: false,
+        exitCode: 0,
+        signal: null,
+      });
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+    // A comparison stranded in "waiting" holds the source deletion lock with no
+    // terminal state for the user to cancel, so the judge must have advanced.
+    const comparison = runtime.store.pairedLaunch(prepared.launchId).comparison;
+    expect(comparison?.state).not.toBe("waiting");
+    expect(comparison).toMatchObject({
+      state: "running",
+      attempt: 1,
+      conversationId: prepared.comparison?.conversationId,
+    });
+    expect(runtime.provider.inputs).toHaveLength(3);
+    expect(runtime.provider.inputs[2]?.prompt)
+      .toContain("Source A settled together");
+    expect(runtime.provider.inputs[2]?.prompt)
+      .toContain("Source B settled together");
+    runtime.store.close();
+  });
+
+  it("rechecks comparison eligibility after synchronous source settlement", async () => {
+    let launches!: DuoLaunchCoordinator;
+    const runtime = await createRuntime({
+      onTurnSettled: (turn) => launches.onTurnSettled(turn),
+    });
+    launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    runtime.provider.synchronousResults.push("Fast source A", "Fast source B");
+
+    await expect(launches.dispatch(prepared.launchId)).resolves.toMatchObject({
+      state: "running",
+      comparison: { state: "running", attempt: 1 },
+    });
+    expect(runtime.store.pairedLaunch(prepared.launchId).sides).toEqual([
+      expect.objectContaining({ dispatchState: "started" }),
+      expect.objectContaining({ dispatchState: "started" }),
+    ]);
+    expect(runtime.provider.inputs).toHaveLength(3);
+    expect(runtime.provider.inputs[2]?.prompt).toContain("Fast source A");
+    expect(runtime.provider.inputs[2]?.prompt).toContain("Fast source B");
+    await launches.cancelComparison(prepared.launchId);
+    runtime.store.close();
+  });
+
+  it("does not judge terminal sources from a partial dispatch", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    runtime.provider.throwOnRun = 2;
+
+    await expect(launches.dispatch(prepared.launchId)).resolves.toMatchObject({
+      state: "interrupted",
+      sides: [
+        { dispatchState: "started" },
+        { dispatchState: "failed" },
+      ],
+    });
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[0].turnId),
+    );
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+
+    expect(runtime.provider.inputs).toHaveLength(2);
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "cancelled",
+      attempt: 0,
+    });
+    runtime.store.close();
+  });
+
+  it("releases the comparison lock when neither source dispatch starts", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    runtime.provider.throwOnRun = 1;
+
+    await expect(launches.dispatch(prepared.launchId)).resolves.toMatchObject({
+      state: "failed",
+      sides: [
+        { dispatchState: "failed" },
+        { dispatchState: "failed" },
+      ],
+      comparison: { state: "cancelled", attempt: 0 },
+    });
+    await runtime.controller.drainSettlementTasks();
+
+    expect(runtime.provider.inputs).toHaveLength(1);
+    expect(runtime.store.pendingPairedLaunchIds([runtime.projectId], 8))
+      .toEqual({ launchIds: [], hasMore: false });
+    for (const conversationId of [
+      prepared.sides[0].conversationId,
+      prepared.sides[1].conversationId,
+      prepared.comparison!.conversationId,
+    ]) {
+      expect(() => runtime.store.assertConversationDeletionAllowed(conversationId))
+        .not.toThrow();
+    }
+    runtime.store.close();
+  });
+
+  it("does not resume a waiting comparison from a partial dispatch", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    runtime.provider.throwOnRun = 2;
+    await launches.dispatch(prepared.launchId);
+    runtime.store.close();
+
+    const reopened = new RuntimeStore(
+      runtime.databasePath,
+      runtime.workspace,
+      { recoverInterruptedRuns: false },
+    );
+    const provider = new PairProvider();
+    const controller = new TurnController(
+      reopened,
+      provider,
+      new Map(),
+      new Map(),
+      new Map(),
+      {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [providerInfo()],
+      },
+    );
+    const restarted = new DuoLaunchCoordinator(
+      reopened,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {} as never,
+      controller,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+    );
+
+    await restarted.resumeComparisons();
+
+    expect(provider.inputs).toHaveLength(0);
+    expect(restarted.status(prepared.launchId)).toMatchObject({
+      state: "interrupted",
+      comparison: { state: "cancelled", attempt: 0 },
+    });
+    await controller.dispose();
+    reopened.close();
+  });
+
+  it("defers a shutdown-settled comparison for restart", async () => {
+    let launches!: DuoLaunchCoordinator;
+    const runtime = await createRuntime({
+      onTurnSettled: (turn) => launches.onTurnSettled(turn),
+    });
+    launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.deferOwnedStops = true;
+    const cleanupWait = vi.spyOn(runtime.controller, "waitForProviderCleanup");
+
+    const cancelledConversationId = prepared.sides[0].conversationId;
+    expect(runtime.controller.cancel(cancelledConversationId)).toBe(true);
+    const survivorIndex = runtime.provider.completions.findIndex(({ input }) =>
+      input.conversationId === prepared.sides[1].conversationId);
+    const survivor = runtime.provider.completions.splice(survivorIndex, 1)[0]!;
+    survivor.resolve({
+      providerId: survivor.input.providerId,
+      conversationId: survivor.input.conversationId!,
+      status: "completed",
+      text: "Settled immediately before shutdown",
+      textTruncated: false,
+      exitCode: 0,
+      signal: null,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(runtime.provider.ownedStopResolvers.has(cancelledConversationId))
+      .toBe(true);
+    expect(cleanupWait).toHaveBeenCalledWith(expect.arrayContaining([
+      cancelledConversationId,
+      prepared.sides[1].conversationId,
+    ]));
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "waiting",
+      attempt: 0,
+    });
+
+    // startComparison is now suspended on the cancelled source's cleanup.
+    // Closing admission before that barrier resolves is the precise race.
+    const shutdown = runtime.controller.dispose("runtime-shutdown");
+    runtime.provider.resolveOwnedStop(cancelledConversationId);
+    await shutdown;
+
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "waiting",
+      attempt: 0,
+    });
+    expect(runtime.provider.inputs).toHaveLength(2);
+    runtime.store.close();
+
+    const reopened = new RuntimeStore(
+      runtime.databasePath,
+      runtime.workspace,
+      { recoverInterruptedRuns: false },
+    );
+    const provider = new PairProvider();
+    const controller = new TurnController(
+      reopened,
+      provider,
+      new Map(),
+      new Map(),
+      new Map(),
+      {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [providerInfo()],
+      },
+    );
+    const restarted = new DuoLaunchCoordinator(
+      reopened,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {} as never,
+      controller,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+    );
+
+    await restarted.resumeComparisons();
+
+    expect(restarted.status(prepared.launchId).comparison).toMatchObject({
+      state: "running",
+      attempt: 1,
+    });
+    expect(provider.inputs).toHaveLength(1);
+    await restarted.cancelComparison(prepared.launchId);
+    await controller.dispose();
+    reopened.close();
+  });
+
+  it("cancels a live judge provider when an interrupted launch is acknowledged", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[0].turnId),
+    );
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("running");
+
+    runtime.store.failPairedLaunch(
+      prepared.launchId,
+      "interrupted",
+      "Injected parent interruption after judge start.",
+    );
+    const judgeConversationId = prepared.comparison!.conversationId;
+    expect(runtime.provider.cancellations).not.toContain(judgeConversationId);
+    runtime.provider.deferOwnedStops = true;
+
+    const acknowledgement = launches.acknowledgeInterrupted(prepared.launchId);
+    expect(runtime.provider.ownedStopResolvers.has(judgeConversationId))
+      .toBe(true);
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison?.state)
+      .not.toBe("cancelled");
+    expect(() => runtime.store.assertConversationDeletionAllowed(
+      prepared.sides[0].conversationId,
+    )).toThrow(/acknowledge an interrupted dispatch|locked comparison/u);
+
+    runtime.provider.resolveOwnedStop(judgeConversationId);
+    await expect(acknowledgement).resolves
+      .toMatchObject({
+      state: "failed",
+      comparison: { state: "cancelled" },
+    });
+    expect(runtime.provider.cancellations).toContain(judgeConversationId);
+    runtime.store.close();
+  });
+
+  it("keeps launch deletion locked until cancelled providers detach", async () => {
+    let launches!: DuoLaunchCoordinator;
+    const runtime = await createRuntime({
+      onTurnSettled: (turn) => launches.onTurnSettled(turn),
+    });
+    launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.deferOwnedStops = true;
+
+    const cancellation = launches.cancel(prepared.launchId);
+    for (const { conversationId } of prepared.sides) {
+      expect(runtime.provider.ownedStopResolvers.has(conversationId)).toBe(true);
+      expect(() => runtime.store.assertConversationDeletionAllowed(conversationId))
+        .toThrow(/active Duo launch|locked comparison/u);
+    }
+    expect(() => runtime.store.assertProjectDeletionAllowed(runtime.projectId))
+      .toThrow(/active Duo launch|locked comparison/u);
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison?.state)
+      .toBe("waiting");
+
+    for (const { conversationId } of prepared.sides) {
+      runtime.provider.resolveOwnedStop(conversationId);
+    }
+    await expect(cancellation).resolves.toMatchObject({
+      state: "cancelled",
+      comparison: { state: "cancelled" },
+    });
+    for (const { conversationId } of prepared.sides) {
+      expect(() => runtime.store.assertConversationDeletionAllowed(conversationId))
+        .not.toThrow();
+    }
+    runtime.store.close();
+  });
+
+  it("keeps a no-comparison launch locked while cancelled providers detach", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(preparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.deferOwnedStops = true;
+
+    const cancellation = launches.cancel(prepared.launchId);
+    expect(runtime.store.pairedLaunch(prepared.launchId)).toMatchObject({
+      state: "running",
+      cancelRequested: true,
+    });
+    for (const { conversationId } of prepared.sides) {
+      expect(runtime.provider.ownedStopResolvers.has(conversationId)).toBe(true);
+      expect(() => runtime.store.assertConversationDeletionAllowed(conversationId))
+        .toThrow(/active Duo launch/u);
+      expect(() => runtime.store.deleteConversation(conversationId))
+        .toThrow(/active Duo launch/u);
+    }
+    expect(() => runtime.store.assertProjectDeletionAllowed(runtime.projectId))
+      .toThrow(/active Duo launch/u);
+    expect(() => runtime.store.removeProject(runtime.projectId))
+      .toThrow(/active Duo launch/u);
+
+    for (const { conversationId } of prepared.sides) {
+      runtime.provider.resolveOwnedStop(conversationId);
+    }
+    await expect(cancellation).resolves.toMatchObject({ state: "cancelled" });
+    for (const { conversationId } of prepared.sides) {
+      expect(() => runtime.store.assertConversationDeletionAllowed(conversationId))
+        .not.toThrow();
+    }
+    runtime.store.close();
+  });
+
+  it.each([
+    { label: "without a comparison", withComparison: false },
+    { label: "with a comparison", withComparison: true },
+  ])("finishes a requested cancellation after restart $label", async ({
+    withComparison,
+  }) => {
+    let launches!: DuoLaunchCoordinator;
+    const runtime = await createRuntime({
+      onTurnSettled: (turn) => launches.onTurnSettled(turn),
+    });
+    launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(withComparison
+      ? comparisonPreparePayload(runtime)
+      : preparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.deferOwnedStops = true;
+
+    // Simulate process loss after the durable request and terminal turn writes,
+    // but before the provider-cleanup barriers let cancel() finalize the launch.
+    void launches.cancel(prepared.launchId);
+    for (const { conversationId } of prepared.sides) {
+      expect(runtime.provider.ownedStopResolvers.has(conversationId)).toBe(true);
+    }
+    expect(runtime.store.pairedLaunch(prepared.launchId)).toMatchObject({
+      state: "running",
+      cancelRequested: true,
+      ...(withComparison ? { comparison: { state: "waiting" } } : {}),
+    });
+    runtime.store.close();
+
+    const reopened = new RuntimeStore(
+      runtime.databasePath,
+      runtime.workspace,
+      { recoverInterruptedRuns: false },
+    );
+    recoverInterruptedTurns(reopened);
+    await reconcileInterruptedDuoLaunches(reopened);
+
+    expect(reopened.pairedLaunch(prepared.launchId)).toMatchObject({
+      state: "cancelled",
+      cancelRequested: true,
+      ...(withComparison ? { comparison: { state: "cancelled" } } : {}),
+    });
+    expect(reopened.pendingPairedLaunchIds([runtime.projectId], 8))
+      .toMatchObject({ launchIds: [] });
+    for (const { conversationId } of prepared.sides) {
+      expect(() => reopened.assertConversationDeletionAllowed(conversationId))
+        .not.toThrow();
+    }
+    expect(() => reopened.assertProjectDeletionAllowed(runtime.projectId))
+      .not.toThrow();
+    reopened.close();
+  });
+
+  it("releases the comparison lock when an interrupted launch is acknowledged", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    // An ambiguous provider dispatch is the documented route to "interrupted",
+    // which is the one state the UI asks the user to acknowledge.
+    runtime.provider.rejectOnRun = 1;
+    await expect(launches.dispatch(prepared.launchId)).resolves.toMatchObject({
+      state: "interrupted",
+    });
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison?.state)
+      .toBe("cancelled");
+
+    await expect(launches.acknowledgeInterrupted(prepared.launchId)).resolves
+      .toMatchObject({ state: "failed" });
+
+    // Acknowledgement remains responsible for releasing legacy waiting rows,
+    // while fresh failed/partial dispatches now cancel comparison atomically.
+    // Either route must leave the launch deletable and no longer pending.
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison?.state)
+      .not.toBe("waiting");
+    expect(runtime.store.pendingPairedLaunchIds([runtime.projectId], 8))
+      .toMatchObject({ launchIds: [] });
+    for (const conversationId of [
+      prepared.sides[0].conversationId,
+      prepared.sides[1].conversationId,
+      prepared.comparison!.conversationId,
+    ]) {
+      expect(() => runtime.store.assertConversationDeletionAllowed(conversationId))
+        .not.toThrow();
+    }
+    expect(() => runtime.store.assertProjectDeletionAllowed(runtime.projectId))
+      .not.toThrow();
+    runtime.store.close();
+  });
+
+  it("waits for a cancelled source to detach before dispatching the judge", async () => {
+    let launches!: DuoLaunchCoordinator;
+    const runtime = await createRuntime({
+      onTurnSettled: (turn) => launches.onTurnSettled(turn),
+    });
+    launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.deferOwnedStops = true;
+
+    const cancelledConversationId = prepared.sides[0].conversationId;
+    expect(runtime.controller.cancel(cancelledConversationId)).toBe(true);
+    expect(runtime.provider.ownedStopResolvers.has(cancelledConversationId))
+      .toBe(true);
+
+    const survivingCompletionIndex = runtime.provider.completions
+      .findIndex(({ input }) =>
+        input.conversationId === prepared.sides[1].conversationId);
+    const survivingCompletion = runtime.provider.completions
+      .splice(survivingCompletionIndex, 1)[0]!;
+    survivingCompletion.resolve({
+      providerId: survivingCompletion.input.providerId,
+      conversationId: survivingCompletion.input.conversationId!,
+      status: "completed",
+      text: "Surviving source result",
+      textTruncated: false,
+      exitCode: 0,
+      signal: null,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
+      .toMatchObject({ state: "waiting", attempt: 0 });
+    expect(runtime.provider.inputs).toHaveLength(2);
+
+    runtime.provider.resolveOwnedStop(cancelledConversationId);
+    await runtime.controller.drainSettlementTasks();
+
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
+      .toMatchObject({ state: "running", attempt: 1 });
+    expect(runtime.provider.inputs).toHaveLength(3);
+    expect(runtime.provider.inputs[2]?.prompt)
+      .toContain("Authoritative terminal status: cancelled");
+    expect(runtime.provider.inputs[2]?.prompt)
+      .toContain("Surviving source result");
+    const comparisonCancellation = launches.cancelComparison(prepared.launchId);
+    expect(runtime.provider.ownedStopResolvers.has(
+      prepared.comparison!.conversationId,
+    )).toBe(true);
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison?.state)
+      .toBe("running");
+    expect(() => runtime.store.assertConversationDeletionAllowed(
+      prepared.sides[0].conversationId,
+    )).toThrow(/locked comparison/u);
+    runtime.provider.resolveOwnedStop(prepared.comparison!.conversationId);
+    await expect(comparisonCancellation).resolves.toMatchObject({
+      comparison: { state: "cancelled" },
+    });
+    expect(() => runtime.store.assertConversationDeletionAllowed(
+      prepared.sides[0].conversationId,
+    )).not.toThrow();
+    runtime.store.close();
+  });
+
   it("compares a cancelled sibling, retries only explicitly, and releases the lock on cancel", async () => {
     const runtime = await createRuntime();
     const launches = comparisonCoordinator(runtime);
@@ -436,8 +996,8 @@ describe("Duo third-model comparison", () => {
       .toMatchObject({ comparison: { state: "running", attempt: 3 } });
     expect(runtime.provider.inputs).toHaveLength(4);
     expect(runtime.provider.inputs[3]?.prompt).toContain("Only surviving result");
-    expect(launches.cancelComparison(prepared.launchId).comparison)
-      .toMatchObject({ state: "cancelled", attempt: 3 });
+    await expect(launches.cancelComparison(prepared.launchId)).resolves
+      .toMatchObject({ comparison: { state: "cancelled", attempt: 3 } });
     expect(runtime.provider.cancellations).toContain(
       prepared.comparison!.conversationId,
     );
@@ -473,7 +1033,7 @@ describe("Duo third-model comparison", () => {
       "Authoritative terminal status: failed",
     );
     expect(runtime.provider.inputs[2]?.prompt).toContain("Surviving source result");
-    launches.cancelComparison(prepared.launchId);
+    await launches.cancelComparison(prepared.launchId);
     runtime.store.close();
   });
 
@@ -525,7 +1085,7 @@ describe("Duo third-model comparison", () => {
     });
     expect(provider.inputs[0]?.prompt).toContain("First persisted result");
     expect(provider.inputs[0]?.prompt).toContain("Second persisted result");
-    restarted.cancelComparison(prepared.launchId);
+    await restarted.cancelComparison(prepared.launchId);
     await controller.dispose();
     reopened.close();
   });

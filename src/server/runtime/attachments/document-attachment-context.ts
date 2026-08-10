@@ -4,6 +4,12 @@ import { pathToFileURL } from "node:url";
 
 import type { TextItem } from "pdfjs-dist/types/src/display/api";
 
+import {
+  MAX_CHAT_ATTACHMENTS,
+  MAX_CHAT_ATTACHMENT_BYTES,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  chatAttachmentKind,
+} from "../../../shared/attachments";
 import type { ChatAttachment } from "../../../shared/contracts";
 import type { ResolvedAttachmentPayload } from "./trusted-attachment-resolver";
 import {
@@ -12,10 +18,19 @@ import {
   DocumentExtractionInitializationError,
   DocumentExtractionScheduler,
 } from "./document-extraction-scheduler";
+import {
+  type PrivateGeneratedAttachmentStore,
+} from "./private-generated-attachments";
 
 const MAX_DOCUMENT_CONTEXT_BYTES = 64 * 1024;
 export const MAX_DOCUMENT_CONTEXT_TOTAL_BYTES = 96 * 1024;
 const MAX_PDF_PAGES = 80;
+const MAX_RASTER_DIMENSION = 1_600;
+const MAX_PDF_SOURCE_IMAGE_PIXELS = 16_000_000;
+const MAX_PDF_SOURCE_RGBA_BYTES = MAX_PDF_SOURCE_IMAGE_PIXELS * 4;
+const MAX_RASTER_PIXELS = 2_500_000;
+const MAX_RASTER_RGBA_BYTES = MAX_RASTER_PIXELS * 4;
+const MIN_MEANINGFUL_PDF_PAGE_ALPHANUMERICS = 24;
 export const DOCUMENT_EXTRACTION_TURN_TIMEOUT_MS = 12_000;
 export const PDF_MODULE_INITIALIZATION_TIMEOUT_MS = 30_000;
 export const MAX_DOCUMENT_EXTRACTION_INPUT_BYTES = 20 * 1024 * 1024;
@@ -41,14 +56,44 @@ export interface DocumentAttachmentContextOptions {
   readonly groupId?: string;
   readonly now?: () => number;
   readonly pdfModuleLoader?: PdfModuleLoader;
+  readonly generatedAttachmentStore?: PrivateGeneratedAttachmentStore;
   readonly scheduler?: DocumentExtractionScheduler;
   readonly signal?: AbortSignal;
 }
+
+export interface PreparedDocumentAttachments {
+  readonly contexts: DocumentAttachmentContext[];
+  readonly generatedImagePaths: string[];
+  readonly imagePaths: string[];
+}
+
+interface PdfRasterBudget {
+  remainingBytes: number;
+  remainingCount: number;
+}
+
+interface GeneratedPdfPage {
+  pageNumber: number;
+  path: string;
+}
+
+interface PdfAnalysis {
+  attachment: ChatAttachment;
+  bytes: Uint8Array;
+  generatedPages: GeneratedPdfPage[];
+  rasterPageNumbers: number[];
+  selectableText: string;
+  textTruncated: boolean;
+  totalPages: number;
+}
+
+class ScannedPdfRasterizationError extends Error {}
 
 async function ensurePdfNodePrimitives(): Promise<void> {
   if (
     typeof Reflect.get(globalThis, "DOMMatrix") === "function"
     && typeof Reflect.get(globalThis, "Path2D") === "function"
+    && typeof Reflect.get(globalThis, "ImageData") === "function"
   ) return;
 
   // PDF.js identifies Electron utility processes as non-Node and therefore
@@ -59,6 +104,9 @@ async function ensurePdfNodePrimitives(): Promise<void> {
   }
   if (typeof Reflect.get(globalThis, "Path2D") !== "function") {
     Reflect.set(globalThis, "Path2D", canvas.Path2D);
+  }
+  if (typeof Reflect.get(globalThis, "ImageData") !== "function") {
+    Reflect.set(globalThis, "ImageData", canvas.ImageData);
   }
 }
 
@@ -208,98 +256,262 @@ export function pdfTextItemsToText(items: readonly unknown[]): string {
   return accumulator.content();
 }
 
-async function extractPdfText(
+function hasMeaningfulPdfText(content: string): boolean {
+  // Scanner overlays commonly add only a page number or short footer. Treat
+  // that sparse incidental layer as visual content, not as a readable page.
+  return (content.match(/[\p{L}\p{N}]/gu) ?? []).length
+    >= MIN_MEANINGFUL_PDF_PAGE_ALPHANUMERICS;
+}
+
+function scannedPdfNote(
+  analysis: PdfAnalysis,
+  imageOrdinalByPath: ReadonlyMap<string, number>,
+): string {
+  const mappings = analysis.generatedPages.map(({ pageNumber, path }) => {
+    const ordinal = imageOrdinalByPath.get(path);
+    if (ordinal === undefined) {
+      throw new Error("A scanned PDF page lost its provider image position.");
+    }
+    return `page ${pageNumber} as provider image ${ordinal}`;
+  });
+  const omittedScanned = analysis.rasterPageNumbers.length
+    - analysis.generatedPages.length;
+  const uninspected = Math.max(0, analysis.totalPages - MAX_PDF_PAGES);
+  return [
+    analysis.selectableText
+      ? "Some PDF pages did not contain enough reliable selectable text."
+      : "This PDF did not contain enough reliable selectable text.",
+    `Inertia rasterized ${mappings.join(", ")} from ${analysis.attachment.name}.`,
+    omittedScanned > 0
+      ? `${omittedScanned} scanned page${omittedScanned === 1 ? " was" : "s were"} omitted by the bounded image-input limits.`
+      : "Inspect those provider images directly.",
+    uninspected > 0
+      ? `${uninspected} page${uninspected === 1 ? " was" : "s were"} beyond the bounded PDF inspection limit.`
+      : "",
+  ].filter(Boolean).join("\n");
+}
+
+function checkExtractionPending(
+  signal: AbortSignal,
+  deadlineAt: number,
+  now: () => number,
+): void {
+  if (signal.aborted) throw new DocumentExtractionCancelledError();
+  if (now() >= deadlineAt) throw new DocumentExtractionDeadlineError();
+}
+
+function pdfDocumentOptions(bytes: Uint8Array): Parameters<PdfTextModule["getDocument"]>[0] {
+  return {
+    data: new Uint8Array(bytes),
+    disableFontFace: true,
+    isImageDecoderSupported: false,
+    isOffscreenCanvasSupported: false,
+    maxImageSize: MAX_PDF_SOURCE_IMAGE_PIXELS,
+    canvasMaxAreaInBytes: MAX_PDF_SOURCE_RGBA_BYTES,
+    useWasm: false,
+    useWorkerFetch: false,
+    verbosity: 0,
+  };
+}
+
+async function rasterizePdfPages(
+  pdfModule: PdfTextModule,
+  analysis: PdfAnalysis,
+  pageNumbers: readonly number[],
+  budget: PdfRasterBudget,
+  generatedAttachments: PrivateGeneratedAttachmentStore,
+  signal: AbortSignal,
+  deadlineAt: number,
+  now: () => number,
+): Promise<GeneratedPdfPage[]> {
+  checkExtractionPending(signal, deadlineAt, now);
+  const { createCanvas } = await import("@napi-rs/canvas");
+  checkExtractionPending(signal, deadlineAt, now);
+  const loadingTask = pdfModule.getDocument(pdfDocumentOptions(analysis.bytes));
+  const cancel = (): void => { void loadingTask.destroy(); };
+  signal.addEventListener("abort", cancel, { once: true });
+  const generated: GeneratedPdfPage[] = [];
+  try {
+    const document = await loadingTask.promise;
+    checkExtractionPending(signal, deadlineAt, now);
+    for (const pageNumber of pageNumbers) {
+      if (budget.remainingCount < 1) break;
+      checkExtractionPending(signal, deadlineAt, now);
+      const page = await document.getPage(pageNumber);
+      try {
+        const baseline = page.getViewport({ scale: 1 });
+        if (
+          !Number.isFinite(baseline.width)
+          || !Number.isFinite(baseline.height)
+          || baseline.width <= 0
+          || baseline.height <= 0
+        ) throw new ScannedPdfRasterizationError(
+          `${analysis.attachment.name} has an invalid page size.`,
+        );
+        const scale = Math.min(
+          2,
+          MAX_RASTER_DIMENSION / baseline.width,
+          MAX_RASTER_DIMENSION / baseline.height,
+          Math.sqrt(MAX_RASTER_PIXELS / (baseline.width * baseline.height)) * 0.99,
+        );
+        if (!Number.isFinite(scale) || scale <= 0) {
+          throw new ScannedPdfRasterizationError(
+            `${analysis.attachment.name} has an unsafe page scale.`,
+          );
+        }
+        const viewport = page.getViewport({ scale });
+        const width = Math.max(1, Math.ceil(viewport.width));
+        const height = Math.max(1, Math.ceil(viewport.height));
+        if (
+          width > MAX_RASTER_DIMENSION
+          || height > MAX_RASTER_DIMENSION
+          || width * height > MAX_RASTER_PIXELS
+          || width * height * 4 > MAX_RASTER_RGBA_BYTES
+        ) throw new ScannedPdfRasterizationError(
+          `${analysis.attachment.name} has an unsafe page size.`,
+        );
+        const canvas = createCanvas(width, height);
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, width, height);
+        const render = page.render({
+          canvas: canvas as never,
+          canvasContext: context as never,
+          viewport,
+          background: "#ffffff",
+        });
+        const cancelRender = (): void => render.cancel();
+        signal.addEventListener("abort", cancelRender, { once: true });
+        try {
+          await render.promise;
+        } catch (error) {
+          if (signal.aborted) throw new DocumentExtractionCancelledError();
+          throw error;
+        } finally {
+          signal.removeEventListener("abort", cancelRender);
+        }
+        checkExtractionPending(signal, deadlineAt, now);
+        const jpeg = await canvas.encode("jpeg", 82);
+        checkExtractionPending(signal, deadlineAt, now);
+        if (jpeg.byteLength > MAX_CHAT_ATTACHMENT_BYTES) {
+          throw new ScannedPdfRasterizationError(
+            `${analysis.attachment.name} produced a page image above the 10 MB limit.`,
+          );
+        }
+        if (budget.remainingCount < 1 || jpeg.byteLength > budget.remainingBytes) {
+          continue;
+        }
+        const path = await generatedAttachments.writeJpeg(jpeg);
+        try {
+          checkExtractionPending(signal, deadlineAt, now);
+        } catch (error) {
+          await generatedAttachments.release([path]).catch(() => undefined);
+          throw error;
+        }
+        budget.remainingCount -= 1;
+        budget.remainingBytes -= jpeg.byteLength;
+        generated.push({ pageNumber, path });
+      } finally {
+        page.cleanup();
+      }
+    }
+    return generated;
+  } catch (error) {
+    await generatedAttachments.release(
+      generated.map(({ path }) => path),
+    ).catch(() => undefined);
+    if (signal.aborted) throw new DocumentExtractionCancelledError();
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    await loadingTask.destroy().catch(() => undefined);
+  }
+}
+
+async function extractPdfAnalysis(
   pdfModule: PdfTextModule,
   attachment: ChatAttachment,
   bytes: Uint8Array,
   maximumJsonBytes: number,
   signal: AbortSignal,
   deadlineAt: number,
-): Promise<{ content: string; truncated: boolean }> {
-  const loadingTask = pdfModule.getDocument({
-    data: new Uint8Array(bytes),
-    disableFontFace: true,
-    isImageDecoderSupported: false,
-    isOffscreenCanvasSupported: false,
-    useWasm: false,
-    useWorkerFetch: false,
-    verbosity: 0,
-  });
+  now: () => number,
+): Promise<PdfAnalysis> {
+  const loadingTask = pdfModule.getDocument(pdfDocumentOptions(bytes));
   const cancel = () => {
     void loadingTask.destroy();
   };
   signal.addEventListener("abort", cancel, { once: true });
   try {
-    if (signal.aborted) throw new DocumentExtractionCancelledError();
+    checkExtractionPending(signal, deadlineAt, now);
     const document = await loadingTask.promise;
     const pageLimit = Math.min(document.numPages, MAX_PDF_PAGES);
     const accumulator = boundedTextAccumulator(maximumJsonBytes);
+    const rasterPageNumbers: number[] = [];
     let hasSelectableText = false;
-    let truncated = document.numPages > pageLimit;
+    let textTruncated = false;
     for (let pageNumber = 1; pageNumber <= pageLimit; pageNumber += 1) {
-      if (signal.aborted) throw new DocumentExtractionCancelledError();
-      if (Date.now() >= deadlineAt) {
-        throw new DocumentExtractionDeadlineError();
-      }
+      checkExtractionPending(signal, deadlineAt, now);
       const page = await document.getPage(pageNumber);
-      const reader = page.streamTextContent().getReader();
-      let streamDone = false;
-      let pageStarted = false;
+      const pageAccumulator = boundedTextAccumulator(MAX_DOCUMENT_CONTEXT_BYTES);
       try {
-        while (!streamDone) {
-          if (signal.aborted) throw new DocumentExtractionCancelledError();
-          const chunk = await reader.read();
-          streamDone = chunk.done;
-          if (streamDone) break;
-          const items = (chunk.value as { items?: readonly unknown[] }).items;
-          if (!Array.isArray(items)) continue;
-          for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
-            if (
-              itemIndex % 256 === 0
-              && Date.now() >= deadlineAt
-            ) {
-              void loadingTask.destroy();
-              throw new DocumentExtractionDeadlineError();
-            }
-            const item = items[itemIndex];
-            if (
-              typeof item !== "object"
-              || item === null
-              || !("str" in item)
-              || typeof (item as Partial<TextItem>).str !== "string"
-            ) continue;
-            const textItem = item as TextItem;
-            let text = textItem.str;
-            if (!pageStarted) {
-              text = text.trimStart();
-              if (!text) continue;
-              const prefix = `${hasSelectableText ? "\n\n" : ""}[Page ${pageNumber}]\n`;
-              if (!accumulator.append(prefix)) {
-                return { content: accumulator.content(), truncated: true };
+        const reader = page.streamTextContent().getReader();
+        let streamDone = false;
+        try {
+          while (!streamDone) {
+            checkExtractionPending(signal, deadlineAt, now);
+            const chunk = await reader.read();
+            streamDone = chunk.done;
+            if (streamDone) break;
+            const items = (chunk.value as { items?: readonly unknown[] }).items;
+            if (!Array.isArray(items)) continue;
+            for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+              if (
+                itemIndex % 256 === 0
+                && now() >= deadlineAt
+              ) {
+                void loadingTask.destroy();
+                throw new DocumentExtractionDeadlineError();
               }
-              pageStarted = true;
-              hasSelectableText = true;
-            }
-            if (!accumulator.append(text)) {
-              return { content: accumulator.content(), truncated: true };
-            }
-            if (textItem.hasEOL && !accumulator.append("\n")) {
-              return { content: accumulator.content(), truncated: true };
+              const item = items[itemIndex];
+              if (
+                typeof item !== "object"
+                || item === null
+                || !("str" in item)
+                || typeof (item as Partial<TextItem>).str !== "string"
+              ) continue;
+              const textItem = item as TextItem;
+              if (!pageAccumulator.append(textItem.str)) textTruncated = true;
+              if (textItem.hasEOL && !pageAccumulator.append("\n")) {
+                textTruncated = true;
+              }
             }
           }
+        } finally {
+          if (!streamDone) void reader.cancel().catch(() => undefined);
+          reader.releaseLock();
         }
       } finally {
-        if (!streamDone) void reader.cancel().catch(() => undefined);
-        reader.releaseLock();
+        page.cleanup();
       }
+      const pageText = pageAccumulator.content();
+      if (!hasMeaningfulPdfText(pageText)) {
+        rasterPageNumbers.push(pageNumber);
+        continue;
+      }
+      const prefixed = `${hasSelectableText ? "\n\n" : ""}[Page ${pageNumber}]\n${pageText}`;
+      if (!accumulator.append(prefixed)) textTruncated = true;
+      hasSelectableText = true;
     }
-    const content = accumulator.content();
-    if (!content) {
-      throw new Error(
-        `${attachment.name} has no selectable text. Convert scanned pages to text before attaching it.`,
-      );
-    }
-    return { content, truncated };
+    return {
+      attachment,
+      bytes,
+      generatedPages: [],
+      rasterPageNumbers,
+      selectableText: accumulator.content(),
+      textTruncated,
+      totalPages: document.numPages,
+    };
   } catch (error) {
     if (signal.aborted) throw new DocumentExtractionCancelledError();
     if (
@@ -307,7 +519,7 @@ async function extractPdfText(
       && (
         error instanceof DocumentExtractionCancelledError
         || error instanceof DocumentExtractionDeadlineError
-        || error.message.includes("has no selectable text")
+        || error instanceof ScannedPdfRasterizationError
       )
     ) throw error;
     throw new Error(`${attachment.name} could not be read as a PDF.`);
@@ -315,6 +527,32 @@ async function extractPdfText(
     signal.removeEventListener("abort", cancel);
     await loadingTask.destroy().catch(() => undefined);
   }
+}
+
+function contextForPdf(
+  analysis: PdfAnalysis,
+  maximumJsonBytes: number,
+  imageOrdinalByPath: ReadonlyMap<string, number>,
+): DocumentAttachmentContext {
+  const rasterNote = analysis.rasterPageNumbers.length > 0
+    ? scannedPdfNote(analysis, imageOrdinalByPath)
+    : "";
+  const combined = [
+    rasterNote,
+    analysis.selectableText
+      ? `${rasterNote ? "Selectable text from the other pages:\n" : ""}${analysis.selectableText}`
+      : "",
+  ].filter(Boolean).join("\n\n");
+  const bounded = boundedUtf8(combined, maximumJsonBytes);
+  return {
+    attachmentId: analysis.attachment.id,
+    label: `PDF · ${analysis.attachment.name}`,
+    content: bounded.value,
+    truncated: analysis.textTruncated
+      || bounded.truncated
+      || analysis.totalPages > MAX_PDF_PAGES
+      || analysis.generatedPages.length < analysis.rasterPageNumbers.length,
+  };
 }
 
 function extractTextDocument(
@@ -333,15 +571,35 @@ function extractTextDocument(
   return { content: bounded.value, truncated: bounded.truncated };
 }
 
-export async function documentAttachmentContexts(
+export async function prepareDocumentAttachments(
   payloads: readonly ResolvedAttachmentPayload[],
   options: DocumentAttachmentContextOptions = {},
-): Promise<DocumentAttachmentContext[]> {
+): Promise<PreparedDocumentAttachments> {
+  const existingImages = payloads.filter(({ attachment }) =>
+    chatAttachmentKind(attachment.mimeType) === "image");
+  const existingImageBytes = existingImages.reduce(
+    (total, { bytes }) => total + bytes.byteLength,
+    0,
+  );
+  if (
+    existingImages.length > MAX_CHAT_ATTACHMENTS
+    || existingImageBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
+  ) throw new Error("Image attachments exceed the shared turn limits.");
+  const rasterBudget: PdfRasterBudget = {
+    remainingBytes: MAX_CHAT_ATTACHMENT_TOTAL_BYTES - existingImageBytes,
+    remainingCount: MAX_CHAT_ATTACHMENTS - existingImages.length,
+  };
   const documents = payloads.flatMap((payload) =>
     payload.attachment.mimeType.startsWith("image/")
       ? []
       : [payload]);
-  if (documents.length === 0) return [];
+  if (documents.length === 0) {
+    return {
+      contexts: [],
+      generatedImagePaths: [],
+      imagePaths: existingImages.map(({ attachment }) => attachment.path),
+    };
+  }
   if (
     documents.length > MAX_DOCUMENT_EXTRACTION_COUNT
     || documents.reduce((total, { bytes }) => total + bytes.byteLength, 0)
@@ -382,63 +640,205 @@ export async function documentAttachmentContexts(
   const batchAbort = new AbortController();
   const cancelBatch = (): void => batchAbort.abort();
   options.signal?.addEventListener("abort", cancelBatch, { once: true });
-  const extractions = documents.map(async ({ attachment, bytes }) => {
-    try {
-      if (batchAbort.signal.aborted) {
-        throw new DocumentExtractionCancelledError();
-      }
-      const extracted = attachment.mimeType === "application/pdf"
-        ? await scheduler.schedule({
-            groupId,
-            weight: bytes.byteLength,
-            deadlineAt,
-            signal: batchAbort.signal,
-            onOperationFailure: (error) => {
-              if (!(error instanceof DocumentExtractionCancelledError)) {
-                batchAbort.abort();
-              }
-            },
-            operation: (signal) => extractPdfText(
-              pdfModule!,
-              attachment,
-              bytes,
-              maximumJsonBytes,
-              signal,
+  const generatedImagePaths: string[] = [];
+  try {
+    const extractions = documents.map(async ({ attachment, bytes }) => {
+      try {
+        if (batchAbort.signal.aborted) {
+          throw new DocumentExtractionCancelledError();
+        }
+        if (attachment.mimeType === "application/pdf") {
+          return {
+            kind: "pdf" as const,
+            analysis: await scheduler.schedule({
+              groupId,
+              weight: bytes.byteLength,
               deadlineAt,
-            ),
-          })
-        : extractTextDocument(attachment, bytes, maximumJsonBytes);
-      return {
-        attachmentId: attachment.id,
-        label: `${attachment.mimeType === "application/pdf" ? "PDF" : "Document"} · ${attachment.name}`,
-        content: extracted.content,
-        truncated: extracted.truncated,
-      };
-    } catch (error) {
-      if (!(error instanceof DocumentExtractionCancelledError)) {
-        batchAbort.abort();
+              signal: batchAbort.signal,
+              onOperationFailure: (error) => {
+                if (!(error instanceof DocumentExtractionCancelledError)) {
+                  batchAbort.abort();
+                }
+              },
+              operation: (signal) => extractPdfAnalysis(
+                pdfModule!,
+                attachment,
+                bytes,
+                maximumJsonBytes,
+                signal,
+                deadlineAt,
+                now,
+              ),
+            }),
+          };
+        }
+        const extracted = extractTextDocument(
+          attachment,
+          bytes,
+          maximumJsonBytes,
+        );
+        return {
+          kind: "text" as const,
+          context: {
+            attachmentId: attachment.id,
+            label: `Document · ${attachment.name}`,
+            content: extracted.content,
+            truncated: extracted.truncated,
+          } satisfies DocumentAttachmentContext,
+        };
+      } catch (error) {
+        if (!(error instanceof DocumentExtractionCancelledError)) {
+          batchAbort.abort();
+        }
+        throw error;
       }
-      throw error;
+    });
+    const settled = await Promise.allSettled(extractions);
+    const failed = settled.find((result): result is PromiseRejectedResult =>
+      result.status === "rejected"
+      && !(result.reason instanceof DocumentExtractionCancelledError));
+    if (failed) {
+      if (failed.reason instanceof DocumentExtractionDeadlineError) {
+        throw new Error("PDF text extraction timed out.");
+      }
+      throw failed.reason;
     }
-  });
-  const settled = await Promise.allSettled(extractions).finally(() => {
+    const cancelled = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (cancelled) throw cancelled.reason;
+    const analyzed = settled.map((result) => {
+      if (result.status === "rejected") throw result.reason;
+      return result.value;
+    });
+    const scannedPdfs = analyzed.flatMap((result) =>
+      result.kind === "pdf" && result.analysis.rasterPageNumbers.length > 0
+        ? [result.analysis]
+        : []);
+    if (scannedPdfs.length > 0 && !options.generatedAttachmentStore) {
+      throw new ScannedPdfRasterizationError(
+        "Scanned PDF pages require private generated-attachment storage.",
+      );
+    }
+    if (scannedPdfs.length > rasterBudget.remainingCount) {
+      throw new ScannedPdfRasterizationError(
+        `Every scanned PDF needs at least one page image, but this turn only has ${rasterBudget.remainingCount} image slot${rasterBudget.remainingCount === 1 ? "" : "s"} left.`,
+      );
+    }
+
+    // Allocate one page per PDF per round before doing any rendering. This is
+    // deterministic and prevents the first PDF from consuming every slot.
+    const allocatedPages = new Map<PdfAnalysis, number[]>();
+    let remainingSlots = rasterBudget.remainingCount;
+    for (let round = 0; remainingSlots > 0; round += 1) {
+      let foundCandidate = false;
+      for (const analysis of scannedPdfs) {
+        const pageNumber = analysis.rasterPageNumbers[round];
+        if (pageNumber === undefined || remainingSlots < 1) continue;
+        foundCandidate = true;
+        const pages = allocatedPages.get(analysis);
+        if (pages) pages.push(pageNumber);
+        else allocatedPages.set(analysis, [pageNumber]);
+        remainingSlots -= 1;
+      }
+      if (!foundCandidate) break;
+    }
+
+    // Each PDF is parsed once for all of its allocated pages. Rendering stays
+    // sequential, so the scheduler accounts for exactly one bounded canvas.
+    for (const analysis of scannedPdfs) {
+      const pages = allocatedPages.get(analysis) ?? [];
+      if (pages.length === 0) continue;
+      const generated = await scheduler.schedule({
+        groupId,
+        weight: analysis.bytes.byteLength
+          + MAX_PDF_SOURCE_RGBA_BYTES
+          + MAX_RASTER_RGBA_BYTES,
+        deadlineAt,
+        signal: batchAbort.signal,
+        operation: (signal) => rasterizePdfPages(
+          pdfModule!,
+          analysis,
+          pages,
+          rasterBudget,
+          options.generatedAttachmentStore!,
+          signal,
+          deadlineAt,
+          now,
+        ),
+      });
+      analysis.generatedPages.push(...generated);
+      generatedImagePaths.push(...generated.map(({ path }) => path));
+    }
+    const unreadablePdf = scannedPdfs.find(
+      ({ generatedPages }) => generatedPages.length === 0,
+    );
+    if (unreadablePdf) {
+      throw new ScannedPdfRasterizationError(
+        `${unreadablePdf.attachment.name} needs a page image, but the turn's 20 MB image budget is exhausted.`,
+      );
+    }
+
+    const analysisById = new Map(scannedPdfs.map((analysis) => [
+      analysis.attachment.id,
+      analysis,
+    ]));
+    const imagePaths = payloads.flatMap(({ attachment }) => {
+      if (chatAttachmentKind(attachment.mimeType) === "image") {
+        return [attachment.path];
+      }
+      return analysisById.get(attachment.id)?.generatedPages.map(
+        ({ path }) => path,
+      ) ?? [];
+    });
+    const imageOrdinalByPath = new Map(
+      imagePaths.map((path, index) => [path, index + 1]),
+    );
+    const contexts = analyzed.map((result) => result.kind === "text"
+      ? result.context
+      : contextForPdf(
+          result.analysis,
+          maximumJsonBytes,
+          imageOrdinalByPath,
+        ));
+    return {
+      contexts,
+      generatedImagePaths: imagePaths.filter((path) =>
+        generatedImagePaths.includes(path)),
+      imagePaths,
+    };
+  } catch (error) {
+    batchAbort.abort();
+    await options.generatedAttachmentStore?.release(generatedImagePaths)
+      .catch(() => undefined);
+    throw error;
+  } finally {
     options.signal?.removeEventListener("abort", cancelBatch);
-  });
-  const failed = settled.find((result): result is PromiseRejectedResult =>
-    result.status === "rejected"
-    && !(result.reason instanceof DocumentExtractionCancelledError));
-  if (failed) {
-    if (failed.reason instanceof DocumentExtractionDeadlineError) {
-      throw new Error("PDF text extraction timed out.");
-    }
-    throw failed.reason;
   }
-  const cancelled = settled.find(
-    (result): result is PromiseRejectedResult => result.status === "rejected",
-  );
-  if (cancelled) throw cancelled.reason;
-  return settled.map((result) => {
-    if (result.status === "rejected") throw result.reason;
-    return result.value;
-  });
+}
+
+export async function documentAttachmentContexts(
+  payloads: readonly ResolvedAttachmentPayload[],
+  options: DocumentAttachmentContextOptions = {},
+): Promise<DocumentAttachmentContext[]> {
+  let prepared: PreparedDocumentAttachments;
+  try {
+    prepared = await prepareDocumentAttachments(payloads, options);
+  } catch (error) {
+    if (
+      !options.generatedAttachmentStore
+      && error instanceof ScannedPdfRasterizationError
+    ) {
+      throw new Error("Scanned PDF pages require the image-aware turn pipeline.");
+    }
+    throw error;
+  }
+  try {
+    if (prepared.generatedImagePaths.length > 0) {
+      throw new Error("Scanned PDF pages require the image-aware turn pipeline.");
+    }
+    return prepared.contexts;
+  } finally {
+    await options.generatedAttachmentStore?.release(prepared.generatedImagePaths);
+  }
 }

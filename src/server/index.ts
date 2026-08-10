@@ -112,6 +112,7 @@ import {
   TrustedAttachmentResolver,
   type RuntimeAttachmentBroker,
 } from "./runtime/attachments/trusted-attachment-resolver";
+import { PrivateGeneratedAttachmentStore } from "./runtime/attachments/private-generated-attachments";
 import {
   SecureFileError,
   type RuntimeSecureFileBroker,
@@ -201,6 +202,9 @@ export interface RunningRuntime {
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
   const dataDirectory = resolve(options.dataDirectory);
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+  const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
+    dataDirectory,
+  );
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
   let duoLaunches: DuoLaunchCoordinator | null = null;
@@ -610,6 +614,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           ? Promise.all(attachmentIds.map((attachmentId) =>
               options.attachments!.release(attachmentId))).then(() => undefined)
           : undefined,
+      releaseGeneratedAttachments: (paths) => generatedAttachments.release(paths),
+      validateModelSelection: (selection) =>
+        backendProfileController.validateSelection(selection),
       refreshProviderMetadata: async ({ providerId, turnId, runStartedAt, status }) => {
         if (status !== "completed") return;
         const turn = store.agentTurn(turnId);
@@ -707,6 +714,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         dataDirectory,
         enableProviders,
         attachmentResolver,
+        generatedAttachments,
         workflows: agentWorkflows,
         providerTerminalResumes,
         providerInfo: () => providerInfo,

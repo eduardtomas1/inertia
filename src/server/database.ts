@@ -729,11 +729,11 @@ export class RuntimeStore {
     failure: string | null = null,
     now = new Date().toISOString(),
   ): StoredPairedLaunch {
-    return this.pairedLaunchRepository.finishCancellation(
-      launchId,
-      now,
-      failure,
-    );
+    return this.pairedLaunchRepository.finishCancellation(launchId, now, failure);
+  }
+
+  recoverRequestedPairedLaunchCancellations(now = new Date().toISOString()): StoredPairedLaunch[] {
+    return this.pairedLaunchRepository.recoverRequestedCancellations(now);
   }
 
   failPairedLaunch(

@@ -63,6 +63,10 @@ const reviewOperation = {
   timeoutMs: REVIEW_OPERATION_REQUEST_TIMEOUT_MS,
   timeoutDelivery: "ambiguous",
 } as const satisfies RuntimeCommandPolicy;
+const duoCancellation = {
+  timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
+  timeoutDelivery: "ambiguous",
+} as const satisfies RuntimeCommandPolicy;
 
 // Keep this total over ClientCommand["type"]. A new protocol command must
 // choose its timeout and timeout-delivery semantics before TypeScript accepts
@@ -112,13 +116,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "conversation.unarchive": shortMutation,
   "conversation.unsettle": shortMutation,
   "conversation.update": shortMutation,
-  "duo.acknowledge": shortMutation,
-  "duo.comparison.cancel": shortMutation,
+  "duo.acknowledge": duoCancellation,
+  "duo.comparison.cancel": duoCancellation,
   "duo.comparison.retry": shortMutation,
-  "duo.cancel": {
-    timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
-    timeoutDelivery: "ambiguous",
-  },
+  "duo.cancel": duoCancellation,
   "duo.dispatch": {
     timeoutMs: DUO_DISPATCH_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "ambiguous",

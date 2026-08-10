@@ -134,7 +134,10 @@ function profileRoute(
   const provider = providers.find(({ id }) => id === providerId);
   const nativeCatalogCurrent = profile.preset !== "native"
     || model.id === "provider-default"
-    || provider?.metadataState.models.freshness === "fresh";
+    || (
+      provider?.metadataState.models.freshness !== "unavailable"
+      && provider?.models.some(({ id }) => id === model.id) === true
+    );
   const selectable = profile.enabled
     && profile.compatibility.state !== "unknown"
     && profile.compatibility.state !== "unavailable"
@@ -212,7 +215,7 @@ function fallbackNativeRoutes(
         ? currentSelection
         : generatedSelection;
       const selectable = model.id === "provider-default"
-        || provider.metadataState.models.freshness === "fresh";
+        || provider.metadataState.models.freshness !== "unavailable";
       return {
         key: modelRouteIdentityKey(selection),
         displayName: model.label,

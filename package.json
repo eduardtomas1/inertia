@@ -26,6 +26,8 @@
     "typecheck:private-connect": "tsc --noEmit -p src/renderer/private-connect/tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && npm run typecheck:private-connect && tsc --noEmit -p tsconfig.test.unit.json && tsc --noEmit -p tsconfig.test.e2e.json",
     "test": "vitest run",
+    "test:duo": "npm run test:duo:server && vitest run tests/renderer/multi-spawn tests/renderer/duo",
+    "test:duo:server": "node scripts/run-electron-vitest.mjs run tests/server/duo",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:portable": "vitest run --maxWorkers=1 tests/main/runtime-process-protocol.test.ts tests/main/runtime-supervisor.test.ts tests/server/process-lifecycle.test.ts tests/server/providers.test.ts tests/server/provider-metadata.test.ts tests/server/provider-io.test.ts tests/server/agent-harness.test.ts tests/server/codex-app-server.test.ts tests/server/claude-agent-sdk-harness.test.ts tests/server/cursor-acp-harness.test.ts tests/server/opencode-sdk-harness.test.ts tests/server/opencode-boundary.test.ts",

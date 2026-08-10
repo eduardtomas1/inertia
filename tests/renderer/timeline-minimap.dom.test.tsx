@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   TimelineMinimap,
@@ -22,6 +22,8 @@ const markers: TimelineMarker[] = [
 ];
 
 describe("TimelineMinimap", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("owns one custom preview across pointer and keyboard focus", () => {
     const onNavigate = vi.fn();
     render(
@@ -88,5 +90,43 @@ describe("TimelineMinimap", () => {
 
     fireEvent.click(first);
     expect(onNavigate).toHaveBeenCalledWith(0, "turn");
+  });
+
+  it("scrolls a newly active marker into a clipped rail without stealing focus", () => {
+    const scrollIntoView = vi.spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    const view = render(
+      <TimelineMinimap
+        activeIndex={0}
+        left={24}
+        markers={markers}
+        onNavigate={vi.fn()}
+      />,
+    );
+    const first = screen.getByRole("button", {
+      name: "Go to turn 1: Inspect the lifecycle boundary",
+    });
+    const second = screen.getByRole("button", {
+      name: "Go to turn 2: Verify the focused regression",
+    });
+    first.focus();
+    scrollIntoView.mockClear();
+
+    view.rerender(
+      <TimelineMinimap
+        activeIndex={4}
+        left={24}
+        markers={markers}
+        onNavigate={vi.fn()}
+      />,
+    );
+
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      block: "nearest",
+      inline: "nearest",
+    });
+    expect(scrollIntoView.mock.instances.at(-1)).toBe(second);
+    expect(first).toHaveFocus();
+    expect(second).toHaveAttribute("tabindex", "0");
   });
 });

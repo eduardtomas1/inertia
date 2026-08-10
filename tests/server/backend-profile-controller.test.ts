@@ -222,7 +222,7 @@ describe("model backend profile controller", () => {
     runtimeStore.close();
   });
 
-  it("distinguishes stale native catalogs from fresh model removal", async () => {
+  it("uses a known stale native route but requires refresh before trusting an unknown one", async () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });
     const concrete = nativeModelSelection({
@@ -234,8 +234,11 @@ describe("model backend profile controller", () => {
     stale.metadataState.models.freshness = "stale";
     controller.profiles([stale]);
 
-    expect(() => controller.validateSelection(concrete))
-      .toThrow("Refresh provider models");
+    expect(controller.validateSelection(concrete)).toMatchObject({
+      modelId: "gpt-authoritative",
+      alias: "GPT Authoritative",
+      reasoningEffort: "high",
+    });
     expect(controller.validateSelection(concrete, {
       allowUnavailableNativeCatalog: true,
     })).toMatchObject({
@@ -247,6 +250,13 @@ describe("model backend profile controller", () => {
       providerId: "codex",
       modelId: "provider-default",
     })).modelId).toBe("provider-default");
+
+    const staleWithoutModel = nativeProvider();
+    staleWithoutModel.models = [];
+    staleWithoutModel.metadataState.models.freshness = "stale";
+    controller.profiles([staleWithoutModel]);
+    expect(() => controller.validateSelection(concrete))
+      .toThrow("Refresh provider models");
 
     const freshWithoutModel = nativeProvider();
     freshWithoutModel.models = [];

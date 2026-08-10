@@ -1,5 +1,8 @@
 export const DOCUMENT_EXTRACTION_CONCURRENCY = 2;
-export const DOCUMENT_EXTRACTION_WORKING_BYTES = 12 * 1024 * 1024;
+// One real-world scanned page may require a bounded 64 MiB source decode plus
+// a 10 MiB output canvas and its at-most-10 MiB PDF input. Raster jobs reserve
+// that complete envelope, so the 96 MiB process cap admits only one at a time.
+export const DOCUMENT_EXTRACTION_WORKING_BYTES = 96 * 1024 * 1024;
 
 export class DocumentExtractionCancelledError extends Error {
   constructor() {

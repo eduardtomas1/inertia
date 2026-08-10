@@ -385,10 +385,28 @@ describe("TerminalPanel focus lifecycle", () => {
       />,
     );
 
-    const picker = await screen.findByRole("combobox", { name: "Chat to resume" });
-    expect(picker).toHaveTextContent("Current chat · Inertia");
-    expect(picker).toHaveTextContent("Earlier investigation · Shared checkout");
-    fireEvent.change(picker, { target: { value: otherConversationId } });
+    const picker = await screen.findByRole("button", {
+      name: "Chat to resume: Current chat in Inertia",
+    });
+    expect(picker).toHaveTextContent("Current chat");
+    fireEvent.click(picker);
+    const search = await screen.findByRole("searchbox", {
+      name: "Search resumable chats",
+    });
+    await waitFor(() => expect(search).toHaveFocus());
+    fireEvent.keyDown(search, { key: "Escape" });
+    await waitFor(() => expect(picker).toHaveFocus());
+    fireEvent.click(picker);
+    const options = await screen.findByRole("listbox", {
+      name: "Resumable provider chats",
+    });
+    expect(options).toHaveTextContent("Current chat");
+    expect(options).toHaveTextContent("Earlier investigation");
+    fireEvent.click(screen.getByRole("option", { name: /Earlier investigation/u }));
+    await waitFor(() => expect(picker).toHaveFocus());
+    expect(picker).toHaveAccessibleName(
+      "Chat to resume: Earlier investigation in Shared checkout",
+    );
     const resume = await screen.findByRole("button", {
       name: "Resume Claude chat Earlier investigation in Shared checkout",
     });
@@ -404,6 +422,79 @@ describe("TerminalPanel focus lifecycle", () => {
       }),
     })));
     expect(created).toBe(1);
+  });
+
+  it("accepts the same composer resume request again after its parent clears it", async () => {
+    const conversationId = "22222222-2222-4222-8222-222222222222";
+    let resumeAttempts = 0;
+    const onResumeRequestHandled = vi.fn();
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: "55555555-5555-4555-8555-555555555555",
+        };
+      }
+      if (sent.type === "terminal.provider.resume") {
+        resumeAttempts += 1;
+        if (resumeAttempts === 1) throw new Error("Provider was temporarily busy.");
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: "66666666-6666-4666-8666-666666666666",
+          providerResume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: "77777777-7777-4777-8777-777777777777",
+          },
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    const props = {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      conversationId,
+      projectName: "Inertia",
+      status: "online" as const,
+      fontSize: 13,
+      theme: "dark" as const,
+      visible: true,
+      providerResumes: [{
+        projectId: "11111111-1111-4111-8111-111111111111",
+        projectName: "Inertia",
+        conversationId,
+        conversationTitle: "Current chat",
+        availability: {
+          kind: "available" as const,
+          resume: {
+            providerId: "claude" as const,
+            providerLabel: "Claude",
+            sessionId: "88888888-8888-4888-8888-888888888888",
+          },
+          reason: null,
+        },
+      }],
+      sendCommand,
+      subscribe: () => () => undefined,
+      onResumeRequestHandled,
+      onClose: () => undefined,
+    };
+    const view = render(
+      <TerminalPanel {...props} resumeRequestConversationId={conversationId} />,
+    );
+
+    await waitFor(() => expect(resumeAttempts).toBe(1));
+    expect(onResumeRequestHandled).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Provider was temporarily busy."))
+      .toBeVisible();
+
+    view.rerender(<TerminalPanel {...props} resumeRequestConversationId={null} />);
+    view.rerender(
+      <TerminalPanel {...props} resumeRequestConversationId={conversationId} />,
+    );
+    await waitFor(() => expect(resumeAttempts).toBe(2));
+    expect(onResumeRequestHandled).toHaveBeenCalledTimes(2);
   });
 
   it("explains unsupported or stale sessions without exposing a resume action", async () => {
@@ -778,9 +869,8 @@ describe("TerminalPanel focus lifecycle", () => {
     expect(await screen.findByRole("button", {
       name: "Claude session is resumed in another Inertia terminal",
     })).toBeDisabled();
-    fireEvent.change(screen.getByRole("combobox", { name: "Chat to resume" }), {
-      target: { value: secondaryConversationId },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /Chat to resume:/u }));
+    fireEvent.click(await screen.findByRole("option", { name: /Secondary chat/u }));
     const secondaryResume = await screen.findByRole("button", {
       name: "Resume Claude chat Secondary chat in Inertia",
     });
@@ -792,6 +882,192 @@ describe("TerminalPanel focus lifecycle", () => {
       .filter((sent) => sent.type === "terminal.provider.resume")
       .map((sent) => sent.payload.conversationId))
       .toEqual([primaryConversationId, secondaryConversationId]));
+  });
+
+  it("routes a composer request to the terminal already resuming that chat", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const conversationId = "22222222-2222-4222-8222-222222222222";
+    let created = 0;
+    const onResumeRequestHandled = vi.fn();
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        created += 1;
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: `created-${created}`,
+        };
+      }
+      if (sent.type === "terminal.provider.resume") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: "resumed-primary",
+          providerResume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: "session-primary",
+          },
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    const props = {
+      projectId,
+      conversationId,
+      projectName: "Inertia",
+      status: "online" as const,
+      fontSize: 13,
+      theme: "dark" as const,
+      visible: true,
+      providerResumes: [{
+        projectId,
+        projectName: "Inertia",
+        conversationId,
+        conversationTitle: "Primary chat",
+        availability: {
+          kind: "available" as const,
+          resume: {
+            providerId: "claude" as const,
+            providerLabel: "Claude",
+            sessionId: "session-primary",
+          },
+          reason: null,
+        },
+      }],
+      sendCommand,
+      subscribe: () => () => undefined,
+      onClose: () => undefined,
+    };
+    const view = render(<TerminalPanel {...props} />);
+
+    const resume = await screen.findByRole("button", {
+      name: "Resume Claude session in Inertia",
+    });
+    await waitFor(() => expect(resume).toBeEnabled());
+    fireEvent.click(resume);
+    await waitFor(() => expect(resume).toHaveTextContent("Resumed"));
+
+    fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Terminal 2/u }))
+      .toHaveAttribute("aria-selected", "true"));
+    view.rerender(
+      <TerminalPanel
+        {...props}
+        resumeRequestConversationId={conversationId}
+        onResumeRequestHandled={onResumeRequestHandled}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Terminal 1/u }))
+      .toHaveAttribute("aria-selected", "true"));
+    expect(onResumeRequestHandled).toHaveBeenCalled();
+    expect(sendCommand.mock.calls.filter(
+      ([sent]) => sent.type === "terminal.provider.resume",
+    )).toHaveLength(1);
+  });
+
+  it("opens a fresh terminal for a composer request when the active tab is resumed", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const primaryConversationId = "22222222-2222-4222-8222-222222222222";
+    const secondaryConversationId = "33333333-3333-4333-8333-333333333333";
+    let created = 0;
+    const onResumeRequestHandled = vi.fn();
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        created += 1;
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: `created-${created}`,
+        };
+      }
+      if (sent.type === "terminal.provider.resume") {
+        const secondary = sent.payload.conversationId === secondaryConversationId;
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: secondary ? "resumed-secondary" : "resumed-primary",
+          providerResume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: secondary ? "session-secondary" : "session-primary",
+          },
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    const providerResumes = [
+      {
+        projectId,
+        projectName: "Inertia",
+        conversationId: primaryConversationId,
+        conversationTitle: "Primary chat",
+        availability: {
+          kind: "available" as const,
+          resume: {
+            providerId: "claude" as const,
+            providerLabel: "Claude",
+            sessionId: "session-primary",
+          },
+          reason: null,
+        },
+      },
+      {
+        projectId,
+        projectName: "Inertia",
+        conversationId: secondaryConversationId,
+        conversationTitle: "Secondary chat",
+        availability: {
+          kind: "available" as const,
+          resume: {
+            providerId: "claude" as const,
+            providerLabel: "Claude",
+            sessionId: "session-secondary",
+          },
+          reason: null,
+        },
+      },
+    ];
+    const props = {
+      projectId,
+      conversationId: primaryConversationId,
+      projectName: "Inertia",
+      status: "online" as const,
+      fontSize: 13,
+      theme: "dark" as const,
+      visible: true,
+      providerResumes,
+      sendCommand,
+      subscribe: () => () => undefined,
+      onClose: () => undefined,
+    };
+    const view = render(<TerminalPanel {...props} />);
+
+    const primaryResume = await screen.findByRole("button", {
+      name: "Resume Claude chat Primary chat in Inertia",
+    });
+    await waitFor(() => expect(primaryResume).toBeEnabled());
+    fireEvent.click(primaryResume);
+    await waitFor(() => expect(primaryResume).toHaveTextContent("Resumed"));
+
+    view.rerender(
+      <TerminalPanel
+        {...props}
+        resumeRequestConversationId={secondaryConversationId}
+        onResumeRequestHandled={onResumeRequestHandled}
+      />,
+    );
+
+    await waitFor(() => expect(sendCommand.mock.calls
+      .map(([sent]) => sent)
+      .filter((sent) => sent.type === "terminal.provider.resume")
+      .map((sent) => sent.payload.conversationId))
+      .toEqual([primaryConversationId, secondaryConversationId]));
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: /Terminal 2/u }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(onResumeRequestHandled).toHaveBeenCalled();
   });
 
   it("does not attach a delayed project action to a newly selected chat", async () => {

@@ -39,11 +39,25 @@ type DuoStatusResult = Extract<
   Extract<ServerEvent, { type: "request.result" }>["result"],
   { kind: "duo.status" }
 >;
+type DuoComparisonState = NonNullable<DuoStatusResult["comparison"]>["state"];
+type ComparisonMutationIntent = {
+  launchId: string;
+  kind: "retry" | "cancel";
+  baselineAttempt: number;
+  baselineState: DuoComparisonState;
+};
+type DuoMutationIntent = ComparisonMutationIntent | {
+  launchId: string;
+  kind: "acknowledge";
+};
+const INVALID_DUO_RESPONSE = "Invalid Duo response.";
+const DUO_PROJECTS_UNAVAILABLE = "Duo projects unavailable.";
 
 export interface MultiSpawnController {
   open: boolean;
   submitting: boolean;
   cancelling: boolean;
+  launchBlocked: boolean;
   error: string | null;
   recoveryGuidance: IdentifiedDuoRecoveryGuidance[];
   recoveryStatus: DuoStatusResult | null;
@@ -67,20 +81,22 @@ function errorMessage(error: unknown): string {
 }
 
 function reconciliationMessage(detail: string): string {
-  return "The connection changed while Inertia was preparing the duo. "
-    + "The launch will not be retried automatically. Refresh to reconcile its "
-    + `two chats safely. ${detail}`;
+  return "Connection changed during Duo setup. It will not be retried "
+    + `automatically. Refresh to reconcile both chats. ${detail}`;
 }
 
 function launchStatusMessage(status: DuoStatusResult): string | null {
   const comparison = status.comparison;
   if (comparison?.state === "failed") {
     return comparison.error
-      ?? "The third-model judge failed. The two source results remain locked; retry explicitly or cancel the comparison.";
+      ?? "The judge failed. Source chats stay locked; retry or cancel it.";
   }
   if (comparison?.state === "interrupted") {
     return comparison.error
-      ?? "The third-model judge was interrupted and was not retried automatically. The source results remain locked.";
+      ?? "The judge was interrupted without retry. Source chats stay locked.";
+  }
+  if (status.state === "running" && status.cancelRequested) {
+    return "Duo cancellation is still waiting for provider cleanup. Both chats remain locked until it finishes.";
   }
   if (status.state === "running") return null;
   const startedRoutes: number[] = [];
@@ -90,7 +106,7 @@ function launchStatusMessage(status: DuoStatusResult): string | null {
     if (dispatchState === "failed") failedRoutes.push(ordinal + 1);
   }
   if (startedRoutes.length > 0 && failedRoutes.length > 0) {
-    return `Provider dispatch was partial: route ${startedRoutes.join(", ")} accepted a start while route ${failedRoutes.join(", ")} failed. Inertia requested cancellation for started work, but provider-side effects are not atomic. Inspect both saved chats; nothing will be retried automatically.`;
+    return `Partial dispatch: route ${startedRoutes.join(", ")} started; route ${failedRoutes.join(", ")} failed. Provider effects are not atomic. Inspect both chats; no automatic retry.`;
   }
   if (status.error) return status.error;
   if (status.state === "cancelled") {
@@ -98,16 +114,53 @@ function launchStatusMessage(status: DuoStatusResult): string | null {
   }
   if (status.state === "interrupted" || status.state === "recovery-required") {
     return status.state === "interrupted"
-      ? "Duo dispatch was durably claimed, but one or both provider outcomes are uncertain. Provider-side effects are not atomic and nothing will be retried automatically. Inspect both saved chats and re-check the status."
-      : "The duo needs manual Git recovery. Inertia retained uncertain worktree or branch state and will not delete it automatically. Inspect the exact topology, complete any safe manual command, then re-check recovery status.";
+      ? "Duo dispatch is uncertain and provider effects are not atomic. Inspect both chats; no automatic retry."
+      : "Manual Git recovery is required. Inspect the retained worktree or branch, recover it safely, then re-check.";
   }
   if (status.state === "failed") {
-    return "Neither side will be retried automatically. Open the two saved chats to inspect the launch failure.";
+    return "Neither side will retry automatically. Inspect both saved chats.";
   }
   if (status.state === "prepared") {
-    return "Both chats are saved and idle. The ambiguous launch was not dispatched automatically; open the saved chats to recover or start again deliberately.";
+    return "Both chats are saved and idle; inspect them before starting again.";
   }
-  return `The duo is ${status.state}. Refresh before starting another launch.`;
+  return `Duo is ${status.state}. Refresh before another launch.`;
+}
+
+function retainedLaunchBlockingMessage(status: DuoStatusResult): string | null {
+  const comparisonState = status.comparison?.state;
+  if (
+    comparisonState === "waiting"
+    || comparisonState === "dispatching"
+    || comparisonState === "running"
+  ) return `The comparison is still ${comparisonState}. Wait or cancel it to release the chat locks before another Duo.`;
+  return launchStatusMessage(status);
+}
+
+function comparisonNeedsMonitoring(status: DuoStatusResult): boolean {
+  const state = status.comparison?.state;
+  return state === "waiting"
+    || state === "dispatching"
+    || state === "running"
+    || (status.state === "running" && status.cancelRequested === true);
+}
+
+function comparisonMutationConfirmed(
+  intent: DuoMutationIntent,
+  status: DuoStatusResult,
+): boolean {
+  if (intent.kind === "acknowledge") return status.state !== "interrupted";
+  const comparison = status.comparison;
+  if (!comparison) return false;
+  if (intent.kind === "cancel") {
+    return comparison.state === "cancelled" || comparison.state === "completed";
+  }
+  if (
+    comparison.attempt === intent.baselineAttempt
+    && comparison.state === intent.baselineState
+  ) return false;
+  return comparison.attempt > intent.baselineAttempt
+    || comparison.state === "cancelled"
+    || comparison.state === "completed";
 }
 
 function launchRetainsRecoveryIdentity(status: DuoStatusResult): boolean {
@@ -117,6 +170,7 @@ function launchRetainsRecoveryIdentity(status: DuoStatusResult): boolean {
     || status.state === "dispatching"
     || status.state === "recovery-required"
     || status.state === "interrupted"
+    || (status.state === "running" && status.cancelRequested === true)
     || comparisonState === "waiting"
     || comparisonState === "dispatching"
     || comparisonState === "running"
@@ -141,7 +195,7 @@ function orderedPreparedSides(result: DuoPreparedResult): DuoPreparedResult["sid
     || ordered[0]?.ordinal !== 0
     || ordered[1]?.ordinal !== 1
   ) {
-    throw new Error("The local service returned an invalid duo assignment.");
+    throw new Error(INVALID_DUO_RESPONSE);
   }
   return ordered as DuoPreparedResult["sides"];
 }
@@ -194,6 +248,8 @@ export function useMultiSpawn({
   >([]);
   const [recoveryStatus, setRecoveryStatusState] =
     useState<DuoStatusResult | null>(null);
+  const [watchedComparisonStatus, setWatchedComparisonStatus] =
+    useState<DuoStatusResult | null>(null);
   const [recheckingRecovery, setRecheckingRecovery] = useState(false);
   const [acknowledgingRecovery, setAcknowledgingRecovery] = useState(false);
   const [retryingComparison, setRetryingComparison] = useState(false);
@@ -215,15 +271,40 @@ export function useMultiSpawn({
     navigationGeneration: number;
   } | null>(null);
   const comparisonOpenedRef = useRef<string | null>(null);
+  const watchedComparisonLaunchIdRef = useRef<string | null>(null);
+  const comparisonMutationsRef = useRef<
+    Record<string, DuoMutationIntent | undefined>
+  >({});
   splitConversationIdRef.current = splitConversationId;
   workspaceVisibleRef.current = workspaceVisible;
 
-  const setRecoveryStatus = useCallback((
+  const presentRecoveryStatus = useCallback((
     status: DuoStatusResult | null,
   ): void => {
     recoveryStatusRef.current = status;
     setRecoveryStatusState(status);
   }, []);
+
+  const watchComparisonStatus = useCallback((status: DuoStatusResult): void => {
+    watchedComparisonLaunchIdRef.current = status.launchId;
+    setWatchedComparisonStatus(status);
+  }, []);
+
+  const setRecoveryStatus = useCallback((
+    status: DuoStatusResult | null,
+  ): void => {
+    presentRecoveryStatus(status);
+    const watchedLaunchId = watchedComparisonLaunchIdRef.current;
+    if (
+      status
+      && (
+        !watchedLaunchId
+        || watchedLaunchId === status.launchId
+        || comparisonNeedsMonitoring(status)
+        || comparisonMutationsRef.current[status.launchId]
+      )
+    ) watchComparisonStatus(status);
+  }, [presentRecoveryStatus, watchComparisonStatus]);
 
   const selectConversation = useCallback((
     key: string,
@@ -276,7 +357,7 @@ export function useMultiSpawn({
       payload: { launchId },
     }));
     if (event.result.kind !== "duo.status") {
-      throw new Error("The local service returned an unexpected duo status.");
+      throw new Error(INVALID_DUO_RESPONSE);
     }
     return event.result;
   }, [run]);
@@ -289,33 +370,54 @@ export function useMultiSpawn({
       payload: { launchId },
     }));
     if (event.result.kind !== "duo.status") {
-      throw new Error("The local service returned an unexpected duo status.");
+      throw new Error(INVALID_DUO_RESPONSE);
     }
     return event.result;
   }, [request]);
 
   useEffect(() => {
-    const comparisonState = recoveryStatus?.comparison?.state;
+    const comparisonWatchLaunchId = watchedComparisonStatus?.launchId;
     if (
-      !recoveryStatus
+      !comparisonWatchLaunchId
       || (
-        comparisonState !== "waiting"
-        && comparisonState !== "dispatching"
-        && comparisonState !== "running"
+        !comparisonNeedsMonitoring(watchedComparisonStatus)
+        && !comparisonMutationsRef.current[comparisonWatchLaunchId]
       )
     ) return;
     let cancelled = false;
     let timer: number | null = null;
     const poll = (): void => {
-      void queryLaunchStatusInBackground(recoveryStatus.launchId).then((status) => {
-        if (cancelled) return;
-        setRecoveryGuidance(identifiedRecoveryGuidance(status));
-        setRecoveryStatus(status);
+      void queryLaunchStatusInBackground(comparisonWatchLaunchId).then((status) => {
+        if (
+          cancelled
+          || watchedComparisonLaunchIdRef.current !== comparisonWatchLaunchId
+        ) return;
+        const mutation = comparisonMutationsRef.current[comparisonWatchLaunchId]
+          ?? null;
+        const mutationSettled = mutation
+          ? comparisonMutationConfirmed(mutation, status)
+          : false;
+        if (mutationSettled) {
+          delete comparisonMutationsRef.current[comparisonWatchLaunchId];
+        }
+        watchComparisonStatus(status);
+        const presented = recoveryStatusRef.current;
+        const updatesPresentation = presented?.launchId
+          === comparisonWatchLaunchId;
+        if (updatesPresentation) {
+          setRecoveryGuidance(identifiedRecoveryGuidance(status));
+          presentRecoveryStatus(status);
+          if (mutationSettled || watchedComparisonStatus.cancelRequested) {
+            setError(launchStatusMessage(status));
+          }
+        }
         if (!launchRetainsRecoveryIdentity(status)) {
           clearPendingMultiSpawnLaunchId(window.localStorage);
         }
-        const message = launchStatusMessage(status);
-        if (message) setActionError(message);
+        if (!mutation || mutationSettled) {
+          const message = launchStatusMessage(status);
+          if (message) setActionError(message);
+        }
       }).catch(() => {
         if (cancelled) return;
         // A transient read must not replace authoritative launch state. Retry
@@ -329,15 +431,16 @@ export function useMultiSpawn({
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [
+    presentRecoveryStatus,
     queryLaunchStatusInBackground,
-    recoveryStatus,
     setActionError,
-    setRecoveryStatus,
+    watchComparisonStatus,
+    watchedComparisonStatus,
   ]);
 
   useEffect(() => {
     const watched = watchedComparisonRef.current;
-    if (!watched || recoveryStatus?.launchId !== watched.launchId) return;
+    if (!watched || watchedComparisonStatus?.launchId !== watched.launchId) return;
     if (!workspaceVisible) {
       watchedComparisonRef.current = null;
       return;
@@ -361,7 +464,7 @@ export function useMultiSpawn({
       watchedComparisonRef.current = null;
       return;
     }
-    const comparison = recoveryStatus.comparison;
+    const comparison = watchedComparisonStatus.comparison;
     if (
       comparison?.state !== "completed"
       || !comparison.conversationId
@@ -417,7 +520,6 @@ export function useMultiSpawn({
     closeSidebar,
     conversationSelectionGenerationRef,
     focusWorkspace,
-    recoveryStatus,
     selectConversation,
     setActionError,
     showWorkspace,
@@ -425,6 +527,7 @@ export function useMultiSpawn({
     splitConversationId,
     splitSelectionTransitionsRef,
     updateSplitConversationId,
+    watchedComparisonStatus,
     workspaceVisible,
   ]);
 
@@ -444,9 +547,7 @@ export function useMultiSpawn({
       }));
       if (!isCurrent()) return null;
       if (cancellation.result.kind !== "duo.status") {
-        throw new Error(
-          "The local service returned an unexpected Duo recovery response.",
-        );
+        throw new Error(INVALID_DUO_RESPONSE);
       }
       status = cancellation.result;
     }
@@ -461,7 +562,7 @@ export function useMultiSpawn({
       payload: { projectIds: [...new Set(projectIds)] },
     }));
     if (event.result.kind !== "duo.pending") {
-      throw new Error("The local service returned an unexpected pending Duo result.");
+      throw new Error(INVALID_DUO_RESPONSE);
     }
     return event.result;
   }, [run]);
@@ -493,7 +594,7 @@ export function useMultiSpawn({
       const retained = statuses.filter(launchRetainsRecoveryIdentity);
       setRecoveryStatus(retained[0] ?? statuses[0] ?? null);
       setRecoveryGuidance(retained.flatMap(identifiedRecoveryGuidance));
-      const retainedMessages = retained.map(launchStatusMessage).filter(
+      const retainedMessages = retained.map(retainedLaunchBlockingMessage).filter(
         (message): message is string => Boolean(message),
       );
       const statusMessages = statuses.map(launchStatusMessage).filter(
@@ -507,7 +608,7 @@ export function useMultiSpawn({
       }
       if (pending.hasMore) {
         setError(
-          "More previous duo launches need reconciliation for these projects. Reconcile again before starting another pair.",
+          "More previous duo launches need reconciliation. Reconcile again.",
         );
         return "blocked";
       }
@@ -522,11 +623,12 @@ export function useMultiSpawn({
       } else {
         setError(null);
       }
-      return retained.length > 0 ? "blocked" : "clear";
+      const blocked = retained.length > 0;
+      return blocked ? "blocked" : "clear";
     } catch {
       if (!isCurrent()) return "stale";
       setError(
-        "Previous duo launches could not be discovered or reconciled yet. Refresh before launching another pair.",
+        "A previous duo launch could not be read. Refresh before another.",
       );
       return "blocked";
     }
@@ -540,10 +642,13 @@ export function useMultiSpawn({
     ) return;
     const generation = operationGenerationRef.current + 1;
     operationGenerationRef.current = generation;
-    setError(null);
+    setError("Checking previous duo launches.");
     setRecoveryGuidance([]);
     setRecoveryStatus(null);
     setRecheckingRecovery(false);
+    setAcknowledgingRecovery(false);
+    setRetryingComparison(false);
+    setCancellingComparison(false);
     setOpen(true);
     void reconcileProjectLaunches([snapshot.activeProjectId], generation);
   }, [reconcileProjectLaunches, setRecoveryStatus, snapshot?.activeProjectId]);
@@ -578,7 +683,7 @@ export function useMultiSpawn({
       }));
       if (operationGenerationRef.current !== generation) return;
       if (event.result.kind !== "duo.status") {
-        throw new Error("The local service returned an unexpected cancellation response.");
+        throw new Error(INVALID_DUO_RESPONSE);
       }
         setRecoveryGuidance(identifiedRecoveryGuidance(event.result));
       setRecoveryStatus(event.result);
@@ -616,6 +721,14 @@ export function useMultiSpawn({
     setRecoveryStatus(null);
     setRecheckingRecovery(false);
     setAcknowledgingRecovery(false);
+    /*
+     * These two are only cleared by a generation-guarded finally, and bumping
+     * the generation above invalidates that guard. Leaving them set kept the
+     * whole dialog disabled for the rest of the session, which removed the only
+     * way to release a locked comparison.
+     */
+    setRetryingComparison(false);
+    setCancellingComparison(false);
     setOpen(false);
   }, [cancelActiveLaunch, setRecoveryStatus]);
 
@@ -632,7 +745,7 @@ export function useMultiSpawn({
     const isCurrent = () => operationGenerationRef.current === generation;
     cancelRequestedRef.current = false;
     setSubmitting(true);
-    setError("Checking these projects for previous duo launches.");
+    setError("Checking previous duo launches.");
     const reconciliation = await reconcileProjectLaunches(
       [
         ...draft.sides.map(({ projectId }) => projectId),
@@ -686,7 +799,7 @@ export function useMultiSpawn({
       }));
       if (!isCurrent()) return;
       if (prepareEvent.result.kind !== "duo.prepared") {
-        throw new Error("The local service returned an unexpected duo response.");
+        throw new Error(INVALID_DUO_RESPONSE);
       }
       prepared = true;
       const sides = orderedPreparedSides(prepareEvent.result);
@@ -732,7 +845,7 @@ export function useMultiSpawn({
       }));
       if (!isCurrent()) return;
       if (dispatchEvent.result.kind !== "duo.status") {
-        throw new Error("The local service returned an unexpected dispatch response.");
+        throw new Error(INVALID_DUO_RESPONSE);
       }
       const launchMessage = launchStatusMessage(dispatchEvent.result);
       setRecoveryGuidance(identifiedRecoveryGuidance(dispatchEvent.result));
@@ -766,9 +879,7 @@ export function useMultiSpawn({
             }));
             if (!isCurrent()) return;
             if (recovery.result.kind !== "duo.status") {
-              throw new Error(
-                "The local service returned an unexpected Duo recovery response.",
-              );
+              throw new Error(INVALID_DUO_RESPONSE);
             }
             status = recovery.result;
           }
@@ -836,7 +947,7 @@ export function useMultiSpawn({
     setRecheckingRecovery(true);
     try {
       if (projectIds.length === 0) {
-        throw new Error("The projects for this Duo launch are unavailable.");
+        throw new Error(DUO_PROJECTS_UNAVAILABLE);
       }
       const reconciliation = await reconcileProjectLaunches(
         projectIds,
@@ -872,6 +983,11 @@ export function useMultiSpawn({
     const isCurrent = () =>
       operationGenerationRef.current === generation
       && recoveryStatusRef.current?.launchId === launchId;
+    comparisonMutationsRef.current[launchId] = {
+      launchId,
+      kind: "acknowledge",
+    };
+    watchComparisonStatus({ ...recoveryStatus });
     setAcknowledgingRecovery(true);
     setError(null);
     try {
@@ -881,18 +997,22 @@ export function useMultiSpawn({
       }));
       if (!isCurrent()) return;
       if (event.result.kind !== "duo.status" || event.result.state !== "failed") {
-        throw new Error(
-          "The local service did not confirm the Duo acknowledgement.",
-        );
+        throw new Error(INVALID_DUO_RESPONSE);
       }
+      delete comparisonMutationsRef.current[launchId];
       if (projectIds.length === 0) {
-        throw new Error("The projects for this Duo launch are unavailable.");
+        throw new Error(DUO_PROJECTS_UNAVAILABLE);
       }
       await reconcileProjectLaunches(projectIds, generation);
     } catch (caught) {
       if (!isCurrent()) return;
+      if (runtimeCommandDelivery(caught) === "ambiguous") {
+        setError("Duo acknowledgement may still be finishing. Re-check first.");
+        return;
+      }
+      delete comparisonMutationsRef.current[launchId];
       setError(
-        `The uncertain Duo launch could not be acknowledged. ${errorMessage(caught)}`,
+        `Duo acknowledgement failed. ${errorMessage(caught)}`,
       );
     } finally {
       if (operationGenerationRef.current === generation) {
@@ -905,6 +1025,49 @@ export function useMultiSpawn({
     recheckingRecovery,
     recoveryStatus,
     run,
+    watchComparisonStatus,
+  ]);
+
+  const applyComparisonMutationStatus = useCallback((
+    status: DuoStatusResult,
+  ): void => {
+    setRecoveryStatus(status);
+    const retained = launchRetainsRecoveryIdentity(status);
+    if (!retained) clearPendingMultiSpawnLaunchId(window.localStorage);
+    setError(launchStatusMessage(status));
+  }, [setRecoveryStatus]);
+
+  const reconcileAmbiguousComparisonMutation = useCallback(async (
+    mutation: ComparisonMutationIntent,
+    generation: number,
+  ): Promise<void> => {
+    if (operationGenerationRef.current !== generation) return;
+    try {
+      const status = await queryLaunchStatus(mutation.launchId);
+      if (operationGenerationRef.current !== generation) return;
+      setRecoveryGuidance(identifiedRecoveryGuidance(status));
+      if (comparisonMutationConfirmed(mutation, status)) {
+        delete comparisonMutationsRef.current[mutation.launchId];
+        applyComparisonMutationStatus(status);
+        return;
+      }
+      watchComparisonStatus(status);
+      presentRecoveryStatus(status);
+      setError(
+        "Comparison command still pending; re-check before another recovery action.",
+      );
+    } catch (statusError) {
+      if (operationGenerationRef.current !== generation) return;
+      setError(
+        "Comparison status is unavailable; outcome is uncertain. "
+        + `Re-check. ${errorMessage(statusError)}`,
+      );
+    }
+  }, [
+    applyComparisonMutationStatus,
+    presentRecoveryStatus,
+    queryLaunchStatus,
+    watchComparisonStatus,
   ]);
 
   const retryComparison = useCallback(async (): Promise<void> => {
@@ -919,6 +1082,16 @@ export function useMultiSpawn({
     ) return;
     const generation = operationGenerationRef.current;
     const launchId = recoveryStatus.launchId;
+    const mutation: ComparisonMutationIntent = {
+      launchId,
+      kind: "retry",
+      baselineAttempt: recoveryStatus.comparison.attempt,
+      baselineState: recoveryStatus.comparison.state,
+    };
+    comparisonMutationsRef.current[launchId] = mutation;
+    // A close invalidates foreground mutation callbacks. Keep an independent
+    // watch alive so its eventual authoritative state is still surfaced.
+    watchComparisonStatus({ ...recoveryStatus });
     setRetryingComparison(true);
     setError(null);
     try {
@@ -926,15 +1099,18 @@ export function useMultiSpawn({
         type: "duo.comparison.retry",
         payload: { launchId },
       }));
-      if (operationGenerationRef.current !== generation) return;
       if (event.result.kind !== "duo.status") {
-        throw new Error(
-          "The local service returned an unexpected judge retry response.",
-        );
+        throw new Error(INVALID_DUO_RESPONSE);
       }
-      setRecoveryStatus(event.result);
-      setError(launchStatusMessage(event.result));
+      delete comparisonMutationsRef.current[launchId];
+      if (operationGenerationRef.current !== generation) return;
+      applyComparisonMutationStatus(event.result);
     } catch (caught) {
+      if (runtimeCommandDelivery(caught) === "ambiguous") {
+        await reconcileAmbiguousComparisonMutation(mutation, generation);
+        return;
+      }
+      delete comparisonMutationsRef.current[launchId];
       if (operationGenerationRef.current !== generation) return;
       setError(`The third-model judge could not be retried. ${errorMessage(caught)}`);
     } finally {
@@ -943,11 +1119,13 @@ export function useMultiSpawn({
       }
     }
   }, [
+    applyComparisonMutationStatus,
     cancellingComparison,
     recoveryStatus,
     retryingComparison,
+    reconcileAmbiguousComparisonMutation,
     run,
-    setRecoveryStatus,
+    watchComparisonStatus,
   ]);
 
   const cancelComparison = useCallback(async (): Promise<void> => {
@@ -960,6 +1138,14 @@ export function useMultiSpawn({
     ) return;
     const generation = operationGenerationRef.current;
     const launchId = recoveryStatus.launchId;
+    const mutation: ComparisonMutationIntent = {
+      launchId,
+      kind: "cancel",
+      baselineAttempt: recoveryStatus.comparison.attempt,
+      baselineState: recoveryStatus.comparison.state,
+    };
+    comparisonMutationsRef.current[launchId] = mutation;
+    watchComparisonStatus({ ...recoveryStatus });
     setCancellingComparison(true);
     setError(null);
     try {
@@ -967,15 +1153,18 @@ export function useMultiSpawn({
         type: "duo.comparison.cancel",
         payload: { launchId },
       }));
-      if (operationGenerationRef.current !== generation) return;
       if (event.result.kind !== "duo.status") {
-        throw new Error(
-          "The local service returned an unexpected judge cancellation response.",
-        );
+        throw new Error(INVALID_DUO_RESPONSE);
       }
-      setRecoveryStatus(event.result);
-      setError(launchStatusMessage(event.result));
+      delete comparisonMutationsRef.current[launchId];
+      if (operationGenerationRef.current !== generation) return;
+      applyComparisonMutationStatus(event.result);
     } catch (caught) {
+      if (runtimeCommandDelivery(caught) === "ambiguous") {
+        await reconcileAmbiguousComparisonMutation(mutation, generation);
+        return;
+      }
+      delete comparisonMutationsRef.current[launchId];
       if (operationGenerationRef.current !== generation) return;
       setError(`The third-model comparison could not be cancelled. ${errorMessage(caught)}`);
     } finally {
@@ -984,17 +1173,23 @@ export function useMultiSpawn({
       }
     }
   }, [
+    applyComparisonMutationStatus,
     cancellingComparison,
     recoveryStatus,
     retryingComparison,
+    reconcileAmbiguousComparisonMutation,
     run,
-    setRecoveryStatus,
+    watchComparisonStatus,
   ]);
 
   return {
     open,
     submitting,
     cancelling,
+    launchBlocked: open && (
+      (recoveryStatus !== null && launchRetainsRecoveryIdentity(recoveryStatus))
+      || error?.includes("previous duo launch") === true
+    ),
     error,
     recoveryGuidance,
     recoveryStatus,

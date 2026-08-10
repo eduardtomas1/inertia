@@ -296,6 +296,41 @@ function networkScope(value: unknown): AgentApprovalNetworkScope | undefined {
   return { host, protocol };
 }
 
+function isKnownPersistentApprovalDecision(value: unknown): boolean {
+  const decision = objectValue(value);
+  if (!decision) return false;
+  if (hasOnlyKeys(decision, ["acceptWithExecpolicyAmendment"])) {
+    const amendment = objectValue(decision.acceptWithExecpolicyAmendment);
+    if (
+      !amendment
+      || !hasOnlyKeys(amendment, ["execpolicy_amendment"])
+      || !Array.isArray(amendment.execpolicy_amendment)
+      || amendment.execpolicy_amendment.length > 128
+    ) return false;
+    return amendment.execpolicy_amendment.every((part) =>
+      typeof part === "string"
+      && part.length <= 2_000
+      && !CONTROL_CHARACTERS.test(part)
+      && !UNSAFE_APPROVAL_FORMATTING.test(part)
+    );
+  }
+  if (!hasOnlyKeys(decision, ["applyNetworkPolicyAmendment"])) return false;
+  const wrapper = objectValue(decision.applyNetworkPolicyAmendment);
+  const amendment = objectValue(wrapper?.network_policy_amendment);
+  if (
+    !wrapper
+    || !hasOnlyKeys(wrapper, ["network_policy_amendment"])
+    || !amendment
+    || !hasOnlyKeys(amendment, ["action", "host"])
+  ) return false;
+  const host = strictBoundedText(amendment.host, 512);
+  return Boolean(
+    host
+    && host === host.trim()
+    && (amendment.action === "allow" || amendment.action === "deny"),
+  );
+}
+
 export function parseCodexApprovalRequest(method: string, params: JsonObject): ParsedCodexApprovalRequest | undefined {
   const requestId = randomUUID();
   const command = strictBoundedText(params.command, 4_000);
@@ -349,14 +384,20 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
   const rawAdvertisedDecisions = Array.isArray(params.availableDecisions)
     ? params.availableDecisions
     : undefined;
-  if (hasAdvertisedDecisions && !rawAdvertisedDecisions) return undefined;
+  if (
+    hasAdvertisedDecisions
+    && params.availableDecisions !== null
+    && !rawAdvertisedDecisions
+  ) return undefined;
   if (
     rawAdvertisedDecisions
     && (
       rawAdvertisedDecisions.length === 0
-      || rawAdvertisedDecisions.length > 3
+      || rawAdvertisedDecisions.length > 12
       || rawAdvertisedDecisions.some(
-        (value) => typeof value !== "string" || !decisionMap[value],
+        (value) => typeof value === "string"
+          ? !decisionMap[value] && value !== "acceptForSession"
+          : !isKnownPersistentApprovalDecision(value),
       )
     )
   ) return undefined;

@@ -1143,6 +1143,9 @@ describe("atomic Duo schema migration", () => {
         expect(trigger.sql).toMatch(/Cancel the active Duo launch/u);
         expect(trigger.sql).toMatch(/locked comparison/u);
         expect(trigger.sql).toMatch(/comparison_state/u);
+        expect(trigger.sql).toMatch(
+          /status\s*=\s*'running'\s+AND\s+launch\.cancel_requested\s*=\s*1/u,
+        );
         expect(trigger.sql).toMatch(/recovery-required/u);
         expect(trigger.sql).toMatch(/interrupted/u);
         expect(trigger.sql).toMatch(/live_turn\.status NOT IN/u);

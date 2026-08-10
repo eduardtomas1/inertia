@@ -18,12 +18,11 @@ import {
   type DatabaseMigrationDefinition,
 } from "./catalog";
 import { durableDataMigrationDefinitions } from "./durable-data";
-import { protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
+import { protectCancellingDuoDeletion, protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
 import { roadmapSettingsMigrationDefinitions } from "./roadmap-settings";
 import { quotedSqlIdentifier } from "./sql-identifiers";
-
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
 const MODEL_SELECTION_COLUMNS = [
   "model_selection_json",
@@ -1206,6 +1205,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
     migrationExtensions.push({ name: "ProtectInterruptedDuoRecovery", up: protectInterruptedPairedLaunchDeletion });
     migrationExtensions.push({ name: "PersistDuoThirdModelComparison", up: persistDuoThirdModelComparison });
     migrationExtensions.push(...roadmapSettingsMigrationDefinitions);
+    migrationExtensions.push({ name: "ProtectCancellingDuoProviderCleanup", up: protectCancellingDuoDeletion });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

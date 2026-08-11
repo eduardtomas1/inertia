@@ -115,15 +115,15 @@ test("opens Environment by default with reachable responsive geometry", async ({
           });
         }
 
+        const disclosures = environmentPanel.locator("details > summary");
+        await expect(disclosures).toHaveCount(3);
+        const branchDisclosure = disclosures.nth(0);
+        const commitDisclosure = disclosures.nth(1);
+        const serverDisclosure = disclosures.nth(2);
+
         if (theme === "dark") {
           const changes = environmentPanel.getByRole("button", { name: /Changes/u });
           await expect(changes).toBeEnabled();
-          const branchDisclosure = environmentPanel.locator("summary")
-            .filter({ hasText: "main" });
-          const commitDisclosure = environmentPanel.locator("summary")
-            .filter({ hasText: "Commit and Push" });
-          const serverDisclosure = environmentPanel.locator("summary")
-            .filter({ hasText: "Local Servers" });
           const repository = environmentPanel.getByRole("button", {
             name: /Open active workspace Inertia externally/u,
           });
@@ -138,8 +138,8 @@ test("opens Environment by default with reachable responsive geometry", async ({
           await expect(repository).toBeFocused();
         }
 
-        for (const label of ["main", "Commit and Push", "Local Servers"]) {
-          await environmentPanel.getByText(label, { exact: true }).click();
+        for (const disclosure of [branchDisclosure, commitDisclosure, serverDisclosure]) {
+          await disclosure.click();
         }
         await expect(environmentPanel.locator("code")).toContainText("/");
         await expect(environmentPanel.getByRole("button", {
@@ -168,8 +168,8 @@ test("opens Environment by default with reachable responsive geometry", async ({
             contentType: "image/png",
           });
         }
-        for (const label of ["main", "Commit and Push", "Local Servers"]) {
-          await environmentPanel.getByText(label, { exact: true }).click();
+        for (const disclosure of [branchDisclosure, commitDisclosure, serverDisclosure]) {
+          await disclosure.click();
         }
 
         if (theme === "dark") {

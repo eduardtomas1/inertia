@@ -29,6 +29,7 @@ export type ChangesPanelProps = {
   notes?: DiffReviewNote[];
   loading?: boolean;
   summaryLoading?: boolean;
+  questionRunning?: boolean;
   wrapLines?: boolean;
   lastReversal?: DiffReversalOperation | null;
   fileNavigator?: ReactNode;
@@ -130,6 +131,7 @@ export function ChangesPanel({
   notes = [],
   loading = false,
   summaryLoading = false,
+  questionRunning = false,
   wrapLines = true,
   lastReversal = null,
   fileNavigator,
@@ -222,6 +224,14 @@ export function ChangesPanel({
   }, [structured.fingerprint, selectedPath]);
 
   const clearSelection = () => { setSelection(null); setReviewAction(null); setComment(""); setSelectionError(null); setStoppingAsk(false); };
+  const stopActiveQuestion = () => {
+    if (!onCancelAsk || stoppingAsk) return;
+    setStoppingAsk(true);
+    void onCancelAsk().catch((error) => {
+      setSelectionError(error instanceof Error ? error.message : "The review question could not be stopped.");
+      setStoppingAsk(false);
+    });
+  };
   const chooseLine = (hunk: DiffHunk, index: number, extend: boolean) => {
     const start = extend && selection?.hunkId === hunk.id ? Math.min(selection.anchor, index) : index;
     const end = extend && selection?.hunkId === hunk.id ? Math.max(selection.anchor, index) : index;
@@ -359,6 +369,17 @@ export function ChangesPanel({
               {summaryLoading ? <><LoadingMark label="Summarizing changes" /><Square size={10} /></> : <Sparkles size={15} />}
             </IconButton>
           )}
+          {questionRunning && !(reviewAction === "ask" && submitting) && onCancelAsk && (
+            <button
+              type="button"
+              className="subtle-button"
+              disabled={stoppingAsk}
+              onClick={stopActiveQuestion}
+            >
+              {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={12} />}
+              {stoppingAsk ? "Stopping…" : "Stop asking"}
+            </button>
+          )}
           {onRefresh && <IconButton label="Refresh changes" onClick={onRefresh} disabled={diffBusy}>{diffBusy ? <LoadingMark label="Refreshing changes" /> : <RefreshCw size={15} />}</IconButton>}
         </div>
       </header>
@@ -475,7 +496,7 @@ export function ChangesPanel({
                       {selected && line.id === lastSelectedId && (
                         <div className="diff-selection-popover">
                           <div className="diff-selection-actions">
-                            <button type="button" onClick={() => setReviewAction("ask")}><CircleHelp size={13} />Ask about</button>
+                            <button type="button" disabled={questionRunning} onClick={() => setReviewAction("ask")}><CircleHelp size={13} />Ask about</button>
                             {agentRevision && <button type="button" onClick={() => setReviewAction("revise")}><WandSparkles size={13} />Request revision</button>}
                             {selectiveRevert && <button type="button" onClick={() => setReviewAction("revert")} disabled={!changedSelection || diff?.truncated}><RotateCcw size={13} />Revert</button>}
                             {persistentReview && <button type="button" onClick={() => setReviewAction("note")}><StickyNote size={13} />Note</button>}
@@ -508,13 +529,7 @@ export function ChangesPanel({
                                     type="button"
                                     className="subtle-button"
                                     disabled={stoppingAsk}
-                                    onClick={() => {
-                                      setStoppingAsk(true);
-                                      void onCancelAsk().catch((error) => {
-                                        setSelectionError(error instanceof Error ? error.message : "The review question could not be stopped.");
-                                        setStoppingAsk(false);
-                                      });
-                                    }}
+                                    onClick={stopActiveQuestion}
                                   >
                                     {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={12} />}
                                     {stoppingAsk ? "Stopping…" : "Stop asking"}
@@ -530,7 +545,7 @@ export function ChangesPanel({
                     </div>)}
                   </section>;
                 })}
-                {selectionError && <p className="panel-notice diff-selection-error">{selectionError}</p>}
+                {selectionError && <p className="panel-notice diff-selection-error" role="alert">{selectionError}</p>}
               </div>
             ) : <div className="panel-empty changes-empty"><FileCode2 size={22} /><h3>{selectedPath ? "Diff unavailable" : diffEmptyState?.title ?? "Select a file"}</h3><p>{selectedPath ? "This file is outside the bounded diff preview. Refresh after reducing the change set." : diffEmptyState?.detail ?? "Choose a changed file to inspect it."}</p></div>}
             {diff?.truncated && <p className="panel-notice diff-truncated">This diff is truncated to keep the workspace responsive.</p>}

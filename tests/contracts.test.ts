@@ -215,6 +215,23 @@ describe("client command contract", () => {
     }
   });
 
+  it("accepts only a scoped thread UUID for selection-question cancellation", () => {
+    const base = {
+      type: "review.selection.cancel",
+      requestId: crypto.randomUUID(),
+      payload: { conversationId: crypto.randomUUID() },
+    } as const;
+    expect(clientCommandSchema.safeParse(base).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { conversationId: "../thread" },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, runId: crypto.randomUUID() },
+    }).success).toBe(false);
+  });
+
   it("accepts scoped turn-artifact reads and rejects unbounded or cross-shaped payloads", () => {
     const projectId = crypto.randomUUID();
     const conversationId = crypto.randomUUID();

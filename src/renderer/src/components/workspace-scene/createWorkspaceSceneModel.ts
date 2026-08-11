@@ -579,6 +579,7 @@ export function createWorkspaceSceneModel({
         reviewStates: workspaceTools.reviewStates,
         notes: workspaceTools.reviewNotes,
         summaryLoading: busyAction === "review.summary.generate",
+        questionRunning: busyAction === "review.selection.ask",
         wrapLines: settings.wrapDiffs,
         lastReversal: workspaceTools.lastDiffReversal,
         onRefresh: () => {

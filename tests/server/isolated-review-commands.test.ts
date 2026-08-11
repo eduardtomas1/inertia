@@ -153,6 +153,31 @@ describe("isolated review revision authority", () => {
     );
   });
 
+  it("rejects cancellation when no selection question owns the thread", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    const { dependencies, stopConversation } = fixture(authority);
+
+    await expect(createIsolatedReviewCommandHandler(dependencies)(
+      {} as WebSocket,
+      {
+        type: "review.selection.cancel",
+        requestId,
+        payload: { conversationId },
+      },
+    )).rejects.toThrow(
+      "This thread does not have an active review question.",
+    );
+
+    expect(stopConversation).toHaveBeenCalledWith(
+      conversationId,
+      "selection-ask",
+    );
+    expect(dependencies.send).not.toHaveBeenCalled();
+  });
+
   it("holds conversation ownership from diff read through turn start", async () => {
     const authority = new ConversationWorkAuthority(() => ({
       projectId,

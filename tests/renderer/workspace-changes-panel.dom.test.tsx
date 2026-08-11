@@ -165,6 +165,50 @@ describe("WorkspaceChangesPanel repository scope", () => {
       .not.toBeInTheDocument());
   });
 
+  it("restores the stop control after selection UI unmounts and reports cancellation failure", async () => {
+    const onCancelAsk = vi.fn(async () => {
+      throw new Error("The active review question was already released.");
+    });
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{
+          patch: patchFor("README.md"),
+          truncated: false,
+          files: [changedFile("README.md")],
+        }}
+        selectedPath="README.md"
+        summary={null}
+        questionRunning
+        onSelectFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onCancelAsk={onCancelAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+
+    const stop = screen.getByRole("button", { name: "Stop asking" });
+    stop.focus();
+    expect(document.activeElement).toBe(stop);
+    fireEvent.click(stop);
+
+    expect(onCancelAsk).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(
+      "The active review question was already released.",
+    )).toHaveAttribute("role", "alert");
+    expect(screen.getByRole("button", { name: "Stop asking" })).toBeEnabled();
+
+    fireEvent.click(screen.getByText("after").closest("button")!);
+    expect(screen.getByRole("button", { name: "Ask about" })).toBeDisabled();
+  });
+
   it("switches one flat file navigator between repositories without losing identity", async () => {
     const onLoadRepositoryDiff = vi.fn(async (
       repositoryPath: string,

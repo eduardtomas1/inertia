@@ -80,6 +80,9 @@ describe("Duo worktree ownership adoption", () => {
       resolveModelRoute: resolveNativeModelRoute,
       harnessIdFor: (input: { harnessId: string }) => input.harnessId,
       cancel: () => true,
+      isRunning: () => false,
+      ownsRun: () => false,
+      stopOwned: async () => "missing" as const,
     } as unknown as TurnProviderRuntime;
     const turns = new TurnController(
       store,

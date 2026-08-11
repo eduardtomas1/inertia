@@ -24,6 +24,7 @@ export interface ProviderTerminalResumeAuthority {
 
 export class ProviderTerminalResumeRegistry {
   private readonly conversationIds = new Set<string>();
+  private readonly authorityReservationIds = new Map<string, string>();
 
   constructor(
     private readonly authority?: ProviderTerminalResumeAuthority,
@@ -39,6 +40,7 @@ export class ProviderTerminalResumeRegistry {
       return false;
     }
     this.conversationIds.add(conversationId);
+    this.authorityReservationIds.set(conversationId, conversationId);
     return true;
   }
 
@@ -46,23 +48,31 @@ export class ProviderTerminalResumeRegistry {
     conversationId: string,
     projectId: string,
     checkoutPath: string,
+    authorityReservationId = conversationId,
   ): boolean {
     if (this.conversationIds.has(conversationId)) return false;
     if (
       this.authority
       && !this.authority.reserveAtCheckout(
-        conversationId,
+        authorityReservationId,
         projectId,
         checkoutPath,
       )
     ) return false;
     this.conversationIds.add(conversationId);
+    this.authorityReservationIds.set(
+      conversationId,
+      authorityReservationId,
+    );
     return true;
   }
 
   release(conversationId: string): void {
     if (!this.conversationIds.delete(conversationId)) return;
-    this.authority?.release(conversationId);
+    const reservationId = this.authorityReservationIds.get(conversationId)
+      ?? conversationId;
+    this.authorityReservationIds.delete(conversationId);
+    this.authority?.release(reservationId);
   }
 }
 

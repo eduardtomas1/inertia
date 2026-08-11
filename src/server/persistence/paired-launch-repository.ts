@@ -245,6 +245,81 @@ export class PairedLaunchRepository {
     };
   }
 
+  deletionRecoveryLaunchIds(
+    scope: { conversationId: string } | { projectId: string },
+    limit: number,
+  ): PendingPairedLaunchIds {
+    const relation = "conversationId" in scope
+      ? `launch.comparison_conversation_id = ?
+        OR EXISTS (
+          SELECT 1 FROM paired_launch_sides AS related_side
+          WHERE related_side.launch_id = launch.id
+            AND related_side.conversation_id = ?
+        )`
+      : `EXISTS (
+          SELECT 1 FROM paired_launch_sides AS related_side
+          WHERE related_side.launch_id = launch.id
+            AND related_side.project_id = ?
+        )
+        OR EXISTS (
+          SELECT 1 FROM conversations AS comparison_conversation
+          WHERE comparison_conversation.id = launch.comparison_conversation_id
+            AND comparison_conversation.project_id = ?
+        )`;
+    const identity = "conversationId" in scope
+      ? scope.conversationId
+      : scope.projectId;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 32) {
+      throw new Error("The Duo deletion recovery bound is invalid.");
+    }
+    const rows = this.database.prepare(`
+      SELECT launch.id
+      FROM paired_launches AS launch
+      WHERE (${relation})
+        AND (
+          EXISTS (
+            SELECT 1
+            FROM paired_launch_sides AS live_side
+            JOIN agent_turns AS live_turn ON live_turn.id = live_side.turn_id
+            WHERE live_side.launch_id = launch.id
+              AND live_turn.status NOT IN (
+                'completed', 'failed', 'cancelled', 'interrupted'
+              )
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM agent_turns AS comparison_turn
+            WHERE comparison_turn.id = launch.comparison_turn_id
+              AND comparison_turn.status NOT IN (
+                'completed', 'failed', 'cancelled', 'interrupted'
+              )
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM workspace_runs AS active_turn_run
+            JOIN agent_turns AS owned_turn
+              ON owned_turn.run_id = active_turn_run.id
+            WHERE active_turn_run.status IN ('running', 'waiting')
+              AND (
+                owned_turn.id = launch.comparison_turn_id
+                OR EXISTS (
+                  SELECT 1
+                  FROM paired_launch_sides AS run_side
+                  WHERE run_side.launch_id = launch.id
+                    AND run_side.turn_id = owned_turn.id
+                )
+              )
+          )
+        )
+      ORDER BY launch.created_at ASC, launch.id ASC
+      LIMIT ?
+    `).all(identity, identity, limit + 1) as Array<{ id: string }>;
+    return {
+      launchIds: rows.slice(0, limit).map(({ id }) => id),
+      hasMore: rows.length > limit,
+    };
+  }
+
   assertConversationDeletionAllowed(conversationId: string): void {
     const blocked = this.database.prepare(`
       SELECT 1

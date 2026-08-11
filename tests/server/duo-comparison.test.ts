@@ -72,6 +72,7 @@ class PairProvider implements TurnProviderRuntime {
   readonly cancellations: string[] = [];
   readonly callbacks: ProviderRunCallbacks[] = [];
   readonly ownedStopResolvers = new Map<string, () => void>();
+  readonly activeConversations = new Set<string>();
   readonly completions: Array<{
     input: ProviderRunInput;
     resolve: (result: ProviderRunResult) => void;
@@ -93,15 +94,19 @@ class PairProvider implements TurnProviderRuntime {
   ): Promise<ProviderRunResult> {
     this.inputs.push(input);
     this.callbacks.push(callbacks);
+    const conversationId = input.conversationId ?? input.threadId;
     if (this.inputs.length === this.throwOnRun) {
       throw new Error("provider invocation rejected");
     }
     if (this.inputs.length === this.rejectOnRun) {
+      this.activeConversations.add(conversationId);
       return Promise.reject(new Error("backend launch rejected before harness start"));
     }
+    this.activeConversations.add(conversationId);
     callbacks.onStarted?.();
     const synchronousResult = this.synchronousResults.shift();
     if (synchronousResult !== undefined) {
+      this.activeConversations.delete(conversationId);
       return Promise.resolve({
         providerId: input.providerId,
         conversationId: input.conversationId ?? input.threadId,
@@ -110,10 +115,17 @@ class PairProvider implements TurnProviderRuntime {
         textTruncated: false,
         exitCode: 0,
         signal: null,
+        cleanupConfirmed: true,
       });
     }
     return new Promise((resolve) => {
-      this.completions.push({ input, resolve });
+      this.completions.push({
+        input,
+        resolve: (result) => {
+          this.activeConversations.delete(conversationId);
+          resolve(result);
+        },
+      });
     });
   }
 
@@ -127,6 +139,7 @@ class PairProvider implements TurnProviderRuntime {
         textTruncated: false,
         exitCode: 0,
         signal: null,
+        cleanupConfirmed: true,
       });
     }
   }
@@ -137,10 +150,15 @@ class PairProvider implements TurnProviderRuntime {
   }
 
   stopOwned(conversationId: string): Promise<"settled"> {
-    if (!this.deferOwnedStops) return Promise.resolve("settled");
+    this.cancellations.push(conversationId);
+    if (!this.deferOwnedStops) {
+      this.activeConversations.delete(conversationId);
+      return Promise.resolve("settled");
+    }
     return new Promise((resolve) => {
       this.ownedStopResolvers.set(conversationId, () => {
         this.ownedStopResolvers.delete(conversationId);
+        this.activeConversations.delete(conversationId);
         resolve("settled");
       });
     });
@@ -150,8 +168,19 @@ class PairProvider implements TurnProviderRuntime {
     this.ownedStopResolvers.get(conversationId)?.();
   }
 
-  isRunning(): boolean {
-    return this.inputs.length > 0;
+  isRunning(conversationId: string): boolean {
+    return this.activeConversations.has(conversationId);
+  }
+
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string | null },
+  ): boolean {
+    return this.activeConversations.has(conversationId)
+      && this.inputs.some((input) =>
+        input.conversationId === conversationId
+        && input.runId === identity.runId
+        && input.turnId === identity.turnId);
   }
 
   respondToApproval(
@@ -178,6 +207,14 @@ interface DuoTestRuntime {
   provider: PairProvider;
   store: RuntimeStore;
   workspace: string;
+}
+
+function confirmPriorRuntimeCleanup(store: RuntimeStore): void {
+  const ownership = store.providerRunOwnership.all();
+  expect(ownership.length).toBeGreaterThan(0);
+  for (const owned of ownership) {
+    store.providerRunOwnership.clear(owned.turnId, owned.runId);
+  }
 }
 
 async function createRuntime(
@@ -301,6 +338,7 @@ async function settleNextProvider(
     textTruncated: false,
     exitCode: status === "completed" ? 0 : 1,
     signal: null,
+    cleanupConfirmed: true,
     ...(status === "failed" ? { error: "Expected provider failure" } : {}),
   });
   await new Promise<void>((resolve) => setImmediate(resolve));
@@ -429,6 +467,7 @@ describe("Duo third-model comparison", () => {
         textTruncated: false,
         exitCode: 0,
         signal: null,
+      cleanupConfirmed: true,
       });
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
@@ -602,6 +641,7 @@ describe("Duo third-model comparison", () => {
       textTruncated: false,
       exitCode: 0,
       signal: null,
+    cleanupConfirmed: true,
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -816,6 +856,7 @@ describe("Duo third-model comparison", () => {
       runtime.workspace,
       { recoverInterruptedRuns: false },
     );
+    confirmPriorRuntimeCleanup(reopened);
     recoverInterruptedTurns(reopened);
     await reconcileInterruptedDuoLaunches(reopened);
 
@@ -899,6 +940,7 @@ describe("Duo third-model comparison", () => {
       textTruncated: false,
       exitCode: 0,
       signal: null,
+    cleanupConfirmed: true,
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -957,6 +999,7 @@ describe("Duo third-model comparison", () => {
       textTruncated: false,
       exitCode: 0,
       signal: null,
+    cleanupConfirmed: true,
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
     await launches.onTurnSettled(
@@ -1111,6 +1154,7 @@ describe("Duo third-model comparison", () => {
       runtime.workspace,
       { recoverInterruptedRuns: false },
     );
+    confirmPriorRuntimeCleanup(reopened);
     recoverInterruptedTurns(reopened);
     const provider = new PairProvider();
     const controller = new TurnController(

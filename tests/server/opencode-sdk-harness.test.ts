@@ -1007,15 +1007,27 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       { commands: { opencode: exitCommand } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
-    await expect(exitManager.run(nativeProviderRunInput({
+    const exitResult = await exitManager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-exit",
       cwd: exitRoot,
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("exited during startup") });
+    }));
+    expect(exitResult).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("exited during startup"),
+    });
     expect(missingManager.activeConversationIds()).toEqual([]);
-    expect(exitManager.activeConversationIds()).toEqual([]);
+    if (exitResult.cleanupConfirmed) {
+      expect(exitManager.activeConversationIds()).toEqual([]);
+      await expect(exitManager.disposeAll()).resolves.toBeUndefined();
+    } else {
+      expect(exitManager.activeConversationIds()).toEqual(["opencode-exit"]);
+      await expect(exitManager.disposeAll()).rejects.toThrow(
+        /cleanup could not be confirmed/iu,
+      );
+    }
   });
 });

@@ -18,7 +18,10 @@ interface RuntimeWorkerShutdownOptions {
 export async function completeRuntimeWorkerShutdown(
   options: RuntimeWorkerShutdownOptions,
 ): Promise<void> {
-  let shutdownConfirmed = true;
+  // A failed/partial startup has no returned runtime whose full owner set can
+  // be drained. Treat it as unconfirmed even when the visible start promise
+  // rejected before the supervisor observed a child.
+  let shutdownConfirmed = options.runtime !== null;
   try {
     await options.runtime?.close(options.cause);
   } catch {

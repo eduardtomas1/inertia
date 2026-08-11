@@ -40,7 +40,7 @@ describe("runtime process-tree termination", () => {
     const spawnProcessSync = vi.fn(() => ({
       pid: 1,
       output: [],
-      stdout: "100 1\n101 100\n102 101\n",
+      stdout: "100 1 T\n101 100 T\n102 101 T\n",
       stderr: "",
       status: 0,
       signal: null,
@@ -54,7 +54,7 @@ describe("runtime process-tree termination", () => {
 
     expect(spawnProcessSync).toHaveBeenCalledWith(
       "/bin/ps",
-      ["-axo", "pid=,ppid="],
+      ["-axo", "pid=,ppid=,stat="],
       expect.objectContaining({
         maxBuffer: 2 * 1024 * 1024,
         shell: false,
@@ -84,9 +84,9 @@ describe("runtime process-tree termination", () => {
       return true;
     });
     const tables = [
-      "100 1\n101 100\n",
-      "100 1\n101 100\n102 101\n",
-      "100 1\n101 100\n102 101\n",
+      "100 1 T\n101 100 T\n",
+      "100 1 T\n101 100 T\n102 101 T\n",
+      "100 1 T\n101 100 T\n102 101 T\n",
     ];
     const spawnProcessSync = vi.fn(() => ({
       stdout: tables.shift() ?? "",
@@ -105,6 +105,41 @@ describe("runtime process-tree termination", () => {
     expect(kill.mock.calls).toContainEqual([102, 0]);
   });
 
+  it("does not confirm a reparented tree when the root cannot be frozen", async () => {
+    const kill = vi.fn((pid: number, signal?: number | NodeJS.Signals): true => {
+      if (pid === 100 && signal === "SIGSTOP") throw new Error("ESRCH");
+      return true;
+    });
+    const spawnProcessSync = vi.fn(() => ({
+      stdout: "101 1 S\n",
+      status: 0,
+    }));
+
+    await expect(forceKillRuntimeProcessTree(100, {
+      platform: "linux",
+      kill,
+      spawnProcessSync: spawnProcessSync as never,
+    })).resolves.toBe(false);
+
+    expect(kill).toHaveBeenCalledWith(100, "SIGSTOP");
+    expect(spawnProcessSync).toHaveBeenCalledOnce();
+    expect(kill).not.toHaveBeenCalledWith(101, "SIGKILL");
+  });
+
+  it("does not confirm a zombie root as live cleanup authority", async () => {
+    const kill = vi.fn(() => true as const);
+    const spawnProcessSync = vi.fn(() => ({
+      stdout: "100 1 Z\n",
+      status: 0,
+    }));
+
+    await expect(forceKillRuntimeProcessTree(100, {
+      platform: "darwin",
+      kill,
+      spawnProcessSync: spawnProcessSync as never,
+    })).resolves.toBe(false);
+  });
+
   it("keeps the event loop responsive while a surviving descendant remains unconfirmed", async () => {
     vi.useFakeTimers();
     try {
@@ -118,7 +153,7 @@ describe("runtime process-tree termination", () => {
         return true;
       });
       const spawnProcessSync = vi.fn(() => ({
-        stdout: "100 1\n101 100\n",
+        stdout: "100 1 T\n101 100 T\n",
         status: 0,
       }));
       let eventLoopProgressed = false;

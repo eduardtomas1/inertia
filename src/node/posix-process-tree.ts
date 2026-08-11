@@ -24,7 +24,7 @@ export function posixDescendantPids(
 ): number[] {
   const children = new Map<number, number[]>();
   for (const line of processTable.split(/\r?\n/gu)) {
-    const match = line.trim().match(/^(\d+)\s+(\d+)$/u);
+    const match = line.trim().match(/^(\d+)\s+(\d+)(?:\s+\S+)?$/u);
     if (!match) continue;
     const pid = Number(match[1]);
     const parent = Number(match[2]);
@@ -47,6 +47,15 @@ export function posixDescendantPids(
   return descendants;
 }
 
+function liveProcessState(rootPid: number, processTable: string): boolean {
+  for (const line of processTable.split(/\r?\n/gu)) {
+    const match = line.trim().match(/^(\d+)\s+\d+\s+(\S+)$/u);
+    if (!match || Number(match[1]) !== rootPid) continue;
+    return !match[2]!.toUpperCase().startsWith("Z");
+  }
+  return false;
+}
+
 /**
  * Freezes an owned POSIX process tree, rescans for children created during the
  * snapshot race, then force-kills descendants before their parents.
@@ -67,7 +76,11 @@ export function forceKillPosixProcessTreeWithStatus(
   if (rootProcessGroup) {
     try { kill(-rootPid, "SIGSTOP"); } catch { /* It may not be a group leader. */ }
   }
-  try { kill(rootPid, "SIGSTOP"); } catch { /* It may already be gone. */ }
+  let rootFreezeConfirmed = false;
+  try {
+    kill(rootPid, "SIGSTOP");
+    rootFreezeConfirmed = true;
+  } catch { /* A missing root cannot authorize a descendant snapshot. */ }
 
   const frozen = new Set<number>();
   let killOrder: number[] = [];
@@ -76,11 +89,12 @@ export function forceKillPosixProcessTreeWithStatus(
     const remainingMs = deadlineAt - now();
     if (remainingMs <= 0) break;
     let descendants: number[] = [];
+    let processTable = "";
     let snapshotRead = false;
     try {
       const table = spawnProcessSync(
         PROCESS_TABLE_COMMAND,
-        ["-axo", "pid=,ppid="],
+        ["-axo", "pid=,ppid=,stat="],
         {
           encoding: "utf8",
           timeout: Math.max(
@@ -93,6 +107,7 @@ export function forceKillPosixProcessTreeWithStatus(
       );
       if (table.status === 0 && typeof table.stdout === "string") {
         snapshotRead = true;
+        processTable = table.stdout;
         descendants = posixDescendantPids(rootPid, table.stdout);
       }
     } catch {
@@ -102,7 +117,8 @@ export function forceKillPosixProcessTreeWithStatus(
     killOrder = descendants;
     const newlyDiscovered = descendants.filter((pid) => !frozen.has(pid));
     if (newlyDiscovered.length === 0) {
-      snapshotConfirmed = true;
+      snapshotConfirmed = rootFreezeConfirmed
+        && liveProcessState(rootPid, processTable);
       break;
     }
     for (const pid of [...newlyDiscovered].reverse()) {

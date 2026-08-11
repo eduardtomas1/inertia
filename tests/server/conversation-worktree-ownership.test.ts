@@ -14,8 +14,9 @@ import Database from "better-sqlite3";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startRuntime, type RunningRuntime } from "../../src/server";
+import type { RunningRuntime } from "../../src/server";
 import { RuntimeStore } from "../../src/server/database";
+import { startTestRuntime as startRuntime } from "../support/test-runtime";
 import {
   createWorktreeWithOwnershipReceipt,
   removeOwnedWorktree,
@@ -155,6 +156,8 @@ describe("ordinary conversation worktree ownership", () => {
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
     });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
@@ -634,6 +637,8 @@ describe("ordinary conversation worktree ownership", () => {
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
     });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
@@ -722,6 +727,8 @@ describe("ordinary conversation worktree ownership", () => {
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
     });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);

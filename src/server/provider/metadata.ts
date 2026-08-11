@@ -15,6 +15,7 @@ import {
   nativeHarnessId,
 } from "../../shared/model-routing";
 import { readCodexMetadata } from "../codex-metadata";
+import { isProcessTreeTerminationUnconfirmed } from "../process-lifecycle";
 import { readClaudeAgentSdkMetadata } from "./claude-agent-sdk-harness";
 import type { ProviderAuthState, ProviderId } from "./contracts";
 import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
@@ -372,6 +373,7 @@ export class ProviderMetadataCache {
   private readonly now: () => number;
   private readonly modelTtlMs: number;
   private readonly rateLimitTtlMs: number;
+  private cleanupUnconfirmed = false;
 
   constructor(options: ProviderMetadataCacheOptions = {}) {
     this.persistence = options.persistence;
@@ -389,6 +391,10 @@ export class ProviderMetadataCache {
 
   current(providerId: ProviderId): ProviderMetadata {
     return this.currentScoped(this.nativeScope(providerId));
+  }
+
+  processCleanupConfirmed(): boolean {
+    return !this.cleanupUnconfirmed;
   }
 
   currentScoped(scopeInput: ProviderMetadataScope): ProviderMetadata {
@@ -630,7 +636,8 @@ export class ProviderMetadataCache {
         cwd,
         fields,
       );
-    } catch {
+    } catch (error) {
+      this.cleanupUnconfirmed ||= isProcessTreeTerminationUnconfirmed(error);
       if (entry.revision !== revision) return;
       for (const field of fields) if (entry[field].values.length > 0) entry[field].stale = true;
       this.persist(entry);

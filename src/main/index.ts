@@ -67,6 +67,7 @@ import {
   hardenDesktopSession,
 } from "./preview-broker.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import { stopRuntimeAndPrivateConnect } from "./runtime-shutdown-coordination.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
@@ -955,11 +956,7 @@ function finishQuitAfterCleanup(): void {
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
   setImmediate(() => runtimeDiagnostics?.record("app.start"));
-  const testUpdateVersion = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_TEST_APP_UPDATE_VERSION === "string"
-    && /^v?\d+\.\d+\.\d+$/u.test(process.env.INERTIA_TEST_APP_UPDATE_VERSION)
-      ? process.env.INERTIA_TEST_APP_UPDATE_VERSION
-      : app.getVersion();
+  const testUpdateVersion = runtimeBootstrap.runtimeUpdateVersion(app.getVersion());
   appUpdateService = new AppUpdateService({
     currentVersion: app.getVersion(),
     fetch: process.env.NODE_ENV === "test"
@@ -974,13 +971,10 @@ async function bootstrap(): Promise<void> {
       resolveWindowBackground(windowThemePreference, nativeTheme.shouldUseDarkColors),
     );
   });
-  const dataDirectory = process.env.INERTIA_DATA_DIR
-    ? resolve(process.env.INERTIA_DATA_DIR)
-    : join(app.getPath("userData"), "runtime");
+  const dataDirectory = runtimeBootstrap.runtimeDataPath(process.env.INERTIA_DATA_DIR, app.getPath("userData"));
   runtimeDataDirectory = dataDirectory;
-  const defaultWorkspacePath = process.env.INERTIA_WORKSPACE_DIR
-    ? resolve(process.env.INERTIA_WORKSPACE_DIR)
-    : join(app.getPath("home"), "Inertia");
+  const bootstrapSafety = runtimeBootstrap.prepareRuntimeBootstrapSafety(dataDirectory);
+  const defaultWorkspacePath = runtimeBootstrap.runtimeWorkspacePath(process.env.INERTIA_WORKSPACE_DIR, app.getPath("home"));
   credentialVault = new CredentialVault(
     new ElectronSafeStorageBackend(safeStorage),
     new FileCredentialVaultPersistence(
@@ -996,7 +990,9 @@ async function bootstrap(): Promise<void> {
     createWindow(),
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
-    createAttachmentStorageSession(attachmentStorageRoot()),
+    createAttachmentStorageSession(attachmentStorageRoot(), {
+      preserveExisting: bootstrapSafety.preserveAttachments,
+    }),
   ]);
   attachmentStorageDirectory = attachmentStorage.directory;
   const orphanReservation = attachmentStorage.reservation;
@@ -1032,6 +1028,7 @@ async function bootstrap(): Promise<void> {
     : null;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
+    systemBootId: bootstrapSafety.systemBootId,
     attachmentBroker: {
       resolve: (attachmentId, signal) =>
         attachmentRegistry().resolve(attachmentId, signal),
@@ -1145,6 +1142,8 @@ async function bootstrap(): Promise<void> {
           process.kill(snapshot.pid, "SIGKILL");
           return snapshot;
         },
+        recycle: () => runtimeSupervisor?.testOnlyRecycle()
+          ?? Promise.reject(new Error("The test runtime is not running")),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);

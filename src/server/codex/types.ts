@@ -106,6 +106,7 @@ export interface CodexAppServerResult {
   failure?: ProviderRunFailure;
   compatibilityError?: "full-access-unsupported";
   continuationError?: "stale-provider-session";
+  cleanupConfirmed: boolean;
 }
 
 export interface CodexAppServerRun {

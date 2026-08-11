@@ -6,6 +6,7 @@ import type {
   AppSnapshot,
   ConversationShell,
   Project,
+  WorkspaceRun,
 } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
@@ -64,11 +65,14 @@ function conversation(
   };
 }
 
-function snapshot(conversations: ConversationShell[]): AppSnapshot {
+function snapshot(
+  conversations: ConversationShell[],
+  runs: WorkspaceRun[] = [],
+): AppSnapshot {
   return {
     projects: [project],
     conversations,
-    runs: [],
+    runs,
     providers: [],
     settings: {
       ...defaultSettings,
@@ -86,6 +90,7 @@ function snapshot(conversations: ConversationShell[]): AppSnapshot {
 function renderSidebar(
   conversations: ConversationShell[],
   onSelectConversation = vi.fn(),
+  runs: WorkspaceRun[] = [],
 ) {
   const onSnoozeConversation = vi.fn();
   return {
@@ -93,7 +98,7 @@ function renderSidebar(
     onSnoozeConversation,
     ...render(
       <Sidebar
-        snapshot={snapshot(conversations)}
+        snapshot={snapshot(conversations, runs)}
         connectionStatus="online"
         view="workspace"
         open
@@ -302,7 +307,22 @@ describe("compact Work sidebar", () => {
       new Date(2026, 7, 11, 9),
       { snoozedUntil: new Date(2026, 7, 12, 12).toISOString() },
     );
-    const view = renderSidebar([snoozed]);
+    const dismissedRun: WorkspaceRun = {
+      id: "run-snoozed",
+      kind: "agent",
+      projectId: project.id,
+      conversationId: snoozed.id,
+      actionId: null,
+      label: snoozed.title,
+      detail: null,
+      status: "failed",
+      attentionState: "dismissed",
+      canStop: false,
+      port: null,
+      startedAt: new Date(2026, 7, 11, 9).toISOString(),
+      finishedAt: new Date(2026, 7, 11, 9, 1).toISOString(),
+    };
+    const view = renderSidebar([snoozed], vi.fn(), [dismissedRun]);
 
     const snoozedToggle = screen.getByRole("button", { name: "Snoozed 1" });
     expect(snoozedToggle).toHaveAttribute("aria-expanded", "false");
@@ -310,7 +330,7 @@ describe("compact Work sidebar", () => {
     fireEvent.click(snoozedToggle);
 
     expect(screen.getByRole("button", {
-      name: "Restore this task, OpenAI, Studio, Repository acme-monorepo/apps/studio, Idle, Snoozed",
+      name: "Restore this task, OpenAI, Studio, Repository acme-monorepo/apps/studio, Failed, Snoozed",
     })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {
       name: "Thread actions for Restore this task",

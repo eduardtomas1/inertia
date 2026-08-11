@@ -285,7 +285,7 @@ export function groupWorkThreads(
     && !needsAttention
     && status !== "working"
   );
-  const snoozed = threads.filter((thread) => !thread.hidden && isOrdinarilySnoozed(thread));
+  const snoozed = threads.filter(isOrdinarilySnoozed);
   const active = threads.filter((thread) => (
     !thread.settled && !thread.hidden && !isOrdinarilySnoozed(thread)
   ));

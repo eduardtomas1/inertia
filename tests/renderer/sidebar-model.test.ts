@@ -411,7 +411,7 @@ describe("work-first chat model", () => {
       { id: "yesterday", threads: [] },
       { id: "earlier", threads: [] },
       { id: "done", threads: [] },
-      { id: "snoozed", threads: ["idle", "done"] },
+      { id: "snoozed", threads: ["dismissed", "idle", "done"] },
     ]);
   });
 

@@ -5,10 +5,7 @@ import {
   pullRequestCapabilityStateCoherent,
   runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent,
 } from "./server-event-discriminants";
-import {
-  APP_SHORTCUT_KEYS,
-  DEFAULT_APP_KEYBINDINGS,
-} from "../keybindings";
+import { APP_SHORTCUT_KEYS, DEFAULT_APP_KEYBINDINGS } from "../keybindings";
 import { modelSelectionSchema } from "../model-routing";
 import {
   modelBackendDefaultSchema,
@@ -24,6 +21,7 @@ import {
   DUO_LAUNCH_STATES,
 } from "./duo";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
+import { usageDashboardSchema } from "./usage-dashboard-schema";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -1126,6 +1124,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) =>
     providerMaintenanceOperation(value.operation),
+  "usage.dashboard": (value) => usageDashboardSchema(value.dashboard),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "project.created": (value) => stringField(value, "projectId"),
   "git.action": (value) => stringField(value, "message"),

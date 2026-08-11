@@ -25,10 +25,7 @@ import {
   type TurnGitArtifact,
   type WorkspaceRun,
 } from "../shared/contracts";
-import {
-  type ModelBackendDefault,
-  type PersistedModelBackendProfile,
-} from "../shared/backend-profile-settings";
+import { type ModelBackendDefault, type PersistedModelBackendProfile } from "../shared/backend-profile-settings";
 import type { BackendCompatibilityProbeResult } from "../shared/backend-probe";
 import type { PersistedProviderMetadata } from "./provider/metadata";
 import type { SanitizedTurnExecutionManifest } from "./runtime/turns/request-context";
@@ -79,12 +76,9 @@ import { SettingsRepository } from "./persistence/settings-repository";
 import { SnapshotRepository } from "./persistence/snapshot-repository";
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { TurnLedgerRepository } from "./persistence/turn-ledger-repository";
+import { UsageDashboardRepository, type UsageDashboardRange } from "./persistence/usage-dashboard-repository";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
-import type {
-  AgentTurnRow,
-  ConversationRow,
-  ProjectRow,
-} from "./persistence/rows";
+import type { AgentTurnRow, ConversationRow, ProjectRow } from "./persistence/rows";
 import type {
   AgentTurnLifecycleUpdate,
   AgentTurnSettlementResult,
@@ -141,6 +135,7 @@ export class RuntimeStore {
   private readonly snapshotRepository: SnapshotRepository;
   private readonly transcriptRepository: TranscriptRepository;
   private readonly turnLedgerRepository: TurnLedgerRepository;
+  private readonly usageDashboardRepository: UsageDashboardRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
   readonly conversationWork = new ConversationWorkAuthority((id) => ({ projectId: this.conversation(id).projectId, checkoutPath: this.conversationPath(id) }));
@@ -254,6 +249,7 @@ export class RuntimeStore {
       requireConversation: (conversationId) => this.requireConversation(conversationId),
       touchProject: (projectId, timestamp) => this.projectRepository.touch(projectId, timestamp),
     });
+    this.usageDashboardRepository = new UsageDashboardRepository(this.database);
     this.workspaceRunRepository = new WorkspaceRunRepository({
       database: this.database,
       requireConversation: (conversationId) => this.requireConversation(conversationId),
@@ -1030,6 +1026,10 @@ export class RuntimeStore {
 
   usageForConversation(conversationId: string): ThreadUsageSnapshot | null {
     return this.executionLedgerRepository.usageForConversation(conversationId);
+  }
+
+  usageDashboard(range: UsageDashboardRange) {
+    return this.usageDashboardRepository.read(range);
   }
 
   checkpointCount(conversationId: string): number {

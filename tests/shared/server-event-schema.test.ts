@@ -688,6 +688,108 @@ describe("server event request-result trust boundary", () => {
     expect(parseServerEvent(event({ kind: "git.status", status: { ...gitStatus, isRepository: false, root: null, branch: null, upstream: null, hasRemote: false, pullRequest: { available: false, remoteName: null, forge: null, unavailableReason: "no-remotes" } } }))).toBeTruthy();
   });
 });
+
+describe("usage dashboard event trust boundary", () => {
+  const measured = {
+    value: 0,
+    measuredRequests: 0,
+    totalRequests: 0,
+    coverage: "complete",
+  };
+  const dashboard = {
+    generatedAt: "2026-06-30T12:00:00.000Z",
+    range: {
+      days: 7,
+      fromInclusive: "2026-06-24T00:00:00.000Z",
+      toExclusive: "2026-07-01T00:00:00.000Z",
+      startDate: "2026-06-24",
+      endDate: "2026-06-30",
+      timeZone: "UTC",
+    },
+    totals: {
+      requestCount: 0,
+      completedCount: 0,
+      failedCount: 0,
+      cancelledCount: 0,
+      interruptedCount: 0,
+      activeDays: 0,
+      runtime: measured,
+      processedTokens: measured,
+    },
+    daily: Array.from({ length: 7 }, (_, index) => ({
+      date: `2026-06-${24 + index}`,
+      requestCount: 0,
+      completedCount: 0,
+      failedCount: 0,
+      cancelledCount: 0,
+      interruptedCount: 0,
+      runtime: measured,
+      processedTokens: measured,
+    })),
+    providers: [],
+    models: [],
+    tokens: {
+      input: measured,
+      cachedInput: measured,
+      cacheWriteInput: measured,
+      output: measured,
+      reasoningOutput: measured,
+    },
+    cost: { status: "unavailable", reason: "No pricing provenance." },
+  };
+
+  it("accepts safe aggregates and rejects malformed or duplicate series", () => {
+    expect(parseServerEvent(event({
+      kind: "usage.dashboard",
+      dashboard,
+    }))).toBeTruthy();
+    expect(() => parseServerEvent(event({
+      kind: "usage.dashboard",
+      dashboard: {
+        ...dashboard,
+        totals: { ...dashboard.totals, requestCount: -1 },
+      },
+    }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({
+      kind: "usage.dashboard",
+      dashboard: {
+        ...dashboard,
+        totals: {
+          ...dashboard.totals,
+          requestCount: 1,
+          processedTokens: { ...measured, coverage: "partial" },
+        },
+      },
+    }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({
+      kind: "usage.dashboard",
+      dashboard: {
+        ...dashboard,
+        totals: {
+          ...dashboard.totals,
+          processedTokens: { ...measured, coverage: "partial" },
+        },
+      },
+    }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({
+      kind: "usage.dashboard",
+      dashboard: {
+        ...dashboard,
+        daily: dashboard.daily.map((day) => ({
+          ...day,
+          date: dashboard.daily[0]!.date,
+        })),
+      },
+    }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({
+      kind: "usage.dashboard",
+      dashboard: {
+        ...dashboard,
+        range: { ...dashboard.range, days: "7" },
+      },
+    }))).toThrow("Malformed server event");
+  });
+});
 describe("server event settings trust boundary", () => {
   const snapshotEvent = (settings: unknown): unknown => ({
     type: "snapshot.updated",

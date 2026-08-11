@@ -57,6 +57,8 @@ describe("thread notifications", () => {
     expect(activeConversationIsVisible(visible)).toBe(true);
     expect(activeConversationIsVisible({ ...visible, view: "settings" }))
       .toBe(false);
+    expect(activeConversationIsVisible({ ...visible, view: "usage" }))
+      .toBe(false);
     expect(activeConversationIsVisible({ ...visible, commitDialogOpen: true }))
       .toBe(false);
     expect(activeConversationIsVisible({ ...visible, paletteOpen: true }))

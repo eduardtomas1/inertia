@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Activity,
+  BarChart3,
   Archive,
   ArchiveRestore,
   CheckCircle2,
@@ -45,7 +46,8 @@ import {
   type SidebarThreadStatus,
 } from "../utils/sidebarModel";
 import { IconButton, LoadingMark } from "./ui";
-import { loadMultiSpawnDialog, loadSettingsView } from "./lazySurfaceLoaders";
+import { loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
+import type { AppView } from "../appView";
 
 const ACTIVITY_HISTORY_PAGE = 10;
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
@@ -53,11 +55,11 @@ const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
 type SidebarProps = {
   snapshot: AppSnapshot | null;
   connectionStatus: ConnectionStatus;
-  view: "workspace" | "settings";
+  view: AppView;
   open: boolean;
   busy: boolean;
   onClose: () => void;
-  onViewChange: (view: "workspace" | "settings") => void;
+  onViewChange: (view: AppView) => void;
   onImportProject: () => void;
   onSelectProject: (project: Project) => void;
   onSelectConversation: (conversation: Conversation) => void;
@@ -298,7 +300,7 @@ function SidebarView({
     });
   };
 
-  const navigate = (nextView: "workspace" | "settings") => {
+  const navigate = (nextView: AppView) => {
     onViewChange(nextView);
     onClose();
   };
@@ -815,6 +817,9 @@ function SidebarView({
         </div>
 
         <div className="sidebar-footer">
+          <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
+            <BarChart3 size={16} /><span>Usage</span>
+          </button>
           <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} /><span>Settings</span>
           </button>

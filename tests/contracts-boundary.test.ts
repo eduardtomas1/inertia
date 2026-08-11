@@ -12,6 +12,7 @@ import * as eventExports from "../src/shared/contracts/events";
 import * as modelRoutingExports from "../src/shared/model-routing";
 import * as providerMaintenanceExports from "../src/shared/provider-maintenance";
 import * as providerTerminalResumeExports from "../src/shared/provider-terminal-resume";
+import * as usageDashboardExports from "../src/shared/contracts/usage-dashboard";
 import * as workspaceExports from "../src/shared/contracts/workspace";
 import { clientCommandSchema } from "../src/shared/contracts/client-command";
 
@@ -29,6 +30,7 @@ describe("shared contracts boundary", () => {
       ...clientCommandExports,
       ...duoExports,
       ...eventExports,
+      ...usageDashboardExports,
       ...workspaceExports,
     };
 
@@ -48,6 +50,7 @@ describe("shared contracts boundary", () => {
 
     expect(commandTypes).toEqual([
       "app.refresh",
+      "usage.dashboard.get",
       "provider.refresh",
       "provider.auth.start",
       "provider.maintenance.refresh",

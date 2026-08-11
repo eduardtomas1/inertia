@@ -21,4 +21,5 @@ export * from "./contracts/conversation-detail";
 export * from "./contracts/duo";
 export * from "./contracts/events";
 export * from "./contracts/git";
+export * from "./contracts/usage-dashboard";
 export * from "./contracts/workspace";

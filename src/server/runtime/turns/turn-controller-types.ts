@@ -203,6 +203,9 @@ export type TurnTerminalCause =
 export interface NativeGoalStartAcknowledgement {
   objective?: string;
   tokenBudget?: number | null;
+  latestGoal: ProviderGoalSnapshot | null;
+  cleared: boolean;
+  settlementQueued: boolean;
   resolve(goal: ProviderGoalSnapshot): void;
   reject(error: Error): void;
 }

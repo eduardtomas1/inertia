@@ -349,6 +349,116 @@ describe("TurnController native goal lifecycle", () => {
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(false));
   });
 
+  it("returns the latest same-revision goal projected after the start acknowledgement", async () => {
+    const runtime = await goalRuntime();
+    const warmup = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Establish the provider thread.",
+    });
+    runtime.controller.start(warmup.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "session",
+      sessionId: "thread-latest-goal-start",
+    });
+    runtime.provider.resolve();
+    await vi.waitFor(() =>
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false));
+
+    const pendingGoal = runtime.controller.setNativeGoal({
+      conversationId: runtime.conversationId,
+      objective: "Finish within one revision",
+      status: "active",
+      tokenBudget: 1_000,
+    });
+    await vi.waitFor(() => expect(runtime.provider.runCount).toBe(2));
+    const activeGoal: ProviderGoalSnapshot = {
+      objective: "Finish within one revision",
+      status: "active",
+      tokenBudget: 1_000,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    };
+    const completedGoal: ProviderGoalSnapshot = {
+      ...activeGoal,
+      status: "complete",
+      tokensUsed: 250,
+      timeUsedSeconds: 1,
+    };
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "goal-updated",
+      sessionId: "thread-latest-goal-start",
+      goal: activeGoal,
+    });
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "goal-updated",
+      sessionId: "thread-latest-goal-start",
+      goal: completedGoal,
+    });
+
+    await expect(pendingGoal).resolves.toMatchObject({
+      status: "complete",
+      tokensUsed: 250,
+    });
+    expect(runtime.store.agentGoals(runtime.conversationId)).toContainEqual(
+      expect.objectContaining({ status: "complete", tokensUsed: 250 }),
+    );
+  });
+
+  it("does not revive a goal cleared after its start acknowledgement", async () => {
+    const runtime = await goalRuntime();
+    const warmup = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Establish the provider thread.",
+    });
+    runtime.controller.start(warmup.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "session",
+      sessionId: "thread-cleared-goal-start",
+    });
+    runtime.provider.resolve();
+    await vi.waitFor(() =>
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false));
+
+    const pendingGoal = runtime.controller.setNativeGoal({
+      conversationId: runtime.conversationId,
+      objective: "Clear before acknowledgement settles",
+      status: "active",
+      tokenBudget: 1_000,
+    });
+    await vi.waitFor(() => expect(runtime.provider.runCount).toBe(2));
+    const activeGoal: ProviderGoalSnapshot = {
+      objective: "Clear before acknowledgement settles",
+      status: "active",
+      tokenBudget: 1_000,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    };
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "goal-updated",
+      sessionId: "thread-cleared-goal-start",
+      goal: activeGoal,
+    });
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "goal-cleared",
+      sessionId: "thread-cleared-goal-start",
+    });
+
+    await expect(pendingGoal).rejects.toThrow(
+      "The Codex goal was cleared before it was confirmed.",
+    );
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([]);
+  });
+
   it("routes live mutations through the exact active turn identity", async () => {
     const runtime = await goalRuntime();
     const queued = runtime.controller.queue({

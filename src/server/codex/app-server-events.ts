@@ -650,9 +650,19 @@ export class CodexAppServerEvents {
     // timestamps cannot distinguish the response from the later update.
     const supersededByNotification =
       this.nativeGoalSequence > sequenceAtResponse
-      && this.nativeGoalUpdatedAt !== null
-      && update.goal.updatedAt <= this.nativeGoalUpdatedAt;
+      && (
+        this.nativeGoalSnapshot === null
+        || (
+          this.nativeGoalUpdatedAt !== null
+          && update.goal.updatedAt <= this.nativeGoalUpdatedAt
+        )
+      );
     if (supersededByNotification) {
+      if (!this.nativeGoalSnapshot) {
+        throw new Error(
+          "Codex cleared the goal before the update completed.",
+        );
+      }
       return this.nativeGoalSnapshot;
     }
     if (!this.acceptGoalUpdate(update.threadId, update.goal, "response")) {

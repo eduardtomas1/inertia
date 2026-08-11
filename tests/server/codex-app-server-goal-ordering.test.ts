@@ -524,6 +524,26 @@ describe("Codex App Server goal event ordering", () => {
     }
   });
 
+  it("does not let a goal response revive a later clear", () => {
+    const harness = eventHarness();
+    try {
+      const sequenceBeforeRequest = harness.events.goalProjectionSequence();
+      harness.events.handleNotification("thread/goal/cleared", {
+        threadId: THREAD_ID,
+      });
+
+      expect(() => harness.events.projectGoalResponse(
+        THREAD_ID,
+        goalUpdate("active", 1_800_000_010).goal,
+        sequenceBeforeRequest,
+      )).toThrow("Codex cleared the goal before the update completed.");
+      expect(harness.goalClears).toEqual([THREAD_ID]);
+      expect(harness.goalStatuses).toEqual([]);
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
   it("lets an equal-revision response win over pre-response notifications", () => {
     const harness = eventHarness();
     try {

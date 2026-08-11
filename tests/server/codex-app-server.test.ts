@@ -224,6 +224,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       ]);
       return;
     }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-clear-response-ordering") {
+      sendBatch([
+        { id: message.id, result: { goal } },
+        { method: "thread/goal/cleared", params: { threadId } },
+      ]);
+      return;
+    }
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-response-ordering") {
       const terminalGoal = { ...goal, updatedAt: 1800000011 };
       sendBatch([
@@ -304,6 +311,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     if (
       process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-clear-response-ordering"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-response-ordering"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-terminal-response-ordering"
@@ -1252,6 +1260,45 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       "active",
       "complete",
     ]);
+  });
+
+  it("preserves a clear decoded after a goal mutation response", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO =
+      "goal-set-clear-response-ordering";
+    const updates: ProviderGoalSnapshot[] = [];
+    const clears: string[] = [];
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the clear-ordering connection open",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-set-clear-response-ordering",
+      onStatus: () => markRunning(),
+      onGoalUpdated: (_threadId, goal) => updates.push(goal),
+      onGoalCleared: (threadId) => clears.push(threadId),
+    });
+    await running;
+
+    await expect(run.setGoal({
+      objective: "Do not revive this goal",
+      status: "active",
+      tokenBudget: null,
+    })).rejects.toThrow(
+      "Codex cleared the goal before the update completed.",
+    );
+    expect(clears).toEqual(["thread-goal-set-clear-response-ordering"]);
+    expect(updates).toEqual([]);
+
+    run.cancel(true);
+    await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
   });
 
   it("keeps an awaited continuation alive through a terminal goal response", async () => {

@@ -337,6 +337,47 @@ describe("AgentWorkflowController", () => {
     expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
   });
 
+  it("preserves a same-revision goal event newer than the start acknowledgement", async () => {
+    const runtime = harness();
+    const acknowledgement = {
+      objective: "Run until verified",
+      status: "active" as const,
+      tokenBudget: 12_000,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    };
+    const terminal = nativeGoal({
+      objective: acknowledgement.objective,
+      status: "complete",
+      tokenBudget: acknowledgement.tokenBudget,
+      tokensUsed: 500,
+      timeUsedSeconds: 1,
+      createdAt: acknowledgement.createdAt,
+      updatedAt: acknowledgement.updatedAt,
+    });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => {
+        runtime.goals.push(terminal);
+        return acknowledgement;
+      }),
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: acknowledgement.objective,
+      status: "active",
+      tokenBudget: acknowledgement.tokenBudget,
+    })).resolves.toMatchObject({
+      status: "complete",
+      tokensUsed: 500,
+    });
+    expect(runtime.goals).toEqual([terminal]);
+  });
+
   it("routes an active native goal clear through its exact live run", async () => {
     const runtime = harness({ goals: [nativeGoal()] });
     const clearNativeGoal = vi.fn(async () => true);

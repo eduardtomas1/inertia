@@ -489,6 +489,10 @@ export class AgentWorkflowController {
             "The Codex thread changed before the goal could be updated.",
           );
         }
+        const observed = this.nativeGoal(
+          input.conversationId,
+          providerSessionId,
+        );
         const runtimeGoal = await this.nativeGoalRuntime?.setNativeGoal({
           conversationId: input.conversationId,
           ...(input.objective !== undefined
@@ -511,11 +515,22 @@ export class AgentWorkflowController {
             input.conversationId,
             providerSessionId,
           );
-          if (this.sameNativeGoalRevision(current, candidate)) {
+          // Provider events are projected synchronously, while the goal-start
+          // acknowledgement resumes on a later microtask. A terminal update
+          // from the same decoder batch can therefore already be newer than
+          // the acknowledged snapshot even when Codex timestamps both within
+          // the same second. Preserve that event ordering, and let a clear
+          // tombstone reject an acknowledgement that it superseded.
+          if (
+            current
+            && current.providerSessionId === candidate.providerSessionId
+            && !this.sameNativeGoalRevision(observed, current)
+            && current.updatedAt >= candidate.updatedAt
+          ) {
             this.nativeGoalRefreshWarnings.delete(input.conversationId);
-            return current!;
+            return current;
           }
-          const stored = this.store.mergeNativeAgentGoal(candidate, true).goal;
+          const stored = this.store.mergeNativeAgentGoal(candidate).goal;
           if (!stored) {
             throw new RuntimeRequestError(
               "The Codex goal changed before the update could be stored.",

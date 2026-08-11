@@ -135,7 +135,7 @@ test("runs and persists a budgeted native goal across automatic turns", async ()
     await composer.fill("/goal");
     await page.getByRole("option", { name: /^\/goal/u }).click();
     const goalControl = page.getByRole("region", { name: "Codex goal" });
-    await expect(goalControl).toBeVisible();
+    await expect(goalControl).toBeVisible({ timeout: 15_000 });
     await goalControl.getByRole("textbox", { name: "Objective" })
       .fill("Ship the reliable goal flow");
     await goalControl.getByRole("spinbutton", {

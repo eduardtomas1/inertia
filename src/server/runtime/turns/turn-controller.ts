@@ -236,6 +236,9 @@ export class TurnController {
         ...(input.tokenBudget !== undefined
           ? { tokenBudget: input.tokenBudget }
           : {}),
+        latestGoal: null,
+        cleared: false,
+        settlementQueued: false,
         resolve,
         reject,
       };
@@ -914,13 +917,23 @@ export class TurnController {
       if (
         goalStart
         && event.type === "goal-updated"
+        && this.matchesNativeGoalSession(active, event)
         && (goalStart.objective === undefined
           || event.goal.objective === goalStart.objective)
         && (goalStart.tokenBudget === undefined
           || event.goal.tokenBudget === goalStart.tokenBudget)
       ) {
-        active.nativeGoalStartAcknowledgement = null;
-        goalStart.resolve(event.goal);
+        goalStart.latestGoal = event.goal;
+        goalStart.cleared = false;
+        this.queueNativeGoalStartSettlement(active, goalStart);
+      } else if (
+        goalStart
+        && event.type === "goal-cleared"
+        && this.matchesNativeGoalSession(active, event)
+      ) {
+        goalStart.latestGoal = null;
+        goalStart.cleared = true;
+        this.queueNativeGoalStartSettlement(active, goalStart);
       }
       return true;
     } catch (error) {
@@ -1121,6 +1134,42 @@ export class TurnController {
     active.inputIds.clear();
     this.activeByConversation.delete(active.conversation.id);
     this.activeByTurn.delete(active.turn.id);
+  }
+
+  private matchesNativeGoalSession(
+    active: ActiveTurn,
+    event: Extract<ProviderEvent, {
+      type: "goal-updated" | "goal-cleared";
+    }>,
+  ): boolean {
+    const expectedSessionId = active.sessionAfter
+      ?? active.providerInput.sessionId
+      ?? active.conversation.providerSessionId;
+    return event.providerId === "codex"
+      && active.turn.harnessId === "codex-app-server"
+      && Boolean(expectedSessionId)
+      && event.sessionId === expectedSessionId;
+  }
+
+  private queueNativeGoalStartSettlement(
+    active: ActiveTurn,
+    acknowledgement: NonNullable<ActiveTurn["nativeGoalStartAcknowledgement"]>,
+  ): void {
+    if (acknowledgement.settlementQueued) return;
+    acknowledgement.settlementQueued = true;
+    queueMicrotask(() => {
+      if (active.nativeGoalStartAcknowledgement !== acknowledgement) return;
+      active.nativeGoalStartAcknowledgement = null;
+      if (acknowledgement.cleared) {
+        acknowledgement.reject(
+          new Error("The Codex goal was cleared before it was confirmed."),
+        );
+        return;
+      }
+      if (acknowledgement.latestGoal) {
+        acknowledgement.resolve(acknowledgement.latestGoal);
+      }
+    });
   }
 
   private broadcastConversationShell(active: ActiveTurn): void {

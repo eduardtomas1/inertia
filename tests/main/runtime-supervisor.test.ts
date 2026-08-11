@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -20,7 +20,7 @@ import {
 
 const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;
-const dataDirectory = resolve(tmpdir(), "inertia data");
+let dataDirectory: string;
 const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
 const attachmentId = "33333333-3333-4333-8333-333333333333";
 const trustedAttachment = {
@@ -136,18 +136,12 @@ function createHarness(options: {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  rmSync(join(dataDirectory, ".runtime-cleanup-receipts"), {
-    recursive: true,
-    force: true,
-  });
-  rmSync(join(dataDirectory, ".runtime-generation-leases"), {
-    recursive: true,
-    force: true,
-  });
+  dataDirectory = mkdtempSync(join(tmpdir(), "inertia-supervisor-"));
 });
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
+  rmSync(dataDirectory, { recursive: true, force: true });
 });
 
 describe("RuntimeSupervisor", () => {

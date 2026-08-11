@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
@@ -20,6 +21,7 @@ export function runtimeWorkspacePath(configuredPath: string | undefined, homePat
 export function prepareRuntimeBootstrapSafety(
   dataDirectory: string,
 ): RuntimeBootstrapSafety {
+  mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
   const systemBootId = readSystemBootId() ?? "unavailable";
   const generationLeases = new RuntimeGenerationLeaseJournal(dataDirectory);
   const receiptsRetired = runtimeCleanupReceiptIds(dataDirectory).every(

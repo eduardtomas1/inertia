@@ -6,7 +6,6 @@ import {
   fsyncSync,
   linkSync,
   lstatSync,
-  mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
@@ -15,6 +14,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+
+import {
+  journalDirectoryIsPinned,
+  pinJournalDirectory,
+  type PinnedJournalDirectory,
+} from "../node/pinned-journal-directory.js";
 
 const MAX_RECEIPTS = 32;
 const RECEIPT_DIRECTORY = ".runtime-cleanup-receipts";
@@ -28,10 +33,6 @@ interface RuntimeCleanupReceipt {
 
 function receiptName(runtimeGenerationId: string): string {
   return `${createHash("sha256").update(runtimeGenerationId).digest("hex")}.json`;
-}
-
-function receiptDirectory(dataDirectory: string): string {
-  return join(dataDirectory, RECEIPT_DIRECTORY);
 }
 
 function fsyncDirectory(directory: string): void {
@@ -77,11 +78,15 @@ function parseStoredReceipt(path: string): RuntimeCleanupReceipt | null {
   }
 }
 
-export function runtimeCleanupReceiptIds(dataDirectory: string): string[] {
-  const directory = receiptDirectory(dataDirectory);
-  if (!existsSync(directory)) return [];
+function readRuntimeCleanupReceiptIds(
+  directory: PinnedJournalDirectory | null,
+): string[] {
+  if (!directory) return [];
+  if (!journalDirectoryIsPinned(directory)) {
+    throw new Error("The runtime cleanup receipt directory identity changed.");
+  }
   const receipts: RuntimeCleanupReceipt[] = [];
-  const names = readdirSync(directory);
+  const names = readdirSync(directory.path);
   if (names.length > MAX_RECEIPTS * 3) {
     throw new Error("The runtime cleanup receipt storage bound was exceeded.");
   }
@@ -90,12 +95,15 @@ export function runtimeCleanupReceiptIds(dataDirectory: string): string[] {
       /^\.[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(tmp|consume)$/iu,
     );
     if (transient) {
-      const path = join(directory, name);
+      if (!journalDirectoryIsPinned(directory)) {
+        throw new Error("The runtime cleanup receipt directory identity changed.");
+      }
+      const path = join(directory.path, name);
       const receipt = parseStoredReceipt(path);
       if (!receipt) throw new Error("A runtime cleanup receipt transient is invalid.");
       if (transient[1] === "tmp") {
         const expectedName = receiptName(receipt.runtimeGenerationId);
-        const target = join(directory, expectedName);
+        const target = join(directory.path, expectedName);
         if (existsSync(target)) {
           const published = parseReceipt(target, expectedName);
           if (
@@ -104,6 +112,9 @@ export function runtimeCleanupReceiptIds(dataDirectory: string): string[] {
           ) throw new Error("A runtime cleanup receipt transient conflicts.");
         } else {
           try {
+            if (!journalDirectoryIsPinned(directory)) {
+              throw new Error("The runtime cleanup receipt directory identity changed.");
+            }
             linkSync(path, target);
             receipts.push(receipt);
           } catch {
@@ -112,8 +123,11 @@ export function runtimeCleanupReceiptIds(dataDirectory: string): string[] {
         }
       }
       try {
+        if (!journalDirectoryIsPinned(directory)) {
+          throw new Error("The runtime cleanup receipt directory identity changed.");
+        }
         unlinkSync(path);
-        fsyncDirectory(directory);
+        fsyncDirectory(directory.path);
       } catch {
         throw new Error("A runtime cleanup receipt transient could not be retired.");
       }
@@ -122,7 +136,10 @@ export function runtimeCleanupReceiptIds(dataDirectory: string): string[] {
     if (!/^[0-9a-f]{64}\.json$/u.test(name)) {
       throw new Error("Runtime cleanup receipt storage contains a foreign entry.");
     }
-    const receipt = parseReceipt(join(directory, name), name);
+    if (!journalDirectoryIsPinned(directory)) {
+      throw new Error("The runtime cleanup receipt directory identity changed.");
+    }
+    const receipt = parseReceipt(join(directory.path, name), name);
     if (!receipt) throw new Error("A runtime cleanup receipt is invalid.");
     receipts.push(receipt);
     if (receipts.length > MAX_RECEIPTS) {
@@ -136,36 +153,90 @@ export function runtimeCleanupReceiptIds(dataDirectory: string): string[] {
     runtimeGenerationId);
 }
 
-export function publishRuntimeCleanupReceipt(
-  dataDirectory: string,
+export function runtimeCleanupReceiptIds(dataDirectory: string): string[] {
+  return readRuntimeCleanupReceiptIds(pinJournalDirectory(
+    dataDirectory,
+    RECEIPT_DIRECTORY,
+    false,
+  ));
+}
+
+function publishReceipt(
+  directory: PinnedJournalDirectory,
   runtimeGenerationId: string,
 ): boolean {
-  if (!GENERATION_PATTERN.test(runtimeGenerationId)) return false;
   let temporary: string | null = null;
   try {
-    const directory = receiptDirectory(dataDirectory);
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    if (!journalDirectoryIsPinned(directory)) return false;
     const expectedName = receiptName(runtimeGenerationId);
-    const target = join(directory, expectedName);
+    const target = join(directory.path, expectedName);
     if (existsSync(target)) return parseReceipt(target, expectedName) !== null;
-    if (runtimeCleanupReceiptIds(dataDirectory).length >= MAX_RECEIPTS) return false;
-    temporary = join(directory, `.${randomUUID()}.tmp`);
+    if (readRuntimeCleanupReceiptIds(directory).length >= MAX_RECEIPTS) return false;
+    temporary = join(directory.path, `.${randomUUID()}.tmp`);
+    if (!journalDirectoryIsPinned(directory)) return false;
     writeFileSync(temporary, JSON.stringify({
       runtimeGenerationId,
       confirmedAt: new Date().toISOString(),
     }), { encoding: "utf8", mode: 0o600, flag: "wx", flush: true });
     chmodSync(temporary, 0o600);
+    if (!journalDirectoryIsPinned(directory)) return false;
     linkSync(temporary, target);
+    if (!journalDirectoryIsPinned(directory)) return false;
     unlinkSync(temporary);
     temporary = null;
-    fsyncDirectory(directory);
+    fsyncDirectory(directory.path);
     return true;
   } catch {
-    if (temporary) {
+    if (temporary && journalDirectoryIsPinned(directory)) {
       try { unlinkSync(temporary); } catch { /* Nothing was published. */ }
     }
     return false;
   }
+}
+
+export function publishRuntimeCleanupReceipt(
+  dataDirectory: string,
+  runtimeGenerationId: string,
+): boolean {
+  if (!GENERATION_PATTERN.test(runtimeGenerationId)) return false;
+  try {
+    const directory = pinJournalDirectory(dataDirectory, RECEIPT_DIRECTORY, true);
+    return directory ? publishReceipt(directory, runtimeGenerationId) : false;
+  } catch {
+    return false;
+  }
+}
+
+function consumeReceipt(
+  directory: PinnedJournalDirectory,
+  runtimeGenerationId: string,
+): boolean {
+  const expectedName = receiptName(runtimeGenerationId);
+  const target = join(directory.path, expectedName);
+  const quarantine = join(directory.path, `.${randomUUID()}.consume`);
+  try {
+    if (!journalDirectoryIsPinned(directory)) return false;
+    renameSync(target, quarantine);
+    if (!journalDirectoryIsPinned(directory)) return false;
+  } catch {
+    return false;
+  }
+  if (!parseReceipt(quarantine, expectedName)) {
+    try {
+      if (journalDirectoryIsPinned(directory)) linkSync(quarantine, target);
+    } catch { /* Preserve both identities for inspection. */ }
+    return false;
+  }
+  try {
+    if (!journalDirectoryIsPinned(directory)) return false;
+    unlinkSync(quarantine);
+    fsyncDirectory(directory.path);
+  } catch {
+    try {
+      if (journalDirectoryIsPinned(directory)) linkSync(quarantine, target);
+    } catch { /* The exact ACK already cleared the database lease. */ }
+  }
+  return journalDirectoryIsPinned(directory);
 }
 
 export function consumeRuntimeCleanupReceipt(
@@ -173,32 +244,21 @@ export function consumeRuntimeCleanupReceipt(
   runtimeGenerationId: string,
 ): boolean {
   if (!GENERATION_PATTERN.test(runtimeGenerationId)) return false;
-  const directory = receiptDirectory(dataDirectory);
-  const expectedName = receiptName(runtimeGenerationId);
-  const target = join(directory, expectedName);
-  const quarantine = join(directory, `.${randomUUID()}.consume`);
   try {
-    renameSync(target, quarantine);
+    const directory = pinJournalDirectory(dataDirectory, RECEIPT_DIRECTORY, false);
+    return directory ? consumeReceipt(directory, runtimeGenerationId) : false;
   } catch {
     return false;
   }
-  if (!parseReceipt(quarantine, expectedName)) {
-    try { linkSync(quarantine, target); } catch { /* Preserve both identities for inspection. */ }
-    return false;
-  }
-  try {
-    unlinkSync(quarantine);
-  } catch {
-    try { linkSync(quarantine, target); } catch { /* The exact ACK already cleared the database lease. */ }
-  }
-  return true;
 }
 
 export class RuntimeCleanupReceiptJournal {
   private readonly ids: Set<string>;
+  private directory: PinnedJournalDirectory | null;
 
   constructor(private readonly dataDirectory: string) {
-    this.ids = new Set(runtimeCleanupReceiptIds(dataDirectory));
+    this.directory = pinJournalDirectory(dataDirectory, RECEIPT_DIRECTORY, false);
+    this.ids = new Set(readRuntimeCleanupReceiptIds(this.directory));
   }
 
   pending(): string[] {
@@ -210,20 +270,30 @@ export class RuntimeCleanupReceiptJournal {
   }
 
   publish(runtimeGenerationId: string): boolean {
-    if (!publishRuntimeCleanupReceipt(this.dataDirectory, runtimeGenerationId)) {
+    if (!GENERATION_PATTERN.test(runtimeGenerationId)) return false;
+    try {
+      this.directory ??= pinJournalDirectory(
+        this.dataDirectory,
+        RECEIPT_DIRECTORY,
+        true,
+      );
+    } catch {
       return false;
     }
+    if (!this.directory || !publishReceipt(this.directory, runtimeGenerationId)) return false;
     this.ids.add(runtimeGenerationId);
     return true;
   }
 
   consume(runtimeGenerationId: string): boolean {
     if (!this.ids.has(runtimeGenerationId)) return false;
+    if (!this.directory || !journalDirectoryIsPinned(this.directory)) return false;
     // The exact current-worker ACK proves its database generation lease was
     // cleared. Disk retirement is retryable housekeeping: a canonical file
     // left behind is safely replayed on a later app start, while a quarantined
     // foreign replacement remains available for inspection.
-    consumeRuntimeCleanupReceipt(this.dataDirectory, runtimeGenerationId);
+    consumeReceipt(this.directory, runtimeGenerationId);
+    if (!journalDirectoryIsPinned(this.directory)) return false;
     this.ids.delete(runtimeGenerationId);
     return true;
   }

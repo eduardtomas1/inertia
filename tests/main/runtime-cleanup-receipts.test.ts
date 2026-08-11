@@ -6,6 +6,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +15,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  consumeRuntimeCleanupReceipt,
   RuntimeCleanupReceiptJournal,
   publishRuntimeCleanupReceipt,
   runtimeCleanupReceiptIds,
@@ -29,6 +31,10 @@ function directory(): string {
   const path = mkdtempSync(join(tmpdir(), "inertia-cleanup-receipts-"));
   directories.push(path);
   return path;
+}
+
+function redirectDirectory(target: string, path: string): void {
+  symlinkSync(target, path, process.platform === "win32" ? "junction" : "dir");
 }
 
 afterEach(() => {
@@ -90,5 +96,42 @@ describe("runtime cleanup receipt journal", () => {
     writeFileSync(corrupt, "not-json");
     expect(() => runtimeCleanupReceiptIds(path)).toThrow("transient is invalid");
     expect(readFileSync(corrupt, "utf8")).toBe("not-json");
+  });
+
+  it("rejects a pre-existing journal redirect without touching its target", () => {
+    const path = directory();
+    const outside = directory();
+    const sentinel = join(outside, "sentinel.txt");
+    writeFileSync(sentinel, "outside");
+    redirectDirectory(outside, join(path, ".runtime-cleanup-receipts"));
+
+    expect(() => runtimeCleanupReceiptIds(path)).toThrow("unsafe");
+    expect(() => new RuntimeCleanupReceiptJournal(path)).toThrow("unsafe");
+    expect(publishRuntimeCleanupReceipt(path, generationA)).toBe(false);
+    expect(consumeRuntimeCleanupReceipt(path, generationA)).toBe(false);
+    expect(readdirSync(outside)).toEqual(["sentinel.txt"]);
+    expect(readFileSync(sentinel, "utf8")).toBe("outside");
+  });
+
+  it("fails closed when the pinned journal directory is replaced", () => {
+    const path = directory();
+    const receiptDirectory = join(path, ".runtime-cleanup-receipts");
+    const retainedDirectory = join(path, "retained-cleanup-receipts");
+    const journal = new RuntimeCleanupReceiptJournal(path);
+    expect(journal.publish(generationA)).toBe(true);
+    renameSync(receiptDirectory, retainedDirectory);
+    mkdirSync(receiptDirectory);
+    const sentinel = join(receiptDirectory, "sentinel.txt");
+    writeFileSync(sentinel, "replacement");
+
+    expect(journal.publish(generationB)).toBe(false);
+    expect(journal.consume(generationA)).toBe(false);
+    expect(journal.pending()).toEqual([generationA]);
+    expect(() => runtimeCleanupReceiptIds(path)).toThrow("foreign entry");
+    expect(publishRuntimeCleanupReceipt(path, generationB)).toBe(false);
+    expect(consumeRuntimeCleanupReceipt(path, generationA)).toBe(false);
+    expect(readdirSync(receiptDirectory)).toEqual(["sentinel.txt"]);
+    expect(readFileSync(sentinel, "utf8")).toBe("replacement");
+    expect(readdirSync(retainedDirectory)).toHaveLength(1);
   });
 });

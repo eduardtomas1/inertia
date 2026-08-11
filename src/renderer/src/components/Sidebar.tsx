@@ -223,6 +223,22 @@ function SidebarView({
   }, [onClose]);
 
   useEffect(() => {
+    if (sidebarMode !== "activity") return;
+    const clearWorkFocusIfOutside = (event: Event): void => {
+      const target = event.target;
+      if (target instanceof Node && sidebarRef.current?.contains(target)) return;
+      workFocusIdentityRef.current = null;
+      workFocusIndexRef.current = null;
+    };
+    document.addEventListener("focusin", clearWorkFocusIfOutside);
+    document.addEventListener("pointerdown", clearWorkFocusIfOutside, true);
+    return () => {
+      document.removeEventListener("focusin", clearWorkFocusIfOutside);
+      document.removeEventListener("pointerdown", clearWorkFocusIfOutside, true);
+    };
+  }, [sidebarMode]);
+
+  useEffect(() => {
     if (!mobile || !open) return;
     const sidebar = sidebarRef.current;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -933,12 +949,15 @@ function SidebarView({
                           data-sidebar-nav
                           data-work-focus-id={`section:${section.id}`}
                           aria-expanded={expanded}
-                          onClick={() => setExpandedWorkSections((current) => {
-                            const next = new Set(current);
-                            if (next.has(section.id)) next.delete(section.id);
-                            else next.add(section.id);
-                            return next;
-                          })}
+                          onClick={() => {
+                            setConversationMenu(null);
+                            setExpandedWorkSections((current) => {
+                              const next = new Set(current);
+                              if (next.has(section.id)) next.delete(section.id);
+                              else next.add(section.id);
+                              return next;
+                            });
+                          }}
                         >
                           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                           <span>{section.label}</span>

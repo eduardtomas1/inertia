@@ -316,6 +316,26 @@ describe("compact Work sidebar", () => {
     expect(done?.querySelectorAll(".activity-thread")).toHaveLength(11);
   });
 
+  it("does not reopen a row menu after its Work section is collapsed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    renderSidebar([
+      conversation("earlier", "Earlier menu work", new Date(2026, 7, 6, 9)),
+    ]);
+
+    const earlierToggle = screen.getByRole("button", { name: "Earlier 1" });
+    fireEvent.click(earlierToggle);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Thread actions for Earlier menu work",
+    }));
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+
+    fireEvent.click(earlierToggle);
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+    fireEvent.click(earlierToggle);
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+  });
+
   it("keeps snoozed work reachable so it can be unsnoozed", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
@@ -362,6 +382,29 @@ describe("compact Work sidebar", () => {
       .toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Finish before midnight,/ }))
       .toHaveFocus();
+  });
+
+  it("does not reclaim focus after the user points outside Work", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 23, 59, 59, 900);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("today", "Leave Work before midnight", new Date(2026, 7, 11, 12)),
+    ]);
+
+    const row = screen.getByRole("button", { name: /^Leave Work before midnight,/ });
+    row.focus();
+    fireEvent.pointerDown(document.body);
+    row.blur();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+
+    expect(screen.getByRole("button", { name: /^Leave Work before midnight,/ }))
+      .not.toHaveFocus();
+    expect(screen.getByRole("searchbox", {
+      name: "Search projects and conversations",
+    })).not.toHaveFocus();
   });
 
   it("moves focus from a disappearing Snoozed disclosure to the regrouped row", () => {

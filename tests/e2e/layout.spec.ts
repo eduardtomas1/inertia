@@ -145,7 +145,7 @@ test("opens Environment by default with reachable responsive geometry", async ({
         await expect(environmentPanel.getByRole("button", {
           name: "Review changes",
         })).toBeVisible();
-        await expect(environmentPanel.getByText("No local servers detected."))
+        await expect(environmentPanel.getByText("Open a local URL in Preview to show it here."))
           .toBeVisible();
         const expandedLabel = `environment-expanded-${theme}`;
         const expandedPath = testInfo.outputPath(`${expandedLabel}.png`);

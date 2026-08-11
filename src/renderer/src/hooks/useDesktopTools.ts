@@ -12,7 +12,7 @@ interface DesktopToolsOptions {
   previewContextId?: string | null;
 }
 
-function readyPreviewUrl(requestedUrl: string, loadedUrl: string): string {
+function loadedPreviewUrl(requestedUrl: string, loadedUrl: string): string {
   if (!loadedUrl) return "";
   try {
     return new URL(requestedUrl).origin === new URL(loadedUrl).origin
@@ -59,12 +59,12 @@ export function useDesktopTools({
   const [ownedPreview, setOwnedPreview] = useState<{
     contextId: string | null;
     url: string;
-    readyUrl: string;
+    lastLoadedUrl: string;
     navigation: PreviewState;
   }>({
     contextId: previewContextId,
     url: "",
-    readyUrl: "",
+    lastLoadedUrl: "",
     navigation: emptyPreviewState(),
   });
 
@@ -72,7 +72,7 @@ export function useDesktopTools({
     setOwnedPreview({
       contextId: previewContextId,
       url: "",
-      readyUrl: "",
+      lastLoadedUrl: "",
       navigation: emptyPreviewState(),
     });
     if (!previewContextId) return;
@@ -85,7 +85,9 @@ export function useDesktopTools({
       setOwnedPreview({
         contextId: state.contextId,
         url: state.url,
-        readyUrl: state.ready ? readyPreviewUrl(state.url, state.url) : "",
+        lastLoadedUrl: state.ready
+          ? loadedPreviewUrl(state.url, state.url)
+          : "",
         navigation: state,
       });
     });
@@ -149,7 +151,7 @@ export function useDesktopTools({
     setOwnedPreview((current) => ({
       contextId,
       url,
-      readyUrl: "",
+      lastLoadedUrl: "",
       navigation: { ...current.navigation, url, loading: true },
     }));
     void window.inertia.previewNavigate({
@@ -166,7 +168,7 @@ export function useDesktopTools({
         setOwnedPreview({
           contextId,
           url: state.url,
-          readyUrl: readyPreviewUrl(url, state.url),
+          lastLoadedUrl: loadedPreviewUrl(url, state.url),
           navigation: state,
         });
       })
@@ -199,7 +201,7 @@ export function useDesktopTools({
     setOwnedPreview((current) => current.contextId === contextId
       ? {
           ...current,
-          readyUrl: "",
+          lastLoadedUrl: "",
           navigation: { ...current.navigation, loading: true },
         }
       : current);
@@ -217,7 +219,9 @@ export function useDesktopTools({
         setOwnedPreview((current) => ({
           contextId,
           url: state.url,
-          readyUrl: current.contextId === contextId ? current.readyUrl : "",
+          lastLoadedUrl: current.contextId === contextId
+            ? current.lastLoadedUrl
+            : "",
           navigation: state,
         }));
       })
@@ -228,7 +232,7 @@ export function useDesktopTools({
           || authority.previewContextId !== contextId
         ) return;
         setOwnedPreview((current) => current.contextId === contextId
-          ? { ...current, readyUrl: "" }
+          ? { ...current, lastLoadedUrl: "" }
           : current);
         setActionError(
           error instanceof Error
@@ -252,13 +256,13 @@ export function useDesktopTools({
     : {
         contextId: previewContextId,
         url: "",
-        readyUrl: "",
+        lastLoadedUrl: "",
         navigation: emptyPreviewState(),
       };
 
   return {
     previewUrl: visiblePreview.url,
-    readyPreviewUrl: visiblePreview.readyUrl,
+    lastLoadedPreviewUrl: visiblePreview.lastLoadedUrl,
     previewNavigation: visiblePreview.navigation,
     chooseComposerAttachments,
     importComposerAttachments,

@@ -204,22 +204,27 @@ export function EnvironmentPanel({
             <summary>
               <Globe2 size={14} aria-hidden="true" />
               <span>Local Servers</span>
-              <small>{summary.localServers.length}</small>
+              <small>{summary.localPreviewTargets.length}</small>
               <ChevronDown className="environment-disclosure-chevron" size={13} aria-hidden="true" />
             </summary>
             <div className="environment-disclosure-content is-servers">
-              {summary.localServers.length === 0 ? (
-                <p>No local servers detected.</p>
-              ) : summary.localServers.map((server) => (
-                <button
-                  type="button"
-                  onClick={(event) => activateWorkspaceTool(event, "preview", onOpenPreview)}
-                  key={server.url}
-                >
-                  <span title={server.url}>{server.url}</span>
-                  <ExternalLink size={12} aria-hidden="true" />
-                </button>
-              ))}
+              {summary.localPreviewTargets.length === 0 ? (
+                <p>Open a local URL in Preview to show it here.</p>
+              ) : (
+                <>
+                  <small>Last opened in Preview</small>
+                  {summary.localPreviewTargets.map((target) => (
+                    <button
+                      type="button"
+                      onClick={(event) => activateWorkspaceTool(event, "preview", onOpenPreview)}
+                      key={target.url}
+                    >
+                      <span title={target.url}>{target.url}</span>
+                      <ExternalLink size={12} aria-hidden="true" />
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
           </details>
         </div>

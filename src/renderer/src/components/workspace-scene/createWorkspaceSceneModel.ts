@@ -312,7 +312,7 @@ export function createWorkspaceSceneModel({
     projectPath: project?.normalizedPath ?? null,
     repositoryRoot: project?.repositoryRoot ?? null,
     worktreePath: conversation?.worktreePath ?? null,
-    localServerUrl: desktopTools.readyPreviewUrl,
+    lastLoadedPreviewUrl: desktopTools.lastLoadedPreviewUrl,
     gitLoading: workspaceTools.gitLoading,
     gitError: workspaceTools.gitError,
   });

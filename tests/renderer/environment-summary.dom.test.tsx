@@ -44,7 +44,7 @@ const summary: EnvironmentSummarySnapshot = {
     { id: "attachment-1", name: "reference.png", mimeType: "image/png" },
     { id: "attachment-2", name: "requirements.pdf", mimeType: "application/pdf" },
   ],
-  localServers: [{ url: "http://localhost:4173/" }],
+  localPreviewTargets: [{ url: "http://localhost:4173/" }],
 };
 
 const project: Project = {
@@ -205,6 +205,7 @@ describe("Environment panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Commit" }));
     fireEvent.click(screen.getByRole("button", { name: "Push 1" }));
     fireEvent.click(screen.getByText("Local Servers").closest("summary")!);
+    expect(screen.getByText("Last opened in Preview")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /localhost:4173/u }));
     fireEvent.click(screen.getByRole("button", { name: /Open repository inertia externally/u }));
     fireEvent.click(screen.getByRole("button", { name: "Editor view" }));
@@ -414,7 +415,7 @@ describe("Environment panel", () => {
       <EnvironmentPanel
         summary={{
           ...summary,
-          localServers: [],
+          localPreviewTargets: [],
           checks: [],
           subagents: [],
           attachments: [],
@@ -430,7 +431,8 @@ describe("Environment panel", () => {
     expect(localServers.querySelector("summary")).toHaveTextContent("0");
     fireEvent.click(localServers.querySelector("summary")!);
     expect(localServers).toHaveAttribute("open");
-    expect(screen.getByText("No local servers detected.")).toBeVisible();
+    expect(screen.getByText("Open a local URL in Preview to show it here."))
+      .toBeVisible();
     expect(screen.queryByRole("heading", { name: "Active work" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Recent attachments" })).not.toBeInTheDocument();
     expect(screen.queryByText(/No recent task attachments/u)).not.toBeInTheDocument();

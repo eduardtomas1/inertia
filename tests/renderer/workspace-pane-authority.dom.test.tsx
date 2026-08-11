@@ -1744,7 +1744,7 @@ describe("workspace pane authority", () => {
     );
     act(() => hook.result.current.navigatePreview("http://localhost:3000"));
     expect(hook.result.current.previewUrl).toBe("http://localhost:3000");
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
 
     hook.rerender({ contextId: betaChat.id });
     act(() => {
@@ -1758,7 +1758,7 @@ describe("workspace pane authority", () => {
 
     await waitFor(() => {
       expect(hook.result.current.previewUrl).toBe("");
-      expect(hook.result.current.readyPreviewUrl).toBe("");
+      expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
       expect(previewClose).toHaveBeenCalledWith({
         ownerId: "primary",
         contextId: alphaChat.id,
@@ -1823,20 +1823,20 @@ describe("workspace pane authority", () => {
       "Connection refused.",
     ));
     expect(hook.result.current.previewUrl).toBe("http://localhost:3000");
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
 
     act(() => hook.result.current.navigatePreview("http://localhost:4173"));
-    await waitFor(() => expect(hook.result.current.readyPreviewUrl)
+    await waitFor(() => expect(hook.result.current.lastLoadedPreviewUrl)
       .toBe("http://localhost:4173"));
 
     act(() => hook.result.current.previewCommand("reload"));
     await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
       "Reload failed.",
     ));
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
 
     act(() => hook.result.current.navigatePreview("http://localhost:4173"));
-    await waitFor(() => expect(hook.result.current.readyPreviewUrl)
+    await waitFor(() => expect(hook.result.current.lastLoadedPreviewUrl)
       .toBe("http://localhost:4173"));
 
     act(() => publishPreviewState?.({
@@ -1848,7 +1848,7 @@ describe("workspace pane authority", () => {
       canGoBack: true,
       canGoForward: false,
     }));
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
 
     act(() => publishPreviewState?.({
       ownerId: "primary",
@@ -1859,7 +1859,7 @@ describe("workspace pane authority", () => {
       canGoBack: true,
       canGoForward: false,
     }));
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
 
     act(() => publishPreviewState?.({
       ownerId: "primary",
@@ -1870,12 +1870,12 @@ describe("workspace pane authority", () => {
       canGoBack: true,
       canGoForward: false,
     }));
-    expect(hook.result.current.readyPreviewUrl).toBe("http://localhost:4173/docs");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("http://localhost:4173/docs");
 
     act(() => hook.result.current.previewCommand("reload"));
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
     await waitFor(() => expect(previewCommand).toHaveBeenCalledTimes(2));
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
 
     act(() => publishPreviewState?.({
       ownerId: "primary",
@@ -1886,7 +1886,7 @@ describe("workspace pane authority", () => {
       canGoBack: true,
       canGoForward: false,
     }));
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
 
     act(() => publishPreviewState?.({
       ownerId: "primary",
@@ -1897,18 +1897,18 @@ describe("workspace pane authority", () => {
       canGoBack: true,
       canGoForward: false,
     }));
-    expect(hook.result.current.readyPreviewUrl).toBe("http://localhost:5173/docs");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("http://localhost:5173/docs");
 
     act(() => hook.result.current.navigatePreview("https://example.com"));
     await waitFor(() => expect(hook.result.current.previewUrl)
       .toBe("http://localhost:4173"));
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
 
     act(() => hook.result.current.navigatePreview("http://localhost:5173"));
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
     await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
       "Connection refused again.",
     ));
-    expect(hook.result.current.readyPreviewUrl).toBe("");
+    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
   });
 });

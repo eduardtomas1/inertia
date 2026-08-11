@@ -44,7 +44,7 @@ export interface EnvironmentSummarySnapshot {
     name: string;
     mimeType: ChatMessage["attachments"][number]["mimeType"];
   }>;
-  localServers: Array<{ url: string }>;
+  localPreviewTargets: Array<{ url: string }>;
 }
 
 interface EnvironmentSummaryInput {
@@ -60,7 +60,7 @@ interface EnvironmentSummaryInput {
   projectPath?: string | null;
   repositoryRoot?: string | null;
   worktreePath?: string | null;
-  localServerUrl?: string | null;
+  lastLoadedPreviewUrl?: string | null;
   gitLoading?: boolean;
   gitError?: string | null;
 }
@@ -70,7 +70,9 @@ function pathName(path: string): string {
   return normalized.split("/").filter(Boolean).at(-1) ?? path;
 }
 
-function localServerSummary(url: string | null | undefined): EnvironmentSummarySnapshot["localServers"] {
+function localPreviewTargetSummary(
+  url: string | null | undefined,
+): EnvironmentSummarySnapshot["localPreviewTargets"] {
   if (!url) return [];
   try {
     const parsed = new URL(url);
@@ -176,7 +178,7 @@ export function buildEnvironmentSummary({
   projectPath = null,
   repositoryRoot = null,
   worktreePath = null,
-  localServerUrl = null,
+  lastLoadedPreviewUrl = null,
   gitLoading = false,
   gitError = null,
 }: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
@@ -258,6 +260,6 @@ export function buildEnvironmentSummary({
     checks,
     subagents: activeSubagents,
     attachments: recentAttachments(messages),
-    localServers: localServerSummary(localServerUrl),
+    localPreviewTargets: localPreviewTargetSummary(lastLoadedPreviewUrl),
   };
 }

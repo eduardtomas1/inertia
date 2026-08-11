@@ -148,7 +148,7 @@ describe("environment summary projection", () => {
       projectPath: "/workspace/inertia",
       repositoryRoot: "/workspace/inertia",
       worktreePath: "/workspace/worktrees/environment-panel",
-      localServerUrl: "http://localhost:4173/app",
+      lastLoadedPreviewUrl: "http://localhost:4173/app",
     });
 
     expect(summary.runtime).toEqual({ status: "online" });
@@ -171,7 +171,7 @@ describe("environment summary projection", () => {
       name: "inertia",
       path: "/workspace/inertia",
     });
-    expect(summary.localServers).toEqual([{
+    expect(summary.localPreviewTargets).toEqual([{
       url: "http://localhost:4173",
     }]);
     expect(summary.checks).toHaveLength(2);
@@ -205,7 +205,7 @@ describe("environment summary projection", () => {
       attachments: [],
       workspace: null,
       repository: null,
-      localServers: [],
+      localPreviewTargets: [],
       gitState: "unknown",
     });
   });
@@ -377,10 +377,10 @@ describe("environment summary projection", () => {
       runs: [],
       subagents: [],
       messages: [],
-      localServerUrl: "https://preview.example.com/app",
+      lastLoadedPreviewUrl: "https://preview.example.com/app",
     });
 
-    expect(summary.localServers).toEqual([]);
+    expect(summary.localPreviewTargets).toEqual([]);
   });
 
   it("does not report a clean tree when no repository was discovered", () => {
@@ -654,10 +654,10 @@ describe("environment summary projection", () => {
       runs: [],
       subagents: [],
       messages: [],
-      localServerUrl: "http://[::1]:3000/private?token=hidden",
+      lastLoadedPreviewUrl: "http://[::1]:3000/private?token=hidden",
     });
 
-    expect(summary.localServers).toEqual([{
+    expect(summary.localPreviewTargets).toEqual([{
       url: "http://[::1]:3000",
     }]);
   });

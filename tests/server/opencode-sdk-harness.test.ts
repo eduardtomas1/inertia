@@ -24,6 +24,7 @@ type LifecycleScenario =
   | "cancel"
   | "stuck-cancel"
   | "oversized"
+  | "utf8-oversized"
   | "event-flood"
   | "slow"
   | "endless"
@@ -80,6 +81,7 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "session.idle", properties: { sessionID } });
       }, 10);
       if (scenario === "oversized") setTimeout(() => sendEvent({ type: "message.updated", properties: { sessionID, payload: "x".repeat(1024 * 1024 + 1) } }), 10);
+      if (scenario === "utf8-oversized") setTimeout(() => sendEvent({ type: "message.updated", properties: { sessionID, payload: "é".repeat(600 * 1024) } }), 10);
       if (scenario === "event-flood") setTimeout(() => {
         for (let index = 0; index < 2050; index += 1) {
           sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant-" + index, sessionID, role: "assistant" } } });
@@ -900,6 +902,27 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       interactionMode: "build",
       access: "supervised",
     }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("oversized") });
+
+    const utf8Root = portableFixtureRoot("OpenCode UTF-8 oversized");
+    roots.push(utf8Root);
+    const utf8Capture = join(utf8Root, "capture.json");
+    const utf8Command = portableNodeExecutable(utf8Root, "opencode");
+    writeNodeSubcommand(utf8Root, "serve", lifecycleServerSource(utf8Root, utf8Capture, "utf8-oversized"));
+    const utf8Manager = new ProviderManager(
+      { commands: { opencode: utf8Command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    await expect(utf8Manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-utf8-oversized",
+      cwd: utf8Root,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: "OpenCode sent an oversized event.",
+    });
 
     const capabilityRoot = portableFixtureRoot("OpenCode image capability");
     roots.push(capabilityRoot);

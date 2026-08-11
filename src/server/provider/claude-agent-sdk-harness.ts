@@ -20,6 +20,7 @@ import {
   type ClaudeOwnedQueryDependencies,
 } from "./claude-owned-query";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
+import { ClaudeRunEventBudget } from "./claude-event-budget";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -344,11 +345,13 @@ function startClaudeRun(
     options.input.cwd,
   );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
-  const eventBudget = new ProviderRunEventBudget(
-    "Claude",
-    MAX_EVENT_TEXT_CHARS,
-    MAX_RUN_EVENTS,
-    MAX_RUN_EVENT_BYTES,
+  const eventBudget = new ClaudeRunEventBudget(
+    new ProviderRunEventBudget(
+      "Claude",
+      MAX_EVENT_TEXT_CHARS,
+      MAX_RUN_EVENTS,
+      MAX_RUN_EVENT_BYTES,
+    ),
   );
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();

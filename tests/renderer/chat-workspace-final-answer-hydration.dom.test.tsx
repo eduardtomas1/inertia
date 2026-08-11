@@ -20,6 +20,26 @@ vi.mock("../../src/renderer/src/components/Composer", () => ({
   Composer: () => <div data-testid="hydration-composer" />,
 }));
 
+const finalAnswerAnchorStarts = vi.hoisted(() => vi.fn());
+
+vi.mock(
+  "../../src/renderer/src/components/response-timeline/final-answer-anchor",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof import(
+      "../../src/renderer/src/components/response-timeline/final-answer-anchor"
+    )>();
+    return {
+      ...actual,
+      startFinalAnswerAnchor: (
+        ...args: Parameters<typeof actual.startFinalAnswerAnchor>
+      ) => {
+        finalAnswerAnchorStarts(...args);
+        return actual.startFinalAnswerAnchor(...args);
+      },
+    };
+  },
+);
+
 const project: Project = {
   id: "11111111-1111-4111-8111-111111111111",
   name: "Hydration project",
@@ -251,17 +271,12 @@ function rect(top: number, height: number): DOMRect {
 }
 
 function installGeometry(targetAnswerId: string): {
-  anchorStartCount: () => number;
   flushFrames: () => Promise<void>;
   setScrollTop: (value: number) => void;
 } {
   const frames = new Map<number, FrameRequestCallback>();
   let nextFrameId = 0;
   let scrollTop = 0;
-  const addEventListener = vi.spyOn(
-    HTMLElement.prototype,
-    "addEventListener",
-  );
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
     const id = ++nextFrameId;
     frames.set(id, callback);
@@ -295,14 +310,6 @@ function installGeometry(targetAnswerId: string): {
       this.scrollTop = scrollTop;
     });
   return {
-    anchorStartCount: () => addEventListener.mock.calls.reduce(
-      (count, [type], index) => type === "wheel"
-          && (addEventListener.mock.instances[index] as HTMLElement)
-            .classList.contains("message-scroll")
-        ? count + 1
-        : count,
-      0,
-    ),
     setScrollTop: (value) => {
       scrollTop = value;
     },
@@ -322,6 +329,7 @@ function installGeometry(targetAnswerId: string): {
 }
 
 afterEach(() => {
+  finalAnswerAnchorStarts.mockReset();
   vi.restoreAllMocks();
 });
 
@@ -395,7 +403,11 @@ describe("ChatWorkspace final-answer hydration", () => {
     );
     await geometry.flushFrames();
 
-    expect(geometry.anchorStartCount()).toBe(1);
+    expect(finalAnswerAnchorStarts).toHaveBeenCalledTimes(1);
+    expect(finalAnswerAnchorStarts).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: activeConversation.id,
+      answerId: settledTurn.terminalAssistantMessageId,
+    }));
     view.rerender(
       <ChatWorkspace
         {...props}
@@ -406,7 +418,7 @@ describe("ChatWorkspace final-answer hydration", () => {
       />,
     );
     await geometry.flushFrames();
-    expect(geometry.anchorStartCount()).toBe(1);
+    expect(finalAnswerAnchorStarts).toHaveBeenCalledTimes(1);
   });
 
   it("leaves a virtualized terminal shell hydration in history", async () => {
@@ -452,6 +464,6 @@ describe("ChatWorkspace final-answer hydration", () => {
 
     expect(view.container.querySelector(".response-virtual-window"))
       .not.toBeNull();
-    expect(geometry.anchorStartCount()).toBe(0);
+    expect(finalAnswerAnchorStarts).not.toHaveBeenCalled();
   });
 });

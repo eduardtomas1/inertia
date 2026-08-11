@@ -212,6 +212,7 @@ describe("environment summary projection", () => {
         }),
         run({
           id: "service-2",
+          conversationId: "conversation-3",
           canStop: true,
           startedAt: "2026-07-28T12:01:00.000Z",
         }),
@@ -253,8 +254,27 @@ describe("environment summary projection", () => {
         { id: "project-3", name: "Website" },
       ],
       conversations: [
-        { id: "conversation-1", projectId: "project-1" },
-        { id: "conversation-2", projectId: "project-2" },
+        {
+          id: "conversation-1",
+          projectId: "project-1",
+          title: "Primary chat",
+          branch: "main",
+          worktreePath: null,
+        },
+        {
+          id: "conversation-2",
+          projectId: "project-2",
+          title: "Docs chat",
+          branch: "docs/preview",
+          worktreePath: "/workspace/.inertia/worktrees/docs-preview",
+        },
+        {
+          id: "conversation-3",
+          projectId: "project-1",
+          title: "Secondary worktree",
+          branch: "codex/secondary",
+          worktreePath: "/workspace/.inertia/worktrees/secondary",
+        },
       ],
       visibleProjectIds: ["project-2"],
     });
@@ -278,7 +298,11 @@ describe("environment summary projection", () => {
         "split-service",
       ]);
     expect(summary.checks.find(({ id }) => id === "split-service")?.contextLabel)
-      .toBe("Docs · npm run preview");
+      .toBe("Docs · Docs chat (docs/preview) · npm run preview");
+    expect(summary.checks.find(({ id }) => id === "service-1")?.contextLabel)
+      .toBe("Primary chat");
+    expect(summary.checks.find(({ id }) => id === "service-2")?.contextLabel)
+      .toBe("Secondary worktree (codex/secondary)");
     expect(summary.checks.find(({ id }) => id === "split-service")?.canOpenPreview)
       .toBe(true);
     expect(summary.checks.find(({ id }) => id === "unrelated-service")?.contextLabel)
@@ -330,6 +354,9 @@ describe("environment summary projection", () => {
       conversations: [{
         id: "conversation-1",
         projectId: "project-1",
+        title: "Primary chat",
+        branch: "main",
+        worktreePath: null,
       }],
     });
 

@@ -66,7 +66,10 @@ interface EnvironmentSummaryInput {
   subagents: readonly SubagentTrace[];
   messages: readonly ChatMessage[];
   projects?: readonly Pick<Project, "id" | "name">[];
-  conversations?: readonly Pick<Conversation, "id" | "projectId">[];
+  conversations?: readonly Pick<
+    Conversation,
+    "id" | "projectId" | "title" | "branch" | "worktreePath"
+  >[];
   visibleProjectIds?: readonly string[];
 }
 
@@ -74,6 +77,16 @@ function runtimeLabel(status: ConnectionStatus): string {
   if (status === "online") return "Ready";
   if (status === "connecting") return "Connecting";
   return "Offline";
+}
+
+function conversationRunOwnerLabel(
+  conversation: Pick<Conversation, "title" | "branch" | "worktreePath">,
+): string {
+  const title = conversation.title.trim() || "Untitled chat";
+  if (!conversation.worktreePath) return title;
+  const worktreeLabel = conversation.branch?.trim()
+    || conversation.worktreePath.split(/[\\/]/u).filter(Boolean).at(-1);
+  return worktreeLabel ? `${title} (${worktreeLabel})` : title;
 }
 
 function branchSummary(
@@ -176,10 +189,7 @@ export function buildEnvironmentSummary({
   if (projectId) visibleProjectIds.add(projectId);
   const projectNames = new Map(projects.map(({ id, name }) => [id, name]));
   const knownConversations = new Map(
-    conversations.map(({ id, projectId: ownerProjectId }) => [
-      id,
-      ownerProjectId,
-    ]),
+    conversations.map((conversation) => [conversation.id, conversation]),
   );
   const projectsWithConversations = new Set(
     conversations.map(({ projectId: ownerProjectId }) => ownerProjectId),
@@ -207,11 +217,14 @@ export function buildEnvironmentSummary({
     })
     .map((run): EnvironmentSummaryCheck => {
       const attention = workspaceRunAttentionView(run);
+      const ownerConversation = run.conversationId
+        ? knownConversations.get(run.conversationId)
+        : undefined;
       const routeKnown = projectNames.has(run.projectId)
         && (
           run.conversationId === null
             ? projectsWithConversations.has(run.projectId)
-            : knownConversations.get(run.conversationId) === run.projectId
+            : ownerConversation?.projectId === run.projectId
         );
       return {
         id: run.id,
@@ -226,6 +239,11 @@ export function buildEnvironmentSummary({
           run.projectId === projectId
             ? null
             : projectNames.get(run.projectId) ?? "Unavailable project",
+          run.canStop && run.conversationId
+            ? ownerConversation
+              ? conversationRunOwnerLabel(ownerConversation)
+              : "Unavailable conversation"
+            : null,
           run.detail,
         ].filter((part): part is string => Boolean(part)).join(" · ") || null,
         canOpenPreview: routeKnown && workspaceRunPreviewUrl(run) !== null,

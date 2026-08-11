@@ -182,7 +182,7 @@ describe("environment summary header popover", () => {
       status: "running" as const,
       canStop: true,
       port: 4173,
-      contextLabel: "Docs · npm run preview",
+      contextLabel: "Docs · Docs chat (docs/preview) · npm run preview",
       canOpenPreview: true,
       canAcknowledge: false,
       canDismiss: false,
@@ -215,7 +215,7 @@ describe("environment summary header popover", () => {
     );
 
     const stop = screen.getByRole("button", {
-      name: "Stop Preview service · Docs · npm run preview",
+      name: "Stop Preview service · Docs · Docs chat (docs/preview) · npm run preview",
     });
     stop.focus();
     expect(stop).toHaveFocus();
@@ -226,7 +226,7 @@ describe("environment summary header popover", () => {
     expect(onStopRun).toHaveBeenCalledWith(preview);
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Open preview for Preview service · Docs · npm run preview",
+      name: "Open preview for Preview service · Docs · Docs chat (docs/preview) · npm run preview",
     }));
     expect(onOpenRunPreview).toHaveBeenCalledWith(preview);
     fireEvent.click(screen.getByRole("button", {

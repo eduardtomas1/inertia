@@ -918,7 +918,6 @@ export class TurnController {
           || event.goal.objective === goalStart.objective)
         && (goalStart.tokenBudget === undefined
           || event.goal.tokenBudget === goalStart.tokenBudget)
-        && event.goal.status === "active"
       ) {
         active.nativeGoalStartAcknowledgement = null;
         goalStart.resolve(event.goal);

@@ -569,6 +569,28 @@ describe("Codex App Server goal event ordering", () => {
     }
   });
 
+  it("accepts a same-revision goal recreated after clear", () => {
+    const harness = eventHarness();
+    try {
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("active", 1_800_000_010),
+      );
+      harness.events.handleNotification("thread/goal/cleared", {
+        threadId: THREAD_ID,
+      });
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("active", 1_800_000_010),
+      );
+
+      expect(harness.goalClears).toEqual([THREAD_ID]);
+      expect(harness.goalStatuses).toEqual(["active", "active"]);
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
   it("cancels pending subagent-drain completion for a late continuation", () => {
     vi.useFakeTimers();
     const harness = eventHarness();

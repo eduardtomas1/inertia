@@ -191,6 +191,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (message.method === "thread/goal/set") {
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-live-mutation-error") {
+      sendBatch([
+        { id: message.id, error: { code: -32000, message: "goal mutation rejected" } },
+        { method: "error", params: { threadId, turnId, error: { message: "parent turn failed after goal mutation" }, willRetry: false } },
+        { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "failed", items: [], error: { message: "parent turn failed after goal mutation" } } } },
+      ]);
+      return;
+    }
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-error") {
       send({ id: message.id, error: { code: -32000, message: "an unfinished goal already exists" } });
       return;
@@ -1073,6 +1081,30 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(manager.isRunning("conversation-goal-rejected")).toBe(false);
   });
 
+  it("settles a goal start superseded by a terminal notification", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-set-response-ordering";
+    const manager = trackedManager(fake.command);
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-terminal-start",
+      cwd: fake.root,
+      prompt: "/goal Finish before the first continuation",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-terminal-start",
+      goalStart: { objective: "Finish before the first continuation" },
+      goalContinuationExpected: true,
+    }))).resolves.toMatchObject({
+      status: "completed",
+      sessionId: "thread-goal-terminal-start",
+    });
+
+    expect(manager.isRunning("conversation-goal-terminal-start")).toBe(false);
+  });
+
   it("interrupts an automatic goal turn while preserving its active snapshot", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
@@ -1149,6 +1181,43 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       objective: "Finish from the live connection",
       status: "complete",
     })]);
+  });
+
+  it("does not promote a recoverable goal RPC error to the run failure", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-live-mutation-error";
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the parent turn running",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-live-mutation-error",
+      onStatus: (status) => {
+        if (status === "running") markRunning();
+      },
+    });
+    await running;
+
+    await expect(run.setGoal({
+      status: "paused",
+    })).rejects.toThrow("goal mutation rejected");
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "codex-error",
+        message: "Codex reported an error.",
+        technicalDetail: expect.stringContaining(
+          "parent turn failed after goal mutation",
+        ),
+      },
+    });
   });
 
   it("orders goal mutations at the decoded response frame", async () => {

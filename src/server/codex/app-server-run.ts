@@ -48,6 +48,7 @@ interface PendingClientRequest {
   resolve: (value: JsonObject) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
+  recordFailure: boolean;
   onResponseFrame?: () => void;
 }
 
@@ -257,17 +258,20 @@ export function startCodexAppServerRun(
     method: string,
     params: JsonObject,
     onResponseFrame?: () => void,
+    recordFailure = true,
   ): Promise<JsonObject> => {
     const id = nextRequestId;
     nextRequestId += 1;
     return new Promise<JsonObject>((resolve, reject) => {
       const timeout = setTimeout(() => {
         pendingRequests.delete(id);
-        rememberFailure(
-          "rpc-timeout",
-          "Codex App Server did not respond in time.",
-          `RPC method: ${method}`,
-        );
+        if (recordFailure) {
+          rememberFailure(
+            "rpc-timeout",
+            "Codex App Server did not respond in time.",
+            `RPC method: ${method}`,
+          );
+        }
         reject(new Error(`${method} timed out.`));
       }, options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS);
       timeout.unref();
@@ -276,6 +280,7 @@ export function startCodexAppServerRun(
         resolve,
         reject,
         timeout,
+        recordFailure,
         ...(onResponseFrame ? { onResponseFrame } : {}),
       });
       if (!writeMessage({ method, id, params })) {
@@ -383,11 +388,13 @@ export function startCodexAppServerRun(
       if (error) {
         const errorMessage =
           boundedText(error.message, 4_000) ?? `${pending.method} failed.`;
-        rememberFailure(
-          "codex-error",
-          "Codex rejected a protocol request.",
-          errorMessage,
-        );
+        if (pending.recordFailure) {
+          rememberFailure(
+            "codex-error",
+            "Codex rejected a protocol request.",
+            errorMessage,
+          );
+        }
         pending.reject(new Error(errorMessage));
       } else {
         pending.resolve(objectValue(message.result) ?? {});
@@ -552,7 +559,7 @@ export function startCodexAppServerRun(
         threadId: providerThreadId,
         input: [{ type: "text", text, text_elements: [] }],
         expectedTurnId: activeTurnId,
-      });
+      }, undefined, false);
       return true;
     } catch {
       return false;
@@ -579,7 +586,7 @@ export function startCodexAppServerRun(
       let sequenceAtResponse = events.goalProjectionSequence();
       const response = await request("thread/goal/set", params, () => {
         sequenceAtResponse = events.goalProjectionSequence();
-      });
+      }, false);
       const parsed = events.projectGoalResponse(
         providerThreadId,
         response.goal,
@@ -605,6 +612,7 @@ export function startCodexAppServerRun(
         () => {
           sequenceAtResponse = events.goalProjectionSequence();
         },
+        false,
       );
       return events.projectGoalClearResponse(
         providerThreadId,
@@ -636,6 +644,7 @@ interface OpenCodexTurnOptions {
     method: string,
     params: JsonObject,
     onResponseFrame?: () => void,
+    recordFailure?: boolean,
   ) => Promise<JsonObject>;
   notify: (method: string, params?: JsonObject) => void;
   setProviderThreadId: (threadId: string) => void;
@@ -764,21 +773,25 @@ export async function openCodexTurn({
       params.tokenBudget = options.goalStart.tokenBudget;
     }
     beginGoalMutation(true);
+    let terminalGoalStart = false;
     try {
       let sequenceAtResponse = goalProjectionSequence();
       const response = await request("thread/goal/set", params, () => {
         sequenceAtResponse = goalProjectionSequence();
       });
-      if (!projectGoalResponse(
+      const projectedGoal = projectGoalResponse(
         openedThreadId,
         response.goal,
         sequenceAtResponse,
-      )) {
+      );
+      if (!projectedGoal) {
         throw new Error("Codex returned a malformed goal response.");
       }
+      terminalGoalStart = projectedGoal.status !== "active";
     } finally {
       endGoalMutation(true);
     }
+    if (terminalGoalStart) finish("completed", 0, null);
     return;
   }
 

@@ -665,7 +665,9 @@ export class CodexAppServerEvents {
     if (threadId !== this.host.providerThreadId()) return false;
     this.nativeGoalStatus = null;
     this.nativeGoalSnapshot = null;
+    this.nativeGoalUpdatedAt = null;
     this.nativeGoalFingerprint = null;
+    this.nativeGoalRevisionFingerprints.clear();
     this.nativeGoalSequence += 1;
     this.host.options.onGoalCleared?.(threadId);
     this.finishAwaitingGoalContinuation();

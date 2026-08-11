@@ -304,6 +304,51 @@ describe("TurnController native goal lifecycle", () => {
     expect(runtime.provider.input).not.toHaveProperty("goalStart");
   });
 
+  it("acknowledges a goal that becomes terminal before its first turn", async () => {
+    const runtime = await goalRuntime();
+    const warmup = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Establish the provider thread.",
+    });
+    runtime.controller.start(warmup.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "session",
+      sessionId: "thread-terminal-goal-start",
+    });
+    runtime.provider.resolve();
+    await vi.waitFor(() =>
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false));
+
+    const pendingGoal = runtime.controller.setNativeGoal({
+      conversationId: runtime.conversationId,
+      objective: "Finish immediately",
+      status: "active",
+      tokenBudget: 1_000,
+    });
+    await vi.waitFor(() => expect(runtime.provider.runCount).toBe(2));
+    const completedGoal: ProviderGoalSnapshot = {
+      objective: "Finish immediately",
+      status: "complete",
+      tokenBudget: 1_000,
+      tokensUsed: 250,
+      timeUsedSeconds: 1,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:01.000Z",
+    };
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "goal-updated",
+      sessionId: "thread-terminal-goal-start",
+      goal: completedGoal,
+    });
+
+    await expect(pendingGoal).resolves.toEqual(completedGoal);
+    runtime.provider.resolve();
+    await vi.waitFor(() =>
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false));
+  });
+
   it("routes live mutations through the exact active turn identity", async () => {
     const runtime = await goalRuntime();
     const queued = runtime.controller.queue({

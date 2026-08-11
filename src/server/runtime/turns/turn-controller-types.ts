@@ -49,8 +49,13 @@ export interface TurnProviderRuntime {
   stopOwned(
     conversationId: string,
     identity: { runId: string; turnId: string | null },
+    graceMs?: number,
   ): Promise<"missing" | "identity-mismatch" | "settled" | "force-detached">;
   isRunning(conversationId: string): boolean;
+  ownsRun?(
+    conversationId: string,
+    identity: { runId: string; turnId: string | null },
+  ): boolean;
   respondToApproval(
     conversationId: string,
     requestId: string,

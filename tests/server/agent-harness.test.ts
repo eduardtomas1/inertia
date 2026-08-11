@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   AgentHarnessRegistry,
@@ -42,6 +42,7 @@ function resultForHarness(input: ProviderRunInput, text: string): ProviderRunRes
     textTruncated: false,
     exitCode: 0,
     signal: null,
+  cleanupConfirmed: true,
   };
 }
 
@@ -222,6 +223,7 @@ describe("agent harness architecture", () => {
                 textTruncated: false,
                 exitCode: 0,
                 signal: null,
+              cleanupConfirmed: true,
               });
               return true;
             },
@@ -471,6 +473,7 @@ describe("agent harness architecture", () => {
       textTruncated: false,
       exitCode: 0,
       signal: null,
+    cleanupConfirmed: true,
     });
     await run;
     emit?.({ ...identity, type: "text", text: "delayed after settlement" });
@@ -520,6 +523,7 @@ describe("agent harness architecture", () => {
               textTruncated: false,
               exitCode: null,
               signal: null,
+            cleanupConfirmed: true,
             });
           },
           extension: { kind: "cli", providerId: "claude" },
@@ -541,7 +545,7 @@ describe("agent harness architecture", () => {
     expect(manager.cancel("conversation-claude")).toBe(false);
   });
 
-  it("force-stops only an exactly owned temporary run and makes its late events inert", async () => {
+  it("retains an unconfirmed exact run and makes its late events inert", async () => {
     const emitters = new Map<string, NonNullable<Parameters<AgentHarness["start"]>[0]["callbacks"]>["onEvent"]>();
     const resolvers = new Map<string, (result: ProviderRunResult) => void>();
     const cancelCalls = new Map<string, boolean[]>();
@@ -606,7 +610,7 @@ describe("agent harness architecture", () => {
       1,
     )).resolves.toBe("force-detached");
     expect(cancelCalls.get("isolated-conversation")).toEqual([false, true]);
-    expect(manager.isRunning("isolated-conversation")).toBe(false);
+    expect(manager.isRunning("isolated-conversation")).toBe(true);
     expect(manager.isRunning("ordinary-conversation")).toBe(true);
 
     emitters.get("isolated-conversation")?.({
@@ -633,10 +637,14 @@ describe("agent harness architecture", () => {
     ));
     await expect(ordinary).resolves.toMatchObject({ status: "completed" });
     expect(ordinaryText).toEqual(["ordinary text"]);
+    resolvers.get("isolated-conversation")?.(resultForHarness(isolatedInput, ""));
+    await vi.waitFor(() => {
+      expect(manager.isRunning("isolated-conversation")).toBe(false);
+    });
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
-  it("bounds global shutdown and force-detaches malformed runs concurrently", async () => {
+  it("bounds global shutdown but retains every unconfirmed malformed run", async () => {
     const cancelCalls = new Map<string, boolean[]>();
     const harness: AgentHarness = {
       id: "claude-cli",
@@ -672,11 +680,13 @@ describe("agent harness architecture", () => {
     await new Promise<void>((resolve) => queueMicrotask(resolve));
 
     const startedAt = performance.now();
-    await manager.disposeAll();
+    await expect(manager.disposeAll()).rejects.toThrow(
+      "Provider process cleanup could not be confirmed",
+    );
     const elapsedMs = performance.now() - startedAt;
 
     expect(elapsedMs).toBeLessThan(700);
-    expect(manager.activeConversationIds()).toEqual([]);
+    expect(manager.activeConversationIds()).toHaveLength(3);
     for (const calls of cancelCalls.values()) {
       expect(calls[0]).toBe(false);
       expect(calls).toContain(true);

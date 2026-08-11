@@ -78,14 +78,19 @@ export type * from "./provider/contracts";
 
 interface ActiveRun {
   result: Promise<ProviderRunResult>;
+  lifecycleSettlement: Promise<void>;
+  resolveLifecycleSettlement: () => void;
   harnessRun: AgentHarnessRun | null;
+  harnessStartInvoked: boolean;
   launchAbort: AbortController;
   markPendingCancellation: () => void;
   runId: string;
   turnId: string | null;
+  processCleanupConfirmed: boolean;
   cancelRequested: boolean;
   settled: boolean;
   detach: () => void;
+  quarantine: () => void;
   hardKillTimer?: NodeJS.Timeout;
 }
 
@@ -134,6 +139,7 @@ export class ProviderManager {
   private readonly resolveBackendLaunchOptions:
     | ProviderManagerOptions["resolveBackendLaunchOptions"];
   private processEnvironment: NodeJS.ProcessEnv | undefined;
+  private auxiliaryCleanupUnconfirmed = false;
 
   constructor(
     options: ProviderManagerOptions & { metadataCache?: ProviderMetadataCache } = {},
@@ -167,6 +173,19 @@ export class ProviderManager {
 
   isRunning(conversationId: string): boolean {
     return this.activeRuns.has(conversationId);
+  }
+
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string | null },
+  ): boolean {
+    const active = this.activeRuns.get(conversationId);
+    return Boolean(
+      active
+      && !active.settled
+      && active.runId === identity.runId
+      && active.turnId === identity.turnId,
+    );
   }
 
   activeConversationIds(): string[] {
@@ -296,6 +315,7 @@ export class ProviderManager {
     this.processEnvironment = (await providerEnvironment()).env;
     const configured = this.commands[providerId]?.trim() || PROVIDER_INFO[providerId].command;
     const detection = await detectProvider(providerId, { ...options, refreshEnvironment: false, command: configured });
+    this.auxiliaryCleanupUnconfirmed ||= !detection.cleanupConfirmed;
     if (detection.executable) {
       this.resolvedCommands.set(providerId, detection.executable);
     } else {
@@ -314,7 +334,9 @@ export class ProviderManager {
     command: string,
     options: Omit<ProviderDetectionOptions, "command"> = {},
   ): Promise<ProviderDetection> {
-    return await detectProvider(providerId, { ...options, command });
+    const detection = await detectProvider(providerId, { ...options, command });
+    this.auxiliaryCleanupUnconfirmed ||= !detection.cleanupConfirmed;
+    return detection;
   }
 
   setCommand(providerId: ProviderId, command?: string): void {
@@ -569,6 +591,7 @@ export class ProviderManager {
       if (this.activeRuns.get(conversationId) === active) {
         this.activeRuns.delete(conversationId);
       }
+      active.resolveLifecycleSettlement();
     };
     const cancelledBeforeStart = (): ProviderRunResult => {
       compatibilityEmitter.status("cancelled");
@@ -580,6 +603,7 @@ export class ProviderManager {
         textTruncated: false,
         exitCode: null,
         signal: null,
+        cleanupConfirmed: true,
       };
     };
     const startHarness = (
@@ -608,6 +632,7 @@ export class ProviderManager {
               ...input,
               model: launchOptions.modelArgument ?? undefined,
             };
+        active.harnessStartInvoked = true;
         harnessRun = harness.start({
           input: launchInput,
           executable,
@@ -622,6 +647,7 @@ export class ProviderManager {
       } finally {
         releaseLaunch();
       }
+      active.harnessRun = harnessRun;
       if (harnessRun.harnessId !== harness.id || harnessRun.providerId !== providerId) {
         try {
           harnessRun.cancel(true);
@@ -631,7 +657,6 @@ export class ProviderManager {
         disposeLaunch();
         throw new ProviderRuntimeError("invalid_input", `Agent harness '${harness.id}' returned a mismatched run.`);
       }
-      active.harnessRun = harnessRun;
       if (active.cancelRequested) {
         this.cancelStartedHarness(active);
       } else {
@@ -645,16 +670,28 @@ export class ProviderManager {
     };
 
     const launchAbort = new AbortController();
+    let resolveLifecycleSettlement!: () => void;
+    const lifecycleSettlement = new Promise<void>((resolve) => {
+      resolveLifecycleSettlement = resolve;
+    });
     active = {
       result: Promise.resolve(null as never),
+      lifecycleSettlement,
+      resolveLifecycleSettlement,
       harnessRun: null,
+      harnessStartInvoked: false,
       launchAbort,
       markPendingCancellation: () => compatibilityEmitter.status("cancelling"),
       runId,
       turnId,
+      processCleanupConfirmed: false,
       cancelRequested: false,
       settled: false,
       detach: settle,
+      quarantine: () => {
+        active.cancelRequested = true;
+        compatibilityEmitter.close();
+      },
     };
     this.activeRuns.set(conversationId, active);
 
@@ -675,16 +712,31 @@ export class ProviderManager {
           )
         : startHarness(resolved);
     } catch (error) {
-      settle();
+      if (!active.harnessStartInvoked) {
+        active.processCleanupConfirmed = true;
+        settle();
+      }
+      else active.cancelRequested = true;
       throw error;
     }
     const result = launched.then(
       (value) => {
-        settle();
+        if (!value.cleanupConfirmed) {
+          active.cancelRequested = true;
+          compatibilityEmitter.close();
+          if (active.hardKillTimer) clearTimeout(active.hardKillTimer);
+        } else {
+          active.processCleanupConfirmed = true;
+          settle();
+        }
         return value;
       },
       (error: unknown) => {
-        settle();
+        if (!active.harnessStartInvoked) {
+          active.processCleanupConfirmed = true;
+          settle();
+        }
+        else active.cancelRequested = true;
         throw error;
       },
     );
@@ -825,6 +877,10 @@ export class ProviderManager {
     if (active.runId !== identity.runId || active.turnId !== identity.turnId) {
       return "identity-mismatch";
     }
+    if (active.processCleanupConfirmed) {
+      active.detach();
+      return active.settled ? "settled" : "force-detached";
+    }
 
     this.cancel(conversationId);
     if (await this.waitForSettlement(active, graceMs)) return "settled";
@@ -840,20 +896,32 @@ export class ProviderManager {
     }
     if (await this.waitForSettlement(active, FORCE_DETACH_GRACE_MS)) return "settled";
 
-    // Force cancellation has been invoked. Make every late provider callback
-    // inert and release manager-owned timers/maps even if the harness violated
-    // its contract by never settling `result`.
-    active.detach();
+    // Exact lifecycle owners can retain this run as a durable in-process
+    // exclusion until the harness settles or the runtime supervisor confirms
+    // termination of the complete utility-process tree.
+    active.quarantine();
     return "force-detached";
   }
 
   async disposeAll(): Promise<void> {
     const active = [...this.activeRuns.entries()];
-    await Promise.allSettled(active.map(([conversationId, run]) =>
+    const results = await Promise.allSettled(active.map(([conversationId, run]) =>
       this.stopOwned(
         conversationId,
         { runId: run.runId, turnId: run.turnId },
+        undefined,
       )));
+    if (
+      results.some((result) => (
+        result.status === "rejected"
+        || (result.value !== "settled" && result.value !== "missing")
+      ))
+      || this.activeRuns.size > 0
+      || this.auxiliaryCleanupUnconfirmed
+      || !this.metadataCache.processCleanupConfirmed()
+    ) {
+      throw new Error("Provider process cleanup could not be confirmed.");
+    }
   }
 
   respondToApproval(
@@ -898,7 +966,7 @@ export class ProviderManager {
     if (boundedGraceMs === 0) return active.settled;
     let timer: NodeJS.Timeout | undefined;
     const settled = await Promise.race([
-      active.result.then(() => true, () => true),
+      active.lifecycleSettlement.then(() => true),
       new Promise<false>((resolve) => {
         timer = setTimeout(() => resolve(false), boundedGraceMs);
         timer.unref();

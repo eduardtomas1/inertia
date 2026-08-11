@@ -38,7 +38,7 @@ interface ProbeResult {
   output: string;
   started: boolean;
   timedOut: boolean;
-  cleanupConfirmed?: boolean | null;
+  cleanupConfirmed?: boolean;
 }
 
 type ProviderProbeProcess = (
@@ -69,7 +69,10 @@ async function probeProcess(
     let started = false;
     let timedOut = false;
     let timer: NodeJS.Timeout | undefined;
-    const finish = (exitCode: number | null): void => {
+    const finish = (
+      exitCode: number | null,
+      cleanupConfirmed = true,
+    ): void => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
@@ -78,7 +81,7 @@ async function probeProcess(
         output: output.toString(),
         started,
         timedOut,
-        cleanupConfirmed: null,
+        cleanupConfirmed,
       });
     };
 
@@ -102,14 +105,10 @@ async function probeProcess(
     child.once("spawn", () => { started = true; });
     child.stdout.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
     child.stderr.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
-    child.once("error", () => finish(null));
-    child.once("close", (code) => finish(code));
-    child.stdin.end();
-
-    timer = setTimeout(() => {
+    const terminateAndFinish = (): void => {
       if (settled) return;
-      timedOut = true;
       settled = true;
+      if (timer) clearTimeout(timer);
       void requireProcessTreeTermination(
         terminateProcessTree,
         child,
@@ -131,6 +130,18 @@ async function probeProcess(
           cleanupConfirmed: false,
         }),
       );
+    };
+    child.once("error", () => {
+      if (started) terminateAndFinish();
+      else finish(null);
+    });
+    child.once("close", (code) => finish(code));
+    child.stdin.end();
+
+    timer = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      terminateAndFinish();
     }, timeoutMs);
     timer.unref();
   });
@@ -260,6 +271,7 @@ export async function detectProvider(
       installState: "not-installed",
       authState: "unknown",
       canRun: false,
+      cleanupConfirmed: true,
       statusMessage: providerId === "codex" ? "Codex CLI not found" : statusMessage("not-installed", "unknown"),
     };
   }
@@ -284,7 +296,16 @@ export async function detectProvider(
       && appServerProbe.exitCode === 0
       && /(?:codex\s+app-server|run the app server|\bapp-server\b)/iu.test(appServerProbe.output)
     );
-    return { executable, probe, version: versionFromOutput(probe.output), acpReady, appServerReady };
+    return {
+      executable,
+      probe,
+      version: versionFromOutput(probe.output),
+      acpReady,
+      appServerReady,
+      cleanupConfirmed: probe.cleanupConfirmed === true
+        && (acpProbe === undefined || acpProbe.cleanupConfirmed === true)
+        && (appServerProbe === undefined || appServerProbe.cleanupConfirmed === true),
+    };
   }));
   const working = versionProbes
     .filter(({ probe, acpReady }) => probe.started && !probe.timedOut && probe.exitCode === 0 && acpReady)
@@ -296,7 +317,7 @@ export async function detectProvider(
     : working[0];
   if (!selected) {
     const cleanupUnconfirmed = versionProbes.some(
-      ({ probe }) => probe.cleanupConfirmed === false,
+      ({ cleanupConfirmed }) => !cleanupConfirmed,
     );
     const cursorWithoutAcp = providerId === "cursor" && versionProbes.some(
       ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
@@ -307,6 +328,7 @@ export async function detectProvider(
       installState: cursorWithoutAcp ? "installed" : "error",
       authState: "unknown",
       canRun: false,
+      cleanupConfirmed: !cleanupUnconfirmed,
       statusMessage: cleanupUnconfirmed
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
         : cursorWithoutAcp
@@ -316,6 +338,7 @@ export async function detectProvider(
   }
 
   if (!probeAuthentication) {
+    const cleanupConfirmed = versionProbes.every((probe) => probe.cleanupConfirmed);
     return {
       provider,
       available: true,
@@ -324,6 +347,7 @@ export async function detectProvider(
       installState: "installed",
       authState: "unknown",
       canRun: false,
+      cleanupConfirmed,
       statusMessage: providerId === "codex" && !selected.appServerReady
         ? "Codex App Server is unsupported; update the selected CLI"
         : `${provider.name} is installed; authentication was not checked`,
@@ -334,10 +358,14 @@ export async function detectProvider(
   const authState = authStateFromProbe(providerId, authProbe);
   const authenticated = authState === "authenticated" || authState === "configured";
   const appServerReady = selected.appServerReady;
-  const cleanupUnconfirmed = authProbe.cleanupConfirmed === false;
+  const versionCleanupConfirmed = versionProbes.every(
+    (probe) => probe.cleanupConfirmed,
+  );
+  const cleanupConfirmed = authProbe.cleanupConfirmed === true
+    && versionCleanupConfirmed;
   const canRun = authenticated
     && appServerReady
-    && !cleanupUnconfirmed;
+    && cleanupConfirmed;
   return {
     provider,
     available: true,
@@ -346,7 +374,10 @@ export async function detectProvider(
     installState: "installed",
     authState,
     canRun,
-    statusMessage: cleanupUnconfirmed
+    cleanupConfirmed,
+    statusMessage: !versionCleanupConfirmed
+      ? `${provider.name} probe cleanup could not be confirmed stopped`
+      : authProbe.cleanupConfirmed !== true
       ? `${provider.name} connection probe timed out, and its process tree could not be confirmed stopped`
       : providerId === "codex" && !appServerReady
       ? "Codex App Server is unsupported; update the selected CLI"

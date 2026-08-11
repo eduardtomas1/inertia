@@ -1,18 +1,8 @@
-import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access, realpath, stat } from "node:fs/promises";
+import { access, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { ProviderId } from "./provider/contracts";
-import {
-  requireProcessTreeTermination,
-  terminateProcessTreeAndWait,
-  type ProcessTreeTerminator,
-} from "./process-lifecycle";
-
-const MAX_ENVIRONMENT_BYTES = 512 * 1024;
-const ENVIRONMENT_TIMEOUT_MS = 3_000;
-const SAFE_SHELLS = new Set(["bash", "dash", "fish", "ksh", "sh", "zsh"]);
 
 export interface ProviderEnvironment {
   env: NodeJS.ProcessEnv;
@@ -198,16 +188,6 @@ function copyMatchingEnvironment(
   }
 }
 
-function allowedLoginShellEnvironment(
-  source: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  const result: NodeJS.ProcessEnv = {};
-  for (const providerId of Object.keys(PROVIDER_ENVIRONMENT_KEYS) as ProviderId[]) {
-    Object.assign(result, providerChildEnvironment(providerId, source));
-  }
-  return result;
-}
-
 function unique(values: readonly string[], platform: NodeJS.Platform = process.platform): string[] {
   const seen = new Set<string>();
   return values.filter((value) => {
@@ -230,80 +210,86 @@ export function environmentValue(
   return match ? environment[match] : undefined;
 }
 
-function parseEnvironment(buffer: Buffer): NodeJS.ProcessEnv {
-  const result: NodeJS.ProcessEnv = {};
-  for (const entry of buffer.toString("utf8").split("\0")) {
-    const separator = entry.indexOf("=");
-    if (separator < 1) continue;
-    const key = entry.slice(0, separator);
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)) continue;
-    result[key] = entry.slice(separator + 1);
+export async function loginShellEnvironment(): Promise<NodeJS.ProcessEnv> {
+  // Login shells execute arbitrary user dotfiles, which may leave process
+  // trees outside the runtime's cleanup authority. Provider discovery uses
+  // the inherited environment plus bounded, reviewed CLI locations instead.
+  return {};
+}
+
+async function boundedNvmDefaultVersion(home: string): Promise<readonly bigint[] | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    const flags = fsConstants.O_RDONLY | (process.platform === "win32"
+      ? 0
+      : fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW);
+    handle = await open(join(home, ".nvm", "alias", "default"), flags);
+    const info = await handle.stat();
+    if (!info.isFile()) return null;
+    const buffer = Buffer.alloc(129);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead < 1 || bytesRead === buffer.length) return null;
+    const selector = buffer.subarray(0, bytesRead).toString("utf8").trim();
+    if (!/^v?\d+(?:\.\d+){0,2}$/u.test(selector)) return null;
+    return selector.replace(/^v/u, "").split(".").map((part) => BigInt(part));
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
   }
-  return result;
 }
 
-export async function loginShellEnvironment(
-  terminateProcessTree: ProcessTreeTerminator = terminateProcessTreeAndWait,
-): Promise<NodeJS.ProcessEnv> {
-  if (process.platform === "win32") return {};
-  const configured = process.env.SHELL;
-  const shell = configured && isAbsolute(configured) && SAFE_SHELLS.has(basename(configured))
-    ? configured
-    : process.platform === "darwin" ? "/bin/zsh" : "/bin/sh";
-
-  return await new Promise<NodeJS.ProcessEnv>((resolveEnvironment, rejectEnvironment) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let settled = false;
-    let termination: Promise<void> | undefined;
-    let timer: NodeJS.Timeout | undefined;
-    const finish = (value: NodeJS.ProcessEnv): void => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolveEnvironment(value);
-    };
-
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(shell, ["-ilc", "/usr/bin/env -0"], {
-        detached: true,
-        env: process.env,
-        shell: false,
-        stdio: ["ignore", "pipe", "ignore"],
-        windowsHide: true,
-      });
-    } catch {
-      finish({});
-      return;
-    }
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      if (size >= MAX_ENVIRONMENT_BYTES) return;
-      const remaining = MAX_ENVIRONMENT_BYTES - size;
-      const next = chunk.subarray(0, remaining);
-      chunks.push(next);
-      size += next.length;
-    });
-    child.once("error", () => { if (!termination) finish({}); });
-    child.once("close", (code) => {
-      if (!termination) finish(code === 0 ? parseEnvironment(Buffer.concat(chunks)) : {});
-    });
-
-    timer = setTimeout(() => {
-      termination = requireProcessTreeTermination(
-        terminateProcessTree,
-        child,
-        true,
-        "Login shell environment process tree",
-      );
-      void termination.then(() => finish({}), rejectEnvironment);
-    }, ENVIRONMENT_TIMEOUT_MS);
-    timer.unref();
-  });
+function nvmVersionComponents(name: string): readonly [bigint, bigint, bigint] {
+  const parts = name.replace(/^v/u, "").split(".").map((part) => BigInt(part));
+  return [parts[0] ?? 0n, parts[1] ?? 0n, parts[2] ?? 0n];
 }
 
-function commonExecutableDirectories(environment: NodeJS.ProcessEnv): string[] {
+async function boundedNvmExecutableDirectories(
+  home: string,
+  activeBin: string | undefined,
+): Promise<string[]> {
+  try {
+    const versionsRoot = join(home, ".nvm", "versions", "node");
+    const defaultVersion = await boundedNvmDefaultVersion(home);
+    const active = activeBin ? resolve(activeBin) : null;
+    const versions = await readdir(versionsRoot, {
+      withFileTypes: true,
+    });
+    return versions
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name)
+      .filter((name) => /^v?\d+(?:\.\d+){0,2}$/u.test(name))
+      .map((name) => ({
+        bin: join(versionsRoot, name, "bin"),
+        components: nvmVersionComponents(name),
+      }))
+      .sort((left, right) => {
+        const activeOrder = Number(active === resolve(right.bin))
+          - Number(active === resolve(left.bin));
+        if (activeOrder !== 0) return activeOrder;
+        const leftDefault = defaultVersion?.every(
+          (part, index) => left.components[index] === part,
+        ) ?? false;
+        const rightDefault = defaultVersion?.every(
+          (part, index) => right.components[index] === part,
+        ) ?? false;
+        if (leftDefault !== rightDefault) return leftDefault ? -1 : 1;
+        for (let index = 0; index < left.components.length; index += 1) {
+          if (left.components[index] === right.components[index]) continue;
+          return left.components[index]! > right.components[index]! ? -1 : 1;
+        }
+        return left.bin.localeCompare(right.bin);
+      })
+      .slice(0, 32)
+      .map(({ bin }) => bin);
+  } catch {
+    return [];
+  }
+}
+
+async function commonExecutableDirectories(
+  environment: NodeJS.ProcessEnv,
+): Promise<string[]> {
   const home = environmentValue(environment, "USERPROFILE") || homedir();
   if (process.platform === "win32") {
     const local = environmentValue(environment, "LOCALAPPDATA");
@@ -333,6 +319,15 @@ function commonExecutableDirectories(environment: NodeJS.ProcessEnv): string[] {
     join(home, ".local", "bin"),
     join(home, "bin"),
     join(home, ".npm-global", "bin"),
+    join(home, ".volta", "bin"),
+    join(home, ".bun", "bin"),
+    join(home, ".asdf", "shims"),
+    join(home, ".local", "share", "mise", "shims"),
+    join(home, ".opencode", "bin"),
+    ...await boundedNvmExecutableDirectories(
+      home,
+      environmentValue(environment, "NVM_BIN"),
+    ),
     join(home, "Library", "pnpm"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
@@ -349,14 +344,13 @@ async function loadProviderEnvironment(): Promise<ProviderEnvironment> {
   const shellEnvironment = await loginShellEnvironment();
   const env = normalizeCodexHomeEnvironment({
     ...process.env,
-    ...allowedLoginShellEnvironment(shellEnvironment),
   });
   const inheritedPath = environmentValue(process.env, "PATH") ?? "";
   const effectivePath = environmentValue(shellEnvironment, "PATH") ?? "";
   const pathEntries = unique([
     ...(effectivePath.split(delimiter)),
     ...(inheritedPath.split(delimiter)),
-    ...commonExecutableDirectories(env),
+    ...await commonExecutableDirectories(env),
   ]);
   if (process.platform === "win32") {
     for (const key of Object.keys(env)) {

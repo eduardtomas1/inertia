@@ -36,6 +36,11 @@ export interface RuntimeWorkerOptions {
   dataDirectory: string;
   defaultWorkspacePath: string;
   enableProviders: boolean;
+  runtimeGenerationId: string;
+  systemBootId: string;
+  confirmedTerminatedRuntimeGenerationIds?: readonly string[];
+  /** Main-owned quarantine after an earlier utility process exited unconfirmed. */
+  priorRuntimeCleanupUnconfirmed?: boolean;
   /** Optional trusted desktop override; never accepted from the renderer. */
   codexBinaryPath?: string;
   /** Main-owned import root used to revalidate brokered attachment capabilities. */
@@ -222,6 +227,11 @@ export type RuntimeWorkerEvent =
   | { type: "runtime.startup-failed"; message: string }
   | { type: "runtime.shutdown-unconfirmed" }
   | { type: "runtime.stopped" }
+  | {
+      type: "runtime.cleanup-receipt-consumed";
+      receiptRuntimeGenerationId: string;
+      currentRuntimeGenerationId: string;
+    }
   | { type: "runtime.project-path-resolved"; requestId: string; path: string }
   | { type: "runtime.project-path-rejected"; requestId: string; message: string }
   | {
@@ -286,6 +296,22 @@ export type RuntimeWorkerEvent =
     } & SecureFileRequest);
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+export function validRuntimeGenerationId(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const parts = value.split(":");
+  return parts.length === 2
+    && UUID_PATTERN.test(parts[0] ?? "")
+    && /^[1-9][0-9]{0,9}$/u.test(parts[1] ?? "");
+}
+
+export function validSystemBootId(value: unknown): value is string {
+  return typeof value === "string" && (
+    /^(?:linux|darwin):[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)
+    || /^win32:[0-9a-f]{8}$/u.test(value)
+    || /^test:[0-9a-f-]{36}$/u.test(value)
+    || value === "unavailable"
+  );
+}
 
 function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -457,16 +483,50 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const hasAttachmentRoot = Object.hasOwn(options, "attachmentRoot");
   const hasPackageSmokePdf = Object.hasOwn(options, "packageSmokePdf");
   const hasRecoveryImportFault = Object.hasOwn(options, "recoveryImportFault");
+  const hasRuntimeGenerationId = Object.hasOwn(options, "runtimeGenerationId");
+  const hasSystemBootId = Object.hasOwn(options, "systemBootId");
+  const hasConfirmedGenerations = Object.hasOwn(
+    options,
+    "confirmedTerminatedRuntimeGenerationIds",
+  );
+  const hasPriorRuntimeCleanupUnconfirmed = Object.hasOwn(
+    options,
+    "priorRuntimeCleanupUnconfirmed",
+  );
   if (
-    optionKeys.length !== 3
+    !hasRuntimeGenerationId
+    || !hasSystemBootId
+    || optionKeys.length !== 5
       + Number(hasKimiProfiles)
       + Number(hasCodexBinaryPath)
       + Number(hasAttachmentRoot)
       + Number(hasPackageSmokePdf)
       + Number(hasRecoveryImportFault)
+      + Number(hasConfirmedGenerations)
+      + Number(hasPriorRuntimeCleanupUnconfirmed)
     || !runtimePath(options.dataDirectory)
     || !runtimePath(options.defaultWorkspacePath)
     || typeof options.enableProviders !== "boolean"
+    || (hasRuntimeGenerationId && !validRuntimeGenerationId(options.runtimeGenerationId))
+    || (hasSystemBootId && !validSystemBootId(options.systemBootId))
+    || (
+      hasPriorRuntimeCleanupUnconfirmed
+      && options.priorRuntimeCleanupUnconfirmed !== true
+    )
+    || (
+      hasConfirmedGenerations
+      && (
+        !Array.isArray(options.confirmedTerminatedRuntimeGenerationIds)
+        || options.confirmedTerminatedRuntimeGenerationIds.length < 1
+        || options.confirmedTerminatedRuntimeGenerationIds.length > 32
+        || new Set(options.confirmedTerminatedRuntimeGenerationIds).size
+          !== options.confirmedTerminatedRuntimeGenerationIds.length
+        || options.confirmedTerminatedRuntimeGenerationIds.some((generationId) => (
+          !validRuntimeGenerationId(generationId)
+          || generationId === options.runtimeGenerationId
+        ))
+      )
+    )
     || (hasCodexBinaryPath && !runtimePath(options.codexBinaryPath))
     || (hasAttachmentRoot && !runtimePath(options.attachmentRoot))
     || (
@@ -513,6 +573,17 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       dataDirectory: options.dataDirectory,
       defaultWorkspacePath: options.defaultWorkspacePath,
       enableProviders: options.enableProviders,
+      runtimeGenerationId: options.runtimeGenerationId as string,
+      systemBootId: options.systemBootId as string,
+      ...(hasConfirmedGenerations
+        ? {
+            confirmedTerminatedRuntimeGenerationIds:
+              [...options.confirmedTerminatedRuntimeGenerationIds as string[]],
+          }
+        : {}),
+      ...(hasPriorRuntimeCleanupUnconfirmed
+        ? { priorRuntimeCleanupUnconfirmed: true as const }
+        : {}),
       ...(hasCodexBinaryPath ? { codexBinaryPath: options.codexBinaryPath as string } : {}),
       ...(hasAttachmentRoot ? { attachmentRoot: options.attachmentRoot as string } : {}),
       ...(hasKimiProfiles ? { kimiClaudeProfiles } : {}),
@@ -542,6 +613,17 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
 export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
+  if (
+    value.type === "runtime.cleanup-receipt-consumed"
+    && Object.keys(value).length === 3
+    && validRuntimeGenerationId(value.receiptRuntimeGenerationId)
+    && validRuntimeGenerationId(value.currentRuntimeGenerationId)
+    && value.receiptRuntimeGenerationId !== value.currentRuntimeGenerationId
+  ) return {
+    type: "runtime.cleanup-receipt-consumed",
+    receiptRuntimeGenerationId: value.receiptRuntimeGenerationId,
+    currentRuntimeGenerationId: value.currentRuntimeGenerationId,
+  };
   if (value.type === "runtime.shutdown-unconfirmed" && Object.keys(value).length === 1) {
     return { type: "runtime.shutdown-unconfirmed" };
   }

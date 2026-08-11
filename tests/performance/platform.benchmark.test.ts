@@ -465,6 +465,7 @@ for (let index = 0; index < 200; index += 1) {
   });
 }
 send({ type: "result", is_error: false });
+setInterval(() => undefined, 1_000);
 `);
   const expectedText = Array.from(
     { length: 200 },
@@ -474,6 +475,10 @@ send({ type: "result", is_error: false });
   const callbackCounts: number[] = [];
   for (let sample = 0; sample < 3; sample += 1) {
     const conversationId = `provider-benchmark-${sample}`;
+    const identity = {
+      runId: `${conversationId}:run`,
+      turnId: `${conversationId}:turn`,
+    };
     const textEvents: string[] = [];
     const manager = new ProviderManager(
       { commands: { claude: executable } },
@@ -487,6 +492,7 @@ send({ type: "result", is_error: false });
         providerId: "claude",
         harnessId: "claude-cli",
         conversationId,
+        ...identity,
         cwd: root,
         prompt: "Emit the deterministic benchmark stream.",
         interactionMode: "build",
@@ -494,17 +500,30 @@ send({ type: "result", is_error: false });
       }), {
         onText: ({ text }) => textEvents.push(text),
       });
-      const elapsed = performance.now() - startedAt;
       expect(result).toMatchObject({
         status: "completed",
         sessionId: "33333333-3333-4333-8333-333333333333",
         text: expectedText,
+        cleanupConfirmed: true,
       });
       expect(textEvents).toHaveLength(200);
       expect(textEvents.join("")).toBe(expectedText);
+      if (manager.isRunning(conversationId)) {
+        const stopped = await manager.stopOwned(conversationId, identity);
+        expect(
+          stopped === "settled"
+          || (stopped === "missing" && !manager.isRunning(conversationId)),
+        ).toBe(true);
+      }
+      expect(manager.isRunning(conversationId)).toBe(false);
+      await manager.disposeAll();
+      const elapsed = performance.now() - startedAt;
       samples.push(elapsed);
       callbackCounts.push(textEvents.length);
     } finally {
+      if (manager.isRunning(conversationId)) {
+        await manager.stopOwned(conversationId, identity);
+      }
       await manager.disposeAll();
     }
   }

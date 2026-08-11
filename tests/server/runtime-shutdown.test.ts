@@ -17,6 +17,63 @@ function deferred(): {
 }
 
 describe("runtime shutdown phases", () => {
+  it("quiesces command admission before disposing owned resources", async () => {
+    const command = deferred();
+    const calls: string[] = [];
+    const shutdown = runRuntimeShutdownPhases({
+      quiesceRuntimeWork: async () => {
+        calls.push("commands:start");
+        await command.promise;
+        calls.push("commands:done");
+      },
+      independentDrains: [() => { calls.push("terminals"); }],
+      stopIsolatedRuns: () => { calls.push("isolated"); },
+      disposeTurnsAndProviders: () => { calls.push("turns"); },
+      settleArtifacts: () => {},
+      terminateClients: () => {},
+      closeServer: () => {},
+      closeStore: () => {},
+    });
+
+    await Promise.resolve();
+    expect(calls).toEqual(["commands:start"]);
+    command.resolve();
+    await expect(shutdown).resolves.toBeUndefined();
+    expect(calls).toEqual([
+      "commands:start",
+      "commands:done",
+      "terminals",
+      "isolated",
+      "turns",
+    ]);
+  });
+
+  it("fails closed when command cleanup outlives the shutdown deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const calls: string[] = [];
+      const shutdown = runRuntimeShutdownPhases({
+        quiesceRuntimeWork: () => new Promise<void>(() => undefined),
+        independentDrains: [() => { calls.push("terminals"); }],
+        stopIsolatedRuns: () => { calls.push("isolated"); },
+        disposeTurnsAndProviders: () => { calls.push("turns"); },
+        settleArtifacts: () => {},
+        terminateClients: () => {},
+        closeServer: () => {},
+        closeStore: () => {},
+      }, 100);
+      const rejected = expect(shutdown).rejects.toMatchObject({
+        name: "RuntimeShutdownDeadlineError",
+        phase: "runtime command cleanup",
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      await rejected;
+      expect(calls).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("overlaps independent near-timeout drains within one shutdown deadline", async () => {
     vi.useFakeTimers();
     try {
@@ -183,7 +240,32 @@ describe("runtime shutdown phases", () => {
       "artifacts",
       "clients",
       "server",
-      "store",
+    ]);
+  });
+
+  it("keeps the database open when turn and provider cleanup is unconfirmed", async () => {
+    const cleanupError = new Error("provider cleanup is unconfirmed");
+    const calls: string[] = [];
+
+    await expect(runRuntimeShutdownPhases({
+      independentDrains: [],
+      stopIsolatedRuns: () => { calls.push("isolated"); },
+      disposeTurnsAndProviders: () => {
+        calls.push("turns");
+        throw cleanupError;
+      },
+      settleArtifacts: () => { calls.push("artifacts"); },
+      terminateClients: () => { calls.push("clients"); },
+      closeServer: () => { calls.push("server"); },
+      closeStore: () => { calls.push("store"); },
+    })).rejects.toBe(cleanupError);
+
+    expect(calls).toEqual([
+      "isolated",
+      "turns",
+      "artifacts",
+      "clients",
+      "server",
     ]);
   });
 

@@ -122,6 +122,22 @@ describe("provider terminal resume mapping", () => {
     );
     registry.release("conversation-2");
     expect(authority.release).toHaveBeenCalledTimes(2);
+
+    expect(registry.acquireAtCheckout(
+      "conversation-3",
+      "project-2",
+      "/workspace/deleting-chat",
+      "conversation-delete:request-3",
+    )).toBe(true);
+    expect(authority.reserveAtCheckout).toHaveBeenLastCalledWith(
+      "conversation-delete:request-3",
+      "project-2",
+      "/workspace/deleting-chat",
+    );
+    registry.release("conversation-3");
+    expect(authority.release).toHaveBeenLastCalledWith(
+      "conversation-delete:request-3",
+    );
   });
 
   it("uses exact interactive CLI argv for every native provider", () => {
@@ -287,6 +303,7 @@ describe("ProviderManager terminal resume launch", () => {
       installState: "installed",
       authState: "authenticated",
       canRun: true,
+      cleanupConfirmed: true,
       statusMessage: "Connected",
     });
 
@@ -314,6 +331,7 @@ describe("ProviderManager terminal resume launch", () => {
       installState: "installed",
       authState: "authenticated",
       canRun: true,
+      cleanupConfirmed: true,
       statusMessage: "Connected",
     });
     await expect(manager.terminalResumeLaunch(

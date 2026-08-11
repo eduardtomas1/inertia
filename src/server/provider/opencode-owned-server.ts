@@ -13,6 +13,15 @@ import { providerProcessInvocation } from "./process";
 const START_TIMEOUT_MS = 10_000;
 const MAX_ERROR_CHARS = 1024 * 1024;
 
+export class OpenCodeServerCleanupUnconfirmedError extends Error {
+  readonly code = "process-tree-termination-unconfirmed";
+
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = "OpenCodeServerCleanupUnconfirmedError";
+  }
+}
+
 export function openCodeServerProcessInvocation(
   executable: string,
   environment: NodeJS.ProcessEnv,
@@ -116,12 +125,12 @@ export async function startOwnedOpenCodeServer(
     try {
       await terminate(true);
     } catch (cleanupError) {
-      throw new Error(
+      throw new OpenCodeServerCleanupUnconfirmedError(
         `${safeError(error, "OpenCode server failed during startup.")} ${safeError(
           cleanupError,
           `${terminationSubject} could not be confirmed stopped.`,
         )}`,
-        { cause: cleanupError },
+        cleanupError,
       );
     }
     throw error;

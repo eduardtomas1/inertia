@@ -44,6 +44,7 @@ export class ProjectIdentityRefresher {
   private readonly states = new Map<string, ProjectIdentityState>();
   private readonly pendingByProject =
     new Map<string, PendingProjectIdentityRefresh>();
+  private readonly activeInspections = new Set<Promise<void>>();
   private readonly queue: PendingProjectIdentityRefresh[] = [];
   private readonly concurrency: number;
   private readonly deadlineMs: number;
@@ -96,6 +97,12 @@ export class ProjectIdentityRefresher {
     this.pendingByProject.clear();
   }
 
+  async drain(): Promise<void> {
+    while (this.activeInspections.size > 0) {
+      await Promise.allSettled(this.activeInspections);
+    }
+  }
+
   async refreshAll(targets: readonly ProjectIdentityTarget[]): Promise<void> {
     await Promise.all(targets.map((target) => this.refresh(target)));
   }
@@ -142,7 +149,10 @@ export class ProjectIdentityRefresher {
       pending.started = true;
       this.active += 1;
       this.peakActive = Math.max(this.peakActive, this.active);
-      void this.inspectPending(pending).finally(() => {
+      const inspection = this.inspectPending(pending);
+      this.activeInspections.add(inspection);
+      void inspection.finally(() => {
+        this.activeInspections.delete(inspection);
         this.active -= 1;
         if (this.pendingByProject.get(pending.target.id) === pending) {
           this.pendingByProject.delete(pending.target.id);

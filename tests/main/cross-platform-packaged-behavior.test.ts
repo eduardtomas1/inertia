@@ -16,6 +16,20 @@ function workflowStep(workflow: string, name: string): string {
   return workflow.slice(start, end < 0 ? undefined : end);
 }
 
+function workflowMatrixEntry(workflow: string, label: string): string {
+  const marker = `          - label: ${label}`;
+  const start = workflow.indexOf(marker);
+  if (start < 0) throw new Error(`Missing CI matrix entry for ${label}.`);
+  const boundaries = [
+    workflow.indexOf("\n          - label:", start + marker.length),
+    workflow.indexOf("\n    env:", start + marker.length),
+  ].filter((boundary) => boundary >= 0);
+  if (boundaries.length === 0) {
+    throw new Error(`Unbounded CI matrix entry for ${label}.`);
+  }
+  return workflow.slice(start, Math.min(...boundaries));
+}
+
 describe("cross-platform packaged behavior contract", () => {
   it("keeps build, Electron E2E, fuse verification, and native smoke on all three CI platforms", async () => {
     const workflow = await source(".github/workflows/ci.yml");
@@ -36,11 +50,34 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
+  it("keeps Windows CI bounded through its complete platform gate", async () => {
+    const workflow = await source(".github/workflows/ci.yml");
+    expect(workflow).toContain(
+      "timeout-minutes: ${{ matrix.timeout_minutes }}",
+    );
+    for (const [label, runner, artifact, timeout] of [
+      ["Linux x64", "ubuntu-24.04", "linux-x64", 40],
+      ["Windows x64", "windows-2025", "windows-x64", 55],
+      ["macOS arm64", "macos-15", "macos-arm64", 40],
+    ] as const) {
+      const entry = workflowMatrixEntry(workflow, label);
+      expect(entry).toContain(`runner: ${runner}`);
+      expect(entry).toContain(`artifact: ${artifact}`);
+      expect(entry).toContain(`timeout_minutes: ${timeout}`);
+    }
+  });
+
   it("keeps one native smoke implementation for macOS, Windows, and Linux runtime supervision", async () => {
     const smoke = await source("scripts/package-smoke.mjs");
     expect(smoke).toContain('process.platform === "darwin"');
     expect(smoke).toContain('process.platform === "win32"');
     expect(smoke).toContain('process.platform === "linux"');
+    expect(smoke).toContain(
+      "mkdir(dataDirectory, { recursive: true, mode: 0o700 })",
+    );
+    expect(smoke).toContain(
+      'process.platform === "darwin" ? ["--use-mock-keychain"] : []',
+    );
     expect(smoke).toContain("runtimePid === mainPid");
     expect(smoke).toContain("runtime-stopped");
     expect(smoke.indexOf('"before-quit"')).toBeLessThan(

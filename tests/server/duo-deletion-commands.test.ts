@@ -93,7 +93,10 @@ function conversationDependencies(
   store: Partial<RuntimeStore>,
 ): ConversationCommandDependencies {
   return {
-    store: store as RuntimeStore,
+    store: {
+      providerRunOwnership: { forConversation: vi.fn(() => []) },
+      ...store,
+    } as RuntimeStore,
     providers: {} as never,
     backendProfileController: {} as never,
     workspaceRuns: {} as never,
@@ -116,10 +119,23 @@ function conversationDependencies(
 function projectDependencies(
   store: Partial<RuntimeStore>,
 ): ProjectWorkspaceCommandDependencies {
+  const conversationWork = {
+    reserveProviderCheckouts: vi.fn(() => ["project-delete:0"]),
+    providerReservationsExactlyCover: vi.fn(() => true),
+    release: vi.fn(),
+  };
   return {
-    store: store as RuntimeStore,
+    store: {
+      hasRecordedActiveWorkspaceRunForProject: vi.fn(() => false),
+      project: vi.fn(() => ({ id: projectId, path: "/workspace" }) as never),
+      conversationWork,
+      ...store,
+    } as RuntimeStore,
     workspaceRuns: {} as never,
-    turns: { isActive: vi.fn(() => false) } as never,
+    turns: {
+      isActive: vi.fn(() => false),
+      hasActiveCheckout: vi.fn(() => false),
+    } as never,
     providers: {} as never,
     providerTerminalResumes: { isActive: vi.fn(() => false) } as never,
     terminals: {} as never,
@@ -368,7 +384,7 @@ describe("Duo deletion command preflights", () => {
     const store: Partial<RuntimeStore> = {
       hasActiveWorkspaceRunForProject: vi.fn(() => false),
       assertProjectDeletionAllowed,
-      shellSnapshot: vi.fn(),
+      shellSnapshot: vi.fn(() => ({ conversations: [] }) as never),
       removeProject: vi.fn(),
     };
     const dependencies = projectDependencies(store);
@@ -379,10 +395,43 @@ describe("Duo deletion command preflights", () => {
     );
 
     expect(assertProjectDeletionAllowed).toHaveBeenCalledWith(projectId);
-    expect(store.shellSnapshot).not.toHaveBeenCalled();
+    expect(store.shellSnapshot).toHaveBeenCalledTimes(2);
     expect(store.removeProject).not.toHaveBeenCalled();
     expect(dependencies.rememberDeletedConversation).not.toHaveBeenCalled();
     expect(dependencies.forgetRemoteTranscript).not.toHaveBeenCalled();
+  });
+
+  it("rechecks resumed terminals acquired while Duo project recovery is awaiting", async () => {
+    let finishRecovery!: (value: boolean) => void;
+    const recovery = new Promise<boolean>((resolve) => {
+      finishRecovery = resolve;
+    });
+    const removeProject = vi.fn();
+    const store: Partial<RuntimeStore> = {
+      shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as never),
+      hasActiveWorkspaceRunForProject: vi.fn(() => false),
+      assertProjectDeletionAllowed: vi.fn(),
+      removeProject,
+    };
+    const dependencies = projectDependencies(store);
+    const resumes = new ProviderTerminalResumeRegistry();
+    dependencies.providerTerminalResumes = resumes;
+    dependencies.duoLaunches = {
+      reconcileProjectDeletion: vi.fn(() => recovery),
+    };
+    const pending = createProjectWorkspaceCommandHandler(dependencies)(
+      {} as never,
+      projectRemove,
+    );
+    await vi.waitFor(() => expect(
+      dependencies.duoLaunches?.reconcileProjectDeletion,
+    ).toHaveBeenCalledOnce());
+
+    expect(resumes.acquire(conversationId)).toBe(true);
+    finishRecovery(true);
+    await expect(pending).rejects.toThrow(/End resumed provider terminals/u);
+    expect(removeProject).not.toHaveBeenCalled();
+    resumes.release(conversationId);
   });
 
   it("updates deletion caches only after terminal project removal succeeds", async () => {
@@ -410,6 +459,87 @@ describe("Duo deletion command preflights", () => {
     expect(removeProject).toHaveBeenCalledBefore(
       dependencies.forgetRemoteTranscript as ReturnType<typeof vi.fn>,
     );
+  });
+
+  it("removes stale project history using stored checkout paths", async () => {
+    const missingProjectPath = "/missing/project-checkout";
+    const missingWorktreePath = "/missing/conversation-worktree";
+    const missingConversation = {
+      ...conversation,
+      worktreePath: missingWorktreePath,
+    };
+    const removeProject = vi.fn();
+    const store: Partial<RuntimeStore> = {
+      project: vi.fn(() => ({
+        id: projectId,
+        path: missingProjectPath,
+      }) as never),
+      shellSnapshot: vi.fn(() => ({
+        conversations: [missingConversation],
+      }) as AppSnapshot),
+      assertProjectDeletionAllowed: vi.fn(),
+      removeProject,
+    };
+    const dependencies = projectDependencies(store);
+    const reserveProviderCheckouts = vi.mocked(
+      dependencies.store.conversationWork.reserveProviderCheckouts,
+    );
+    reserveProviderCheckouts.mockReturnValue([
+      "project-delete:0",
+      "project-delete:1",
+    ]);
+    const providerReservationsExactlyCover = vi.mocked(
+      dependencies.store.conversationWork.providerReservationsExactlyCover,
+    );
+    dependencies.workspacePath = vi.fn(() => {
+      throw new Error("Missing paths must not require privileged resolution.");
+    });
+
+    await expect(createProjectWorkspaceCommandHandler(dependencies)(
+      {} as never,
+      projectRemove,
+    )).resolves.toBe("mutation");
+
+    const storedWorkspaces = [
+      { projectId, checkoutPath: missingProjectPath },
+      { projectId, checkoutPath: missingWorktreePath },
+    ];
+    expect(dependencies.workspacePath).not.toHaveBeenCalled();
+    expect(reserveProviderCheckouts).toHaveBeenCalledWith(
+      `project-delete:${projectRemove.requestId}`,
+      storedWorkspaces,
+    );
+    expect(providerReservationsExactlyCover).toHaveBeenCalledWith(
+      ["project-delete:0", "project-delete:1"],
+      storedWorkspaces,
+    );
+    expect(removeProject).toHaveBeenCalledWith(projectId);
+  });
+
+  it("keeps stale project history when its stored checkout is reserved", async () => {
+    const missingProjectPath = "/missing/project-checkout";
+    const removeProject = vi.fn();
+    const dependencies = projectDependencies({
+      project: vi.fn(() => ({
+        id: projectId,
+        path: missingProjectPath,
+      }) as never),
+      shellSnapshot: vi.fn(() => ({ conversations: [] }) as unknown as AppSnapshot),
+      removeProject,
+    });
+    vi.mocked(dependencies.store.conversationWork.reserveProviderCheckouts)
+      .mockReturnValue(null);
+    dependencies.workspacePath = vi.fn(() => {
+      throw new Error("Missing paths must not require privileged resolution.");
+    });
+
+    await expect(createProjectWorkspaceCommandHandler(dependencies)(
+      {} as never,
+      projectRemove,
+    )).rejects.toThrow("Stop active work for this project");
+
+    expect(dependencies.workspacePath).not.toHaveBeenCalled();
+    expect(removeProject).not.toHaveBeenCalled();
   });
 
   it("blocks project removal while one of its chats owns a resumed terminal", async () => {

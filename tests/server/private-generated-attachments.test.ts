@@ -140,6 +140,13 @@ describe("private generated attachment storage", () => {
       await expect(access(link)).rejects.toThrow();
       await expect(readFile(outside, "utf8")).resolves.toBe("preserve");
       expect(await readdir(store.directory)).toEqual([]);
+
+      await symlink(outside, link);
+      await expect(PrivateGeneratedAttachmentStore.create(dataDirectory, {
+        preserveExisting: true,
+      })).rejects.toThrow("unsafe entry");
+      expect((await lstat(link)).isSymbolicLink()).toBe(true);
+      await expect(readFile(outside, "utf8")).resolves.toBe("preserve");
     },
   );
 });

@@ -216,6 +216,7 @@ describe("runtime boundary helpers", () => {
       installState: "error",
       authState: "unknown",
       canRun: false,
+      cleanupConfirmed: true,
       statusMessage: "Discovery failed",
     }, metadata);
     expect(unavailable).toMatchObject({ models: [expect.objectContaining({ id: "model-a" })], metadataState: { models: { provenance: "persistent-cache" } } });

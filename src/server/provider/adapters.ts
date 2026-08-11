@@ -30,6 +30,7 @@ export interface ProviderParserState {
   sawText: boolean;
   sawStreamingDelta: boolean;
   hadErrorEvent: boolean;
+  sawTerminalEvent?: boolean;
   failureText?: string;
   toolActivities?: Map<
     string,
@@ -153,6 +154,7 @@ export function normalizeProviderLine(
   };
 
   if (type === "error" || type === "turn.failed" || event.is_error === true) {
+    if (type === "turn.failed") state.sawTerminalEvent = true;
     state.hadErrorEvent = true;
     const error = objectValue(event.error);
     state.failureText ??= stringValue(event.message) ?? stringValue(error?.message) ?? stringValue(event.result);
@@ -168,7 +170,10 @@ export function normalizeProviderLine(
   switch (providerId) {
     case "codex": {
       if (type === "turn.started") emitActivity("turn", "started", "Turn started");
-      if (type === "turn.completed") emitActivity("turn", "completed", "Turn completed");
+      if (type === "turn.completed") {
+        state.sawTerminalEvent = true;
+        emitActivity("turn", "completed", "Turn completed");
+      }
 
       const item = objectValue(event.item);
       if (!item) return;
@@ -294,6 +299,7 @@ export function normalizeProviderLine(
         return;
       }
       if (type === "result") {
+        state.sawTerminalEvent = true;
         if (event.is_error !== true && !state.sawText) emitNonEmptyText(event.result);
         emitActivity("turn", event.is_error === true ? "failed" : "completed", "Turn completed");
       }
@@ -330,6 +336,7 @@ export function normalizeProviderLine(
         return;
       }
       if (type === "result") {
+        state.sawTerminalEvent = true;
         if (event.is_error !== true && !state.sawText) emitNonEmptyText(event.result);
         emitActivity("turn", event.is_error === true ? "failed" : "completed", "Turn completed");
       }
@@ -376,6 +383,7 @@ export function normalizeProviderLine(
       }
       if (type === "step_finish") {
         const reason = stringValue(part?.reason);
+        if (reason === "stop") state.sawTerminalEvent = true;
         emitActivity("turn", "completed", reason === "stop" ? "Run completed" : "Step completed");
       }
     }

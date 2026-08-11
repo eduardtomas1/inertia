@@ -86,6 +86,8 @@ export function startCodexAppServerRun(
   let lastProtocolMethod: string | undefined;
   let lastActivityId: string | undefined;
   let terminalEvent: string | undefined;
+  let ownedTerminationArmed = false;
+  let exitedBeforeOwnedTermination = false;
   let transportCloseTimer: NodeJS.Timeout | undefined;
   let decoder: JsonLineDecoder | undefined;
   let compatibilityError: CodexAppServerResult["compatibilityError"];
@@ -193,15 +195,22 @@ export function startCodexAppServerRun(
     );
     events?.dispose();
     events?.settleInteractions();
+    ownedTerminationArmed = true;
     void (async () => {
       let finalStatus = status;
+      let cleanupConfirmed = true;
       try {
         // A terminal App Server turn has no further process work to preserve.
         // Use the same owned promise as cancellation, but avoid adding a
         // graceful-wait window after the provider has already settled.
         await terminateOwnedProcessTree(true);
+        if (exitedBeforeOwnedTermination) {
+          finalStatus = "failed";
+          cleanupConfirmed = false;
+        }
       } catch (error) {
         finalStatus = "failed";
+        cleanupConfirmed = false;
         rememberFailure(
           "process-exit",
           "Codex App Server process tree could not be confirmed stopped.",
@@ -227,11 +236,13 @@ export function startCodexAppServerRun(
         ...(finalFailure ? { failure: finalFailure } : {}),
         ...(compatibilityError ? { compatibilityError } : {}),
         ...(continuationError ? { continuationError } : {}),
+        cleanupConfirmed,
       });
     })();
   };
 
   const requestProcessTermination = (force: boolean): void => {
+    ownedTerminationArmed = true;
     void terminateOwnedProcessTree(force).then(
       () => {
         if (!settled) {
@@ -484,6 +495,7 @@ export function startCodexAppServerRun(
   });
   child.once("close", (code, signal) => {
     if (settled) return;
+    exitedBeforeOwnedTermination = !ownedTerminationArmed;
     rememberFailure(
       signal ? "process-signal" : "process-exit",
       signal

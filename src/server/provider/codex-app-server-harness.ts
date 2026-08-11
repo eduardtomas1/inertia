@@ -243,6 +243,7 @@ function failedCodexRun(
         reason: "codex-error",
         message: error,
       },
+      cleanupConfirmed: true,
     }),
     cancel: () => undefined,
     extension: {

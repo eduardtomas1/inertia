@@ -81,6 +81,8 @@ export interface AttachmentStorageSession {
 }
 
 export interface AttachmentStorageSessionOptions {
+  /** Inventory prior sessions without unlinking while provider cleanup is unconfirmed. */
+  readonly preserveExisting?: boolean;
   readonly openDirectory?: (
     path: string,
     flags: number,
@@ -92,6 +94,7 @@ export interface AttachmentStorageSessionOptions {
 }
 
 interface OrphanCleanupOptions {
+  readonly preserveExisting?: boolean;
   readonly readDirectory?: (directory: string) => Promise<string[]>;
   readonly inspectFile?: (path: string) => ReturnType<typeof lstat>;
   readonly unlinkFile?: (path: string) => Promise<void>;
@@ -121,7 +124,25 @@ export async function cleanupOrphanedAttachments(
     const path = join(directory, name);
     try {
       const info = await inspectFile(path);
-      if (!info.isFile() && !info.isSymbolicLink()) continue;
+      if (!info.isFile() || info.isSymbolicLink()) {
+        if (options.preserveExisting) return fullReservation();
+        try {
+          await unlinkWithRetry(path, unlinkFile, waitForRetry);
+        } catch {
+          return fullReservation();
+        }
+        continue;
+      }
+      if (options.preserveExisting) {
+        records += 1;
+        const size = typeof info.size === "bigint"
+          ? info.size >= BigInt(MAX_SESSION_ATTACHMENT_BYTES)
+            ? MAX_SESSION_ATTACHMENT_BYTES
+            : Number(info.size)
+          : info.size;
+        bytes += Math.max(0, size);
+        continue;
+      }
       try {
         await unlinkWithRetry(path, unlinkFile, waitForRetry);
       } catch {
@@ -262,7 +283,9 @@ async function cleanupOrphanedSessions(
   root: string,
   options: AttachmentStorageSessionOptions = {},
 ): Promise<AttachmentStorageReservation> {
-  let reservation = await cleanupOrphanedAttachments(root);
+  let reservation = await cleanupOrphanedAttachments(root, {
+    preserveExisting: options.preserveExisting,
+  });
   let names: string[];
   try {
     names = await readdir(root);
@@ -277,9 +300,11 @@ async function cleanupOrphanedSessions(
     } catch {
       return fullReservation();
     }
-    const orphaned = await cleanupOrphanedAttachments(directory);
+    const orphaned = await cleanupOrphanedAttachments(directory, {
+      preserveExisting: options.preserveExisting,
+    });
     reservation = addReservation(reservation, orphaned);
-    if (orphaned.records > 0 || orphaned.bytes > 0) continue;
+    if (orphaned.records > 0 || orphaned.bytes > 0 || options.preserveExisting) continue;
     try {
       await rmdir(directory);
     } catch (error) {

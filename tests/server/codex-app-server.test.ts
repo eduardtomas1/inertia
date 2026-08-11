@@ -2179,6 +2179,29 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(terminateProcessTree.mock.calls[0]?.[1]).toBe(true);
   });
 
+  it("does not trust post-close cleanup after an unexpected direct-child exit", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "premature-exit";
+    const terminateProcessTree = vi.fn(async () => true);
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Exit before cleanup is armed",
+      planMode: false,
+      access: "full",
+      terminateProcessTree,
+    });
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: false,
+      failure: { reason: "process-exit" },
+    });
+    expect(terminateProcessTree).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["malformed-frame", "malformed-protocol"],
     ["premature-exit", "process-exit"],
@@ -2215,7 +2238,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         },
       });
     }
-    expect(manager.activeConversationIds()).toEqual([]);
+    if (scenario === "premature-exit") {
+      expect(manager.activeConversationIds()).toEqual([
+        "conversation-premature-exit",
+      ]);
+      managers.splice(managers.indexOf(manager), 1);
+      await expect(manager.disposeAll()).rejects.toThrow(
+        "Provider process cleanup could not be confirmed.",
+      );
+    } else {
+      expect(manager.activeConversationIds()).toEqual([]);
+    }
   });
 
   it("classifies a parent-observed transport close and cleans up the live process", async () => {
@@ -2275,6 +2308,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         signal: "SIGTERM",
         failure: { reason: "process-signal" },
       });
+    }
+    if (signalManager.activeConversationIds().length > 0) {
+      expect(signalManager.activeConversationIds()).toEqual([
+        "conversation-signal",
+      ]);
+      managers.splice(managers.indexOf(signalManager), 1);
+      await expect(signalManager.disposeAll()).rejects.toThrow(
+        "Provider process cleanup could not be confirmed.",
+      );
     }
 
     const terminalFake = fakeAppServer();

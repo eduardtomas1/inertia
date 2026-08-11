@@ -41,6 +41,8 @@ export interface ProviderDetection {
   installState: ProviderInstallState;
   authState: ProviderAuthState;
   canRun: boolean;
+  /** Fixed probe owner completion; false poisons clean runtime shutdown. */
+  cleanupConfirmed: boolean;
   statusMessage?: string;
 }
 
@@ -317,6 +319,8 @@ export interface ProviderRunResult {
   signal: NodeJS.Signals | null;
   error?: string;
   failure?: ProviderRunFailure;
+  /** True only after authoritative complete process-tree cleanup. */
+  cleanupConfirmed: boolean;
 }
 
 export type ProviderRuntimeErrorCode = "invalid_input" | "already_running";

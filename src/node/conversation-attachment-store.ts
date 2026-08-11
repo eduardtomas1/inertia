@@ -1,12 +1,12 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
-  chmod,
   lstat,
   mkdir,
   open,
   readdir,
   realpath,
+  rename,
   rm,
 } from "node:fs/promises";
 import {
@@ -18,6 +18,7 @@ import {
   resolve,
   sep,
 } from "node:path";
+import { Worker } from "node:worker_threads";
 
 import {
   CHAT_ATTACHMENT_MIME_TYPES,
@@ -75,6 +76,16 @@ export interface ConversationAttachmentStoreOptions {
   readonly maxBytes?: number;
   readonly maxRecords?: number;
   readonly validate?: ConversationAttachmentValidator;
+  readonly persistenceFault?: {
+    readonly attachmentId: string;
+    readonly stallAfterContentSyncMs: number;
+  };
+}
+
+interface StoreDirectoryAuthority {
+  readonly path: string;
+  readonly dev: number;
+  readonly ino: number;
 }
 
 function contained(root: string, target: string): boolean {
@@ -156,7 +167,9 @@ function metadataFromUnknown(value: unknown): PersistedAttachmentMetadata | null
   return candidate as PersistedAttachmentMetadata;
 }
 
-async function secureStoreDirectory(dataDirectory: string): Promise<string> {
+async function secureStoreDirectory(
+  dataDirectory: string,
+): Promise<StoreDirectoryAuthority> {
   await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
   const parent = await realpath(dataDirectory);
   const requested = join(parent, STORE_DIRECTORY);
@@ -204,7 +217,11 @@ async function secureStoreDirectory(dataDirectory: string): Promise<string> {
   ) {
     throw new Error("Conversation attachment storage could not be secured.");
   }
-  return canonical;
+  return {
+    path: canonical,
+    dev: verified.dev,
+    ino: verified.ino,
+  };
 }
 
 function metadataFor(payload: ConversationAttachmentPayload): PersistedAttachmentMetadata {
@@ -234,22 +251,155 @@ function metadataFor(payload: ConversationAttachmentPayload): PersistedAttachmen
   };
 }
 
+const PERSIST_WORKER_SOURCE = `
+  const { constants } = require("node:fs");
+  const { chmod, mkdir, open } = require("node:fs/promises");
+  const { join } = require("node:path");
+  const { parentPort, workerData } = require("node:worker_threads");
+
+  async function persist() {
+    await mkdir(workerData.directory, { mode: 0o700 });
+    if (process.platform !== "win32") {
+      await chmod(workerData.directory, 0o700);
+    }
+    const contentPath = join(workerData.directory, workerData.contentName);
+    const content = await open(
+      contentPath,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+      0o600,
+    );
+    try {
+      await content.writeFile(workerData.bytes);
+      await content.sync();
+    } finally {
+      await content.close();
+    }
+    if (workerData.stallAfterContentSyncMs > 0) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, workerData.stallAfterContentSyncMs);
+      });
+    }
+    if (process.platform !== "win32") await chmod(contentPath, 0o600);
+    const metadataPath = join(workerData.directory, ${JSON.stringify(METADATA_FILE)});
+    const manifest = await open(
+      metadataPath,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+      0o600,
+    );
+    try {
+      await manifest.writeFile(workerData.metadata, "utf8");
+      await manifest.sync();
+    } finally {
+      await manifest.close();
+    }
+    if (process.platform !== "win32") await chmod(metadataPath, 0o600);
+  }
+
+  void persist().then(
+    () => parentPort.postMessage({ ok: true }),
+    () => parentPort.postMessage({ ok: false }),
+  ).finally(() => parentPort.close());
+`;
+
+function cancellationError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Conversation attachment retention was cancelled.");
+}
+
+function persistRecordOffThread(
+  input: {
+    readonly directory: string;
+    readonly contentName: string;
+    readonly bytes: Uint8Array;
+    readonly metadata: string;
+    readonly stallAfterContentSyncMs: number;
+  },
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) return Promise.reject(cancellationError(signal));
+  const worker = new Worker(PERSIST_WORKER_SOURCE, {
+    eval: true,
+    execArgv: ["--no-warnings"],
+    workerData: input,
+  });
+  return new Promise<void>((resolvePersist, rejectPersist) => {
+    let receipt = false;
+    let workerError: Error | null = null;
+    let settled = false;
+
+    const cleanup = (): void => {
+      signal?.removeEventListener("abort", abort);
+      worker.removeAllListeners();
+    };
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) rejectPersist(error);
+      else resolvePersist();
+    };
+    const abort = (): void => {
+      const error = signal
+        ? cancellationError(signal)
+        : new Error("Conversation attachment retention was cancelled.");
+      finish(error);
+      worker.unref();
+      void worker.terminate().catch(() => undefined);
+    };
+
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    worker.on("message", (message: unknown) => {
+      receipt = typeof message === "object"
+        && message !== null
+        && "ok" in message
+        && message.ok === true;
+      if (!receipt) {
+        workerError = new Error("Conversation attachment persistence failed.");
+      }
+    });
+    worker.once("error", (error) => {
+      workerError = error instanceof Error ? error : new Error(String(error));
+    });
+    worker.once("exit", (code) => {
+      if (settled) return;
+      finish(
+        code === 0 && receipt
+          ? undefined
+          : workerError
+            ?? new Error("Conversation attachment persistence failed."),
+      );
+    });
+  });
+}
+
 export class ConversationAttachmentStore {
   readonly directory: string;
+  private readonly directoryAuthority: StoreDirectoryAuthority;
   private readonly maxBytes: number;
   private readonly maxRecords: number;
   private readonly validate?: ConversationAttachmentValidator;
+  private readonly persistenceFault?: ConversationAttachmentStoreOptions["persistenceFault"];
+  private readonly authoritativeRecords = new Set<string>();
+  private readonly retentionRecords = new Map<string, Set<string>>();
+  private readonly recordRetentions = new Map<string, Set<string>>();
   private records: Map<string, number> | null = null;
   private mutationTail: Promise<void> = Promise.resolve();
 
   private constructor(
-    directory: string,
+    directoryAuthority: StoreDirectoryAuthority,
     options: ConversationAttachmentStoreOptions,
   ) {
-    this.directory = directory;
+    this.directoryAuthority = directoryAuthority;
+    this.directory = directoryAuthority.path;
     this.maxBytes = boundedLimit(options.maxBytes, MAX_PERSISTED_BYTES);
     this.maxRecords = boundedLimit(options.maxRecords, MAX_PERSISTED_RECORDS);
     this.validate = options.validate;
+    this.persistenceFault = options.persistenceFault;
   }
 
   static async open(
@@ -265,10 +415,17 @@ export class ConversationAttachmentStore {
   async retain(
     payloads: readonly ConversationAttachmentPayload[],
     signal?: AbortSignal,
+    retentionId = randomUUID(),
   ): Promise<ChatAttachment[]> {
+    if (!UUID_PATTERN.test(retentionId)) {
+      throw new Error("Invalid conversation attachment retention identity.");
+    }
     if (payloads.length === 0) return [];
     return await this.serialize(async () => {
       signal?.throwIfAborted();
+      if (this.retentionRecords.has(retentionId)) {
+        throw new Error("Conversation attachment retention identity was reused.");
+      }
       const unique = new Map<string, ConversationAttachmentPayload>();
       for (const payload of payloads) {
         const prior = unique.get(payload.attachment.id);
@@ -337,7 +494,14 @@ export class ConversationAttachmentStore {
       for (const payload of newPayloads) {
         this.records?.set(payload.attachment.id, payload.attachment.size);
       }
-      return [...unique.keys()].map((id) => {
+      const attachmentIds = [...unique.keys()];
+      this.retentionRecords.set(retentionId, new Set(attachmentIds));
+      for (const id of attachmentIds) {
+        const retentions = this.recordRetentions.get(id) ?? new Set<string>();
+        retentions.add(retentionId);
+        this.recordRetentions.set(id, retentions);
+      }
+      return attachmentIds.map((id) => {
         const payload = unique.get(id)!;
         const extension = chatAttachmentStorageExtension(
           payload.attachment.mimeType,
@@ -354,12 +518,59 @@ export class ConversationAttachmentStore {
     return await this.inspect(id);
   }
 
+  acceptRetention(retentionId: string): void {
+    if (!UUID_PATTERN.test(retentionId)) {
+      throw new Error("Invalid conversation attachment retention identity.");
+    }
+    const attachmentIds = this.retentionRecords.get(retentionId);
+    if (!attachmentIds) return;
+    this.retentionRecords.delete(retentionId);
+    for (const id of attachmentIds) {
+      const retentions = this.recordRetentions.get(id);
+      retentions?.delete(retentionId);
+      if (retentions?.size === 0) this.recordRetentions.delete(id);
+      this.authoritativeRecords.add(id);
+    }
+  }
+
+  async releaseRetention(retentionId: string): Promise<void> {
+    if (!UUID_PATTERN.test(retentionId)) {
+      throw new Error("Invalid conversation attachment retention identity.");
+    }
+    await this.serialize(async () => {
+      const attachmentIds = this.retentionRecords.get(retentionId);
+      if (!attachmentIds) return;
+      this.retentionRecords.delete(retentionId);
+      for (const id of attachmentIds) {
+        const retentions = this.recordRetentions.get(id);
+        retentions?.delete(retentionId);
+        if (retentions?.size === 0) this.recordRetentions.delete(id);
+        if (
+          !this.authoritativeRecords.has(id)
+          && !this.recordRetentions.has(id)
+        ) {
+          await this.removeRecord(id);
+          this.records?.delete(id);
+        }
+      }
+    });
+  }
+
   async release(ids: readonly string[]): Promise<void> {
     await this.serialize(async () => {
       for (const id of new Set(ids)) {
         if (!UUID_PATTERN.test(id)) {
           throw new Error("Invalid conversation attachment identity.");
         }
+        this.authoritativeRecords.delete(id);
+        for (const retentionId of this.recordRetentions.get(id) ?? []) {
+          const attachmentIds = this.retentionRecords.get(retentionId);
+          attachmentIds?.delete(id);
+          if (attachmentIds?.size === 0) {
+            this.retentionRecords.delete(retentionId);
+          }
+        }
+        this.recordRetentions.delete(id);
         await this.removeRecord(id);
         this.records?.delete(id);
       }
@@ -412,6 +623,8 @@ export class ConversationAttachmentStore {
         }
       }
       this.records = records;
+      this.authoritativeRecords.clear();
+      for (const id of records.keys()) this.authoritativeRecords.add(id);
     });
   }
 
@@ -583,52 +796,54 @@ export class ConversationAttachmentStore {
   ): Promise<void> {
     const metadata = metadataFor(payload);
     const recordDirectory = join(this.directory, metadata.id);
+    const stagingName = `.pending-${randomUUID()}`;
+    const stagingDirectory = join(this.directory, stagingName);
+    let published = false;
     signal?.throwIfAborted();
-    await mkdir(recordDirectory, { mode: 0o700 });
+    await this.assertStoreRoot();
     try {
+      const configuredStall = process.env.NODE_ENV === "test"
+        && this.persistenceFault?.attachmentId === metadata.id
+        ? this.persistenceFault.stallAfterContentSyncMs
+        : 0;
+      await persistRecordOffThread({
+        directory: stagingDirectory,
+        contentName: `${metadata.id}.${metadata.extension}`,
+        bytes: payload.bytes,
+        metadata: JSON.stringify(metadata),
+        stallAfterContentSyncMs: Math.max(
+          0,
+          Math.min(Math.trunc(configuredStall), 60_000),
+        ),
+      }, signal);
       signal?.throwIfAborted();
-      if (process.platform !== "win32") await chmod(recordDirectory, 0o700);
+      await this.assertStoreRoot();
+      await rename(stagingDirectory, recordDirectory);
+      published = true;
       signal?.throwIfAborted();
-      const contentPath = join(
-        recordDirectory,
-        `${metadata.id}.${metadata.extension}`,
-      );
-      const content = await open(
-        contentPath,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-        0o600,
-      );
-      try {
-        await content.writeFile(payload.bytes, { signal });
-        signal?.throwIfAborted();
-        await content.sync();
-        signal?.throwIfAborted();
-      } finally {
-        await content.close();
-      }
-      if (process.platform !== "win32") await chmod(contentPath, 0o600);
-      signal?.throwIfAborted();
-      const metadataPath = join(recordDirectory, METADATA_FILE);
-      const manifest = await open(
-        metadataPath,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-        0o600,
-      );
-      try {
-        await manifest.writeFile(JSON.stringify(metadata), {
-          encoding: "utf8",
-          signal,
-        });
-        signal?.throwIfAborted();
-        await manifest.sync();
-        signal?.throwIfAborted();
-      } finally {
-        await manifest.close();
-      }
-      if (process.platform !== "win32") await chmod(metadataPath, 0o600);
     } catch (error) {
-      await this.removeRecord(metadata.id).catch(() => undefined);
+      if (published) {
+        await this.removeRecord(metadata.id).catch(() => undefined);
+      } else if (signal?.aborted) {
+        void this.removeContainedEntry(stagingName).catch(() => undefined);
+      } else {
+        await this.removeContainedEntry(stagingName).catch(() => undefined);
+      }
       throw error;
+    }
+  }
+
+  private async assertStoreRoot(): Promise<void> {
+    const named = await lstat(this.directory);
+    if (
+      !named.isDirectory()
+      || named.isSymbolicLink()
+      || !sameIdentity(this.directoryAuthority, named)
+      || !isPrivateEntry(named, 0o700)
+    ) throw new Error("Conversation attachment storage changed.");
+    const canonical = await realpath(this.directory);
+    if (canonical !== this.directory) {
+      throw new Error("Conversation attachment storage escaped its authority.");
     }
   }
 
@@ -651,6 +866,7 @@ export class ConversationAttachmentStore {
     ) {
       throw new Error("Conversation attachment cleanup escaped storage.");
     }
+    await this.assertStoreRoot();
     await rm(target, {
       recursive: true,
       force: true,

@@ -4,7 +4,9 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -159,6 +161,108 @@ describe("durable conversation attachment storage", () => {
     await expect(store.retain([image()], cancellation.signal))
       .rejects.toMatchObject({ name: "AbortError" });
     await expect(store.usage()).resolves.toEqual({ records: 0, bytes: 0 });
+  });
+
+  it("does not let late cleanup delete an attachment claimed by a retry", async () => {
+    const dataDirectory = await root();
+    const store = await ConversationAttachmentStore.open(dataDirectory);
+    const firstRetention = "66666666-6666-4666-8666-666666666666";
+    const retryRetention = "77777777-7777-4777-8777-777777777777";
+    const [first] = await store.retain(
+      [image()],
+      undefined,
+      firstRetention,
+    );
+    const [retry] = await store.retain(
+      [image()],
+      undefined,
+      retryRetention,
+    );
+
+    await store.releaseRetention(firstRetention);
+
+    await expect(store.preview(retry!.id)).resolves.toMatchObject({
+      attachment: retry,
+    });
+    store.acceptRetention(retryRetention);
+    await store.releaseRetention(firstRetention);
+    await expect(store.preview(first!.id)).resolves.not.toBeNull();
+  });
+
+  it("releases the mutation queue when a durable worker is cancelled", async () => {
+    const dataDirectory = await root();
+    const stalled = image("88888888-8888-4888-8888-888888888888");
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      persistenceFault: {
+        attachmentId: stalled.attachment.id,
+        stallAfterContentSyncMs: 60_000,
+      },
+    });
+    const cancellation = new AbortController();
+    const retaining = store.retain(
+      [stalled],
+      cancellation.signal,
+      "99999999-9999-4999-8999-999999999999",
+    );
+    let staged = false;
+    for (let attempt = 0; attempt < 200 && !staged; attempt += 1) {
+      const pending = (await readdir(store.directory)).find((name) =>
+        name.startsWith(".pending-"));
+      staged = pending
+        ? await readFile(join(
+            store.directory,
+            pending,
+            `${stalled.attachment.id}.png`,
+          )).then(() => true, () => false)
+        : false;
+      if (!staged) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(staged).toBe(true);
+
+    cancellation.abort();
+    await expect(retaining).rejects.toMatchObject({ name: "AbortError" });
+
+    const next = image("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    let timeout!: ReturnType<typeof setTimeout>;
+    try {
+      await expect(Promise.race([
+        store.retain(
+          [next],
+          undefined,
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        ),
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("The mutation queue remained occupied.")),
+            5_000,
+          );
+        }),
+      ])).resolves.toHaveLength(1);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }, 10_000);
+
+  it("refuses cleanup after its pinned storage root is replaced", async () => {
+    const dataDirectory = await root();
+    const outside = await root();
+    const store = await ConversationAttachmentStore.open(dataDirectory);
+    const moved = `${store.directory}-moved`;
+    await writeFile(join(outside, ".DS_Store"), "preserve", "utf8");
+    await rename(store.directory, moved);
+    await symlink(
+      outside,
+      store.directory,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    try {
+      await expect(store.reconcile([])).rejects.toThrow(/changed/u);
+      await expect(readFile(join(outside, ".DS_Store"), "utf8"))
+        .resolves.toBe("preserve");
+    } finally {
+      await rm(store.directory, { recursive: true, force: true });
+      await rename(moved, store.directory);
+    }
   });
 
   it("fails closed when retained bytes or their private record are replaced", async () => {

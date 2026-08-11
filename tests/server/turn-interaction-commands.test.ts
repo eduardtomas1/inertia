@@ -188,6 +188,8 @@ function dependencies(options: {
         attachment: ChatAttachment;
       }>) => payloads.map(({ attachment }) => attachment)),
       release: vi.fn(async () => undefined),
+      acceptRetention: vi.fn(),
+      releaseRetention: vi.fn(async () => undefined),
     } as unknown as TurnInteractionCommandDependencies["conversationAttachments"],
     backendProfileController: {
       validateSelection: vi.fn((selection) =>
@@ -628,8 +630,8 @@ describe("message attachment ownership transfer", () => {
 
       completeRetention([{ ...trustedAttachment, path: "/durable/reference.png" }]);
       await vi.waitFor(() => {
-        expect(handlerDependencies.conversationAttachments.release)
-          .toHaveBeenCalledWith([trustedAttachment.id]);
+        expect(handlerDependencies.conversationAttachments.releaseRetention)
+          .toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f-]{36}$/u));
       });
       expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
       expect(handlerDependencies.store.createMessage).not.toHaveBeenCalled();
@@ -708,7 +710,9 @@ describe("message attachment ownership transfer", () => {
       imagePaths: [retainedAttachment.path],
     }));
     expect(relinquishAll).not.toHaveBeenCalled();
-    expect(handlerDependencies.conversationAttachments.release)
+    expect(handlerDependencies.conversationAttachments.acceptRetention)
+      .toHaveBeenCalledOnce();
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
       .not.toHaveBeenCalled();
   });
 
@@ -731,7 +735,7 @@ describe("message attachment ownership transfer", () => {
     expect(queue).not.toHaveBeenCalled();
     expect(relinquishAll).toHaveBeenCalledOnce();
     expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
-    expect(handlerDependencies.conversationAttachments.release)
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
       .not.toHaveBeenCalled();
   });
 
@@ -754,8 +758,8 @@ describe("message attachment ownership transfer", () => {
     expect(queue).toHaveBeenCalledTimes(1);
     expect(relinquishAll).toHaveBeenCalledOnce();
     expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
-    expect(handlerDependencies.conversationAttachments.release)
-      .toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
+      .toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f-]{36}$/u));
 
     await expect(handler({} as never, messageCommand())).resolves.toBe(
       "handled",
@@ -952,8 +956,8 @@ describe("message attachment ownership transfer", () => {
       expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
       expect(handlerDependencies.attachmentResolver?.relinquishAll)
         .toHaveBeenCalledWith([trustedAttachment.id]);
-      expect(handlerDependencies.conversationAttachments.release)
-        .not.toHaveBeenCalled();
+      expect(handlerDependencies.conversationAttachments.releaseRetention)
+        .toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f-]{36}$/u));
       const { stdout } = await execFileAsync("git", [
         "-C",
         repository,

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import type WebSocket from "ws";
@@ -154,7 +155,8 @@ export function createTurnInteractionCommandHandler(
           ({ attachment }) => attachment,
         );
         let attachments = sourceAttachments;
-        let retainedAttachmentIds: string[] = [];
+        const attachmentRetentionId = randomUUID();
+        let attachmentRetentionStarted = false;
         let retainedAttachmentsAccepted = false;
         let generatedAttachmentPaths: string[] = [];
         const relinquishAttachments = async () => {
@@ -164,16 +166,17 @@ export function createTurnInteractionCommandHandler(
             dependencies.attachmentResolver?.relinquishAll(
               sourceAttachments.map(({ id }) => id),
             ),
-            !retainedAttachmentsAccepted && retainedAttachmentIds.length > 0
-              ? dependencies.conversationAttachments.release(
-                  retainedAttachmentIds,
+            attachmentRetentionStarted
+              && !retainedAttachmentsAccepted
+              && sourceAttachments.length > 0
+              ? dependencies.conversationAttachments.releaseRetention(
+                  attachmentRetentionId,
                 )
               : undefined,
             generated.length > 0
               ? dependencies.generatedAttachments.release(generated)
               : undefined,
           ]);
-          if (!retainedAttachmentsAccepted) retainedAttachmentIds = [];
         };
         let documentPreparation: PreparedDocumentAttachments;
         let extraction: Promise<PreparedDocumentAttachments> | null = null;
@@ -373,9 +376,11 @@ export function createTurnInteractionCommandHandler(
           }
         }
         const retentionAbort = new AbortController();
+        attachmentRetentionStarted = true;
         const retention = dependencies.conversationAttachments.retain(
           resolvedAttachments,
           retentionAbort.signal,
+          attachmentRetentionId,
         );
         let retentionCompleted = false;
         try {
@@ -385,7 +390,6 @@ export function createTurnInteractionCommandHandler(
             () => retentionAbort.abort(),
           );
           retentionCompleted = true;
-          retainedAttachmentIds = attachments.map(({ id }) => id);
           const durablePathBySourcePath = new Map(
             sourceAttachments.map((source, index) => [
               source.path,
@@ -401,8 +405,8 @@ export function createTurnInteractionCommandHandler(
         } catch (error) {
           if (!retentionCompleted) {
             void retention.then(
-              (lateAttachments) => dependencies.conversationAttachments
-                .release(lateAttachments.map(({ id }) => id)),
+              () => dependencies.conversationAttachments
+                .releaseRetention(attachmentRetentionId),
               () => undefined,
             ).catch(() => undefined);
           }
@@ -447,7 +451,12 @@ export function createTurnInteractionCommandHandler(
                 skills: resolvedSkills.inputs,
               })
             : null;
-          retainedAttachmentsAccepted = queued !== null;
+          if (queued !== null) {
+            dependencies.conversationAttachments.acceptRetention(
+              attachmentRetentionId,
+            );
+            retainedAttachmentsAccepted = true;
+          }
         } catch (error) {
           if (providerTransitionReserved) {
             dependencies.providerTerminalResumes.release(conversation.id);
@@ -477,6 +486,9 @@ export function createTurnInteractionCommandHandler(
               null,
               undefined,
               { activateConversation: command.payload.activate },
+            );
+            dependencies.conversationAttachments.acceptRetention(
+              attachmentRetentionId,
             );
             retainedAttachmentsAccepted = true;
             attachmentOwnershipAccepted = true;

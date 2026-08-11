@@ -126,6 +126,11 @@ export async function cleanupOrphanedAttachments(
       const info = await inspectFile(path);
       if (!info.isFile() || info.isSymbolicLink()) {
         if (options.preserveExisting) return fullReservation();
+        try {
+          await unlinkWithRetry(path, unlinkFile, waitForRetry);
+        } catch {
+          return fullReservation();
+        }
         continue;
       }
       if (options.preserveExisting) {

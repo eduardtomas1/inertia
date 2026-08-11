@@ -369,6 +369,7 @@ describe("compact Work sidebar", () => {
     const start = new Date(2026, 7, 11, 12);
     vi.setSystemTime(start);
     renderSidebar([
+      conversation("existing", "Existing recent work", new Date(2026, 7, 11, 10)),
       conversation("expiring", "Snooze expires now", new Date(2026, 7, 11, 9), {
         snoozedUntil: new Date(start.getTime() + 100).toISOString(),
       }),
@@ -383,6 +384,31 @@ describe("compact Work sidebar", () => {
       .not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Snooze expires now,/ }))
       .toHaveFocus();
+  });
+
+  it("retains the row action focus identity while its Work menu is open", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("existing", "Existing recent work", new Date(2026, 7, 11, 10)),
+      conversation("expiring", "Menu snooze expires", new Date(2026, 7, 11, 9), {
+        snoozedUntil: new Date(start.getTime() + 100).toISOString(),
+      }),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Snoozed 1" }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Thread actions for Menu snooze expires",
+    }));
+    screen.getByRole("menuitem", { name: "Rename" }).focus();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+
+    expect(screen.getByRole("button", {
+      name: "Thread actions for Menu snooze expires",
+    })).toHaveFocus();
   });
 
   it("moves focus to search when an expired dismissed snooze leaves Work", () => {
@@ -407,6 +433,32 @@ describe("compact Work sidebar", () => {
       .not.toBeInTheDocument();
     expect(screen.getByRole("searchbox", {
       name: "Search projects and conversations",
+    })).toHaveFocus();
+  });
+
+  it("moves focus to the nearest remaining control when dismissed Work disappears", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(start);
+    const snoozed = conversation(
+      "dismissed-expiring",
+      "Dismissed snooze expires",
+      new Date(2026, 7, 11, 9),
+      { snoozedUntil: new Date(start.getTime() + 100).toISOString() },
+    );
+    renderSidebar([
+      conversation("existing", "Existing recent work", new Date(2026, 7, 11, 10)),
+      snoozed,
+    ], vi.fn(), [dismissedRun(snoozed)]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Snoozed 1" }));
+    screen.getByRole("button", { name: /^Dismissed snooze expires,/ }).focus();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+
+    expect(screen.getByRole("button", {
+      name: "Thread actions for Existing recent work",
     })).toHaveFocus();
   });
 

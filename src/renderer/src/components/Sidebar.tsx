@@ -194,6 +194,7 @@ function SidebarView({
   const sidebarRef = useRef<HTMLElement>(null);
   const navigationRef = useRef<HTMLDivElement>(null);
   const workFocusIdentityRef = useRef<string | null>(null);
+  const workFocusIndexRef = useRef<number | null>(null);
   const onCloseRef = useRef(onClose);
   const mobile = useMediaQuery("(max-width: 760px)");
   useNativePreviewSuspension(Boolean(
@@ -326,6 +327,7 @@ function SidebarView({
   useLayoutEffect(() => {
     if (sidebarMode !== "activity") {
       workFocusIdentityRef.current = null;
+      workFocusIndexRef.current = null;
       return;
     }
     const identity = workFocusIdentityRef.current;
@@ -339,11 +341,16 @@ function SidebarView({
     const focusableWorkItems = [...(
       navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
     )];
+    const previousIndex = workFocusIndexRef.current;
     const target = focusableWorkItems.find((item) => item.dataset.workFocusId === identity)
-      ?? focusableWorkItems[0]
+      ?? (previousIndex === null
+        ? undefined
+        : focusableWorkItems[Math.min(previousIndex, focusableWorkItems.length - 1)])
       ?? sidebarRef.current?.querySelector<HTMLInputElement>('input[type="search"]');
     target?.focus({ preventScroll: true });
     workFocusIdentityRef.current = target?.dataset.workFocusId ?? null;
+    const targetIndex = target ? focusableWorkItems.indexOf(target) : -1;
+    workFocusIndexRef.current = targetIndex >= 0 ? targetIndex : null;
   }, [sidebarMode, snoozeNow, workSections]);
   const visibleWorkCount = workSections.reduce(
     (count, section) => count + section.threads.length,
@@ -465,7 +472,13 @@ function SidebarView({
       && snapshot.activeConversationId !== conversation.id
     );
     return (
-      <div className="conversation-menu" role="menu">
+      <div
+        className="conversation-menu"
+        role="menu"
+        data-work-focus-owner={sidebarMode === "activity"
+          ? `thread-actions:${conversation.id}`
+          : undefined}
+      >
         <button type="button" role="menuitem" onClick={() => { setRenameDraft(conversation.title); setRenaming(conversation.id); setConversationMenu(null); }}><Pencil size={13} />Rename</button>
         <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onPinConversation(conversation, !conversation.pinnedAt); }}>
           <MessageSquare size={13} />{conversation.pinnedAt ? "Unpin" : "Pin"}
@@ -668,7 +681,24 @@ function SidebarView({
         inert={mobile && !open ? true : undefined}
         onFocusCapture={(event) => {
           const target = event.target instanceof HTMLElement ? event.target : null;
-          workFocusIdentityRef.current = target?.dataset.workFocusId ?? null;
+          const focusOwner = target?.closest<HTMLElement>(
+            "[data-work-focus-id], [data-work-focus-owner]",
+          );
+          const identity = focusOwner?.dataset.workFocusId
+            ?? focusOwner?.dataset.workFocusOwner
+            ?? null;
+          workFocusIdentityRef.current = identity;
+          if (!identity) {
+            workFocusIndexRef.current = null;
+            return;
+          }
+          const focusableWorkItems = [...(
+            navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
+          )];
+          const identityIndex = focusableWorkItems.findIndex(
+            (item) => item.dataset.workFocusId === identity,
+          );
+          workFocusIndexRef.current = identityIndex >= 0 ? identityIndex : null;
         }}
       >
         <div className="sidebar-brand drag-region">

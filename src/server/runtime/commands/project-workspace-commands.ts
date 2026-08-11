@@ -90,6 +90,16 @@ export function createProjectWorkspaceCommandHandler(
         const projectId = command.payload.projectId;
         const conversations = dependencies.store.shellSnapshot().conversations
           .filter((conversation) => conversation.projectId === projectId);
+        const storedWorkspaces = (items: typeof conversations) => {
+          const projectPath = dependencies.store.project(projectId).path;
+          return [
+            { projectId, checkoutPath: projectPath },
+            ...items.map((conversation) => ({
+              projectId: conversation.projectId,
+              checkoutPath: conversation.worktreePath ?? projectPath,
+            })),
+          ];
+        };
         if (conversations.some((conversation) => (
           dependencies.providerTerminalResumes.isActive(conversation.id)
         ))) {
@@ -97,16 +107,7 @@ export function createProjectWorkspaceCommandHandler(
             "End resumed provider terminals for this project before removing it.",
           );
         }
-        const workspaces = [
-          { projectId, checkoutPath: dependencies.workspacePath(projectId) },
-          ...conversations.map((conversation) => ({
-            projectId: conversation.projectId,
-            checkoutPath: dependencies.workspacePath(
-              conversation.projectId,
-              conversation.id,
-            ),
-          })),
-        ];
+        const workspaces = storedWorkspaces(conversations);
         if (
           workspaces.some(({ checkoutPath }) =>
             dependencies.turns.hasActiveCheckout(checkoutPath))
@@ -143,16 +144,7 @@ export function createProjectWorkspaceCommandHandler(
           const latestConversations = dependencies.store.shellSnapshot()
             .conversations.filter((conversation) =>
               conversation.projectId === projectId);
-          const latestWorkspaces = [
-            { projectId, checkoutPath: dependencies.workspacePath(projectId) },
-            ...latestConversations.map((conversation) => ({
-              projectId: conversation.projectId,
-              checkoutPath: dependencies.workspacePath(
-                conversation.projectId,
-                conversation.id,
-              ),
-            })),
-          ];
+          const latestWorkspaces = storedWorkspaces(latestConversations);
           if (
             latestConversations.length !== conversations.length
             || latestConversations.some((conversation) =>

@@ -240,7 +240,32 @@ describe("runtime shutdown phases", () => {
       "artifacts",
       "clients",
       "server",
-      "store",
+    ]);
+  });
+
+  it("keeps the database open when turn and provider cleanup is unconfirmed", async () => {
+    const cleanupError = new Error("provider cleanup is unconfirmed");
+    const calls: string[] = [];
+
+    await expect(runRuntimeShutdownPhases({
+      independentDrains: [],
+      stopIsolatedRuns: () => { calls.push("isolated"); },
+      disposeTurnsAndProviders: () => {
+        calls.push("turns");
+        throw cleanupError;
+      },
+      settleArtifacts: () => { calls.push("artifacts"); },
+      terminateClients: () => { calls.push("clients"); },
+      closeServer: () => { calls.push("server"); },
+      closeStore: () => { calls.push("store"); },
+    })).rejects.toBe(cleanupError);
+
+    expect(calls).toEqual([
+      "isolated",
+      "turns",
+      "artifacts",
+      "clients",
+      "server",
     ]);
   });
 

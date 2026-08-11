@@ -1172,6 +1172,51 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("drains settlement work before propagating an unconfirmed provider cleanup", async () => {
+    let releaseSettlement!: () => void;
+    const settlement = new Promise<void>((resolve) => {
+      releaseSettlement = resolve;
+    });
+    const runtime = await testRuntime({
+      onTurnSettled: () => settlement,
+    });
+    runtime.provider.deferOwnedStop();
+    const cleanupError = new Error("provider cleanup is unconfirmed");
+    vi.spyOn(runtime.provider, "disposeAll").mockRejectedValue(cleanupError);
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Drain the settlement before closing SQLite.",
+    });
+    runtime.controller.start(queued.turn.id);
+
+    const disposal = runtime.controller.dispose("runtime-shutdown");
+    let disposalSettled = false;
+    const observed = disposal.then(
+      () => null,
+      (error: unknown) => error,
+    ).finally(() => {
+      disposalSettled = true;
+    });
+    await flushPromises();
+    expect(disposalSettled).toBe(false);
+
+    runtime.provider.resolveOwnedStop();
+    await flushPromises();
+    expect(disposalSettled).toBe(false);
+
+    releaseSettlement();
+    expect(await observed).toBe(cleanupError);
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "interrupted",
+      terminalReason: "runtime-shutdown",
+    });
+
+    runtime.provider.resolve({ status: "cancelled" });
+    await flushPromises();
+    await flushPromises();
+    runtime.store.close();
+  });
+
   it.each(["cancel", "timeout"] as const)(
     "settles %s immediately but retains cleanup authority until provider exit",
     async (scenario) => {

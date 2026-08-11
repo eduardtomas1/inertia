@@ -441,6 +441,45 @@ describe("inactive Duo turn recovery", () => {
     )).resolves.toBe("mutation");
   });
 
+  it("reconciles and removes stale Duo history after its stored checkouts disappear", async () => {
+    let runtime = await createRuntime();
+    const prepared = prepareLaunch(runtime, false, true);
+    runtime = reopen(runtime);
+    runtime.store.finishPairedLaunchCancellation(prepared.launchId);
+    await rm(runtime.workspace, { recursive: true, force: true });
+
+    const competingReservationId = "missing-checkout-owner";
+    expect(runtime.store.conversationWork.reserveAtCheckout(
+      competingReservationId,
+      runtime.projectId,
+      prepared.conversations.sides[0].worktreePath!,
+    )).toBe(true);
+    await expect(projectHandler(runtime)(
+      {} as never,
+      {
+        type: "project.remove",
+        requestId: randomUUID(),
+        payload: { projectId: runtime.projectId },
+      },
+    )).rejects.toThrow(/Stop active work/u);
+    expect(runtime.store.project(runtime.projectId).id).toBe(runtime.projectId);
+    runtime.store.conversationWork.release(competingReservationId);
+
+    await expect(projectHandler(runtime)(
+      {} as never,
+      {
+        type: "project.remove",
+        requestId: randomUUID(),
+        payload: { projectId: runtime.projectId },
+      },
+    )).resolves.toBe("mutation");
+
+    expect(() => runtime.store.project(runtime.projectId)).toThrow();
+    for (const { id } of prepared.conversations.sides) {
+      expect(() => runtime.store.conversation(id)).toThrow();
+    }
+  });
+
   it("reconciles a detached optional judge and its exact durable projections before all three chats delete", async () => {
     let runtime = await createRuntime();
     const prepared = prepareLaunch(runtime, true);

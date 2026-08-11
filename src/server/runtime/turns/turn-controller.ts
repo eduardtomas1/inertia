@@ -960,8 +960,11 @@ export class TurnController {
           : "The local runtime crashed before this turn completed.",
       );
     }
-    await this.providers.disposeAll();
-    await this.drainSettlementTasks();
+    try {
+      await this.providers.disposeAll();
+    } finally {
+      await this.drainSettlementTasks();
+    }
   }
 
   /**

@@ -77,6 +77,7 @@ import { RecoveryRepository } from "./persistence/recovery-repository";
 import { ReviewRepository } from "./persistence/review-repository";
 import { SettingsRepository } from "./persistence/settings-repository";
 import { SnapshotRepository } from "./persistence/snapshot-repository";
+import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "./persistence/stored-conversation-workspace";
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { TurnLedgerRepository } from "./persistence/turn-ledger-repository";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
@@ -101,7 +102,6 @@ import type {
   UpsertSubagentTraceInput,
   UpsertSubagentTraceResult,
 } from "./persistence/types";
-import { ConversationWorkAuthority } from "./runtime/conversation-work-authority";
 import type { WorktreeFilesystemReceipt } from "./worktree-filesystem-identity";
 
 export { RecordNotFoundError } from "./persistence/errors";
@@ -143,7 +143,7 @@ export class RuntimeStore {
   private readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
-  readonly conversationWork = new ConversationWorkAuthority((id) => ({ projectId: this.conversation(id).projectId, checkoutPath: this.conversationPath(id) }));
+  readonly conversationWork = new ConversationWorkAuthority(storedConversationWorkspaceResolver(this));
 
   constructor(
     databasePath: string,

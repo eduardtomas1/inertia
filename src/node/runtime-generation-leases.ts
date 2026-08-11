@@ -1,32 +1,28 @@
-import { createHash, randomUUID } from "node:crypto";
-import {
-  chmodSync,
-  closeSync,
-  existsSync,
-  fsyncSync,
-  linkSync,
-  lstatSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
 
+import {
+  discardDirectRuntimeJournalLeaf,
+  directRuntimeJournalRootIsPinned,
+  directRuntimeJournalLeafExists,
+  listDirectRuntimeJournalLeaves,
+  pinDirectRuntimeJournalRoot,
+  readDirectRuntimeJournalLeaf,
+  renameDirectRuntimeJournalLeaf,
+  unlinkDirectRuntimeJournalLeaf,
+  writeDirectRuntimeJournalLeaf,
+  type DirectRuntimeJournalRoot,
+  type DirectRuntimeJournalTestHooks,
+} from "./direct-runtime-journal.js";
 import {
   validRuntimeGenerationId,
   validSystemBootId,
 } from "./runtime-process-protocol.js";
-import {
-  journalDirectoryIsPinned,
-  pinJournalDirectory,
-  type PinnedJournalDirectory,
-} from "./pinned-journal-directory.js";
 
 const MAX_GENERATION_LEASES = 32;
-const LEASE_DIRECTORY = ".runtime-generation-leases";
+const MAX_LEASE_BYTES = 768;
+const LEASE_PREFIX = ".runtime-generation-lease-";
+const LEASE_SCHEMA_VERSION = 1;
+const LEGACY_LEASE_DIRECTORY = ".runtime-generation-leases";
 
 export interface RuntimeGenerationLease {
   readonly runtimeGenerationId: string;
@@ -34,98 +30,108 @@ export interface RuntimeGenerationLease {
   readonly createdAt: string;
 }
 
-function leaseName(runtimeGenerationId: string): string {
-  return `${createHash("sha256").update(runtimeGenerationId).digest("hex")}.json`;
+interface StoredRuntimeGenerationLease extends RuntimeGenerationLease {
+  readonly version: typeof LEASE_SCHEMA_VERSION;
 }
 
-function fsyncDirectory(directory: string): void {
-  try {
-    const handle = openSync(directory, "r");
-    try { fsyncSync(handle); } finally { closeSync(handle); }
-  } catch { /* Windows does not expose directory fsync. */ }
+function generationHash(runtimeGenerationId: string): string {
+  return createHash("sha256").update(runtimeGenerationId).digest("hex");
 }
 
-function validLease(
-  value: unknown,
-  expectedName: string,
-): value is RuntimeGenerationLease {
-  if (!value || typeof value !== "object") return false;
-  const lease = value as Partial<RuntimeGenerationLease>;
-  return validRuntimeGenerationId(lease.runtimeGenerationId)
-    && validSystemBootId(lease.systemBootId)
-    && typeof lease.createdAt === "string"
-    && Number.isFinite(Date.parse(lease.createdAt))
-    && leaseName(lease.runtimeGenerationId) === expectedName;
+function canonicalName(hash: string): string {
+  return `${LEASE_PREFIX}${hash}.json`;
+}
+
+function transientName(hash: string, operation: "publish" | "consume"): string {
+  return `${LEASE_PREFIX}${hash}.${operation}.tmp`;
+}
+
+function exactObjectKeys(value: object, expected: readonly string[]): boolean {
+  const keys = Object.keys(value).sort();
+  return keys.length === expected.length
+    && keys.every((key, index) => key === expected[index]);
 }
 
 function parseLease(
-  path: string,
-  expectedName?: string,
+  bytes: Buffer,
+  expectedHash: string,
 ): RuntimeGenerationLease | null {
   try {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1 || stat.size > 512) {
-      return null;
-    }
-    const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    const value = JSON.parse(bytes.toString("utf8")) as unknown;
     if (!value || typeof value !== "object") return null;
-    const generationId = (value as { runtimeGenerationId?: unknown }).runtimeGenerationId;
-    if (typeof generationId !== "string") return null;
-    const name = expectedName ?? leaseName(generationId);
-    return validLease(value, name) ? value : null;
+    if (!exactObjectKeys(value, [
+      "createdAt",
+      "runtimeGenerationId",
+      "systemBootId",
+      "version",
+    ])) return null;
+    const lease = value as Partial<StoredRuntimeGenerationLease>;
+    if (
+      lease.version !== LEASE_SCHEMA_VERSION
+      || !validRuntimeGenerationId(lease.runtimeGenerationId)
+      || !validSystemBootId(lease.systemBootId)
+      || typeof lease.createdAt !== "string"
+      || !Number.isFinite(Date.parse(lease.createdAt))
+      || generationHash(lease.runtimeGenerationId) !== expectedHash
+    ) return null;
+    return {
+      runtimeGenerationId: lease.runtimeGenerationId,
+      systemBootId: lease.systemBootId,
+      createdAt: lease.createdAt,
+    };
   } catch {
     return null;
   }
 }
 
+function storedLease(lease: RuntimeGenerationLease): Buffer {
+  return Buffer.from(JSON.stringify({
+    version: LEASE_SCHEMA_VERSION,
+    runtimeGenerationId: lease.runtimeGenerationId,
+    systemBootId: lease.systemBootId,
+    createdAt: lease.createdAt,
+  }), "utf8");
+}
+
 function readGenerationLeases(
-  directory: PinnedJournalDirectory | null,
+  root: DirectRuntimeJournalRoot,
 ): RuntimeGenerationLease[] {
-  if (!directory) return [];
-  if (!journalDirectoryIsPinned(directory)) {
-    throw new Error("The runtime generation lease directory identity changed.");
+  if (directRuntimeJournalLeafExists(root, LEGACY_LEASE_DIRECTORY)) {
+    throw new Error("The legacy runtime generation lease storage is unsafe.");
   }
-  const names = readdirSync(directory.path);
-  if (names.length > MAX_GENERATION_LEASES * 3) {
-    throw new Error("The runtime generation lease storage bound was exceeded.");
-  }
+  const names = listDirectRuntimeJournalLeaves(
+    root,
+    LEASE_PREFIX,
+    MAX_GENERATION_LEASES * 3,
+  );
   const leases: RuntimeGenerationLease[] = [];
   for (const name of names) {
-    const transient = name.match(
-      /^\.[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(tmp|consume)$/iu,
+    const match = name.match(
+      /^\.runtime-generation-lease-([0-9a-f]{64})\.(?:(json)|(publish|consume)\.tmp)$/u,
     );
-    if (transient) {
-      const path = join(directory.path, name);
-      const lease = parseLease(path);
-      if (!lease) throw new Error("A runtime generation lease transient is invalid.");
-      if (transient[1] === "tmp") {
-        const expectedName = leaseName(lease.runtimeGenerationId);
-        const target = join(directory.path, expectedName);
-        if (existsSync(target)) {
-          const published = parseLease(target, expectedName);
-          if (
-            !published
-            || published.runtimeGenerationId !== lease.runtimeGenerationId
-            || published.systemBootId !== lease.systemBootId
-          ) throw new Error("A runtime generation lease transient conflicts.");
-        }
-      }
-      try {
-        if (!journalDirectoryIsPinned(directory)) {
-          throw new Error("The runtime generation lease directory identity changed.");
-        }
-        unlinkSync(path);
-        fsyncDirectory(directory.path);
-      } catch {
+    if (!match) {
+      throw new Error("Runtime generation lease storage contains a foreign entry.");
+    }
+    if (match[3] === "publish") {
+      // A publisher temp exists before the utility process is admitted. Even a
+      // zero-byte or torn regular temp is therefore safe to discard, while the
+      // fd-safe helper still rejects redirects and identity replacement.
+      if (!discardDirectRuntimeJournalLeaf(root, name)) {
         throw new Error("A runtime generation lease transient could not be retired.");
       }
       continue;
     }
-    if (!/^[0-9a-f]{64}\.json$/u.test(name)) {
-      throw new Error("Runtime generation lease storage contains a foreign entry.");
-    }
-    const lease = parseLease(join(directory.path, name), name);
+    const leaf = readDirectRuntimeJournalLeaf(root, name, MAX_LEASE_BYTES);
+    if (!leaf) throw new Error("A runtime generation lease disappeared.");
+    const lease = parseLease(leaf.bytes, match[1]!);
     if (!lease) throw new Error("A runtime generation lease is invalid.");
+    if (!match[2]) {
+      // Consume follows affirmative cleanup and is safe to finish.
+      if (!unlinkDirectRuntimeJournalLeaf(root, name, leaf.identity)) {
+        throw new Error("A runtime generation lease transient could not be retired.");
+      }
+      continue;
+    }
     leases.push(lease);
     if (leases.length > MAX_GENERATION_LEASES) {
       throw new Error("The runtime generation lease bound was exceeded.");
@@ -137,92 +143,22 @@ function readGenerationLeases(
   ));
 }
 
-function publishGenerationLease(
-  directory: PinnedJournalDirectory,
-  lease: RuntimeGenerationLease,
-): boolean {
-  const expectedName = leaseName(lease.runtimeGenerationId);
-  if (!validLease(lease, expectedName)) return false;
-  let temporary: string | null = null;
-  try {
-    if (!journalDirectoryIsPinned(directory)) return false;
-    const target = join(directory.path, expectedName);
-    if (existsSync(target)) {
-      const current = parseLease(target, expectedName);
-      return current?.runtimeGenerationId === lease.runtimeGenerationId
-        && current.systemBootId === lease.systemBootId;
-    }
-    if (readGenerationLeases(directory).length >= MAX_GENERATION_LEASES) {
-      return false;
-    }
-    temporary = join(directory.path, `.${randomUUID()}.tmp`);
-    if (!journalDirectoryIsPinned(directory)) return false;
-    writeFileSync(temporary, JSON.stringify(lease), {
-      encoding: "utf8",
-      mode: 0o600,
-      flag: "wx",
-      flush: true,
-    });
-    chmodSync(temporary, 0o600);
-    if (!journalDirectoryIsPinned(directory)) return false;
-    linkSync(temporary, target);
-    if (!journalDirectoryIsPinned(directory)) return false;
-    unlinkSync(temporary);
-    temporary = null;
-    fsyncDirectory(directory.path);
-    return true;
-  } catch {
-    if (temporary && journalDirectoryIsPinned(directory)) {
-      try { unlinkSync(temporary); } catch { /* Nothing was admitted. */ }
-    }
-    return false;
-  }
-}
-
-function consumeGenerationLease(
-  directory: PinnedJournalDirectory,
-  runtimeGenerationId: string,
-): boolean {
-  const expectedName = leaseName(runtimeGenerationId);
-  const target = join(directory.path, expectedName);
-  const quarantine = join(directory.path, `.${randomUUID()}.consume`);
-  try {
-    if (!journalDirectoryIsPinned(directory)) return false;
-    renameSync(target, quarantine);
-    if (!journalDirectoryIsPinned(directory)) return false;
-    const stored = parseLease(quarantine, expectedName);
-    if (!stored || stored.runtimeGenerationId !== runtimeGenerationId) {
-      try {
-        if (journalDirectoryIsPinned(directory)) linkSync(quarantine, target);
-      } catch { /* Preserve foreign bytes. */ }
-      return false;
-    }
-    if (!journalDirectoryIsPinned(directory)) return false;
-    unlinkSync(quarantine);
-    fsyncDirectory(directory.path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export class RuntimeGenerationLeaseJournal {
   private invalid = false;
   private leases = new Map<string, RuntimeGenerationLease>();
-  private directory: PinnedJournalDirectory | null = null;
+  private root: DirectRuntimeJournalRoot | null = null;
 
-  constructor(private readonly dataDirectory: string) {
+  constructor(
+    private readonly dataDirectory: string,
+    private readonly testHooks?: DirectRuntimeJournalTestHooks,
+  ) {
     this.refresh();
   }
 
   refresh(): void {
     try {
-      this.directory ??= pinJournalDirectory(
-        this.dataDirectory,
-        LEASE_DIRECTORY,
-        false,
-      );
-      const leases = readGenerationLeases(this.directory);
+      this.root ??= pinDirectRuntimeJournalRoot(this.dataDirectory);
+      const leases = readGenerationLeases(this.root);
       this.leases = new Map(leases.map((lease) => [lease.runtimeGenerationId, lease]));
       if (this.leases.size !== leases.length) {
         throw new Error("A runtime generation lease identity is duplicated.");
@@ -237,29 +173,37 @@ export class RuntimeGenerationLeaseJournal {
   all(): RuntimeGenerationLease[] { return [...this.leases.values()]; }
   safetyLocked(): boolean { return this.invalid || this.leases.size > 0; }
 
+  private failedMutation(): false {
+    this.refresh();
+    return false;
+  }
+
   publish(runtimeGenerationId: string, systemBootId: string): boolean {
-    if (this.invalid) return false;
+    if (
+      this.invalid
+      || !validRuntimeGenerationId(runtimeGenerationId)
+      || !validSystemBootId(systemBootId)
+    ) return false;
+    this.refresh();
+    if (this.invalid || !this.root) return false;
     const current = this.leases.get(runtimeGenerationId);
-    if (current && current.systemBootId !== systemBootId) return false;
-    const lease: RuntimeGenerationLease = current ?? {
+    if (current) return current.systemBootId === systemBootId;
+    if (this.leases.size >= MAX_GENERATION_LEASES) return false;
+    const lease: RuntimeGenerationLease = {
       runtimeGenerationId,
       systemBootId,
       createdAt: new Date().toISOString(),
     };
-    try {
-      this.directory ??= pinJournalDirectory(
-        this.dataDirectory,
-        LEASE_DIRECTORY,
-        true,
-      );
-    } catch {
-      this.invalid = true;
-      return false;
-    }
-    if (!this.directory || !publishGenerationLease(this.directory, lease)) {
-      if (this.directory && !journalDirectoryIsPinned(this.directory)) {
-        this.invalid = true;
-      }
+    const hash = generationHash(runtimeGenerationId);
+    if (!writeDirectRuntimeJournalLeaf(
+      this.root,
+      transientName(hash, "publish"),
+      canonicalName(hash),
+      storedLease(lease),
+      this.testHooks,
+    )) {
+      this.refresh();
+      if (!directRuntimeJournalRootIsPinned(this.root)) this.invalid = true;
       return false;
     }
     this.leases.set(runtimeGenerationId, lease);
@@ -267,28 +211,56 @@ export class RuntimeGenerationLeaseJournal {
   }
 
   consume(runtimeGenerationId: string): boolean {
-    if (this.invalid || !this.leases.has(runtimeGenerationId)) return false;
-    if (
-      !this.directory
-      || !consumeGenerationLease(this.directory, runtimeGenerationId)
-    ) {
-      if (this.directory && !journalDirectoryIsPinned(this.directory)) {
-        this.invalid = true;
-      }
-      return false;
+    if (this.invalid || !this.root) return false;
+    this.refresh();
+    if (this.invalid || !this.root) return false;
+    const current = this.leases.get(runtimeGenerationId);
+    if (!current) return false;
+    const hash = generationHash(runtimeGenerationId);
+    const canonical = canonicalName(hash);
+    const source = readDirectRuntimeJournalLeaf(
+      this.root,
+      canonical,
+      MAX_LEASE_BYTES,
+    );
+    if (!source || !parseLease(source.bytes, hash)) return this.failedMutation();
+    const consuming = transientName(hash, "consume");
+    if (!renameDirectRuntimeJournalLeaf(
+      this.root,
+      canonical,
+      consuming,
+      source.identity,
+      this.testHooks,
+    )) return this.failedMutation();
+    const moved = readDirectRuntimeJournalLeaf(
+      this.root,
+      consuming,
+      MAX_LEASE_BYTES,
+    );
+    if (!moved || !parseLease(moved.bytes, hash)) return this.failedMutation();
+    if (!unlinkDirectRuntimeJournalLeaf(
+      this.root,
+      consuming,
+      moved.identity,
+      this.testHooks,
+    )) {
+      return this.failedMutation();
     }
     this.leases.delete(runtimeGenerationId);
     return true;
   }
 
   clearRuntimeGeneration(runtimeGenerationId: string): boolean {
+    this.refresh();
     if (this.invalid) return false;
     return !this.leases.has(runtimeGenerationId)
       || this.consume(runtimeGenerationId);
   }
 
   clearPriorBootSessions(systemBootId: string): boolean {
-    if (this.invalid || !validSystemBootId(systemBootId)) return false;
+    if (!validSystemBootId(systemBootId)) return false;
+    this.refresh();
+    if (this.invalid) return false;
     if (systemBootId === "unavailable") return true;
     return this.all()
       .filter((lease) => (

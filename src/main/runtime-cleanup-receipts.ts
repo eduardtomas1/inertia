@@ -1,28 +1,24 @@
-import { createHash, randomUUID } from "node:crypto";
-import {
-  chmodSync,
-  closeSync,
-  existsSync,
-  fsyncSync,
-  linkSync,
-  lstatSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 import {
-  journalDirectoryIsPinned,
-  pinJournalDirectory,
-  type PinnedJournalDirectory,
-} from "../node/pinned-journal-directory.js";
+  discardDirectRuntimeJournalLeaf,
+  directRuntimeJournalRootIsPinned,
+  directRuntimeJournalLeafExists,
+  listDirectRuntimeJournalLeaves,
+  pinDirectRuntimeJournalRoot,
+  readDirectRuntimeJournalLeaf,
+  renameDirectRuntimeJournalLeaf,
+  unlinkDirectRuntimeJournalLeaf,
+  writeDirectRuntimeJournalLeaf,
+  type DirectRuntimeJournalRoot,
+  type DirectRuntimeJournalTestHooks,
+} from "../node/direct-runtime-journal.js";
 
 const MAX_RECEIPTS = 32;
-const RECEIPT_DIRECTORY = ".runtime-cleanup-receipts";
+const MAX_RECEIPT_BYTES = 768;
+const RECEIPT_PREFIX = ".runtime-cleanup-receipt-";
+const RECEIPT_SCHEMA_VERSION = 1;
+const LEGACY_RECEIPT_DIRECTORY = ".runtime-cleanup-receipts";
 const GENERATION_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[1-9][0-9]{0,9}$/iu;
 
@@ -31,165 +27,191 @@ interface RuntimeCleanupReceipt {
   confirmedAt: string;
 }
 
-function receiptName(runtimeGenerationId: string): string {
-  return `${createHash("sha256").update(runtimeGenerationId).digest("hex")}.json`;
+interface StoredRuntimeCleanupReceipt extends RuntimeCleanupReceipt {
+  readonly version: typeof RECEIPT_SCHEMA_VERSION;
 }
 
-function fsyncDirectory(directory: string): void {
-  try {
-    const directoryHandle = openSync(directory, "r");
-    try { fsyncSync(directoryHandle); } finally { closeSync(directoryHandle); }
-  } catch { /* Windows does not expose directory fsync. */ }
+function generationHash(runtimeGenerationId: string): string {
+  return createHash("sha256").update(runtimeGenerationId).digest("hex");
 }
 
-function parseReceipt(path: string, expectedName: string): RuntimeCleanupReceipt | null {
+function canonicalName(hash: string): string {
+  return `${RECEIPT_PREFIX}${hash}.json`;
+}
+
+function transientName(hash: string, operation: "publish" | "consume"): string {
+  return `${RECEIPT_PREFIX}${hash}.${operation}.tmp`;
+}
+
+function exactObjectKeys(value: object, expected: readonly string[]): boolean {
+  const keys = Object.keys(value).sort();
+  return keys.length === expected.length
+    && keys.every((key, index) => key === expected[index]);
+}
+
+function parseReceipt(
+  bytes: Buffer,
+  expectedHash: string,
+): RuntimeCleanupReceipt | null {
   try {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.size < 1 || stat.size > 512) return null;
-    const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    const value = JSON.parse(bytes.toString("utf8")) as unknown;
     if (!value || typeof value !== "object") return null;
-    const receipt = value as Partial<RuntimeCleanupReceipt>;
+    if (!exactObjectKeys(value, [
+      "confirmedAt",
+      "runtimeGenerationId",
+      "version",
+    ])) return null;
+    const receipt = value as Partial<StoredRuntimeCleanupReceipt>;
     if (
-      typeof receipt.runtimeGenerationId !== "string"
+      receipt.version !== RECEIPT_SCHEMA_VERSION
+      || typeof receipt.runtimeGenerationId !== "string"
       || !GENERATION_PATTERN.test(receipt.runtimeGenerationId)
-      || receiptName(receipt.runtimeGenerationId) !== expectedName
       || typeof receipt.confirmedAt !== "string"
       || !Number.isFinite(Date.parse(receipt.confirmedAt))
+      || generationHash(receipt.runtimeGenerationId) !== expectedHash
     ) return null;
-    return receipt as RuntimeCleanupReceipt;
+    return {
+      runtimeGenerationId: receipt.runtimeGenerationId,
+      confirmedAt: receipt.confirmedAt,
+    };
   } catch {
     return null;
   }
 }
 
-function parseStoredReceipt(path: string): RuntimeCleanupReceipt | null {
-  try {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1 || stat.size > 512) {
-      return null;
-    }
-    const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    if (!value || typeof value !== "object") return null;
-    const receipt = value as Partial<RuntimeCleanupReceipt>;
-    if (typeof receipt.runtimeGenerationId !== "string") return null;
-    return parseReceipt(path, receiptName(receipt.runtimeGenerationId));
-  } catch {
-    return null;
-  }
+function storedReceipt(receipt: RuntimeCleanupReceipt): Buffer {
+  return Buffer.from(JSON.stringify({
+    version: RECEIPT_SCHEMA_VERSION,
+    runtimeGenerationId: receipt.runtimeGenerationId,
+    confirmedAt: receipt.confirmedAt,
+  }), "utf8");
 }
 
-function readRuntimeCleanupReceiptIds(
-  directory: PinnedJournalDirectory | null,
-): string[] {
-  if (!directory) return [];
-  if (!journalDirectoryIsPinned(directory)) {
-    throw new Error("The runtime cleanup receipt directory identity changed.");
+function readRuntimeCleanupReceipts(
+  root: DirectRuntimeJournalRoot,
+): RuntimeCleanupReceipt[] {
+  if (directRuntimeJournalLeafExists(root, LEGACY_RECEIPT_DIRECTORY)) {
+    throw new Error("The legacy runtime cleanup receipt storage is unsafe.");
   }
+  const names = listDirectRuntimeJournalLeaves(
+    root,
+    RECEIPT_PREFIX,
+    MAX_RECEIPTS * 3,
+  );
   const receipts: RuntimeCleanupReceipt[] = [];
-  const names = readdirSync(directory.path);
-  if (names.length > MAX_RECEIPTS * 3) {
-    throw new Error("The runtime cleanup receipt storage bound was exceeded.");
-  }
   for (const name of names) {
-    const transient = name.match(
-      /^\.[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(tmp|consume)$/iu,
+    const match = name.match(
+      /^\.runtime-cleanup-receipt-([0-9a-f]{64})\.(?:(json)|(publish|consume)\.tmp)$/u,
     );
-    if (transient) {
-      if (!journalDirectoryIsPinned(directory)) {
-        throw new Error("The runtime cleanup receipt directory identity changed.");
-      }
-      const path = join(directory.path, name);
-      const receipt = parseStoredReceipt(path);
-      if (!receipt) throw new Error("A runtime cleanup receipt transient is invalid.");
-      if (transient[1] === "tmp") {
-        const expectedName = receiptName(receipt.runtimeGenerationId);
-        const target = join(directory.path, expectedName);
-        if (existsSync(target)) {
-          const published = parseReceipt(target, expectedName);
-          if (
-            !published
-            || published.runtimeGenerationId !== receipt.runtimeGenerationId
-          ) throw new Error("A runtime cleanup receipt transient conflicts.");
-        } else {
-          try {
-            if (!journalDirectoryIsPinned(directory)) {
-              throw new Error("The runtime cleanup receipt directory identity changed.");
-            }
-            linkSync(path, target);
-            receipts.push(receipt);
-          } catch {
-            throw new Error("A runtime cleanup receipt transient could not be published.");
-          }
-        }
-      }
-      try {
-        if (!journalDirectoryIsPinned(directory)) {
-          throw new Error("The runtime cleanup receipt directory identity changed.");
-        }
-        unlinkSync(path);
-        fsyncDirectory(directory.path);
-      } catch {
-        throw new Error("A runtime cleanup receipt transient could not be retired.");
+    if (!match) {
+      throw new Error("Runtime cleanup receipt storage contains a foreign entry.");
+    }
+    let leaf;
+    try {
+      leaf = readDirectRuntimeJournalLeaf(root, name, MAX_RECEIPT_BYTES);
+    } catch (error) {
+      if (
+        match[3] === "publish"
+        && discardDirectRuntimeJournalLeaf(root, name)
+      ) continue;
+      throw error;
+    }
+    if (!leaf) throw new Error("A runtime cleanup receipt disappeared.");
+    const receipt = parseReceipt(leaf.bytes, match[1]!);
+    if (!receipt) {
+      if (
+        match[3] === "publish"
+        && unlinkDirectRuntimeJournalLeaf(root, name, leaf.identity)
+      ) continue;
+      throw new Error("A runtime cleanup receipt is invalid.");
+    }
+    if (match[2]) {
+      receipts.push(receipt);
+      if (receipts.length > MAX_RECEIPTS) {
+        throw new Error("The runtime cleanup receipt bound was exceeded.");
       }
       continue;
     }
-    if (!/^[0-9a-f]{64}\.json$/u.test(name)) {
-      throw new Error("Runtime cleanup receipt storage contains a foreign entry.");
+    if (match[3] === "publish") {
+      const targetName = canonicalName(match[1]!);
+      const target = readDirectRuntimeJournalLeaf(
+        root,
+        targetName,
+        MAX_RECEIPT_BYTES,
+      );
+      if (target) {
+        const published = parseReceipt(target.bytes, match[1]!);
+        if (
+          !published
+          || published.runtimeGenerationId !== receipt.runtimeGenerationId
+        ) throw new Error("A runtime cleanup receipt transient conflicts.");
+        if (!unlinkDirectRuntimeJournalLeaf(root, name, leaf.identity)) {
+          throw new Error("A runtime cleanup receipt transient could not be retired.");
+        }
+      } else if (!renameDirectRuntimeJournalLeaf(
+        root,
+        name,
+        targetName,
+        leaf.identity,
+      )) {
+        throw new Error("A runtime cleanup receipt transient could not be published.");
+      } else {
+        receipts.push(receipt);
+        if (receipts.length > MAX_RECEIPTS) {
+          throw new Error("The runtime cleanup receipt bound was exceeded.");
+        }
+      }
+      continue;
     }
-    if (!journalDirectoryIsPinned(directory)) {
-      throw new Error("The runtime cleanup receipt directory identity changed.");
-    }
-    const receipt = parseReceipt(join(directory.path, name), name);
-    if (!receipt) throw new Error("A runtime cleanup receipt is invalid.");
-    receipts.push(receipt);
-    if (receipts.length > MAX_RECEIPTS) {
-      throw new Error("The runtime cleanup receipt bound was exceeded.");
+    if (!unlinkDirectRuntimeJournalLeaf(root, name, leaf.identity)) {
+      throw new Error("A runtime cleanup receipt transient could not be retired.");
     }
   }
-  return receipts.sort((left, right) => (
+  const unique = new Map(receipts.map((receipt) => [
+    receipt.runtimeGenerationId,
+    receipt,
+  ]));
+  if (unique.size !== receipts.length) {
+    throw new Error("A runtime cleanup receipt identity is duplicated.");
+  }
+  return [...unique.values()].sort((left, right) => (
     left.confirmedAt.localeCompare(right.confirmedAt)
     || left.runtimeGenerationId.localeCompare(right.runtimeGenerationId)
-  )).map(({ runtimeGenerationId }) =>
+  ));
+}
+
+function readRuntimeCleanupReceiptIds(root: DirectRuntimeJournalRoot): string[] {
+  return readRuntimeCleanupReceipts(root).map(({ runtimeGenerationId }) =>
     runtimeGenerationId);
 }
 
 export function runtimeCleanupReceiptIds(dataDirectory: string): string[] {
-  return readRuntimeCleanupReceiptIds(pinJournalDirectory(
-    dataDirectory,
-    RECEIPT_DIRECTORY,
-    false,
-  ));
+  return readRuntimeCleanupReceiptIds(pinDirectRuntimeJournalRoot(dataDirectory));
 }
 
 function publishReceipt(
-  directory: PinnedJournalDirectory,
+  root: DirectRuntimeJournalRoot,
   runtimeGenerationId: string,
+  hooks?: DirectRuntimeJournalTestHooks,
 ): boolean {
-  let temporary: string | null = null;
   try {
-    if (!journalDirectoryIsPinned(directory)) return false;
-    const expectedName = receiptName(runtimeGenerationId);
-    const target = join(directory.path, expectedName);
-    if (existsSync(target)) return parseReceipt(target, expectedName) !== null;
-    if (readRuntimeCleanupReceiptIds(directory).length >= MAX_RECEIPTS) return false;
-    temporary = join(directory.path, `.${randomUUID()}.tmp`);
-    if (!journalDirectoryIsPinned(directory)) return false;
-    writeFileSync(temporary, JSON.stringify({
-      runtimeGenerationId,
-      confirmedAt: new Date().toISOString(),
-    }), { encoding: "utf8", mode: 0o600, flag: "wx", flush: true });
-    chmodSync(temporary, 0o600);
-    if (!journalDirectoryIsPinned(directory)) return false;
-    linkSync(temporary, target);
-    if (!journalDirectoryIsPinned(directory)) return false;
-    unlinkSync(temporary);
-    temporary = null;
-    fsyncDirectory(directory.path);
-    return true;
+    const receipts = readRuntimeCleanupReceipts(root);
+    if (receipts.some((receipt) => (
+      receipt.runtimeGenerationId === runtimeGenerationId
+    ))) return true;
+    if (receipts.length >= MAX_RECEIPTS) return false;
+    const hash = generationHash(runtimeGenerationId);
+    return writeDirectRuntimeJournalLeaf(
+      root,
+      transientName(hash, "publish"),
+      canonicalName(hash),
+      storedReceipt({
+        runtimeGenerationId,
+        confirmedAt: new Date().toISOString(),
+      }),
+      hooks,
+    );
   } catch {
-    if (temporary && journalDirectoryIsPinned(directory)) {
-      try { unlinkSync(temporary); } catch { /* Nothing was published. */ }
-    }
     return false;
   }
 }
@@ -200,43 +222,60 @@ export function publishRuntimeCleanupReceipt(
 ): boolean {
   if (!GENERATION_PATTERN.test(runtimeGenerationId)) return false;
   try {
-    const directory = pinJournalDirectory(dataDirectory, RECEIPT_DIRECTORY, true);
-    return directory ? publishReceipt(directory, runtimeGenerationId) : false;
+    return publishReceipt(
+      pinDirectRuntimeJournalRoot(dataDirectory),
+      runtimeGenerationId,
+    );
   } catch {
     return false;
   }
 }
 
 function consumeReceipt(
-  directory: PinnedJournalDirectory,
+  root: DirectRuntimeJournalRoot,
   runtimeGenerationId: string,
+  hooks?: DirectRuntimeJournalTestHooks,
 ): boolean {
-  const expectedName = receiptName(runtimeGenerationId);
-  const target = join(directory.path, expectedName);
-  const quarantine = join(directory.path, `.${randomUUID()}.consume`);
+  const hash = generationHash(runtimeGenerationId);
+  const canonical = canonicalName(hash);
+  const consuming = transientName(hash, "consume");
   try {
-    if (!journalDirectoryIsPinned(directory)) return false;
-    renameSync(target, quarantine);
-    if (!journalDirectoryIsPinned(directory)) return false;
+    const source = readDirectRuntimeJournalLeaf(
+      root,
+      canonical,
+      MAX_RECEIPT_BYTES,
+    );
+    if (!source) {
+      const replay = readDirectRuntimeJournalLeaf(
+        root,
+        consuming,
+        MAX_RECEIPT_BYTES,
+      );
+      return !!replay
+        && !!parseReceipt(replay.bytes, hash)
+        && unlinkDirectRuntimeJournalLeaf(root, consuming, replay.identity, hooks);
+    }
+    if (!parseReceipt(source.bytes, hash)) return false;
+    if (!renameDirectRuntimeJournalLeaf(
+      root,
+      canonical,
+      consuming,
+      source.identity,
+      hooks,
+    )) return false;
+    const moved = readDirectRuntimeJournalLeaf(
+      root,
+      consuming,
+      MAX_RECEIPT_BYTES,
+    );
+    if (!moved || !parseReceipt(moved.bytes, hash)) return false;
+    // An exact worker ACK already cleared the database lease. A valid consume
+    // transient is therefore safe to replay and retire on app reconstruction.
+    unlinkDirectRuntimeJournalLeaf(root, consuming, moved.identity, hooks);
+    return directRuntimeJournalRootIsPinned(root);
   } catch {
     return false;
   }
-  if (!parseReceipt(quarantine, expectedName)) {
-    try {
-      if (journalDirectoryIsPinned(directory)) linkSync(quarantine, target);
-    } catch { /* Preserve both identities for inspection. */ }
-    return false;
-  }
-  try {
-    if (!journalDirectoryIsPinned(directory)) return false;
-    unlinkSync(quarantine);
-    fsyncDirectory(directory.path);
-  } catch {
-    try {
-      if (journalDirectoryIsPinned(directory)) linkSync(quarantine, target);
-    } catch { /* The exact ACK already cleared the database lease. */ }
-  }
-  return journalDirectoryIsPinned(directory);
 }
 
 export function consumeRuntimeCleanupReceipt(
@@ -245,8 +284,10 @@ export function consumeRuntimeCleanupReceipt(
 ): boolean {
   if (!GENERATION_PATTERN.test(runtimeGenerationId)) return false;
   try {
-    const directory = pinJournalDirectory(dataDirectory, RECEIPT_DIRECTORY, false);
-    return directory ? consumeReceipt(directory, runtimeGenerationId) : false;
+    return consumeReceipt(
+      pinDirectRuntimeJournalRoot(dataDirectory),
+      runtimeGenerationId,
+    );
   } catch {
     return false;
   }
@@ -254,11 +295,14 @@ export function consumeRuntimeCleanupReceipt(
 
 export class RuntimeCleanupReceiptJournal {
   private readonly ids: Set<string>;
-  private directory: PinnedJournalDirectory | null;
+  private readonly root: DirectRuntimeJournalRoot;
 
-  constructor(private readonly dataDirectory: string) {
-    this.directory = pinJournalDirectory(dataDirectory, RECEIPT_DIRECTORY, false);
-    this.ids = new Set(readRuntimeCleanupReceiptIds(this.directory));
+  constructor(
+    dataDirectory: string,
+    private readonly testHooks?: DirectRuntimeJournalTestHooks,
+  ) {
+    this.root = pinDirectRuntimeJournalRoot(dataDirectory);
+    this.ids = new Set(readRuntimeCleanupReceiptIds(this.root));
   }
 
   pending(): string[] {
@@ -270,30 +314,21 @@ export class RuntimeCleanupReceiptJournal {
   }
 
   publish(runtimeGenerationId: string): boolean {
-    if (!GENERATION_PATTERN.test(runtimeGenerationId)) return false;
-    try {
-      this.directory ??= pinJournalDirectory(
-        this.dataDirectory,
-        RECEIPT_DIRECTORY,
-        true,
-      );
-    } catch {
-      return false;
-    }
-    if (!this.directory || !publishReceipt(this.directory, runtimeGenerationId)) return false;
+    if (
+      !GENERATION_PATTERN.test(runtimeGenerationId)
+      || !directRuntimeJournalRootIsPinned(this.root)
+      || !publishReceipt(this.root, runtimeGenerationId, this.testHooks)
+    ) return false;
     this.ids.add(runtimeGenerationId);
     return true;
   }
 
   consume(runtimeGenerationId: string): boolean {
-    if (!this.ids.has(runtimeGenerationId)) return false;
-    if (!this.directory || !journalDirectoryIsPinned(this.directory)) return false;
-    // The exact current-worker ACK proves its database generation lease was
-    // cleared. Disk retirement is retryable housekeeping: a canonical file
-    // left behind is safely replayed on a later app start, while a quarantined
-    // foreign replacement remains available for inspection.
-    consumeReceipt(this.directory, runtimeGenerationId);
-    if (!journalDirectoryIsPinned(this.directory)) return false;
+    if (
+      !this.ids.has(runtimeGenerationId)
+      || !directRuntimeJournalRootIsPinned(this.root)
+      || !consumeReceipt(this.root, runtimeGenerationId, this.testHooks)
+    ) return false;
     this.ids.delete(runtimeGenerationId);
     return true;
   }

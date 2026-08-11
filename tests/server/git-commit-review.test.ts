@@ -135,7 +135,7 @@ afterEach(() => {
   }
 });
 
-describe("Git commit review receipts", () => {
+describe("Git commit review receipts", { timeout: 30_000 }, () => {
   it("ignores Git housekeeping while still detecting new loose objects", () => {
     const root = unbornRepository();
     const objectsRoot = join(root, ".git", "objects");
@@ -621,7 +621,7 @@ setInterval(() => {}, 1000);
 
     expect(git(root, "cat-file", "-s", "HEAD:large.bin"))
       .toBe(String(3 * 1024 * 1024));
-  }, 30_000);
+  });
 
   it("rejects an in-progress merge before mutating HEAD or the index", async () => {
     const root = repository();

@@ -218,6 +218,12 @@ function SidebarView({
 
   useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query, sidebarMode]);
 
+  useLayoutEffect(() => {
+    setConversationMenu(null);
+    setRenaming(null);
+    setRenameDraft("");
+  }, [sidebarMode]);
+
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
@@ -340,6 +346,31 @@ function SidebarView({
     () => groupWorkThreads(activityThreads, snoozeNow),
     [activityThreads, snoozeNow],
   );
+  const workSearchActive = Boolean(query.trim());
+  const visibleWorkConversationIds = useMemo(() => {
+    const visibleIds = new Set<string>();
+    for (const section of workSections) {
+      const expanded = !COLLAPSIBLE_WORK_SECTIONS.has(section.id)
+        || workSearchActive
+        || expandedWorkSections.has(section.id);
+      if (!expanded) continue;
+      const visibleThreads = section.id === "done"
+        ? section.threads.slice(0, doneVisible)
+        : section.threads;
+      for (const { conversation } of visibleThreads) visibleIds.add(conversation.id);
+    }
+    return visibleIds;
+  }, [doneVisible, expandedWorkSections, workSearchActive, workSections]);
+  useLayoutEffect(() => {
+    if (sidebarMode !== "activity") return;
+    if (conversationMenu && !visibleWorkConversationIds.has(conversationMenu)) {
+      setConversationMenu(null);
+    }
+    if (renaming && !visibleWorkConversationIds.has(renaming)) {
+      setRenaming(null);
+      setRenameDraft("");
+    }
+  }, [conversationMenu, renaming, sidebarMode, visibleWorkConversationIds]);
   useLayoutEffect(() => {
     if (sidebarMode !== "activity") {
       workFocusIdentityRef.current = null;
@@ -367,7 +398,7 @@ function SidebarView({
     workFocusIdentityRef.current = target?.dataset.workFocusId ?? null;
     const targetIndex = target ? focusableWorkItems.indexOf(target) : -1;
     workFocusIndexRef.current = targetIndex >= 0 ? targetIndex : null;
-  }, [sidebarMode, snoozeNow, workSections]);
+  }, [doneVisible, sidebarMode, snoozeNow, workSections]);
   const visibleWorkCount = workSections.reduce(
     (count, section) => count + section.threads.length,
     0,
@@ -565,6 +596,9 @@ function SidebarView({
         value={renameDraft}
         maxLength={120}
         autoFocus
+        data-work-focus-id={sidebarMode === "activity"
+          ? `thread:${conversation.id}`
+          : undefined}
         aria-label={`Rename ${conversation.title}`}
         onChange={(event) => setRenameDraft(event.target.value)}
         onBlur={() => setRenaming(null)}
@@ -933,9 +967,8 @@ function SidebarView({
               {workSections.map((section) => {
                 if (section.threads.length === 0) return null;
                 const collapsible = COLLAPSIBLE_WORK_SECTIONS.has(section.id);
-                const searchActive = Boolean(query.trim());
-                const disclosure = collapsible && !searchActive;
-                const expanded = !collapsible || searchActive || expandedWorkSections.has(section.id);
+                const disclosure = collapsible && !workSearchActive;
+                const expanded = !collapsible || workSearchActive || expandedWorkSections.has(section.id);
                 const visibleThreads = section.id === "done"
                   ? section.threads.slice(0, doneVisible)
                   : section.threads;
@@ -969,7 +1002,13 @@ function SidebarView({
                     )}
                     {expanded && visibleThreads.map(({ conversation }) => activityRow(conversation))}
                     {expanded && section.id === "done" && visibleThreads.length < section.threads.length && (
-                      <button type="button" className="activity-show-more" onClick={() => setDoneVisible((count) => count + WORK_DONE_PAGE_SIZE)}>
+                      <button
+                        type="button"
+                        className="activity-show-more"
+                        data-sidebar-nav
+                        data-work-focus-id="show-more:done"
+                        onClick={() => setDoneVisible((count) => count + WORK_DONE_PAGE_SIZE)}
+                      >
                         Show more <span>{section.threads.length - visibleThreads.length} older</span>
                       </button>
                     )}

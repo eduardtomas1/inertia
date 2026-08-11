@@ -111,43 +111,47 @@ function renderSidebar(
   runs: WorkspaceRun[] = [],
 ) {
   const onSnoozeConversation = vi.fn();
+  const sidebarProps = {
+    connectionStatus: "online" as const,
+    view: "workspace" as const,
+    open: true,
+    busy: false,
+    onClose: vi.fn(),
+    onViewChange: vi.fn(),
+    onImportProject: vi.fn(),
+    onSelectProject: vi.fn(),
+    onSelectConversation,
+    splitConversationId: null,
+    onOpenConversationInSplit: vi.fn(),
+    onCloseConversationSplit: vi.fn(),
+    onCreateConversation: vi.fn(),
+    onOpenMultiSpawn: vi.fn(),
+    onRenameConversation: vi.fn(),
+    onPinConversation: vi.fn(),
+    onSnoozeConversation,
+    onArchiveConversation: vi.fn(),
+    onSettleConversation: vi.fn(),
+    onRestoreConversation: vi.fn(),
+    onDeleteConversation: vi.fn(),
+    onAcknowledgeRun: vi.fn(),
+    onDismissRun: vi.fn(),
+    onOpenProject: vi.fn(),
+    onRenameProject: vi.fn(),
+    onSetProjectGrouping: vi.fn(),
+    onSetProjectGitRepositoryLimit: vi.fn(),
+    onSidebarModeChange: vi.fn(),
+    onRemoveProject: vi.fn(),
+  };
+  const view = render(
+    <Sidebar snapshot={snapshot(conversations, runs)} {...sidebarProps} />,
+  );
   return {
     onSelectConversation,
     onSnoozeConversation,
-    ...render(
-      <Sidebar
-        snapshot={snapshot(conversations, runs)}
-        connectionStatus="online"
-        view="workspace"
-        open
-        busy={false}
-        onClose={vi.fn()}
-        onViewChange={vi.fn()}
-        onImportProject={vi.fn()}
-        onSelectProject={vi.fn()}
-        onSelectConversation={onSelectConversation}
-        splitConversationId={null}
-        onOpenConversationInSplit={vi.fn()}
-        onCloseConversationSplit={vi.fn()}
-        onCreateConversation={vi.fn()}
-        onOpenMultiSpawn={vi.fn()}
-        onRenameConversation={vi.fn()}
-        onPinConversation={vi.fn()}
-        onSnoozeConversation={onSnoozeConversation}
-        onArchiveConversation={vi.fn()}
-        onSettleConversation={vi.fn()}
-        onRestoreConversation={vi.fn()}
-        onDeleteConversation={vi.fn()}
-        onAcknowledgeRun={vi.fn()}
-        onDismissRun={vi.fn()}
-        onOpenProject={vi.fn()}
-        onRenameProject={vi.fn()}
-        onSetProjectGrouping={vi.fn()}
-        onSetProjectGitRepositoryLimit={vi.fn()}
-        onSidebarModeChange={vi.fn()}
-        onRemoveProject={vi.fn()}
-      />,
-    ),
+    rerenderSnapshot(nextSnapshot: AppSnapshot) {
+      view.rerender(<Sidebar snapshot={nextSnapshot} {...sidebarProps} />);
+    },
+    ...view,
   };
 }
 
@@ -310,10 +314,13 @@ describe("compact Work sidebar", () => {
     expect(done).not.toBeNull();
     expect(done?.querySelectorAll(".activity-thread")).toHaveLength(10);
 
-    fireEvent.click(within(done as HTMLElement).getByRole("button", {
+    const showMore = within(done as HTMLElement).getByRole("button", {
       name: "Show more 1 older",
-    }));
+    });
+    showMore.focus();
+    fireEvent.click(showMore);
     expect(done?.querySelectorAll(".activity-thread")).toHaveLength(11);
+    expect(screen.getByRole("button", { name: /^Completed task 10,/ })).toHaveFocus();
   });
 
   it("does not reopen a row menu after its Work section is collapsed", () => {
@@ -334,6 +341,87 @@ describe("compact Work sidebar", () => {
     expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
     fireEvent.click(earlierToggle);
     expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+  });
+
+  it("clears a row menu when automatic regrouping hides its owner", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("expiring", "Hidden after snooze", new Date(2026, 7, 6, 9), {
+        snoozedUntil: new Date(start.getTime() + 100).toISOString(),
+      }),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Snoozed 1" }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Thread actions for Hidden after snooze",
+    }));
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Earlier 1" }));
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+  });
+
+  it("does not retain a Work row menu across sidebar mode changes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const work = conversation(
+      "mode-change",
+      "Switch sidebar modes",
+      new Date(2026, 7, 11, 9),
+    );
+    const view = renderSidebar([work]);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Thread actions for Switch sidebar modes",
+    }));
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+
+    const workSnapshot = snapshot([work]);
+    view.rerenderSnapshot({
+      ...workSnapshot,
+      settings: { ...workSnapshot.settings, sidebarMode: "classic" },
+    });
+    view.rerenderSnapshot(workSnapshot);
+
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+  });
+
+  it("ends a row rename when automatic regrouping hides its owner", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("existing", "Existing recent work", new Date(2026, 7, 11, 10)),
+      conversation("expiring", "Rename before expiry", new Date(2026, 7, 6, 9), {
+        snoozedUntil: new Date(start.getTime() + 100).toISOString(),
+      }),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Snoozed 1" }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Thread actions for Rename before expiry",
+    }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(screen.getByRole("textbox", { name: "Rename Rename before expiry" }))
+      .toHaveFocus();
+
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+    expect(screen.queryByRole("textbox", { name: "Rename Rename before expiry" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Earlier 1" })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("button", { name: "Earlier 1" }));
+    expect(screen.queryByRole("textbox", { name: "Rename Rename before expiry" }))
+      .not.toBeInTheDocument();
   });
 
   it("keeps snoozed work reachable so it can be unsnoozed", () => {
@@ -506,6 +594,8 @@ describe("compact Work sidebar", () => {
   });
 
   it("keeps empty and missing-project states explicit", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
     const emptyView = renderSidebar([]);
     expect(screen.getByText("No work yet")).toBeInTheDocument();
     emptyView.unmount();
@@ -530,6 +620,8 @@ describe("compact Work sidebar", () => {
   });
 
   it("uses a distinct non-color icon for every Work status", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
     const statusCases = [
       ["working", "running", null, "lucide-circle-dot"],
       ["approval", "needs-input", "approval", "lucide-shield-alert"],

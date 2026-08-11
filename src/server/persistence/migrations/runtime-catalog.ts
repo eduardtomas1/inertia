@@ -1212,6 +1212,14 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           ON agent_turns(association, completed_at ASC, id ASC);
         `,
       },
+      {
+        name: "InvalidateLegacyUnownedTurnUsageStarts",
+        up: `
+          UPDATE agent_turns
+          SET usage_start_json = NULL
+          WHERE usage_start_json IS NOT NULL;
+        `,
+      },
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

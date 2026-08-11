@@ -1468,7 +1468,7 @@ describe("runtime migration catalog", () => {
     const schema54 = new Database(databasePath);
     schema54.exec(`
       DROP INDEX agent_turns_usage_dashboard_completed_idx;
-      DELETE FROM schema_migrations WHERE version = 55;
+      DELETE FROM schema_migrations WHERE version >= 55;
     `);
     expect((schema54.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
@@ -1510,6 +1510,129 @@ describe("runtime migration catalog", () => {
     migrated.close();
   });
 
+  it("invalidates legacy turn-start usage without changing owned completions", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "schema-55-usage-boundary.sqlite");
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const store = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Usage boundary", workspacePath);
+    const conversation = store.createConversation(project.id, "Legacy boundary");
+    const usageAtStart = {
+      usedTokens: 60,
+      totalProcessedTokens: 1_000,
+      totalProcessedScope: "thread" as const,
+      maxTokens: 200_000,
+      inputTokens: 800,
+      cachedInputTokens: 100,
+      cacheWriteInputTokens: 0,
+      outputTokens: 100,
+      reasoningOutputTokens: 20,
+      compactsAutomatically: true,
+      capturedAt: "2026-08-11T10:00:00.000Z",
+    };
+    const usageAtCompletion = {
+      ...usageAtStart,
+      usedTokens: 90,
+      totalProcessedTokens: 1_300,
+      inputTokens: 1_020,
+      outputTokens: 160,
+      capturedAt: "2026-08-11T10:01:00.000Z",
+    };
+    const turn = store.beginAgentTurn({
+      id: "legacy-unowned-usage-start",
+      conversationId: conversation.id,
+      runId: "legacy-unowned-usage-run",
+      content: "Preserve completion but reject this unowned start.",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      providerSessionBefore: "legacy-session",
+      requestedAt: "2026-08-11T10:00:00.000Z",
+      usageAtStart,
+      configurationRevision: 0,
+      association: "authoritative",
+    }).turn;
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "starting",
+      updatedAt: "2026-08-11T10:00:01.000Z",
+    });
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "running",
+      updatedAt: "2026-08-11T10:00:02.000Z",
+    });
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "completed",
+      providerSessionAfter: "legacy-session",
+      usageAtCompletion,
+      completedAt: "2026-08-11T10:01:00.000Z",
+      updatedAt: "2026-08-11T10:01:00.000Z",
+    });
+    store.close();
+
+    const schema55 = new Database(databasePath);
+    schema55.prepare("DELETE FROM schema_migrations WHERE version = 56").run();
+    const before = schema55.prepare(`
+      SELECT usage_start_json, usage_completion_json
+      FROM agent_turns WHERE id = ?
+    `).get(turn.id) as {
+      usage_start_json: string | null;
+      usage_completion_json: string | null;
+    };
+    expect(JSON.parse(before.usage_start_json!)).toMatchObject({
+      totalProcessedTokens: 1_000,
+    });
+    expect(JSON.parse(before.usage_completion_json!)).toMatchObject({
+      totalProcessedTokens: 1_300,
+    });
+    schema55.close();
+
+    migrateFixtureInPlace(databasePath);
+    migrateFixtureInPlace(databasePath);
+
+    const migrated = new Database(databasePath, { readonly: true });
+    const after = migrated.prepare(`
+      SELECT usage_start_json, usage_completion_json
+      FROM agent_turns WHERE id = ?
+    `).get(turn.id) as {
+      usage_start_json: string | null;
+      usage_completion_json: string | null;
+    };
+    expect(after.usage_start_json).toBeNull();
+    expect(JSON.parse(after.usage_completion_json!)).toEqual(
+      JSON.parse(before.usage_completion_json!),
+    );
+    expect((migrated.prepare(
+      "SELECT name FROM projects WHERE id = ?",
+    ).get(project.id) as { name: string }).name).toBe("Usage boundary");
+    expect(migrated.pragma("quick_check")).toEqual([{ quick_check: "ok" }]);
+    migrated.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    const dashboard = reopened.usageDashboard({
+      days: 7,
+      fromInclusive: "2026-08-05T00:00:00.000Z",
+      toExclusive: "2026-08-12T00:00:00.000Z",
+      endDate: "2026-08-11",
+      timeZone: "UTC",
+    });
+    reopened.close();
+    expect(dashboard.totals.processedTokens).toEqual({
+      value: null,
+      measuredRequests: 0,
+      totalRequests: 1,
+      coverage: "unavailable",
+    });
+  });
+
   it("appends final-answer auto-scroll after the released schema-50 migration", async () => {
     const directory = await temporaryDirectory();
     const databasePath = join(directory, "schema-50-upgrade.sqlite");
@@ -1544,6 +1667,7 @@ describe("runtime migration catalog", () => {
       { version: 53 },
       { version: 54 },
       { version: 55 },
+      { version: 56 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

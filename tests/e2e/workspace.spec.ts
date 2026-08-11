@@ -41,12 +41,21 @@ test("switches between Projects and Work and manages chat history", async () => 
   await expect(projectMenu.getByText("Grouping behavior", { exact: true })).toBeVisible();
   await projectMenu.getByRole("menuitemradio", { name: "Keep separate", exact: true }).click();
 
+  const branchName = (await page
+    .locator('[data-header-menu="branch"] > button span')
+    .first()
+    .textContent())?.trim();
+  if (!branchName) {
+    throw new Error("Current Git branch is unavailable");
+  }
+  const newChatAccessibleName = `New chat, Codex, Inertia, Branch ${branchName}, Idle`;
+
   await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Work", exact: true }).click();
   await expect(sidebar).toHaveClass(/sidebar-mode-activity/u);
   await expect(sidebar.getByRole("heading", { name: "Recent" })).toBeVisible();
   const activityCard = sidebar.locator(".activity-thread.is-active");
   const threadCard = activityCard.getByRole("button", {
-    name: "New chat, Codex, Inertia, Branch main, Idle",
+    name: newChatAccessibleName,
   });
   await expect(threadCard).toBeVisible();
   const relativeTime = activityCard.locator(".activity-thread-topline time");
@@ -66,12 +75,12 @@ test("switches between Projects and Work and manages chat history", async () => 
   await doneToggle.click();
   const doneCard = sidebar.locator(".work-thread-section.is-done .activity-thread.is-active");
   await expect(doneCard.getByRole("button", {
-    name: "New chat, Codex, Inertia, Branch main, Idle",
+    name: newChatAccessibleName,
   })).toBeVisible();
   await doneCard.getByRole("button", { name: "Thread actions for New chat" }).click();
   await sidebar.getByRole("menuitem", { name: "Reopen" }).click();
   await expect(sidebar.locator(".work-thread-section.is-recent .activity-thread.is-active").getByRole("button", {
-    name: "New chat, Codex, Inertia, Branch main, Idle",
+    name: newChatAccessibleName,
   })).toBeVisible();
 
   await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Projects", exact: true }).click();

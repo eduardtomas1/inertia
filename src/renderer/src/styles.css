@@ -1345,20 +1345,23 @@ textarea {
 
 .activity-thread-state-mark {
   position: absolute;
-  right: -1px;
-  bottom: 1px;
-  width: 5px;
-  height: 5px;
-  border: 1.5px solid var(--surface);
+  right: -2px;
+  bottom: 0;
+  display: grid;
+  width: 10px;
+  height: 10px;
+  place-items: center;
   border-radius: 50%;
-  background: var(--text-muted);
+  color: var(--text-muted);
+  background: var(--surface);
 }
 
-.activity-thread.status-working .activity-thread-state-mark { background: var(--status-working); }
-.activity-thread.status-approval .activity-thread-state-mark { background: var(--status-approval); }
-.activity-thread.status-input .activity-thread-state-mark { background: var(--status-input); }
-.activity-thread.status-failed .activity-thread-state-mark { background: var(--status-failed); }
-.activity-thread.status-completed .activity-thread-state-mark { background: var(--status-completed); }
+.activity-thread-state-mark > svg { flex: 0 0 auto; stroke-width: 2.25; }
+.activity-thread.status-working .activity-thread-state-mark { color: var(--status-working); }
+.activity-thread.status-approval .activity-thread-state-mark { color: var(--status-approval); }
+.activity-thread.status-input .activity-thread-state-mark { color: var(--status-input); }
+.activity-thread.status-failed .activity-thread-state-mark { color: var(--status-failed); }
+.activity-thread.status-completed .activity-thread-state-mark { color: var(--status-completed); }
 
 .activity-thread.status-working .activity-thread-provider > .provider-brand-icon {
   animation: pulse 1.4s ease-in-out infinite;

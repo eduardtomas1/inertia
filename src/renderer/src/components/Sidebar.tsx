@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  CircleDot,
+  CircleX,
   Columns2,
   Folder,
   FolderOpen,
@@ -14,12 +16,15 @@ import {
   History,
   Layers3,
   ListTree,
+  MessageCircleQuestion,
   MessageSquare,
+  Minus,
   MoreHorizontal,
   Pencil,
   Pin,
   Search,
   Settings,
+  ShieldAlert,
   SquarePen,
   Trash2,
   X,
@@ -97,6 +102,19 @@ const statusLabels: Record<SidebarThreadStatus, string> = {
   completed: "Completed",
   idle: "Idle",
 };
+
+const workStatusIcons: Record<SidebarThreadStatus, typeof CircleDot> = {
+  working: CircleDot,
+  approval: ShieldAlert,
+  input: MessageCircleQuestion,
+  failed: CircleX,
+  completed: CheckCircle2,
+  idle: Minus,
+};
+
+function workProjectLabel(project: Project | undefined): string {
+  return project?.name ?? "Unknown project";
+}
 
 function groupingLabel(mode: ProjectGroupingMode): string {
   if (mode === "repository") return "Repository";
@@ -269,12 +287,13 @@ function SidebarView({
           const project = projectById.get(conversation.projectId);
           const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
             ?? agentRequestProviderName(conversation.providerId);
+          const projectLabel = workProjectLabel(project);
           const repositoryLabel = workRepositoryLabel(project);
           return [
             conversation.title,
             conversation.branch,
             providerLabel,
-            project?.name,
+            projectLabel,
             repositoryLabel,
             project?.path,
             project?.repositoryRoot,
@@ -511,11 +530,13 @@ function SidebarView({
     const isActive = snapshot?.activeConversationId === conversation.id && view === "workspace";
     const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
       ?? agentRequestProviderName(conversation.providerId);
+    const projectLabel = workProjectLabel(project);
     const repositoryLabel = workRepositoryLabel(project);
+    const WorkStatusIcon = workStatusIcons[model.status];
     const accessibleContext = [
       conversation.title,
       providerLabel,
-      project?.name ?? "Unknown project",
+      projectLabel,
       repositoryLabel ? `Repository ${repositoryLabel}` : null,
       conversation.branch ? `Branch ${conversation.branch}` : null,
       statusLabels[model.status],
@@ -552,7 +573,13 @@ function SidebarView({
                 size={15}
                 decorative
               />
-              <span className="activity-thread-state-mark" />
+              <span
+                className="activity-thread-state-mark"
+                data-work-status={model.status}
+                aria-hidden="true"
+              >
+                <WorkStatusIcon size={8} />
+              </span>
             </span>
             <span className="activity-thread-copy">
               <span className="activity-thread-topline">
@@ -565,7 +592,7 @@ function SidebarView({
                 <span className="activity-thread-provider-label">{providerLabel}</span>
                 <span className="activity-thread-project-meta" title={project?.path}>
                   <Folder size={10} aria-hidden="true" />
-                  {project?.name ?? "Unknown project"}
+                  {projectLabel}
                 </span>
                 {repositoryLabel && (
                   <span className="activity-thread-repository-meta" title={project?.repositoryRoot ?? undefined}>

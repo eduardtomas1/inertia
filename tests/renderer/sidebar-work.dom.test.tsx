@@ -326,5 +326,34 @@ describe("compact Work sidebar", () => {
       name: "Recover detached work, OpenAI, Unknown project, Idle",
     });
     expect(row).toHaveTextContent("Unknown project");
+
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "Unknown project" } });
+    expect(row).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "Studio" } });
+    expect(screen.getByText("No matching work")).toBeInTheDocument();
+  });
+
+  it("uses a distinct non-color icon for every Work status", () => {
+    const statusCases = [
+      ["working", "running", null, "lucide-circle-dot"],
+      ["approval", "needs-input", "approval", "lucide-shield-alert"],
+      ["input", "needs-input", "input", "lucide-message-circle-question-mark"],
+      ["failed", "failed", null, "lucide-circle-x"],
+      ["completed", "completed", null, "lucide-circle-check"],
+      ["idle", "idle", null, "lucide-minus"],
+    ] as const;
+    renderSidebar(statusCases.map(([id, status, attentionKind]) => conversation(
+      id,
+      `${id} task`,
+      new Date(2026, 7, 11, 9),
+      { status, attentionKind },
+    )));
+
+    for (const [id, , , iconClass] of statusCases) {
+      const cue = document.querySelector(`[data-work-status="${id}"]`);
+      expect(cue).not.toBeNull();
+      expect(cue?.querySelector(`.${iconClass}`)).not.toBeNull();
+    }
   });
 });

@@ -97,7 +97,7 @@ export function EnvironmentPanel({
         : summary.gitState === "unknown"
           ? "Repository not checked"
           : "Branch unavailable");
-  const repositoryLabel = summary.repository?.name
+  const repositoryLabel = summary.openTarget?.name
     ?? summary.projectName
     ?? summary.workspace?.value
     ?? "Repository unavailable";
@@ -245,8 +245,8 @@ export function EnvironmentPanel({
             className="environment-row"
             onClick={onOpenProject}
             disabled={!summary.workspace}
-            title={summary.repository?.path ?? summary.workspace?.path}
-            aria-label={`Open repository ${repositoryLabel} externally`}
+            title={summary.openTarget?.path ?? summary.workspace?.path}
+            aria-label={`Open active workspace ${repositoryLabel} externally`}
           >
             <FolderGit2 size={14} aria-hidden="true" />
             <span>{repositoryLabel}</span>

@@ -125,7 +125,7 @@ test("opens Environment by default with reachable responsive geometry", async ({
           const serverDisclosure = environmentPanel.locator("summary")
             .filter({ hasText: "Local Servers" });
           const repository = environmentPanel.getByRole("button", {
-            name: /Open repository Inertia externally/u,
+            name: /Open active workspace Inertia externally/u,
           });
           await changes.focus();
           await page.keyboard.press("Tab");

@@ -310,7 +310,6 @@ export function createWorkspaceSceneModel({
     subagents: projection.subagents,
     messages: projection.messages,
     projectPath: project?.normalizedPath ?? null,
-    repositoryRoot: project?.repositoryRoot ?? null,
     worktreePath: conversation?.worktreePath ?? null,
     lastLoadedPreviewUrl: desktopTools.lastLoadedPreviewUrl,
     gitLoading: workspaceTools.gitLoading,

@@ -146,7 +146,6 @@ describe("environment summary projection", () => {
         message("new", "notes.pdf", "2026-07-28T11:00:00.000Z"),
       ],
       projectPath: "/workspace/inertia",
-      repositoryRoot: "/workspace/inertia",
       worktreePath: "/workspace/worktrees/environment-panel",
       lastLoadedPreviewUrl: "http://localhost:4173/app",
     });
@@ -167,9 +166,9 @@ describe("environment summary projection", () => {
       value: "environment-panel",
       path: "/workspace/worktrees/environment-panel",
     });
-    expect(summary.repository).toEqual({
-      name: "inertia",
-      path: "/workspace/inertia",
+    expect(summary.openTarget).toEqual({
+      name: "Inertia",
+      path: "/workspace/worktrees/environment-panel",
     });
     expect(summary.localPreviewTargets).toEqual([{
       url: "http://localhost:4173",
@@ -204,7 +203,7 @@ describe("environment summary projection", () => {
       subagents: [],
       attachments: [],
       workspace: null,
-      repository: null,
+      openTarget: null,
       localPreviewTargets: [],
       gitState: "unknown",
     });
@@ -227,6 +226,10 @@ describe("environment summary projection", () => {
     expect(summary.workspace).toMatchObject({
       label: "Project directory",
       value: "notes",
+    });
+    expect(summary.openTarget).toEqual({
+      name: "Notes",
+      path: "/workspace/notes",
     });
   });
 
@@ -674,7 +677,6 @@ describe("environment summary projection", () => {
       subagents: [],
       messages: [],
       projectPath: "C:\\Users\\Ada\\Inertia\\",
-      repositoryRoot: "C:\\Users\\Ada\\Inertia\\",
       worktreePath: "C:\\Users\\Ada\\worktrees\\environment-panel\\",
     });
 
@@ -682,7 +684,10 @@ describe("environment summary projection", () => {
       label: "Worktree",
       value: "environment-panel",
     });
-    expect(summary.repository).toMatchObject({ name: "Inertia" });
+    expect(summary.openTarget).toEqual({
+      name: "Inertia",
+      path: "C:\\Users\\Ada\\worktrees\\environment-panel\\",
+    });
   });
 
   it("uses the authoritative live bit for queued and future provider states", () => {

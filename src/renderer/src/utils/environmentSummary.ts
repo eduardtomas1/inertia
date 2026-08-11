@@ -15,7 +15,7 @@ export interface EnvironmentSummarySnapshot {
     value: string;
     path: string;
   } | null;
-  repository: {
+  openTarget: {
     name: string;
     path: string;
   } | null;
@@ -58,7 +58,6 @@ interface EnvironmentSummaryInput {
   subagents: readonly SubagentTrace[];
   messages: readonly ChatMessage[];
   projectPath?: string | null;
-  repositoryRoot?: string | null;
   worktreePath?: string | null;
   lastLoadedPreviewUrl?: string | null;
   gitLoading?: boolean;
@@ -176,7 +175,6 @@ export function buildEnvironmentSummary({
   subagents,
   messages,
   projectPath = null,
-  repositoryRoot = null,
   worktreePath = null,
   lastLoadedPreviewUrl = null,
   gitLoading = false,
@@ -238,9 +236,9 @@ export function buildEnvironmentSummary({
       value: pathName(workspacePath),
       path: workspacePath,
     } : null,
-    repository: repositoryRoot ? {
-      name: pathName(repositoryRoot),
-      path: repositoryRoot,
+    openTarget: workspacePath ? {
+      name: projectName ?? pathName(workspacePath),
+      path: workspacePath,
     } : null,
     runtime: {
       status: connectionStatus,

@@ -22,7 +22,7 @@ const summary: EnvironmentSummarySnapshot = {
     value: "environment-panel",
     path: "/workspace/worktrees/environment-panel",
   },
-  repository: { name: "inertia", path: "/workspace/inertia" },
+  openTarget: { name: "inertia", path: "/workspace/inertia" },
   runtime: { status: "online" },
   changes: {
     files: 2,
@@ -207,7 +207,7 @@ describe("Environment panel", () => {
     fireEvent.click(screen.getByText("Local Servers").closest("summary")!);
     expect(screen.getByText("Last opened in Preview")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /localhost:4173/u }));
-    fireEvent.click(screen.getByRole("button", { name: /Open repository inertia externally/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Open active workspace inertia externally/u }));
     fireEvent.click(screen.getByRole("button", { name: "Editor view" }));
     fireEvent.click(screen.getByRole("button", { name: /Open in/u }));
     expect(actions.onOpenChanges).toHaveBeenCalledOnce();

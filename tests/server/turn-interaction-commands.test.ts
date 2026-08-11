@@ -14,11 +14,14 @@ import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
 import {
+  PDF_MODULE_INITIALIZATION_TIMEOUT_MS,
+} from "../../src/server/runtime/attachments/document-attachment-context";
+import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
+import {
   createTurnInteractionCommandHandler,
   type TurnInteractionCommandDependencies,
 } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
-import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const execFileAsync = promisify(execFile);
@@ -286,7 +289,7 @@ describe("message attachment ownership transfer", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  }, 20_000);
+  }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
 
   it("cleans a generated page when aggregate preparation times out after the private write", async () => {
     vi.useFakeTimers();

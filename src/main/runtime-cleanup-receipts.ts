@@ -271,8 +271,12 @@ function consumeReceipt(
     if (!moved || !parseReceipt(moved.bytes, hash)) return false;
     // An exact worker ACK already cleared the database lease. A valid consume
     // transient is therefore safe to replay and retire on app reconstruction.
-    unlinkDirectRuntimeJournalLeaf(root, consuming, moved.identity, hooks);
-    return directRuntimeJournalRootIsPinned(root);
+    return unlinkDirectRuntimeJournalLeaf(
+      root,
+      consuming,
+      moved.identity,
+      hooks,
+    );
   } catch {
     return false;
   }

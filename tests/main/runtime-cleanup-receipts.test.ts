@@ -156,6 +156,29 @@ describe("runtime cleanup receipt journal", () => {
     expect(readdirSync(path).filter((name) => name.startsWith(prefix))).toEqual([]);
   });
 
+  it("keeps a receipt pending when retiring its consume transient fails", () => {
+    const path = directory();
+    let interruptRetirement = true;
+    const journal = new RuntimeCleanupReceiptJournal(path, {
+      beforeUnlink: (target) => {
+        if (interruptRetirement && target.endsWith(".consume.tmp")) {
+          interruptRetirement = false;
+          throw new Error("simulated consume transient retirement failure");
+        }
+      },
+    });
+    expect(journal.publish(generationA)).toBe(true);
+
+    expect(journal.consume(generationA)).toBe(false);
+    expect(journal.pending()).toEqual([generationA]);
+    expect(lstatSync(join(path, transientName(generationA, "consume"))).isFile())
+      .toBe(true);
+
+    expect(journal.consume(generationA)).toBe(true);
+    expect(journal.pending()).toEqual([]);
+    expect(readdirSync(path).filter((name) => name.startsWith(prefix))).toEqual([]);
+  });
+
   it("preserves and rejects malformed canonical and consume leaves", () => {
     const path = directory();
     const foreign = join(path, `${prefix}foreign.txt`);

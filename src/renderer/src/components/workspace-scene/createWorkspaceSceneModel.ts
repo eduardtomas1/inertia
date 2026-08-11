@@ -48,6 +48,7 @@ import { requestTimelineFocus } from "../../utils/timelineFocus";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";
+import { goalExecutionStatus } from "../../utils/goalExecution";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 
@@ -247,6 +248,11 @@ export function createWorkspaceSceneModel({
     === persistedConversation?.id
     ? workflow.state
     : null;
+  const goalMutationSafetyLocked = workflow.error
+    ?.includes("recovery safety mode") === true;
+  const currentGoalExecution = goalMutationSafetyLocked
+    ? "idle"
+    : goalExecutionStatus(projection.turns);
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
@@ -431,8 +437,11 @@ export function createWorkspaceSceneModel({
       promptPresets: connection.snapshot?.promptPresets ?? [],
       goal: persistedConversation ? {
         workflow: currentWorkflow,
+        executionStatus: currentGoalExecution,
         loading: workflow.loading,
         busy: workflow.loading
+          || goalMutationSafetyLocked
+          || currentGoalExecution === "starting"
           || busyAction?.startsWith("agent.goal") === true,
         error: workflow.error,
         onRetry: () => workflow.refresh(true),
@@ -659,12 +668,15 @@ export function createWorkspaceSceneModel({
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,
       goal: {
         workflow: currentWorkflow,
+        executionStatus: currentGoalExecution,
         error: workflow.error,
         plan: latestPlan,
         subagents: projection.subagents,
         turns: projection.turns,
         selectedSkillIds: workflow.selectedSkillIds,
         busy: workflow.loading
+          || goalMutationSafetyLocked
+          || currentGoalExecution === "starting"
           || busyAction?.startsWith("agent.goal") === true,
         onRetry: () => workflow.refresh(true),
         onSetGoal: setGoal,

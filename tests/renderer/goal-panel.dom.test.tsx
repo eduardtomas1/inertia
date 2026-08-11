@@ -224,7 +224,7 @@ describe("GoalPanel", () => {
     });
 
     expect(screen.getByText(
-      "Tracked by Inertia only; it is not injected into the provider.",
+      /Tracked by Inertia only; it is not injected into the provider/u,
     )).toBeInTheDocument();
     expect(screen.getByText(
       "This route does not expose structured skill input.",
@@ -279,7 +279,7 @@ describe("GoalPanel", () => {
     );
 
     await user.type(screen.getByLabelText("Objective"), "  Keep the route honest  ");
-    await user.type(screen.getByLabelText("Token budget (optional)"), "8000");
+    await user.type(screen.getByLabelText("Token target (optional)"), "8000");
     await user.click(screen.getByRole("button", {
       name: "Create inertia local goal",
     }));
@@ -310,6 +310,66 @@ describe("GoalPanel", () => {
     expect(onClearGoal).toHaveBeenCalledWith(expect.objectContaining({
       source: "codex-native",
     }));
+  });
+
+  it("offers Resume for an active native goal after its runner detaches", async () => {
+    const user = userEvent.setup();
+    const onSetGoal = vi.fn(async () => undefined);
+    renderPanel({
+      executionStatus: "idle",
+      onSetGoal,
+    });
+
+    expect(screen.getByText(/no Inertia run is connected/u)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause" }))
+      .not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Resume goal" }));
+    expect(onSetGoal).toHaveBeenCalledWith({
+      source: "codex-native",
+      status: "active",
+    });
+  });
+
+  it("disables goal mutations while the native run is starting", () => {
+    renderPanel({
+      executionStatus: "starting",
+      onSetGoal: vi.fn(async () => undefined),
+      onClearGoal: vi.fn(),
+    });
+
+    expect(screen.getByText("Starting…")).toHaveAttribute("role", "status");
+    expect(screen.getByRole("button", { name: "Pause" })).toBeDisabled();
+    expect(screen.getByRole("button", {
+      name: "Clear codex native goal",
+    })).toBeDisabled();
+  });
+
+  it("does not offer an ineffective active transition at the budget limit", async () => {
+    const user = userEvent.setup();
+    const onSetGoal = vi.fn(async () => undefined);
+    renderPanel({
+      workflow: workflow({
+        goals: [goal({
+          status: "budgetLimited",
+          tokenBudget: 10_000,
+          tokensUsed: 10_000,
+        })],
+      }),
+      onSetGoal,
+    });
+
+    expect(screen.queryByRole("button", { name: "Mark active" }))
+      .not.toBeInTheDocument();
+    const input = screen.getByRole("spinbutton", { name: "New token budget" });
+    await user.type(input, "12000");
+    await user.click(screen.getByRole("button", {
+      name: "Resume with new budget",
+    }));
+    expect(onSetGoal).toHaveBeenCalledWith({
+      source: "codex-native",
+      status: "active",
+      tokenBudget: 12_000,
+    });
   });
 
   it("selects only enabled discovered skills through the supplied callback", async () => {
@@ -566,7 +626,7 @@ describe("GoalPanel", () => {
     });
 
     expect(screen.getByRole("button", { name: /skill-8/i })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(screen.getByText(/Maximum 8 skills selected/u)).toHaveTextContent(
       "Maximum 8 skills selected for one turn.",
     );
   });

@@ -25,6 +25,7 @@ import {
   MAX_GOAL_TOKEN_BUDGET,
   parseGoalTokenBudget,
 } from "../utils/goalBudget";
+import type { GoalExecutionStatus } from "../utils/goalExecution";
 
 interface GoalInput {
   source: AgentGoalSource;
@@ -35,6 +36,7 @@ interface GoalInput {
 
 export interface ChatGoalControlProps {
   workflow: AgentWorkflowState | null;
+  executionStatus?: GoalExecutionStatus;
   loading: boolean;
   busy: boolean;
   error: string | null;
@@ -60,12 +62,27 @@ function routeLabel(source: AgentGoalSource): string {
   return source === "codex-native" ? "Codex goal" : "Local objective";
 }
 
-function nextActions(status: AgentGoalStatus): Array<{
+function nextActions(
+  goal: AgentGoal,
+  executionStatus: GoalExecutionStatus,
+): Array<{
   label: string;
   status: AgentGoalStatus;
   icon: React.JSX.Element;
 }> {
-  if (status === "active") {
+  if (goal.status === "budgetLimited") return [];
+  if (
+    goal.status === "active"
+    && goal.source === "codex-native"
+    && executionStatus === "idle"
+  ) {
+    return [{
+      label: "Resume goal",
+      status: "active",
+      icon: <Play size={12} aria-hidden="true" />,
+    }];
+  }
+  if (goal.status === "active") {
     return [
       {
         label: "Pause",
@@ -85,7 +102,7 @@ function nextActions(status: AgentGoalStatus): Array<{
     ];
   }
   return [{
-    label: status === "complete" ? "Reopen goal" : "Mark active",
+    label: goal.status === "complete" ? "Reopen goal" : "Mark active",
     status: "active",
     icon: <Play size={12} aria-hidden="true" />,
   }];
@@ -98,6 +115,7 @@ function currentRouteGoal(workflow: AgentWorkflowState): AgentGoal | null {
 
 export function ChatGoalControl({
   workflow,
+  executionStatus = "idle",
   loading,
   busy,
   error,
@@ -114,13 +132,19 @@ export function ChatGoalControl({
   const firstActionRef = useRef<HTMLButtonElement>(null);
   const [objective, setObjective] = useState("");
   const [tokenBudget, setTokenBudget] = useState("");
+  const [recoveryBudget, setRecoveryBudget] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const source = workflow?.goalCapability.kind ?? null;
   const goal = workflow ? currentRouteGoal(workflow) : null;
+  const recoveryBudgetFloor = goal?.tokensUsed ?? goal?.tokenBudget ?? 0;
+  const parsedRecoveryBudget = parseGoalTokenBudget(recoveryBudget);
+  const validRecoveryBudget = typeof parsedRecoveryBudget === "number"
+    && parsedRecoveryBudget > recoveryBudgetFloor;
   const separateGoalCount = workflow?.goals.filter(({ source: goalSource }) =>
     goalSource !== source).length ?? 0;
   const label = source ? routeLabel(source) : "Goal";
   const stateLabel = goal ? statusLabel(goal.status) : null;
+  const controlsBusy = busy || executionStatus === "starting";
   const ownerKey = `${workflow?.conversationId ?? ""}:${source ?? ""}`;
   const ownerKeyRef = useRef(ownerKey);
 
@@ -129,6 +153,7 @@ export function ChatGoalControl({
     ownerKeyRef.current = ownerKey;
     setObjective("");
     setTokenBudget("");
+    setRecoveryBudget("");
     if (open) onDismiss("owner-change");
   }, [onDismiss, open, ownerKey]);
 
@@ -207,6 +232,25 @@ export function ChatGoalControl({
     }
   };
 
+  const resumeBudgetLimitedGoal = async (
+    nextTokenBudget: number | null,
+  ): Promise<void> => {
+    if (!source || submitting) return;
+    setSubmitting(true);
+    try {
+      await onSetGoal({
+        source,
+        status: "active",
+        tokenBudget: nextTokenBudget,
+      });
+      setRecoveryBudget("");
+    } catch {
+      // The workspace error surface owns the public failure message.
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -214,12 +258,13 @@ export function ChatGoalControl({
       className="chat-goal-control is-command-surface"
       data-goal-source={source ?? "unavailable"}
       data-goal-status={goal?.status ?? "empty"}
+      data-goal-execution={executionStatus}
     >
       <div
         className="chat-goal-inline"
         role="region"
         aria-labelledby={headingId}
-        aria-busy={busy || submitting}
+        aria-busy={controlsBusy || submitting}
       >
           <header>
             <span>
@@ -247,7 +292,7 @@ export function ChatGoalControl({
               <button
                 ref={firstActionRef}
                 type="button"
-                disabled={loading || busy}
+                disabled={loading || controlsBusy}
                 onClick={() => void onRetry().catch(() => undefined)}
               >
                 <RefreshCw size={13} aria-hidden="true" />
@@ -262,16 +307,83 @@ export function ChatGoalControl({
                 <small>
                   {source === "codex-native"
                     ? "Owned by and shared with this Codex thread."
-                    : "Saved in Inertia only; it is not shared with the provider."}
+                    : goal.tokenBudget === null
+                      ? "Saved in Inertia only; it is not shared with the provider."
+                      : `Local token target: ${goal.tokenBudget.toLocaleString()}. Inertia does not measure or enforce provider usage.`}
                 </small>
+                {goal.source === "codex-native"
+                  && goal.status === "active"
+                  && executionStatus === "idle" && (
+                    <small role="status">
+                      This goal is still active in Codex, but no Inertia run is
+                      connected. Resume it to continue.
+                    </small>
+                  )}
               </section>
+              {goal.status === "budgetLimited" && (
+                <section
+                  className="chat-goal-budget-recovery"
+                  aria-label="Resume budget-limited goal"
+                >
+                  <p>
+                    This budget is exhausted. Raise or remove it before
+                    resuming the goal.
+                  </p>
+                  <div className="chat-goal-budget">
+                    <label htmlFor={budgetId}>New token budget</label>
+                    <input
+                      id={budgetId}
+                      type="number"
+                      inputMode="numeric"
+                      min={recoveryBudgetFloor + 1}
+                      max={MAX_GOAL_TOKEN_BUDGET}
+                      step={1}
+                      value={recoveryBudget}
+                      placeholder={recoveryBudgetFloor === 0
+                        ? "Higher limit"
+                        : `More than ${recoveryBudgetFloor.toLocaleString()}`}
+                      disabled={controlsBusy || submitting}
+                      aria-invalid={parsedRecoveryBudget === undefined
+                        || (typeof parsedRecoveryBudget === "number"
+                          && !validRecoveryBudget)}
+                      onChange={(event) =>
+                        setRecoveryBudget(event.currentTarget.value)}
+                    />
+                  </div>
+                  <div className="chat-goal-actions">
+                    <button
+                      type="button"
+                      disabled={controlsBusy
+                        || submitting
+                        || !validRecoveryBudget}
+                      onClick={() => {
+                        if (typeof parsedRecoveryBudget === "number") {
+                          void resumeBudgetLimitedGoal(parsedRecoveryBudget);
+                        }
+                      }}
+                    >
+                      <Play size={12} aria-hidden="true" />
+                      Resume with new budget
+                    </button>
+                    <button
+                      ref={firstActionRef}
+                      type="button"
+                      disabled={controlsBusy || submitting}
+                      onClick={() => void resumeBudgetLimitedGoal(null)}
+                    >
+                      <Play size={12} aria-hidden="true" />
+                      Resume without budget
+                    </button>
+                  </div>
+                </section>
+              )}
               <footer className="chat-goal-actions">
-                {nextActions(goal.status).map((action, index) => (
+                {nextActions(goal, executionStatus).map((action, index) => (
                   <button
                     ref={index === 0 ? firstActionRef : undefined}
                     key={action.status}
                     type="button"
-                    disabled={busy || submitting}
+                    disabled={controlsBusy || submitting}
                     onClick={() => void updateStatus(action.status)}
                   >
                     {action.icon}
@@ -284,7 +396,7 @@ export function ChatGoalControl({
                   aria-label={source === "codex-native"
                     ? "Clear Codex goal"
                     : "Clear local objective"}
-                  disabled={busy || submitting}
+                  disabled={controlsBusy || submitting}
                   onClick={() => void clearGoal()}
                 >
                   <Trash2 size={13} aria-hidden="true" />
@@ -311,11 +423,15 @@ export function ChatGoalControl({
                 maxLength={4_000}
                 rows={3}
                 placeholder="Define the outcome for this chat…"
-                disabled={busy || submitting}
+                disabled={controlsBusy || submitting}
                 onChange={(event) => setObjective(event.currentTarget.value)}
               />
               <div className="chat-goal-budget">
-                <label htmlFor={budgetId}>Token budget (optional)</label>
+                <label htmlFor={budgetId}>
+                  {source === "codex-native"
+                    ? "Token budget (optional)"
+                    : "Token target (optional)"}
+                </label>
                 <input
                   id={budgetId}
                   type="number"
@@ -325,7 +441,7 @@ export function ChatGoalControl({
                   step={1}
                   value={tokenBudget}
                   placeholder="No limit"
-                  disabled={busy || submitting}
+                  disabled={controlsBusy || submitting}
                   aria-invalid={parseGoalTokenBudget(tokenBudget) === undefined}
                   onChange={(event) =>
                     setTokenBudget(event.currentTarget.value)}
@@ -335,7 +451,7 @@ export function ChatGoalControl({
                 <small>
                   {source === "codex-native"
                     ? "This becomes the native goal for this Codex thread."
-                    : "This stays in Inertia and is never injected into provider context."}
+                    : "This stays in Inertia and is never injected into provider context. Inertia does not measure or enforce the local token target."}
                 </small>
                 {workflow.goalCapability.kind === "inertia-local" && (
                   <p>{workflow.goalCapability.reason}</p>
@@ -344,7 +460,7 @@ export function ChatGoalControl({
               <button
                 type="submit"
                 disabled={
-                  busy
+                  controlsBusy
                   || submitting
                   || objective.trim().length === 0
                   || parseGoalTokenBudget(tokenBudget) === undefined

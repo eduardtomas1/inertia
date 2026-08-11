@@ -44,6 +44,10 @@ import {
   MAX_GOAL_TOKEN_BUDGET,
   parseGoalTokenBudget,
 } from "../utils/goalBudget";
+import {
+  goalExecutionStatus,
+  type GoalExecutionStatus,
+} from "../utils/goalExecution";
 
 export interface GoalPanelGoalInput {
   source: AgentGoalSource;
@@ -54,6 +58,7 @@ export interface GoalPanelGoalInput {
 
 export interface GoalPanelProps {
   workflow: AgentWorkflowState | null;
+  executionStatus?: GoalExecutionStatus;
   plan: AgentPlan | null;
   subagents: readonly SubagentTrace[];
   turns: readonly AgentTurn[];
@@ -96,12 +101,27 @@ function goalProgress(goal: AgentGoal): number | null {
   )));
 }
 
-function nextGoalActions(status: AgentGoalStatus): Array<{
+function nextGoalActions(
+  goal: AgentGoal,
+  executionStatus: GoalExecutionStatus,
+): Array<{
   label: string;
   status: AgentGoalStatus;
   icon: React.JSX.Element;
 }> {
-  if (status === "active") {
+  if (goal.status === "budgetLimited") return [];
+  if (
+    goal.status === "active"
+    && goal.source === "codex-native"
+    && executionStatus === "idle"
+  ) {
+    return [{
+      label: "Resume goal",
+      status: "active",
+      icon: <Play size={11} aria-hidden="true" />,
+    }];
+  }
+  if (goal.status === "active") {
     return [
       {
         label: "Pause",
@@ -121,7 +141,7 @@ function nextGoalActions(status: AgentGoalStatus): Array<{
     ];
   }
   return [{
-    label: status === "complete" ? "Reopen goal" : "Mark active",
+    label: goal.status === "complete" ? "Reopen goal" : "Mark active",
     status: "active",
     icon: <Play size={11} aria-hidden="true" />,
   }];
@@ -131,16 +151,46 @@ function GoalCard({
   goal,
   editable,
   busy,
+  executionStatus,
   onSetGoal,
   onClearGoal,
 }: {
   goal: AgentGoal;
   editable: boolean;
   busy: boolean;
+  executionStatus: GoalExecutionStatus;
   onSetGoal?: GoalPanelProps["onSetGoal"];
   onClearGoal?: GoalPanelProps["onClearGoal"];
 }): React.JSX.Element {
+  const budgetId = useId();
   const progress = goalProgress(goal);
+  const [recoveryBudget, setRecoveryBudget] = useState("");
+  const [submittingBudget, setSubmittingBudget] = useState(false);
+  const controlsBusy = busy
+    || executionStatus === "starting"
+    || submittingBudget;
+  const parsedRecoveryBudget = parseGoalTokenBudget(recoveryBudget);
+  const recoveryBudgetFloor = goal.tokensUsed ?? goal.tokenBudget ?? 0;
+  const validRecoveryBudget = typeof parsedRecoveryBudget === "number"
+    && parsedRecoveryBudget > recoveryBudgetFloor;
+  const resumeBudgetLimitedGoal = async (
+    tokenBudget: number | null,
+  ): Promise<void> => {
+    if (!onSetGoal || submittingBudget) return;
+    setSubmittingBudget(true);
+    try {
+      await onSetGoal({
+        source: goal.source,
+        status: "active",
+        tokenBudget,
+      });
+      setRecoveryBudget("");
+    } catch {
+      // The scene owns the public error surface.
+    } finally {
+      setSubmittingBudget(false);
+    }
+  };
   return (
     <article
       className={clsx(
@@ -154,6 +204,22 @@ function GoalCard({
         <span className="goal-panel-status">{goalStatusLabel(goal.status)}</span>
       </header>
       <p className="goal-panel-objective">{goal.objective}</p>
+
+      {goal.source === "codex-native"
+        && goal.status === "active"
+        && executionStatus === "idle" && (
+          <p className="goal-panel-capability-note" role="status">
+            The goal is active in Codex, but no Inertia run is connected.
+            Resume it to continue.
+          </p>
+        )}
+
+      {goal.source === "inertia-local" && goal.tokenBudget !== null && (
+        <p className="goal-panel-capability-note">
+          Local token target: {goal.tokenBudget.toLocaleString()}. Inertia does
+          not measure or enforce provider usage.
+        </p>
+      )}
 
       {(progress !== null || goal.timeUsedSeconds !== null) && (
         <div className="goal-panel-metrics">
@@ -178,14 +244,68 @@ function GoalCard({
         </div>
       )}
 
+      {editable && onSetGoal && goal.status === "budgetLimited" && (
+        <section
+          className="goal-panel-budget-recovery"
+          aria-label="Resume budget-limited goal"
+        >
+          <p>
+            This budget is exhausted. Raise or remove it before resuming.
+          </p>
+          <label htmlFor={budgetId}>New token budget</label>
+          <input
+            id={budgetId}
+            type="number"
+            inputMode="numeric"
+            min={recoveryBudgetFloor + 1}
+            max={MAX_GOAL_TOKEN_BUDGET}
+            step={1}
+            value={recoveryBudget}
+            placeholder={recoveryBudgetFloor === 0
+              ? "Higher limit"
+              : `More than ${recoveryBudgetFloor.toLocaleString()}`}
+            disabled={controlsBusy}
+            aria-invalid={parsedRecoveryBudget === undefined
+              || (typeof parsedRecoveryBudget === "number"
+                && !validRecoveryBudget)}
+            onChange={(event) =>
+              setRecoveryBudget(event.currentTarget.value)}
+          />
+          <div>
+            <button
+              type="button"
+              className="goal-panel-text-button"
+              disabled={controlsBusy || !validRecoveryBudget}
+              onClick={() => {
+                if (typeof parsedRecoveryBudget === "number") {
+                  void resumeBudgetLimitedGoal(parsedRecoveryBudget);
+                }
+              }}
+            >
+              <Play size={11} aria-hidden="true" />
+              Resume with new budget
+            </button>
+            <button
+              type="button"
+              className="goal-panel-text-button"
+              disabled={controlsBusy}
+              onClick={() => void resumeBudgetLimitedGoal(null)}
+            >
+              <Play size={11} aria-hidden="true" />
+              Resume without budget
+            </button>
+          </div>
+        </section>
+      )}
+
       {editable && (onSetGoal || onClearGoal) && (
         <footer className="goal-panel-card-actions">
-          {onSetGoal && nextGoalActions(goal.status).map((action) => (
+          {onSetGoal && nextGoalActions(goal, executionStatus).map((action) => (
             <button
               key={action.status}
               type="button"
               className="goal-panel-text-button"
-              disabled={busy}
+              disabled={controlsBusy}
               onClick={() => {
                 void onSetGoal({
                   source: goal.source,
@@ -202,7 +322,7 @@ function GoalCard({
               type="button"
               className="goal-panel-icon-button"
               aria-label={`Clear ${sourceLabel(goal.source).toLowerCase()} goal`}
-              disabled={busy}
+              disabled={controlsBusy}
               onClick={() => onClearGoal(goal)}
             >
               <Trash2 size={12} aria-hidden="true" />
@@ -284,7 +404,11 @@ function GoalComposer({
           <Flag size={13} aria-hidden="true" />
         </button>
       </div>
-      <label htmlFor={budgetId}>Token budget (optional)</label>
+      <label htmlFor={budgetId}>
+        {source === "codex-native"
+          ? "Token budget (optional)"
+          : "Token target (optional)"}
+      </label>
       <input
         id={budgetId}
         type="number"
@@ -301,7 +425,7 @@ function GoalComposer({
       <small>
         {source === "codex-native"
           ? "Shared with this Codex thread."
-          : "Tracked by Inertia only; it is not injected into the provider."}
+          : "Tracked by Inertia only; it is not injected into the provider. Inertia does not measure or enforce the local token target."}
       </small>
     </form>
   );
@@ -657,6 +781,7 @@ const MAX_COMPACT_SUBAGENTS = 6;
 
 export function GoalPanel({
   workflow,
+  executionStatus: providedExecutionStatus,
   plan,
   subagents,
   turns,
@@ -675,6 +800,8 @@ export function GoalPanel({
   canStopSubagent,
   onStopSubagent,
 }: GoalPanelProps): React.JSX.Element {
+  const executionStatus = providedExecutionStatus
+    ?? goalExecutionStatus(turns);
   const panelId = useId();
   const currentHeadingId = `${panelId}-current`;
   const localHeadingId = `${panelId}-local-tracking`;
@@ -692,6 +819,7 @@ export function GoalPanel({
   const hasEditableGoal = workflow?.goals.some(
     ({ source }) => source === capabilitySource,
   ) ?? false;
+  const controlsBusy = busy || executionStatus === "starting";
   return (
     <section
       className="goal-panel"
@@ -706,7 +834,11 @@ export function GoalPanel({
             <span>{workflow?.goalCapability.label ?? "Workflow unavailable"}</span>
           </div>
         </div>
-        {busy && <span className="goal-panel-sync" role="status">Syncing…</span>}
+        {controlsBusy && (
+          <span className="goal-panel-sync" role="status">
+            {executionStatus === "starting" ? "Starting…" : "Syncing…"}
+          </span>
+        )}
       </header>
 
       <div className="goal-panel-scroll">
@@ -717,7 +849,7 @@ export function GoalPanel({
               <button
                 type="button"
                 className="goal-panel-text-button"
-                disabled={busy}
+                disabled={controlsBusy}
                 onClick={() => void onRetry().catch(() => undefined)}
               >
                 Retry
@@ -743,7 +875,7 @@ export function GoalPanel({
               <span>
                 {error
                   ? "Agent workflow could not be loaded."
-                  : busy
+                  : controlsBusy
                     ? "Loading agent workflow…"
                     : "Open a conversation to inspect its goal."}
               </span>
@@ -759,7 +891,10 @@ export function GoalPanel({
                   key={goal.source}
                   goal={goal}
                   editable={goal.source === capabilitySource}
-                  busy={busy}
+                  busy={controlsBusy}
+                  executionStatus={goal.source === "codex-native"
+                    ? executionStatus
+                    : "idle"}
                   onSetGoal={onSetGoal}
                   onClearGoal={onClearGoal}
                 />
@@ -768,7 +903,7 @@ export function GoalPanel({
                 <GoalComposer
                   source={workflow.goalCapability.kind}
                   sourceName={workflow.goalCapability.label}
-                  busy={busy}
+                  busy={controlsBusy}
                   onSetGoal={onSetGoal}
                 />
               )}
@@ -796,7 +931,8 @@ export function GoalPanel({
                 key={goal.source}
                 goal={goal}
                 editable
-                busy={busy}
+                busy={controlsBusy}
+                executionStatus="idle"
                 onSetGoal={onSetGoal}
                 onClearGoal={onClearGoal}
               />

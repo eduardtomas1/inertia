@@ -80,7 +80,7 @@ export interface SidebarThreadView {
   settled: boolean;
 }
 
-export type SidebarWorkSectionId = "recent" | "yesterday" | "earlier" | "done";
+export type SidebarWorkSectionId = "recent" | "yesterday" | "earlier" | "done" | "snoozed";
 
 export interface SidebarWorkSection {
   id: SidebarWorkSectionId;
@@ -275,8 +275,21 @@ export function groupWorkThreads(
   threads: readonly SidebarThreadView[],
   now = Date.now(),
 ): SidebarWorkSection[] {
-  const active = threads.filter(({ hidden, settled }) => !settled && !hidden);
-  const done = threads.filter(({ settled }) => settled);
+  const isOrdinarilySnoozed = ({
+    conversation,
+    needsAttention,
+    status,
+  }: SidebarThreadView) => Boolean(
+    conversation.snoozedUntil
+    && Date.parse(conversation.snoozedUntil) > now
+    && !needsAttention
+    && status !== "working"
+  );
+  const snoozed = threads.filter((thread) => !thread.hidden && isOrdinarilySnoozed(thread));
+  const active = threads.filter((thread) => (
+    !thread.settled && !thread.hidden && !isOrdinarilySnoozed(thread)
+  ));
+  const done = threads.filter((thread) => thread.settled && !isOrdinarilySnoozed(thread));
   const dayOffset = ({ conversation }: SidebarThreadView) => (
     localCalendarDayOffset(conversation.updatedAt, now)
   );
@@ -303,6 +316,11 @@ export function groupWorkThreads(
       id: "done",
       label: "Done",
       threads: done,
+    },
+    {
+      id: "snoozed",
+      label: "Snoozed",
+      threads: snoozed,
     },
   ];
 }

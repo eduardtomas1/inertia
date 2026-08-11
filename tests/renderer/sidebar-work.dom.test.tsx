@@ -87,8 +87,10 @@ function renderSidebar(
   conversations: ConversationShell[],
   onSelectConversation = vi.fn(),
 ) {
+  const onSnoozeConversation = vi.fn();
   return {
     onSelectConversation,
+    onSnoozeConversation,
     ...render(
       <Sidebar
         snapshot={snapshot(conversations)}
@@ -108,7 +110,7 @@ function renderSidebar(
         onOpenMultiSpawn={vi.fn()}
         onRenameConversation={vi.fn()}
         onPinConversation={vi.fn()}
-        onSnoozeConversation={vi.fn()}
+        onSnoozeConversation={onSnoozeConversation}
         onArchiveConversation={vi.fn()}
         onSettleConversation={vi.fn()}
         onRestoreConversation={vi.fn()}
@@ -289,6 +291,32 @@ describe("compact Work sidebar", () => {
       name: "Show more 1 older",
     }));
     expect(done?.querySelectorAll(".activity-thread")).toHaveLength(11);
+  });
+
+  it("keeps snoozed work reachable so it can be unsnoozed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const snoozed = conversation(
+      "snoozed",
+      "Restore this task",
+      new Date(2026, 7, 11, 9),
+      { snoozedUntil: new Date(2026, 7, 12, 12).toISOString() },
+    );
+    const view = renderSidebar([snoozed]);
+
+    const snoozedToggle = screen.getByRole("button", { name: "Snoozed 1" });
+    expect(snoozedToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Restore this task")).not.toBeInTheDocument();
+    fireEvent.click(snoozedToggle);
+
+    expect(screen.getByRole("button", {
+      name: "Restore this task, OpenAI, Studio, Repository acme-monorepo/apps/studio, Idle, Snoozed",
+    })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Thread actions for Restore this task",
+    }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unsnooze" }));
+    expect(view.onSnoozeConversation).toHaveBeenCalledWith(snoozed, null);
   });
 
   it("refreshes local-day groups at midnight without a snapshot update", () => {

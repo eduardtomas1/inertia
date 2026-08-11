@@ -329,6 +329,7 @@ describe("work-first chat model", () => {
       { id: "yesterday", threads: [] },
       { id: "earlier", threads: [] },
       { id: "done", threads: [] },
+      { id: "snoozed", threads: [] },
     ]);
   });
 
@@ -372,6 +373,45 @@ describe("work-first chat model", () => {
       { id: "yesterday", threads: ["yesterday"] },
       { id: "earlier", threads: ["earlier"] },
       { id: "done", threads: ["done"] },
+      { id: "snoozed", threads: [] },
+    ]);
+  });
+
+  it("groups ordinary snoozed work separately while keeping actionable snoozed work visible", () => {
+    const now = new Date(2026, 7, 11, 12).getTime();
+    const snoozedUntil = new Date(2026, 7, 12, 12).toISOString();
+    const entries = [
+      conversation({ id: "idle", projectId: "p", snoozedUntil }),
+      conversation({
+        id: "done",
+        projectId: "p",
+        settledAt: new Date(2026, 7, 10, 12).toISOString(),
+        snoozedUntil,
+      }),
+      conversation({ id: "working", projectId: "p", status: "running", snoozedUntil }),
+      conversation({
+        id: "approval",
+        projectId: "p",
+        status: "needs-input",
+        attentionKind: "approval",
+        snoozedUntil,
+      }),
+      conversation({ id: "dismissed", projectId: "p", snoozedUntil }),
+    ];
+    const runs = [workspaceRun("dismissed", {
+      status: "failed",
+      attentionState: "dismissed",
+    })];
+
+    expect(groupWorkThreads(sortActivityThreads(entries, null, runs), now).map((section) => ({
+      id: section.id,
+      threads: section.threads.map(({ conversation: entry }) => entry.id),
+    }))).toEqual([
+      { id: "recent", threads: ["approval", "working"] },
+      { id: "yesterday", threads: [] },
+      { id: "earlier", threads: [] },
+      { id: "done", threads: [] },
+      { id: "snoozed", threads: ["idle", "done"] },
     ]);
   });
 
@@ -445,6 +485,7 @@ describe("work-first chat model", () => {
       { id: "yesterday", threads: [] },
       { id: "earlier", threads: [] },
       { id: "done", threads: [] },
+      { id: "snoozed", threads: [] },
     ]);
   });
 

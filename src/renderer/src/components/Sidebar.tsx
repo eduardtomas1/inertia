@@ -59,6 +59,7 @@ const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
 const COLLAPSIBLE_WORK_SECTIONS: ReadonlySet<SidebarWorkSectionId> = new Set([
   "earlier",
   "done",
+  "snoozed",
 ]);
 
 type SidebarProps = {
@@ -300,23 +301,12 @@ function SidebarView({
             project?.repositoryRelativePath,
           ].some((value) => value?.toLocaleLowerCase().includes(needle));
         })
-        .map((conversation) => threadViewsById.get(conversation.id)!)
-        .filter((thread) => {
-          const snoozed = Boolean(
-            thread.conversation.snoozedUntil
-            && Date.parse(thread.conversation.snoozedUntil) > snoozeNow,
-          );
-          if (snoozed && !thread.needsAttention && thread.status !== "working") {
-            return false;
-          }
-          return true;
-        }),
+        .map((conversation) => threadViewsById.get(conversation.id)!),
     );
   }, [
     projectById,
     query,
     conversations,
-    snoozeNow,
     snapshot?.settings.providerIdentityLabels,
     threadViewsById,
   ]);
@@ -540,6 +530,9 @@ function SidebarView({
       repositoryLabel ? `Repository ${repositoryLabel}` : null,
       conversation.branch ? `Branch ${conversation.branch}` : null,
       statusLabels[model.status],
+      conversation.snoozedUntil && Date.parse(conversation.snoozedUntil) > snoozeNow
+        ? "Snoozed"
+        : null,
       conversation.pinnedAt ? "Pinned" : null,
       model.unread ? "New completion" : null,
     ].filter((value): value is string => Boolean(value)).join(", ");

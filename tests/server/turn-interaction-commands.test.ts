@@ -380,6 +380,12 @@ describe("message attachment ownership transfer", () => {
       )).resolves.toBe("handled");
       expect(generatedAttachments.usage()).toEqual({ bytes: 0, records: 0 });
       expect(handlerDependencies.store.createMessage).toHaveBeenCalledOnce();
+      expect(handlerDependencies.conversationAttachments.acceptRetention)
+        .toHaveBeenCalledOnce();
+      expect(handlerDependencies.attachmentResolver?.releaseAll)
+        .toHaveBeenCalledWith([pdf.id]);
+      expect(handlerDependencies.conversationAttachments.releaseRetention)
+        .not.toHaveBeenCalled();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

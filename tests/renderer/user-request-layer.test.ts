@@ -153,7 +153,7 @@ describe("Quiet Ledger user request layer", () => {
       checkpoint,
       checkpointRestoreDisabled: true,
       attachment: {
-        id: "attachment-1",
+        id: "11111111-1111-4111-8111-111111111111",
         name: "reference.png",
         path: "/workspace/reference.png",
         mimeType: "image/png",
@@ -172,7 +172,7 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain("PNG image · 1.0 KB");
     expect(html).toContain('aria-label="Preview attachment reference.png"');
     expect(html).toContain(
-      'src="inertia://bundle/attachment-preview/attachment-1"',
+      'src="inertia://bundle/attachment-preview/11111111-1111-4111-8111-111111111111"',
     );
     expect(html).toContain("1.0 KB");
     expect(html).not.toContain("/workspace/reference.png");
@@ -183,7 +183,7 @@ describe("Quiet Ledger user request layer", () => {
   it("labels historical documents truthfully without exposing their private path", () => {
     const html = renderRequest("Review the attached brief.", {
       attachment: {
-        id: "attachment-pdf",
+        id: "22222222-2222-4222-8222-222222222222",
         name: "brief.pdf",
         path: "/private/runtime/brief.pdf",
         mimeType: "application/pdf",

@@ -100,6 +100,23 @@ describe("RuntimeStore conversation lifecycle", () => {
       { ...valid, name: "../reference.png" },
       valid,
     ]))).toEqual([valid]);
+
+    const bounded = Array.from({ length: 9 }, (_, index) => ({
+      ...valid,
+      id: `0000000${index}-0000-4000-8000-00000000000${index}`,
+      size: 3 * 1024 * 1024,
+    }));
+    expect(parseAttachments(JSON.stringify([
+      bounded[0],
+      bounded[0],
+      ...bounded.slice(1),
+    ]))).toEqual(bounded.slice(0, 6));
+    const countBounded = bounded.map((attachment) => ({
+      ...attachment,
+      size: 1,
+    }));
+    expect(parseAttachments(JSON.stringify(countBounded)))
+      .toEqual(countBounded.slice(0, 8));
   });
 
   it("upgrades schema 54 attachment paths to opaque capabilities", async () => {

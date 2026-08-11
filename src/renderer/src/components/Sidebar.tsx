@@ -240,18 +240,21 @@ function SidebarView({
 
   useEffect(() => {
     if (sidebarMode !== "activity") return;
-    const clearWorkFocusIfOutside = (event: Event): void => {
+    const clearWorkFocusIfUnowned = (event: Event): void => {
       const target = event.target;
-      if (target instanceof Node && sidebarRef.current?.contains(target)) return;
+      const focusOwner = target instanceof Element
+        ? target.closest("[data-work-focus-id], [data-work-focus-owner]")
+        : null;
+      if (focusOwner && sidebarRef.current?.contains(focusOwner)) return;
       workFocusIdentityRef.current = null;
       workFocusIndexRef.current = null;
       workFocusConversationIdsRef.current = [];
     };
-    document.addEventListener("focusin", clearWorkFocusIfOutside);
-    document.addEventListener("pointerdown", clearWorkFocusIfOutside, true);
+    document.addEventListener("focusin", clearWorkFocusIfUnowned);
+    document.addEventListener("pointerdown", clearWorkFocusIfUnowned, true);
     return () => {
-      document.removeEventListener("focusin", clearWorkFocusIfOutside);
-      document.removeEventListener("pointerdown", clearWorkFocusIfOutside, true);
+      document.removeEventListener("focusin", clearWorkFocusIfUnowned);
+      document.removeEventListener("pointerdown", clearWorkFocusIfUnowned, true);
     };
   }, [sidebarMode]);
 

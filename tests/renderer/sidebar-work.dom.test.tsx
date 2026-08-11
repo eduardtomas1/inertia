@@ -516,6 +516,29 @@ describe("compact Work sidebar", () => {
     })).not.toHaveFocus();
   });
 
+  it("does not reclaim focus after the user points at blank sidebar space", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 23, 59, 59, 900);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("today", "Leave Work inside the sidebar", new Date(2026, 7, 11, 12)),
+    ]);
+
+    const row = screen.getByRole("button", { name: /^Leave Work inside the sidebar,/ });
+    row.focus();
+    fireEvent.pointerDown(screen.getByLabelText("Project navigation"));
+    row.blur();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+
+    expect(screen.getByRole("button", { name: /^Leave Work inside the sidebar,/ }))
+      .not.toHaveFocus();
+    expect(screen.getByRole("searchbox", {
+      name: "Search projects and conversations",
+    })).not.toHaveFocus();
+  });
+
   it("moves focus from a disappearing Snoozed disclosure to the regrouped row", () => {
     vi.useFakeTimers();
     const start = new Date(2026, 7, 11, 12);

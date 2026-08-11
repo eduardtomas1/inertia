@@ -249,9 +249,9 @@ describe("environment summary projection", () => {
       subagents: [],
       messages: [],
       projects: [
-        { id: "project-1", name: "Inertia" },
-        { id: "project-2", name: "Docs" },
-        { id: "project-3", name: "Website" },
+        { id: "project-1", name: "Inertia", path: "/workspace/inertia" },
+        { id: "project-2", name: "Docs", path: "/workspace/docs" },
+        { id: "project-3", name: "Website", path: "/workspace/website" },
       ],
       conversations: [
         {
@@ -316,6 +316,70 @@ describe("environment summary projection", () => {
       });
   });
 
+  it("disambiguates stoppable runs from projects with duplicate names", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [
+        run({
+          id: "docs-alpha-run",
+          projectId: "docs-alpha",
+          conversationId: "docs-alpha-chat",
+          detail: "npm run typecheck",
+        }),
+        run({
+          id: "docs-beta-run",
+          projectId: "docs-beta",
+          conversationId: "docs-beta-chat",
+          detail: "npm run typecheck",
+        }),
+      ],
+      subagents: [],
+      messages: [],
+      projects: [
+        { id: "project-1", name: "Inertia", path: "/workspace/inertia" },
+        { id: "docs-alpha", name: "Docs", path: "/workspace/docs-alpha" },
+        { id: "docs-beta", name: "Docs", path: "/workspace/docs-beta" },
+      ],
+      conversations: [
+        {
+          id: "conversation-1",
+          projectId: "project-1",
+          title: "Primary chat",
+          branch: "main",
+          worktreePath: null,
+        },
+        {
+          id: "docs-alpha-chat",
+          projectId: "docs-alpha",
+          title: "Checks",
+          branch: "codex/checks",
+          worktreePath: "/workspace/docs-alpha/.inertia/checks",
+        },
+        {
+          id: "docs-beta-chat",
+          projectId: "docs-beta",
+          title: "Checks",
+          branch: "codex/checks",
+          worktreePath: "/workspace/docs-beta/.inertia/checks",
+        },
+      ],
+    });
+
+    expect(summary.checks.find(({ id }) => id === "docs-alpha-run")
+      ?.contextLabel).toBe(
+      "Docs (/workspace/docs-alpha) · Checks (codex/checks) · npm run typecheck",
+    );
+    expect(summary.checks.find(({ id }) => id === "docs-beta-run")
+      ?.contextLabel).toBe(
+      "Docs (/workspace/docs-beta) · Checks (codex/checks) · npm run typecheck",
+    );
+  });
+
   it("offers previews only for live, safely routed service ports", () => {
     const summary = buildEnvironmentSummary({
       projectId: "project-1",
@@ -350,7 +414,11 @@ describe("environment summary projection", () => {
       ],
       subagents: [],
       messages: [],
-      projects: [{ id: "project-1", name: "Inertia" }],
+      projects: [{
+        id: "project-1",
+        name: "Inertia",
+        path: "/workspace/inertia",
+      }],
       conversations: [{
         id: "conversation-1",
         projectId: "project-1",

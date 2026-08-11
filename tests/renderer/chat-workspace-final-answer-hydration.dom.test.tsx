@@ -328,6 +328,14 @@ function installGeometry(targetAnswerId: string): {
   };
 }
 
+async function expectLoadingConversation(): Promise<void> {
+  const loading = await screen.findAllByRole("status", {
+    name: "Loading conversation",
+  });
+  expect(loading.length).toBeGreaterThan(0);
+  for (const marker of loading) expect(marker).toBeVisible();
+}
+
 afterEach(() => {
   finalAnswerAnchorStarts.mockReset();
   vi.restoreAllMocks();
@@ -363,8 +371,7 @@ describe("ChatWorkspace final-answer hydration", () => {
       />,
     );
 
-    expect(await screen.findByRole("status", { name: "Loading conversation" }))
-      .toBeVisible();
+    await expectLoadingConversation();
     expect(screen.queryByText(`Request ${staleTurn.id}`)).toBeNull();
     const transcript = screen.getByLabelText("Thread transcript");
     Object.defineProperties(transcript, {
@@ -441,7 +448,7 @@ describe("ChatWorkspace final-answer hydration", () => {
         onLatestContentVisibilityChange={visible}
       />,
     );
-    await screen.findByRole("status", { name: "Loading conversation" });
+    await expectLoadingConversation();
     const transcript = screen.getByLabelText("Thread transcript");
     Object.defineProperties(transcript, {
       clientHeight: { configurable: true, value: 600 },

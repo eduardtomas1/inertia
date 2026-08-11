@@ -66,11 +66,13 @@ export function EnvironmentSummary({
   useNativePreviewSuspension(true);
   const pendingActionFocusRef = useRef<{
     runId: string;
+    row: HTMLLIElement | null;
+    source: HTMLButtonElement;
     fallback: HTMLButtonElement | null;
   } | null>(null);
   useLayoutEffect(() => {
     const pending = pendingActionFocusRef.current;
-    if (!pending || summary.checks.some((check) => check.id === pending.runId)) {
+    if (!pending || pending.source.isConnected) {
       return;
     }
     pendingActionFocusRef.current = null;
@@ -80,6 +82,15 @@ export function EnvironmentSummary({
       && activeElement !== document.body
       && activeElement.isConnected
     ) {
+      return;
+    }
+    const remainingRowAction = summary.checks.some(
+      (check) => check.id === pending.runId,
+    ) && pending.row?.isConnected
+      ? pending.row.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      : null;
+    if (remainingRowAction) {
+      remainingRowAction.focus();
       return;
     }
     if (pending.fallback?.isConnected && !pending.fallback.disabled) {
@@ -110,6 +121,8 @@ export function EnvironmentSummary({
         : [];
       pendingActionFocusRef.current = {
         runId: check.id,
+        row,
+        source: event.currentTarget,
         fallback: candidateRows
           .map((candidate) => candidate.querySelector<HTMLButtonElement>(
             "button:not(:disabled)",

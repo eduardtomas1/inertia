@@ -273,6 +273,34 @@ describe("environment summary header popover", () => {
       .toHaveFocus();
   });
 
+  it("keeps focus in a run row when its activated action disappears", () => {
+    const running = environmentCheck({
+      id: "running-check",
+      label: "Preview",
+      canStop: true,
+      canOpenPreview: true,
+    });
+    const view = render(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [running],
+      }} />,
+    );
+    const stop = screen.getByRole("button", { name: "Stop Preview" });
+    stop.focus();
+
+    fireEvent.click(stop);
+    view.rerender(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [{ ...running, canStop: false }],
+      }} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Open preview for Preview" }))
+      .toHaveFocus();
+  });
+
   it.each([
     {
       actionName: "Stop Build",

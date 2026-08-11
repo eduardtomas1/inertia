@@ -65,7 +65,7 @@ interface EnvironmentSummaryInput {
   runs: readonly WorkspaceRun[];
   subagents: readonly SubagentTrace[];
   messages: readonly ChatMessage[];
-  projects?: readonly Pick<Project, "id" | "name">[];
+  projects?: readonly Pick<Project, "id" | "name" | "path">[];
   conversations?: readonly Pick<
     Conversation,
     "id" | "projectId" | "title" | "branch" | "worktreePath"
@@ -187,7 +187,11 @@ export function buildEnvironmentSummary({
 }: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
   const visibleProjectIds = new Set(additionalVisibleProjectIds);
   if (projectId) visibleProjectIds.add(projectId);
-  const projectNames = new Map(projects.map(({ id, name }) => [id, name]));
+  const knownProjects = new Map(projects.map((project) => [project.id, project]));
+  const projectNameCounts = new Map<string, number>();
+  for (const { name } of projects) {
+    projectNameCounts.set(name, (projectNameCounts.get(name) ?? 0) + 1);
+  }
   const knownConversations = new Map(
     conversations.map((conversation) => [conversation.id, conversation]),
   );
@@ -220,7 +224,8 @@ export function buildEnvironmentSummary({
       const ownerConversation = run.conversationId
         ? knownConversations.get(run.conversationId)
         : undefined;
-      const routeKnown = projectNames.has(run.projectId)
+      const ownerProject = knownProjects.get(run.projectId);
+      const routeKnown = ownerProject !== undefined
         && (
           run.conversationId === null
             ? projectsWithConversations.has(run.projectId)
@@ -238,7 +243,11 @@ export function buildEnvironmentSummary({
         contextLabel: [
           run.projectId === projectId
             ? null
-            : projectNames.get(run.projectId) ?? "Unavailable project",
+            : ownerProject
+              ? projectNameCounts.get(ownerProject.name) === 1
+                ? ownerProject.name
+                : `${ownerProject.name} (${ownerProject.path})`
+              : "Unavailable project",
           run.canStop && run.conversationId
             ? ownerConversation
               ? conversationRunOwnerLabel(ownerConversation)

@@ -306,8 +306,8 @@ describe("usage dashboard projection", () => {
       expect.objectContaining({ model: "legacy-model" }),
     ]));
     expect(dashboard.tokens.input).toMatchObject({
-      value: 1_740,
-      measuredRequests: 5,
+      value: 1_440,
+      measuredRequests: 3,
       coverage: "partial",
     });
     expect(dashboard.cost).toEqual({
@@ -315,6 +315,118 @@ describe("usage dashboard projection", () => {
       reason: "Inertia does not persist versioned model pricing or provider invoice charges.",
     });
     expect(JSON.stringify(dashboard)).not.toContain("conversation-codex");
+  });
+
+  it("aggregates token categories only when the harness semantics are defensible", () => {
+    const codex = turn({
+      id: "codex-turn-fields",
+      providerId: "codex",
+      model: "gpt-turn-fields",
+      completedAt: "2026-06-20T10:00:00.000Z",
+      completionUsage: usage("2026-06-20T10:00:00.000Z", {
+        inputTokens: 40,
+        outputTokens: 10,
+      }),
+    });
+    const claude = turn({
+      id: "claude-run-fields",
+      providerId: "claude",
+      model: "claude-run-fields",
+      completedAt: "2026-06-20T11:00:00.000Z",
+      completionUsage: usage("2026-06-20T11:00:00.000Z", {
+        totalProcessedTokens: 80,
+        totalProcessedScope: "run",
+        inputTokens: 60,
+        outputTokens: 20,
+      }),
+    });
+    const cursor = turn({
+      id: "cursor-session-fields",
+      providerId: "cursor",
+      model: "cursor-session-fields",
+      completedAt: "2026-06-20T12:00:00.000Z",
+      providerSessionBefore: "cursor-session",
+      startUsage: usage("2026-06-20T11:59:00.000Z", {
+        inputTokens: 100,
+        outputTokens: 40,
+      }),
+      completionUsage: usage("2026-06-20T12:00:00.000Z", {
+        inputTokens: 160,
+        outputTokens: 70,
+      }),
+    });
+    const resetCursor = turn({
+      id: "cursor-reset-fields",
+      providerId: "cursor",
+      model: "cursor-reset-fields",
+      completedAt: "2026-06-20T13:00:00.000Z",
+      providerSessionBefore: "cursor-reset-session",
+      startUsage: usage("2026-06-20T12:59:00.000Z", { inputTokens: 100 }),
+      completionUsage: usage("2026-06-20T13:00:00.000Z", { inputTokens: 80 }),
+    });
+    const opencode = turn({
+      id: "opencode-message-fields",
+      providerId: "opencode",
+      model: "opencode-message-fields",
+      completedAt: "2026-06-20T14:00:00.000Z",
+      completionUsage: usage("2026-06-20T14:00:00.000Z", {
+        totalProcessedTokens: 500,
+        totalProcessedScope: "run",
+        inputTokens: 400,
+        outputTokens: 100,
+      }),
+    });
+    const claudeContextOnly = turn({
+      id: "claude-context-fields",
+      providerId: "claude",
+      model: "claude-context-fields",
+      completedAt: "2026-06-20T15:00:00.000Z",
+      completionUsage: usage("2026-06-20T15:00:00.000Z", {
+        inputTokens: 300,
+        outputTokens: 50,
+      }),
+    });
+    const unknownHarness = turn({
+      id: "unknown-harness-fields",
+      providerId: "codex",
+      model: "unknown-harness-fields",
+      completedAt: "2026-06-20T16:00:00.000Z",
+      completionUsage: usage("2026-06-20T16:00:00.000Z", {
+        inputTokens: 999,
+        outputTokens: 999,
+      }),
+    });
+    unknownHarness.modelSelection = {
+      ...unknownHarness.modelSelection,
+      harnessId: "future-harness",
+    };
+    unknownHarness.continuationIdentity = {
+      ...unknownHarness.continuationIdentity,
+      harnessId: "future-harness",
+    };
+
+    const dashboard = projectUsageDashboard([
+      codex,
+      claude,
+      cursor,
+      resetCursor,
+      opencode,
+      claudeContextOnly,
+      unknownHarness,
+    ], range);
+
+    expect(dashboard.tokens.input).toEqual({
+      value: 160,
+      measuredRequests: 3,
+      totalRequests: 7,
+      coverage: "partial",
+    });
+    expect(dashboard.tokens.output).toEqual({
+      value: 60,
+      measuredRequests: 3,
+      totalRequests: 7,
+      coverage: "partial",
+    });
   });
 
   it("rejects ranges that do not match their declared time zone", () => {

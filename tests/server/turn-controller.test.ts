@@ -1744,10 +1744,7 @@ describe("TurnController authoritative lifecycle", () => {
       harnessId: "codex-app-server",
       model: "gpt-test",
       reasoningEffort: "high",
-      usageAtStart: expect.objectContaining({
-        usedTokens: 12,
-        totalProcessedTokens: 20,
-      }),
+      usageAtStart: null,
     });
     expect(runtime.store.checkpoint(checkpoint.id).turnId).toBe(queued.turn.id);
     expect(runtime.store.associateCheckpointWithTurn(

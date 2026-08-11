@@ -1,7 +1,9 @@
-import type {
-  AgentTurnUsageSnapshot,
-  ProviderId,
-  ThreadUsageSnapshot,
+import {
+  isAgentTurnTerminalStatus,
+  type AgentTurn,
+  type AgentTurnUsageSnapshot,
+  type ProviderId,
+  type ThreadUsageSnapshot,
 } from "../../../shared/contracts";
 import { sanitizeProviderActivityDetail } from "../../provider/activity-detail";
 import type { ProviderRunFailure } from "../../provider/contracts";
@@ -56,6 +58,25 @@ export function boundaryUsage(
     compactsAutomatically: usage.compactsAutomatically,
     capturedAt,
   };
+}
+
+export function previousTurnBoundaryUsage(
+  previousTurn: Pick<
+    AgentTurn,
+    "association" | "status" | "usageAtCompletion"
+  > | null,
+): AgentTurnUsageSnapshot | null {
+  // The conversation-level usage projection may belong to an older turn.
+  // Only the preceding turn's immutable completion is a safe cumulative base.
+  if (
+    !previousTurn
+    || previousTurn.association !== "authoritative"
+    || !isAgentTurnTerminalStatus(previousTurn.status)
+    || !previousTurn.usageAtCompletion
+  ) {
+    return null;
+  }
+  return { ...previousTurn.usageAtCompletion };
 }
 
 export function publicTurnError(error: unknown): string {

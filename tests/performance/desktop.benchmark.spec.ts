@@ -1308,7 +1308,7 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<{
   await page.getByRole("button", { name: "Close runs" }).click();
 
   const settingsFirstOpenMs = await rendererInteractionMeasurement(page, {
-    triggerSelector: ".sidebar-footer .sidebar-destination",
+    triggerSelector: ".sidebar-footer .sidebar-destination:last-child",
     targetSelector: ".settings-view",
   });
   await page.locator("button.sidebar-destination")

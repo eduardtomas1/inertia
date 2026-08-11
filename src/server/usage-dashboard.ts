@@ -68,6 +68,15 @@ interface ModelBucket extends ProviderBucket {
   backendConfigurationRevision: number;
 }
 
+type TokenFieldKey = Extract<
+  keyof AgentTurnUsageSnapshot,
+  | "inputTokens"
+  | "cachedInputTokens"
+  | "cacheWriteInputTokens"
+  | "outputTokens"
+  | "reasoningOutputTokens"
+>;
+
 const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   codex: "Codex",
   claude: "Claude",
@@ -276,6 +285,50 @@ function measuredProcessedTokens(turn: UsageDashboardTurn): number | null {
   return completionTotal - start.totalProcessedTokens;
 }
 
+function measuredTokenField(
+  turn: UsageDashboardTurn,
+  field: TokenFieldKey,
+): number | null {
+  const completion = turn.usageAtCompletion;
+  if (!completion) return null;
+  const completionValue = completion[field];
+  if (completionValue === null) return null;
+
+  const harnessId = turn.modelSelection.harnessId;
+  if (turn.providerId === "codex" && harnessId === "codex-app-server") {
+    // Codex `tokenUsage.last` is the completed provider turn, not the thread
+    // total carried by `tokenUsage.total`.
+    return completionValue;
+  }
+  if (
+    turn.providerId === "claude"
+    && harnessId === "claude-agent-sdk"
+    && completion.totalProcessedScope === "run"
+  ) {
+    // Claude result usage is an aggregate for this run. Context-only control
+    // usage has no run scope and must not be promoted to a turn total.
+    return completionValue;
+  }
+  if (
+    turn.providerId !== "cursor"
+    || harnessId !== "cursor-acp"
+    || !hasComparableCumulativeProvenance(turn)
+  ) {
+    // OpenCode reports only the latest message breakdown; CLI, unknown, and
+    // synthetic harnesses have no durable per-turn category contract.
+    return null;
+  }
+
+  const startValue = turn.usageAtStart?.[field];
+  if (
+    startValue === null
+    || startValue === undefined
+    || completionValue < startValue
+  ) return null;
+  // ACP v1 category fields are cumulative across the resumed session.
+  return completionValue - startValue;
+}
+
 function measuredRuntime(turn: UsageDashboardTurn): number | null {
   if (!turn.startedAt || !turn.completedAt) return null;
   const startedAt = Date.parse(turn.startedAt);
@@ -405,20 +458,19 @@ export function projectUsageDashboard(
     addTurn(model, turn);
     modelBuckets.set(modelKey, model);
 
-    const completion: AgentTurnUsageSnapshot | null = turn.usageAtCompletion;
-    addMeasured(tokenAccumulators.input, completion?.inputTokens ?? null);
+    addMeasured(tokenAccumulators.input, measuredTokenField(turn, "inputTokens"));
     addMeasured(
       tokenAccumulators.cachedInput,
-      completion?.cachedInputTokens ?? null,
+      measuredTokenField(turn, "cachedInputTokens"),
     );
     addMeasured(
       tokenAccumulators.cacheWriteInput,
-      completion?.cacheWriteInputTokens ?? null,
+      measuredTokenField(turn, "cacheWriteInputTokens"),
     );
-    addMeasured(tokenAccumulators.output, completion?.outputTokens ?? null);
+    addMeasured(tokenAccumulators.output, measuredTokenField(turn, "outputTokens"));
     addMeasured(
       tokenAccumulators.reasoningOutput,
-      completion?.reasoningOutputTokens ?? null,
+      measuredTokenField(turn, "reasoningOutputTokens"),
     );
   }
 

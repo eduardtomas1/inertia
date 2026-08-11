@@ -18,7 +18,7 @@ export interface UsageRuntimeValue extends UsageMeasuredValue {
 }
 
 export interface UsageTokenField extends UsageMeasuredValue {
-  /** Sum of provider-reported completion fields; categories can overlap. */
+  /** Sum of harness-vetted turn values or proven cumulative deltas. */
   value: number | null;
 }
 

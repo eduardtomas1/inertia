@@ -12,7 +12,7 @@ import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
 import type { ProviderActivityEvent } from "../../provider/contracts";
 import { assembleTurnRequest } from "./request-context";
-import { boundaryUsage } from "./turn-controller-support";
+import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import type {
   ActiveTurn,
   QueuedTurn,
@@ -188,7 +188,6 @@ export function resolveTurnRequest(
     attachments,
     executionManifest: assembled.persistence.manifest,
   });
-  const currentUsage = dependencies.store.usageForConversation(conversation.id);
   const input: BeginAgentTurnInput = {
     id: turnId,
     conversationId: conversation.id,
@@ -209,7 +208,7 @@ export function resolveTurnRequest(
     accessMode: conversation.accessMode,
     providerSessionBefore: canResume ? conversation.providerSessionId : null,
     requestedAt,
-    usageAtStart: boundaryUsage(currentUsage ?? undefined, requestedAt),
+    usageAtStart: canResume ? previousTurnBoundaryUsage(latestTurn) : null,
     configurationRevision: modelSelection.backendConfigurationRevision,
     association: "authoritative",
   };

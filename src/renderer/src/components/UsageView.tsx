@@ -389,7 +389,7 @@ function UsageDashboardContent({
 
           <footer className="usage-notes">
             <p>
-              <strong>Measured locally.</strong> Authoritative terminal turns only. Processed totals use direct run values or proven resumed-session deltas; missing fields remain unavailable. No prompts, files, credentials, or new telemetry. Reported token categories can overlap.
+              <strong>Measured locally.</strong> Authoritative terminal turns only. Processed totals and token categories use harness-vetted turn values or proven resumed-session deltas; message-only, context-only, and missing fields remain unavailable. No prompts, files, credentials, or new telemetry. Token categories can overlap.
             </p>
             <p id="usage-cost-unavailable">
               <strong>Cost unavailable.</strong> {dashboard.cost.reason} Inertia does not claim invoice parity without pricing provenance.

@@ -84,9 +84,9 @@ describe("Private Connect browser lifecycle", () => {
     render(<App initialPairingFragment={null} />);
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
-    expect(vi.mocked(apiRequest)).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(vi.mocked(apiRequest)).toHaveBeenCalledWith(expect.objectContaining({
       type: "state.get",
-    }), "csrf-token");
+    }), "csrf-token"));
     expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
   });
 

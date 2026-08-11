@@ -45,6 +45,14 @@ function contrastRatio(foreground: string, background: string): number {
 }
 
 describe("provider icon assets", () => {
+  it("preserves reviewed SVG bytes across Git checkouts", () => {
+    const attributes = readFileSync(join(process.cwd(), ".gitattributes"), "utf8")
+      .split(/\r?\n/u);
+    expect(attributes).toContain(
+      "src/renderer/src/assets/provider-icons/*.svg binary",
+    );
+  });
+
   it("keeps the reviewed official vector geometry intact", () => {
     for (const [fileName, expectedDigest] of Object.entries(assetDigests)) {
       const asset = readFileSync(join(assetDirectory, fileName));

@@ -5,6 +5,7 @@ import {
   projectUsageDashboard,
   type UsageDashboardRange,
   type UsageDashboardTurn,
+  validateUsageDashboardRange,
 } from "../usage-dashboard";
 import {
   legacyModelSelection,
@@ -75,6 +76,7 @@ export class UsageDashboardRepository {
   constructor(private readonly database: Database.Database) {}
 
   read(range: UsageDashboardRange): UsageDashboard {
+    validateUsageDashboardRange(range);
     const rows = this.database.prepare(`
       SELECT provider_id, model_selection_json, continuation_identity_json,
         harness_id, backend_profile_id, model, model_alias, reasoning_effort,

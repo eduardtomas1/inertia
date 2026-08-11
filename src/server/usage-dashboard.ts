@@ -52,6 +52,10 @@ interface UsageBucket {
   processedTokens: MeasuredAccumulator;
 }
 
+interface DailyBucket extends UsageBucket {
+  providers: Map<ProviderId, ProviderBucket>;
+}
+
 interface ProviderBucket extends UsageBucket {
   providerId: ProviderId;
 }
@@ -88,6 +92,13 @@ function emptyUsageBucket(): UsageBucket {
     interruptedCount: 0,
     runtime: emptyMeasuredAccumulator(),
     processedTokens: emptyMeasuredAccumulator(),
+  };
+}
+
+function emptyDailyBucket(): DailyBucket {
+  return {
+    ...emptyUsageBucket(),
+    providers: new Map<ProviderId, ProviderBucket>(),
   };
 }
 
@@ -218,6 +229,13 @@ function validateRange(range: UsageDashboardRange): {
   return { from, to, formatter, dateKeys: keys };
 }
 
+/** Rejects renderer-supplied range boundaries before they reach persistence. */
+export function validateUsageDashboardRange(
+  range: UsageDashboardRange,
+): void {
+  validateRange(range);
+}
+
 function hasComparableCumulativeProvenance(turn: UsageDashboardTurn): boolean {
   const selection = turn.modelSelection;
   const identity = turn.continuationIdentity;
@@ -321,7 +339,7 @@ export function projectUsageDashboard(
 ): UsageDashboard {
   const validated = validateRange(range);
   const dailyBuckets = new Map(
-    validated.dateKeys.map((key) => [key, emptyUsageBucket()]),
+    validated.dateKeys.map((key) => [key, emptyDailyBucket()]),
   );
   const providerBuckets = new Map<ProviderId, ProviderBucket>();
   const modelBuckets = new Map<string, ModelBucket>();
@@ -349,6 +367,13 @@ export function projectUsageDashboard(
 
     addTurn(day, turn);
     addTurn(totalBucket, turn);
+
+    const dailyProvider = day.providers.get(turn.providerId) ?? {
+      ...emptyUsageBucket(),
+      providerId: turn.providerId,
+    };
+    addTurn(dailyProvider, turn);
+    day.providers.set(turn.providerId, dailyProvider);
 
     const provider = providerBuckets.get(turn.providerId) ?? {
       ...emptyUsageBucket(),
@@ -410,6 +435,8 @@ export function projectUsageDashboard(
       bucket.requestCount,
       true,
     ),
+    providers: [...bucket.providers].map(([key, provider]) =>
+      breakdownValue(key, provider)).sort(breakdownSort),
   }));
   const providers = [...providerBuckets].map(([key, bucket]) =>
     breakdownValue(key, bucket)).sort(breakdownSort);

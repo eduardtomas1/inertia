@@ -31,6 +31,8 @@ export interface UsageDashboardDay {
   interruptedCount: number;
   runtime: UsageRuntimeValue;
   processedTokens: UsageMeasuredValue;
+  /** Renderer-safe per-provider aggregates for truthful daily series. */
+  providers: UsageDashboardBreakdown[];
 }
 
 export interface UsageDashboardBreakdown {

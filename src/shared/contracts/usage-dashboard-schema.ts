@@ -123,7 +123,12 @@ export function usageDashboardSchema(value: unknown): boolean {
       if (!recordWithStrings(entry, "date")) return false;
       return statusCounts(entry)
         && metricForRequests(entry.runtime, Number(entry.requestCount))
-        && metricForRequests(entry.processedTokens, Number(entry.requestCount));
+        && metricForRequests(entry.processedTokens, Number(entry.requestCount))
+        && arrayOf(entry.providers, (provider) => breakdown(provider))
+        && uniqueRecordField(entry.providers as unknown[], "key")
+        && uniqueRecordField(entry.providers as unknown[], "providerId")
+        && sumRecordField(entry.providers as unknown[], "requestCount")
+          === Number(entry.requestCount);
     })
     && (value.daily as unknown[]).length === Number(range.days)
     && uniqueRecordField(value.daily as unknown[], "date")

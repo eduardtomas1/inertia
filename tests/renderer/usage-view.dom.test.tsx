@@ -46,6 +46,14 @@ function dashboard(days: UsageRangeDays = 30): UsageDashboard {
       processedTokens: index === days - 1
         ? metric(2_100, 4, 6)
         : { ...metric(0, 0, 0), coverage: "complete" as const },
+      providers: index === days - 1 ? [{
+        key: "claude",
+        providerId: "claude" as const,
+        providerLabel: "Claude",
+        requestCount: 6,
+        runtime: metric(30_000, 5, 6),
+        processedTokens: metric(2_100, 4, 6),
+      }] : [],
     };
   });
   const startDate = daily[0]!.date;
@@ -128,7 +136,7 @@ describe("UsageView", () => {
       "Usage is unavailable while the local service is offline",
     );
     resolveRequest(result(dashboard()));
-    await waitFor(() => expect(screen.queryByText("Activity over time")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Daily processed tokens")).toBeNull());
   });
 
   it("loads a truthful dashboard and keeps range and trend controls keyboard accessible", async () => {
@@ -143,36 +151,46 @@ describe("UsageView", () => {
     });
     const view = render(<UsageView status="online" request={request} />);
 
-    expect(await screen.findByRole("heading", { name: "Activity over time" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Daily processed tokens" })).toBeVisible();
     const totals = screen.getByRole("region", { name: "Usage totals" });
     expect(within(totals).getByText("6", { exact: true })).toBeVisible();
-    expect(within(totals).getByText("Unavailable", { exact: true })).toBeVisible();
     expect(within(totals).getByText(/1 interrupted/u)).toBeVisible();
-    expect(screen.getByText(/Token totals are partial/u)).toBeVisible();
+    expect(screen.getByText(/partial · measured across/u)).toBeVisible();
     expect(screen.getByText("<synthetic>", { exact: true })).toBeVisible();
-    expect(screen.getByText(/Claude · Kimi/u)).toBeVisible();
-    expect(screen.getByText("Configuration revision 3", { exact: true }))
+    expect(screen.getByText(/Claude · Kimi · revision 3/u)).toBeVisible();
+    expect(screen.getByRole("img", { name: /^Daily measured tokens by provider/u }))
       .toBeVisible();
-    expect(screen.getByRole("img", {
-      name: /Request share by provider\. Claude 100\s*%/u,
-    })).toBeVisible();
     expect(view.container.querySelector(
-      '.usage-provider-list .usage-provider-mark[data-provider="claude"] svg',
+      '.usage-chart-partial-point[data-provider="claude"]',
     )).toBeVisible();
     expect(view.container.querySelector(
-      ".usage-token-list .usage-coverage-meter.is-partial > span",
-    )).toHaveStyle({ width: `${5 / 6 * 100}%` });
-    expect(screen.getByText(/No prompts, files, credentials, or new telemetry/u)).toBeVisible();
+      '.usage-provider-summary .usage-provider-mark[data-provider="claude"] svg',
+    )).toBeVisible();
+    expect(screen.getByText(/no prompts, files, credentials, or new telemetry/iu)).toBeVisible();
     expect(screen.getByRole("region", { name: "Model usage table" })).toHaveAttribute(
       "tabindex",
       "0",
     );
 
+    const cost = screen.getByRole("button", { name: "Cost" });
+    expect(cost).toHaveAttribute("aria-disabled", "true");
+    expect(cost).toHaveAttribute("aria-describedby", "usage-cost-unavailable");
+    cost.focus();
+    expect(cost).toHaveFocus();
     const tokens = screen.getByRole("button", { name: "Tokens" });
-    tokens.focus();
-    await user.keyboard("[Enter]");
     expect(tokens).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText(/Gaps are unavailable totals/u)).toBeVisible();
+
+    const explorer = screen.getByRole("slider", { name: "Explore daily token chart" });
+    explorer.focus();
+    await waitFor(() => expect(screen.getByText("* Partial coverage")).toBeVisible());
+    await user.keyboard("[ArrowLeft]");
+    expect(explorer).toHaveAttribute("aria-valuenow", "29");
+
+    const day = screen.getByRole("button", { name: "Day" });
+    day.focus();
+    await user.keyboard("[Enter]");
+    expect(day).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("region", { name: "Day usage table" })).toBeVisible();
 
     const sevenDays = screen.getByRole("button", { name: "7 days" });
     sevenDays.focus();
@@ -184,6 +202,42 @@ describe("UsageView", () => {
     });
     expect(screen.getByRole("button", { name: "7 days" }))
       .toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("distinguishes a measured zero from unavailable provider tokens", async () => {
+    const zero = dashboard();
+    zero.totals.processedTokens = metric(0, 6, 6);
+    zero.daily = zero.daily.map((day, index) => ({
+      ...day,
+      processedTokens: index === zero.daily.length - 1
+        ? metric(0, 6, 6)
+        : day.processedTokens,
+      providers: day.providers.map((provider) => ({
+        ...provider,
+        processedTokens: metric(0, 6, 6),
+      })),
+    }));
+    zero.providers = zero.providers.map((provider) => ({
+      ...provider,
+      processedTokens: metric(0, 6, 6),
+    }));
+    zero.models = zero.models.map((model) => ({
+      ...model,
+      processedTokens: metric(0, 6, 6),
+    }));
+
+    const view = render(<UsageView
+      status="online"
+      request={vi.fn(async () => result(zero))}
+    />);
+    const provider = await waitFor(() => {
+      const element = view.container.querySelector(".usage-provider-summary article");
+      expect(element).not.toBeNull();
+      return element!;
+    });
+
+    expect(provider).toHaveTextContent("0 measured tokens · share unavailable");
+    expect(provider).not.toHaveTextContent("Token total unavailable");
   });
 
   it("shows explicit empty and error states with a retry action", async () => {
@@ -207,6 +261,7 @@ describe("UsageView", () => {
       interruptedCount: 0,
       runtime: { ...metric(0, 0, 0), coverage: "complete" },
       processedTokens: { ...metric(0, 0, 0), coverage: "complete" },
+      providers: [],
     }));
     empty.providers = [];
     empty.models = [];

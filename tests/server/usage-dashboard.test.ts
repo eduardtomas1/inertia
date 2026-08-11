@@ -257,11 +257,28 @@ describe("usage dashboard projection", () => {
       .toMatchObject({
         requestCount: 2,
         processedTokens: { value: 1_400, coverage: "complete" },
+        providers: [
+          {
+            providerId: "claude",
+            requestCount: 1,
+            processedTokens: { value: 900, coverage: "complete" },
+          },
+          {
+            providerId: "codex",
+            requestCount: 1,
+            processedTokens: { value: 500, coverage: "complete" },
+          },
+        ],
       });
     expect(dashboard.daily.find(({ date }) => date === "2026-06-11"))
       .toMatchObject({
         requestCount: 1,
         processedTokens: { value: null, coverage: "unavailable" },
+        providers: [{
+          providerId: "cursor",
+          requestCount: 1,
+          processedTokens: { value: null, coverage: "unavailable" },
+        }],
       });
     expect(dashboard.providers.map(({ providerId, requestCount }) => [
       providerId,
@@ -309,6 +326,22 @@ describe("usage dashboard projection", () => {
       ...range,
       fromInclusive: "2026-06-01T12:00:00.000Z",
     })).toThrow(/date range is invalid|does not match/u);
+  });
+
+  it("rejects an unbounded renderer range at the repository boundary", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-usage-range-"));
+    directories.push(directory);
+    const workspace = join(directory, "workspace");
+    await mkdir(workspace);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), workspace, {
+      recoverInterruptedRuns: false,
+    });
+
+    expect(() => store.usageDashboard({
+      ...range,
+      fromInclusive: "2000-01-01T00:00:00.000Z",
+    })).toThrow(/date range is invalid/u);
+    store.close();
   });
 
   it("accepts local-midnight ranges across daylight-saving changes", () => {
@@ -390,6 +423,39 @@ describe("usage dashboard projection", () => {
     expect(dashboard.models).toEqual(expect.arrayContaining([
       expect.objectContaining({ model: "Unknown model" }),
     ]));
+  });
+
+  it("keeps an overflowing aggregate unavailable instead of rounding it", () => {
+    const dashboard = projectUsageDashboard([
+      turn({
+        id: "maximum-safe-total",
+        providerId: "claude",
+        model: "claude-overflow-test",
+        completedAt: "2026-06-20T10:00:00.000Z",
+        completionUsage: usage("2026-06-20T10:00:00.000Z", {
+          totalProcessedTokens: Number.MAX_SAFE_INTEGER,
+          totalProcessedScope: "run",
+        }),
+      }),
+      turn({
+        id: "overflowing-total",
+        providerId: "claude",
+        model: "claude-overflow-test",
+        completedAt: "2026-06-20T11:00:00.000Z",
+        completionUsage: usage("2026-06-20T11:00:00.000Z", {
+          totalProcessedTokens: 1,
+          totalProcessedScope: "run",
+        }),
+      }),
+    ], range);
+
+    expect(dashboard.totals.processedTokens).toEqual({
+      value: null,
+      measuredRequests: 2,
+      totalRequests: 2,
+      coverage: "unavailable",
+    });
+    expect(usageDashboardSchema(dashboard)).toBe(true);
   });
 
   it("subtracts cumulative counters only with captured continuation provenance", () => {
@@ -532,6 +598,13 @@ describe("usage dashboard projection", () => {
           ...withoutRevision
         } = model;
         return withoutRevision;
+      }),
+    })).toBe(false);
+    expect(usageDashboardSchema({
+      ...dashboard,
+      daily: dashboard.daily.map((day) => {
+        const { providers: _providers, ...withoutProviders } = day;
+        return withoutProviders;
       }),
     })).toBe(false);
   });

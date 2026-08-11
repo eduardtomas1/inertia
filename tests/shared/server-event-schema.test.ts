@@ -725,6 +725,7 @@ describe("usage dashboard event trust boundary", () => {
       interruptedCount: 0,
       runtime: measured,
       processedTokens: measured,
+      providers: [],
     })),
     providers: [],
     models: [],
@@ -779,6 +780,16 @@ describe("usage dashboard event trust boundary", () => {
           ...day,
           date: dashboard.daily[0]!.date,
         })),
+      },
+    }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({
+      kind: "usage.dashboard",
+      dashboard: {
+        ...dashboard,
+        daily: dashboard.daily.map((day) => {
+          const { providers: _providers, ...withoutProviders } = day;
+          return withoutProviders;
+        }),
       },
     }))).toThrow("Malformed server event");
     expect(() => parseServerEvent(event({

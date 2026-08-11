@@ -210,62 +210,85 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test("navigates to Usage and keeps dashboard geometry contained", async ({ browserName: _browserName }, testInfo) => {
-  await resizeWindow(1440, 920);
+test("navigates to Usage and preserves the editorial dashboard geometry", async ({ browserName: _browserName }, testInfo) => {
+  // The supplied T3 Code reference is 1280 × 734, so this is also the
+  // comparison viewport used for the committed wide screenshots.
+  await resizeWindow(1280, 734);
   const usageDestination = page.getByRole("button", { name: "Usage", exact: true });
   await expect(page.locator(".sidebar-footer .sidebar-destination")).toHaveText([
     "Usage",
     "Settings",
   ]);
+  const navigationPath = testInfo.outputPath("usage-dashboard-navigation.png");
+  await page.locator(".sidebar-footer").screenshot({
+    path: navigationPath,
+    animations: "disabled",
+  });
+  await testInfo.attach("Usage navigation · above Settings", {
+    path: navigationPath,
+    contentType: "image/png",
+  });
   await usageDestination.focus();
   await usageDestination.press("Enter");
 
   await expect(usageDestination).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Usage overview" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Usage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Daily processed tokens" })).toBeVisible();
   const environmentSummary = page.getByRole("dialog", { name: "Environment summary" });
   if (await environmentSummary.isVisible()) {
     await page.getByRole("button", { name: "Close environment summary" }).click();
     await expect(environmentSummary).toBeHidden();
   }
+  const projectNavigation = page.getByRole("button", {
+    name: "Toggle project navigation",
+  });
+  await expect(projectNavigation).toHaveAttribute("aria-pressed", "true");
+  await projectNavigation.click();
+  await expect(projectNavigation).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByRole("region", { name: "Usage totals" })).toContainText("4");
   await expect(page.getByText(/Claude · Kimi/u)).toBeVisible();
   await expect(page.getByText("<synthetic>", { exact: true })).toBeVisible();
-  await expect(page.getByText("Estimated cost", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Token totals are partial/u)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cost", exact: true }))
+    .toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByRole("button", { name: "Tokens", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(/partial · measured across/u)).toBeVisible();
   await expect(page.getByRole("img", {
-    name: /Request share by provider\. Claude 25\s*%, Codex 25\s*%, Cursor 25\s*%, OpenCode 25\s*%/u,
+    name: /^Daily measured tokens by provider/u,
   })).toBeVisible();
-  expect(await page.locator(".usage-provider-list .usage-provider-mark")
+  expect(await page.locator(".usage-provider-summary .usage-provider-mark")
     .evaluateAll((marks) => marks.map((mark) => mark.getAttribute("data-provider"))))
     .toEqual(["claude", "codex", "cursor", "opencode"]);
   await expectNoViewportOverflow();
 
   const geometry = await page.locator(".usage-view").evaluate((view) => {
     const viewBounds = view.getBoundingClientRect();
-    const stats = [...view.querySelectorAll(".usage-headline-stat")]
-      .map((stat) => stat.getBoundingClientRect());
-    const chart = view.querySelector(".usage-trend-chart")?.getBoundingClientRect();
-    const providerShare = view.querySelector(".usage-provider-share-rail")
-      ?.getBoundingClientRect();
+    const summary = view.querySelector(".usage-summary-column")?.getBoundingClientRect();
+    const chartPanel = view.querySelector(".usage-daily-panel")?.getBoundingClientRect();
+    const chart = view.querySelector(".usage-provider-chart")?.getBoundingClientRect();
+    const metrics = [...view.querySelectorAll(".usage-metric")]
+      .map((metric) => metric.getBoundingClientRect());
     const table = view.querySelector(".usage-table-wrap")?.getBoundingClientRect();
     return {
       view: { left: viewBounds.left, right: viewBounds.right, width: viewBounds.width },
-      stats: stats.map(({ left, right, width, height }) => ({ left, right, width, height })),
-      chart: chart ? { left: chart.left, right: chart.right, height: chart.height } : null,
-      providerShare: providerShare
-        ? { left: providerShare.left, right: providerShare.right, width: providerShare.width }
+      summary: summary ? { left: summary.left, right: summary.right, width: summary.width } : null,
+      chartPanel: chartPanel
+        ? { left: chartPanel.left, right: chartPanel.right, width: chartPanel.width }
         : null,
+      chart: chart ? { left: chart.left, right: chart.right, height: chart.height } : null,
+      metrics: metrics.map(({ left, right, width, height }) => ({ left, right, width, height })),
       table: table ? { left: table.left, right: table.right, width: table.width } : null,
       viewportWidth: window.innerWidth,
     };
   });
-  expect(geometry.stats).toHaveLength(4);
-  expect(geometry.stats.every(({ width, height }) => width > 150 && height > 120)).toBe(true);
-  expect(geometry.stats.every(({ left, right }) => left >= geometry.view.left && right <= geometry.view.right + 1)).toBe(true);
-  expect(geometry.chart?.height).toBeGreaterThan(260);
+  expect(geometry.summary?.width).toBeGreaterThan(200);
+  expect(geometry.chartPanel?.width).toBeGreaterThan(350);
+  expect(geometry.summary!.right).toBeLessThan(geometry.chartPanel!.left);
+  expect(geometry.metrics).toHaveLength(5);
+  expect(geometry.metrics.every(({ width, height }) => width > 120 && height > 65)).toBe(true);
+  expect(geometry.metrics.every(({ left, right }) => left >= geometry.view.left && right <= geometry.view.right + 1)).toBe(true);
+  expect(geometry.chart?.height).toBeGreaterThan(200);
   expect(geometry.chart?.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
-  expect(geometry.providerShare?.width).toBeGreaterThan(500);
-  expect(geometry.providerShare?.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
   expect(geometry.table?.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
 
   const desktopPath = testInfo.outputPath("usage-dashboard-desktop.png");
@@ -275,26 +298,39 @@ test("navigates to Usage and keeps dashboard geometry contained", async ({ brows
     contentType: "image/png",
   });
 
-  await page.getByRole("heading", { name: "Where requests ran" })
-    .scrollIntoViewIfNeeded();
-  const breakdownPath = testInfo.outputPath("usage-dashboard-breakdown.png");
-  await page.screenshot({ path: breakdownPath, animations: "disabled" });
-  await testInfo.attach("Usage dashboard · provider breakdown", {
-    path: breakdownPath,
-    contentType: "image/png",
+  const explorer = page.getByRole("slider", { name: "Explore daily token chart" });
+  await explorer.focus();
+  await explorer.press("ArrowLeft");
+  await expect(page.locator(".usage-chart-tooltip")).toBeVisible();
+  await expect(page.locator(".usage-chart-tooltip")).toContainText("Total measured");
+  await expectNoViewportOverflow();
+  await explorer.evaluate((element) => element.blur());
+  await expect(page.locator(".usage-chart-tooltip")).toBeHidden();
+
+  await page.getByRole("heading", { name: "Breakdown" }).evaluate((heading) => {
+    heading.scrollIntoView({ block: "start" });
   });
-  await page.getByRole("heading", { name: "Models and backends" })
-    .scrollIntoViewIfNeeded();
   const modelsPath = testInfo.outputPath("usage-dashboard-models.png");
   await page.screenshot({ path: modelsPath, animations: "disabled" });
   await testInfo.attach("Usage dashboard · model detail", {
     path: modelsPath,
     contentType: "image/png",
   });
+
+  const dayMode = page.getByRole("button", { name: "Day", exact: true });
+  await dayMode.focus();
+  await dayMode.press("Enter");
+  await expect(dayMode).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("region", { name: "Day usage table" })).toBeVisible();
+  const breakdownPath = testInfo.outputPath("usage-dashboard-breakdown.png");
+  await page.screenshot({ path: breakdownPath, animations: "disabled" });
+  await testInfo.attach("Usage dashboard · day breakdown", {
+    path: breakdownPath,
+    contentType: "image/png",
+  });
+  await page.getByRole("button", { name: "Model", exact: true }).click();
   await page.locator(".usage-view").evaluate((view) => view.scrollTo(0, 0));
 
-  await page.getByRole("button", { name: "Tokens", exact: true }).click();
-  await expect(page.getByText(/Gaps are unavailable totals/u)).toBeVisible();
   await page.getByRole("button", { name: "Change theme (current: light)" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   const darkPath = testInfo.outputPath("usage-dashboard-dark.png");
@@ -304,10 +340,7 @@ test("navigates to Usage and keeps dashboard geometry contained", async ({ brows
     contentType: "image/png",
   });
 
-  const methodNote = page.getByText(
-    "Measured locally, with explicit coverage",
-    { exact: true },
-  );
+  const methodNote = page.getByText("Measured locally.", { exact: true });
   await methodNote.scrollIntoViewIfNeeded();
   await expect(methodNote).toBeInViewport();
   expect(await page.locator(".usage-view").evaluate((view) => view.scrollTop))
@@ -316,47 +349,35 @@ test("navigates to Usage and keeps dashboard geometry contained", async ({ brows
   await page.locator(".usage-view").evaluate((view) => view.scrollTo(0, 0));
 
   await resizeWindow(680, 800);
-  await page.getByRole("button", { name: "Requests", exact: true }).click();
   await page.getByRole("button", { name: "Change theme (current: dark)" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await expect(page.getByRole("heading", { name: "Usage overview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Daily processed tokens" })).toBeVisible();
   await expectNoViewportOverflow();
-  const compactStats = await page.locator(".usage-headline-stat").evaluateAll(
-    (stats) => stats.map((stat) => stat.getBoundingClientRect().width),
-  );
-  expect(Math.max(...compactStats) - Math.min(...compactStats)).toBeLessThan(2);
+  const compactGeometry = await page.locator(".usage-view").evaluate((view) => {
+    const viewBounds = view.getBoundingClientRect();
+    const summary = view.querySelector(".usage-summary-column")?.getBoundingClientRect();
+    const chart = view.querySelector(".usage-daily-panel")?.getBoundingClientRect();
+    const metrics = [...view.querySelectorAll(".usage-metric")]
+      .map((metric) => metric.getBoundingClientRect());
+    return {
+      view: { left: viewBounds.left, right: viewBounds.right },
+      summary: summary ? { left: summary.left, right: summary.right, bottom: summary.bottom } : null,
+      chart: chart ? { left: chart.left, right: chart.right, top: chart.top } : null,
+      metrics: metrics.map(({ left, right, width }) => ({ left, right, width })),
+    };
+  });
+  expect(compactGeometry.summary?.right).toBeLessThanOrEqual(compactGeometry.view.right + 1);
+  expect(compactGeometry.chart?.right).toBeLessThanOrEqual(compactGeometry.view.right + 1);
+  expect(compactGeometry.summary!.bottom).toBeLessThan(compactGeometry.chart!.top);
+  expect(compactGeometry.metrics.every(({ left, right }) => (
+    left >= compactGeometry.view.left && right <= compactGeometry.view.right + 1
+  ))).toBe(true);
   const compactPath = testInfo.outputPath("usage-dashboard-compact.png");
   await page.screenshot({ path: compactPath, animations: "disabled" });
   await testInfo.attach("Usage dashboard · compact", {
     path: compactPath,
     contentType: "image/png",
   });
-  await page.getByRole("heading", { name: "Where requests ran" })
-    .scrollIntoViewIfNeeded();
-  const compactBreakdown = await page.locator(".usage-view").evaluate((view) => {
-    const viewBounds = view.getBoundingClientRect();
-    const providerRows = [...view.querySelectorAll(".usage-provider-row")]
-      .map((row) => row.getBoundingClientRect());
-    const providerShare = view.querySelector(".usage-provider-share-rail")
-      ?.getBoundingClientRect();
-    const table = view.querySelector(".usage-table-wrap")?.getBoundingClientRect();
-    return {
-      view: { left: viewBounds.left, right: viewBounds.right },
-      providerRows: providerRows.map(({ left, right }) => ({ left, right })),
-      providerShare: providerShare
-        ? { left: providerShare.left, right: providerShare.right }
-        : null,
-      table: table ? { left: table.left, right: table.right } : null,
-    };
-  });
-  expect(compactBreakdown.providerRows.every(({ left, right }) => (
-    left >= compactBreakdown.view.left
-    && right <= compactBreakdown.view.right + 1
-  ))).toBe(true);
-  expect(compactBreakdown.providerShare?.right)
-    .toBeLessThanOrEqual(compactBreakdown.view.right + 1);
-  expect(compactBreakdown.table?.right)
-    .toBeLessThanOrEqual(compactBreakdown.view.right + 1);
   await expectNoViewportOverflow();
   expect(rendererErrors).toEqual([]);
 });

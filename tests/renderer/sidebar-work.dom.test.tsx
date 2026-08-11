@@ -472,6 +472,27 @@ describe("compact Work sidebar", () => {
       .toHaveFocus();
   });
 
+  it("moves focus to the collapsed section that receives regrouped rows", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 23, 59, 59, 900);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("yesterday-first", "First yesterday task", new Date(2026, 7, 10, 10)),
+      conversation("yesterday-second", "Second yesterday task", new Date(2026, 7, 10, 9)),
+      conversation("done", "Completed task", new Date(2026, 7, 9, 9), {
+        settledAt: new Date(2026, 7, 9, 10).toISOString(),
+      }),
+    ]);
+
+    screen.getByRole("button", { name: /^Second yesterday task,/ }).focus();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+
+    expect(screen.getByRole("button", { name: "Earlier 2" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Done 1" })).not.toHaveFocus();
+  });
+
   it("does not reclaim focus after the user points outside Work", () => {
     vi.useFakeTimers();
     const start = new Date(2026, 7, 11, 23, 59, 59, 900);
@@ -515,6 +536,94 @@ describe("compact Work sidebar", () => {
       .not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Snooze expires now,/ }))
       .toHaveFocus();
+  });
+
+  it("moves a disappearing disclosure to its collapsed destination section", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("expiring", "Old snooze expires", new Date(2026, 7, 6, 9), {
+        snoozedUntil: new Date(start.getTime() + 100).toISOString(),
+      }),
+      conversation("done", "Completed task", new Date(2026, 7, 5, 9), {
+        settledAt: new Date(2026, 7, 5, 10).toISOString(),
+      }),
+    ]);
+
+    screen.getByRole("button", { name: "Snoozed 1" }).focus();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+
+    expect(screen.getByRole("button", { name: "Earlier 1" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Done 1" })).not.toHaveFocus();
+  });
+
+  it("tracks the remaining owner of a disclosure across staggered regrouping", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("first-expiring", "First snooze expires", new Date(2026, 7, 11, 9), {
+        snoozedUntil: new Date(start.getTime() + 100).toISOString(),
+      }),
+      conversation("last-expiring", "Last snooze expires", new Date(2026, 7, 6, 9), {
+        snoozedUntil: new Date(start.getTime() + 200).toISOString(),
+      }),
+      conversation("done", "Completed task", new Date(2026, 7, 5, 9), {
+        settledAt: new Date(2026, 7, 5, 10).toISOString(),
+      }),
+    ]);
+
+    screen.getByRole("button", { name: "Snoozed 2" }).focus();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+    expect(screen.getByRole("button", { name: "Snoozed 1" })).toHaveFocus();
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(screen.getByRole("button", { name: "Earlier 1" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^First snooze expires,/ }))
+      .not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Done 1" })).not.toHaveFocus();
+  });
+
+  it("refreshes a surviving disclosure's fallback position before it disappears", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(start);
+    const dismissed = conversation(
+      "dismissed-last",
+      "Dismissed snooze expires last",
+      new Date(2026, 7, 6, 9),
+      { snoozedUntil: new Date(start.getTime() + 200).toISOString() },
+    );
+    renderSidebar([
+      conversation("first-expiring", "First snooze expires", new Date(2026, 7, 11, 9), {
+        snoozedUntil: new Date(start.getTime() + 100).toISOString(),
+      }),
+      dismissed,
+      conversation("done", "Completed task", new Date(2026, 7, 5, 9), {
+        settledAt: new Date(2026, 7, 5, 10).toISOString(),
+      }),
+    ], vi.fn(), [dismissedRun(dismissed)]);
+
+    screen.getByRole("button", { name: "Snoozed 2" }).focus();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+    expect(screen.getByRole("button", { name: "Snoozed 1" })).toHaveFocus();
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(screen.getByRole("button", { name: "Done 1" })).toHaveFocus();
+    expect(screen.getByRole("button", {
+      name: "Thread actions for First snooze expires",
+    })).not.toHaveFocus();
   });
 
   it("retains the row action focus identity while its Work menu is open", () => {

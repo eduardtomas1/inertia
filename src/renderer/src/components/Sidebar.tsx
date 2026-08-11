@@ -145,6 +145,15 @@ function workRepositoryLabel(project: Project | undefined): string | null {
     : null;
 }
 
+function workFocusConversationId(identity: string): string | null {
+  if (identity.startsWith("thread-actions:")) {
+    return identity.slice("thread-actions:".length);
+  }
+  return identity.startsWith("thread:")
+    ? identity.slice("thread:".length)
+    : null;
+}
+
 function SidebarView({
   snapshot,
   connectionStatus,
@@ -195,6 +204,7 @@ function SidebarView({
   const navigationRef = useRef<HTMLDivElement>(null);
   const workFocusIdentityRef = useRef<string | null>(null);
   const workFocusIndexRef = useRef<number | null>(null);
+  const workFocusConversationIdsRef = useRef<readonly string[]>([]);
   const onCloseRef = useRef(onClose);
   const mobile = useMediaQuery("(max-width: 760px)");
   useNativePreviewSuspension(Boolean(
@@ -235,6 +245,7 @@ function SidebarView({
       if (target instanceof Node && sidebarRef.current?.contains(target)) return;
       workFocusIdentityRef.current = null;
       workFocusIndexRef.current = null;
+      workFocusConversationIdsRef.current = [];
     };
     document.addEventListener("focusin", clearWorkFocusIfOutside);
     document.addEventListener("pointerdown", clearWorkFocusIfOutside, true);
@@ -375,21 +386,63 @@ function SidebarView({
     if (sidebarMode !== "activity") {
       workFocusIdentityRef.current = null;
       workFocusIndexRef.current = null;
+      workFocusConversationIdsRef.current = [];
       return;
     }
     const identity = workFocusIdentityRef.current;
     if (!identity) return;
+    const focusedSectionId = identity.startsWith("section:")
+      ? identity.slice("section:".length)
+      : null;
+    const focusedSection = focusedSectionId
+      ? workSections.find((section) => section.id === focusedSectionId)
+      : undefined;
+    if (focusedSection?.threads.length) {
+      workFocusConversationIdsRef.current = focusedSection.threads.map(
+        ({ conversation }) => conversation.id,
+      );
+    }
+    const focusableWorkItems = [...(
+      navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
+    )];
+    const currentIdentityIndex = focusableWorkItems.findIndex(
+      (item) => item.dataset.workFocusId === identity,
+    );
+    if (currentIdentityIndex >= 0) workFocusIndexRef.current = currentIdentityIndex;
     const activeElement = document.activeElement;
     if (
       activeElement instanceof HTMLElement
       && activeElement !== document.body
       && activeElement.isConnected
     ) return;
-    const focusableWorkItems = [...(
-      navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
-    )];
     const previousIndex = workFocusIndexRef.current;
+    const focusedConversationId = workFocusConversationId(identity);
+    const focusedConversationIds = focusedConversationId
+      ? [focusedConversationId]
+      : workFocusConversationIdsRef.current;
+    const destinationThread = focusedConversationIds
+      .map((conversationId) => focusableWorkItems.find(
+        (item) => item.dataset.workFocusId === `thread:${conversationId}`,
+      ))
+      .find((item) => item !== undefined);
+    const destinationSection = focusedConversationIds
+      .map((conversationId) => workSections.find((section) => (
+        section.threads.some(({ conversation }) => conversation.id === conversationId)
+      )))
+      .find((section) => section !== undefined);
+    const collapsedDestinationSection = destinationSection
+      && COLLAPSIBLE_WORK_SECTIONS.has(destinationSection.id)
+      && !workSearchActive
+      && !expandedWorkSections.has(destinationSection.id)
+      ? destinationSection
+      : undefined;
     const target = focusableWorkItems.find((item) => item.dataset.workFocusId === identity)
+      ?? destinationThread
+      ?? (collapsedDestinationSection
+        ? focusableWorkItems.find(
+          (item) => item.dataset.workFocusId === `section:${collapsedDestinationSection.id}`,
+        )
+        : undefined)
       ?? (previousIndex === null
         ? undefined
         : focusableWorkItems[Math.min(previousIndex, focusableWorkItems.length - 1)])
@@ -398,7 +451,14 @@ function SidebarView({
     workFocusIdentityRef.current = target?.dataset.workFocusId ?? null;
     const targetIndex = target ? focusableWorkItems.indexOf(target) : -1;
     workFocusIndexRef.current = targetIndex >= 0 ? targetIndex : null;
-  }, [doneVisible, sidebarMode, snoozeNow, workSections]);
+  }, [
+    doneVisible,
+    expandedWorkSections,
+    sidebarMode,
+    snoozeNow,
+    workSearchActive,
+    workSections,
+  ]);
   const visibleWorkCount = workSections.reduce(
     (count, section) => count + section.threads.length,
     0,
@@ -740,8 +800,17 @@ function SidebarView({
           workFocusIdentityRef.current = identity;
           if (!identity) {
             workFocusIndexRef.current = null;
+            workFocusConversationIdsRef.current = [];
             return;
           }
+          const focusedConversationId = workFocusConversationId(identity);
+          const focusedSectionId = identity.startsWith("section:")
+            ? identity.slice("section:".length)
+            : null;
+          workFocusConversationIdsRef.current = focusedConversationId
+            ? [focusedConversationId]
+            : workSections.find((section) => section.id === focusedSectionId)
+              ?.threads.map(({ conversation }) => conversation.id) ?? [];
           const focusableWorkItems = [...(
             navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
           )];

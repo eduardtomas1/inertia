@@ -772,7 +772,11 @@ export class CodexAppServerEvents {
     ) return;
     this.goalContinuationTimer = setTimeout(() => {
       this.goalContinuationTimer = undefined;
-      this.completeParentTurn("completed", 0);
+      this.host.rememberFailure(
+        "goal-continuation-timeout",
+        "Codex kept the goal active but did not start another turn in time.",
+      );
+      this.completeParentTurn("failed", 1);
     }, this.goalContinuationGraceMs);
     this.goalContinuationTimer.unref();
   }

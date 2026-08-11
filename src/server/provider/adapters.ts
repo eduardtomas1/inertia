@@ -488,7 +488,7 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     && (
       input.providerId !== "codex"
       || input.harnessId !== "codex-app-server"
-      || !input.sessionId
+      || (!input.sessionId && !input.goalStart)
     )
   ) {
     throw new ProviderRuntimeError(
@@ -502,7 +502,6 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     if (
       input.providerId !== "codex"
       || input.harnessId !== "codex-app-server"
-      || !input.sessionId
       || (input.goalStart.objective !== undefined && (
         !objective
         || objective.length > 4_000

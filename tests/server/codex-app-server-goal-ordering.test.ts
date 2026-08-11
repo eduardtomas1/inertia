@@ -63,6 +63,7 @@ function eventHarness(options: { goalContinuationExpected?: boolean } = {}) {
   let activeTurnId: string | undefined = TURN_ID;
   const goalStatuses: AgentGoalStatus[] = [];
   const goalClears: string[] = [];
+  const rememberFailure = vi.fn();
   const finish = vi.fn((status: "completed" | "failed" | "cancelled") => {
     phase = "settled";
     return status;
@@ -103,7 +104,7 @@ function eventHarness(options: { goalContinuationExpected?: boolean } = {}) {
     writeMessage: () => true,
     cancel: vi.fn(),
     finish,
-    rememberFailure: vi.fn(),
+    rememberFailure,
   };
   const events = new CodexAppServerEvents(host);
   return {
@@ -111,6 +112,7 @@ function eventHarness(options: { goalContinuationExpected?: boolean } = {}) {
     finish,
     goalClears,
     goalStatuses,
+    rememberFailure,
     phase: () => phase,
     activeTurnId: () => activeTurnId,
   };
@@ -162,7 +164,11 @@ describe("Codex App Server goal event ordering", () => {
       expect(harness.activeTurnId()).toBeUndefined();
       vi.advanceTimersByTime(25);
       expect(harness.finish).toHaveBeenCalledOnce();
-      expect(harness.finish).toHaveBeenCalledWith("completed", 0, null);
+      expect(harness.rememberFailure).toHaveBeenCalledWith(
+        "goal-continuation-timeout",
+        expect.stringContaining("did not start another turn"),
+      );
+      expect(harness.finish).toHaveBeenCalledWith("failed", 1, null);
     } finally {
       harness.events.dispose();
       vi.useRealTimers();
@@ -330,7 +336,7 @@ describe("Codex App Server goal event ordering", () => {
         },
       });
       harness.events.handleNotification("turn/completed", completedTurn());
-      vi.advanceTimersByTime(25);
+      vi.advanceTimersByTime(24);
       expect(harness.finish).not.toHaveBeenCalled();
 
       harness.events.beginGoalMutation(true);
@@ -353,7 +359,7 @@ describe("Codex App Server goal event ordering", () => {
           error: null,
         },
       });
-      vi.advanceTimersByTime(25);
+      vi.advanceTimersByTime(24);
 
       expect(harness.finish).not.toHaveBeenCalled();
       expect(harness.phase()).toBe("running");
@@ -659,7 +665,7 @@ describe("Codex App Server goal event ordering", () => {
         },
       });
       harness.events.handleNotification("turn/completed", completedTurn());
-      vi.advanceTimersByTime(25);
+      vi.advanceTimersByTime(24);
       expect(harness.finish).not.toHaveBeenCalled();
 
       harness.events.handleNotification("turn/started", {

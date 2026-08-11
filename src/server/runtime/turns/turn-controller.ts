@@ -823,7 +823,13 @@ export class TurnController {
             return;
           }
           acknowledge(true);
-          if (this.store.agentTurn(active.turn.id).status === "starting") {
+          // App Server harness acceptance happens before initialize/thread open
+          // and, for ordinary turns, before turn/start is acknowledged. Keep
+          // Codex truthfully `starting` until its protocol emits `running`.
+          if (
+            active.turn.harnessId !== "codex-app-server"
+            && this.store.agentTurn(active.turn.id).status === "starting"
+          ) {
             if (this.transition(active, "running")) {
               this.broadcastConversationShell(active);
             }

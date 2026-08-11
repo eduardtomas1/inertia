@@ -211,6 +211,28 @@ function isNativeClaudeConversation(
     && conversation.modelSelection.harnessId === "claude-agent-sdk";
 }
 
+function assertRecoverableGoalBudget(
+  existing: AgentGoal | undefined,
+  input: { status: AgentGoalStatus; tokenBudget?: number | null },
+): void {
+  if (existing?.status !== "budgetLimited" || input.status !== "active") {
+    return;
+  }
+  if (input.tokenBudget === undefined) {
+    throw new RuntimeRequestError(
+      "Raise or remove the exhausted token budget before resuming this goal.",
+    );
+  }
+  if (
+    input.tokenBudget !== null
+    && input.tokenBudget <= (existing.tokensUsed ?? existing.tokenBudget ?? 0)
+  ) {
+    throw new RuntimeRequestError(
+      "The resumed token budget must be greater than the exhausted usage or prior limit.",
+    );
+  }
+}
+
 export class AgentWorkflowController {
   private readonly skills = new Map<string, PrivateSkillCapability>();
   private readonly skillIdsByPath = new Map<string, string>();
@@ -271,7 +293,7 @@ export class AgentWorkflowController {
     return {
       conversationId,
       goals,
-      goalCapability: native && conversation.providerSessionId
+      goalCapability: native
         ? {
             kind: "codex-native",
             available: true,
@@ -281,9 +303,7 @@ export class AgentWorkflowController {
             kind: "inertia-local",
             available: true,
             label: "Inertia local goal",
-            reason: native
-              ? "Codex can own the goal after this chat starts a provider thread."
-              : "This provider does not expose a native thread-goal API.",
+            reason: "This provider does not expose a native thread-goal API.",
           },
       skills: [...this.skills.values()]
         .filter(({ summary }) =>
@@ -334,7 +354,6 @@ export class AgentWorkflowController {
       const providerSessionId = conversation.providerSessionId;
       await this.withNativeGoalOperation(
         conversationId,
-        providerSessionId,
         async () => {
           if (!this.hasNativeGoalSession(
             conversationId,
@@ -453,6 +472,7 @@ export class AgentWorkflowController {
     if (input.source === "inertia-local") {
       const existing = this.store.agentGoals(input.conversationId)
         .find(({ source }) => source === "inertia-local");
+      assertRecoverableGoalBudget(existing, input);
       const objective = input.objective?.trim() || existing?.objective;
       if (!objective) {
         throw new RuntimeRequestError(
@@ -475,11 +495,86 @@ export class AgentWorkflowController {
         synchronizedAt: null,
       });
     }
-    this.requireNativeCodexGoal(conversation);
+    this.requireNativeCodexRoute(conversation);
+    const existingNativeGoal = this.store.agentGoals(input.conversationId)
+      .find(({ source }) => source === "codex-native");
+    assertRecoverableGoalBudget(existingNativeGoal, input);
+    if (!conversation.providerSessionId) {
+      if (input.status !== "active" || !input.objective?.trim()) {
+        throw new RuntimeRequestError(
+          "Define an objective before starting a new Codex goal.",
+        );
+      }
+      if (!this.nativeGoalRuntime) {
+        throw new RuntimeRequestError(
+          "The Codex goal runtime is unavailable.",
+        );
+      }
+      return await this.withNativeGoalOperation(
+        input.conversationId,
+        async () => {
+          const currentRoute = this.store.conversation(input.conversationId);
+          if (
+            !isNativeCodexConversation(currentRoute)
+            || currentRoute.providerSessionId
+          ) {
+            throw new RuntimeRequestError(
+              "The Codex thread changed before the goal could be started.",
+            );
+          }
+          const runtimeGoal = await this.nativeGoalRuntime!.setNativeGoal({
+            conversationId: input.conversationId,
+            objective: input.objective,
+            status: "active",
+            ...(input.tokenBudget !== undefined
+              ? { tokenBudget: input.tokenBudget }
+              : {}),
+          });
+          const currentConversation = this.store.conversation(
+            input.conversationId,
+          );
+          if (
+            !runtimeGoal
+            || !isNativeCodexConversation(currentConversation)
+            || !currentConversation.providerSessionId
+          ) {
+            throw new RuntimeRequestError(
+              "Codex did not establish a goal-capable provider thread.",
+            );
+          }
+          const providerSessionId = currentConversation.providerSessionId;
+          const current = this.nativeGoal(
+            input.conversationId,
+            providerSessionId,
+          );
+          const candidate: AgentGoal = {
+            conversationId: input.conversationId,
+            source: "codex-native",
+            providerSessionId,
+            ...runtimeGoal,
+            synchronizedAt: this.clock().toISOString(),
+          };
+          if (
+            current
+            && current.updatedAt >= candidate.updatedAt
+          ) {
+            this.nativeGoalRefreshWarnings.delete(input.conversationId);
+            return current;
+          }
+          const stored = this.store.mergeNativeAgentGoal(candidate, true).goal;
+          if (!stored) {
+            throw new RuntimeRequestError(
+              "The Codex goal changed before the update could be stored.",
+            );
+          }
+          this.nativeGoalRefreshWarnings.delete(input.conversationId);
+          return stored;
+        },
+      );
+    }
     const providerSessionId = conversation.providerSessionId!;
     return await this.withNativeGoalOperation(
       input.conversationId,
-      providerSessionId,
       async () => {
         if (!this.hasNativeGoalSession(
           input.conversationId,
@@ -603,7 +698,6 @@ export class AgentWorkflowController {
       const providerSessionId = conversation.providerSessionId!;
       return await this.withNativeGoalOperation(
         conversationId,
-        providerSessionId,
         async () => {
           if (!this.hasNativeGoalSession(
             conversationId,
@@ -695,10 +789,9 @@ export class AgentWorkflowController {
 
   private async withNativeGoalOperation<T>(
     conversationId: string,
-    providerSessionId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const key = `${conversationId}\0${providerSessionId}`;
+    const key = conversationId;
     const predecessor = this.nativeGoalOperations.get(key)
       ?? Promise.resolve();
     let release!: () => void;
@@ -1064,6 +1157,14 @@ export class AgentWorkflowController {
     ) {
       throw new RuntimeRequestError(
         "This conversation does not have a native Codex goal-capable thread.",
+      );
+    }
+  }
+
+  private requireNativeCodexRoute(conversation: Conversation): void {
+    if (!isNativeCodexConversation(conversation)) {
+      throw new RuntimeRequestError(
+        "This conversation does not use the native Codex goal-capable route.",
       );
     }
   }

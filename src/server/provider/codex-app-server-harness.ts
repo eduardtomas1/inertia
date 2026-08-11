@@ -158,14 +158,16 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
         : compatibilityError === "full-access-unsupported"
           ? "This Codex App Server version does not support Full Access. Update Codex CLI and try again."
           : runtimeFailure?.reason === "protocol-overflow"
-            ? "Codex produced a protocol message that was too large to process safely."
-            : runtimeFailure?.reason === "malformed-protocol"
-              ? "Codex returned a malformed App Server message."
-              : runtimeFailure?.reason === "rpc-timeout"
-                ? "Codex App Server stopped responding."
-                : runtimeFailure?.reason === "transport-closed"
-                  ? "The Codex App Server connection closed before the turn completed."
-                  : providerMessage;
+              ? "Codex produced a protocol message that was too large to process safely."
+              : runtimeFailure?.reason === "malformed-protocol"
+                ? "Codex returned a malformed App Server message."
+                : runtimeFailure?.reason === "goal-continuation-timeout"
+                  ? "Codex kept the goal active but did not start another turn. Resume the goal to continue."
+                  : runtimeFailure?.reason === "rpc-timeout"
+                    ? "Codex App Server stopped responding."
+                    : runtimeFailure?.reason === "transport-closed"
+                      ? "The Codex App Server connection closed before the turn completed."
+                      : providerMessage;
       const failure = runtimeFailure
         ? { ...runtimeFailure, message }
         : { reason: "codex-error" as const, message };

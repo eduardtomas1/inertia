@@ -175,7 +175,7 @@ describe("provider adapter seams", () => {
     expect(() => validateProviderRunInput(input("claude", { imagePaths: ["bad\0path"] }))).toThrow("An image path is invalid.");
   });
 
-  it("accepts only bounded goal starts on an exact Codex App Server session", () => {
+  it("accepts bounded Codex goal starts with or without an established session", () => {
     expect(validateProviderRunInput(input("codex", {
       sessionId: "thread-1",
       goalStart: { objective: "Ship the goal", tokenBudget: 12_000 },
@@ -185,9 +185,10 @@ describe("provider adapter seams", () => {
       sessionId: "thread-1",
       goalStart: { objective: "Ship without a budget", tokenBudget: null },
     }))).toBe("conversation-1");
-    expect(() => validateProviderRunInput(input("codex", {
-      goalStart: { objective: "Missing session" },
-    }))).toThrow("native goal start request is invalid");
+    expect(validateProviderRunInput(input("codex", {
+      goalStart: { objective: "Create the first session" },
+      goalContinuationExpected: true,
+    }))).toBe("conversation-1");
     expect(() => validateProviderRunInput(input("claude", {
       sessionId: "session-1",
       goalStart: { objective: "Wrong provider" },

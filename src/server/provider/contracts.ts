@@ -111,6 +111,7 @@ export const PROVIDER_FAILURE_REASONS = [
   "process-exit",
   "process-signal",
   "rpc-timeout",
+  "goal-continuation-timeout",
   "codex-error",
   "transport-closed",
 ] as const;

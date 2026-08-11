@@ -93,6 +93,13 @@ export function startCodexAppServerRun(
   let compatibilityError: CodexAppServerResult["compatibilityError"];
   let continuationError: CodexAppServerResult["continuationError"];
   let resolveResult!: (result: CodexAppServerResult) => void;
+  let startupGateReleased = false;
+  let startupFailure: Error | undefined;
+  let releaseStartupGate!: () => void;
+  const startupGate = new Promise<void>((resolve) => {
+    releaseStartupGate = resolve;
+  });
+  let goalMutationTail = Promise.resolve();
   let events: CodexAppServerEvents;
   const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
     child,
@@ -103,6 +110,32 @@ export function startCodexAppServerRun(
   const result = new Promise<CodexAppServerResult>((resolve) => {
     resolveResult = resolve;
   });
+
+  const settleStartupGate = (error?: unknown): void => {
+    if (startupGateReleased) return;
+    startupGateReleased = true;
+    if (error) {
+      startupFailure = error instanceof Error
+        ? error
+        : new Error("Codex App Server could not start the turn.");
+    }
+    releaseStartupGate();
+  };
+
+  const serializeGoalMutation = <T>(
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    const current = goalMutationTail.then(async () => {
+      await startupGate;
+      if (startupFailure) throw startupFailure;
+      return await operation();
+    });
+    goalMutationTail = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    return current;
+  };
 
   const rememberFailure = (
     reason: ProviderRunFailure["reason"],
@@ -189,6 +222,9 @@ export function startCodexAppServerRun(
     }
     settled = true;
     phase = "settled";
+    settleStartupGate(
+      new Error("The Codex App Server run ended before startup completed."),
+    );
     decoder?.stop();
     settlePendingRequests(
       "Codex App Server stopped before responding.",
@@ -538,7 +574,10 @@ export function startCodexAppServerRun(
       isSettled: () => settled,
       isCancelRequested: () => cancelRequested,
       finish,
-    }).catch((error: unknown) => {
+    }).then(() => {
+      settleStartupGate();
+    }, (error: unknown) => {
+      settleStartupGate(error);
       if (
         options.access === "full"
         && isUnsupportedFullAccessError(error)
@@ -581,12 +620,13 @@ export function startCodexAppServerRun(
 
   const setGoal = async (
     input: ProviderGoalMutation,
-  ): Promise<ProviderGoalSnapshot> => {
+  ): Promise<ProviderGoalSnapshot> => serializeGoalMutation(async () => {
     if (settled || cancelRequested || !providerThreadId) {
       throw new Error("The Codex goal connection is not active.");
     }
+    const ownedThreadId = providerThreadId;
     const params: JsonObject = {
-      threadId: providerThreadId,
+      threadId: ownedThreadId,
       status: input.status,
     };
     if (input.objective !== undefined) params.objective = input.objective;
@@ -601,7 +641,7 @@ export function startCodexAppServerRun(
         sequenceAtResponse = events.goalProjectionSequence();
       }, false);
       const parsed = events.projectGoalResponse(
-        providerThreadId,
+        ownedThreadId,
         response.goal,
         sequenceAtResponse,
       );
@@ -610,31 +650,32 @@ export function startCodexAppServerRun(
     } finally {
       events.endGoalMutation(activatesGoal);
     }
-  };
+  });
 
-  const clearGoal = async (): Promise<boolean> => {
+  const clearGoal = async (): Promise<boolean> => serializeGoalMutation(async () => {
     if (settled || cancelRequested || !providerThreadId) {
       throw new Error("The Codex goal connection is not active.");
     }
+    const ownedThreadId = providerThreadId;
     events.beginGoalMutation(false);
     try {
       let sequenceAtResponse = events.goalProjectionSequence();
       await request(
         "thread/goal/clear",
-        { threadId: providerThreadId },
+        { threadId: ownedThreadId },
         () => {
           sequenceAtResponse = events.goalProjectionSequence();
         },
         false,
       );
       return events.projectGoalClearResponse(
-        providerThreadId,
+        ownedThreadId,
         sequenceAtResponse,
       );
     } finally {
       events.endGoalMutation(false);
     }
-  };
+  });
 
   return {
     child,

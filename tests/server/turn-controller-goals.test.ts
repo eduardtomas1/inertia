@@ -27,6 +27,7 @@ class GoalProvider implements TurnProviderRuntime {
   callbacks: ProviderRunCallbacks | null = null;
   input: ProviderRunInput | null = null;
   runCount = 0;
+  running = false;
   readonly goalMutations: Array<{
     conversationId: string;
     input: ProviderGoalMutation;
@@ -51,6 +52,7 @@ class GoalProvider implements TurnProviderRuntime {
     this.input = input;
     this.callbacks = callbacks;
     this.runCount += 1;
+    this.running = true;
     callbacks.onStarted?.();
     return new Promise((resolve) => {
       this.resolveResult = resolve;
@@ -61,20 +63,23 @@ class GoalProvider implements TurnProviderRuntime {
     this.callbacks?.onEvent?.(event);
   }
 
-  resolve(): void {
+  resolve(status: "completed" | "failed" = "completed"): void {
     if (!this.input) throw new Error("Provider has not started.");
+    this.running = false;
     this.resolveResult?.({
       providerId: this.input.providerId,
       conversationId: this.input.conversationId ?? this.input.threadId,
-      status: "completed",
+      status,
       text: "",
       textTruncated: false,
-      exitCode: 0,
+      exitCode: status === "completed" ? 0 : 1,
       signal: null,
+      cleanupConfirmed: true,
     });
   }
 
   cancel(): boolean {
+    this.running = false;
     return true;
   }
 
@@ -83,7 +88,7 @@ class GoalProvider implements TurnProviderRuntime {
   }
 
   isRunning(): boolean {
-    return this.callbacks !== null;
+    return this.running;
   }
 
   respondToApproval(
@@ -236,36 +241,27 @@ afterEach(async () => {
 });
 
 describe("TurnController native goal lifecycle", () => {
-  it("runs an idle goal durably while ordinary follow-ups remain ordinary", async () => {
+  it("establishes a provider thread from a goal as the first action", async () => {
     const runtime = await goalRuntime();
-    const warmup = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Establish the provider thread.",
-    });
-    runtime.controller.start(warmup.turn.id);
-    runtime.provider.emit({
-      ...identity(runtime),
-      type: "session",
-      sessionId: "thread-goal-start",
-    });
-    runtime.provider.resolve();
-    await vi.waitFor(() =>
-      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false));
-
     const pendingGoal = runtime.controller.setNativeGoal({
       conversationId: runtime.conversationId,
       objective: "Finish the reliable flow",
       status: "active",
       tokenBudget: 12_000,
     });
-    await vi.waitFor(() => expect(runtime.provider.runCount).toBe(2));
+    await vi.waitFor(() => expect(runtime.provider.runCount).toBe(1));
     expect(runtime.provider.input).toMatchObject({
-      sessionId: "thread-goal-start",
+      sessionId: undefined,
       goalStart: {
         objective: "Finish the reliable flow",
         tokenBudget: 12_000,
       },
       goalContinuationExpected: true,
+    });
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "session",
+      sessionId: "thread-goal-start",
     });
     const activeGoal: ProviderGoalSnapshot = {
       objective: "Finish the reliable flow",
@@ -302,6 +298,62 @@ describe("TurnController native goal lifecycle", () => {
       goalContinuationExpected: true,
     });
     expect(runtime.provider.input).not.toHaveProperty("goalStart");
+  });
+
+  it("resumes execution when a goal remains active after its run ends", async () => {
+    const runtime = await goalRuntime();
+    const first = runtime.controller.setNativeGoal({
+      conversationId: runtime.conversationId,
+      objective: "Survive a detached runner",
+      status: "active",
+      tokenBudget: 12_000,
+    });
+    await vi.waitFor(() => expect(runtime.provider.runCount).toBe(1));
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "session",
+      sessionId: "thread-resumable-goal",
+    });
+    const activeGoal: ProviderGoalSnapshot = {
+      objective: "Survive a detached runner",
+      status: "active",
+      tokenBudget: 12_000,
+      tokensUsed: 600,
+      timeUsedSeconds: 4,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:04.000Z",
+    };
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "goal-updated",
+      sessionId: "thread-resumable-goal",
+      goal: activeGoal,
+    });
+    await expect(first).resolves.toEqual(activeGoal);
+    runtime.provider.resolve("failed");
+    await vi.waitFor(() =>
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false));
+    expect(runtime.store.agentTurn(runtime.provider.input!.turnId!))
+      .toMatchObject({ status: "failed" });
+
+    const resumed = runtime.controller.setNativeGoal({
+      conversationId: runtime.conversationId,
+      status: "active",
+    });
+    await vi.waitFor(() => expect(runtime.provider.runCount).toBe(2));
+    expect(runtime.provider.input).toMatchObject({
+      sessionId: "thread-resumable-goal",
+      prompt: expect.stringContaining("/goal Survive a detached runner"),
+      goalStart: {},
+      goalContinuationExpected: true,
+    });
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "goal-updated",
+      sessionId: "thread-resumable-goal",
+      goal: activeGoal,
+    });
+    await expect(resumed).resolves.toEqual(activeGoal);
   });
 
   it("acknowledges a goal that becomes terminal before its first turn", async () => {

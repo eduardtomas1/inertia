@@ -65,6 +65,10 @@ export type ClaudeMetadataSurface = Pick<
   Query,
   "supportedModels" | "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET"
 >;
+export type ClaudeUserMessageToolResultSurface = Pick<
+  SDKUserMessage,
+  "tool_use_result"
+>;
 
 export const openCodeClient: OpencodeClient = createOpencodeClient({
   baseUrl: "http://127.0.0.1:9",

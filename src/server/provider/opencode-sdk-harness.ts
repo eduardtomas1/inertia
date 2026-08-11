@@ -33,7 +33,7 @@ import type {
 } from "./interactions";
 import { providerActivityDetailSections } from "./activity-detail";
 import { isSafeApprovalDisplayText } from "./approval-display";
-import { CappedProviderBuffer } from "./io";
+import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import {
   createOwnedOpenCodeClient,
   ownedOpenCodeCredentials,
@@ -50,8 +50,9 @@ import {
   waitForOpenCodeHealth,
   withOpenCodeRequestDeadline,
 } from "./opencode-owned-server";
-const MAX_EVENT_CHARS = 1024 * 1024;
-const MAX_RUN_EVENT_CHARS = 32 * 1024 * 1024;
+const MAX_EVENT_BYTES = 1024 * 1024;
+const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
+const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_TRACKED_MESSAGES = 2_048;
 const MAX_TRACKED_PARTS = 4_096;
@@ -612,16 +613,14 @@ async function pumpOpenCodeEvents(
     isDone: (event: Event) => boolean;
   },
 ): Promise<void> {
-  let eventCount = 0;
-  let eventChars = 0;
+  const eventBudget = new ProviderRunEventBudget(
+    "OpenCode",
+    MAX_EVENT_BYTES,
+    MAX_RUN_EVENTS,
+    MAX_RUN_EVENT_BYTES,
+  );
   for await (const event of stream) {
-    const serialized = JSON.stringify(event);
-    if (serialized.length > MAX_EVENT_CHARS) throw new Error("OpenCode sent an oversized event.");
-    eventCount += 1;
-    eventChars += serialized.length;
-    if (eventCount > MAX_RUN_EVENTS || eventChars > MAX_RUN_EVENT_CHARS) {
-      throw new Error("OpenCode exceeded the bounded event budget for this run.");
-    }
+    eventBudget.observe(event);
     if (openCodeEventSessionId(event) !== sessionId) continue;
     handlers.onActivity();
     handlers.onEvent(event);
@@ -1006,7 +1005,7 @@ function imageMime(path: string): string {
     default: throw new Error(`OpenCode does not support the attached image type: ${extname(path) || "unknown"}.`);
   }
 }
-function bounded(value: string): string { return value.slice(0, MAX_EVENT_CHARS); }
+function bounded(value: string): string { return value.slice(0, MAX_EVENT_TEXT_CHARS); }
 function commonPrefixLength(left: string, right: string): number { let index = 0; while (index < left.length && index < right.length && left[index] === right[index]) index += 1; return index; }
 function objectValue(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function stringValue(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 ? value : undefined; }

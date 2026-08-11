@@ -95,7 +95,7 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   const localServer = new URL(hostilePreviewUrl);
   await expect(page.getByRole("heading", { name: "Local servers" })).toBeVisible();
   await expect(page.getByRole("button", {
-    name: `${localServer.host} ${localServer.origin}`,
+    name: `${localServer.origin} Open in Preview`,
   }))
     .toBeVisible();
   await expect.poll(

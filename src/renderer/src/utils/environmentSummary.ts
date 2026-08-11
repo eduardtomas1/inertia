@@ -21,7 +21,6 @@ export interface EnvironmentSummarySnapshot {
   } | null;
   runtime: {
     status: ConnectionStatus;
-    label: string;
   };
   changes: {
     files: number;
@@ -45,10 +44,7 @@ export interface EnvironmentSummarySnapshot {
     name: string;
     mimeType: ChatMessage["attachments"][number]["mimeType"];
   }>;
-  localServers: Array<{
-    label: string;
-    url: string;
-  }>;
+  localServers: Array<{ url: string }>;
 }
 
 interface EnvironmentSummaryInput {
@@ -84,36 +80,44 @@ function localServerSummary(url: string | null | undefined): EnvironmentSummaryS
     ) {
       return [];
     }
-    return [{ label: parsed.host, url: parsed.origin }];
+    return [{ url: parsed.origin }];
   } catch {
     return [];
   }
-}
-
-function runtimeLabel(status: ConnectionStatus): string {
-  if (status === "online") return "Ready";
-  if (status === "connecting") return "Connecting";
-  return "Offline";
 }
 
 function branchSummary(
   gitStatus: GitStatusSnapshot | null,
   workspaceGitStatus: WorkspaceGitSnapshot | null,
 ): EnvironmentSummarySnapshot["branch"] {
-  if (gitStatus?.isRepository && gitStatus.branch) {
-    return { label: "Branch", value: gitStatus.branch };
+  if (gitStatus?.isRepository) {
+    return {
+      label: "Branch",
+      value: gitStatus.branch ?? "Detached HEAD",
+    };
+  }
+  const readyRepositories = workspaceGitStatus?.repositories
+    .filter(({ state }) => state === "ready")
+    ?? [];
+  if (readyRepositories.length === 1) {
+    return {
+      label: "Branch",
+      value: readyRepositories[0]!.branch ?? "Detached HEAD",
+    };
   }
   const branches = new Set(
-    workspaceGitStatus?.repositories
-      .filter(({ state, branch }) => state === "ready" && branch)
+    readyRepositories
+      .filter(({ branch }) => branch)
       .map(({ branch }) => branch!)
-      ?? [],
   );
-  if (branches.size === 1) {
+  if (branches.size === 1 && readyRepositories.every(({ branch }) => branch)) {
     return { label: "Branch", value: [...branches][0]! };
   }
-  if (branches.size > 1) {
-    return { label: "Branches", value: `${branches.size} active` };
+  if (readyRepositories.length > 1) {
+    return {
+      label: "Branches",
+      value: `${readyRepositories.length} repositories`,
+    };
   }
   return null;
 }
@@ -239,7 +243,6 @@ export function buildEnvironmentSummary({
     } : null,
     runtime: {
       status: connectionStatus,
-      label: runtimeLabel(connectionStatus),
     },
     changes,
     gitState: gitLoading

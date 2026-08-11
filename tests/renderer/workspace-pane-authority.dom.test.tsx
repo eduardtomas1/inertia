@@ -1715,6 +1715,9 @@ describe("workspace pane authority", () => {
 
   it("exposes a preview as ready only after navigation succeeds", async () => {
     const setActionError = vi.fn();
+    let publishPreviewState:
+      | Parameters<typeof window.inertia.onPreviewState>[0]
+      | null = null;
     const previewNavigate = vi.fn()
       .mockRejectedValueOnce(new Error("Connection refused."))
       .mockResolvedValueOnce({
@@ -1729,13 +1732,25 @@ describe("workspace pane authority", () => {
         canGoBack: false,
         canGoForward: false,
       })
+      .mockResolvedValueOnce({
+        url: "http://localhost:4173",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+      })
       .mockRejectedValueOnce(new Error("Connection refused again."));
+    const previewCommand = vi.fn()
+      .mockRejectedValue(new Error("Reload failed."));
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
         previewClose: vi.fn(async () => undefined),
-        onPreviewState: vi.fn(() => () => undefined),
+        onPreviewState: vi.fn((listener) => {
+          publishPreviewState = listener;
+          return () => undefined;
+        }),
         previewNavigate,
+        previewCommand,
       },
     });
     const hook = renderHook(() => useDesktopTools({
@@ -1754,6 +1769,26 @@ describe("workspace pane authority", () => {
     act(() => hook.result.current.navigatePreview("http://localhost:4173"));
     await waitFor(() => expect(hook.result.current.readyPreviewUrl)
       .toBe("http://localhost:4173"));
+
+    act(() => hook.result.current.previewCommand("reload"));
+    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
+      "Reload failed.",
+    ));
+    expect(hook.result.current.readyPreviewUrl).toBe("");
+
+    act(() => hook.result.current.navigatePreview("http://localhost:4173"));
+    await waitFor(() => expect(hook.result.current.readyPreviewUrl)
+      .toBe("http://localhost:4173"));
+
+    act(() => publishPreviewState?.({
+      ownerId: "primary",
+      contextId: alphaChat.id,
+      url: "https://example.com/docs",
+      loading: false,
+      canGoBack: true,
+      canGoForward: false,
+    }));
+    expect(hook.result.current.readyPreviewUrl).toBe("");
 
     act(() => hook.result.current.navigatePreview("https://example.com"));
     await waitFor(() => expect(hook.result.current.previewUrl)

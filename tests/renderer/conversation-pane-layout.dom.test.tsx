@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { useConversationPaneLayout } from "../../src/renderer/src/hooks/useConversationPaneLayout";
@@ -96,5 +96,20 @@ describe("useConversationPaneLayout", () => {
       toolsVisible: false,
     });
     expect(hook.result.current.activeTool).toBeNull();
+  });
+
+  it("opens Environment first without borrowing another task's last panel", () => {
+    window.localStorage.setItem(
+      "inertia:layout:last-workspace-tool:v2",
+      "terminal",
+    );
+    const hook = renderHook(() => useConversationPaneLayout("alpha"));
+
+    expect(hook.result.current.activeTool).toBeNull();
+    act(() => hook.result.current.toggleWorkspaceTools());
+
+    expect(hook.result.current.activeTool).toBe("environment");
+    expect(window.localStorage.getItem(toolKey("alpha")))
+      .toBe("environment");
   });
 });

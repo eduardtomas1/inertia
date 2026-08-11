@@ -86,7 +86,7 @@ export function useDesktopTools({
         contextId: state.contextId,
         url: state.url,
         readyUrl: current.contextId === state.contextId
-          ? current.readyUrl
+          ? readyPreviewUrl(current.readyUrl, state.url)
           : "",
         navigation: state,
       }));
@@ -212,7 +212,9 @@ export function useDesktopTools({
         setOwnedPreview((current) => ({
           contextId,
           url: state.url,
-          readyUrl: current.contextId === contextId ? current.readyUrl : "",
+          readyUrl: current.contextId === contextId
+            ? readyPreviewUrl(current.readyUrl, state.url)
+            : "",
           navigation: state,
         }));
       })
@@ -222,6 +224,9 @@ export function useDesktopTools({
           authority.previewOwnerId !== previewOwnerId
           || authority.previewContextId !== contextId
         ) return;
+        setOwnedPreview((current) => current.contextId === contextId
+          ? { ...current, readyUrl: "" }
+          : current);
         setActionError(
           error instanceof Error
             ? error.message

@@ -151,7 +151,7 @@ describe("environment summary projection", () => {
       localServerUrl: "http://localhost:4173/app",
     });
 
-    expect(summary.runtime).toEqual({ status: "online", label: "Ready" });
+    expect(summary.runtime).toEqual({ status: "online" });
     expect(summary.changes).toEqual({
       files: 2,
       insertions: 9,
@@ -172,7 +172,6 @@ describe("environment summary projection", () => {
       path: "/workspace/inertia",
     });
     expect(summary.localServers).toEqual([{
-      label: "localhost:4173",
       url: "http://localhost:4173",
     }]);
     expect(summary.checks).toHaveLength(2);
@@ -198,7 +197,7 @@ describe("environment summary projection", () => {
 
     expect(summary).toMatchObject({
       projectName: null,
-      runtime: { status: "connecting", label: "Connecting" },
+      runtime: { status: "connecting" },
       changes: null,
       branch: null,
       checks: [],
@@ -208,6 +207,92 @@ describe("environment summary projection", () => {
       repository: null,
       localServers: [],
       gitState: "unavailable",
+    });
+  });
+
+  it("identifies a detached repository without inventing a branch name", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: {
+        isRepository: true,
+        root: "/workspace/inertia",
+        branch: null,
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        hasRemote: false,
+        files: [],
+        insertions: 0,
+        deletions: 0,
+      },
+      workspaceGitStatus: null,
+      runs: [],
+      subagents: [],
+      messages: [],
+    });
+
+    expect(summary.branch).toEqual({ label: "Branch", value: "Detached HEAD" });
+  });
+
+  it("keeps mixed multi-repository branch state explicit", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: {
+        repositories: [{
+          repositoryPath: ".",
+          state: "ready",
+          error: null,
+          branch: "main",
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [],
+          insertions: 0,
+          deletions: 0,
+          clean: true,
+          truncated: false,
+        }, {
+          repositoryPath: "packages/feature",
+          state: "ready",
+          error: null,
+          branch: null,
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [],
+          insertions: 0,
+          deletions: 0,
+          clean: true,
+          truncated: false,
+        }],
+        files: 0,
+        insertions: 0,
+        deletions: 0,
+        scannedDirectories: 2,
+        skippedDirectories: 0,
+        discoveredRepositories: 2,
+        repositoryLimit: 128,
+        partial: false,
+        truncated: false,
+        issues: [],
+      },
+      runs: [],
+      subagents: [],
+      messages: [],
+    });
+
+    expect(summary.branch).toEqual({
+      label: "Branches",
+      value: "2 repositories",
     });
   });
 
@@ -488,7 +573,6 @@ describe("environment summary projection", () => {
     });
 
     expect(summary.localServers).toEqual([{
-      label: "[::1]:3000",
       url: "http://[::1]:3000",
     }]);
   });

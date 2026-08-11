@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
@@ -8,9 +9,13 @@ import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/en
 
 const summary: EnvironmentSummarySnapshot = {
   projectName: "Inertia",
-  workspace: { label: "Worktree", value: "inertia", path: "/workspace/inertia" },
+  workspace: {
+    label: "Worktree",
+    value: "environment-panel",
+    path: "/workspace/worktrees/environment-panel",
+  },
   repository: { name: "inertia", path: "/workspace/inertia" },
-  runtime: { status: "online", label: "Ready" },
+  runtime: { status: "online" },
   changes: {
     files: 2,
     insertions: 9,
@@ -27,8 +32,11 @@ const summary: EnvironmentSummarySnapshot = {
     providerRole: "reviewer",
     status: "running",
   }],
-  attachments: [{ id: "attachment-1", name: "reference.png", mimeType: "image/png" }],
-  localServers: [{ label: "localhost:4173", url: "http://localhost:4173/" }],
+  attachments: [
+    { id: "attachment-1", name: "reference.png", mimeType: "image/png" },
+    { id: "attachment-2", name: "requirements.pdf", mimeType: "application/pdf" },
+  ],
+  localServers: [{ url: "http://localhost:4173/" }],
 };
 
 const project: Project = {
@@ -124,14 +132,18 @@ describe("Environment panel", () => {
     render(<EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />);
 
     expect(screen.getByRole("heading", { name: "Inertia" })).toBeVisible();
+    expect(screen.getByText("environment-panel")).toBeVisible();
     expect(screen.getByText("codex/summary")).toBeVisible();
+    expect(screen.getByText("inertia", { exact: true })).toBeVisible();
     expect(screen.getByLabelText("9 insertions and 4 deletions")).toBeVisible();
     expect(screen.getByText("reference.png")).toBeVisible();
-    expect(screen.getByText("localhost:4173")).toBeVisible();
+    expect(screen.getByText("requirements.pdf")).toBeVisible();
+    expect(screen.getByText("http://localhost:4173/")).toBeVisible();
     expect(screen.getByText("Typecheck")).toBeVisible();
     expect(screen.getByText("Review")).toBeVisible();
+    expect(screen.queryByText("Ready", { exact: true })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Changes/u }));
+    fireEvent.click(screen.getByRole("button", { name: /changed files/u }));
     fireEvent.click(screen.getByRole("button", { name: /Browse files/u }));
     fireEvent.click(screen.getByRole("button", { name: /localhost:4173/u }));
     fireEvent.click(screen.getByRole("button", { name: /Open project/u }));
@@ -159,7 +171,7 @@ describe("Environment panel", () => {
       .not.toBeInTheDocument();
   });
 
-  it("distinguishes loading, unavailable, and failed repository states", () => {
+  it("distinguishes clean, loading, unavailable, and failed repository states", () => {
     const actions = {
       onOpenChanges: vi.fn(),
       onOpenFiles: vi.fn(),
@@ -175,9 +187,23 @@ describe("Environment panel", () => {
       />,
     );
     expect(screen.getByText("Loading repository state…")).toBeVisible();
-    expect(screen.getByRole("button", { name: /Changes/u })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Checking working tree/u })).toBeDisabled();
     expect(screen.queryByLabelText("9 insertions and 4 deletions"))
       .not.toBeInTheDocument();
+
+    view.rerender(
+      <EnvironmentPanel
+        summary={{
+          ...summary,
+          changes: { ...summary.changes!, files: 0, insertions: 0, deletions: 0 },
+          gitState: "ready",
+        }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByText("Working tree clean")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Working tree clean/u })).toBeEnabled();
 
     view.rerender(
       <EnvironmentPanel
@@ -186,7 +212,7 @@ describe("Environment panel", () => {
         {...actions}
       />,
     );
-    expect(screen.getByText("No Git repository available")).toBeVisible();
+    expect(screen.getByText("No Git repository")).toBeVisible();
 
     view.rerender(
       <EnvironmentPanel
@@ -199,21 +225,89 @@ describe("Environment panel", () => {
         {...actions}
       />,
     );
-    expect(screen.getByText("Repository state unavailable")).toBeVisible();
+    expect(screen.getByText("Repository details unavailable")).toBeVisible();
     expect(screen.getByText(/Permission denied\./u)).toBeVisible();
-    expect(screen.getByRole("button", { name: /Changes/u })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Repository details unavailable/u })).toBeDisabled();
     expect(screen.queryByLabelText("9 insertions and 4 deletions"))
       .not.toBeInTheDocument();
     expect(actions.onOpenChanges).not.toHaveBeenCalled();
+  });
 
-    view.rerender(
+  it("only promotes runtime state when live details need attention", () => {
+    const actions = {
+      onOpenChanges: vi.fn(),
+      onOpenFiles: vi.fn(),
+      onOpenPreview: vi.fn(),
+      onOpenProject: vi.fn(),
+      onRevealProject: vi.fn(),
+    };
+    const view = render(
       <EnvironmentPanel
-        summary={{ ...summary, attachments: [] }}
+        summary={summary}
         workspaceToolsAvailable
         {...actions}
       />,
     );
-    expect(screen.getByText("No recent task attachments.")).toBeVisible();
+    expect(screen.queryByText("Ready", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText(/workspace runtime/u)).not.toBeInTheDocument();
+
+    view.rerender(
+      <EnvironmentPanel
+        summary={{ ...summary, runtime: { status: "connecting" } }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Connecting to workspace");
+    expect(screen.getByRole("status")).toHaveTextContent("may be incomplete");
+
+    view.rerender(
+      <EnvironmentPanel
+        summary={{ ...summary, runtime: { status: "offline" } }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Workspace runtime unavailable");
+    expect(screen.getByRole("status")).toHaveTextContent("may be out of date");
+  });
+
+  it("omits empty secondary sections and keeps the main actions in keyboard order", async () => {
+    const user = userEvent.setup();
+    const actions = {
+      onOpenChanges: vi.fn(),
+      onOpenFiles: vi.fn(),
+      onOpenPreview: vi.fn(),
+      onOpenProject: vi.fn(),
+      onRevealProject: vi.fn(),
+    };
+    render(
+      <EnvironmentPanel
+        summary={{
+          ...summary,
+          localServers: [],
+          checks: [],
+          subagents: [],
+          attachments: [],
+        }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+
+    expect(screen.queryByRole("heading", { name: "Local servers" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Active work" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Recent attachments" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/No recent task attachments/u)).not.toBeInTheDocument();
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Open project" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Reveal" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Browse files" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: /changed files/u })).toHaveFocus();
   });
 
   it("keeps every labelled section unique when split panes both show Environment", () => {

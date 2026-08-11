@@ -29,52 +29,65 @@ async function ensureWorkspaceTools(): Promise<void> {
 
 test("opens Environment by default with reachable responsive geometry", async ({ browserName: _browserName }, testInfo) => {
   const themeButton = page.getByRole("button", { name: /Change theme/u });
+  for (const theme of ["dark", "light"] as const) {
+    if (!new RegExp(`current: ${theme}`, "u").test(await themeButton.getAttribute("aria-label") ?? "")) {
+      await themeButton.click();
+    }
+    await expect(themeButton).toHaveAttribute("aria-label", new RegExp(`current: ${theme}`, "u"));
+
+    for (const size of [
+      { width: 1440, height: 920, label: "wide" },
+      { width: 760, height: 600, label: "compact" },
+    ]) {
+      await resizeWindow(size.width, size.height);
+      const environmentTab = page.getByRole("tab", { name: "Environment" });
+      const environmentPanel = page.getByRole("tabpanel", { name: "Environment" });
+      await expect(environmentTab).toHaveAttribute("aria-selected", "true");
+      await expect(environmentPanel).toBeVisible();
+      await expect(environmentPanel.getByRole("heading", { name: "Inertia" })).toBeVisible();
+      await expect(environmentPanel.getByText(/changed file/u)).toBeVisible();
+      await expect(environmentPanel.getByText("Ready", { exact: true })).toHaveCount(0);
+      await expect(environmentPanel.getByRole("heading", { name: "Recent attachments" })).toHaveCount(0);
+      await expect(environmentPanel.getByRole("heading", { name: "Local servers" })).toHaveCount(0);
+      await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
+      await expectNoViewportOverflow();
+
+      const geometry = await page.evaluate(() => {
+        const frame = document.querySelector(".workspace-frame")?.getBoundingClientRect();
+        const chat = document.querySelector(".chat-workspace")?.getBoundingClientRect();
+        const environment = document.querySelector(".environment-panel")?.getBoundingClientRect();
+        return frame && chat && environment ? {
+          frame: { left: frame.left, top: frame.top, right: frame.right, bottom: frame.bottom },
+          chat: { left: chat.left, top: chat.top, right: chat.right, bottom: chat.bottom },
+          environment: { left: environment.left, top: environment.top, right: environment.right, bottom: environment.bottom },
+        } : null;
+      });
+      expect(geometry).not.toBeNull();
+      if (geometry) {
+        expect(geometry.environment.left).toBeGreaterThanOrEqual(geometry.frame.left);
+        expect(geometry.environment.top).toBeGreaterThanOrEqual(geometry.frame.top);
+        expect(geometry.environment.right).toBeLessThanOrEqual(geometry.frame.right + 1);
+        expect(geometry.environment.bottom).toBeLessThanOrEqual(geometry.frame.bottom + 1);
+        if (size.width > 1024) {
+          expect(geometry.chat.right).toBeLessThanOrEqual(geometry.environment.left + 1);
+        } else {
+          expect(geometry.chat.bottom).toBeLessThanOrEqual(geometry.environment.top + 1);
+        }
+      }
+
+      const label = `environment-default-${theme}-${size.label}`;
+      const screenshotPath = testInfo.outputPath(`${label}.png`);
+      await page.screenshot({ animations: "disabled", path: screenshotPath });
+      await testInfo.attach(label, {
+        path: screenshotPath,
+        contentType: "image/png",
+      });
+    }
+  }
   if (!/current: dark/u.test(await themeButton.getAttribute("aria-label") ?? "")) {
     await themeButton.click();
   }
   await expect(themeButton).toHaveAttribute("aria-label", /current: dark/u);
-  for (const size of [
-    { width: 1440, height: 920, label: "wide" },
-    { width: 760, height: 600, label: "compact" },
-  ]) {
-    await resizeWindow(size.width, size.height);
-    const environmentTab = page.getByRole("tab", { name: "Environment" });
-    await expect(environmentTab).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tabpanel", { name: "Environment" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Inertia" })).toBeVisible();
-    await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
-    await expectNoViewportOverflow();
-
-    const geometry = await page.evaluate(() => {
-      const frame = document.querySelector(".workspace-frame")?.getBoundingClientRect();
-      const chat = document.querySelector(".chat-workspace")?.getBoundingClientRect();
-      const environment = document.querySelector(".environment-panel")?.getBoundingClientRect();
-      return frame && chat && environment ? {
-        frame: { left: frame.left, top: frame.top, right: frame.right, bottom: frame.bottom },
-        chat: { left: chat.left, top: chat.top, right: chat.right, bottom: chat.bottom },
-        environment: { left: environment.left, top: environment.top, right: environment.right, bottom: environment.bottom },
-      } : null;
-    });
-    expect(geometry).not.toBeNull();
-    if (geometry) {
-      expect(geometry.environment.left).toBeGreaterThanOrEqual(geometry.frame.left);
-      expect(geometry.environment.top).toBeGreaterThanOrEqual(geometry.frame.top);
-      expect(geometry.environment.right).toBeLessThanOrEqual(geometry.frame.right + 1);
-      expect(geometry.environment.bottom).toBeLessThanOrEqual(geometry.frame.bottom + 1);
-      if (size.width > 1024) {
-        expect(geometry.chat.right).toBeLessThanOrEqual(geometry.environment.left + 1);
-      } else {
-        expect(geometry.chat.bottom).toBeLessThanOrEqual(geometry.environment.top + 1);
-      }
-    }
-
-    const screenshotPath = testInfo.outputPath(`environment-default-${size.label}.png`);
-    await page.screenshot({ path: screenshotPath });
-    await testInfo.attach(`environment-default-${size.label}`, {
-      path: screenshotPath,
-      contentType: "image/png",
-    });
-  }
   await resizeWindow(1440, 920);
   expect(rendererErrors).toEqual([]);
 });

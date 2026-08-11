@@ -46,7 +46,7 @@ function completedTurn(): JsonObject {
   };
 }
 
-function eventHarness() {
+function eventHarness(options: { goalContinuationExpected?: boolean } = {}) {
   let phase: CodexRunPhase = "running";
   let activeTurnId: string | undefined = TURN_ID;
   const goalStatuses: AgentGoalStatus[] = [];
@@ -63,7 +63,7 @@ function eventHarness() {
       prompt: "Continue the goal",
       planMode: false,
       access: "full",
-      goalContinuationExpected: true,
+      goalContinuationExpected: options.goalContinuationExpected ?? true,
       goalContinuationGraceMs: 25,
       subagentDrainTimeoutMs: 25,
       onGoalUpdated: (_threadId, goal) => {
@@ -150,6 +150,119 @@ describe("Codex App Server goal event ordering", () => {
       expect(harness.activeTurnId()).toBeUndefined();
       vi.advanceTimersByTime(25);
       expect(harness.finish).toHaveBeenCalledOnce();
+      expect(harness.finish).toHaveBeenCalledWith("completed", 0, null);
+    } finally {
+      harness.events.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the run alive while a goal activation response is pending", () => {
+    vi.useFakeTimers();
+    const harness = eventHarness({ goalContinuationExpected: false });
+    try {
+      harness.events.beginGoalActivation();
+      harness.events.handleNotification("turn/completed", completedTurn());
+
+      expect(harness.phase()).toBe("awaiting-goal-continuation");
+      vi.advanceTimersByTime(100);
+      expect(harness.finish).not.toHaveBeenCalled();
+
+      const sequenceAtResponse = harness.events.goalProjectionSequence();
+      expect(harness.events.projectGoalResponse(
+        THREAD_ID,
+        goalUpdate("active", 1_800_000_010).goal,
+        sequenceAtResponse,
+      )).toMatchObject({ status: "active" });
+      harness.events.endGoalActivation();
+      harness.events.handleNotification("turn/started", {
+        threadId: THREAD_ID,
+        turn: {
+          id: "turn-after-activation",
+          status: "inProgress",
+          items: [],
+          error: null,
+        },
+      });
+
+      expect(harness.phase()).toBe("running");
+      expect(harness.activeTurnId()).toBe("turn-after-activation");
+      expect(harness.finish).not.toHaveBeenCalled();
+    } finally {
+      harness.events.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects an equal-revision replay after a later goal status", () => {
+    const harness = eventHarness();
+    try {
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("active", 1_800_000_010),
+      );
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("complete", 1_800_000_010),
+      );
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("active", 1_800_000_010),
+      );
+      harness.events.handleNotification("turn/completed", completedTurn());
+
+      expect(harness.goalStatuses).toEqual(["active", "complete"]);
+      expect(harness.finish).toHaveBeenCalledWith("completed", 0, null);
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
+  it("rejects a continuation after the goal becomes terminal", () => {
+    vi.useFakeTimers();
+    const harness = eventHarness();
+    try {
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("active", 1_800_000_010),
+      );
+      harness.events.handleNotification("item/started", {
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        item: {
+          id: "spawn-before-terminal-goal",
+          type: "collabAgentToolCall",
+          tool: "spawnAgent",
+          status: "inProgress",
+          senderThreadId: THREAD_ID,
+          receiverThreadIds: ["child-before-terminal-goal"],
+          prompt: "Keep checking",
+          agentsStates: {
+            "child-before-terminal-goal": {
+              status: "running",
+              message: "Still checking",
+            },
+          },
+        },
+      });
+      harness.events.handleNotification("turn/completed", completedTurn());
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("complete", 1_800_000_010),
+      );
+      harness.events.handleNotification("turn/started", {
+        threadId: THREAD_ID,
+        turn: {
+          id: "turn-after-terminal-goal",
+          status: "inProgress",
+          items: [],
+          error: null,
+        },
+      });
+
+      expect(harness.phase()).toBe("awaiting-goal-continuation");
+      expect(harness.activeTurnId()).toBeUndefined();
+      vi.advanceTimersByTime(25);
       expect(harness.finish).toHaveBeenCalledWith("completed", 0, null);
     } finally {
       harness.events.dispose();
@@ -335,6 +448,8 @@ describe("Codex App Server goal event ordering", () => {
       phase: () => phase,
       hasObservedTurn: (turnId) => turnId === TURN_ID,
       goalProjectionSequence: () => 0,
+      beginGoalActivation: vi.fn(),
+      endGoalActivation: vi.fn(),
       projectGoalResponse: () => null,
       setContinuationError: vi.fn(),
       setPhase: (value) => {

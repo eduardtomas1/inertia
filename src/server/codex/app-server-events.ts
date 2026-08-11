@@ -153,6 +153,9 @@ export class CodexAppServerEvents {
   private nativeGoalSnapshot: ProviderGoalSnapshot | null = null;
   private nativeGoalUpdatedAt: string | null = null;
   private nativeGoalSequence = 0;
+  private nativeGoalFingerprint: string | null = null;
+  private readonly nativeGoalRevisionFingerprints = new Set<string>();
+  private pendingGoalActivations = 0;
 
   constructor(private readonly host: CodexAppServerEventHost) {
     this.subagentDrainTimeoutMs = codexSubagentDrainTimeoutMs(
@@ -194,6 +197,26 @@ export class CodexAppServerEvents {
 
   goalProjectionSequence(): number {
     return this.nativeGoalSequence;
+  }
+
+  beginGoalActivation(): void {
+    this.pendingGoalActivations += 1;
+  }
+
+  endGoalActivation(): void {
+    if (this.pendingGoalActivations > 0) {
+      this.pendingGoalActivations -= 1;
+    }
+    if (
+      this.pendingGoalActivations === 0
+      && this.host.phase() === "awaiting-goal-continuation"
+    ) {
+      if (this.nativeGoalStatus === "active") {
+        this.armGoalContinuationTimer();
+      } else {
+        this.finishAwaitingGoalContinuation();
+      }
+    }
   }
 
   settleInteractions(): void {
@@ -436,6 +459,11 @@ export class CodexAppServerEvents {
         && phase !== "awaiting-goal-continuation"
       ) return;
       if (
+        phase === "awaiting-goal-continuation"
+        && this.nativeGoalStatus !== "active"
+        && this.pendingGoalActivations === 0
+      ) return;
+      if (
         !this.host.providerThreadId()
         || notificationThreadId !== this.host.providerThreadId()
         || !notificationTurnId
@@ -561,7 +589,10 @@ export class CodexAppServerEvents {
         );
         this.completeParentTurn("failed", 1);
       } else if (status === "completed") {
-        if (this.nativeGoalStatus === "active") {
+        if (
+          this.nativeGoalStatus === "active"
+          || this.pendingGoalActivations > 0
+        ) {
           this.awaitGoalContinuation();
         } else {
           this.completeParentTurn("completed", 0);
@@ -599,7 +630,7 @@ export class CodexAppServerEvents {
     if (supersededByNotification) {
       return this.nativeGoalSnapshot;
     }
-    if (!this.acceptGoalUpdate(update.threadId, update.goal)) {
+    if (!this.acceptGoalUpdate(update.threadId, update.goal, "response")) {
       return this.nativeGoalSnapshot ?? update.goal;
     }
     return update.goal;
@@ -609,6 +640,7 @@ export class CodexAppServerEvents {
     if (threadId !== this.host.providerThreadId()) return false;
     this.nativeGoalStatus = null;
     this.nativeGoalSnapshot = null;
+    this.nativeGoalFingerprint = null;
     this.nativeGoalSequence += 1;
     this.host.options.onGoalCleared?.(threadId);
     this.finishAwaitingGoalContinuation();
@@ -641,14 +673,36 @@ export class CodexAppServerEvents {
   private acceptGoalUpdate(
     threadId: string,
     goal: ProviderGoalSnapshot,
+    source: "notification" | "response" = "notification",
   ): boolean {
     if (
       this.nativeGoalUpdatedAt
       && goal.updatedAt < this.nativeGoalUpdatedAt
     ) return false;
+    const fingerprint = JSON.stringify([
+      goal.objective,
+      goal.status,
+      goal.tokenBudget,
+      goal.tokensUsed,
+      goal.timeUsedSeconds,
+      goal.createdAt,
+      goal.updatedAt,
+    ]);
+    if (goal.updatedAt !== this.nativeGoalUpdatedAt) {
+      this.nativeGoalRevisionFingerprints.clear();
+      this.nativeGoalFingerprint = null;
+    } else if (
+      source === "notification"
+      && fingerprint !== this.nativeGoalFingerprint
+      && this.nativeGoalRevisionFingerprints.has(fingerprint)
+    ) {
+      return false;
+    }
     this.nativeGoalUpdatedAt = goal.updatedAt;
     this.nativeGoalStatus = goal.status;
     this.nativeGoalSnapshot = goal;
+    this.nativeGoalFingerprint = fingerprint;
+    this.nativeGoalRevisionFingerprints.add(fingerprint);
     this.nativeGoalSequence += 1;
     this.host.options.onGoalUpdated?.(threadId, goal);
     if (goal.status !== "active") {
@@ -658,9 +712,18 @@ export class CodexAppServerEvents {
   }
 
   private awaitGoalContinuation(): void {
-    if (this.goalContinuationTimer) return;
     this.host.setActiveTurnId(undefined);
     this.host.setPhase("awaiting-goal-continuation");
+    this.armGoalContinuationTimer();
+  }
+
+  private armGoalContinuationTimer(): void {
+    if (
+      this.goalContinuationTimer
+      || this.pendingGoalActivations > 0
+      || this.host.phase() !== "awaiting-goal-continuation"
+      || this.nativeGoalStatus !== "active"
+    ) return;
     this.goalContinuationTimer = setTimeout(() => {
       this.goalContinuationTimer = undefined;
       this.completeParentTurn("completed", 0);

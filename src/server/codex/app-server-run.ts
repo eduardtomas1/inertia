@@ -503,8 +503,10 @@ export function startCodexAppServerRun(
       phase: () => phase,
       hasObservedTurn: (turnId) => events.hasObservedTurn(turnId),
       goalProjectionSequence: () => events.goalProjectionSequence(),
-      projectGoalResponse: (threadId, goal, sequenceBeforeRequest) =>
-        events.projectGoalResponse(threadId, goal, sequenceBeforeRequest),
+      beginGoalActivation: () => events.beginGoalActivation(),
+      endGoalActivation: () => events.endGoalActivation(),
+      projectGoalResponse: (threadId, goal, sequenceAtResponse) =>
+        events.projectGoalResponse(threadId, goal, sequenceAtResponse),
       setContinuationError: (error) => {
         continuationError = error;
       },
@@ -569,17 +571,23 @@ export function startCodexAppServerRun(
     if (input.tokenBudget !== undefined) {
       params.tokenBudget = input.tokenBudget;
     }
-    let sequenceAtResponse = events.goalProjectionSequence();
-    const response = await request("thread/goal/set", params, () => {
-      sequenceAtResponse = events.goalProjectionSequence();
-    });
-    const parsed = events.projectGoalResponse(
-      providerThreadId,
-      response.goal,
-      sequenceAtResponse,
-    );
-    if (!parsed) throw new Error("Codex returned a malformed goal response.");
-    return parsed;
+    const activatesGoal = input.status === "active";
+    if (activatesGoal) events.beginGoalActivation();
+    try {
+      let sequenceAtResponse = events.goalProjectionSequence();
+      const response = await request("thread/goal/set", params, () => {
+        sequenceAtResponse = events.goalProjectionSequence();
+      });
+      const parsed = events.projectGoalResponse(
+        providerThreadId,
+        response.goal,
+        sequenceAtResponse,
+      );
+      if (!parsed) throw new Error("Codex returned a malformed goal response.");
+      return parsed;
+    } finally {
+      if (activatesGoal) events.endGoalActivation();
+    }
   };
 
   const clearGoal = async (): Promise<boolean> => {
@@ -629,6 +637,8 @@ interface OpenCodexTurnOptions {
   phase: () => CodexRunPhase;
   hasObservedTurn: (turnId: string) => boolean;
   goalProjectionSequence: () => number;
+  beginGoalActivation: () => void;
+  endGoalActivation: () => void;
   projectGoalResponse: (
     threadId: string,
     goal: unknown,
@@ -658,6 +668,8 @@ export async function openCodexTurn({
   phase,
   hasObservedTurn,
   goalProjectionSequence,
+  beginGoalActivation,
+  endGoalActivation,
   projectGoalResponse,
   setContinuationError,
   setPhase,
@@ -744,18 +756,22 @@ export async function openCodexTurn({
     if (options.goalStart.tokenBudget !== undefined) {
       params.tokenBudget = options.goalStart.tokenBudget;
     }
-    let sequenceAtResponse = goalProjectionSequence();
-    const response = await request("thread/goal/set", params, () => {
-      sequenceAtResponse = goalProjectionSequence();
-    });
-    if (!projectGoalResponse(
-      openedThreadId,
-      response.goal,
-      sequenceAtResponse,
-    )) {
-      throw new Error("Codex returned a malformed goal response.");
+    beginGoalActivation();
+    try {
+      let sequenceAtResponse = goalProjectionSequence();
+      const response = await request("thread/goal/set", params, () => {
+        sequenceAtResponse = goalProjectionSequence();
+      });
+      if (!projectGoalResponse(
+        openedThreadId,
+        response.goal,
+        sequenceAtResponse,
+      )) {
+        throw new Error("Codex returned a malformed goal response.");
+      }
+    } finally {
+      endGoalActivation();
     }
-    if (isCancelRequested()) finish("cancelled", null, null);
     return;
   }
 

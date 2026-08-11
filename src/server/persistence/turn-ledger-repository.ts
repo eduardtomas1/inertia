@@ -5,6 +5,7 @@ import {
   isAgentTurnTerminalStatus,
   type AgentTurn,
   type ChatMessage,
+  type UsageDashboard,
 } from "../../shared/contracts";
 import {
   continuationIdentityForSelection,
@@ -56,7 +57,7 @@ type TurnLedgerPersistenceContext = Pick<
 export class TurnLedgerRepository {
   constructor(private readonly context: TurnLedgerPersistenceContext) {}
 
-  usageDashboard(range: UsageDashboardRange) {
+  usageDashboard(range: UsageDashboardRange): UsageDashboard {
     return new UsageDashboardRepository(this.context.database).read(range);
   }
 

@@ -197,7 +197,10 @@ function ModelBreakdown({ dashboard }: { dashboard: UsageDashboard }): React.JSX
 }
 
 function DayBreakdown({ dashboard }: { dashboard: UsageDashboard }): React.JSX.Element {
-  const days = [...dashboard.daily].reverse().slice(0, 8);
+  const days = dashboard.daily
+    .filter(({ requestCount }) => requestCount > 0)
+    .reverse()
+    .slice(0, 8);
   return (
     <table className="usage-breakdown-table is-day-table">
       <thead>

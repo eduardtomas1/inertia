@@ -625,7 +625,7 @@ describe("usage dashboard repository", () => {
       providerId: "claude",
       model: "claude-sonnet",
     });
-    const requestedAt = "2026-06-15T10:00:00.000Z";
+    const requestedAt = "2026-05-31T23:00:00.000Z";
     const message = store.createMessage(
       conversation.id,
       "A private prompt that must not reach analytics.",
@@ -653,10 +653,10 @@ describe("usage dashboard repository", () => {
     });
     store.updateAgentTurnLifecycle(created.id, {
       status: "completed",
-      startedAt: "2026-06-15T10:00:01.000Z",
-      completedAt: "2026-06-15T10:00:04.000Z",
-      updatedAt: "2026-06-15T10:00:04.000Z",
-      usageAtCompletion: usage("2026-06-15T10:00:04.000Z", {
+      startedAt: "2026-05-31T23:00:01.000Z",
+      completedAt: "2026-05-31T23:00:04.000Z",
+      updatedAt: "2026-05-31T23:00:04.000Z",
+      usageAtCompletion: usage("2026-05-31T23:00:04.000Z", {
         totalProcessedTokens: 250,
         totalProcessedScope: "run",
       }),
@@ -666,7 +666,13 @@ describe("usage dashboard repository", () => {
     const reopened = new RuntimeStore(databasePath, workspace, {
       recoverInterruptedRuns: false,
     });
-    const dashboard = reopened.usageDashboard(range);
+    const dashboard = reopened.usageDashboard({
+      days: 30,
+      fromInclusive: "2026-06-01T00:00:00.000+02:00",
+      toExclusive: "2026-07-01T00:00:00.000+02:00",
+      endDate: "2026-06-30",
+      timeZone: "Europe/Madrid",
+    });
     reopened.close();
 
     expect(dashboard.totals).toMatchObject({

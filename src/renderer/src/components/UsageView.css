@@ -85,7 +85,7 @@
 }
 
 .usage-range-segment button:hover:not(:disabled),
-.usage-mini-segment button:hover:not(:disabled) {
+.usage-mini-segment button:hover:not(:disabled):not([aria-disabled="true"]) {
   color: var(--text);
 }
 

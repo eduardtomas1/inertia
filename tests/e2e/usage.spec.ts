@@ -228,6 +228,11 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     path: navigationPath,
     contentType: "image/png",
   });
+  await page.getByRole("button", { name: /^Connections & devices/u }).click();
+  await expect(page.getByRole("button", {
+    name: "Connections & devices",
+    exact: true,
+  })).toHaveAttribute("aria-current", "page");
   await usageDestination.focus();
   await usageDestination.press("Enter");
 
@@ -239,6 +244,11 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     await page.getByRole("button", { name: "Close environment summary" }).click();
     await expect(environmentSummary).toBeHidden();
   }
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("button", { name: "General", exact: true }))
+    .toHaveAttribute("aria-current", "page");
+  await usageDestination.click();
+  await expect(page.getByRole("main", { name: "Usage" })).toBeVisible();
   const projectNavigation = page.getByRole("button", {
     name: "Toggle project navigation",
   });
@@ -379,5 +389,21 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     contentType: "image/png",
   });
   await expectNoViewportOverflow();
+  const mobileProjectNavigation = page.getByRole("button", {
+    name: "Toggle project navigation",
+  });
+  await mobileProjectNavigation.focus();
+  await mobileProjectNavigation.press("Enter");
+  await expect(page.locator(".sidebar")).toHaveClass(/\bis-open\b/u);
+  const mobileUsageDestination = page.locator(".sidebar").getByRole("button", {
+    name: "Usage",
+    exact: true,
+  });
+  await mobileUsageDestination.focus();
+  await mobileUsageDestination.press("Enter");
+  await expect(page.locator(".sidebar")).not.toHaveClass(/\bis-open\b/u);
+  await expect(mobileProjectNavigation).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator(".sidebar :focus")).toHaveCount(0);
   expect(rendererErrors).toEqual([]);
 });

@@ -77,6 +77,8 @@ export class UsageDashboardRepository {
 
   read(range: UsageDashboardRange): UsageDashboard {
     validateUsageDashboardRange(range);
+    const fromInclusive = new Date(range.fromInclusive).toISOString();
+    const toExclusive = new Date(range.toExclusive).toISOString();
     const rows = this.database.prepare(`
       SELECT provider_id, model_selection_json, continuation_identity_json,
         harness_id, backend_profile_id, model, model_alias, reasoning_effort,
@@ -90,7 +92,7 @@ export class UsageDashboardRepository {
         AND status IN ('completed', 'failed', 'cancelled', 'interrupted')
         AND association = 'authoritative'
       ORDER BY completed_at ASC, id ASC
-    `).all(range.fromInclusive, range.toExclusive) as UsageDashboardTurnRow[];
+    `).all(fromInclusive, toExclusive) as UsageDashboardTurnRow[];
     return projectUsageDashboard(rows.map(usageDashboardTurnFromRow), range);
   }
 }

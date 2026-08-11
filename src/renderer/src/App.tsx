@@ -788,7 +788,7 @@ export default function App(): React.JSX.Element {
   }, [navigateToView]);
 
   useEffect(() => {
-    if (view === "workspace" && settingsTarget) setSettingsTarget(null);
+    if (view !== "settings" && settingsTarget) setSettingsTarget(null);
   }, [settingsTarget, view]);
 
   const visibleError = actionError ?? connection.error;

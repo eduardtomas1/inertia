@@ -240,6 +240,37 @@ describe("UsageView", () => {
     expect(provider).not.toHaveTextContent("Token total unavailable");
   });
 
+  it("shows recent active periods in Day mode even when activity is old", async () => {
+    const historical = dashboard();
+    const first = historical.daily[0]!;
+    const last = historical.daily.at(-1)!;
+    historical.daily = historical.daily.map((day, index) => {
+      if (index === 0) return { ...last, date: first.date };
+      if (index !== historical.daily.length - 1) return day;
+      return {
+        ...day,
+        requestCount: 0,
+        completedCount: 0,
+        failedCount: 0,
+        cancelledCount: 0,
+        interruptedCount: 0,
+        runtime: { ...metric(0, 0, 0), coverage: "complete" as const },
+        processedTokens: { ...metric(0, 0, 0), coverage: "complete" as const },
+        providers: [],
+      };
+    });
+    const user = userEvent.setup();
+    render(<UsageView
+      status="online"
+      request={vi.fn(async () => result(historical))}
+    />);
+
+    await screen.findByRole("heading", { name: "Daily processed tokens" });
+    await user.click(screen.getByRole("button", { name: "Day" }));
+    expect(screen.getByRole("row", { name: /Jun 1, 2026/u })).toBeVisible();
+    expect(screen.queryByRole("row", { name: /Jun 30, 2026/u })).toBeNull();
+  });
+
   it("shows explicit empty and error states with a retry action", async () => {
     const empty = dashboard();
     empty.totals = {

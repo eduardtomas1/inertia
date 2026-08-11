@@ -41,6 +41,12 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain('process.platform === "darwin"');
     expect(smoke).toContain('process.platform === "win32"');
     expect(smoke).toContain('process.platform === "linux"');
+    expect(smoke).toContain(
+      "mkdir(dataDirectory, { recursive: true, mode: 0o700 })",
+    );
+    expect(smoke).toContain(
+      'process.platform === "darwin" ? ["--use-mock-keychain"] : []',
+    );
     expect(smoke).toContain("runtimePid === mainPid");
     expect(smoke).toContain("runtime-stopped");
     expect(smoke.indexOf('"before-quit"')).toBeLessThan(

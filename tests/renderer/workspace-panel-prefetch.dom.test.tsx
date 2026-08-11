@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prefetchWorkspaceTool = vi.hoisted(() => vi.fn());
 
@@ -7,11 +8,18 @@ vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
   prefetchWorkspaceTool,
 }));
 
-import { WorkspacePanel } from "../../src/renderer/src/components/WorkspacePanel";
+import {
+  WorkspacePanel,
+  type WorkspacePanelTab,
+} from "../../src/renderer/src/components/WorkspacePanel";
 
 describe("workspace tool intent prefetch", () => {
   beforeEach(() => {
     prefetchWorkspaceTool.mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("keeps Environment primary while exposing settings and the other tools", () => {
@@ -68,40 +76,73 @@ describe("workspace tool intent prefetch", () => {
   });
 
   it("moves and selects tabs with standard arrow, Home, and End keys", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
     const onTabChange = vi.fn();
+    function Harness(): React.JSX.Element {
+      const [activeTab, setActiveTab] = useState<WorkspacePanelTab>("changes");
+      return (
+        <WorkspacePanel
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            onTabChange(tab);
+            setActiveTab(tab);
+          }}
+        >
+          <span>Current panel</span>
+        </WorkspacePanel>
+      );
+    }
     render(
-      <WorkspacePanel activeTab="changes" onTabChange={onTabChange}>
-        <span>Current panel</span>
-      </WorkspacePanel>,
+      <Harness />,
     );
+    const flushFocusFrame = () => {
+      act(() => frames.shift()?.(performance.now()));
+    };
     const changes = screen.getByRole("tab", { name: "Changes" });
     changes.focus();
 
     fireEvent.keyDown(changes, { key: "ArrowLeft" });
+    flushFocusFrame();
     expect(screen.getByRole("tab", { name: "Environment" })).toHaveFocus();
     expect(onTabChange).toHaveBeenLastCalledWith("environment");
 
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Environment" }), {
-      key: "ArrowLeft",
+    fireEvent.click(screen.getByLabelText("Choose workspace tool"));
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }), {
+      detail: 0,
     });
+    flushFocusFrame();
     expect(screen.getByRole("tab", { name: "Preview" })).toHaveFocus();
     expect(onTabChange).toHaveBeenLastCalledWith("preview");
 
     fireEvent.keyDown(screen.getByRole("tab", { name: "Preview" }), {
       key: "Home",
     });
+    flushFocusFrame();
     expect(screen.getByRole("tab", { name: "Environment" })).toHaveFocus();
     expect(onTabChange).toHaveBeenLastCalledWith("environment");
 
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Environment" }), {
+    fireEvent.click(screen.getByLabelText("Choose workspace tool"));
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }), {
+      detail: 0,
+    });
+    flushFocusFrame();
+    expect(screen.getByRole("tab", { name: "Changes" })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Changes" }), {
       key: "End",
     });
+    flushFocusFrame();
     expect(screen.getByRole("tab", { name: "Preview" })).toHaveFocus();
     expect(onTabChange).toHaveBeenLastCalledWith("preview");
 
     fireEvent.keyDown(screen.getByRole("tab", { name: "Preview" }), {
       key: "ArrowRight",
     });
+    flushFocusFrame();
     expect(screen.getByRole("tab", { name: "Environment" })).toHaveFocus();
     expect(onTabChange).toHaveBeenLastCalledWith("environment");
   });

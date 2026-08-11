@@ -215,6 +215,10 @@ export function SettingsView({
   onSetBackendDefault,
   onClearBackendDefault,
 }: SettingsViewProps): React.JSX.Element {
+  const rootRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    rootRef.current?.focus();
+  }, []);
   const onUpdate = (updates: Partial<AppSettings>): void => {
     void updateSettingsRequest(updates).catch(() => undefined);
   };
@@ -408,7 +412,12 @@ export function SettingsView({
   };
 
   return (
-    <main className="settings-view">
+    <main
+      ref={rootRef}
+      className="settings-view"
+      aria-label="Settings"
+      tabIndex={-1}
+    >
       <aside className="settings-navigation" aria-label="Settings sections">
         <nav>
           {sections.map((item) => {

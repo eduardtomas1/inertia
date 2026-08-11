@@ -82,14 +82,12 @@ export function useDesktopTools({
         state.ownerId !== authority.previewOwnerId
         || state.contextId !== authority.previewContextId
       ) return;
-      setOwnedPreview((current) => ({
+      setOwnedPreview({
         contextId: state.contextId,
         url: state.url,
-        readyUrl: current.contextId === state.contextId
-          ? readyPreviewUrl(current.readyUrl, state.url)
-          : "",
+        readyUrl: state.ready ? readyPreviewUrl(state.url, state.url) : "",
         navigation: state,
-      }));
+      });
     });
     return () => {
       unsubscribe();
@@ -198,6 +196,13 @@ export function useDesktopTools({
   ) => {
     const contextId = previewContextId;
     if (!contextId) return;
+    setOwnedPreview((current) => current.contextId === contextId
+      ? {
+          ...current,
+          readyUrl: "",
+          navigation: { ...current.navigation, loading: true },
+        }
+      : current);
     void window.inertia.previewCommand({
       ownerId: previewOwnerId,
       contextId,
@@ -212,9 +217,7 @@ export function useDesktopTools({
         setOwnedPreview((current) => ({
           contextId,
           url: state.url,
-          readyUrl: current.contextId === contextId
-            ? readyPreviewUrl(current.readyUrl, state.url)
-            : "",
+          readyUrl: current.contextId === contextId ? current.readyUrl : "",
           navigation: state,
         }));
       })

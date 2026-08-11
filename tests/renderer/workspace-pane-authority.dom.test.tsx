@@ -1793,7 +1793,13 @@ describe("workspace pane authority", () => {
       })
       .mockRejectedValueOnce(new Error("Connection refused again."));
     const previewCommand = vi.fn()
-      .mockRejectedValue(new Error("Reload failed."));
+      .mockRejectedValueOnce(new Error("Reload failed."))
+      .mockResolvedValueOnce({
+        url: "http://localhost:4173/docs",
+        loading: true,
+        canGoBack: true,
+        canGoForward: false,
+      });
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
@@ -1837,21 +1843,61 @@ describe("workspace pane authority", () => {
       ownerId: "primary",
       contextId: alphaChat.id,
       url: "http://localhost:4173/docs",
+      ready: false,
+      loading: true,
+      canGoBack: true,
+      canGoForward: false,
+    }));
+    expect(hook.result.current.readyPreviewUrl).toBe("");
+
+    act(() => publishPreviewState?.({
+      ownerId: "primary",
+      contextId: alphaChat.id,
+      url: "http://localhost:4173/docs",
+      ready: false,
+      loading: false,
+      canGoBack: true,
+      canGoForward: false,
+    }));
+    expect(hook.result.current.readyPreviewUrl).toBe("");
+
+    act(() => publishPreviewState?.({
+      ownerId: "primary",
+      contextId: alphaChat.id,
+      url: "http://localhost:4173/docs",
+      ready: true,
       loading: false,
       canGoBack: true,
       canGoForward: false,
     }));
     expect(hook.result.current.readyPreviewUrl).toBe("http://localhost:4173/docs");
 
+    act(() => hook.result.current.previewCommand("reload"));
+    expect(hook.result.current.readyPreviewUrl).toBe("");
+    await waitFor(() => expect(previewCommand).toHaveBeenCalledTimes(2));
+    expect(hook.result.current.readyPreviewUrl).toBe("");
+
     act(() => publishPreviewState?.({
       ownerId: "primary",
       contextId: alphaChat.id,
       url: "http://localhost:5173/docs",
-      loading: false,
+      ready: false,
+      loading: true,
       canGoBack: true,
       canGoForward: false,
     }));
     expect(hook.result.current.readyPreviewUrl).toBe("");
+
+    act(() => publishPreviewState?.({
+      ownerId: "primary",
+      contextId: alphaChat.id,
+      url: "http://localhost:5173/docs",
+      ready: true,
+      loading: false,
+      canGoBack: true,
+      canGoForward: false,
+    }));
+    expect(hook.result.current.readyPreviewUrl).toBe("http://localhost:5173/docs");
 
     act(() => hook.result.current.navigatePreview("https://example.com"));
     await waitFor(() => expect(hook.result.current.previewUrl)

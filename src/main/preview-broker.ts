@@ -18,6 +18,7 @@ interface PreviewSlot {
   view: WebContentsView;
   contextId: string;
   bounds: Rectangle | null;
+  ready: boolean;
 }
 
 interface PreviewBrokerOptions {
@@ -266,16 +267,23 @@ export class PreviewBroker {
     };
   }
 
-  #publish(ownerId: PreviewOwner, contextId: string): void {
+  #publish(
+    ownerId: PreviewOwner,
+    contextId: string,
+    ready?: boolean,
+  ): void {
     const window = this.options.getWindow();
+    const slot = this.#ownedSlot(ownerId, contextId);
     if (
       !window
       || window.webContents.isDestroyed()
-      || !this.#ownedSlot(ownerId, contextId)
+      || !slot
     ) return;
+    if (ready !== undefined) slot.ready = ready;
     window.webContents.send(this.options.stateChannel, {
       ownerId,
       contextId,
+      ready: slot.ready,
       ...this.#state(ownerId, contextId),
     });
   }
@@ -321,13 +329,35 @@ export class PreviewBroker {
       target.sendInputEvent(forwardedKeyboardInput(input));
     });
     hardenDesktopSession(view.webContents.session);
-    const publish = () => this.#publish(ownerId, contextId);
-    view.webContents.on("did-start-loading", publish);
-    view.webContents.on("did-stop-loading", publish);
-    view.webContents.on("did-navigate", publish);
-    view.webContents.on("did-navigate-in-page", publish);
+    view.webContents.on("did-start-loading", () => {
+      this.#publish(ownerId, contextId, false);
+    });
+    view.webContents.on("did-stop-loading", () => {
+      this.#publish(ownerId, contextId);
+    });
+    view.webContents.on("did-navigate", () => {
+      this.#publish(ownerId, contextId, true);
+    });
+    view.webContents.on(
+      "did-navigate-in-page",
+      (_event, _url, isMainFrame) => {
+        if (isMainFrame) this.#publish(ownerId, contextId, true);
+      },
+    );
+    view.webContents.on(
+      "did-fail-load",
+      (
+        _event,
+        _errorCode,
+        _errorDescription,
+        _validatedUrl,
+        isMainFrame,
+      ) => {
+        if (isMainFrame) this.#publish(ownerId, contextId, false);
+      },
+    );
     window.contentView.addChildView(view);
-    const slot: PreviewSlot = { view, contextId, bounds: null };
+    const slot: PreviewSlot = { view, contextId, bounds: null, ready: false };
     this.#slots.set(ownerId, slot);
     const pending = this.#pendingBounds.get(ownerId);
     const bounds = pending?.contextId === contextId

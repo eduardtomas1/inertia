@@ -63,7 +63,7 @@ export function WorkspacePanel({
   const panelRef = useRef<HTMLElement>(null);
   const environmentToolMenuRef = useRef<HTMLDetailsElement>(null);
 
-  const selectEnvironmentTool = (
+  const selectWorkspaceTool = (
     tab: WorkspacePanelTab,
     keyboardActivated: boolean,
   ): void => {
@@ -127,7 +127,7 @@ export function WorkspacePanel({
                         type="button"
                         onFocus={() => prefetchWorkspaceTool(tab)}
                         onPointerEnter={() => prefetchWorkspaceTool(tab)}
-                        onClick={(event) => selectEnvironmentTool(tab, event.detail === 0)}
+                        onClick={(event) => selectWorkspaceTool(tab, event.detail === 0)}
                         key={tab}
                       >
                         {meta.icon}<span>{meta.label}</span>
@@ -167,7 +167,7 @@ export function WorkspacePanel({
                   : current < 0 || current === tabElements.length - 1 ? 0 : current + 1;
             tabElements[next]?.focus();
             const nextTab = tabs[next];
-            if (nextTab) onTabChange(nextTab);
+            if (nextTab) selectWorkspaceTool(nextTab, true);
           }}
         >
           {tabs.map((tab) => {
@@ -189,7 +189,7 @@ export function WorkspacePanel({
                 onFocus={() => prefetchWorkspaceTool(tab)}
                 onPointerDown={() => prefetchWorkspaceTool(tab)}
                 onPointerEnter={() => prefetchWorkspaceTool(tab)}
-                onClick={() => onTabChange(tab)}
+                onClick={(event) => selectWorkspaceTool(tab, event.detail === 0)}
                 key={tab}
               >
                 {meta.icon}

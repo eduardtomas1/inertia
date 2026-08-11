@@ -117,6 +117,7 @@ test("opens Environment by default with reachable responsive geometry", async ({
 
         if (theme === "dark") {
           const changes = environmentPanel.getByRole("button", { name: /Changes/u });
+          await expect(changes).toBeEnabled();
           const branchDisclosure = environmentPanel.locator("summary")
             .filter({ hasText: "main" });
           const commitDisclosure = environmentPanel.locator("summary")
@@ -176,7 +177,9 @@ test("opens Environment by default with reachable responsive geometry", async ({
           await changes.focus();
           await changes.press("Enter");
           await expect(page.getByRole("tab", { name: /Changes/u })).toBeFocused();
-          await selectWorkspaceTool(page.locator(".workspace-panel"), "Environment");
+          await page.keyboard.press("Home");
+          await expect(page.getByRole("tab", { name: "Environment" }))
+            .toBeFocused();
         }
       }
     }

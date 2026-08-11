@@ -51,7 +51,13 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await ensureTerminalTools();
   const terminalPanel = page.locator("aside.terminal-panel").first();
   const terminalFontSize = await terminalPanel.getAttribute("data-terminal-font-size");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Environment");
+  const environmentSettings = page.getByRole("button", {
+    name: "Environment settings",
+  });
+  await environmentSettings.focus();
+  await environmentSettings.press("Enter");
+  await expect(page.getByRole("main", { name: "Settings" })).toBeFocused();
   await expect(page.getByRole("button", { name: "General", exact: true }))
     .toHaveAttribute("aria-current", "page");
   await page.getByRole("radio", { name: "Dark" }).click();

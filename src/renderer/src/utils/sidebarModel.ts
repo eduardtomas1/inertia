@@ -289,7 +289,9 @@ export function groupWorkThreads(
   const active = threads.filter((thread) => (
     !thread.settled && !thread.hidden && !isOrdinarilySnoozed(thread)
   ));
-  const done = threads.filter((thread) => thread.settled && !isOrdinarilySnoozed(thread));
+  const done = threads.filter((thread) => (
+    thread.settled && !thread.hidden && !isOrdinarilySnoozed(thread)
+  ));
   const dayOffset = ({ conversation }: SidebarThreadView) => (
     localCalendarDayOffset(conversation.updatedAt, now)
   );

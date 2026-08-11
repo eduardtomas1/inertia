@@ -1,4 +1,12 @@
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   Activity,
   Archive,
@@ -185,6 +193,7 @@ function SidebarView({
   const snoozeNow = useSnoozeClock(conversations);
   const sidebarRef = useRef<HTMLElement>(null);
   const navigationRef = useRef<HTMLDivElement>(null);
+  const workFocusIdentityRef = useRef<string | null>(null);
   const onCloseRef = useRef(onClose);
   const mobile = useMediaQuery("(max-width: 760px)");
   useNativePreviewSuspension(Boolean(
@@ -314,6 +323,28 @@ function SidebarView({
     () => groupWorkThreads(activityThreads, snoozeNow),
     [activityThreads, snoozeNow],
   );
+  useLayoutEffect(() => {
+    if (sidebarMode !== "activity") {
+      workFocusIdentityRef.current = null;
+      return;
+    }
+    const identity = workFocusIdentityRef.current;
+    if (!identity) return;
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLElement
+      && activeElement !== document.body
+      && activeElement.isConnected
+    ) return;
+    const focusableWorkItems = [...(
+      navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
+    )];
+    const target = focusableWorkItems.find((item) => item.dataset.workFocusId === identity)
+      ?? focusableWorkItems[0]
+      ?? sidebarRef.current?.querySelector<HTMLInputElement>('input[type="search"]');
+    target?.focus({ preventScroll: true });
+    workFocusIdentityRef.current = target?.dataset.workFocusId ?? null;
+  }, [sidebarMode, snoozeNow, workSections]);
   const visibleWorkCount = workSections.reduce(
     (count, section) => count + section.threads.length,
     0,
@@ -552,6 +583,7 @@ function SidebarView({
             type="button"
             className="activity-thread-select"
             data-sidebar-nav
+            data-work-focus-id={`thread:${conversation.id}`}
             aria-current={isActive ? "page" : undefined}
             aria-label={accessibleContext}
             onClick={() => activateConversation(conversation)}
@@ -605,6 +637,7 @@ function SidebarView({
         <IconButton
           label={`Thread actions for ${conversation.title}`}
           className="activity-thread-menu-button"
+          data-work-focus-id={`thread-actions:${conversation.id}`}
           onClick={() => {
             setProjectMenu(null);
             setConversationMenu(conversationMenu === conversation.id ? null : conversation.id);
@@ -633,6 +666,10 @@ function SidebarView({
         aria-label="Project navigation"
         aria-hidden={mobile && !open ? true : undefined}
         inert={mobile && !open ? true : undefined}
+        onFocusCapture={(event) => {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          workFocusIdentityRef.current = target?.dataset.workFocusId ?? null;
+        }}
       >
         <div className="sidebar-brand drag-region">
           <button type="button" className="brand-lockup no-drag" aria-label="Go to workspace" onClick={() => navigate("workspace")}>
@@ -864,6 +901,7 @@ function SidebarView({
                           type="button"
                           className="work-thread-section-toggle"
                           data-sidebar-nav
+                          data-work-focus-id={`section:${section.id}`}
                           aria-expanded={expanded}
                           onClick={() => setExpandedWorkSections((current) => {
                             const next = new Set(current);

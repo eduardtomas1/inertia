@@ -87,6 +87,24 @@ function snapshot(
   };
 }
 
+function dismissedRun(conversation: ConversationShell): WorkspaceRun {
+  return {
+    id: `run-${conversation.id}`,
+    kind: "agent",
+    projectId: conversation.projectId,
+    conversationId: conversation.id,
+    actionId: null,
+    label: conversation.title,
+    detail: null,
+    status: "failed",
+    attentionState: "dismissed",
+    canStop: false,
+    port: null,
+    startedAt: conversation.updatedAt,
+    finishedAt: new Date(Date.parse(conversation.updatedAt) + 60_000).toISOString(),
+  };
+}
+
 function renderSidebar(
   conversations: ConversationShell[],
   onSelectConversation = vi.fn(),
@@ -307,22 +325,7 @@ describe("compact Work sidebar", () => {
       new Date(2026, 7, 11, 9),
       { snoozedUntil: new Date(2026, 7, 12, 12).toISOString() },
     );
-    const dismissedRun: WorkspaceRun = {
-      id: "run-snoozed",
-      kind: "agent",
-      projectId: project.id,
-      conversationId: snoozed.id,
-      actionId: null,
-      label: snoozed.title,
-      detail: null,
-      status: "failed",
-      attentionState: "dismissed",
-      canStop: false,
-      port: null,
-      startedAt: new Date(2026, 7, 11, 9).toISOString(),
-      finishedAt: new Date(2026, 7, 11, 9, 1).toISOString(),
-    };
-    const view = renderSidebar([snoozed], vi.fn(), [dismissedRun]);
+    const view = renderSidebar([snoozed], vi.fn(), [dismissedRun(snoozed)]);
 
     const snoozedToggle = screen.getByRole("button", { name: "Snoozed 1" });
     expect(snoozedToggle).toHaveAttribute("aria-expanded", "false");
@@ -349,6 +352,7 @@ describe("compact Work sidebar", () => {
 
     expect(screen.getByRole("heading", { name: "Recent 1" }))
       .toBeInTheDocument();
+    screen.getByRole("button", { name: /^Finish before midnight,/ }).focus();
     act(() => {
       vi.advanceTimersByTime(101);
     });
@@ -356,6 +360,54 @@ describe("compact Work sidebar", () => {
       .not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Yesterday 1" }))
       .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Finish before midnight,/ }))
+      .toHaveFocus();
+  });
+
+  it("moves focus from a disappearing Snoozed disclosure to the regrouped row", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("expiring", "Snooze expires now", new Date(2026, 7, 11, 9), {
+        snoozedUntil: new Date(start.getTime() + 100).toISOString(),
+      }),
+    ]);
+
+    screen.getByRole("button", { name: "Snoozed 1" }).focus();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+
+    expect(screen.queryByRole("button", { name: "Snoozed 1" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Snooze expires now,/ }))
+      .toHaveFocus();
+  });
+
+  it("moves focus to search when an expired dismissed snooze leaves Work", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(start);
+    const snoozed = conversation(
+      "dismissed-expiring",
+      "Dismissed snooze expires",
+      new Date(2026, 7, 11, 9),
+      { snoozedUntil: new Date(start.getTime() + 100).toISOString() },
+    );
+    renderSidebar([snoozed], vi.fn(), [dismissedRun(snoozed)]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Snoozed 1" }));
+    screen.getByRole("button", { name: /^Dismissed snooze expires,/ }).focus();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+
+    expect(screen.queryByRole("button", { name: /^Dismissed snooze expires,/ }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", {
+      name: "Search projects and conversations",
+    })).toHaveFocus();
   });
 
   it("keeps empty and missing-project states explicit", () => {

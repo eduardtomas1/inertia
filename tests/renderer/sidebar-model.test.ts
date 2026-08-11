@@ -396,7 +396,12 @@ describe("work-first chat model", () => {
         attentionKind: "approval",
         snoozedUntil,
       }),
-      conversation({ id: "dismissed", projectId: "p", snoozedUntil }),
+      conversation({
+        id: "dismissed",
+        projectId: "p",
+        settledAt: new Date(2026, 7, 10, 12).toISOString(),
+        snoozedUntil,
+      }),
     ];
     const runs = [workspaceRun("dismissed", {
       status: "failed",
@@ -411,8 +416,13 @@ describe("work-first chat model", () => {
       { id: "yesterday", threads: [] },
       { id: "earlier", threads: [] },
       { id: "done", threads: [] },
-      { id: "snoozed", threads: ["dismissed", "idle", "done"] },
+      { id: "snoozed", threads: ["idle", "dismissed", "done"] },
     ]);
+    expect(groupWorkThreads(
+      sortActivityThreads(entries, null, runs),
+      Date.parse(snoozedUntil) + 1,
+    ).flatMap(({ threads }) => threads.map(({ conversation: entry }) => entry.id)))
+      .not.toContain("dismissed");
   });
 
   it("keeps actionable work above pins and pins above ordinary recency", () => {

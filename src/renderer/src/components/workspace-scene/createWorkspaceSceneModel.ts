@@ -307,8 +307,9 @@ export function createWorkspaceSceneModel({
     projectPath: project?.normalizedPath ?? null,
     repositoryRoot: project?.repositoryRoot ?? null,
     worktreePath: conversation?.worktreePath ?? null,
-    localServerUrl: desktopTools.previewUrl,
-    gitLoading: workspaceTools.loading,
+    localServerUrl: desktopTools.readyPreviewUrl,
+    gitLoading: workspaceTools.gitLoading,
+    gitError: workspaceTools.gitError,
   });
   const canUpdatePlan = Boolean(
     conversation

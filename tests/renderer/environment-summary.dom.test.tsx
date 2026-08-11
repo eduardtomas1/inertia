@@ -20,8 +20,13 @@ const summary: EnvironmentSummarySnapshot = {
   gitState: "ready",
   gitNotice: null,
   branch: { label: "Branch", value: "codex/summary" },
-  checks: [],
-  subagents: [],
+  checks: [{ id: "check-1", label: "Typecheck", status: "running" }],
+  subagents: [{
+    id: "trace-1",
+    providerName: "Review",
+    providerRole: "reviewer",
+    status: "running",
+  }],
   attachments: [{ id: "attachment-1", name: "reference.png", mimeType: "image/png" }],
   localServers: [{ label: "localhost:4173", url: "http://localhost:4173/" }],
 };
@@ -56,44 +61,41 @@ function HeaderHarness({
   onOpenEnvironment?: () => void;
 }): React.JSX.Element {
   return (
-    <>
-      <WorkspaceHeader
-        project={activeProject}
-        conversation={null}
-        view="workspace"
-        activeTool={null}
-        sidebarCollapsed={false}
-        theme="dark"
-        gitStatus={null}
-        branches={[]}
-        actions={[]}
-        busy={false}
-        activityOpen={false}
-        activeRunCount={0}
-        attentionRunCount={0}
-        onOpenSidebar={vi.fn()}
-        onToggleTools={vi.fn()}
-        workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-        onOpenEnvironment={onOpenEnvironment}
-        onCycleTheme={vi.fn()}
-        onOpenSettings={onOpenSettings}
-        onOpenConnectionsSettings={onOpenConnectionsSettings}
-        onOpenProject={vi.fn()}
-        onRefreshBranches={vi.fn()}
-        onSwitchBranch={vi.fn()}
-        onCreateBranch={vi.fn()}
-        onCreateConversationOnBranch={vi.fn()}
-        onCreateConversationInWorktree={vi.fn()}
-        onCreateConversationInIsolatedWorktree={vi.fn()}
-        onCommit={vi.fn()}
-        onOpenPullRequest={vi.fn()}
-        onPull={vi.fn()}
-        onPush={vi.fn()}
-        onRunAction={vi.fn()}
-        onToggleActivity={vi.fn()}
-      />
-      <button type="button">Outside</button>
-    </>
+    <WorkspaceHeader
+      project={activeProject}
+      conversation={null}
+      view="workspace"
+      activeTool={null}
+      sidebarCollapsed={false}
+      theme="dark"
+      gitStatus={null}
+      branches={[]}
+      actions={[]}
+      busy={false}
+      activityOpen={false}
+      activeRunCount={0}
+      attentionRunCount={0}
+      onOpenSidebar={vi.fn()}
+      onToggleTools={vi.fn()}
+      workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
+      onOpenEnvironment={onOpenEnvironment}
+      onCycleTheme={vi.fn()}
+      onOpenSettings={onOpenSettings}
+      onOpenConnectionsSettings={onOpenConnectionsSettings}
+      onOpenProject={vi.fn()}
+      onRefreshBranches={vi.fn()}
+      onSwitchBranch={vi.fn()}
+      onCreateBranch={vi.fn()}
+      onCreateConversationOnBranch={vi.fn()}
+      onCreateConversationInWorktree={vi.fn()}
+      onCreateConversationInIsolatedWorktree={vi.fn()}
+      onCommit={vi.fn()}
+      onOpenPullRequest={vi.fn()}
+      onPull={vi.fn()}
+      onPush={vi.fn()}
+      onRunAction={vi.fn()}
+      onToggleActivity={vi.fn()}
+    />
   );
 }
 
@@ -126,6 +128,8 @@ describe("Environment panel", () => {
     expect(screen.getByLabelText("9 insertions and 4 deletions")).toBeVisible();
     expect(screen.getByText("reference.png")).toBeVisible();
     expect(screen.getByText("localhost:4173")).toBeVisible();
+    expect(screen.getByText("Typecheck")).toBeVisible();
+    expect(screen.getByText("Review")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: /Changes/u }));
     fireEvent.click(screen.getByRole("button", { name: /Browse files/u }));
@@ -147,6 +151,96 @@ describe("Environment panel", () => {
     expect(trigger).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(trigger);
     expect(onOpenEnvironment).toHaveBeenCalledOnce();
+  });
+
+  it("does not offer Environment before a task has a project", () => {
+    render(<HeaderHarness />);
+    expect(screen.queryByRole("button", { name: "Open Environment" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("distinguishes loading, unavailable, and failed repository states", () => {
+    const actions = {
+      onOpenChanges: vi.fn(),
+      onOpenFiles: vi.fn(),
+      onOpenPreview: vi.fn(),
+      onOpenProject: vi.fn(),
+      onRevealProject: vi.fn(),
+    };
+    const view = render(
+      <EnvironmentPanel
+        summary={{ ...summary, gitState: "loading" }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByText("Loading repository state…")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Changes/u })).toBeDisabled();
+    expect(screen.queryByLabelText("9 insertions and 4 deletions"))
+      .not.toBeInTheDocument();
+
+    view.rerender(
+      <EnvironmentPanel
+        summary={{ ...summary, changes: null, gitState: "unavailable" }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByText("No Git repository available")).toBeVisible();
+
+    view.rerender(
+      <EnvironmentPanel
+        summary={{
+          ...summary,
+          gitState: "error",
+          gitNotice: "Permission denied.",
+        }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByText("Repository state unavailable")).toBeVisible();
+    expect(screen.getByText(/Permission denied\./u)).toBeVisible();
+    expect(screen.getByRole("button", { name: /Changes/u })).toBeDisabled();
+    expect(screen.queryByLabelText("9 insertions and 4 deletions"))
+      .not.toBeInTheDocument();
+    expect(actions.onOpenChanges).not.toHaveBeenCalled();
+
+    view.rerender(
+      <EnvironmentPanel
+        summary={{ ...summary, attachments: [] }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByText("No recent task attachments.")).toBeVisible();
+  });
+
+  it("keeps every labelled section unique when split panes both show Environment", () => {
+    const actions = {
+      onOpenChanges: vi.fn(),
+      onOpenFiles: vi.fn(),
+      onOpenPreview: vi.fn(),
+      onOpenProject: vi.fn(),
+      onRevealProject: vi.fn(),
+    };
+    const view = render(
+      <>
+        <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />
+        <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />
+      </>,
+    );
+    const labelled = [...view.container.querySelectorAll<HTMLElement>(
+      ".environment-panel [aria-labelledby], .environment-panel[aria-labelledby]",
+    )];
+    const labels = labelled.map((element) =>
+      element.getAttribute("aria-labelledby"));
+
+    expect(labels).not.toContain(null);
+    expect(new Set(labels).size).toBe(labels.length);
+    for (const label of labels) {
+      expect(document.getElementById(label!)).not.toBeNull();
+    }
   });
 
   it("routes the Private Connect indicator directly to Connections & devices settings", async () => {

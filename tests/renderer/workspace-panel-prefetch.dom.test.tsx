@@ -50,10 +50,18 @@ describe("workspace tool intent prefetch", () => {
       key: "Home",
     });
     expect(screen.getByRole("tab", { name: "Environment" })).toHaveFocus();
+    expect(onTabChange).toHaveBeenLastCalledWith("environment");
 
     fireEvent.keyDown(screen.getByRole("tab", { name: "Environment" }), {
       key: "End",
     });
     expect(screen.getByRole("tab", { name: "Preview" })).toHaveFocus();
+    expect(onTabChange).toHaveBeenLastCalledWith("preview");
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Preview" }), {
+      key: "ArrowRight",
+    });
+    expect(screen.getByRole("tab", { name: "Environment" })).toHaveFocus();
+    expect(onTabChange).toHaveBeenLastCalledWith("environment");
   });
 });

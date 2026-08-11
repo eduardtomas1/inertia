@@ -5,6 +5,7 @@ import type {
   WorkspaceGitSnapshot,
   WorkspaceRun,
 } from "@shared/contracts";
+import { isLiteralLoopbackHost } from "@shared/preview-url";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 
 export interface EnvironmentSummarySnapshot {
@@ -65,6 +66,7 @@ interface EnvironmentSummaryInput {
   worktreePath?: string | null;
   localServerUrl?: string | null;
   gitLoading?: boolean;
+  gitError?: string | null;
 }
 
 function pathName(path: string): string {
@@ -76,13 +78,10 @@ function localServerSummary(url: string | null | undefined): EnvironmentSummaryS
   if (!url) return [];
   try {
     const parsed = new URL(url);
-    const hostname = parsed.hostname.toLocaleLowerCase("en-US");
-    const local = hostname === "localhost"
-      || hostname === "127.0.0.1"
-      || hostname === "::1"
-      || hostname === "[::1]"
-      || hostname.endsWith(".localhost");
-    if (!local || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
+    if (
+      !isLiteralLoopbackHost(parsed.hostname)
+      || (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+    ) {
       return [];
     }
     return [{ label: parsed.host, url: parsed.origin }];
@@ -123,13 +122,18 @@ function changesSummary(
   gitStatus: GitStatusSnapshot | null,
   workspaceGitStatus: WorkspaceGitSnapshot | null,
 ): EnvironmentSummarySnapshot["changes"] {
-  if (workspaceGitStatus && workspaceGitStatus.repositories.length > 0) {
-    return {
-      files: workspaceGitStatus.files,
-      insertions: workspaceGitStatus.insertions,
-      deletions: workspaceGitStatus.deletions,
-      repositories: workspaceGitStatus.repositories.length,
-    };
+  if (workspaceGitStatus) {
+    const readyRepositories = workspaceGitStatus.repositories.filter(
+      ({ state }) => state === "ready",
+    ).length;
+    if (readyRepositories > 0) {
+      return {
+        files: workspaceGitStatus.files,
+        insertions: workspaceGitStatus.insertions,
+        deletions: workspaceGitStatus.deletions,
+        repositories: readyRepositories,
+      };
+    }
   }
   if (!gitStatus?.isRepository) return null;
   return {
@@ -178,6 +182,7 @@ export function buildEnvironmentSummary({
   worktreePath = null,
   localServerUrl = null,
   gitLoading = false,
+  gitError = null,
 }: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
   const checks = projectId
     ? runs
@@ -211,7 +216,15 @@ export function buildEnvironmentSummary({
     : [];
 
   const changes = changesSummary(gitStatus, workspaceGitStatus);
-  const gitNotice = workspaceGitStatus?.issues[0]?.message ?? null;
+  const gitNotice = gitError
+    ?? workspaceGitStatus?.issues[0]?.message
+    ?? workspaceGitStatus?.repositories.find(({ state }) =>
+      state === "error")?.error
+    ?? null;
+  const gitFailed = Boolean(
+    workspaceGitStatus?.issues.length
+    || workspaceGitStatus?.repositories.some(({ state }) => state === "error"),
+  );
   const workspacePath = worktreePath ?? projectPath;
   return {
     projectName,
@@ -229,9 +242,9 @@ export function buildEnvironmentSummary({
       label: runtimeLabel(connectionStatus),
     },
     changes,
-    gitState: gitLoading && !changes
+    gitState: gitLoading
       ? "loading"
-      : gitNotice && !changes
+      : gitError || (gitFailed && !changes)
         ? "error"
         : changes
           ? "ready"

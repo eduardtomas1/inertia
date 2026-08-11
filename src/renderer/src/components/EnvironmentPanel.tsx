@@ -1,3 +1,4 @@
+import { useId } from "react";
 import {
   Bot,
   ExternalLink,
@@ -44,20 +45,29 @@ export function EnvironmentPanel({
   onOpenProject,
   onRevealProject,
 }: EnvironmentPanelProps): React.JSX.Element {
+  const panelId = useId();
+  const headingId = `${panelId}-heading`;
+  const workspaceHeadingId = `${panelId}-workspace`;
+  const repositoryHeadingId = `${panelId}-repository`;
+  const serversHeadingId = `${panelId}-servers`;
+  const activeWorkHeadingId = `${panelId}-active-work`;
+  const attachmentsHeadingId = `${panelId}-attachments`;
   const changesDetail = summary.gitState === "loading"
     ? "Loading repository state…"
-    : summary.changes
-      ? summary.changes.files === 0
-        ? "Working tree clean"
-        : `${summary.changes.files} ${summary.changes.files === 1 ? "file" : "files"}${summary.changes.repositories > 1 ? ` · ${summary.changes.repositories} repositories` : ""}`
-      : "No Git repository available";
+    : summary.gitState === "error"
+      ? "Repository state unavailable"
+      : summary.changes
+        ? summary.changes.files === 0
+          ? "Working tree clean"
+          : `${summary.changes.files} ${summary.changes.files === 1 ? "file" : "files"}${summary.changes.repositories > 1 ? ` · ${summary.changes.repositories} repositories` : ""}`
+        : "No Git repository available";
 
   return (
-    <section className="environment-panel" aria-labelledby="environment-panel-heading">
+    <section className="environment-panel" aria-labelledby={headingId}>
       <header className="environment-panel-heading">
         <span>
           <small>Environment</small>
-          <h2 id="environment-panel-heading">{summary.projectName ?? "Workspace"}</h2>
+          <h2 id={headingId}>{summary.projectName ?? "Workspace"}</h2>
           <p>Live facts and safe actions for this task.</p>
         </span>
         <span className={`environment-runtime-pill is-${summary.runtime.status}`} aria-live="polite">
@@ -78,18 +88,18 @@ export function EnvironmentPanel({
       </div>
 
       <div className="environment-panel-body">
-        <section className="environment-panel-section" aria-labelledby="environment-workspace-heading">
-          <h3 id="environment-workspace-heading">Workspace</h3>
+        <section className="environment-panel-section" aria-labelledby={workspaceHeadingId}>
+          <h3 id={workspaceHeadingId}>Workspace</h3>
           <div className="environment-fact-list">
             <button
               type="button"
               className="environment-fact"
               onClick={onOpenChanges}
-              disabled={!workspaceToolsAvailable || summary.gitState === "loading" || !summary.changes}
+              disabled={!workspaceToolsAvailable || summary.gitState !== "ready" || !summary.changes}
             >
               <GitCompareArrows size={16} aria-hidden="true" />
-              <span><strong>Changes</strong><small>{changesDetail}</small></span>
-              {summary.changes && summary.changes.files > 0 && (
+              <span><strong>Changes</strong><small aria-live="polite">{changesDetail}</small></span>
+              {summary.gitState === "ready" && summary.changes && summary.changes.files > 0 && (
                 <span
                   className="environment-change-stats"
                   aria-label={`${summary.changes.insertions} insertions and ${summary.changes.deletions} deletions`}
@@ -99,7 +109,7 @@ export function EnvironmentPanel({
               )}
             </button>
 
-            <div className="environment-fact" aria-live="polite">
+            <div className="environment-fact">
               <Laptop size={16} aria-hidden="true" />
               <span><strong>Runtime</strong><small>Local workspace service</small></span>
               <em className={`is-${summary.runtime.status}`}>{summary.runtime.label}</em>
@@ -128,8 +138,8 @@ export function EnvironmentPanel({
         </section>
 
         {summary.repository && (
-          <section className="environment-panel-section" aria-labelledby="environment-repository-heading">
-            <h3 id="environment-repository-heading">Repository</h3>
+          <section className="environment-panel-section" aria-labelledby={repositoryHeadingId}>
+            <h3 id={repositoryHeadingId}>Repository</h3>
             <div className="environment-link-row">
               <HardDrive size={15} aria-hidden="true" />
               <span><strong>{summary.repository.name}</strong><small title={summary.repository.path}>{summary.repository.path}</small></span>
@@ -138,8 +148,8 @@ export function EnvironmentPanel({
         )}
 
         {summary.localServers.length > 0 && (
-          <section className="environment-panel-section" aria-labelledby="environment-servers-heading">
-            <h3 id="environment-servers-heading">Local servers</h3>
+          <section className="environment-panel-section" aria-labelledby={serversHeadingId}>
+            <h3 id={serversHeadingId}>Local servers</h3>
             {summary.localServers.map((server) => (
               <button type="button" className="environment-link-row" onClick={onOpenPreview} key={server.url}>
                 <Globe2 size={15} aria-hidden="true" />
@@ -151,8 +161,8 @@ export function EnvironmentPanel({
         )}
 
         {(summary.checks.length > 0 || summary.subagents.length > 0) && (
-          <section className="environment-panel-section" aria-labelledby="environment-active-work-heading">
-            <h3 id="environment-active-work-heading">Active work</h3>
+          <section className="environment-panel-section" aria-labelledby={activeWorkHeadingId}>
+            <h3 id={activeWorkHeadingId}>Active work</h3>
             <ul className="environment-compact-list">
               {summary.checks.map((check) => (
                 <li key={check.id}>
@@ -172,8 +182,8 @@ export function EnvironmentPanel({
           </section>
         )}
 
-        <section className="environment-panel-section" aria-labelledby="environment-attachments-heading">
-          <h3 id="environment-attachments-heading">Recent attachments</h3>
+        <section className="environment-panel-section" aria-labelledby={attachmentsHeadingId}>
+          <h3 id={attachmentsHeadingId}>Recent attachments</h3>
           {summary.attachments.length > 0 ? (
             <ul className="environment-compact-list environment-attachments">
               {summary.attachments.map((attachment) => {

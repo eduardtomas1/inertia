@@ -63,6 +63,7 @@ export function useWorkspaceGit({
     useState<WorkspaceGitSnapshot | null>(null);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [commitReviewRevision, setCommitReviewRevision] = useState(0);
   const projectRefreshIdentity = workspaceGitRefreshIdentity(project);
   const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
@@ -222,6 +223,7 @@ export function useWorkspaceGit({
     setWorkspaceGitStatus(null);
     setBranches([]);
     setLoading(false);
+    setLoadError(null);
   }, [authority, enabled, projectRefreshIdentity]);
 
   useEffect(() => {
@@ -238,15 +240,16 @@ export function useWorkspaceGit({
     }
     let cancelled = false;
     setLoading(true);
+    setLoadError(null);
     void loadGit({
       scope: loadWorkspaceOnMount ? "workspace" : "status",
     }).catch((error) => {
       if (!cancelled) {
-        setActionError(
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : "Git changes could not be loaded.",
-        );
+        const message = error instanceof Error && error.message.trim()
+          ? error.message
+          : "Git changes could not be loaded.";
+        setLoadError(message);
+        setActionError(message);
       }
     }).finally(() => {
       if (!cancelled) setLoading(false);
@@ -377,18 +380,35 @@ export function useWorkspaceGit({
     commitReviewRef.current = null;
     setCommitReviewRevision((current) => current + 1);
     setLoading(true);
-    void loadGit({
+    setLoadError(null);
+    const owner = `${project.id}:${conversation?.id ?? ""}`;
+    const refresh = loadGit({
       authoritative: true,
       scope: loadWorkspaceOnMount ? "workspace" : "status",
-    }).then(() => {
+    });
+    const generation = requestGenerationRef.current;
+    void refresh.then(() => {
+      if (
+        authorityRef.current !== owner
+        || requestGenerationRef.current !== generation
+      ) return;
       loadBranches();
     }).catch((error) => {
-      setActionError(
-        error instanceof Error && error.message.trim()
-          ? error.message
-          : "Git changes could not be reconciled.",
-      );
-    }).finally(() => setLoading(false));
+      if (
+        authorityRef.current !== owner
+        || requestGenerationRef.current !== generation
+      ) return;
+      const message = error instanceof Error && error.message.trim()
+        ? error.message
+        : "Git changes could not be reconciled.";
+      setLoadError(message);
+      setActionError(message);
+    }).finally(() => {
+      if (
+        authorityRef.current === owner
+        && requestGenerationRef.current === generation
+      ) setLoading(false);
+    });
   }), [
     conversation?.id,
     enabled,
@@ -495,6 +515,7 @@ export function useWorkspaceGit({
     workspaceGitStatus,
     branches,
     loading,
+    loadError,
     loadGit,
     loadWorkspaceRepositoryDiff,
     loadCommitReview,

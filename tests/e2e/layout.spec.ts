@@ -58,6 +58,7 @@ test("opens Environment by default with reachable responsive geometry", async ({
     expect(geometry).not.toBeNull();
     if (geometry) {
       expect(geometry.environment.left).toBeGreaterThanOrEqual(geometry.frame.left);
+      expect(geometry.environment.top).toBeGreaterThanOrEqual(geometry.frame.top);
       expect(geometry.environment.right).toBeLessThanOrEqual(geometry.frame.right + 1);
       expect(geometry.environment.bottom).toBeLessThanOrEqual(geometry.frame.bottom + 1);
       if (size.width > 1024) {

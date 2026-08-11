@@ -1260,6 +1260,80 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.gitStatus?.root).toBe("/fresh-status");
   });
 
+  it("preserves a mounted Git load failure until a successful retry", async () => {
+    let fail = true;
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (fail) return Promise.reject(new Error("Workspace scan timed out."));
+      if (command.type === "git.refresh") {
+        return Promise.resolve(result({
+          kind: "git.status",
+          status: {
+            isRepository: false,
+            root: "/alpha",
+            branch: null,
+            upstream: null,
+            ahead: 0,
+            behind: 0,
+            hasRemote: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
+        }));
+      }
+      if (command.type === "git.workspace.refresh") {
+        return Promise.resolve(result({
+          kind: "git.workspace.status",
+          status: {
+            repositories: [],
+            files: 0,
+            insertions: 0,
+            deletions: 0,
+            scannedDirectories: 1,
+            skippedDirectories: 0,
+            discoveredRepositories: 0,
+            repositoryLimit: 64,
+            partial: false,
+            truncated: false,
+            issues: [],
+          },
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected ${command.type} command`));
+    });
+    const setActionError = vi.fn();
+    const hook = renderHook(
+      ({ refreshVersion }: { refreshVersion: number }) => useWorkspaceGit({
+        enabled: true,
+        loadStatusOnMount: true,
+        loadWorkspaceOnMount: true,
+        project: alpha,
+        conversation: alphaChat,
+        online: true,
+        ignoreWhitespace: false,
+        refreshVersion,
+        request,
+        run: async (_key, command) => await request(command),
+        subscribe: noopSubscribe,
+        setActionError,
+      }),
+      { initialProps: { refreshVersion: 0 } },
+    );
+
+    await waitFor(() => expect(hook.result.current.loadError)
+      .toBe("Workspace scan timed out."));
+    expect(setActionError).toHaveBeenCalledWith("Workspace scan timed out.");
+
+    fail = false;
+    hook.rerender({ refreshVersion: 1 });
+    await waitFor(() => {
+      expect(hook.result.current.loading).toBe(false);
+      expect(hook.result.current.loadError).toBeNull();
+      expect(hook.result.current.workspaceGitStatus?.scannedDirectories)
+        .toBe(1);
+    });
+  });
+
   it("queues one authoritative trailing load for explicit refreshes during a scan", async () => {
     const deferred = deferredWorkspaceGitRequests();
     const run = async (
@@ -1617,6 +1691,7 @@ describe("workspace pane authority", () => {
     );
     act(() => hook.result.current.navigatePreview("http://localhost:3000"));
     expect(hook.result.current.previewUrl).toBe("http://localhost:3000");
+    expect(hook.result.current.readyPreviewUrl).toBe("");
 
     hook.rerender({ contextId: betaChat.id });
     act(() => {
@@ -1630,10 +1705,66 @@ describe("workspace pane authority", () => {
 
     await waitFor(() => {
       expect(hook.result.current.previewUrl).toBe("");
+      expect(hook.result.current.readyPreviewUrl).toBe("");
       expect(previewClose).toHaveBeenCalledWith({
         ownerId: "primary",
         contextId: alphaChat.id,
       });
     });
+  });
+
+  it("exposes a preview as ready only after navigation succeeds", async () => {
+    const setActionError = vi.fn();
+    const previewNavigate = vi.fn()
+      .mockRejectedValueOnce(new Error("Connection refused."))
+      .mockResolvedValueOnce({
+        url: "http://localhost:4173",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+      })
+      .mockResolvedValueOnce({
+        url: "http://localhost:4173",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+      })
+      .mockRejectedValueOnce(new Error("Connection refused again."));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        previewClose: vi.fn(async () => undefined),
+        onPreviewState: vi.fn(() => () => undefined),
+        previewNavigate,
+      },
+    });
+    const hook = renderHook(() => useDesktopTools({
+      setActionError,
+      previewOwnerId: "primary",
+      previewContextId: alphaChat.id,
+    }));
+
+    act(() => hook.result.current.navigatePreview("http://localhost:3000"));
+    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
+      "Connection refused.",
+    ));
+    expect(hook.result.current.previewUrl).toBe("http://localhost:3000");
+    expect(hook.result.current.readyPreviewUrl).toBe("");
+
+    act(() => hook.result.current.navigatePreview("http://localhost:4173"));
+    await waitFor(() => expect(hook.result.current.readyPreviewUrl)
+      .toBe("http://localhost:4173"));
+
+    act(() => hook.result.current.navigatePreview("https://example.com"));
+    await waitFor(() => expect(hook.result.current.previewUrl)
+      .toBe("http://localhost:4173"));
+    expect(hook.result.current.readyPreviewUrl).toBe("");
+
+    act(() => hook.result.current.navigatePreview("http://localhost:5173"));
+    expect(hook.result.current.readyPreviewUrl).toBe("");
+    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
+      "Connection refused again.",
+    ));
+    expect(hook.result.current.readyPreviewUrl).toBe("");
   });
 });

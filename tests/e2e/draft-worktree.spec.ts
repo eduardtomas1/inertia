@@ -10,8 +10,31 @@ test("keeps Environment available while an isolated draft worktree materializes"
     name: "isolated-draft",
     initialState: "empty",
     initialNewThreadMode: "worktree",
+    beforeLaunch: ({ testDirectory }) => {
+      const database = new Database(join(
+        testDirectory,
+        "data",
+        "inertia.sqlite",
+      ));
+      database.prepare(`
+        UPDATE app_state
+        SET workspace_startup_surface = 'tools'
+        WHERE id = 1
+      `).run();
+      database.close();
+    },
   });
   try {
+    await app.page.evaluate(() => window.localStorage.setItem(
+      "inertia:layout:last-workspace-tool:v2",
+      "terminal",
+    ));
+    await app.page.reload();
+    await app.page.locator('.app-shell[data-connection-status="online"]')
+      .waitFor();
+    await expect(app.page.getByRole("button", {
+      name: "Add your first project",
+    })).toBeVisible();
     await app.electronApp.evaluate(({ dialog }, directory) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({
         canceled: false,
@@ -102,6 +125,10 @@ test("keeps Environment available while an isolated draft worktree materializes"
       stat(join(worktreePath!, ".git")).then((metadata) => metadata.isFile()),
     ).resolves.toBe(true);
 
+    await expect(workspaceTools.getByRole("tab", {
+      name: "Environment",
+    })).toHaveAttribute("aria-selected", "true");
+    await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
     const filesTab = workspaceTools.getByRole("tab", { name: /Files/u });
     await expect(filesTab).toBeVisible();
     await filesTab.click();

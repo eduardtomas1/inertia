@@ -408,6 +408,18 @@ export default function App(): React.JSX.Element {
   });
   const workspaceToolsUnavailableReason = draftWorkspaceToolsUnavailableReason(draftConversation.requiresWorkspaceMaterialization);
   const workspaceToolsUnavailable = Boolean(workspaceToolsUnavailableReason);
+  const sceneHeaderActiveTool = workspaceToolsUnavailable && sceneActiveTool
+    ? "environment"
+    : sceneActiveTool;
+  useEffect(() => {
+    if (
+      workspaceToolsUnavailable
+      && sceneActiveTool
+      && sceneActiveTool !== "environment"
+    ) {
+      sceneSetActiveTool("environment");
+    }
+  }, [sceneActiveTool, sceneSetActiveTool, workspaceToolsUnavailable]);
   const workspaceTools = useStableController(
     useWorkspaceTools({
       enabled: !workspaceToolsUnavailable,
@@ -980,7 +992,7 @@ export default function App(): React.JSX.Element {
       project={project}
       conversation={conversation}
       splitConversationId={splitConversation?.id ?? null}
-      sceneActiveTool={sceneActiveTool}
+      sceneActiveTool={sceneHeaderActiveTool}
       sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
       sceneOpenEnvironment={sceneOpenEnvironment}
       workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}

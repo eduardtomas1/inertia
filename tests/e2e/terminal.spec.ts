@@ -92,6 +92,12 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await page.getByRole("tab", { name: "Environment" }).click();
   expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
   await expect(page.getByRole("tabpanel", { name: "Environment" })).toBeVisible();
+  const localServer = new URL(hostilePreviewUrl);
+  await expect(page.getByRole("heading", { name: "Local servers" })).toBeVisible();
+  await expect(page.getByRole("button", {
+    name: `${localServer.host} ${localServer.origin}`,
+  }))
+    .toBeVisible();
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);

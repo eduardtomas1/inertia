@@ -105,6 +105,8 @@ describe("runtime conversation references", () => {
     );
     expect(sceneSource).toContain("tools: project ?");
     expect(sceneSource).toContain('{ tabs: ["environment"] as const }');
+    expect(sceneSource).toContain("gitLoading: workspaceTools.gitLoading");
+    expect(sceneSource).toContain("gitError: workspaceTools.gitError");
   });
 
   it("loads expensive workspace Git discovery only for visible Git surfaces", () => {

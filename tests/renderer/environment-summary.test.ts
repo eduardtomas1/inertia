@@ -211,6 +211,43 @@ describe("environment summary projection", () => {
     });
   });
 
+  it("keeps provisional root changes loading and preserves refresh failures", () => {
+    const input = {
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online" as const,
+      gitStatus: {
+        isRepository: true,
+        root: "/workspace/inertia",
+        branch: "main",
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        hasRemote: false,
+        files: [],
+        insertions: 0,
+        deletions: 0,
+      },
+      workspaceGitStatus: null,
+      runs: [],
+      subagents: [],
+      messages: [],
+    };
+
+    const loading = buildEnvironmentSummary({ ...input, gitLoading: true });
+    expect(loading.changes).toMatchObject({ files: 0, repositories: 1 });
+    expect(loading.gitState).toBe("loading");
+
+    const failed = buildEnvironmentSummary({
+      ...input,
+      gitError: "Workspace scan timed out.",
+    });
+    expect(failed.changes).toMatchObject({ files: 0, repositories: 1 });
+    expect(failed.gitState).toBe("error");
+    expect(failed.gitNotice).toBe("Workspace scan timed out.");
+  });
+
   it("does not present remote preview URLs as local servers", () => {
     const summary = buildEnvironmentSummary({
       projectId: "project-1",
@@ -257,6 +294,185 @@ describe("environment summary projection", () => {
     expect(summary.gitState).toBe("unavailable");
   });
 
+  it("reports an unavailable repository scan as an error instead of a clean tree", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: {
+        repositories: [{
+          repositoryPath: ".",
+          state: "error",
+          error: "Permission denied.",
+          branch: null,
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [],
+          insertions: 0,
+          deletions: 0,
+          clean: false,
+          truncated: false,
+        }],
+        files: 0,
+        insertions: 0,
+        deletions: 0,
+        scannedDirectories: 1,
+        skippedDirectories: 0,
+        discoveredRepositories: 1,
+        repositoryLimit: 128,
+        partial: true,
+        truncated: false,
+        issues: [],
+      },
+      runs: [],
+      subagents: [],
+      messages: [],
+    });
+
+    expect(summary.changes).toBeNull();
+    expect(summary.gitState).toBe("error");
+    expect(summary.gitNotice).toBe("Permission denied.");
+  });
+
+  it("counts only successfully inspected repositories in a partial scan", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: {
+        repositories: [{
+          repositoryPath: ".",
+          state: "ready",
+          error: null,
+          branch: "main",
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [],
+          insertions: 0,
+          deletions: 0,
+          clean: true,
+          truncated: false,
+        }, {
+          repositoryPath: "modules/private",
+          state: "error",
+          error: "Permission denied.",
+          branch: null,
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [],
+          insertions: 0,
+          deletions: 0,
+          clean: false,
+          truncated: false,
+        }],
+        files: 0,
+        insertions: 0,
+        deletions: 0,
+        scannedDirectories: 2,
+        skippedDirectories: 0,
+        discoveredRepositories: 2,
+        repositoryLimit: 128,
+        partial: true,
+        truncated: false,
+        issues: [],
+      },
+      runs: [],
+      subagents: [],
+      messages: [],
+    });
+
+    expect(summary.changes).toMatchObject({ repositories: 1, files: 0 });
+    expect(summary.gitState).toBe("ready");
+    expect(summary.gitNotice).toBe("Permission denied.");
+  });
+
+  it("keeps a message-less repository failure distinct from no repository", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: {
+        repositories: [{
+          repositoryPath: ".",
+          state: "error",
+          error: null,
+          branch: null,
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [],
+          insertions: 0,
+          deletions: 0,
+          clean: false,
+          truncated: false,
+        }],
+        files: 0,
+        insertions: 0,
+        deletions: 0,
+        scannedDirectories: 1,
+        skippedDirectories: 0,
+        discoveredRepositories: 1,
+        repositoryLimit: 128,
+        partial: true,
+        truncated: false,
+        issues: [],
+      },
+      runs: [],
+      subagents: [],
+      messages: [],
+    });
+
+    expect(summary.changes).toBeNull();
+    expect(summary.gitState).toBe("error");
+    expect(summary.gitNotice).toBeNull();
+  });
+
+  it("treats a workspace scan issue without a repository result as an error", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: {
+        repositories: [],
+        files: 0,
+        insertions: 0,
+        deletions: 0,
+        scannedDirectories: 0,
+        skippedDirectories: 1,
+        discoveredRepositories: 0,
+        repositoryLimit: 128,
+        partial: true,
+        truncated: false,
+        issues: [{
+          repositoryPath: ".",
+          message: "Directory could not be read.",
+        }],
+      },
+      runs: [],
+      subagents: [],
+      messages: [],
+    });
+
+    expect(summary.changes).toBeNull();
+    expect(summary.gitState).toBe("error");
+    expect(summary.gitNotice).toBe("Directory could not be read.");
+  });
+
   it("recognizes an IPv6 loopback preview without exposing its path", () => {
     const summary = buildEnvironmentSummary({
       projectId: "project-1",
@@ -275,6 +491,29 @@ describe("environment summary projection", () => {
       label: "[::1]:3000",
       url: "http://[::1]:3000",
     }]);
+  });
+
+  it("derives compact workspace labels from Windows paths", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [],
+      subagents: [],
+      messages: [],
+      projectPath: "C:\\Users\\Ada\\Inertia\\",
+      repositoryRoot: "C:\\Users\\Ada\\Inertia\\",
+      worktreePath: "C:\\Users\\Ada\\worktrees\\environment-panel\\",
+    });
+
+    expect(summary.workspace).toMatchObject({
+      label: "Worktree",
+      value: "environment-panel",
+    });
+    expect(summary.repository).toMatchObject({ name: "Inertia" });
   });
 
   it("uses the authoritative live bit for queued and future provider states", () => {

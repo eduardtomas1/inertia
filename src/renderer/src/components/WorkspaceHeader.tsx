@@ -11,7 +11,6 @@ import { primaryHeaderGitAction } from "../utils/primaryHeaderGitAction";
 import {
   loadActivityCenter,
   loadCommitDialog,
-  loadTerminalPanel,
 } from "./lazySurfaceLoaders";
 
 const loadWorkspaceGitActionMenu = () => import("./WorkspaceGitActionMenu");
@@ -368,19 +367,20 @@ export function WorkspaceHeader({
             )}
           </>
         )}
-        <div className="header-popover-anchor environment-panel-anchor">
-          <IconButton
-            label="Open Environment"
-            aria-pressed={activeTool === "environment"}
-            onClick={() => {
-              setMenu(null);
-              onOpenEnvironment();
-            }}
-            disabled={view !== "workspace" || !project}
-          >
-            <ListFilter size={17} />
-          </IconButton>
-        </div>
+        {view === "workspace" && project && (
+          <div className="header-popover-anchor environment-panel-anchor">
+            <IconButton
+              label="Open Environment"
+              aria-pressed={activeTool === "environment"}
+              onClick={() => {
+                setMenu(null);
+                onOpenEnvironment();
+              }}
+            >
+              <ListFilter size={17} />
+            </IconButton>
+          </div>
+        )}
         <IconButton
           label={activityLabel}
           className={`activity-center-button${attentionRunCount > 0 ? " has-attention" : ""}`}
@@ -400,9 +400,6 @@ export function WorkspaceHeader({
               ? "Close workspace tools"
               : workspaceToolsUnavailableReason ?? "Open workspace tools"}
             aria-pressed={Boolean(activeTool)}
-            onFocus={() => void loadTerminalPanel()}
-            onPointerDown={() => void loadTerminalPanel()}
-            onPointerEnter={() => void loadTerminalPanel()}
             onClick={onToggleTools}
             disabled={!project || Boolean(workspaceToolsUnavailableReason && !activeTool)}
           >

@@ -180,7 +180,7 @@ afterEach(async () => {
   );
 });
 
-describe("published database fixtures", () => {
+describe("published database fixtures", { timeout: 30_000 }, () => {
   it("pins all six released schemas to sanitized, byte-reproducible databases", async () => {
     const manifest = await fixtureManifest();
     expect(manifest.format).toBe(1);

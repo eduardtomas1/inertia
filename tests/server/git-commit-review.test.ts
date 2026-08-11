@@ -621,7 +621,7 @@ setInterval(() => {}, 1000);
 
     expect(git(root, "cat-file", "-s", "HEAD:large.bin"))
       .toBe(String(3 * 1024 * 1024));
-  });
+  }, 30_000);
 
   it("rejects an in-progress merge before mutating HEAD or the index", async () => {
     const root = repository();

@@ -94,6 +94,26 @@ it("preserves a failed metadata-probe cleanup after cancellation", async () => {
   }
 });
 
+it("does not retry a failed metadata-probe cleanup after a local timeout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "inertia-git-marker-timeout-"));
+  const cleanupFailure = new GitError(
+    "operation-failed",
+    "Git stopped responding, and its process tree could not be confirmed stopped.",
+  );
+  gitRunner.runGitInspection.mockRejectedValue(cleanupFailure);
+
+  try {
+    await expect(repositoryMetadataMarkerIdentity(root))
+      .rejects.toBe(cleanupFailure);
+    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(2);
+    expect(gitRunner.runGitInspection.mock.calls.every(([, args]) => (
+      (args as readonly string[]).includes("--path-format=absolute")
+    ))).toBe(true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it("prioritizes failed process-tree cleanup across metadata probes", async () => {
   const root = await mkdtemp(join(tmpdir(), "inertia-git-marker-priority-"));
   const cancellation = new GitError(
@@ -114,7 +134,13 @@ it("prioritizes failed process-tree cleanup across metadata probes", async () =>
   try {
     await expect(repositoryMetadataMarkerIdentity(root))
       .rejects.toBe(cleanupFailure);
-    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(4);
+    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(3);
+    expect(gitRunner.runGitInspection.mock.calls.filter(([, args]) => (
+      (args as readonly string[]).includes("--git-common-dir")
+    ))).toHaveLength(1);
+    expect(gitRunner.runGitInspection.mock.calls.filter(([, args]) => (
+      (args as readonly string[]).includes("--git-dir")
+    ))).toHaveLength(2);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

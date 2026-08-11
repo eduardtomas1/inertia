@@ -57,6 +57,14 @@ export interface PreparedGitRefUpdateContext {
  * a failed process-tree termination over an ordinary sibling cancellation or
  * command failure when either inspection rejects.
  */
+export function isGitProcessTreeTerminationFailure(
+  error: unknown,
+): error is GitError {
+  return error instanceof GitError
+    && error.code === "operation-failed"
+    && error.message === PROCESS_TREE_TERMINATION_FAILURE;
+}
+
 export function gitInspectionSettlementValues<First, Second>(
   results: readonly [
     PromiseSettledResult<First>,
@@ -66,11 +74,8 @@ export function gitInspectionSettlementValues<First, Second>(
   const failures = results.filter(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
-  const terminationFailure = failures.find(({ reason }) => (
-    reason instanceof GitError
-    && reason.code === "operation-failed"
-    && reason.message === PROCESS_TREE_TERMINATION_FAILURE
-  ));
+  const terminationFailure = failures.find(({ reason }) =>
+    isGitProcessTreeTerminationFailure(reason));
   if (terminationFailure) throw terminationFailure.reason;
   if (failures.length > 0) throw failures[0]?.reason;
   return results.map((result) => (

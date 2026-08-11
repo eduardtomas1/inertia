@@ -21,6 +21,19 @@ function flushFocusFrame(): void {
   });
 }
 
+function focusFrames(): {
+  flush: () => void;
+} {
+  const frames: FrameRequestCallback[] = [];
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  return {
+    flush: () => frames.shift()?.(0),
+  };
+}
+
 describe("workspace preview focus", () => {
   it("focuses the standalone primary preview address", () => {
     flushFocusFrame();
@@ -57,5 +70,31 @@ describe("workspace preview focus", () => {
     focusWorkspacePreviewAddress("secondary");
 
     expect(fallback).toHaveFocus();
+  });
+
+  it("waits for the lazy preview address to mount", () => {
+    const frames = focusFrames();
+
+    focusWorkspacePreviewAddress("primary");
+    frames.flush();
+    const input = address();
+    frames.flush();
+
+    expect(input).toHaveFocus();
+  });
+
+  it("does not steal focus while waiting for a lazy preview address", () => {
+    const frames = focusFrames();
+    const fallback = document.createElement("button");
+    document.body.append(fallback);
+
+    focusWorkspacePreviewAddress("primary");
+    frames.flush();
+    fallback.focus();
+    const input = address();
+    frames.flush();
+
+    expect(fallback).toHaveFocus();
+    expect(input).not.toHaveFocus();
   });
 });

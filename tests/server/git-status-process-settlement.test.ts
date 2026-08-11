@@ -58,6 +58,16 @@ describe("Git status process settlement", () => {
       .rejects.toBe(cleanupFailure);
   });
 
+  it("preserves failed HEAD cleanup after a non-aborted timeout", async () => {
+    const cleanupFailure = new GitError(
+      "operation-failed",
+      "Git stopped responding, and its process tree could not be confirmed stopped.",
+    );
+    gitRunner.runGitInspection.mockRejectedValueOnce(cleanupFailure);
+
+    await expect(hasHead("/repository")).rejects.toBe(cleanupFailure);
+  });
+
   it("prioritizes failed cleanup across parallel status probes", async () => {
     const cancellation = new GitError(
       "timeout",

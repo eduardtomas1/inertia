@@ -3,6 +3,7 @@ import { repositoryRoot } from "./paths";
 import { inspectGitRemoteRouting } from "./remote-routing";
 import {
   gitInspectionSettlementValues,
+  isGitProcessTreeTerminationFailure,
   runGitInspection,
 } from "./runner";
 import {
@@ -172,6 +173,7 @@ export async function hasHead(
       error instanceof GitError
       && error.code === "operation-failed"
       && !options.signal?.aborted
+      && !isGitProcessTreeTerminationFailure(error)
     ) {
       return false;
     }

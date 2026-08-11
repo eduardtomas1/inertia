@@ -12,6 +12,7 @@ import {
 } from "./constants";
 import {
   gitInspectionSettlementValues,
+  isGitProcessTreeTerminationFailure,
   runGit,
   runGitInspection,
 } from "./runner";
@@ -156,7 +157,12 @@ export async function repositoryMetadataMarkerIdentity(
       "--path-format=absolute",
       argument,
     ]).catch(async (error: unknown) => {
-      if (options.signal?.aborted) throw error;
+      if (
+        options.signal?.aborted
+        || isGitProcessTreeTerminationFailure(error)
+      ) {
+        throw error;
+      }
       requirePathInspectionTime(options);
       return await inspect(["rev-parse", argument]);
     });

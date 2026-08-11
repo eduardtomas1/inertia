@@ -128,7 +128,10 @@ export function useDesktopTools({
     [],
   );
 
-  const navigatePreview = useCallback((url: string) => {
+  const navigatePreview = useCallback((
+    url: string,
+    onSettled?: () => void,
+  ) => {
     const contextId = previewContextId;
     if (!contextId) return;
     setOwnedPreview((current) => ({
@@ -152,6 +155,7 @@ export function useDesktopTools({
           url: state.url,
           navigation: state,
         });
+        onSettled?.();
       })
       .catch((error) => {
         const authority = authorityRef.current;
@@ -171,6 +175,7 @@ export function useDesktopTools({
             loading: false,
           },
         }));
+        onSettled?.();
       });
   }, [previewContextId, previewOwnerId, setActionError]);
 

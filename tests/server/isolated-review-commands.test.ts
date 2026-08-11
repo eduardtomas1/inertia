@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Conversation } from "../../src/shared/contracts";
 import type { RuntimeStore } from "../../src/server/database";
+import { GitError } from "../../src/server/git";
 import { ConversationWorkAuthority } from "../../src/server/runtime/conversation-work-authority";
 import {
   createIsolatedReviewCommandHandler,
@@ -238,6 +239,49 @@ describe("isolated review revision authority", () => {
       requestId: turnId,
     });
     expect(dependencies.send).toHaveBeenCalledWith(socket, {
+      type: "request.ok",
+      requestId,
+    });
+  });
+
+  it("reports a failed Git process-tree cleanup after setup cancellation", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    reviewSupport.selectedReviewContext.mockImplementation((
+      _store,
+      _selection,
+      _purpose,
+      _secureFiles,
+      signal?: AbortSignal,
+    ) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new GitError(
+        "operation-failed",
+        "Git stopped responding, and its process tree could not be confirmed stopped.",
+      )), { once: true });
+    }));
+    const { dependencies, runIsolated } = fixture(authority);
+    const handler = createIsolatedReviewCommandHandler(dependencies);
+    const socket = {} as WebSocket;
+
+    const question = handler(socket, askCommand);
+    await vi.waitFor(() => {
+      expect(reviewSupport.selectedReviewContext).toHaveBeenCalledOnce();
+    });
+    await expect(handler(socket, {
+      type: "review.selection.cancel",
+      requestId: turnId,
+      payload: { conversationId },
+    })).resolves.toBe("handled");
+
+    await expect(question).rejects.toMatchObject({
+      code: "operation-failed",
+      message:
+        "Git stopped responding, and its process tree could not be confirmed stopped.",
+    });
+    expect(runIsolated).not.toHaveBeenCalled();
+    expect(dependencies.send).not.toHaveBeenCalledWith(socket, {
       type: "request.ok",
       requestId,
     });

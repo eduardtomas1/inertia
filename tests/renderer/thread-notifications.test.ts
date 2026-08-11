@@ -46,6 +46,7 @@ describe("thread notifications", () => {
   it("treats settings and modal overlays as obscuring the active chat", () => {
     const visible = {
       view: "workspace" as const,
+      environmentOpen: false,
       commitDialogOpen: false,
       pullRequestDialogOpen: false,
       multiSpawnOpen: false,
@@ -59,6 +60,8 @@ describe("thread notifications", () => {
     expect(activeConversationIsVisible({ ...visible, commitDialogOpen: true }))
       .toBe(false);
     expect(activeConversationIsVisible({ ...visible, paletteOpen: true }))
+      .toBe(false);
+    expect(activeConversationIsVisible({ ...visible, environmentOpen: true }))
       .toBe(false);
   });
 

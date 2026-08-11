@@ -1709,7 +1709,11 @@ describe("workspace pane authority", () => {
   });
 
   it("opens a service preview only after its exact pane context is active", async () => {
-    const navigatePreview = vi.fn();
+    const navigatePreview = vi.fn((
+      _url: string,
+      onSettled?: () => void,
+    ) => onSettled?.());
+    const focusPreview = vi.fn();
     const activateContext = vi.fn(() => true);
     const previewRun: WorkspaceRun = {
       id: "55555555-5555-4555-8555-555555555555",
@@ -1736,6 +1740,7 @@ describe("workspace pane authority", () => {
       setActionError: vi.fn(),
       activateContext,
       navigatePreview,
+      focusPreview,
     }), {
       initialProps: {
         project: alpha,
@@ -1750,7 +1755,9 @@ describe("workspace pane authority", () => {
     hook.rerender({ project: beta, conversationId: betaChat.id });
     await waitFor(() => expect(navigatePreview).toHaveBeenCalledWith(
       "http://127.0.0.1:4173",
+      focusPreview,
     ));
+    expect(focusPreview).toHaveBeenCalledOnce();
   });
 
   it("rejects stale or invalid service previews without changing context", () => {

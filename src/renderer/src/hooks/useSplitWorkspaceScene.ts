@@ -37,6 +37,7 @@ import {
 import { planFromText } from "../utils/planFromText";
 import { requestComposerPrefill } from "../utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "../utils/subagentDisclosure";
+import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
 import {
   useActivityActions,
   type PreviewWorkspaceRun,
@@ -65,6 +66,9 @@ type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 
 const ignoreLatestContentVisibility = (): void => undefined;
+const focusSecondaryPreview = (): void => {
+  focusWorkspacePreviewAddress("secondary");
+};
 
 export interface SplitWorkspaceSceneController {
   scene: WorkspaceSceneProps["splitScene"];
@@ -260,6 +264,7 @@ export function useSplitWorkspaceScene({
     setActionError,
     activateContext: activatePreviewContext,
     navigatePreview: desktopTools.navigatePreview,
+    focusPreview: focusSecondaryPreview,
   }));
   const planSteps = useMemo(() => {
     if (!splitConversation) return [];

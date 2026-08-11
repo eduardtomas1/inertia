@@ -30,7 +30,8 @@ interface ActivityActionsOptions {
     activity: PreviewWorkspaceRun,
     tool: "preview",
   ) => boolean;
-  navigatePreview?: (url: string) => void;
+  navigatePreview?: (url: string, onSettled?: () => void) => void;
+  focusPreview?: () => void;
 }
 
 interface PendingProjectAction {
@@ -57,6 +58,7 @@ export function useActivityActions({
   setActionError,
   activateContext,
   navigatePreview,
+  focusPreview,
 }: ActivityActionsOptions) {
   const [pendingAction, setPendingAction] =
     useState<PendingProjectAction | null>(null);
@@ -91,10 +93,13 @@ export function useActivityActions({
       return;
     }
     const url = workspaceRunPreviewUrl(pendingPreview);
-    if (url && navigatePreview) navigatePreview(url);
+    if (url && navigatePreview) {
+      navigatePreview(url, focusPreview);
+    }
     setPendingPreview(null);
   }, [
     conversationId,
+    focusPreview,
     navigatePreview,
     pendingPreview,
     project?.id,

@@ -10,13 +10,15 @@ export interface AttentionVisibilityContext {
 }
 
 export function workspaceAttentionObstructed(input: {
+  environmentOpen: boolean;
   paletteOpen: boolean;
   commitDialogOpen: boolean;
   authProviderOpen: boolean;
   multiSpawnOpen: boolean;
   mobileSidebarOpen: boolean;
 }): boolean {
-  return input.paletteOpen
+  return input.environmentOpen
+    || input.paletteOpen
     || input.commitDialogOpen
     || input.authProviderOpen
     || input.multiSpawnOpen

@@ -44,6 +44,7 @@ import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
+import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
@@ -62,6 +63,10 @@ import { createWorkspaceSceneModel } from "./components/workspace-scene/createWo
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
 import { requestComposerPrefill } from "./utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "./utils/subagentDisclosure";
+
+const focusPrimaryPreview = (): void => {
+  focusWorkspacePreviewAddress("primary");
+};
 
 function useDocumentActive(): boolean {
   const [active, setActive] = useState(
@@ -493,6 +498,7 @@ export default function App(): React.JSX.Element {
         workspaceVisible: view === "workspace",
         latestContentVisible,
         obstructed: workspaceAttentionObstructed({
+          environmentOpen: workspaceLayout.environmentOpen,
           paletteOpen, commitDialogOpen,
           authProviderOpen: authProviderId !== null,
           multiSpawnOpen: multiSpawn.open,
@@ -513,6 +519,7 @@ export default function App(): React.JSX.Element {
     authProviderId,
     commitDialogOpen,
     conversation?.id,
+    workspaceLayout.environmentOpen,
     latestContentVisible,
     mobileNavigation, multiSpawn.open,
     paletteOpen,
@@ -629,6 +636,7 @@ export default function App(): React.JSX.Element {
       setActionError,
       activateContext: activatePrimaryRunContext,
       navigatePreview: desktopTools.navigatePreview,
+      focusPreview: focusPrimaryPreview,
     }),
   );
   const {

@@ -9,7 +9,7 @@ import {
   parseUnifiedDiff,
 } from "../../../shared/diff-review";
 import type { RuntimeStore } from "../../database";
-import { getUnifiedDiff } from "../../git";
+import { getUnifiedDiff, GitError } from "../../git";
 import {
   buildReviewSummaryPrompt,
   DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS,
@@ -185,7 +185,10 @@ export function createIsolatedReviewCommandHandler(
             },
           });
         } catch (error) {
-          if (pending.cancelled) {
+          if (
+            pending.cancelled
+            && !(error instanceof GitError && error.code === "operation-failed")
+          ) {
             dependencies.send(socket, {
               type: "request.ok",
               requestId: command.requestId,

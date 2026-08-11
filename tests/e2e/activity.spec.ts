@@ -169,15 +169,19 @@ test("keeps preview and failed-run actions in Environment", async () => {
     await expect(environment.getByText("Lint fixture", { exact: false }))
       .toHaveCount(0);
 
-    await environment.getByRole("button", {
+    const openPreview = environment.getByRole("button", {
       name: "Open preview for Docs preview · npm run preview",
-    }).click();
+    });
+    await openPreview.focus();
+    await page.keyboard.press("Enter");
     await expect(page.getByRole("tab", { name: /Preview/u })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     await expect(page.getByRole("textbox", { name: "Preview address" }))
       .toHaveValue("http://127.0.0.1:4173/");
+    await expect(page.getByRole("textbox", { name: "Preview address" }))
+      .toBeFocused();
     await expectNoViewportOverflow();
     expect(rendererErrors).toEqual([]);
   } finally {

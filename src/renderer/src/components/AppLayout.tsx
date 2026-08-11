@@ -174,6 +174,7 @@ export function formatAppShortcutLabel(
 
 export function activeConversationIsVisible(input: {
   view: "workspace" | "settings";
+  environmentOpen: boolean;
   commitDialogOpen: boolean;
   pullRequestDialogOpen: boolean;
   multiSpawnOpen: boolean;
@@ -182,6 +183,7 @@ export function activeConversationIsVisible(input: {
   mobileSidebarOpen: boolean;
 }): boolean {
   return input.view === "workspace"
+    && !input.environmentOpen
     && !input.commitDialogOpen
     && !input.pullRequestDialogOpen
     && !input.multiSpawnOpen
@@ -379,6 +381,7 @@ export function AppLayout({
   }, [connection.status]);
   const activeConversationVisible = activeConversationIsVisible({
     view,
+    environmentOpen,
     commitDialogOpen,
     pullRequestDialogOpen,
     multiSpawnOpen: multiSpawn.open,

@@ -2193,7 +2193,7 @@ process.exit(child.status ?? 1);
     expect(detail.agentTurns).toEqual([]);
   });
 
-  summaryRuntimeIt("runs diff summaries in an isolated session, exposes Activity status, and cleans up without contaminating the thread", async () => {
+  summaryRuntimeIt("runs diff summaries in an isolated session, exposes workspace-run status, and cleans up without contaminating the thread", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
     const diff = await getUnifiedDiff(workspace);
@@ -2261,7 +2261,7 @@ process.exit(child.status ?? 1);
     expect(readdirSync(data).filter((name) => name.startsWith("read-only-summary-"))).toEqual([]);
   });
 
-  summaryRuntimeIt("deduplicates and explicitly cancels an active diff summary with recoverable Activity cleanup", async () => {
+  summaryRuntimeIt("deduplicates and explicitly cancels an active diff summary with recoverable workspace-run cleanup", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
     const diff = await getUnifiedDiff(workspace);

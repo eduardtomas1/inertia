@@ -185,6 +185,31 @@ describe("workspace pane authority", () => {
     expect(review.result.current.structuredDiff.files).toHaveLength(1);
   });
 
+  it("cancels only the active selection question for the viewed thread", async () => {
+    const request = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.ok",
+      requestId: crypto.randomUUID(),
+    }));
+    const review = renderHook(() => useWorkspaceReview({
+      project: alpha,
+      conversation: alphaChat,
+      detail: null,
+      gitDiff: null,
+      ignoreWhitespace: false,
+      confirmDestructiveActions: false,
+      request,
+      run: vi.fn(),
+      setGitDiff: vi.fn(),
+    }));
+
+    await act(async () => review.result.current.cancelDiffQuestion());
+
+    expect(request).toHaveBeenCalledWith({
+      type: "review.selection.cancel",
+      payload: { conversationId: alphaChat.id },
+    });
+  });
+
   it("blocks root commit clicks and Enter when the complete diff is truncated", () => {
     const review = renderHook(() => useWorkspaceReview({
       project: alpha,

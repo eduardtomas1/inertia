@@ -46,6 +46,7 @@ export type ChangesPanelProps = {
   onGenerateSummary?: () => Promise<void>;
   onCancelSummary?: () => Promise<void>;
   onAsk: (selection: DiffSelection, comment: string) => Promise<void>;
+  onCancelAsk?: () => Promise<void>;
   onRequestRevision: (selection: DiffSelection, comment: string) => Promise<void>;
   onRevert: (selection: DiffSelection, comment: string) => Promise<void>;
   onUndoReversal?: () => Promise<void>;
@@ -146,6 +147,7 @@ export function ChangesPanel({
   onGenerateSummary,
   onCancelSummary,
   onAsk,
+  onCancelAsk,
   onRequestRevision,
   onRevert,
   onUndoReversal,
@@ -162,6 +164,7 @@ export function ChangesPanel({
   const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [stoppingAsk, setStoppingAsk] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [activeHunkId, setActiveHunkId] = useState<string | null>(null);
@@ -215,9 +218,10 @@ export function ChangesPanel({
     setComment("");
     setSelectionError(null);
     setActiveHunkId(null);
+    setStoppingAsk(false);
   }, [structured.fingerprint, selectedPath]);
 
-  const clearSelection = () => { setSelection(null); setReviewAction(null); setComment(""); setSelectionError(null); };
+  const clearSelection = () => { setSelection(null); setReviewAction(null); setComment(""); setSelectionError(null); setStoppingAsk(false); };
   const chooseLine = (hunk: DiffHunk, index: number, extend: boolean) => {
     const start = extend && selection?.hunkId === hunk.id ? Math.min(selection.anchor, index) : index;
     const end = extend && selection?.hunkId === hunk.id ? Math.max(selection.anchor, index) : index;
@@ -497,7 +501,28 @@ export function ChangesPanel({
                                   <small>A complete, current diff and both Git layers will be revalidated before an immediate reversible backup and atomic file update.</small>
                                 </div>
                               )}
-                              <div><span>{selected.lineIds.length} selected lines</span><button type="submit" className="primary-button" disabled={submitting || (reviewAction === "note" && !comment.trim())}>{submitting ? <LoadingMark label={actionLabel(reviewAction)} /> : actionLabel(reviewAction)}</button></div>
+                              <div>
+                                <span>{selected.lineIds.length} selected lines</span>
+                                {reviewAction === "ask" && submitting && onCancelAsk ? (
+                                  <button
+                                    type="button"
+                                    className="subtle-button"
+                                    disabled={stoppingAsk}
+                                    onClick={() => {
+                                      setStoppingAsk(true);
+                                      void onCancelAsk().catch((error) => {
+                                        setSelectionError(error instanceof Error ? error.message : "The review question could not be stopped.");
+                                        setStoppingAsk(false);
+                                      });
+                                    }}
+                                  >
+                                    {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={12} />}
+                                    {stoppingAsk ? "Stopping…" : "Stop asking"}
+                                  </button>
+                                ) : (
+                                  <button type="submit" className="primary-button" disabled={submitting || (reviewAction === "note" && !comment.trim())}>{submitting ? <LoadingMark label={actionLabel(reviewAction)} /> : actionLabel(reviewAction)}</button>
+                                )}
+                              </div>
                             </form>
                           )}
                         </div>

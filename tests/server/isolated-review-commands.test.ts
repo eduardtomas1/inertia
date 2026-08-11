@@ -63,6 +63,7 @@ function deferred<Value>(): {
 function fixture(authority: ConversationWorkAuthority) {
   const start = vi.fn(() => true);
   const queue = vi.fn(() => ({ turn: { id: turnId } }));
+  const stopConversation = vi.fn(() => false);
   const dependencies = {
     store: {
       conversation: vi.fn(() => conversation),
@@ -73,7 +74,7 @@ function fixture(authority: ConversationWorkAuthority) {
       queue,
       start,
     },
-    isolatedRuns: { has: vi.fn(() => false) },
+    isolatedRuns: { has: vi.fn(() => false), stopConversation },
     secureFiles: {},
     dataDirectory: "/private/inertia-data",
     enableProviders: true,
@@ -82,7 +83,7 @@ function fixture(authority: ConversationWorkAuthority) {
     broadcastSnapshot: vi.fn(),
     send: vi.fn(),
   } as unknown as IsolatedReviewCommandDependencies;
-  return { dependencies, queue, start };
+  return { dependencies, queue, start, stopConversation };
 }
 
 describe("isolated review revision authority", () => {
@@ -123,6 +124,33 @@ describe("isolated review revision authority", () => {
     )).rejects.toThrow("Wait for the current agent");
 
     expect(reviewSupport.selectedReviewContext).not.toHaveBeenCalled();
+  });
+
+  it("cancels only an active selection question", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    const { dependencies, stopConversation } = fixture(authority);
+    stopConversation.mockReturnValue(true);
+
+    await expect(createIsolatedReviewCommandHandler(dependencies)(
+      {} as WebSocket,
+      {
+        type: "review.selection.cancel",
+        requestId,
+        payload: { conversationId },
+      },
+    )).resolves.toBe("handled");
+
+    expect(stopConversation).toHaveBeenCalledWith(
+      conversationId,
+      "selection-ask",
+    );
+    expect(dependencies.send).toHaveBeenCalledWith(
+      expect.anything(),
+      { type: "request.ok", requestId },
+    );
   });
 
   it("holds conversation ownership from diff read through turn start", async () => {

@@ -167,6 +167,14 @@ export function useWorkspaceReview({
     });
   }, [conversation, ignoreWhitespace, project, run]);
 
+  const cancelDiffQuestion = useCallback(async () => {
+    if (!conversation) return;
+    await request({
+      type: "review.selection.cancel",
+      payload: { conversationId: conversation.id },
+    });
+  }, [conversation, request]);
+
   const setDiffReviewState = useCallback(async (
     state: Omit<
       DiffReviewState,
@@ -413,6 +421,7 @@ export function useWorkspaceReview({
     reviewStates,
     reviewNotes,
     askAboutDiff,
+    cancelDiffQuestion,
     requestDiffRevision,
     setDiffReviewState,
     createDiffReviewNote,

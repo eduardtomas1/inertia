@@ -65,6 +65,7 @@ export function createIsolatedReviewCommandHandler(
   return defineRuntimeCommandHandler([
     "review.selection.ask",
     "review.selection.revise",
+    "review.selection.cancel",
     "review.summary.generate",
     "review.summary.cancel",
   ], async (socket, command) => {
@@ -173,6 +174,26 @@ export function createIsolatedReviewCommandHandler(
           }
           throw error;
         }
+        return "handled";
+      }
+      case "review.selection.cancel": {
+        const conversation = dependencies.store.conversation(
+          command.payload.conversationId,
+        );
+        if (
+          !dependencies.isolatedRuns.stopConversation(
+            conversation.id,
+            "selection-ask",
+          )
+        ) {
+          throw new RuntimeRequestError(
+            "This thread does not have an active review question.",
+          );
+        }
+        dependencies.send(socket, {
+          type: "request.ok",
+          requestId: command.requestId,
+        });
         return "handled";
       }
       case "review.selection.revise": {

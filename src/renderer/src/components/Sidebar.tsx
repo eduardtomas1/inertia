@@ -6,12 +6,11 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CircleAlert,
-  CircleDot,
   Columns2,
   Folder,
   FolderOpen,
   FolderPlus,
+  GitBranch,
   History,
   Layers3,
   ListTree,
@@ -30,6 +29,7 @@ import clsx from "clsx";
 import type { AppSnapshot, Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
 import { formatRelativeTime } from "../lib/format";
+import { agentRequestProviderName } from "../utils/agentInput";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -43,12 +43,15 @@ import {
   sidebarThreadViewMap,
   sortSidebarThreadViews,
   type SidebarThreadStatus,
+  type SidebarWorkSectionId,
 } from "../utils/sidebarModel";
+import { providerIcon } from "../utils/providerIcons";
 import { IconButton, LoadingMark } from "./ui";
 import { loadMultiSpawnDialog, loadSettingsView } from "./lazySurfaceLoaders";
 
 const ACTIVITY_HISTORY_PAGE = 10;
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
+const COLLAPSIBLE_WORK_SECTIONS = new Set<SidebarWorkSectionId>(["earlier", "done"]);
 
 type SidebarProps = {
   snapshot: AppSnapshot | null;
@@ -91,12 +94,6 @@ const statusLabels: Record<SidebarThreadStatus, string> = {
   completed: "Completed",
   idle: "Idle",
 };
-
-function StatusIcon({ status }: { status: SidebarThreadStatus }): React.JSX.Element {
-  if (status === "failed") return <CircleAlert size={12} />;
-  if (status === "completed") return <CheckCircle2 size={12} />;
-  return <CircleDot size={12} />;
-}
 
 function groupingLabel(mode: ProjectGroupingMode): string {
   if (mode === "repository") return "Repository";
@@ -145,9 +142,9 @@ function SidebarView({
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [historyVisible, setHistoryVisible] = useState(ACTIVITY_HISTORY_PAGE);
-  const [threadFilter, setThreadFilter] = useState<
-    "all" | "needs-you" | "working" | "unread" | "snoozed"
-  >("all");
+  const [expandedWorkSections, setExpandedWorkSections] = useState<Set<SidebarWorkSectionId>>(
+    new Set(),
+  );
   const conversations = snapshot?.conversations ?? EMPTY_CONVERSATIONS;
   const snoozeNow = useSnoozeClock(conversations);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -250,24 +247,30 @@ function SidebarView({
     const needle = query.trim().toLocaleLowerCase();
     return sortSidebarThreadViews(
       conversations
-        .filter((conversation) => (
-        !needle
-          || conversation.title.toLocaleLowerCase().includes(needle)
-          || projectById.get(conversation.projectId)?.name.toLocaleLowerCase().includes(needle)
-        ))
+        .filter((conversation) => {
+          if (!needle) return true;
+          const project = projectById.get(conversation.projectId);
+          const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
+            ?? agentRequestProviderName(conversation.providerId);
+          return [
+            conversation.title,
+            conversation.branch,
+            providerLabel,
+            project?.name,
+            project?.path,
+            project?.repositoryRoot,
+            project?.repositoryRelativePath,
+          ].some((value) => value?.toLocaleLowerCase().includes(needle));
+        })
         .map((conversation) => threadViewsById.get(conversation.id)!)
         .filter((thread) => {
           const snoozed = Boolean(
             thread.conversation.snoozedUntil
             && Date.parse(thread.conversation.snoozedUntil) > snoozeNow,
           );
-          if (threadFilter === "snoozed") return snoozed;
           if (snoozed && !thread.needsAttention && thread.status !== "working") {
             return false;
           }
-          if (threadFilter === "needs-you") return thread.needsAttention;
-          if (threadFilter === "working") return thread.status === "working";
-          if (threadFilter === "unread") return thread.unread;
           return true;
         }),
     );
@@ -276,17 +279,17 @@ function SidebarView({
     query,
     conversations,
     snoozeNow,
+    snapshot?.settings.providerIdentityLabels,
     threadViewsById,
-    threadFilter,
   ]);
-  const { activeThreads, settledThreads, workSections } = useMemo(() => ({
-    activeThreads: activityThreads.filter(
-      ({ hidden, settled }) => !settled && !hidden,
-    ),
-    settledThreads: activityThreads.filter(({ settled }) => settled),
-    workSections: groupWorkThreads(activityThreads),
-  }), [activityThreads]);
-  const visibleHistory = settledThreads.slice(0, historyVisible);
+  const workSections = useMemo(
+    () => groupWorkThreads(activityThreads, snoozeNow),
+    [activityThreads, snoozeNow],
+  );
+  const visibleWorkCount = workSections.reduce(
+    (count, section) => count + section.threads.length,
+    0,
+  );
   const activeRenameProject = renamingProject ? projectById.get(renamingProject) : undefined;
 
   const toggleExpanded = (projectId: string) => {
@@ -482,16 +485,37 @@ function SidebarView({
     </form>
   );
 
-  const activityRow = (conversation: Conversation, variant: "card" | "history") => {
+  const activityRow = (conversation: Conversation) => {
     const model = threadViewsById.get(conversation.id)
       ?? sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
     const project = projectById.get(conversation.projectId);
     const isActive = snapshot?.activeConversationId === conversation.id && view === "workspace";
+    const ProviderIcon = providerIcon(conversation.providerId);
+    const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
+      ?? agentRequestProviderName(conversation.providerId);
+    const repositoryName = project?.repositoryRoot
+      ?.split(/[\\/]/u)
+      .filter(Boolean)
+      .at(-1);
+    const repositoryLabel = repositoryName && project
+      ? project.repositoryRelativePath && project.repositoryRelativePath !== "."
+        ? `${repositoryName}/${project.repositoryRelativePath}`
+        : repositoryName.toLocaleLowerCase() !== project.name.toLocaleLowerCase()
+          ? repositoryName
+          : null
+      : null;
+    const accessibleContext = [
+      conversation.title,
+      providerLabel,
+      project?.name ?? "Unknown project",
+      repositoryLabel ? `Repository ${repositoryLabel}` : null,
+      conversation.branch ? `Branch ${conversation.branch}` : null,
+      statusLabels[model.status],
+    ].filter((value): value is string => Boolean(value)).join(", ");
     return (
       <div
         className={clsx(
           "activity-thread",
-          `is-${variant}`,
           `status-${model.status}`,
           isActive && "is-active",
           splitConversationId === conversation.id && "is-split",
@@ -504,29 +528,45 @@ function SidebarView({
             type="button"
             className="activity-thread-select"
             data-sidebar-nav
-            aria-label={`${conversation.title}, ${statusLabels[model.status]}`}
+            aria-current={isActive ? "page" : undefined}
+            aria-label={accessibleContext}
             onClick={() => activateConversation(conversation)}
           >
-            <span className="activity-thread-topline">
-              <span className="activity-thread-title">{conversation.title}</span>
-              {conversation.pinnedAt && <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />}
-              <time dateTime={conversation.updatedAt}>{formatRelativeTime(conversation.updatedAt)}</time>
+            <span
+              className="activity-thread-provider"
+              data-provider-id={conversation.providerId}
+              title={`${providerLabel} provider`}
+              aria-hidden="true"
+            >
+              <ProviderIcon size={15} strokeWidth={1.9} />
+              <span className="activity-thread-state-mark" />
             </span>
-            {variant === "card" && (
-              <span className="work-thread-meta">
-                <span className={clsx("thread-status-label", `is-${model.status}`)}>
-                  <StatusIcon status={model.status} />
-                  {statusLabels[model.status]}
-                  {model.unread && <span className="thread-unread-mark">Unread</span>}
-                </span>
-                <span className="activity-thread-context">
-                  <span><Folder size={12} />{project?.name ?? "Unknown project"}</span>
-                </span>
+            <span className="activity-thread-copy">
+              <span className="activity-thread-topline">
+                <span className="activity-thread-title">{conversation.title}</span>
+                {conversation.pinnedAt && <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />}
+                {model.unread && <span className="thread-unread-mark">New</span>}
+                <time dateTime={conversation.updatedAt}>{formatRelativeTime(conversation.updatedAt)}</time>
               </span>
-            )}
-            {variant === "history" && (
-              <span className="activity-history-context">{project?.name ?? "Unknown project"} · {statusLabels[model.status]}</span>
-            )}
+              <span className="work-thread-meta">
+                <span className="activity-thread-provider-label">{providerLabel}</span>
+                <span className="activity-thread-project-meta" title={project?.path}>
+                  <Folder size={10} aria-hidden="true" />
+                  {project?.name ?? "Unknown project"}
+                </span>
+                {repositoryLabel && (
+                  <span className="activity-thread-repository-meta" title={project?.repositoryRoot ?? undefined}>
+                    {repositoryLabel}
+                  </span>
+                )}
+                {conversation.branch && (
+                  <span className="activity-thread-branch-meta" title={`Branch ${conversation.branch}`}>
+                    <GitBranch size={10} aria-hidden="true" />
+                    {conversation.branch}
+                  </span>
+                )}
+              </span>
+            </span>
           </button>
         )}
         <IconButton
@@ -612,27 +652,6 @@ function SidebarView({
           {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
         </div>
 
-        {sidebarMode === "activity" && (
-          <div className="thread-filter-bar" role="group" aria-label="Filter conversations">
-            {([
-              ["all", "All"],
-              ["needs-you", "Needs you"],
-              ["working", "Running"],
-              ["unread", "Unread"],
-              ["snoozed", "Snoozed"],
-            ] as const).map(([id, label]) => (
-              <button
-                type="button"
-                aria-pressed={threadFilter === id}
-                onClick={() => setThreadFilter(id)}
-                key={id}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-
         {activeRenameProject && (
           <form
             className="sidebar-project-rename"
@@ -650,12 +669,14 @@ function SidebarView({
           </form>
         )}
 
-        <div className="sidebar-section-title">
-          <span>{sidebarMode === "activity" ? "Conversations" : "Projects"}</span>
-          <IconButton label="Add project" disabled={busy || connectionStatus !== "online"} onClick={onImportProject}>
-            {busy ? <LoadingMark label="Adding project" /> : <FolderPlus size={15} />}
-          </IconButton>
-        </div>
+        {sidebarMode === "classic" && (
+          <div className="sidebar-section-title">
+            <span>Projects</span>
+            <IconButton label="Add project" disabled={busy || connectionStatus !== "online"} onClick={onImportProject}>
+              {busy ? <LoadingMark label="Adding project" /> : <FolderPlus size={15} />}
+            </IconButton>
+          </div>
+        )}
 
         <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} role="list" aria-label={sidebarMode === "activity" ? "Work" : "Projects"}>
           {!snapshot && <div className="sidebar-loading"><LoadingMark label="Loading projects" /><span>Opening your workspace…</span></div>}
@@ -787,29 +808,52 @@ function SidebarView({
 
           {sidebarMode === "activity" && snapshot && (
             <div className="activity-thread-stream">
-              {activeThreads.length === 0 && settledThreads.length === 0 && (
+              {visibleWorkCount === 0 && (
                 <div className="sidebar-empty">
                   <Activity size={19} />
                   <span>{query ? "No matching work" : snapshot.projects.length === 0 ? "No projects yet" : "No work yet"}</span>
                 </div>
               )}
-              {workSections.map((section) => section.threads.length > 0 && (
-                <section className={`work-thread-section is-${section.id}`} aria-labelledby={`work-section-${section.id}`} key={section.id}>
-                  <h2 id={`work-section-${section.id}`}><span>{section.label}</span><span>{section.threads.length}</span></h2>
-                  {section.threads.map(({ conversation }) => activityRow(conversation, "card"))}
-                </section>
-              ))}
-              {settledThreads.length > 0 && (
-                <>
-                  <div className="activity-history-heading"><History size={12} /><span>History</span><span>{settledThreads.length}</span></div>
-                  {visibleHistory.map(({ conversation }) => activityRow(conversation, "history"))}
-                  {visibleHistory.length < settledThreads.length && (
-                    <button type="button" className="activity-show-more" onClick={() => setHistoryVisible((count) => count + ACTIVITY_HISTORY_PAGE)}>
-                      Show more <span>{settledThreads.length - visibleHistory.length} older</span>
-                    </button>
-                  )}
-                </>
-              )}
+              {workSections.map((section) => {
+                if (section.threads.length === 0) return null;
+                const collapsible = COLLAPSIBLE_WORK_SECTIONS.has(section.id);
+                const expanded = !collapsible || Boolean(query.trim()) || expandedWorkSections.has(section.id);
+                const visibleThreads = section.id === "done"
+                  ? section.threads.slice(0, historyVisible)
+                  : section.threads;
+                return (
+                  <section className={`work-thread-section is-${section.id}`} aria-labelledby={`work-section-${section.id}`} key={section.id}>
+                    {collapsible ? (
+                      <h2 id={`work-section-${section.id}`}>
+                        <button
+                          type="button"
+                          className="work-thread-section-toggle"
+                          data-sidebar-nav
+                          aria-expanded={expanded}
+                          onClick={() => setExpandedWorkSections((current) => {
+                            const next = new Set(current);
+                            if (next.has(section.id)) next.delete(section.id);
+                            else next.add(section.id);
+                            return next;
+                          })}
+                        >
+                          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          <span>{section.label}</span>
+                          <span>{section.threads.length}</span>
+                        </button>
+                      </h2>
+                    ) : (
+                      <h2 id={`work-section-${section.id}`}><span>{section.label}</span><span>{section.threads.length}</span></h2>
+                    )}
+                    {expanded && visibleThreads.map(({ conversation }) => activityRow(conversation))}
+                    {expanded && section.id === "done" && visibleThreads.length < section.threads.length && (
+                      <button type="button" className="activity-show-more" onClick={() => setHistoryVisible((count) => count + ACTIVITY_HISTORY_PAGE)}>
+                        Show more <span>{section.threads.length - visibleThreads.length} older</span>
+                      </button>
+                    )}
+                  </section>
+                );
+              })}
             </div>
           )}
         </div>

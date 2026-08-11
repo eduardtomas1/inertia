@@ -80,7 +80,7 @@ export interface SidebarThreadView {
   settled: boolean;
 }
 
-export type SidebarWorkSectionId = "needs-you" | "in-progress" | "recent";
+export type SidebarWorkSectionId = "recent" | "yesterday" | "earlier" | "done";
 
 export interface SidebarWorkSection {
   id: SidebarWorkSectionId;
@@ -252,25 +252,57 @@ export function sortSidebarThreadViews(
     ));
 }
 
-export function groupWorkThreads(threads: readonly SidebarThreadView[]): SidebarWorkSection[] {
+function localCalendarDayOffset(value: string, now: number): number {
+  const date = new Date(value);
+  const current = new Date(now);
+  if (!Number.isFinite(date.getTime()) || !Number.isFinite(current.getTime())) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const dateDay = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  ).getTime();
+  const currentDay = new Date(
+    current.getFullYear(),
+    current.getMonth(),
+    current.getDate(),
+  ).getTime();
+  return Math.round((currentDay - dateDay) / 86_400_000);
+}
+
+export function groupWorkThreads(
+  threads: readonly SidebarThreadView[],
+  now = Date.now(),
+): SidebarWorkSection[] {
   const active = threads.filter(({ hidden, settled }) => !settled && !hidden);
+  const done = threads.filter(({ settled }) => settled);
+  const dayOffset = ({ conversation }: SidebarThreadView) => (
+    localCalendarDayOffset(conversation.updatedAt, now)
+  );
+  const urgent = ({ needsAttention, status }: SidebarThreadView) => (
+    needsAttention || status === "working"
+  );
   return [
-    {
-      id: "needs-you",
-      label: "Needs you",
-      threads: active.filter(({ needsAttention }) => needsAttention),
-    },
-    {
-      id: "in-progress",
-      label: "In progress",
-      threads: active.filter(({ status }) => status === "working"),
-    },
     {
       id: "recent",
       label: "Recent",
-      threads: active.filter(({ needsAttention, status }) => (
-        !needsAttention && status !== "working" && status !== "approval" && status !== "input"
-      )),
+      threads: active.filter((thread) => urgent(thread) || dayOffset(thread) <= 0),
+    },
+    {
+      id: "yesterday",
+      label: "Yesterday",
+      threads: active.filter((thread) => !urgent(thread) && dayOffset(thread) === 1),
+    },
+    {
+      id: "earlier",
+      label: "Earlier",
+      threads: active.filter((thread) => !urgent(thread) && dayOffset(thread) > 1),
+    },
+    {
+      id: "done",
+      label: "Done",
+      threads: done,
     },
   ];
 }

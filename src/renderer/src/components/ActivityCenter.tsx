@@ -9,25 +9,20 @@ import {
 } from "react";
 import {
   Activity,
-  Bot,
   Check,
   CheckCircle2,
   ChevronDown,
   CircleDot,
-  Code2,
-  Command,
   ExternalLink,
   FolderOpen,
   GitBranch,
   MessageSquare,
-  MousePointer2,
   RotateCcw,
   Square,
   TerminalSquare,
   Trash2,
   TriangleAlert,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import type {
   Conversation,
@@ -47,6 +42,7 @@ import {
 } from "../utils/activityCenter";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { agentRequestProviderName } from "../utils/agentInput";
+import { providerIcon } from "../utils/providerIcons";
 import { IconButton } from "./ui";
 
 type ActivityCenterProps = {
@@ -160,13 +156,6 @@ function RunState({ run }: { run: WorkspaceRun }): React.JSX.Element {
   return <CircleDot size={13} aria-hidden="true" />;
 }
 
-const activityProviderIcons: Readonly<Record<ProviderId, LucideIcon>> = {
-  codex: Command,
-  claude: Bot,
-  cursor: MousePointer2,
-  opencode: Code2,
-};
-
 function RunIdentityIcon({
   run,
   providerId,
@@ -175,7 +164,7 @@ function RunIdentityIcon({
   providerId: ProviderId | null;
 }): React.JSX.Element {
   const IdentityIcon = providerId
-    ? activityProviderIcons[providerId]
+    ? providerIcon(providerId)
     : run.kind === "source-control"
       ? GitBranch
       : run.kind === "check"

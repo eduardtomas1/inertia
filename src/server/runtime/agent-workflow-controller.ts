@@ -530,7 +530,7 @@ export class AgentWorkflowController {
             this.nativeGoalRefreshWarnings.delete(input.conversationId);
             return current;
           }
-          const stored = this.store.mergeNativeAgentGoal(candidate).goal;
+          const stored = this.store.mergeNativeAgentGoal(candidate, true).goal;
           if (!stored) {
             throw new RuntimeRequestError(
               "The Codex goal changed before the update could be stored.",

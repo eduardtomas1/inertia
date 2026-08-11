@@ -96,6 +96,7 @@ function sameNativeGoalPayload(left: AgentGoal, right: AgentGoal): boolean {
 function harness(options: {
   current?: Conversation;
   goals?: AgentGoal[];
+  nativeGoalTombstone?: AgentGoal;
   now?: Date;
   claudeSkills?: Array<{
     name: string;
@@ -121,6 +122,7 @@ function harness(options: {
 } {
   const current = options.current ?? conversation();
   const goals = [...(options.goals ?? [])];
+  let nativeGoalTombstone = options.nativeGoalTombstone;
   const clear = vi.fn((
     conversationId: string,
     source: AgentGoal["source"],
@@ -144,6 +146,13 @@ function harness(options: {
       goal: AgentGoal,
       authoritativeMutation = false,
     ) => {
+      if (
+        !authoritativeMutation
+        && nativeGoalTombstone?.providerSessionId === goal.providerSessionId
+        && nativeGoalTombstone.updatedAt >= goal.updatedAt
+      ) {
+        return { goal: null, changed: false };
+      }
       const existing = goals.find(({ source }) => source === "codex-native");
       if (
         existing
@@ -160,6 +169,7 @@ function harness(options: {
       }
       clear(goal.conversationId, goal.source);
       goals.push(goal);
+      nativeGoalTombstone = undefined;
       return { goal, changed: true };
     }),
     clearAgentGoal: clear,
@@ -376,6 +386,46 @@ describe("AgentWorkflowController", () => {
       tokensUsed: 500,
     });
     expect(runtime.goals).toEqual([terminal]);
+  });
+
+  it("persists a confirmed recreation across an equal-revision clear tombstone", async () => {
+    const recreated = nativeGoal({
+      objective: "Recreate after clear",
+      status: "active",
+      tokenBudget: 12_000,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    });
+    const runtime = harness({ nativeGoalTombstone: recreated });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => ({
+        objective: recreated.objective,
+        status: recreated.status,
+        tokenBudget: recreated.tokenBudget,
+        tokensUsed: recreated.tokensUsed!,
+        timeUsedSeconds: recreated.timeUsedSeconds!,
+        createdAt: recreated.createdAt,
+        updatedAt: recreated.updatedAt,
+      })),
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: recreated.objective,
+      status: "active",
+      tokenBudget: recreated.tokenBudget,
+    })).resolves.toMatchObject({
+      objective: "Recreate after clear",
+      status: "active",
+    });
+    expect(runtime.goals).toEqual([expect.objectContaining({
+      objective: "Recreate after clear",
+      status: "active",
+    })]);
   });
 
   it("routes an active native goal clear through its exact live run", async () => {

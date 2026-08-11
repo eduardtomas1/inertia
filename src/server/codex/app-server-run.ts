@@ -794,9 +794,9 @@ export async function openCodexTurn({
     } finally {
       endGoalMutation(true);
     }
-    if (terminalGoalStart) {
+    if (terminalGoalStart && phase() === "starting-turn") {
       finish("completed", 0, null);
-    } else {
+    } else if (!terminalGoalStart) {
       awaitInitialGoalTurn();
     }
     return;

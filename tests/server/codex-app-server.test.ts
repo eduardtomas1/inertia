@@ -224,6 +224,19 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       ]);
       return;
     }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-after-start") {
+      turnId = "goal-terminal-after-start-turn";
+      sendBatch([
+        { id: message.id, result: { goal } },
+        { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+        { method: "thread/goal/updated", params: { threadId, turnId, goal: { ...goal, status: "budgetLimited", tokenBudget: 12_000, tokensUsed: 12_000, updatedAt: 1800000001 } } },
+      ]);
+      setTimeout(() => {
+        send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-terminal-message", delta: "Final goal turn output." } });
+        send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      }, 10);
+      return;
+    }
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-clear-response-ordering") {
       sendBatch([
         { id: message.id, result: { goal } },
@@ -1136,6 +1149,33 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
 
     expect(manager.isRunning("conversation-goal-terminal-start")).toBe(false);
+  });
+
+  it("lets an already-started goal turn drain after a terminal update", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-terminal-after-start";
+    const manager = trackedManager(fake.command);
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-terminal-running",
+      cwd: fake.root,
+      prompt: "/goal Finish the running turn",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-terminal-running",
+      goalStart: {
+        objective: "Finish the running turn",
+        tokenBudget: 12_000,
+      },
+      goalContinuationExpected: true,
+    }))).resolves.toMatchObject({
+      status: "completed",
+      text: "Final goal turn output.",
+    });
+
+    expect(manager.isRunning("conversation-goal-terminal-running")).toBe(false);
   });
 
   it("interrupts an automatic goal turn while preserving its active snapshot", async () => {

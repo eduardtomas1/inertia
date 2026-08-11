@@ -102,7 +102,7 @@ class FakeProvider implements IsolatedRunProviderRuntime {
     graceMs: number | undefined;
   }> = [];
   readonly pending: Deferred<ProviderRunResult>[] = [];
-  settleStop = false;
+  settleStop = true;
 
   resolveModelRoute = resolveNativeModelRoute;
 
@@ -151,6 +151,7 @@ function resultFor(
     textTruncated: false,
     exitCode: status === "failed" ? 1 : 0,
     signal: null,
+    cleanupConfirmed: true,
   };
 }
 
@@ -309,6 +310,43 @@ describe("IsolatedRunController", () => {
     expect(fileSystem.remove).toHaveBeenCalledOnce();
     expect(controller.has("conversation-1")).toBe(false);
     expect(transcript).toEqual(["What changed?", "Answer"]);
+  });
+
+  it("retains an isolated run whose completed result lacks cleanup proof", async () => {
+    const store = new FakeStore();
+    const provider = new FakeProvider();
+    provider.settleStop = false;
+    const fileSystem = fakeFileSystem();
+    const onResult = vi.fn(() => "unsafe");
+    const controller = new IsolatedRunController(
+      store,
+      provider,
+      "/private/inertia-data",
+      vi.fn(),
+      { id: ids(), fileSystem },
+    );
+    const running = controller.run(request({}, { onResult }));
+    await providerStarted(provider);
+    const input = provider.inputs[0]!;
+
+    provider.pending[0]?.resolve({
+      ...resultFor(input),
+      cleanupConfirmed: false,
+    });
+
+    await expect(running).rejects.toThrow(
+      "Provider process cleanup could not be confirmed.",
+    );
+    expect(onResult).not.toHaveBeenCalled();
+    expect(store.updates).toEqual([]);
+    expect(fileSystem.remove).not.toHaveBeenCalled();
+    expect(controller.has("conversation-1")).toBe(true);
+    await expect(controller.run(request({}))).rejects.toThrow(
+      "already running for this thread",
+    );
+    await expect(controller.dispose()).rejects.toThrow(
+      "Isolated provider cleanup remains unconfirmed.",
+    );
   });
 
   it("preserves an explicit custom backend route instead of falling back to the native harness backend", async () => {

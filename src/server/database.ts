@@ -65,7 +65,7 @@ import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
-import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository";
+import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
 import { ProjectRepository } from "./persistence/project-repository";
 import {
   PairedLaunchRepository,
@@ -132,7 +132,7 @@ export class RuntimeStore {
   readonly conversationWorktrees: ConversationWorktreeRepository;
   private readonly executionLedgerRepository: ExecutionLedgerRepository;
   private readonly gitArtifactRepository: GitArtifactRepository;
-  private readonly providerMetadataRepository: ProviderMetadataRepository;
+  private readonly providerMetadataRepository: ProviderMetadataRepository; readonly providerRunOwnership: ProviderRunOwnershipRepository;
   private readonly projectRepository: ProjectRepository;
   private readonly pairedLaunchRepository: PairedLaunchRepository;
   private readonly recoveryRepository: RecoveryRepository;
@@ -185,7 +185,7 @@ export class RuntimeStore {
       requireConversation: (conversationId) =>
         this.requireConversation(conversationId),
     });
-    this.providerMetadataRepository = new ProviderMetadataRepository(this.database);
+    this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
     this.projectRepository = new ProjectRepository({

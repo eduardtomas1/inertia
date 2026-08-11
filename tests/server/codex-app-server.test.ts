@@ -1497,7 +1497,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         },
       });
     }
-    expect(manager.activeConversationIds()).toEqual([]);
+    if (scenario === "premature-exit") {
+      expect(manager.activeConversationIds()).toEqual([
+        "conversation-premature-exit",
+      ]);
+      managers.splice(managers.indexOf(manager), 1);
+      await expect(manager.disposeAll()).rejects.toThrow(
+        "Provider process cleanup could not be confirmed.",
+      );
+    } else {
+      expect(manager.activeConversationIds()).toEqual([]);
+    }
   });
 
   it("classifies a parent-observed transport close and cleans up the live process", async () => {
@@ -1557,6 +1567,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         signal: "SIGTERM",
         failure: { reason: "process-signal" },
       });
+    }
+    if (signalManager.activeConversationIds().length > 0) {
+      expect(signalManager.activeConversationIds()).toEqual([
+        "conversation-signal",
+      ]);
+      managers.splice(managers.indexOf(signalManager), 1);
+      await expect(signalManager.disposeAll()).rejects.toThrow(
+        "Provider process cleanup could not be confirmed.",
+      );
     }
 
     const terminalFake = fakeAppServer();

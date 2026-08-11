@@ -212,11 +212,6 @@ export class DuoLaunchCoordinator {
     }
     this.store.requestPairedLaunchCancellation(launchId);
     const latest = this.store.pairedLaunch(launchId);
-    const cancelledTurnIds = new Set<string>();
-    if (
-      this.cancelComparisonProviderTurn(latest)
-      && latest.comparison?.turnId
-    ) cancelledTurnIds.add(latest.comparison.turnId);
     if (
       latest.state === "cancelled"
       || latest.state === "failed"
@@ -226,25 +221,15 @@ export class DuoLaunchCoordinator {
       if (!await this.reconcileInactiveLaunchTurns(
         latest,
         false,
-        cancelledTurnIds,
       )) {
         return publicStatus(this.store, this.store.pairedLaunch(launchId));
       }
       this.store.cancelPairedLaunchComparison(launchId);
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
     }
-    for (const { conversationId, turnId } of latest.sides) {
-      if (
-        conversationId
-        && this.turns.cancel(conversationId)
-        && turnId
-      ) cancelledTurnIds.add(turnId);
-    }
-    await this.waitForLaunchProviderCleanup(latest);
     if (!await this.reconcileInactiveLaunchTurns(
       latest,
       false,
-      cancelledTurnIds,
     )) {
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
     }
@@ -273,23 +258,9 @@ export class DuoLaunchCoordinator {
   async acknowledgeInterrupted(launchId: string): Promise<DuoLaunchStatus> {
     const current = this.store.pairedLaunch(launchId);
     if (current.state === "interrupted") {
-      const cancelledTurnIds = new Set<string>();
-      for (const { conversationId, turnId } of current.sides) {
-        if (
-          conversationId
-          && this.turns.cancel(conversationId)
-          && turnId
-        ) cancelledTurnIds.add(turnId);
-      }
-      if (
-        this.cancelComparisonProviderTurn(current)
-        && current.comparison?.turnId
-      ) cancelledTurnIds.add(current.comparison.turnId);
-      await this.waitForLaunchProviderCleanup(current);
       if (!await this.reconcileInactiveLaunchTurns(
         current,
         false,
-        cancelledTurnIds,
       )) {
         return publicStatus(this.store, this.store.pairedLaunch(launchId));
       }
@@ -322,11 +293,14 @@ export class DuoLaunchCoordinator {
         { conversationId },
         MAX_DUO_DELETION_RECOVERIES,
       ),
-      authorizedCheckoutReservationId,
+      [authorizedCheckoutReservationId],
     );
   }
 
-  reconcileProjectDeletion(projectId: string): Promise<boolean> {
+  reconcileProjectDeletion(
+    projectId: string,
+    authorizedCheckoutReservationIds: readonly string[] = [],
+  ): Promise<boolean> {
     return reconcileDuoDeletionLaunches(
       this.store,
       this.turns,
@@ -334,6 +308,7 @@ export class DuoLaunchCoordinator {
         { projectId },
         MAX_DUO_DELETION_RECOVERIES,
       ),
+      authorizedCheckoutReservationIds,
     );
   }
 
@@ -415,16 +390,9 @@ export class DuoLaunchCoordinator {
 
   async cancelComparison(launchId: string): Promise<DuoLaunchStatus> {
     const launch = this.store.pairedLaunch(launchId);
-    const cancelledTurnIds = new Set<string>();
-    if (
-      this.cancelComparisonProviderTurn(launch)
-      && launch.comparison?.turnId
-    ) cancelledTurnIds.add(launch.comparison.turnId);
-    await this.waitForLaunchProviderCleanup(launch, true);
     if (!await this.reconcileInactiveLaunchTurns(
       launch,
       true,
-      cancelledTurnIds,
     )) {
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
     }
@@ -458,7 +426,7 @@ export class DuoLaunchCoordinator {
   private async reconcileInactiveLaunchTurns(
     launch: ReturnType<RuntimeStore["pairedLaunch"]>,
     comparisonOnly = false,
-    providerCleanupConfirmedTurnIds: ReadonlySet<string> = new Set(),
+    providerRunOwnershipConfirmedTurnIds: ReadonlySet<string> = new Set(),
     allowProviderStop = true,
   ): Promise<boolean> {
     return reconcileInactiveDuoLaunchTurns(
@@ -467,7 +435,7 @@ export class DuoLaunchCoordinator {
       launch,
       {
         comparisonOnly,
-        providerCleanupConfirmedTurnIds,
+        providerRunOwnershipConfirmedTurnIds,
         allowProviderStop,
       },
     );

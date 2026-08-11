@@ -80,6 +80,7 @@ class RecoveryProvider implements TurnProviderRuntime {
   >();
   ambiguousIdentity: { runId: string; turnId: string | null } | null = null;
   deferStops = false;
+  forceDetachStops = false;
 
   resolveModelRoute = resolveNativeModelRoute;
 
@@ -107,13 +108,19 @@ class RecoveryProvider implements TurnProviderRuntime {
   stopOwned(
     conversationId: string,
     identity: { runId: string; turnId: string | null },
-  ): Promise<"missing" | "identity-mismatch" | "settled"> {
+    _graceMs?: number,
+  ): Promise<
+    "missing" | "identity-mismatch" | "settled" | "force-detached"
+  > {
     const active = this.ambiguousIdentity ?? this.active.get(conversationId);
     if (!active) return Promise.resolve("missing");
     if (
       active.runId !== identity.runId
       || active.turnId !== identity.turnId
     ) return Promise.resolve("identity-mismatch");
+    if (this.forceDetachStops) {
+      return Promise.resolve("force-detached");
+    }
     if (!this.deferStops) {
       this.active.delete(conversationId);
       this.ambiguousIdentity = null;
@@ -135,6 +142,14 @@ class RecoveryProvider implements TurnProviderRuntime {
 
   isRunning(conversationId: string): boolean {
     return this.ambiguousIdentity !== null || this.active.has(conversationId);
+  }
+
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string | null },
+  ): boolean {
+    const active = this.ambiguousIdentity ?? this.active.get(conversationId);
+    return active?.runId === identity.runId && active.turnId === identity.turnId;
   }
 
   respondToApproval(
@@ -764,13 +779,40 @@ describe("inactive Duo turn recovery", () => {
         requestId: randomUUID(),
         payload: { projectId: runtime.projectId },
       },
-    )).rejects.toThrow(/Cancel the active Duo launch/u);
+    )).rejects.toThrow(/Stop active work/u);
     for (const { id } of prepared.conversations.sides) {
       runtime.provider.releaseStop(id);
     }
     await expect(cancellation).resolves.toMatchObject({ state: "cancelled" });
     expect(() => runtime.store.assertProjectDeletionAllowed(runtime.projectId))
       .not.toThrow();
+  });
+
+  it("keeps an active Duo blocked across retries when provider termination is force-detached", async () => {
+    const runtime = await createRuntime();
+    const prepared = prepareLaunch(runtime);
+    expect((await coordinator(runtime).dispatch(prepared.launchId)).state)
+      .toBe("running");
+    runtime.provider.forceDetachStops = true;
+
+    await expect(coordinator(runtime).cancel(prepared.launchId)).resolves
+      .toMatchObject({ state: "running", cancelRequested: true });
+    expect(runtime.provider.active.size).toBe(2);
+    await expect(coordinator(runtime).cancel(prepared.launchId)).resolves
+      .toMatchObject({ state: "running", cancelRequested: true });
+    for (const conversationId of prepared.conversations.sides.map(({ id }) => id)) {
+      expect(runtime.controller.isActive(conversationId)).toBe(true);
+      expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(true);
+    }
+    await expect(projectHandler(runtime)(
+      {} as never,
+      {
+        type: "project.remove",
+        requestId: randomUUID(),
+        payload: { projectId: runtime.projectId },
+      },
+    )).rejects.toThrow(/Stop active work/u);
+    expect(runtime.store.project(runtime.projectId).id).toBe(runtime.projectId);
   });
 
   it("preflights a resumed project terminal before making any ghost repair mutation", async () => {

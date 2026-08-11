@@ -76,6 +76,58 @@ export class ConversationWorkAuthority {
     );
   }
 
+  reserveProviderCheckouts(
+    reservationPrefix: string,
+    workspaces: readonly ConversationWorkspaceIdentity[],
+  ): string[] | null {
+    const distinct = new Map<string, ConversationWorkspaceIdentity>();
+    for (const workspace of workspaces) {
+      const identity = canonicalCheckoutIdentity(workspace.checkoutPath);
+      if (!distinct.has(identity)) distinct.set(identity, workspace);
+    }
+    const ordered = [...distinct.entries()].sort(([left], [right]) =>
+      left.localeCompare(right));
+    const reservations = ordered.map(([, workspace], index) => ({
+      id: `${reservationPrefix}:${index}`,
+      workspace,
+    }));
+    if (reservations.some(({ id, workspace }) => (
+      this.workspaceByReservation.has(id)
+      || this.hasCheckout(workspace.checkoutPath)
+    ))) return null;
+
+    const acquired: string[] = [];
+    for (const { id, workspace } of reservations) {
+      if (!this.reserveAtCheckout(
+        id,
+        workspace.projectId,
+        workspace.checkoutPath,
+      )) {
+        for (const reservationId of acquired) this.release(reservationId);
+        return null;
+      }
+      acquired.push(id);
+    }
+    return acquired;
+  }
+
+  providerReservationsExactlyCover(
+    reservationIds: readonly string[],
+    workspaces: readonly ConversationWorkspaceIdentity[],
+  ): boolean {
+    const expected = new Set(workspaces.map(({ checkoutPath }) =>
+      canonicalCheckoutIdentity(checkoutPath)));
+    if (reservationIds.length !== expected.size) return false;
+    const actual = new Set<string>();
+    for (const reservationId of reservationIds) {
+      const reservation = this.workspaceByReservation.get(reservationId);
+      if (!reservation || reservation.kind !== "provider") return false;
+      actual.add(reservation.checkoutIdentity);
+    }
+    return actual.size === expected.size
+      && [...actual].every((identity) => expected.has(identity));
+  }
+
   reserveCheckout(
     reservationId: string,
     projectId: string,

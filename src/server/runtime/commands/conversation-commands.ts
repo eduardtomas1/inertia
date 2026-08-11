@@ -623,6 +623,13 @@ export function createConversationCommandHandler(
           );
         }
         try {
+          if (dependencies.store.providerRunOwnership.forConversation(
+            conversation.id,
+          ).length > 0) {
+            throw new RuntimeRequestError(
+              "Provider process cleanup is unconfirmed. Keep this thread and its checkout until Inertia confirms the prior runtime process tree stopped.",
+            );
+          }
           if (
             dependencies.duoLaunches
             && !await dependencies.duoLaunches.reconcileConversationDeletion(

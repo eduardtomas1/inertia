@@ -45,6 +45,7 @@ import {
   openCodeQuestions,
 } from "./opencode-boundary";
 import {
+  OpenCodeServerCleanupUnconfirmedError,
   startOwnedOpenCodeServer,
   waitForOpenCodeHealth,
   withOpenCodeRequestDeadline,
@@ -355,6 +356,7 @@ function startOpenCodeRun(
   runDeadlineTimer.unref();
   const result = (async (): Promise<ProviderRunResult> => {
     let outcome: { status: ProviderRunResult["status"]; error?: string };
+    let cleanupConfirmed = true;
     try {
       const credentials = ownedOpenCodeCredentials(options.environment);
       const started = await startOwnedOpenCodeServer(
@@ -509,6 +511,9 @@ function startOpenCodeRun(
           ? { status: "failed", error: terminalError }
           : { status: "completed" };
     } catch (error) {
+      if (error instanceof OpenCodeServerCleanupUnconfirmedError) {
+        cleanupConfirmed = false;
+      }
       outcome = cancelRequested
         ? { status: "cancelled" }
         : {
@@ -524,6 +529,7 @@ function startOpenCodeRun(
       try {
         await terminateOwnedRun?.(true);
       } catch (error) {
+        cleanupConfirmed = false;
         outcome = {
           status: "failed",
           error: safeError(
@@ -533,10 +539,14 @@ function startOpenCodeRun(
         };
       }
     }
-    return finish(outcome.status, outcome.error);
+    return finish(outcome.status, outcome.error, cleanupConfirmed);
   })();
 
-  function finish(status: ProviderRunResult["status"], error?: string): ProviderRunResult {
+  function finish(
+    status: ProviderRunResult["status"],
+    error?: string,
+    cleanupConfirmed = true,
+  ): ProviderRunResult {
     emitter.status(status, error);
     return {
       providerId: "opencode",
@@ -548,6 +558,7 @@ function startOpenCodeRun(
       exitCode: child?.exitCode ?? null,
       signal: child?.signalCode ?? null,
       ...(error ? { error } : {}),
+      cleanupConfirmed,
     };
   }
 

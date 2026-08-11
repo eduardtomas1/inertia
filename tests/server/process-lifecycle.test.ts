@@ -518,7 +518,7 @@ describe("provider process-tree termination", () => {
         killProcess,
         spawnProcessSync: vi.fn(() => ({
           status: 0,
-          stdout: "4243 4242\n",
+          stdout: "4242 1 T\n4243 4242 T\n",
         })) as never,
         waitMs: 100,
       }));
@@ -553,7 +553,7 @@ describe("provider process-tree termination", () => {
         killProcess,
         spawnProcessSync: vi.fn(() => ({
           status: 0,
-          stdout: "4243 4242\n",
+          stdout: "4242 1 T\n4243 4242 T\n",
         })) as never,
         waitMs: 25,
       },
@@ -585,7 +585,7 @@ describe("provider process-tree termination", () => {
         killProcess,
         spawnProcessSync: vi.fn(() => ({
           status: 0,
-          stdout: "4243 4242\n",
+          stdout: "4242 1 T\n4243 4242 T\n",
         })) as never,
         waitMs: 25,
       },
@@ -613,7 +613,7 @@ describe("provider process-tree termination", () => {
       });
       const spawnProcessSync = vi.fn(() => ({
         status: 0,
-        stdout: "4243 4242\n",
+        stdout: "4242 1 T\n4243 4242 T\n",
       }));
       const waitForRootExit = vi.fn(async () => !running.has(4_242));
       const terminate = createOwnedPidProcessTreeTermination(
@@ -660,7 +660,7 @@ describe("provider process-tree termination", () => {
       });
       const spawnProcessSync = vi.fn(() => ({
         status: 0,
-        stdout: "4243 4242\n",
+        stdout: "4242 1 T\n4243 4242 T\n",
       }));
       const rootExited = vi.fn(async () => !running.has(4_242));
       const terminate = createOwnedPidProcessTreeTermination(

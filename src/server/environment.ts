@@ -1,18 +1,8 @@
-import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access, realpath, stat } from "node:fs/promises";
+import { access, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { ProviderId } from "./provider/contracts";
-import {
-  requireProcessTreeTermination,
-  terminateProcessTreeAndWait,
-  type ProcessTreeTerminator,
-} from "./process-lifecycle";
-
-const MAX_ENVIRONMENT_BYTES = 512 * 1024;
-const ENVIRONMENT_TIMEOUT_MS = 3_000;
-const SAFE_SHELLS = new Set(["bash", "dash", "fish", "ksh", "sh", "zsh"]);
 
 export interface ProviderEnvironment {
   env: NodeJS.ProcessEnv;
@@ -198,16 +188,6 @@ function copyMatchingEnvironment(
   }
 }
 
-function allowedLoginShellEnvironment(
-  source: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  const result: NodeJS.ProcessEnv = {};
-  for (const providerId of Object.keys(PROVIDER_ENVIRONMENT_KEYS) as ProviderId[]) {
-    Object.assign(result, providerChildEnvironment(providerId, source));
-  }
-  return result;
-}
-
 function unique(values: readonly string[], platform: NodeJS.Platform = process.platform): string[] {
   const seen = new Set<string>();
   return values.filter((value) => {
@@ -230,80 +210,33 @@ export function environmentValue(
   return match ? environment[match] : undefined;
 }
 
-function parseEnvironment(buffer: Buffer): NodeJS.ProcessEnv {
-  const result: NodeJS.ProcessEnv = {};
-  for (const entry of buffer.toString("utf8").split("\0")) {
-    const separator = entry.indexOf("=");
-    if (separator < 1) continue;
-    const key = entry.slice(0, separator);
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)) continue;
-    result[key] = entry.slice(separator + 1);
+export async function loginShellEnvironment(): Promise<NodeJS.ProcessEnv> {
+  // Login shells execute arbitrary user dotfiles, which may leave process
+  // trees outside the runtime's cleanup authority. Provider discovery uses
+  // the inherited environment plus bounded, reviewed CLI locations instead.
+  return {};
+}
+
+async function boundedNvmExecutableDirectories(home: string): Promise<string[]> {
+  try {
+    const versions = await readdir(join(home, ".nvm", "versions", "node"), {
+      withFileTypes: true,
+    });
+    return versions
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name)
+      .filter((name) => /^v?\d+(?:\.\d+){0,2}$/u.test(name))
+      .sort()
+      .slice(0, 32)
+      .map((name) => join(home, ".nvm", "versions", "node", name, "bin"));
+  } catch {
+    return [];
   }
-  return result;
 }
 
-export async function loginShellEnvironment(
-  terminateProcessTree: ProcessTreeTerminator = terminateProcessTreeAndWait,
-): Promise<NodeJS.ProcessEnv> {
-  if (process.platform === "win32") return {};
-  const configured = process.env.SHELL;
-  const shell = configured && isAbsolute(configured) && SAFE_SHELLS.has(basename(configured))
-    ? configured
-    : process.platform === "darwin" ? "/bin/zsh" : "/bin/sh";
-
-  return await new Promise<NodeJS.ProcessEnv>((resolveEnvironment, rejectEnvironment) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let settled = false;
-    let termination: Promise<void> | undefined;
-    let timer: NodeJS.Timeout | undefined;
-    const finish = (value: NodeJS.ProcessEnv): void => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolveEnvironment(value);
-    };
-
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(shell, ["-ilc", "/usr/bin/env -0"], {
-        detached: true,
-        env: process.env,
-        shell: false,
-        stdio: ["ignore", "pipe", "ignore"],
-        windowsHide: true,
-      });
-    } catch {
-      finish({});
-      return;
-    }
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      if (size >= MAX_ENVIRONMENT_BYTES) return;
-      const remaining = MAX_ENVIRONMENT_BYTES - size;
-      const next = chunk.subarray(0, remaining);
-      chunks.push(next);
-      size += next.length;
-    });
-    child.once("error", () => { if (!termination) finish({}); });
-    child.once("close", (code) => {
-      if (!termination) finish(code === 0 ? parseEnvironment(Buffer.concat(chunks)) : {});
-    });
-
-    timer = setTimeout(() => {
-      termination = requireProcessTreeTermination(
-        terminateProcessTree,
-        child,
-        true,
-        "Login shell environment process tree",
-      );
-      void termination.then(() => finish({}), rejectEnvironment);
-    }, ENVIRONMENT_TIMEOUT_MS);
-    timer.unref();
-  });
-}
-
-function commonExecutableDirectories(environment: NodeJS.ProcessEnv): string[] {
+async function commonExecutableDirectories(
+  environment: NodeJS.ProcessEnv,
+): Promise<string[]> {
   const home = environmentValue(environment, "USERPROFILE") || homedir();
   if (process.platform === "win32") {
     const local = environmentValue(environment, "LOCALAPPDATA");
@@ -333,6 +266,12 @@ function commonExecutableDirectories(environment: NodeJS.ProcessEnv): string[] {
     join(home, ".local", "bin"),
     join(home, "bin"),
     join(home, ".npm-global", "bin"),
+    join(home, ".volta", "bin"),
+    join(home, ".bun", "bin"),
+    join(home, ".asdf", "shims"),
+    join(home, ".local", "share", "mise", "shims"),
+    join(home, ".opencode", "bin"),
+    ...await boundedNvmExecutableDirectories(home),
     join(home, "Library", "pnpm"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
@@ -349,14 +288,13 @@ async function loadProviderEnvironment(): Promise<ProviderEnvironment> {
   const shellEnvironment = await loginShellEnvironment();
   const env = normalizeCodexHomeEnvironment({
     ...process.env,
-    ...allowedLoginShellEnvironment(shellEnvironment),
   });
   const inheritedPath = environmentValue(process.env, "PATH") ?? "";
   const effectivePath = environmentValue(shellEnvironment, "PATH") ?? "";
   const pathEntries = unique([
     ...(effectivePath.split(delimiter)),
     ...(inheritedPath.split(delimiter)),
-    ...commonExecutableDirectories(env),
+    ...await commonExecutableDirectories(env),
   ]);
   if (process.platform === "win32") {
     for (const key of Object.keys(env)) {

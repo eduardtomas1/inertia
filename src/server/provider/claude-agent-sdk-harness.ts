@@ -810,6 +810,7 @@ function startClaudeRun(
         ...outcome,
         status: "failed",
         error: "Claude Code process tree could not be confirmed stopped.",
+        cleanupConfirmed: false,
       };
     }
     try {
@@ -841,6 +842,7 @@ function startClaudeRun(
       textTruncated: text.truncated,
       exitCode: null,
       signal: null,
+      cleanupConfirmed: true,
       ...(error ? { error } : {}),
     };
   }

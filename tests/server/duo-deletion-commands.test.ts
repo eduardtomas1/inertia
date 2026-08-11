@@ -93,7 +93,10 @@ function conversationDependencies(
   store: Partial<RuntimeStore>,
 ): ConversationCommandDependencies {
   return {
-    store: store as RuntimeStore,
+    store: {
+      providerRunOwnership: { forConversation: vi.fn(() => []) },
+      ...store,
+    } as RuntimeStore,
     providers: {} as never,
     backendProfileController: {} as never,
     workspaceRuns: {} as never,
@@ -116,10 +119,22 @@ function conversationDependencies(
 function projectDependencies(
   store: Partial<RuntimeStore>,
 ): ProjectWorkspaceCommandDependencies {
+  const conversationWork = {
+    reserveProviderCheckouts: vi.fn(() => ["project-delete:0"]),
+    providerReservationsExactlyCover: vi.fn(() => true),
+    release: vi.fn(),
+  };
   return {
-    store: store as RuntimeStore,
+    store: {
+      hasRecordedActiveWorkspaceRunForProject: vi.fn(() => false),
+      conversationWork,
+      ...store,
+    } as RuntimeStore,
     workspaceRuns: {} as never,
-    turns: { isActive: vi.fn(() => false) } as never,
+    turns: {
+      isActive: vi.fn(() => false),
+      hasActiveCheckout: vi.fn(() => false),
+    } as never,
     providers: {} as never,
     providerTerminalResumes: { isActive: vi.fn(() => false) } as never,
     terminals: {} as never,
@@ -379,10 +394,43 @@ describe("Duo deletion command preflights", () => {
     );
 
     expect(assertProjectDeletionAllowed).toHaveBeenCalledWith(projectId);
-    expect(store.shellSnapshot).toHaveBeenCalledOnce();
+    expect(store.shellSnapshot).toHaveBeenCalledTimes(2);
     expect(store.removeProject).not.toHaveBeenCalled();
     expect(dependencies.rememberDeletedConversation).not.toHaveBeenCalled();
     expect(dependencies.forgetRemoteTranscript).not.toHaveBeenCalled();
+  });
+
+  it("rechecks resumed terminals acquired while Duo project recovery is awaiting", async () => {
+    let finishRecovery!: (value: boolean) => void;
+    const recovery = new Promise<boolean>((resolve) => {
+      finishRecovery = resolve;
+    });
+    const removeProject = vi.fn();
+    const store: Partial<RuntimeStore> = {
+      shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as never),
+      hasActiveWorkspaceRunForProject: vi.fn(() => false),
+      assertProjectDeletionAllowed: vi.fn(),
+      removeProject,
+    };
+    const dependencies = projectDependencies(store);
+    const resumes = new ProviderTerminalResumeRegistry();
+    dependencies.providerTerminalResumes = resumes;
+    dependencies.duoLaunches = {
+      reconcileProjectDeletion: vi.fn(() => recovery),
+    };
+    const pending = createProjectWorkspaceCommandHandler(dependencies)(
+      {} as never,
+      projectRemove,
+    );
+    await vi.waitFor(() => expect(
+      dependencies.duoLaunches?.reconcileProjectDeletion,
+    ).toHaveBeenCalledOnce());
+
+    expect(resumes.acquire(conversationId)).toBe(true);
+    finishRecovery(true);
+    await expect(pending).rejects.toThrow(/End resumed provider terminals/u);
+    expect(removeProject).not.toHaveBeenCalled();
+    resumes.release(conversationId);
   });
 
   it("updates deletion caches only after terminal project removal succeeds", async () => {

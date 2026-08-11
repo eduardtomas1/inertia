@@ -17,7 +17,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { startRuntime, type RunningRuntime } from "../../src/server";
+import type { RunningRuntime } from "../../src/server";
 import type {
   AppSnapshot,
   ConversationDetail,
@@ -38,6 +38,12 @@ import {
   RuntimeEventQueue as EventQueue,
 } from "../support/runtime-event-queue";
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
+import { startTestRuntime as startRuntime } from "../support/test-runtime";
+
+const runtimeIdentity = {
+  runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+  systemBootId: "test:00000000-0000-4000-8000-000000000001",
+} as const;
 
 function send(socket: WebSocket, command: object): void {
   socket.send(JSON.stringify(command));
@@ -341,6 +347,7 @@ process.exit(child.status ?? 1);
         dataDirectory: data,
         defaultWorkspacePath: workspace,
         enableProviders: false,
+      ...runtimeIdentity,
         attachments: {
           resolve: async () => null,
           release: () => {
@@ -396,6 +403,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      ...runtimeIdentity,
       codexBinaryPath: executable,
       testOnlyProjectIdentityRefresh: identityRefreshGate,
       testOnlyOnTurnSettled: (turn) => {
@@ -496,6 +504,7 @@ process.exit(child.status ?? 1);
         dataDirectory: data,
         defaultWorkspacePath: workspace,
         enableProviders: true,
+      ...runtimeIdentity,
         codexBinaryPath: executable,
       });
       runtimes.push(runtime);
@@ -543,6 +552,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      ...runtimeIdentity,
     });
     runtimes.push(runtime);
     expect(new URL(runtime.websocketUrl).hostname).toBe("127.0.0.1");
@@ -665,7 +675,7 @@ process.exit(child.status ?? 1);
     await runtime.close();
     runtimes.splice(runtimes.indexOf(runtime), 1);
 
-    const restarted = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
+    const restarted = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false, ...runtimeIdentity });
     runtimes.push(restarted);
     const persistedClient = await connect(restarted.websocketUrl);
     const persisted = await persistedClient.events.next(
@@ -687,6 +697,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      ...runtimeIdentity,
     });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
@@ -791,7 +802,7 @@ process.exit(child.status ?? 1);
   it("creates isolated chats by default and reuses checkout context only when explicitly requested", async () => {
     const { data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
+    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false, ...runtimeIdentity });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(
@@ -937,7 +948,7 @@ process.exit(child.status ?? 1);
 
   it("rejects unknown paths and remote web origins", async () => {
     const { data, workspace } = temporaryWorkspace();
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
+    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false, ...runtimeIdentity });
     runtimes.push(runtime);
 
     const url = new URL(runtime.websocketUrl);
@@ -949,7 +960,7 @@ process.exit(child.status ?? 1);
 
   it("returns a scoped request error for malformed or invalid commands", async () => {
     const { data, workspace } = temporaryWorkspace();
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
+    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false, ...runtimeIdentity });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     await client.events.next((event): event is Extract<ServerEvent, { type: "server.welcome" }> => event.type === "server.welcome");
@@ -972,7 +983,7 @@ process.exit(child.status ?? 1);
 
   it("creates an owned terminal and handles input, resize, and close commands", async () => {
     const { data, workspace } = temporaryWorkspace();
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
+    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false, ...runtimeIdentity });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(
@@ -1015,7 +1026,7 @@ process.exit(child.status ?? 1);
         preview: "node -e \"console.log('http://localhost:45678'); setInterval(() => {}, 1000)\"",
       },
     }));
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
+    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false, ...runtimeIdentity });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(
@@ -1158,6 +1169,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      ...runtimeIdentity,
       codexBinaryPath: executable,
     });
     runtimes.push(runtime);
@@ -1352,6 +1364,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      ...runtimeIdentity,
       secureFiles: new SecureFileTestBroker(),
     });
     runtimes.push(runtime);
@@ -1517,6 +1530,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      ...runtimeIdentity,
     });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
@@ -1599,6 +1613,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      ...runtimeIdentity,
       secureFiles: new SecureFileTestBroker(),
     });
     runtimes.push(runtime);
@@ -1868,6 +1883,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      ...runtimeIdentity,
     });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
@@ -1933,6 +1949,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      ...runtimeIdentity,
       codexBinaryPath: executable,
     });
     runtimes.push(runtime);
@@ -2004,6 +2021,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      ...runtimeIdentity,
       codexBinaryPath: executable,
     });
     runtimes.push(runtime);
@@ -2076,6 +2094,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      ...runtimeIdentity,
       codexBinaryPath: executable,
     });
     runtimes.push(runtime);
@@ -2153,6 +2172,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      ...runtimeIdentity,
       codexBinaryPath: executable,
     });
     runtimes.push(runtime);
@@ -2206,6 +2226,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      ...runtimeIdentity,
       codexBinaryPath: executable,
     });
     runtimes.push(runtime);
@@ -2271,6 +2292,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      ...runtimeIdentity,
       codexBinaryPath: executable,
     });
     runtimes.push(runtime);
@@ -2380,6 +2402,7 @@ process.exit(child.status ?? 1);
         dataDirectory: data,
         defaultWorkspacePath: workspace,
         enableProviders: true,
+      ...runtimeIdentity,
         codexBinaryPath: executable,
       });
       runtimes.push(runtime);
@@ -2430,6 +2453,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      ...runtimeIdentity,
       codexBinaryPath: executable,
       reviewSummaryTimeoutMs: 20,
     });

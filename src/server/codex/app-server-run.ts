@@ -189,6 +189,7 @@ export function startCodexAppServerRun(
     events?.settleInteractions();
     void (async () => {
       let finalStatus = status;
+      let cleanupConfirmed = true;
       try {
         // A terminal App Server turn has no further process work to preserve.
         // Use the same owned promise as cancellation, but avoid adding a
@@ -196,6 +197,7 @@ export function startCodexAppServerRun(
         await terminateOwnedProcessTree(true);
       } catch (error) {
         finalStatus = "failed";
+        cleanupConfirmed = false;
         rememberFailure(
           "process-exit",
           "Codex App Server process tree could not be confirmed stopped.",
@@ -221,6 +223,7 @@ export function startCodexAppServerRun(
         ...(finalFailure ? { failure: finalFailure } : {}),
         ...(compatibilityError ? { compatibilityError } : {}),
         ...(continuationError ? { continuationError } : {}),
+        cleanupConfirmed,
       });
     })();
   };

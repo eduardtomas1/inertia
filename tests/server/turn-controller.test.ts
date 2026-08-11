@@ -6,7 +6,6 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
-  AgentApprovalDecision,
   AgentApprovalRequest,
   AgentInputRequest,
   AgentPlan,
@@ -25,165 +24,21 @@ import {
 import type {
   ProviderEvent,
   ProviderGoalSnapshot,
-  ProviderRunCallbacks,
-  ProviderRunInput,
-  ProviderRunResult,
 } from "../../src/server/provider/contracts";
 import {
   TurnController,
   type TurnControllerHooks,
   type TurnProviderRuntime,
-  type TurnTimerScheduler,
 } from "../../src/server/runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "../../src/server/runtime/turns/turn-recovery";
 import { BUILD_MODE_INSTRUCTION } from "../../src/server/runtime/turns/request-context";
 import { resolveNativeModelRoute } from "./model-route-fixture";
+import {
+  FakeTurnProvider,
+  FakeTurnScheduler,
+} from "../support/fake-turn-provider";
 
 const directories: string[] = [];
-
-class FakeScheduler implements TurnTimerScheduler {
-  private nextId = 0;
-  readonly callbacks = new Map<number, () => void>();
-
-  setTimeout(callback: () => void): number {
-    const id = ++this.nextId;
-    this.callbacks.set(id, callback);
-    return id;
-  }
-
-  clearTimeout(handle: unknown): void {
-    this.callbacks.delete(handle as number);
-  }
-
-  runAll(): void {
-    for (const [id, callback] of this.callbacks) {
-      this.callbacks.delete(id);
-      callback();
-    }
-  }
-}
-
-class FakeProvider implements TurnProviderRuntime {
-  callbacks: ProviderRunCallbacks | null = null;
-  input: ProviderRunInput | null = null;
-  cancelCount = 0;
-  disposed = false;
-  approvalSupported = true;
-  inputSupported = true;
-  steerSupported = true;
-  stopSubagentSupported = true;
-  readonly steerCalls: string[] = [];
-  readonly stoppedSubagentIds: string[] = [];
-  readonly stopOwnedCalls: Array<{
-    conversationId: string;
-    identity: { runId: string; turnId: string | null };
-  }> = [];
-  runCount = 0;
-  private stopOwnedGate: Promise<"force-detached"> | null = null;
-  private resolveStopOwnedGate: (() => void) | null = null;
-  private resolveResult: ((result: ProviderRunResult) => void) | null = null;
-  private rejectResult: ((error: unknown) => void) | null = null;
-
-  resolveModelRoute = resolveNativeModelRoute;
-
-  harnessIdFor(input: ProviderRunInput): string {
-    return input.harnessId;
-  }
-
-  run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult> {
-    this.runCount += 1;
-    this.input = input;
-    this.callbacks = callbacks;
-    callbacks.onStarted?.();
-    return new Promise((resolve, reject) => {
-      this.resolveResult = resolve;
-      this.rejectResult = reject;
-    });
-  }
-
-  emit(event: ProviderEvent): void {
-    this.callbacks?.onEvent?.(event);
-  }
-
-  resolve(result: Partial<ProviderRunResult> = {}): void {
-    if (!this.input) throw new Error("Provider has not started.");
-    this.resolveResult?.({
-      providerId: this.input.providerId,
-      conversationId: this.input.conversationId ?? this.input.threadId,
-      status: "completed",
-      text: "",
-      textTruncated: false,
-      exitCode: 0,
-      signal: null,
-      ...result,
-    });
-  }
-
-  reject(error: unknown): void {
-    this.rejectResult?.(error);
-  }
-
-  cancel(): boolean {
-    this.cancelCount += 1;
-    return true;
-  }
-
-  stopOwned(
-    conversationId: string,
-    identity: { runId: string; turnId: string | null },
-  ): Promise<"settled" | "force-detached"> {
-    this.stopOwnedCalls.push({ conversationId, identity });
-    return this.stopOwnedGate ?? Promise.resolve("settled");
-  }
-
-  deferOwnedStop(): void {
-    this.stopOwnedGate = new Promise<"force-detached">((resolve) => {
-      this.resolveStopOwnedGate = () => resolve("force-detached");
-    });
-  }
-
-  resolveOwnedStop(): void {
-    this.resolveStopOwnedGate?.();
-    this.resolveStopOwnedGate = null;
-    this.stopOwnedGate = null;
-  }
-
-  isRunning(): boolean {
-    return this.callbacks !== null;
-  }
-
-  respondToApproval(
-    _conversationId: string,
-    _requestId: string,
-    _decision: AgentApprovalDecision,
-  ): boolean {
-    return this.approvalSupported;
-  }
-
-  respondToInput(): boolean {
-    return this.inputSupported;
-  }
-
-  async steer(
-    _conversationId: string,
-    content: string,
-  ): Promise<boolean> {
-    this.steerCalls.push(content);
-    return this.steerSupported;
-  }
-
-  async stopSubagent(
-    _conversationId: string,
-    providerTaskId: string,
-  ): Promise<boolean> {
-    this.stoppedSubagentIds.push(providerTaskId);
-    return this.stopSubagentSupported;
-  }
-
-  async disposeAll(): Promise<void> {
-    this.disposed = true;
-  }
-}
 
 function providerInfo(): ProviderInfo {
   const field = {
@@ -222,8 +77,8 @@ interface TestRuntime {
   directory: string;
   workspace: string;
   store: RuntimeStore;
-  provider: FakeProvider;
-  scheduler: FakeScheduler;
+  provider: FakeTurnProvider;
+  scheduler: FakeTurnScheduler;
   controller: TurnController;
   conversationId: string;
   events: ServerEvent[];
@@ -262,11 +117,11 @@ async function testRuntime(
     interactionMode: options.interactionMode ?? "build",
     accessMode: "supervised",
   });
-  const provider = new FakeProvider();
+  const provider = new FakeTurnProvider();
   if (options.resolveModelRoute) {
     provider.resolveModelRoute = options.resolveModelRoute;
   }
-  const scheduler = new FakeScheduler();
+  const scheduler = new FakeTurnScheduler();
   const events: ServerEvent[] = [];
   const settled: string[] = [];
   const gitArtifacts: string[] = [];
@@ -879,9 +734,15 @@ describe("TurnController authoritative lifecycle", () => {
       description: "Inspect",
     });
     const databasePath = join(runtime.directory, "inertia.sqlite");
+    const runtimeGenerationId = runtime.store.providerRunOwnership.all()[0]!.runtimeGenerationId;
     runtime.store.close();
-
-    const reopened = new RuntimeStore(databasePath, runtime.workspace);
+    const reopened = new RuntimeStore(
+      databasePath,
+      runtime.workspace,
+      { recoverInterruptedRuns: false },
+    );
+    reopened.providerRunOwnership.clearRuntimeGeneration(runtimeGenerationId);
+    recoverInterruptedTurns(reopened);
     expect(reopened.agentTurn(queued.turn.id).status).toBe("interrupted");
     expect(reopened.conversationDetail(runtime.conversationId)?.subagents)
       .toContainEqual(expect.objectContaining({
@@ -1312,7 +1173,7 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it.each(["cancel", "timeout"] as const)(
-    "settles %s immediately, bounds provider cleanup, and starts a queued retry only after detach",
+    "settles %s immediately but retains cleanup authority until provider exit",
     async (scenario) => {
       const runtime = await testRuntime();
       runtime.provider.deferOwnedStop();
@@ -1342,7 +1203,7 @@ describe("TurnController authoritative lifecycle", () => {
         status: scenario === "cancel" ? "cancelled" : "failed",
         terminalReason: scenario === "cancel" ? "user-cancelled" : "turn-timeout",
       });
-      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
       expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(true);
       expect(runtime.attachmentReleases).toEqual([]);
       expect(runtime.provider.stopOwnedCalls).toEqual([{
@@ -1353,12 +1214,9 @@ describe("TurnController authoritative lifecycle", () => {
         },
       }]);
 
-      const retry = runtime.controller.queue({
-        conversationId: runtime.conversationId,
-        content: `Retry after ${scenario}.`,
-      });
-      expect(runtime.controller.start(retry.turn.id)).toBe(true);
-      expect(runtime.provider.runCount).toBe(1);
+      expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
+        content: `Blocked retry after ${scenario}.` }))
+        .toThrow("already has an active turn");
 
       firstCallbacks?.onEvent?.({
         ...firstIdentity,
@@ -1374,25 +1232,17 @@ describe("TurnController authoritative lifecycle", () => {
       runtime.provider.resolveOwnedStop();
       await new Promise<void>((resolve) => setImmediate(resolve));
 
-      expect(runtime.provider.runCount).toBe(2);
-      expect(runtime.provider.input?.turnId).toBe(retry.turn.id);
+      expect(runtime.attachmentReleases).toEqual([]);
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
+
+      runtime.provider.resolve({ status: "cancelled", text: "" });
+      await flushPromises();
       expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
-
-      firstCallbacks?.onEvent?.({
-        ...firstIdentity,
-        type: "text",
-        text: "late after detach",
-      });
-      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
-        status: scenario === "cancel" ? "cancelled" : "failed",
-        terminalReason: scenario === "cancel" ? "user-cancelled" : "turn-timeout",
-      });
-      expect(runtime.store.conversationDetail(runtime.conversationId)?.messages)
-        .not.toContainEqual(expect.objectContaining({
-          turnId: first.turn.id,
-          content: expect.stringContaining("late"),
-        }));
-
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+      const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
+        content: `Retry after confirmed ${scenario} cleanup.` });
+      expect(runtime.controller.start(retry.turn.id)).toBe(true);
+      expect(runtime.provider.runCount).toBe(2);
       runtime.provider.resolve({ status: "completed", text: "Retry completed." });
       await flushPromises();
       expect(runtime.store.agentTurn(retry.turn.id).status).toBe("completed");
@@ -1515,19 +1365,23 @@ describe("TurnController authoritative lifecycle", () => {
     }]);
     expect(runtime.attachmentReleases).toEqual([]);
 
-    const retry = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Retry only after exact-run cleanup.",
-    });
-    expect(runtime.controller.start(retry.turn.id)).toBe(true);
+    expect(() => runtime.controller.queue({ conversationId: runtime.conversationId,
+      content: "Retry before exact-run cleanup." }))
+      .toThrow("already has an active turn");
     expect(runtime.provider.runCount).toBe(1);
 
     runtime.provider.resolveOwnedStop();
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    expect(runtime.attachmentReleases).toEqual([]);
+    expect(runtime.provider.runCount).toBe(1);
+    runtime.provider.resolve({ status: "cancelled", text: "" });
+    await flushPromises();
     expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+    const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
+      content: "Retry after exact-run cleanup." });
+    expect(runtime.controller.start(retry.turn.id)).toBe(true);
     expect(runtime.provider.runCount).toBe(2);
-    expect(runtime.provider.input?.turnId).toBe(retry.turn.id);
     runtime.provider.resolve({ status: "completed", text: "Retry completed." });
     await flushPromises();
     runtime.store.close();
@@ -2454,6 +2308,7 @@ describe("TurnController authoritative lifecycle", () => {
       attachments: [queuedAttachment],
     });
     const databasePath = join(runtime.directory, "inertia.sqlite");
+    const runtimeGenerationId = runtime.store.providerRunOwnership.all()[0]!.runtimeGenerationId;
     runtime.store.close();
 
     const reopened = new RuntimeStore(
@@ -2461,6 +2316,7 @@ describe("TurnController authoritative lifecycle", () => {
       runtime.workspace,
       { recoverInterruptedRuns: false },
     );
+    reopened.providerRunOwnership.clearRuntimeGeneration(runtimeGenerationId);
     const recovery = recoverInterruptedTurns(reopened);
     expect(recovery.recoveredTurns).toEqual(expect.arrayContaining([
       expect.objectContaining({

@@ -230,6 +230,7 @@ process.exit(2);
           : args[0] === "login"
             ? "Logged in using ChatGPT"
             : "codex app-server - Run the app server",
+        cleanupConfirmed: true,
       }),
     });
 
@@ -278,6 +279,7 @@ process.exit(2);
           output: args[0] === "--version"
             ? "codex 2.3.1"
             : "codex app-server - Run the app server",
+          cleanupConfirmed: true,
         };
       },
     });
@@ -311,6 +313,7 @@ process.exit(2);
         : args[0] === "login"
           ? "Logged in using ChatGPT"
           : executable === newUnsupported ? "unknown subcommand" : "codex app-server",
+      cleanupConfirmed: true,
     });
 
     const compatibleFallback = await detectProvider("codex", { command: "codex", cwd: root }, {
@@ -510,6 +513,7 @@ setInterval(() => {}, 1000);
             output: args[0] === "--version"
               ? "codex 1.2.3"
               : "codex app-server - Run the app server",
+            cleanupConfirmed: true,
           },
     })).resolves.toMatchObject({
       available: true,
@@ -519,11 +523,54 @@ setInterval(() => {}, 1000);
     });
   });
 
+  it("blocks admission when any discovered candidate has unconfirmed cleanup", async () => {
+    const root = temporaryRoot();
+    const unconfirmed = join(root, "old-codex");
+    const selected = join(root, "new-codex");
+
+    await expect(detectProvider("codex", { cwd: root }, {
+      executableCandidates: async () => [unconfirmed, selected],
+      probeProcess: async (executable, args) => {
+        if (executable === unconfirmed) {
+          return {
+            started: true,
+            timedOut: true,
+            exitCode: null,
+            output: "",
+            cleanupConfirmed: false,
+          };
+        }
+        return {
+          started: true,
+          timedOut: false,
+          exitCode: 0,
+          output: args[0] === "--version"
+            ? "codex 2.0.0"
+            : args[0] === "app-server"
+            ? "codex app-server - Run the app server"
+            : "Logged in using ChatGPT",
+          cleanupConfirmed: true,
+        };
+      },
+    })).resolves.toMatchObject({
+      available: true,
+      canRun: false,
+      cleanupConfirmed: false,
+      statusMessage: "Codex probe cleanup could not be confirmed stopped",
+    });
+  });
+
   it("reports a candidate with a failing version probe as an installation error", async () => {
     const root = temporaryRoot();
     const command = portableNodeExecutable(root, "broken-codex");
     const detection = await detectProvider("codex", { command, cwd: root }, {
-      probeProcess: async () => ({ started: true, timedOut: false, exitCode: 7, output: "version probe failed" }),
+      probeProcess: async () => ({
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+        exitCode: 7,
+        output: "version probe failed",
+      }),
     });
 
     expect(detection).toMatchObject({ available: false, installState: "error", authState: "unknown", canRun: false });
@@ -585,6 +632,7 @@ setInterval(() => {}, 1000);
         output: args[0] === "--version" ? "opencode 1.18.10" : "Credentials\n0 credentials",
         started: true,
         timedOut: false,
+        cleanupConfirmed: true,
       }),
     })).resolves.toMatchObject({
       available: true,
@@ -606,6 +654,7 @@ setInterval(() => {}, 1000);
           : "Credentials\n0 credentials\nEnvironment\n1 environment variable",
         started: true,
         timedOut: false,
+        cleanupConfirmed: true,
       }),
     })).resolves.toMatchObject({ authState: "configured", canRun: true, statusMessage: "Configured" });
   });
@@ -683,7 +732,7 @@ setInterval(() => {}, 1000);
     }
   });
 
-  it("does not terminate a CLI process after an ordinary one-shot success", async () => {
+  it("arms complete-tree cleanup before an ordinary CLI terminal result", async () => {
     const root = temporaryRoot();
     const { command, program } = nodeProgram(root, "successful-codex-cli", `
 console.log(JSON.stringify({ type: "turn.started", thread_id: "cli-session" }));
@@ -714,7 +763,8 @@ console.log(JSON.stringify({ type: "turn.completed" }));
       text: "CLI response",
       sessionId: "cli-session",
     });
-    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(terminateProcessTree).toHaveBeenCalledTimes(1);
+    expect(terminateProcessTree).toHaveBeenCalledWith(expect.anything(), true);
     await manager.disposeAll();
   });
 
@@ -842,7 +892,10 @@ setInterval(() => {}, 1000);
       false,
       true,
     ]);
-    await manager.disposeAll();
+    expect(manager.isRunning("failed-cli-cleanup")).toBe(true);
+    await expect(manager.disposeAll()).rejects.toThrow(
+      "Provider process cleanup could not be confirmed.",
+    );
   });
 
   it("requests real partial messages from Claude without duplicating the final assistant event", async () => {
@@ -890,7 +943,10 @@ process.exit(1);
     const result = await manager.run(nativeProviderRunInput({ providerId: "codex", harnessId: "codex-cli", conversationId: "failed-conversation", cwd: root, prompt: "Respond", interactionMode: "build", access: "full" }));
 
     expect(result).toMatchObject({ status: "failed", exitCode: 1, error: "Codex is not authenticated. Sign in with its CLI and try again." });
-    await manager.disposeAll();
+    expect(manager.isRunning("failed-conversation")).toBe(true);
+    await expect(manager.disposeAll()).rejects.toThrow(
+      "Provider process cleanup could not be confirmed.",
+    );
   });
 
   it("attributes custom backend failures without echoing raw provider diagnostics", () => {

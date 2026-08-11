@@ -23,10 +23,13 @@ import type {
   PrivateConnectRuntimeRequest,
   PrivateConnectRuntimeResponse,
 } from "../shared/private-connect/runtime-contract";
-import type {
-  RuntimePrivateConnectForgetScope,
-  RuntimePrivateConnectPromptPreparation,
+import {
+  validRuntimeGenerationId,
+  validSystemBootId,
+  type RuntimePrivateConnectForgetScope,
+  type RuntimePrivateConnectPromptPreparation,
 } from "../node/runtime-process-protocol";
+import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases";
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "./runtime/turns/turn-recovery";
@@ -157,10 +160,22 @@ export interface RuntimeOptions {
     markerPath: string;
     stallMs: number;
   };
+  runtimeGenerationId: string;
+  systemBootId: string;
+  confirmedTerminatedRuntimeGenerationIds?: readonly string[];
+  priorRuntimeCleanupUnconfirmed?: boolean;
+  onCleanupReceiptConsumed?: (
+    receiptRuntimeGenerationId: string,
+    currentRuntimeGenerationId: string,
+  ) => void;
   /** Test-only settlement seam; absent from the validated worker protocol. */
   testOnlyOnTurnSettled?: (turn: AgentTurn) => void | Promise<void>;
   /** Test-only recovery ordering seam; absent from the validated worker protocol. */
   testOnlyProjectIdentityRefresh?: Promise<void>;
+  /** Test-only command admission seam; absent from the validated worker protocol. */
+  testOnlyBeforeRuntimeCommand?: () => Promise<void>;
+  /** Test-only provider discovery seam; absent from the validated worker protocol. */
+  testOnlyProviderRefresh?: () => Promise<void>;
 }
 
 export interface RuntimeBackendCredentialBroker {
@@ -200,10 +215,49 @@ export interface RunningRuntime {
 }
 
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
+  if (!validRuntimeGenerationId(options.runtimeGenerationId)) {
+    throw new Error("The runtime generation identity is invalid.");
+  }
+  if (!validSystemBootId(options.systemBootId)) {
+    throw new Error("The operating system boot identity is invalid.");
+  }
+  const confirmedGenerations = options.confirmedTerminatedRuntimeGenerationIds ?? [];
+  if (
+    confirmedGenerations.length > 32
+    || new Set(confirmedGenerations).size !== confirmedGenerations.length
+    || confirmedGenerations.some((generationId) => (
+      !validRuntimeGenerationId(generationId)
+      || generationId === options.runtimeGenerationId
+    ))
+  ) throw new Error("The confirmed runtime cleanup receipts are invalid.");
   const dataDirectory = resolve(options.dataDirectory);
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+  const runtimeGenerationLeases = new RuntimeGenerationLeaseJournal(dataDirectory);
+  for (const confirmedRuntimeGenerationId of confirmedGenerations) {
+    if (!runtimeGenerationLeases.clearRuntimeGeneration(confirmedRuntimeGenerationId)) {
+      throw new Error("Confirmed provider process ownership could not be retired.");
+    }
+  }
+  const priorBootLeasesCleared = runtimeGenerationLeases.clearPriorBootSessions(
+    options.systemBootId,
+  );
+  const retainedGenerationLeases = runtimeGenerationLeases.all();
+  const currentGenerationOwner = (lease: typeof retainedGenerationLeases[number]): boolean => (
+    lease.runtimeGenerationId === options.runtimeGenerationId
+    && lease.systemBootId === options.systemBootId
+  );
+  const runtimeSafetyLock = options.priorRuntimeCleanupUnconfirmed === true
+    || !runtimeGenerationLeases.isValid()
+    || !retainedGenerationLeases.some(currentGenerationOwner)
+    || retainedGenerationLeases.some((lease) => !currentGenerationOwner(lease));
+  const runtimeSafetyError = (operation: string): string => (
+    options.systemBootId === "unavailable"
+      ? `${operation} A prior runtime-owned process may still be running, and automatic cleanup verification is unavailable on this computer. Keep the affected work in place and contact support for recovery guidance.`
+      : `${operation} A prior runtime-owned process may still be running. Restarting Inertia is not enough; a full computer restart lets Inertia verify cleanup.`
+  );
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
+    { preserveExisting: runtimeSafetyLock },
   );
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
@@ -211,6 +265,22 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let closed = false;
   let databaseRecoveryImportActive = false;
   let activeRuntimeCommands = 0;
+  const activeRuntimeOperations = new Set<Promise<unknown>>();
+  const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+    if (closed) return Promise.reject(new Error("The runtime is shutting down."));
+    const active = Promise.resolve().then(operation);
+    activeRuntimeOperations.add(active);
+    void active.then(
+      () => activeRuntimeOperations.delete(active),
+      () => activeRuntimeOperations.delete(active),
+    );
+    return active;
+  };
+  const drainRuntimeOperations = async (): Promise<void> => {
+    while (activeRuntimeOperations.size > 0) {
+      await Promise.allSettled(activeRuntimeOperations);
+    }
+  };
   const streamingTrace = createTestStreamingTrace(dataDirectory);
   const send = (
     socket: WebSocket,
@@ -237,6 +307,18 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
     },
   );
+  for (const confirmedRuntimeGenerationId of confirmedGenerations) {
+    store.providerRunOwnership.clearRuntimeGeneration(
+      confirmedRuntimeGenerationId,
+    );
+    options.onCleanupReceiptConsumed?.(
+      confirmedRuntimeGenerationId,
+      options.runtimeGenerationId,
+    );
+  }
+  if (priorBootLeasesCleared) {
+    store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
+  }
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;
@@ -246,7 +328,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const testOnlyProjectIdentityRefresh = process.env.NODE_ENV === "test"
     ? options.testOnlyProjectIdentityRefresh
     : undefined;
-  store.startBackups();
+  const testOnlyBeforeRuntimeCommand = process.env.NODE_ENV === "test"
+    ? options.testOnlyBeforeRuntimeCommand
+    : undefined;
+  const testOnlyProviderRefresh = process.env.NODE_ENV === "test"
+    ? options.testOnlyProviderRefresh
+    : undefined;
+  if (!runtimeSafetyLock) store.startBackups();
   const secureFiles: RuntimeSecureFileBroker = options.secureFiles ?? {
     authorizeRoot: async () => {
       throw new SecureFileError(
@@ -274,8 +362,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
   const secureFileAuthorities = new SecureFileAuthorityRegistry(secureFiles);
-  const recovery = recoverInterruptedTurns(store);
-  await reconcileInterruptedDuoLaunches(store);
+  const recovery = runtimeSafetyLock
+    ? { recoveredTurns: [], recoveredAttachmentIds: [] }
+    : recoverInterruptedTurns(store);
+  if (!runtimeSafetyLock) await reconcileInterruptedDuoLaunches(store);
   if (options.attachments && recovery.recoveredAttachmentIds.length > 0) {
     void Promise.allSettled(recovery.recoveredAttachmentIds.map(
       (attachmentId) => options.attachments!.cleanup(attachmentId),
@@ -290,13 +380,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }
     },
   });
-  const projectIdentityRefresh: Promise<void> = projectIdentities
-    .refreshAll(store.shellSnapshot().projects.map(({ id, path }) => ({
-      id,
-      path,
-    })))
-    .catch(() => undefined)
-    .then(() => testOnlyProjectIdentityRefresh);
+  const projectIdentityCandidates = store.shellSnapshot().projects.map(
+    ({ id, path }) => ({ id, path }),
+  );
+  const projectIdentityRefresh: Promise<void> = runtimeSafetyLock
+    ? Promise.resolve()
+    : trackRuntimeOperation(() => projectIdentities
+        .refreshAll(projectIdentityCandidates)
+        .catch(() => undefined)
+        .then(() => testOnlyProjectIdentityRefresh));
   const projectIdentityAuthority = {
     revalidate: async (projectId: string, projectPath: string) => {
       if (projectIdentityIsUsable(projectIdentities.state(projectId))) {
@@ -309,7 +401,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
-  const enableProviders = options.enableProviders ?? true;
+  const enableProviders = !runtimeSafetyLock && (options.enableProviders ?? true);
   const terminals = new TerminalManager();
   const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
   const metadataCache = new ProviderMetadataCache({
@@ -532,16 +624,20 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     refreshEnvironment = false,
     forceMetadata = false,
   ): Promise<void> => {
-    activeProviderRefreshes += 1;
-    try {
-      await refreshProviderInfoCore(
-        providerId,
-        refreshEnvironment,
-        forceMetadata,
-      );
-    } finally {
-      activeProviderRefreshes -= 1;
-    }
+    await trackRuntimeOperation(async () => {
+      activeProviderRefreshes += 1;
+      try {
+        await testOnlyProviderRefresh?.();
+        if (closed) return;
+        await refreshProviderInfoCore(
+          providerId,
+          refreshEnvironment,
+          forceMetadata,
+        );
+      } finally {
+        activeProviderRefreshes -= 1;
+      }
+    });
   };
   const maintenanceTarget = (
     providerId: ProviderMaintenanceProviderId,
@@ -654,6 +750,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       },
       testOnlyStreamingTrace: streamingTrace,
     },
+    {
+      runtimeGenerationId: options.runtimeGenerationId,
+      systemBootId: options.systemBootId,
+    },
   );
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
     store,
@@ -665,7 +765,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     { workspaceRuns },
   );
   duoLaunches = duoLaunchCoordinator;
-  await duoLaunchCoordinator.resumeComparisons();
+  if (!runtimeSafetyLock) {
+    await duoLaunchCoordinator.resumeComparisons();
+  }
 
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
@@ -791,6 +893,22 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     socket: WebSocket,
     command: Parameters<typeof executeCommand>[1],
   ): Promise<void> => {
+    if (closed) {
+      send(socket, {
+        type: "request.error",
+        requestId: command.requestId,
+        message: "The runtime is shutting down.",
+      });
+      return;
+    }
+    if (runtimeSafetyLock) {
+      send(socket, {
+        type: "request.error",
+        requestId: command.requestId,
+        message: runtimeSafetyError("Changes are unavailable in recovery safety mode."),
+      });
+      return;
+    }
     if (databaseRecoveryImportActive) {
       send(socket, {
         type: "request.error",
@@ -801,7 +919,18 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     }
     activeRuntimeCommands += 1;
     try {
-      await executeCommand(socket, command);
+      await trackRuntimeOperation(async () => {
+        await testOnlyBeforeRuntimeCommand?.();
+        if (closed) {
+          send(socket, {
+            type: "request.error",
+            requestId: command.requestId,
+            message: "The runtime is shutting down.",
+          });
+          return;
+        }
+        await executeCommand(socket, command);
+      });
     } finally {
       activeRuntimeCommands -= 1;
       if (activeRuntimeCommands === 0) {
@@ -839,25 +968,30 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   // Reconcile durable pending artifacts only after the runtime can serve the
   // already-terminal turn snapshot. Restart recovery must not hold the app
   // startup screen behind Git work.
-  artifactReconciliation = turnGitArtifacts.reconcile()
-    .then((changed) => {
-      if (changed && !closed) broadcastSnapshot();
-    })
-    .catch(() => undefined);
+  if (!runtimeSafetyLock) {
+    artifactReconciliation = turnGitArtifacts.reconcile()
+      .then((changed) => {
+        if (changed && !closed) broadcastSnapshot();
+      })
+      .catch(() => undefined);
+  }
 
-  if (enableProviders) void refreshProviderInfo(undefined, true).then(() => {
-    void providerMaintenance.refresh(PROVIDER_IDS, false).catch(() => undefined);
-  }).catch(() => {
-    if (closed) return;
-    providerInfo = providerInfo.map((provider) => ({
-      ...provider,
-      installState: "error",
-      authState: "error",
-      canRun: false,
-      statusMessage: "Agent discovery failed",
-    }));
-    broadcastSnapshot();
-  });
+  if (enableProviders) {
+    void trackRuntimeOperation(async () => {
+      await refreshProviderInfo(undefined, true);
+      if (!closed) await providerMaintenance.refresh(PROVIDER_IDS, false);
+    }).catch(() => {
+      if (closed) return;
+      providerInfo = providerInfo.map((provider) => ({
+        ...provider,
+        installState: "error",
+        authState: "error",
+        canRun: false,
+        statusMessage: "Agent discovery failed",
+      }));
+      broadcastSnapshot();
+    });
+  }
 
   const privateConnectGateway = new PrivateConnectRuntimeGateway({
     shell: currentSnapshot,
@@ -929,12 +1063,25 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   return {
     websocketUrl: `ws://127.0.0.1:${address.port}${websocketPath}`,
     databaseRecovery: store.databaseRecoveryReport(),
-    resolveProjectPath: async (request) => (await resolveAuthoritativeProjectPath(
-      store,
-      request,
-      projectIdentityAuthority,
-    )).absolute,
-    privateConnectRequest: (subject, request) => databaseRecoveryImportActive
+    resolveProjectPath: (request) => trackRuntimeOperation(async () => {
+      if (runtimeSafetyLock) {
+        throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
+      }
+      return (await resolveAuthoritativeProjectPath(
+        store,
+        request,
+        projectIdentityAuthority,
+      )).absolute;
+    }),
+    privateConnectRequest: (subject, request) => runtimeSafetyLock
+      ? Promise.resolve({
+          type: "response",
+          requestId: request.requestId,
+          ok: false,
+          code: "unavailable",
+          message: runtimeSafetyError("Private Connect changes are unavailable in recovery safety mode."),
+        })
+      : databaseRecoveryImportActive
       ? Promise.resolve({
           type: "response",
           requestId: request.requestId,
@@ -942,8 +1089,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           code: "unavailable",
           message: "Database recovery is in progress.",
         })
-      : privateConnectGateway.request(subject, request),
-    preparePrivateConnectPrompt: (subject, request) => databaseRecoveryImportActive
+      : trackRuntimeOperation(() => privateConnectGateway.request(subject, request)),
+    preparePrivateConnectPrompt: (subject, request) => runtimeSafetyLock
+      ? Promise.resolve({
+          type: "response",
+          requestId: request.requestId,
+          ok: false,
+          code: "unavailable",
+          message: runtimeSafetyError("Private Connect changes are unavailable in recovery safety mode."),
+        })
+      : databaseRecoveryImportActive
       ? Promise.resolve({
           type: "response",
           requestId: request.requestId,
@@ -951,9 +1106,17 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           code: "unavailable",
           message: "Database recovery is in progress.",
         })
-      : privateConnectGateway.preparePrompt(subject, request),
+      : trackRuntimeOperation(() => privateConnectGateway.preparePrompt(subject, request)),
     commitPrivateConnectPrompt: (subject, request, preparationId) =>
-      databaseRecoveryImportActive
+      runtimeSafetyLock
+        ? {
+            type: "response",
+            requestId: request.requestId,
+            ok: false,
+            code: "unavailable",
+            message: runtimeSafetyError("Private Connect changes are unavailable in recovery safety mode."),
+          }
+        : databaseRecoveryImportActive
         ? {
             type: "response",
             requestId: request.requestId,
@@ -966,14 +1129,20 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (scope.kind === "all") privateConnectGateway.reset();
       else privateConnectGateway.forgetConversation(scope.conversationId);
     },
-    exportRecoveryData: async (path, signal) => {
+    exportRecoveryData: (path, signal) => trackRuntimeOperation(async () => {
+      if (runtimeSafetyLock) {
+        throw new Error(runtimeSafetyError("Database export is unavailable in recovery safety mode."));
+      }
       await writeDatabaseRecoveryExportFile(
         path,
         store.exportRecoveryData(),
         { signal },
       );
-    },
-    importRecoveryData: async (path, targetDirectory, signal, operationId) => {
+    }),
+    importRecoveryData: (path, targetDirectory, signal, operationId) => trackRuntimeOperation(async () => {
+      if (runtimeSafetyLock) {
+        throw new Error(runtimeSafetyError("Database import is unavailable in recovery safety mode."));
+      }
       if (databaseRecoveryImportActive) {
         throw new Error("A database recovery import is already active.");
       }
@@ -1034,7 +1203,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       } finally {
         databaseRecoveryImportActive = false;
       }
-    },
+    }),
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;
@@ -1043,6 +1212,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       snapshotBroadcasts.close();
       secureFileAuthorities.clear();
       await runRuntimeShutdownPhases({
+        quiesceRuntimeWork: async () => {
+          await drainRuntimeOperations();
+          await projectIdentities.drain();
+        },
         independentDrains: [
           () => terminals.disposeAll(),
           () => providerMaintenance.dispose(),

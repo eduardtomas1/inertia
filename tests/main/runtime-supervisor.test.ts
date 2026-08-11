@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
+import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -58,7 +59,29 @@ class FakeUtilityProcess extends EventEmitter {
   }
 
   spawn(): void { this.emit("spawn"); }
-  message(value: unknown): void { this.emit("message", value); }
+  message(value: unknown): void {
+    if (
+      value
+      && typeof value === "object"
+      && "type" in value
+      && value.type === "runtime.ready"
+    ) {
+      const start = this.messages.findLast((message) =>
+        message.type === "runtime.start");
+      if (start?.type === "runtime.start") {
+        for (const receiptRuntimeGenerationId of
+          start.options.confirmedTerminatedRuntimeGenerationIds ?? []) {
+          this.emit("message", {
+            type: "runtime.cleanup-receipt-consumed",
+            receiptRuntimeGenerationId,
+            currentRuntimeGenerationId: start.options.runtimeGenerationId,
+          });
+        }
+      }
+    }
+    this.emit("message", value);
+  }
+  rawMessage(value: unknown): void { this.emit("message", value); }
   exit(code: number): void {
     this.emit("exit", code);
     this.pid = undefined;
@@ -83,6 +106,7 @@ function createHarness(options: {
     _deadlineAt: number,
   ): boolean | Promise<boolean> => true);
   const supervisor = new RuntimeSupervisor({
+    systemBootId: "test:00000000-0000-4000-8000-000000000001",
     workerOptions: {
       dataDirectory,
       defaultWorkspacePath: workspaceDirectory,
@@ -109,7 +133,17 @@ function createHarness(options: {
   return { children, forceKill, supervisor };
 }
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => {
+  vi.useFakeTimers();
+  rmSync(join(dataDirectory, ".runtime-cleanup-receipts"), {
+    recursive: true,
+    force: true,
+  });
+  rmSync(join(dataDirectory, ".runtime-generation-leases"), {
+    recursive: true,
+    force: true,
+  });
+});
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
@@ -129,6 +163,8 @@ describe("RuntimeSupervisor", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        runtimeGenerationId: expect.stringMatching(/^[0-9a-f-]{36}:1$/u),
+        systemBootId: "test:00000000-0000-4000-8000-000000000001",
       },
     }]);
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
@@ -1026,7 +1062,7 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
   });
 
-  it("releases generation-owned attachments when runtime startup fails", async () => {
+  it("retains startup attachments when forced tree cleanup lacks runtime authority", async () => {
     const attachmentBroker: RuntimeAttachmentBroker = {
       resolve: vi.fn(async () => trustedAttachment),
       release: vi.fn(async () => true),
@@ -1048,8 +1084,12 @@ describe("RuntimeSupervisor", () => {
     });
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
-    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
   });
 
   it("drops generation ownership when release confirms the capability is already absent", async () => {
@@ -1122,8 +1162,8 @@ describe("RuntimeSupervisor", () => {
 
     children[0].exit(1);
     await vi.advanceTimersByTimeAsync(0);
-    expect(attachmentBroker.release).toHaveBeenCalledTimes(2);
-    expect(attachmentBroker.release).toHaveBeenLastCalledWith(attachmentId);
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
   });
 
   it("keeps runtime-owned attachments until graceful shutdown settles", async () => {
@@ -1387,21 +1427,22 @@ describe("RuntimeSupervisor", () => {
     expect(children[0].killCalls).toBe(0);
   });
 
-  it("reports startup failure and retries only after the failed child exits", () => {
+  it("reports startup failure and retries only after forced cleanup and exit", async () => {
     const { children, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
     children[0].message({ type: "runtime.startup-failed", message: "The database is locked." });
 
     expect(() => supervisor.connection()).toThrow("The database is locked");
-    vi.advanceTimersByTime(10_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(children).toHaveLength(1);
 
     children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(0);
     expect(supervisor.snapshot()).toMatchObject({ phase: "restarting", restartAttempt: 1, restartScheduled: true });
-    vi.advanceTimersByTime(499);
+    await vi.advanceTimersByTimeAsync(499);
     expect(children).toHaveLength(1);
-    vi.advanceTimersByTime(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(children).toHaveLength(2);
   });
 
@@ -1437,13 +1478,17 @@ describe("RuntimeSupervisor", () => {
     vi.advanceTimersByTime(500);
     expect(children).toHaveLength(2);
     children[1].spawn();
+    expect(children[1].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: { priorRuntimeCleanupUnconfirmed: true },
+    });
     children[1].message({ type: "runtime.ready", websocketUrl: secondUrl });
     expect(supervisor.connection()).toEqual({ websocketUrl: secondUrl });
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 2 });
   });
 
-  it("survives a sustained crash-and-reconnect loop without leaking children or timers", () => {
-    const crashCount = 64;
+  it("bounds crash-and-reconnect attempts and quarantines prior generations", () => {
+    const crashCount = 3;
     const { children, supervisor } = createHarness({ stableUptimeMs: 60_000 });
     supervisor.start();
 
@@ -1461,27 +1506,23 @@ describe("RuntimeSupervisor", () => {
         pid: 10_000 + cycle,
       });
       child!.exit(9);
-      expect(supervisor.snapshot()).toMatchObject({
+      expect(supervisor.snapshot()).toMatchObject(cycle < 2 ? {
         phase: "restarting",
         generation: cycle + 1,
         pid: null,
         restartScheduled: true,
+      } : {
+        phase: "stopped",
+        generation: cycle + 1,
+        pid: null,
+        restartScheduled: false,
       });
+      if (cycle === 2) break;
       vi.advanceTimersByTime(runtimeRestartDelayMs(cycle));
       expect(children).toHaveLength(cycle + 2);
     }
-
-    const recovered = children[crashCount]!;
-    recovered.spawn();
-    recovered.message({ type: "runtime.ready", websocketUrl: secondUrl });
-    expect(supervisor.connection()).toEqual({ websocketUrl: secondUrl });
-    expect(supervisor.snapshot()).toMatchObject({
-      phase: "ready",
-      generation: crashCount + 1,
-      pid: 10_000 + crashCount,
-      restartScheduled: false,
-    });
-    expect(vi.getTimerCount()).toBe(1);
+    expect(children).toHaveLength(3);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("uses bounded exponential backoff and resets it only after stable readiness", () => {
@@ -1546,7 +1587,7 @@ describe("RuntimeSupervisor", () => {
     expect(forceKill).toHaveBeenCalledOnce();
     await Promise.resolve();
     children[0].exit(137);
-    await expect(stopped).resolves.toBe(true);
+    await expect(stopped).resolves.toBe(false);
   });
 
   it("executes the supervisor tree fallback while an unconfirmed runtime close keeps the worker alive", async () => {
@@ -1566,7 +1607,7 @@ describe("RuntimeSupervisor", () => {
     expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
 
     children[0].exit(137);
-    await expect(stopped).resolves.toBe(true);
+    await expect(stopped).resolves.toBe(false);
     vi.runAllTimers();
     expect(forceKill).toHaveBeenCalledOnce();
   });
@@ -1687,7 +1728,8 @@ describe("RuntimeSupervisor", () => {
       phase: "stopped",
       pid: null,
     });
-    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
     vi.advanceTimersByTime(60_000);
     expect(children).toHaveLength(1);
   });

@@ -20,9 +20,9 @@ export async function reconcileInactiveDuoLaunchTurns(
   launch: StoredLaunch,
   options: {
     comparisonOnly?: boolean;
-    providerCleanupConfirmedTurnIds?: ReadonlySet<string>;
+    providerRunOwnershipConfirmedTurnIds?: ReadonlySet<string>;
     allowProviderStop?: boolean;
-    authorizedCheckoutReservationId?: string | null;
+    authorizedCheckoutReservationIds?: readonly string[];
   } = {},
 ): Promise<boolean> {
   const candidates: Array<{ conversationId: string; turnId: string }> = [];
@@ -34,6 +34,7 @@ export async function reconcileInactiveDuoLaunchTurns(
           if (
             !isAgentTurnTerminalStatus(turn.status)
             || hasActiveExactTurnRun(store, turn.runId)
+            || turns.isActive(side.conversationId)
           ) {
             candidates.push({
               conversationId: side.conversationId,
@@ -55,6 +56,7 @@ export async function reconcileInactiveDuoLaunchTurns(
       if (
         !isAgentTurnTerminalStatus(turn.status)
         || hasActiveExactTurnRun(store, turn.runId)
+        || turns.isActive(comparison.conversationId)
       ) {
         candidates.push({
           conversationId: comparison.conversationId,
@@ -70,17 +72,17 @@ export async function reconcileInactiveDuoLaunchTurns(
   } catch {
     return false;
   }
-  const confirmed = options.providerCleanupConfirmedTurnIds ?? new Set();
+  const confirmed = options.providerRunOwnershipConfirmedTurnIds ?? new Set();
   const results = await Promise.all(candidates.map(({ conversationId, turnId }) =>
     turns.reconcileInactiveDuoTurn(
       launch.launchId,
       conversationId,
       turnId,
       {
-        providerCleanupConfirmed: confirmed.has(turnId),
+        providerRunOwnershipConfirmed: confirmed.has(turnId),
         allowProviderStop: options.allowProviderStop ?? true,
-        authorizedCheckoutReservationId:
-          options.authorizedCheckoutReservationId,
+        authorizedCheckoutReservationIds:
+          options.authorizedCheckoutReservationIds,
       },
     )));
   return results.every(Boolean);
@@ -90,7 +92,7 @@ export async function reconcileDuoDeletionLaunches(
   store: RuntimeStore,
   turns: TurnController,
   related: { launchIds: string[]; hasMore: boolean },
-  authorizedCheckoutReservationId: string | null = null,
+  authorizedCheckoutReservationIds: readonly string[] = [],
 ): Promise<boolean> {
   for (const launchId of related.launchIds) {
     let launch: StoredLaunch;
@@ -111,7 +113,7 @@ export async function reconcileDuoDeletionLaunches(
     }
     if (!await reconcileInactiveDuoLaunchTurns(store, turns, launch, {
       allowProviderStop: false,
-      authorizedCheckoutReservationId,
+      authorizedCheckoutReservationIds,
     })) return false;
   }
   return !related.hasMore;

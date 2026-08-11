@@ -3,6 +3,8 @@ export const RUNTIME_SHUTDOWN_DEADLINE_MS = 2_500;
 type ShutdownOperation = () => void | Promise<void>;
 
 export interface RuntimeShutdownPhases {
+  /** Stops command admission and drains work that could create new owned resources. */
+  quiesceRuntimeWork?: ShutdownOperation;
   independentDrains: readonly ShutdownOperation[];
   stopIsolatedRuns: ShutdownOperation;
   disposeTurnsAndProviders: ShutdownOperation;
@@ -103,6 +105,13 @@ export async function runRuntimeShutdownPhases(
   };
 
   try {
+    if (phases.quiesceRuntimeWork) {
+      await beforeDeadline(
+        Promise.resolve().then(phases.quiesceRuntimeWork),
+        deadlineAt,
+        "runtime command cleanup",
+      );
+    }
     await beforeDeadline(
       Promise.all([
         ...phases.independentDrains.map(attempt),

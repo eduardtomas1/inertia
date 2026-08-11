@@ -303,6 +303,7 @@ describe("ProviderManager terminal resume launch", () => {
       installState: "installed",
       authState: "authenticated",
       canRun: true,
+      cleanupConfirmed: true,
       statusMessage: "Connected",
     });
 
@@ -330,6 +331,7 @@ describe("ProviderManager terminal resume launch", () => {
       installState: "installed",
       authState: "authenticated",
       canRun: true,
+      cleanupConfirmed: true,
       statusMessage: "Connected",
     });
     await expect(manager.terminalResumeLaunch(

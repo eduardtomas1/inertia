@@ -688,20 +688,40 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.close();
   });
 
-  it("adds the empty turn ledger to an existing V0.0.6 database without rebuilding conversations", async () => {
-    const { databasePath, workspacePath, store } = await createStore();
-    const conversationId = store.snapshot().conversations[0]!.id;
-    store.close();
-
-    const legacy = new Database(databasePath);
-    legacy.exec("DROP TABLE agent_turns");
-    legacy.prepare("DELETE FROM schema_migrations WHERE version = 16").run();
+  it("adds the turn ledger to V0.0.6 without rebuilding conversations", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-v006-upgrade-"));
+    temporaryDirectories.push(directory);
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const databasePath = join(directory, "inertia.sqlite");
+    await copyFile(join(
+      import.meta.dirname,
+      "..",
+      "fixtures",
+      "database",
+      "v0.0.6.sqlite",
+    ), databasePath);
+    const legacy = new Database(databasePath, { readonly: true });
+    const conversationId = (legacy.prepare(
+      "SELECT id FROM conversations ORDER BY created_at ASC, id ASC LIMIT 1",
+    ).get() as { id: string }).id;
+    expect(legacy.prepare(`
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'table' AND name = 'agent_turns'
+    `).get()).toBeUndefined();
     legacy.close();
     migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.conversation(conversationId).id).toBe(conversationId);
-    expect(migrated.snapshot().agentTurns).toEqual([]);
+    expect(migrated.snapshot().agentTurns).toHaveLength(2);
+    expect(migrated.snapshot().agentTurns).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        conversationId,
+        association: "inferred",
+        status: "completed",
+      }),
+    ]));
     const inspection = new Database(databasePath, { readonly: true });
     const columns = inspection.prepare("PRAGMA table_info(agent_turns)").all() as Array<{ name: string }>;
     inspection.close();

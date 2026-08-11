@@ -1219,6 +1219,22 @@ describe("database backup and startup recovery", () => {
         database.exec("DROP TRIGGER prompt_presets_count_limit");
       },
     },
+    {
+      label: "the Usage dashboard completed-turn range index",
+      mutate: (database: Database.Database) => {
+        database.exec("DROP INDEX agent_turns_usage_dashboard_completed_idx");
+      },
+    },
+    {
+      label: "the exact Usage dashboard completed-turn range index",
+      mutate: (database: Database.Database) => {
+        database.exec(`
+          DROP INDEX agent_turns_usage_dashboard_completed_idx;
+          CREATE INDEX agent_turns_usage_dashboard_completed_idx
+          ON agent_turns(association, completed_at COLLATE NOCASE, id);
+        `);
+      },
+    },
   ])("skips a current-schema backup missing $label", async ({ mutate }) => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

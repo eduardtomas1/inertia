@@ -440,6 +440,40 @@ function validateOpenDatabase(
       || !/raise\s*\(\s*abort/u.test(normalizedPromptPresetTrigger)
     ) return "corrupt";
   }
+  if (version >= 55) {
+    const usageDashboardIndex = (database.prepare(
+      "PRAGMA index_list(agent_turns)",
+    ).all() as Array<{
+      name: string;
+      partial: number;
+      unique: number;
+    }>).find(({ name }) =>
+      name === "agent_turns_usage_dashboard_completed_idx");
+    if (
+      !usageDashboardIndex
+      || usageDashboardIndex.partial !== 0
+      || usageDashboardIndex.unique !== 0
+    ) return "corrupt";
+    const indexedColumns = (database.prepare(
+      "PRAGMA index_xinfo(agent_turns_usage_dashboard_completed_idx)",
+    ).all() as Array<{
+      coll: string;
+      desc: number;
+      key: number;
+      name: string | null;
+      seqno: number;
+    }>)
+      .filter(({ key }) => key === 1)
+      .sort((left, right) => left.seqno - right.seqno)
+      .map(({ coll, desc, name }) => `${name}:${coll}:${desc}`);
+    if (indexedColumns.join(",") !== [
+      "association:BINARY:0",
+      "completed_at:BINARY:0",
+      "id:BINARY:0",
+    ].join(",")) {
+      return "corrupt";
+    }
+  }
   return "valid-current";
 }
 

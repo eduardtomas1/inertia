@@ -62,6 +62,7 @@ export interface IsolatedReviewCommandDependencies {
 export function createIsolatedReviewCommandHandler(
   dependencies: IsolatedReviewCommandDependencies,
 ): RuntimeCommandHandler {
+  const pendingSelectionQuestions = new Map<string, { cancelled: boolean }>();
   return defineRuntimeCommandHandler([
     "review.selection.ask",
     "review.selection.revise",
@@ -82,6 +83,7 @@ export function createIsolatedReviewCommandHandler(
         if (
           dependencies.turns.isActive(conversation.id)
           || dependencies.isolatedRuns.has(conversation.id)
+          || pendingSelectionQuestions.has(conversation.id)
         ) {
           throw new RuntimeRequestError(
             "Wait for the current agent or review turn to finish first.",
@@ -96,19 +98,28 @@ export function createIsolatedReviewCommandHandler(
               ?? "The selected review agent is unavailable.",
           );
         }
-        const context = await selectedReviewContext(
-          dependencies.store,
-          command.payload,
-          "ask",
-          dependencies.secureFiles,
-        );
-        const assembled = assembleReadOnlyReviewRequest(
-          dependencies.store.conversationPath(conversation.id),
-          context.visibleContent,
-          context.requestContext,
-        );
+        const pending = { cancelled: false };
+        pendingSelectionQuestions.set(conversation.id, pending);
         try {
-          const completion = await dependencies.isolatedRuns.run({
+          const context = await selectedReviewContext(
+            dependencies.store,
+            command.payload,
+            "ask",
+            dependencies.secureFiles,
+          );
+          if (pending.cancelled) {
+            dependencies.send(socket, {
+              type: "request.ok",
+              requestId: command.requestId,
+            });
+            return "handled";
+          }
+          const assembled = assembleReadOnlyReviewRequest(
+            dependencies.store.conversationPath(conversation.id),
+            context.visibleContent,
+            context.requestContext,
+          );
+          const completionPromise = dependencies.isolatedRuns.run({
             kind: "selection-ask",
             projectId: conversation.projectId,
             conversationId: conversation.id,
@@ -150,6 +161,14 @@ export function createIsolatedReviewCommandHandler(
               };
             },
           });
+          const completion = await completionPromise;
+          if (pending.cancelled) {
+            dependencies.send(socket, {
+              type: "request.ok",
+              requestId: command.requestId,
+            });
+            return "handled";
+          }
           dependencies.send(socket, {
             type: "request.result",
             requestId: command.requestId,
@@ -159,6 +178,13 @@ export function createIsolatedReviewCommandHandler(
             },
           });
         } catch (error) {
+          if (pending.cancelled) {
+            dependencies.send(socket, {
+              type: "request.ok",
+              requestId: command.requestId,
+            });
+            return "handled";
+          }
           if (
             error instanceof IsolatedRunError
             && error.reason === "cancelled"
@@ -173,6 +199,10 @@ export function createIsolatedReviewCommandHandler(
             throw new RuntimeRequestError(error.message);
           }
           throw error;
+        } finally {
+          if (pendingSelectionQuestions.get(conversation.id) === pending) {
+            pendingSelectionQuestions.delete(conversation.id);
+          }
         }
         return "handled";
       }
@@ -180,12 +210,13 @@ export function createIsolatedReviewCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
-        if (
-          !dependencies.isolatedRuns.stopConversation(
-            conversation.id,
-            "selection-ask",
-          )
-        ) {
+        const stopped = dependencies.isolatedRuns.stopConversation(
+          conversation.id,
+          "selection-ask",
+        );
+        const pending = pendingSelectionQuestions.get(conversation.id);
+        if (pending) pending.cancelled = true;
+        if (!stopped && !pending) {
           throw new RuntimeRequestError(
             "This thread does not have an active review question.",
           );

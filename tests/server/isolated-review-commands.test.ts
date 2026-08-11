@@ -64,6 +64,7 @@ function fixture(authority: ConversationWorkAuthority) {
   const start = vi.fn(() => true);
   const queue = vi.fn(() => ({ turn: { id: turnId } }));
   const stopConversation = vi.fn(() => false);
+  const runIsolated = vi.fn();
   const dependencies = {
     store: {
       conversation: vi.fn(() => conversation),
@@ -74,7 +75,11 @@ function fixture(authority: ConversationWorkAuthority) {
       queue,
       start,
     },
-    isolatedRuns: { has: vi.fn(() => false), stopConversation },
+    isolatedRuns: {
+      has: vi.fn(() => false),
+      run: runIsolated,
+      stopConversation,
+    },
     secureFiles: {},
     dataDirectory: "/private/inertia-data",
     enableProviders: true,
@@ -83,7 +88,7 @@ function fixture(authority: ConversationWorkAuthority) {
     broadcastSnapshot: vi.fn(),
     send: vi.fn(),
   } as unknown as IsolatedReviewCommandDependencies;
-  return { dependencies, queue, start, stopConversation };
+  return { dependencies, queue, runIsolated, start, stopConversation };
 }
 
 describe("isolated review revision authority", () => {
@@ -176,6 +181,69 @@ describe("isolated review revision authority", () => {
       "selection-ask",
     );
     expect(dependencies.send).not.toHaveBeenCalled();
+  });
+
+  it("records cancellation while selection context is still being assembled", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    const context = deferred<{
+      visibleContent: string;
+      requestContext: { diffSelections: [] };
+      patch: string;
+      filePath: string;
+      hunkHeader: string;
+      selectedLineCount: number;
+      fingerprint: string;
+      hunkId: string;
+    }>();
+    reviewSupport.selectedReviewContext.mockReturnValue(context.promise);
+    const { dependencies, runIsolated, stopConversation } = fixture(authority);
+    const handler = createIsolatedReviewCommandHandler(dependencies);
+    const socket = {} as WebSocket;
+
+    const question = handler(socket, askCommand);
+    await vi.waitFor(() => {
+      expect(reviewSupport.selectedReviewContext).toHaveBeenCalledOnce();
+    });
+    await expect(handler(socket, {
+      ...askCommand,
+      requestId: projectId,
+    })).rejects.toThrow(
+      "Wait for the current agent or review turn to finish first.",
+    );
+    await expect(handler(socket, {
+      type: "review.selection.cancel",
+      requestId: turnId,
+      payload: { conversationId },
+    })).resolves.toBe("handled");
+
+    context.resolve({
+      visibleContent: "Can you check this?",
+      requestContext: { diffSelections: [] },
+      patch: "",
+      filePath: "src/example.ts",
+      hunkHeader: "@@ -1 +1 @@",
+      selectedLineCount: 1,
+      fingerprint: "a".repeat(64),
+      hunkId: "hunk-1",
+    });
+    await expect(question).resolves.toBe("handled");
+
+    expect(stopConversation).toHaveBeenCalledWith(
+      conversationId,
+      "selection-ask",
+    );
+    expect(runIsolated).not.toHaveBeenCalled();
+    expect(dependencies.send).toHaveBeenCalledWith(socket, {
+      type: "request.ok",
+      requestId: turnId,
+    });
+    expect(dependencies.send).toHaveBeenCalledWith(socket, {
+      type: "request.ok",
+      requestId,
+    });
   });
 
   it("holds conversation ownership from diff read through turn start", async () => {

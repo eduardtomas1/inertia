@@ -393,6 +393,36 @@ describe("compact Work sidebar", () => {
     expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
   });
 
+  it("clears Work-only metadata searches when switching to Projects", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const work = conversation(
+      "metadata-mode-change",
+      "Search metadata before switching",
+      new Date(2026, 7, 11, 9),
+      { branch: "codex/work-only-branch" },
+    );
+    const view = renderSidebar([work]);
+
+    fireEvent.change(screen.getByRole("searchbox", {
+      name: "Search projects and conversations",
+    }), { target: { value: "work-only-branch" } });
+    expect(screen.getByRole("button", { name: /^Search metadata before switching,/ }))
+      .toBeInTheDocument();
+
+    const workSnapshot = snapshot([work]);
+    view.rerenderSnapshot({
+      ...workSnapshot,
+      settings: { ...workSnapshot.settings, sidebarMode: "classic" },
+    });
+
+    expect(screen.getByRole("searchbox", {
+      name: "Search projects and conversations",
+    })).toHaveValue("");
+    expect(screen.queryByText("No matching projects")).not.toBeInTheDocument();
+    expect(screen.getByText("Search metadata before switching")).toBeInTheDocument();
+  });
+
   it("ends a row rename when automatic regrouping hides its owner", () => {
     vi.useFakeTimers();
     const start = new Date(2026, 7, 11, 12);

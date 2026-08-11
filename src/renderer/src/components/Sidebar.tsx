@@ -229,6 +229,7 @@ function SidebarView({
   useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query, sidebarMode]);
 
   useLayoutEffect(() => {
+    setQuery("");
     setConversationMenu(null);
     setRenaming(null);
     setRenameDraft("");

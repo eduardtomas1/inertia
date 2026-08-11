@@ -17,6 +17,7 @@ import type { SettingsViewProps } from "./SettingsView";
 import { LoadingMark } from "./ui";
 import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadFilesPanel,
   loadGoalPanel,
@@ -69,7 +70,7 @@ export interface WorkspaceToolScene {
   terminalKey: string;
   goal: ComponentProps<typeof GoalPanel>;
   plan: ComponentProps<typeof PlanPanel>;
-  preview: ComponentProps<typeof PreviewPanel>;
+  preview: Omit<ComponentProps<typeof PreviewPanel>, "owner">;
 }
 
 export interface ConversationPaneScene {
@@ -105,7 +106,10 @@ export interface WorkspaceSceneProps {
 function WorkspaceToolSurface({
   resizeHandle,
   tools,
-}: Pick<ConversationPaneScene, "resizeHandle" | "tools">): JSX.Element {
+  owner,
+}: Pick<ConversationPaneScene, "resizeHandle" | "tools"> & {
+  owner: WorkspacePreviewOwner;
+}): JSX.Element {
   const terminalLifecycleRef = useRef({
     key: null as string | null,
     activated: false,
@@ -138,7 +142,7 @@ function WorkspaceToolSurface({
             {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
             {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
             {tools.activeTool === "preview" && (
-              <PreviewPanel {...tools.preview} />
+              <PreviewPanel owner={owner} {...tools.preview} />
             )}
           </Suspense>
         </WorkspacePanel>
@@ -152,7 +156,10 @@ function ConversationPane({
   chat,
   resizeHandle,
   tools,
-}: ConversationPaneScene): JSX.Element {
+  owner,
+}: ConversationPaneScene & {
+  owner: WorkspacePreviewOwner;
+}): JSX.Element {
   const containerRef = resizeHandle?.containerRef as
     | RefObject<HTMLDivElement | null>
     | undefined;
@@ -172,7 +179,11 @@ function ConversationPane({
           ? <ConversationDetailState {...detailState} embedded />
           : <ChatWorkspace {...chat} embedded />}
       </div>
-      <WorkspaceToolSurface resizeHandle={resizeHandle} tools={tools} />
+      <WorkspaceToolSurface
+        resizeHandle={resizeHandle}
+        tools={tools}
+        owner={owner}
+      />
     </div>
   );
 }
@@ -202,13 +213,16 @@ function WorkspaceSceneView({
         <ConversationSplitView
           primary={(
             <ConversationPane
+              owner="primary"
               detailState={detailState}
               chat={chat}
               resizeHandle={resizeHandle}
               tools={tools}
             />
           )}
-          secondary={<ConversationPane {...splitScene.secondary} />}
+          secondary={(
+            <ConversationPane owner="secondary" {...splitScene.secondary} />
+          )}
           primaryTitle={splitScene.primaryTitle}
           secondaryTitle={splitScene.secondaryTitle}
           primaryProjectName={splitScene.primaryProjectName}
@@ -228,7 +242,11 @@ function WorkspaceSceneView({
       )}
 
       {!splitScene && (
-        <WorkspaceToolSurface resizeHandle={resizeHandle} tools={tools} />
+        <WorkspaceToolSurface
+          resizeHandle={resizeHandle}
+          tools={tools}
+          owner="primary"
+        />
       )}
     </>
   );

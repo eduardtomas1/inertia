@@ -1,35 +1,92 @@
 export type WorkspacePreviewOwner = "primary" | "secondary";
 
-const PREVIEW_FOCUS_RETRY_FRAMES = 60;
+interface PendingWorkspacePreviewFocus {
+  owner: WorkspacePreviewOwner;
+  initialActiveElement: Element | null;
+  cancel: () => void;
+}
+
+let pendingFocus: PendingWorkspacePreviewFocus | null = null;
+
+function clearPendingFocus(
+  request: PendingWorkspacePreviewFocus,
+): void {
+  if (pendingFocus !== request) return;
+  pendingFocus = null;
+  request.cancel();
+}
+
+function focusAddress(
+  request: PendingWorkspacePreviewFocus,
+  address: HTMLInputElement,
+): void {
+  const activeElement = document.activeElement;
+  if (
+    activeElement !== request.initialActiveElement
+    && activeElement instanceof HTMLElement
+    && activeElement !== document.body
+    && activeElement.isConnected
+    && !activeElement.matches('[aria-label="Preview address"]')
+  ) {
+    clearPendingFocus(request);
+    return;
+  }
+  clearPendingFocus(request);
+  address.focus({ preventScroll: true });
+}
+
+function previewAddress(
+  owner: WorkspacePreviewOwner,
+): HTMLInputElement | null {
+  const ownerPane = document.getElementById(`${owner}-conversation-pane`);
+  const scope = ownerPane ?? (owner === "primary" ? document : null);
+  return scope?.querySelector<HTMLInputElement>(
+    '[aria-label="Preview address"]',
+  ) ?? null;
+}
 
 export function focusWorkspacePreviewAddress(
   owner: WorkspacePreviewOwner,
 ): void {
-  const focusWhenMounted = (remainingFrames: number): void => {
-    const ownerPane = document.getElementById(`${owner}-conversation-pane`);
-    const scope = ownerPane ?? (owner === "primary" ? document : null);
-    const address = scope?.querySelector<HTMLInputElement>(
-      '[aria-label="Preview address"]',
-    ) ?? null;
-    const activeElement = document.activeElement;
-    if (activeElement === address) return;
+  pendingFocus?.cancel();
+  pendingFocus = null;
+  const cancelForUserFocus = (event: FocusEvent): void => {
+    const target = event.target;
     if (
-      activeElement instanceof HTMLElement
-      && activeElement !== document.body
-      && activeElement.isConnected
-      && !activeElement.matches('[aria-label="Preview address"]')
+      target instanceof HTMLElement
+      && !target.matches('[aria-label="Preview address"]')
     ) {
-      return;
-    }
-    if (address) {
-      address.focus({ preventScroll: true });
-      return;
-    }
-    if (remainingFrames > 0) {
-      window.requestAnimationFrame(() =>
-        focusWhenMounted(remainingFrames - 1));
+      request.cancel();
     }
   };
-  window.requestAnimationFrame(() =>
-    focusWhenMounted(PREVIEW_FOCUS_RETRY_FRAMES));
+  const cancelForUserInput = (): void => request.cancel();
+  const cancel = (): void => {
+    if (pendingFocus === request) pendingFocus = null;
+    document.removeEventListener("focusin", cancelForUserFocus, true);
+    document.removeEventListener("pointerdown", cancelForUserInput, true);
+    document.removeEventListener("keydown", cancelForUserInput, true);
+    window.removeEventListener("blur", cancelForUserInput);
+  };
+  const request: PendingWorkspacePreviewFocus = {
+    owner,
+    initialActiveElement: document.activeElement,
+    cancel,
+  };
+  pendingFocus = request;
+  document.addEventListener("focusin", cancelForUserFocus, true);
+  document.addEventListener("pointerdown", cancelForUserInput, true);
+  document.addEventListener("keydown", cancelForUserInput, true);
+  window.addEventListener("blur", cancelForUserInput);
+
+  const address = previewAddress(owner);
+  if (address) focusAddress(request, address);
+}
+
+export function registerWorkspacePreviewAddress(
+  owner: WorkspacePreviewOwner,
+  address: HTMLInputElement | null,
+): void {
+  const request = pendingFocus;
+  if (!address || !request || request.owner !== owner) return;
+  focusAddress(request, address);
 }

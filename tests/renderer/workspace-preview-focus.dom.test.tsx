@@ -1,8 +1,14 @@
+import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { focusWorkspacePreviewAddress } from "../../src/renderer/src/utils/workspacePreviewFocus";
+import { PreviewPanel } from "../../src/renderer/src/components/PreviewPanel";
+import {
+  focusWorkspacePreviewAddress,
+  registerWorkspacePreviewAddress,
+} from "../../src/renderer/src/utils/workspacePreviewFocus";
 
 afterEach(() => {
+  window.dispatchEvent(new Event("blur"));
   document.body.replaceChildren();
   vi.restoreAllMocks();
 });
@@ -14,29 +20,8 @@ function address(parent: HTMLElement = document.body): HTMLInputElement {
   return input;
 }
 
-function flushFocusFrame(): void {
-  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-    callback(0);
-    return 1;
-  });
-}
-
-function focusFrames(): {
-  flush: () => void;
-} {
-  const frames: FrameRequestCallback[] = [];
-  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-    frames.push(callback);
-    return frames.length;
-  });
-  return {
-    flush: () => frames.shift()?.(0),
-  };
-}
-
 describe("workspace preview focus", () => {
   it("focuses the standalone primary preview address", () => {
-    flushFocusFrame();
     const input = address();
 
     focusWorkspacePreviewAddress("primary");
@@ -45,7 +30,6 @@ describe("workspace preview focus", () => {
   });
 
   it("focuses only the requested split owner", () => {
-    flushFocusFrame();
     const primary = document.createElement("section");
     primary.id = "primary-conversation-pane";
     const secondary = document.createElement("section");
@@ -61,7 +45,6 @@ describe("workspace preview focus", () => {
   });
 
   it("does not move focus when the requested split owner is unavailable", () => {
-    flushFocusFrame();
     const fallback = document.createElement("button");
     document.body.append(fallback);
     address();
@@ -73,26 +56,48 @@ describe("workspace preview focus", () => {
   });
 
   it("waits for the lazy preview address to mount", () => {
-    const frames = focusFrames();
-
     focusWorkspacePreviewAddress("primary");
-    frames.flush();
     const input = address();
-    frames.flush();
+    registerWorkspacePreviewAddress("primary", input);
 
     expect(input).toHaveFocus();
   });
 
+  it("focuses the address when the preview surface mounts", () => {
+    focusWorkspacePreviewAddress("primary");
+
+    const preview = render(
+      <PreviewPanel
+        owner="primary"
+        url="http://127.0.0.1:4173/"
+        onNavigate={() => undefined}
+        onOpenExternal={() => undefined}
+      />,
+    );
+
+    expect(preview.getByRole("textbox", { name: "Preview address" }))
+      .toHaveFocus();
+  });
+
+  it("waits for the requested split owner's preview address", () => {
+    focusWorkspacePreviewAddress("secondary");
+    const primary = address();
+    registerWorkspacePreviewAddress("primary", primary);
+    const secondary = address();
+    registerWorkspacePreviewAddress("secondary", secondary);
+
+    expect(primary).not.toHaveFocus();
+    expect(secondary).toHaveFocus();
+  });
+
   it("does not steal focus while waiting for a lazy preview address", () => {
-    const frames = focusFrames();
     const fallback = document.createElement("button");
     document.body.append(fallback);
 
     focusWorkspacePreviewAddress("primary");
-    frames.flush();
     fallback.focus();
     const input = address();
-    frames.flush();
+    registerWorkspacePreviewAddress("primary", input);
 
     expect(fallback).toHaveFocus();
     expect(input).not.toHaveFocus();

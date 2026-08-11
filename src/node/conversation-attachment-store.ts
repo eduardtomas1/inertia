@@ -506,23 +506,38 @@ export class ConversationAttachmentStore {
     await this.serialize(async () => {
       const attachmentIds = this.retentionRecords.get(retentionId);
       if (!attachmentIds) return;
-      this.retentionRecords.delete(retentionId);
       const removable: string[] = [];
-      for (const id of attachmentIds) {
+      const detach = (id: string): void => {
+        attachmentIds.delete(id);
         const retentions = this.recordRetentions.get(id);
         retentions?.delete(retentionId);
         if (retentions?.size === 0) this.recordRetentions.delete(id);
+      };
+      for (const id of attachmentIds) {
+        const retentions = this.recordRetentions.get(id);
+        let retainedElsewhere = false;
+        for (const candidate of retentions ?? []) {
+          if (candidate === retentionId) continue;
+          retainedElsewhere = true;
+          break;
+        }
         if (
           !this.authoritativeRecords.has(id)
-          && !this.recordRetentions.has(id)
+          && !retainedElsewhere
         ) {
           removable.push(id);
+        } else {
+          detach(id);
         }
       }
       const cleanup = await this.cleanupRecords(removable);
       for (const id of cleanup.removed) {
+        detach(id);
         this.records?.delete(id);
         this.reconciliation?.records.delete(id);
+      }
+      if (attachmentIds.size === 0) {
+        this.retentionRecords.delete(retentionId);
       }
       if (cleanup.failure) throw cleanup.failure;
     });
@@ -995,6 +1010,10 @@ export class ConversationAttachmentStore {
     } finally {
       clearTimeout(timer);
     }
+    if (removed.size !== ids.length && !failure) {
+      failed = true;
+      failure = new Error("Conversation attachment cleanup timed out.");
+    }
     return failed
       ? {
           removed,
@@ -1026,7 +1045,12 @@ export class ConversationAttachmentStore {
       rootUid: this.directoryAuthority.uid,
       name,
     }, signal);
-    await cleanup.result;
+    try {
+      await cleanup.result;
+    } catch (error) {
+      await cleanup.stopped;
+      throw error;
+    }
   }
 
   private usageFromRecords(): { bytes: number; records: number } {

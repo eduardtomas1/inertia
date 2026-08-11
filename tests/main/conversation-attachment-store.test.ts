@@ -218,6 +218,69 @@ describe("durable conversation attachment storage", () => {
     }, { timeout: 5_000, interval: 10 });
   });
 
+  it("holds the reconciliation mutation barrier until aborted cleanup stops", async () => {
+    const dataDirectory = await root();
+    let signalCleanupStarted!: () => void;
+    const cleanupStarted = new Promise<void>((resolve) => {
+      signalCleanupStarted = resolve;
+    });
+    let signalCleanupAborted!: () => void;
+    const cleanupAborted = new Promise<void>((resolve) => {
+      signalCleanupAborted = resolve;
+    });
+    let finishCleanupStop!: () => void;
+    let holdCleanup = true;
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (operation.operation !== "remove" || !holdCleanup) {
+        return testOperationRunner(operation, signal);
+      }
+      holdCleanup = false;
+      signalCleanupStarted();
+      const result = new Promise<void>((_resolve, reject) => {
+        const abort = () => {
+          signalCleanupAborted();
+          reject(signal?.reason ?? new Error("Cleanup was cancelled."));
+        };
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) abort();
+      });
+      const stopped = new Promise<void>((resolve) => {
+        finishCleanupStop = resolve;
+      });
+      return { result, stopped };
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      operationRunner,
+      reconciliationBatchEntries: 1,
+      reconciliationBatchTimeoutMs: 25,
+    });
+    await writeFile(join(store.directory, ".held-cleanup"), "held", "utf8");
+
+    const reconciling = store.reconcile([]);
+    await cleanupStarted;
+    await cleanupAborted;
+    const usage = store.usage();
+    const settledBeforeStop = await Promise.race([
+      Promise.allSettled([reconciling, usage]).then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 25)),
+    ]);
+    expect(settledBeforeStop).toBe(false);
+
+    finishCleanupStop();
+    await expect(reconciling).resolves.toBeUndefined();
+    await expect(usage).resolves.toEqual({
+      bytes: 512 * 1024 * 1024,
+      records: 256,
+    });
+    await vi.waitFor(async () => {
+      await expect(readdir(store.directory)).resolves.toEqual([]);
+      await expect(store.usage()).resolves.toEqual({ bytes: 0, records: 0 });
+    }, { timeout: 5_000, interval: 10 });
+  });
+
   it("rejects attachment identity reuse with different retained content", async () => {
     const dataDirectory = await root();
     const store = await openTestStore(dataDirectory);
@@ -381,6 +444,49 @@ describe("durable conversation attachment storage", () => {
     await expect(store.preview(retained!.id)).resolves.not.toBeNull();
     store.acceptRetention(retryLease);
     await expect(store.preview(retained!.id)).resolves.not.toBeNull();
+  });
+
+  it("keeps failed retention cleanup retryable after partial progress", async () => {
+    const dataDirectory = await root();
+    const failed = image("67676767-6767-4767-8767-676767676767");
+    const removed = image("68686868-6868-4868-8868-686868686868");
+    let cleanupFails = true;
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (
+        cleanupFails
+        && operation.operation === "remove"
+        && operation.name === failed.attachment.id
+      ) {
+        const result = Promise.reject(new Error("Transient cleanup failure."));
+        return {
+          result,
+          stopped: result.then(() => undefined, () => undefined),
+        };
+      }
+      return testOperationRunner(operation, signal);
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      operationRunner,
+    });
+    const retentionId = "69696969-6969-4969-8969-696969696969";
+    await store.retain([failed, removed], undefined, retentionId);
+
+    await expect(store.releaseRetention(retentionId))
+      .rejects.toThrow("Transient cleanup failure.");
+    await expect(store.preview(failed.attachment.id)).resolves.not.toBeNull();
+    await expect(store.preview(removed.attachment.id)).resolves.toBeNull();
+    await expect(store.usage()).resolves.toEqual({
+      bytes: png.length,
+      records: 1,
+    });
+
+    cleanupFails = false;
+    await expect(store.releaseRetention(retentionId)).resolves.toBeUndefined();
+    await expect(store.preview(failed.attachment.id)).resolves.toBeNull();
+    await expect(store.usage()).resolves.toEqual({ bytes: 0, records: 0 });
   });
 
   it("releases the mutation queue when durable publication is cancelled", async () => {

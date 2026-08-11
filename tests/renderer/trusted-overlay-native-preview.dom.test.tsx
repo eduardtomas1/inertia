@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ActivityCenter } from "../../src/renderer/src/components/ActivityCenter";
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
 import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
-import { EnvironmentSummary } from "../../src/renderer/src/components/EnvironmentSummary";
 import { AppStatusOverlays } from "../../src/renderer/src/components/AppStatusOverlays";
 import { ProviderAuthDialog } from "../../src/renderer/src/components/ProviderAuthDialog";
 import { RouteChangeConfirmation } from "../../src/renderer/src/components/composer/RouteChangeConfirmation";
@@ -73,16 +72,6 @@ const provider: ProviderInfo = {
       refreshing: false,
     },
   },
-};
-
-const environmentSummary = {
-  projectName: "Inertia",
-  runtime: { status: "online" as const, label: "Ready" },
-  changes: null,
-  branch: null,
-  checks: [],
-  subagents: [],
-  attachments: [],
 };
 
 async function expectSuspended(): Promise<void> {
@@ -369,17 +358,6 @@ describe("trusted overlay native preview suspension", () => {
     await expectSuspended();
 
     view.rerender(<CommandPalette open={false} {...props} />);
-    await expectRestored();
-  });
-
-  it("suspends for the mounted environment summary", async () => {
-    const view = render(<EnvironmentSummary summary={environmentSummary} />);
-
-    expect(screen.getByRole("dialog", { name: "Environment summary" }))
-      .toBeInTheDocument();
-    await expectSuspended();
-
-    view.unmount();
     await expectRestored();
   });
 

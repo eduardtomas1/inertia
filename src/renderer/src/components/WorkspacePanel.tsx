@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 import {
+  Boxes,
   Files,
   Flag,
   GitCompareArrows,
@@ -25,6 +26,7 @@ export type WorkspacePanelProps = {
 };
 
 const tabMeta: Record<WorkspacePanelTab, { label: string; icon: React.JSX.Element }> = {
+  environment: { label: "Environment", icon: <Boxes size={15} aria-hidden="true" /> },
   changes: { label: "Changes", icon: <GitCompareArrows size={15} aria-hidden="true" /> },
   files: { label: "Files", icon: <Files size={15} aria-hidden="true" /> },
   terminal: { label: "Terminal", icon: <TerminalSquare size={15} aria-hidden="true" /> },
@@ -34,6 +36,7 @@ const tabMeta: Record<WorkspacePanelTab, { label: string; icon: React.JSX.Elemen
 };
 
 const defaultTabs: readonly WorkspacePanelTab[] = [
+  "environment",
   "changes",
   "files",
   "terminal",
@@ -57,7 +60,28 @@ export function WorkspacePanel({
   return (
     <aside className="workspace-panel" aria-label="Workspace tools" hidden={!visible}>
       <header className="workspace-panel-tabs">
-        <div className="workspace-panel-tablist" role="tablist" aria-label="Workspace tools">
+        <div
+          className="workspace-panel-tablist"
+          role="tablist"
+          aria-label="Workspace tools"
+          onKeyDown={(event) => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            const tabElements = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
+            if (tabElements.length === 0) return;
+            event.preventDefault();
+            const current = tabElements.indexOf(document.activeElement as HTMLElement);
+            const next = event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? tabElements.length - 1
+                : event.key === "ArrowLeft"
+                  ? current <= 0 ? tabElements.length - 1 : current - 1
+                  : current < 0 || current === tabElements.length - 1 ? 0 : current + 1;
+            tabElements[next]?.focus();
+            const nextTab = tabs[next];
+            if (nextTab) onTabChange(nextTab);
+          }}
+        >
           {tabs.map((tab) => {
             const meta = tabMeta[tab];
             const active = tab === activeTab;
@@ -71,6 +95,8 @@ export function WorkspacePanel({
                 aria-label={hasBadge ? `${meta.label} ${badge}` : meta.label}
                 aria-selected={active}
                 aria-controls={`${panelId}-content`}
+                data-workspace-tab={tab}
+                tabIndex={active ? 0 : -1}
                 className={active ? "workspace-panel-tab is-active" : "workspace-panel-tab"}
                 onFocus={() => prefetchWorkspaceTool(tab)}
                 onPointerDown={() => prefetchWorkspaceTool(tab)}

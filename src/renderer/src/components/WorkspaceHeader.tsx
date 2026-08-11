@@ -3,8 +3,6 @@ import { Activity, ChevronDown, FolderOpen, GitBranch, Info, ListFilter, Message
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
-import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
-import { EnvironmentSummary } from "./EnvironmentSummary";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
 import { usePrivateConnectState } from "../hooks/usePrivateConnectState";
@@ -33,12 +31,10 @@ type WorkspaceHeaderProps = {
   activityOpen: boolean;
   activeRunCount: number;
   attentionRunCount: number;
-  environmentSummary: EnvironmentSummarySnapshot;
-  environmentOpen: boolean;
   onOpenSidebar: () => void;
   onToggleTools: () => void;
   workspaceToolsUnavailableReason?: string | null;
-  onSetEnvironmentOpen: (open: boolean) => void;
+  onOpenEnvironment: () => void;
   onCycleTheme: () => void;
   onOpenSettings: () => void;
   onOpenConnectionsSettings: () => void;
@@ -71,12 +67,10 @@ export function WorkspaceHeader({
   activityOpen,
   activeRunCount,
   attentionRunCount,
-  environmentSummary,
-  environmentOpen,
   onOpenSidebar,
   onToggleTools,
   workspaceToolsUnavailableReason = null,
-  onSetEnvironmentOpen,
+  onOpenEnvironment,
   onCycleTheme,
   onOpenSettings,
   onOpenConnectionsSettings,
@@ -101,7 +95,6 @@ export function WorkspaceHeader({
   const pendingPrivateConnectPairing = privateConnect?.pendingPairings[0] ?? null;
   useNativePreviewSuspension(menu !== null);
   const headerActionsRef = useRef<HTMLDivElement>(null);
-  const environmentAnchorRef = useRef<HTMLDivElement>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
   const eyebrow = view === "settings"
     ? null
@@ -146,29 +139,6 @@ export function WorkspaceHeader({
           : current < 0 || current === items.length - 1 ? 0 : current + 1;
     items[next]?.focus();
   };
-
-  useEffect(() => {
-    if (!environmentOpen) return;
-    const closeOnPointerDown = (event: PointerEvent): void => {
-      if (
-        event.target instanceof Node
-        && !environmentAnchorRef.current?.contains(event.target)
-      ) {
-        onSetEnvironmentOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      onSetEnvironmentOpen(false);
-      environmentAnchorRef.current?.querySelector("button")?.focus();
-    };
-    document.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [environmentOpen, onSetEnvironmentOpen]);
 
   useEffect(() => {
     if (!menu) return;
@@ -273,7 +243,7 @@ export function WorkspaceHeader({
           <>
             {actions.length > 0 && (
               <div className="header-popover-anchor" data-header-menu="action">
-                <button type="button" className="header-button" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => { onSetEnvironmentOpen(false); setMenu(menu === "action" ? null : "action"); }}>
+                <button type="button" className="header-button" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
                   <Plus size={14} /><span>Add action</span>
                 </button>
                 {menu === "action" && (
@@ -293,7 +263,7 @@ export function WorkspaceHeader({
                   aria-haspopup="menu"
                   aria-controls="workspace-header-branch-menu"
                   aria-label={contextMismatch ? `Checkout context differs, current branch ${gitStatus.branch ?? "detached"}` : undefined}
-                  onClick={() => { onSetEnvironmentOpen(false); const next = menu === "branch" ? null : "branch"; setMenu(next); if (next) onRefreshBranches(); }}
+                  onClick={() => { const next = menu === "branch" ? null : "branch"; setMenu(next); if (next) onRefreshBranches(); }}
                 >
                   <GitBranch size={14} /><span>{gitStatus.branch ?? "Detached"}</span>{contextMismatch && <span className="checkout-context-dot" aria-hidden="true" />}<ChevronDown size={12} />
                 </button>
@@ -377,7 +347,6 @@ export function WorkspaceHeader({
                     onFocus={() => void loadWorkspaceGitActionMenu()}
                     onPointerEnter={() => void loadWorkspaceGitActionMenu()}
                     onClick={() => {
-                      onSetEnvironmentOpen(false);
                       setMenu(menu === "git" ? null : "git");
                     }}
                   >
@@ -399,30 +368,18 @@ export function WorkspaceHeader({
             )}
           </>
         )}
-        <div
-          className="header-popover-anchor environment-summary-anchor"
-          ref={environmentAnchorRef}
-        >
+        <div className="header-popover-anchor environment-panel-anchor">
           <IconButton
-            label={environmentOpen ? "Close environment summary" : "Open environment summary"}
-            aria-expanded={environmentOpen}
-            aria-controls="environment-summary-popover"
-            aria-pressed={environmentOpen}
+            label="Open Environment"
+            aria-pressed={activeTool === "environment"}
             onClick={() => {
               setMenu(null);
-              onSetEnvironmentOpen(!environmentOpen);
+              onOpenEnvironment();
             }}
+            disabled={view !== "workspace" || !project}
           >
             <ListFilter size={17} />
           </IconButton>
-          {environmentOpen && (
-            <div
-              className="environment-summary-popover"
-              id="environment-summary-popover"
-            >
-              <EnvironmentSummary summary={environmentSummary} />
-            </div>
-          )}
         </div>
         <IconButton
           label={activityLabel}
@@ -439,14 +396,15 @@ export function WorkspaceHeader({
         <IconButton label={`Change theme (current: ${theme})`} onClick={onCycleTheme}><SunMoon size={17} /></IconButton>
         {view === "workspace" ? (
           <IconButton
-            label={workspaceToolsUnavailableReason
-              ?? (activeTool ? "Close workspace tools" : "Open workspace tools")}
+            label={activeTool
+              ? "Close workspace tools"
+              : workspaceToolsUnavailableReason ?? "Open workspace tools"}
             aria-pressed={Boolean(activeTool)}
             onFocus={() => void loadTerminalPanel()}
             onPointerDown={() => void loadTerminalPanel()}
             onPointerEnter={() => void loadTerminalPanel()}
             onClick={onToggleTools}
-            disabled={!project || Boolean(workspaceToolsUnavailableReason)}
+            disabled={!project || Boolean(workspaceToolsUnavailableReason && !activeTool)}
           >
             {activeTool ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
           </IconButton>

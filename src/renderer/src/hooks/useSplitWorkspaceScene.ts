@@ -232,7 +232,9 @@ export function useSplitWorkspaceScene({
     setActionError,
     setActiveTool: layout.setActiveTool,
     loadGitStatusOnMount: Boolean(splitConversation && splitProject),
-    loadGitOnMount: layout.activeTool === "changes",
+    loadGitOnMount:
+      layout.activeTool === "changes"
+      || layout.activeTool === "environment",
     loadFilesOnMount: layout.activeTool === "files",
   }));
   const desktopTools = useStableController(useDesktopTools({

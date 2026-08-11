@@ -55,7 +55,7 @@ describe("Quiet Ledger active-to-settled motion", () => {
   it("keeps frequent overlays opaque while reserving backdrop blur for rare dialogs", () => {
     for (const selector of [
       ".activity-center {",
-      ".environment-summary-popover {",
+      ".environment-panel {",
       ".palette-backdrop {",
       ".composer-suggestion-menu,",
     ]) {

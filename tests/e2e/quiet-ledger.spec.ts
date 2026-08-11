@@ -207,7 +207,9 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     });
     await captureElementScenario("streaming-caret-code", activeTurn);
 
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
+    if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+      await page.getByRole("button", { name: "Open workspace tools" }).click();
+    }
     const previewTools = page.getByRole("complementary", {
       name: "Workspace tools",
     });

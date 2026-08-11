@@ -49,7 +49,6 @@ import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./u
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { planFromText } from "./utils/planFromText";
-import { buildEnvironmentSummary } from "./utils/environmentSummary";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
 import { finishLegacyWorkspaceStartupMigration, readLegacyWorkspaceStartup } from "./utils/workspaceStartup";
 import {
@@ -241,6 +240,7 @@ export default function App(): React.JSX.Element {
   const sceneToggleWorkspaceTools = splitConversation
     ? primaryPaneLayout.toggleWorkspaceTools
     : toggleWorkspaceTools;
+  const sceneOpenEnvironment = () => sceneSetActiveTool("environment");
   const conversationProjection = useStableController(
     useConversationProjection({
       snapshot: connection.snapshot,
@@ -263,7 +263,6 @@ export default function App(): React.JSX.Element {
     refreshDetail,
     messages,
     plans,
-    subagents,
     streamingText,
   } = conversationProjection;
   const authProvider = useMemo(
@@ -429,7 +428,7 @@ export default function App(): React.JSX.Element {
         !workspaceToolsUnavailable
         && (
           sceneActiveTool === "changes"
-          || workspaceLayout.environmentOpen
+          || sceneActiveTool === "environment"
         ),
       loadFilesOnMount:
         !workspaceToolsUnavailable && sceneActiveTool === "files",
@@ -455,29 +454,7 @@ export default function App(): React.JSX.Element {
     mutateBranch,
     commit,
     projectActions,
-    workspaceGitStatus,
   } = workspaceTools;
-  const environmentSummary = useMemo(() => buildEnvironmentSummary({
-    projectId: project?.id ?? null,
-    projectName: project?.name ?? null,
-    conversationId: conversation?.id ?? null,
-    connectionStatus: connection.status,
-    gitStatus,
-    workspaceGitStatus,
-    runs: connection.snapshot?.runs ?? [],
-    subagents,
-    messages,
-  }), [
-    connection.snapshot?.runs,
-    connection.status,
-    conversation?.id,
-    gitStatus,
-    messages,
-    project?.id,
-    project?.name,
-    subagents,
-    workspaceGitStatus,
-  ]);
 
   useEffect(() => {
     const run = visibleConversationRun;
@@ -1003,10 +980,10 @@ export default function App(): React.JSX.Element {
       project={project}
       conversation={conversation}
       splitConversationId={splitConversation?.id ?? null}
-      sceneActiveTool={workspaceToolsUnavailable ? null : sceneActiveTool}
+      sceneActiveTool={sceneActiveTool}
       sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
+      sceneOpenEnvironment={sceneOpenEnvironment}
       workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-      environmentSummary={environmentSummary}
       runsSummary={runsSummary}
       gitStatus={gitStatus}
       branches={branches}

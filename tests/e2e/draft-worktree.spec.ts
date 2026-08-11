@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 
 import { createAppFixture } from "./support/app-fixture";
 
-test("waits to expose tools until an isolated draft worktree exists", async () => {
+test("keeps Environment available while an isolated draft worktree materializes", async () => {
   const app = await createAppFixture({
     name: "isolated-draft",
     initialState: "empty",
@@ -27,11 +27,19 @@ test("waits to expose tools until an isolated draft worktree exists", async () =
       level: 3,
     })).toBeVisible();
 
-    const unavailableReason =
-      "Workspace tools are available after the first message creates this isolated worktree.";
-    await expect(app.page.getByRole("button", {
-      name: unavailableReason,
-    })).toBeDisabled();
+    const workspaceTools = app.page.getByRole("complementary", {
+      name: "Workspace tools",
+    });
+    await expect(workspaceTools.getByRole("tab", {
+      name: "Environment",
+    })).toHaveAttribute("aria-selected", "true");
+    await expect(workspaceTools.getByRole("tab", { name: /Changes/u }))
+      .toHaveCount(0);
+    await expect(workspaceTools.getByRole("tab", { name: /Files/u }))
+      .toHaveCount(0);
+    await expect(workspaceTools).toContainText(
+      "Files, changes, and Terminal will become available after this isolated worktree is created by the first message.",
+    );
     await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
 
     const databasePath = join(
@@ -94,15 +102,9 @@ test("waits to expose tools until an isolated draft worktree exists", async () =
       stat(join(worktreePath!, ".git")).then((metadata) => metadata.isFile()),
     ).resolves.toBe(true);
 
-    const workspaceToolsButton = app.page.getByRole("button", {
-      name: "Open workspace tools",
-    });
-    await expect(workspaceToolsButton).toBeEnabled();
-    await workspaceToolsButton.click();
-    const workspaceTools = app.page.getByRole("complementary", {
-      name: "Workspace tools",
-    });
-    await workspaceTools.getByRole("tab", { name: /Files/u }).click();
+    const filesTab = workspaceTools.getByRole("tab", { name: /Files/u });
+    await expect(filesTab).toBeVisible();
+    await filesTab.click();
     await expect(
       workspaceTools.getByRole("tree", { name: "Workspace files" }),
     ).toBeVisible();

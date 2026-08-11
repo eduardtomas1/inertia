@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
-import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
 import type {
   GitStatusSnapshot,
   Project,
@@ -22,16 +21,6 @@ const project: Project = {
   status: "ready",
   createdAt: "2026-07-29T10:00:00.000Z",
   updatedAt: "2026-07-29T10:00:00.000Z",
-};
-
-const summary: EnvironmentSummarySnapshot = {
-  projectName: "Inertia",
-  runtime: { status: "online", label: "Ready" },
-  changes: null,
-  branch: { label: "Branch", value: "feature/pr" },
-  checks: [],
-  subagents: [],
-  attachments: [],
 };
 
 function status(
@@ -81,11 +70,9 @@ function renderHeader(
       activityOpen={false}
       activeRunCount={0}
       attentionRunCount={0}
-      environmentSummary={summary}
-      environmentOpen={false}
       onOpenSidebar={vi.fn()}
       onToggleTools={vi.fn()}
-      onSetEnvironmentOpen={vi.fn()}
+      onOpenEnvironment={vi.fn()}
       onCycleTheme={vi.fn()}
       onOpenSettings={vi.fn()}
       onOpenConnectionsSettings={vi.fn()}
@@ -171,11 +158,9 @@ describe("WorkspaceHeader Git pull request availability", () => {
         activityOpen={false}
         activeRunCount={0}
         attentionRunCount={0}
-        environmentSummary={summary}
-        environmentOpen={false}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
-        onSetEnvironmentOpen={vi.fn()}
+        onOpenEnvironment={vi.fn()}
         onCycleTheme={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenConnectionsSettings={vi.fn()}
@@ -231,11 +216,9 @@ describe("WorkspaceHeader Git pull request availability", () => {
         activityOpen={false}
         activeRunCount={0}
         attentionRunCount={0}
-        environmentSummary={summary}
-        environmentOpen={false}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
-        onSetEnvironmentOpen={vi.fn()}
+        onOpenEnvironment={vi.fn()}
         onCycleTheme={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenConnectionsSettings={vi.fn()}

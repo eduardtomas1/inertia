@@ -9,6 +9,15 @@ import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 
 export interface EnvironmentSummarySnapshot {
   projectName: string | null;
+  workspace: {
+    label: "Worktree" | "Project directory";
+    value: string;
+    path: string;
+  } | null;
+  repository: {
+    name: string;
+    path: string;
+  } | null;
   runtime: {
     status: ConnectionStatus;
     label: string;
@@ -19,6 +28,8 @@ export interface EnvironmentSummarySnapshot {
     deletions: number;
     repositories: number;
   } | null;
+  gitState: "loading" | "ready" | "unavailable" | "error";
+  gitNotice: string | null;
   branch: {
     label: "Branch" | "Branches";
     value: string;
@@ -33,6 +44,10 @@ export interface EnvironmentSummarySnapshot {
     name: string;
     mimeType: ChatMessage["attachments"][number]["mimeType"];
   }>;
+  localServers: Array<{
+    label: string;
+    url: string;
+  }>;
 }
 
 interface EnvironmentSummaryInput {
@@ -45,6 +60,35 @@ interface EnvironmentSummaryInput {
   runs: readonly WorkspaceRun[];
   subagents: readonly SubagentTrace[];
   messages: readonly ChatMessage[];
+  projectPath?: string | null;
+  repositoryRoot?: string | null;
+  worktreePath?: string | null;
+  localServerUrl?: string | null;
+  gitLoading?: boolean;
+}
+
+function pathName(path: string): string {
+  const normalized = path.replaceAll("\\", "/").replace(/\/+$/u, "");
+  return normalized.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+function localServerSummary(url: string | null | undefined): EnvironmentSummarySnapshot["localServers"] {
+  if (!url) return [];
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLocaleLowerCase("en-US");
+    const local = hostname === "localhost"
+      || hostname === "127.0.0.1"
+      || hostname === "::1"
+      || hostname === "[::1]"
+      || hostname.endsWith(".localhost");
+    if (!local || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
+      return [];
+    }
+    return [{ label: parsed.host, url: parsed.origin }];
+  } catch {
+    return [];
+  }
 }
 
 function runtimeLabel(status: ConnectionStatus): string {
@@ -79,7 +123,7 @@ function changesSummary(
   gitStatus: GitStatusSnapshot | null,
   workspaceGitStatus: WorkspaceGitSnapshot | null,
 ): EnvironmentSummarySnapshot["changes"] {
-  if (workspaceGitStatus) {
+  if (workspaceGitStatus && workspaceGitStatus.repositories.length > 0) {
     return {
       files: workspaceGitStatus.files,
       insertions: workspaceGitStatus.insertions,
@@ -129,6 +173,11 @@ export function buildEnvironmentSummary({
   runs,
   subagents,
   messages,
+  projectPath = null,
+  repositoryRoot = null,
+  worktreePath = null,
+  localServerUrl = null,
+  gitLoading = false,
 }: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
   const checks = projectId
     ? runs
@@ -161,16 +210,37 @@ export function buildEnvironmentSummary({
       }))
     : [];
 
+  const changes = changesSummary(gitStatus, workspaceGitStatus);
+  const gitNotice = workspaceGitStatus?.issues[0]?.message ?? null;
+  const workspacePath = worktreePath ?? projectPath;
   return {
     projectName,
+    workspace: workspacePath ? {
+      label: worktreePath ? "Worktree" : "Project directory",
+      value: pathName(workspacePath),
+      path: workspacePath,
+    } : null,
+    repository: repositoryRoot ? {
+      name: pathName(repositoryRoot),
+      path: repositoryRoot,
+    } : null,
     runtime: {
       status: connectionStatus,
       label: runtimeLabel(connectionStatus),
     },
-    changes: changesSummary(gitStatus, workspaceGitStatus),
+    changes,
+    gitState: gitLoading && !changes
+      ? "loading"
+      : gitNotice && !changes
+        ? "error"
+        : changes
+          ? "ready"
+          : "unavailable",
+    gitNotice,
     branch: branchSummary(gitStatus, workspaceGitStatus),
     checks,
     subagents: activeSubagents,
     attachments: recentAttachments(messages),
+    localServers: localServerSummary(localServerUrl),
   };
 }

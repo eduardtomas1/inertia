@@ -26,7 +26,6 @@ import { useStableActions } from "../hooks/useStableController";
 import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { ActivityRunSummary } from "../utils/activityCenter";
-import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
@@ -136,8 +135,8 @@ interface AppLayoutProps {
   splitConversationId: string | null;
   sceneActiveTool: WorkspacePanelTab | null;
   sceneToggleWorkspaceTools: () => void;
+  sceneOpenEnvironment: () => void;
   workspaceToolsUnavailableReason: string | null;
-  environmentSummary: EnvironmentSummarySnapshot;
   runsSummary: ActivityRunSummary;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
@@ -223,8 +222,8 @@ export function AppLayout({
   splitConversationId,
   sceneActiveTool,
   sceneToggleWorkspaceTools,
+  sceneOpenEnvironment,
   workspaceToolsUnavailableReason,
-  environmentSummary,
   runsSummary,
   gitStatus,
   branches,
@@ -243,8 +242,6 @@ export function AppLayout({
     setSidebarOpen,
     sidebarCollapsed,
     setSidebarCollapsed,
-    environmentOpen,
-    setEnvironmentOpen,
     stackedTools,
     mobileNavigation,
     toolsVisible,
@@ -498,15 +495,13 @@ export function AppLayout({
             activityOpen={activityOpen}
             activeRunCount={runsSummary.activeCount}
             attentionRunCount={runsSummary.attentionCount}
-            environmentSummary={environmentSummary}
-            environmentOpen={environmentOpen}
             onOpenSidebar={() => {
               if (mobileNavigation) setSidebarOpen(true);
               else setSidebarCollapsed((collapsed) => !collapsed);
             }}
             onToggleTools={sceneToggleWorkspaceTools}
             workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-            onSetEnvironmentOpen={setEnvironmentOpen}
+            onOpenEnvironment={sceneOpenEnvironment}
             onCycleTheme={actions.cycleTheme}
             onOpenSettings={() => setView("settings")}
             onOpenConnectionsSettings={actions.openConnectionsSettings}

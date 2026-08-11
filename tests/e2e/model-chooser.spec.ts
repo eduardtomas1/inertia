@@ -706,6 +706,8 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await searchModels.press("Escape");
   await expect(modelChooser).toBeHidden();
   await resizeWindow(1440, 720);
-  await workspaceHeader.getByRole("button", { name: "Open workspace tools" }).click();
+  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+    await workspaceHeader.getByRole("button", { name: "Open workspace tools" }).click();
+  }
   expect(rendererErrors).toEqual([]);
 });

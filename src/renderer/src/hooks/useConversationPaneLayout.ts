@@ -41,7 +41,7 @@ export interface ConversationPaneLayout {
 function initialTool(storageKey: string): WorkspacePanelTab {
   return workspacePanelTab(window.localStorage.getItem(storageKey))
     ?? workspacePanelTab(window.localStorage.getItem(LAST_WORKSPACE_TOOL_KEY))
-    ?? "terminal";
+    ?? "environment";
 }
 
 interface PersistedPaneToolState {

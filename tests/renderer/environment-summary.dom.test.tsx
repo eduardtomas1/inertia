@@ -1,13 +1,15 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
+import { EnvironmentPanel } from "../../src/renderer/src/components/EnvironmentPanel";
 import type { Project } from "../../src/shared/contracts";
 import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
 
 const summary: EnvironmentSummarySnapshot = {
   projectName: "Inertia",
+  workspace: { label: "Worktree", value: "inertia", path: "/workspace/inertia" },
+  repository: { name: "inertia", path: "/workspace/inertia" },
   runtime: { status: "online", label: "Ready" },
   changes: {
     files: 2,
@@ -15,10 +17,13 @@ const summary: EnvironmentSummarySnapshot = {
     deletions: 4,
     repositories: 1,
   },
+  gitState: "ready",
+  gitNotice: null,
   branch: { label: "Branch", value: "codex/summary" },
   checks: [],
   subagents: [],
-  attachments: [],
+  attachments: [{ id: "attachment-1", name: "reference.png", mimeType: "image/png" }],
+  localServers: [{ label: "localhost:4173", url: "http://localhost:4173/" }],
 };
 
 const project: Project = {
@@ -42,13 +47,14 @@ function HeaderHarness({
   workspaceToolsUnavailableReason = null,
   onOpenSettings = vi.fn(),
   onOpenConnectionsSettings = vi.fn(),
+  onOpenEnvironment = vi.fn(),
 }: {
   activeProject?: Project | null;
   workspaceToolsUnavailableReason?: string | null;
   onOpenSettings?: () => void;
   onOpenConnectionsSettings?: () => void;
+  onOpenEnvironment?: () => void;
 }): React.JSX.Element {
-  const [open, setOpen] = useState(true);
   return (
     <>
       <WorkspaceHeader
@@ -65,12 +71,10 @@ function HeaderHarness({
         activityOpen={false}
         activeRunCount={0}
         attentionRunCount={0}
-        environmentSummary={summary}
-        environmentOpen={open}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
         workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-        onSetEnvironmentOpen={setOpen}
+        onOpenEnvironment={onOpenEnvironment}
         onCycleTheme={vi.fn()}
         onOpenSettings={onOpenSettings}
         onOpenConnectionsSettings={onOpenConnectionsSettings}
@@ -93,7 +97,7 @@ function HeaderHarness({
   );
 }
 
-describe("environment summary header popover", () => {
+describe("Environment panel", () => {
   beforeEach(() => {
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
@@ -107,25 +111,42 @@ describe("environment summary header popover", () => {
     }));
   });
 
-  it("starts open, reports real context, and restores focus after Escape", async () => {
-    render(<HeaderHarness />);
-    const trigger = screen.getByRole("button", {
-      name: "Close environment summary",
-    });
+  it("reports real context and routes each available action", () => {
+    const actions = {
+      onOpenChanges: vi.fn(),
+      onOpenFiles: vi.fn(),
+      onOpenPreview: vi.fn(),
+      onOpenProject: vi.fn(),
+      onRevealProject: vi.fn(),
+    };
+    render(<EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />);
 
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("dialog", { name: "Environment summary" }))
-      .toBeVisible();
+    expect(screen.getByRole("heading", { name: "Inertia" })).toBeVisible();
     expect(screen.getByText("codex/summary")).toBeVisible();
     expect(screen.getByLabelText("9 insertions and 4 deletions")).toBeVisible();
+    expect(screen.getByText("reference.png")).toBeVisible();
+    expect(screen.getByText("localhost:4173")).toBeVisible();
 
-    fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog", {
-      name: "Environment summary",
-    })).not.toBeInTheDocument());
-    expect(screen.getByRole("button", {
-      name: "Open environment summary",
-    })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: /Changes/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Browse files/u }));
+    fireEvent.click(screen.getByRole("button", { name: /localhost:4173/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Open project/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Reveal/u }));
+    expect(actions.onOpenChanges).toHaveBeenCalledOnce();
+    expect(actions.onOpenFiles).toHaveBeenCalledOnce();
+    expect(actions.onOpenPreview).toHaveBeenCalledOnce();
+    expect(actions.onOpenProject).toHaveBeenCalledOnce();
+    expect(actions.onRevealProject).toHaveBeenCalledOnce();
+  });
+
+  it("routes the header Environment control to the panel", () => {
+    const onOpenEnvironment = vi.fn();
+    render(<HeaderHarness activeProject={project} onOpenEnvironment={onOpenEnvironment} />);
+
+    const trigger = screen.getByRole("button", { name: "Open Environment" });
+    expect(trigger).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(trigger);
+    expect(onOpenEnvironment).toHaveBeenCalledOnce();
   });
 
   it("routes the Private Connect indicator directly to Connections & devices settings", async () => {
@@ -215,14 +236,6 @@ describe("environment summary header popover", () => {
     } finally {
       Reflect.deleteProperty(window, "inertia");
     }
-  });
-
-  it("closes when the user clicks outside", async () => {
-    render(<HeaderHarness />);
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", {
-      name: "Environment summary",
-    })).not.toBeInTheDocument());
   });
 
   it("explains why isolated-worktree draft tools are not ready", () => {

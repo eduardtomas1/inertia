@@ -89,16 +89,13 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(true);
 
-  await page.getByRole("button", { name: "Open environment summary" }).click();
+  await page.getByRole("tab", { name: "Environment" }).click();
   expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
-  await expect(page.getByRole("dialog", {
-    name: "Environment summary",
-  })).toBeVisible();
+  await expect(page.getByRole("tabpanel", { name: "Environment" })).toBeVisible();
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);
-  await page.getByRole("button", { name: "Close environment summary" }).click();
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await page.getByRole("tab", { name: /Preview/u }).click();
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(true);

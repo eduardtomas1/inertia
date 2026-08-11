@@ -145,6 +145,10 @@ describe("environment summary projection", () => {
         message("old", "old.png", "2026-07-28T10:00:00.000Z"),
         message("new", "notes.pdf", "2026-07-28T11:00:00.000Z"),
       ],
+      projectPath: "/workspace/inertia",
+      repositoryRoot: "/workspace/inertia",
+      worktreePath: "/workspace/worktrees/environment-panel",
+      localServerUrl: "http://localhost:4173/app",
     });
 
     expect(summary.runtime).toEqual({ status: "online", label: "Ready" });
@@ -158,6 +162,19 @@ describe("environment summary projection", () => {
       label: "Branch",
       value: "codex/summary",
     });
+    expect(summary.workspace).toEqual({
+      label: "Worktree",
+      value: "environment-panel",
+      path: "/workspace/worktrees/environment-panel",
+    });
+    expect(summary.repository).toEqual({
+      name: "inertia",
+      path: "/workspace/inertia",
+    });
+    expect(summary.localServers).toEqual([{
+      label: "localhost:4173",
+      url: "http://localhost:4173",
+    }]);
     expect(summary.checks).toHaveLength(2);
     expect(summary.checks.map(({ id }) => id)).toContain("failed");
     expect(summary.subagents).toHaveLength(1);
@@ -187,7 +204,77 @@ describe("environment summary projection", () => {
       checks: [],
       subagents: [],
       attachments: [],
+      workspace: null,
+      repository: null,
+      localServers: [],
+      gitState: "unavailable",
     });
+  });
+
+  it("does not present remote preview URLs as local servers", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [],
+      subagents: [],
+      messages: [],
+      localServerUrl: "https://preview.example.com/app",
+    });
+
+    expect(summary.localServers).toEqual([]);
+  });
+
+  it("does not report a clean tree when no repository was discovered", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: {
+        repositories: [],
+        files: 0,
+        insertions: 0,
+        deletions: 0,
+        scannedDirectories: 1,
+        skippedDirectories: 0,
+        discoveredRepositories: 0,
+        repositoryLimit: 128,
+        partial: false,
+        truncated: false,
+        issues: [],
+      },
+      runs: [],
+      subagents: [],
+      messages: [],
+    });
+
+    expect(summary.changes).toBeNull();
+    expect(summary.gitState).toBe("unavailable");
+  });
+
+  it("recognizes an IPv6 loopback preview without exposing its path", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [],
+      subagents: [],
+      messages: [],
+      localServerUrl: "http://[::1]:3000/private?token=hidden",
+    });
+
+    expect(summary.localServers).toEqual([{
+      label: "[::1]:3000",
+      url: "http://[::1]:3000",
+    }]);
   });
 
   it("uses the authoritative live bit for queued and future provider states", () => {

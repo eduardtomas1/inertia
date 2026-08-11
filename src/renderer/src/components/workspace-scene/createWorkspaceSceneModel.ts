@@ -44,6 +44,7 @@ import {
   canStopSubagentTrace,
   isLiveSubagentTrace,
 } from "../../utils/subagentDisclosure";
+import { buildEnvironmentSummary } from "../../utils/environmentSummary";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
 import type {
   TranscriptMessageSendAcceptance,
@@ -290,6 +291,25 @@ export function createWorkspaceSceneModel({
     workspaceBodyRef,
     tools: toolsLayout,
   } = layout;
+  const effectiveActiveTool = workspaceToolsUnavailable
+    ? "environment" as const
+    : activeTool;
+  const environmentSummary = buildEnvironmentSummary({
+    projectId: project?.id ?? null,
+    projectName: project?.name ?? null,
+    conversationId: conversation?.id ?? null,
+    connectionStatus: connection.status,
+    gitStatus: workspaceTools.gitStatus,
+    workspaceGitStatus: workspaceTools.workspaceGitStatus,
+    runs: connection.snapshot?.runs ?? [],
+    subagents: projection.subagents,
+    messages: projection.messages,
+    projectPath: project?.normalizedPath ?? null,
+    repositoryRoot: project?.repositoryRoot ?? null,
+    worktreePath: conversation?.worktreePath ?? null,
+    localServerUrl: desktopTools.previewUrl,
+    gitLoading: workspaceTools.loading,
+  });
   const canUpdatePlan = Boolean(
     conversation
     && conversation.status !== "running"
@@ -522,7 +542,7 @@ export function createWorkspaceSceneModel({
       onStopSubagent: actions.stopSubagent,
       onStop: actions.stopAgent,
     },
-    resizeHandle: project && !workspaceToolsUnavailable && toolsVisible ? {
+    resizeHandle: project && toolsVisible ? {
       label: "Resize workspace tools",
       controls: "workspace-content",
       containerRef: workspaceBodyRef,
@@ -541,12 +561,15 @@ export function createWorkspaceSceneModel({
       valueText: (value) => `${value} pixels for workspace tools`,
       className: "workspace-tools-resize-handle",
     } : null,
-    tools: project && !workspaceToolsUnavailable ? {
-      activeTool,
+    tools: project ? {
+      activeTool: effectiveActiveTool,
       panel: {
-        activeTab: activeTool ?? "terminal",
+        activeTab: effectiveActiveTool ?? "environment",
         visible: toolsVisible,
         onTabChange: setActiveTool,
+        ...(workspaceToolsUnavailable
+          ? { tabs: ["environment"] as const }
+          : {}),
         badges: {
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
           goal: (currentWorkflow?.goals.some(({ status }) =>
@@ -555,6 +578,25 @@ export function createWorkspaceSceneModel({
           plan: planSteps.length,
         },
         onClose: () => setActiveTool(null),
+      },
+      environment: {
+        summary: environmentSummary,
+        workspaceToolsAvailable: !workspaceToolsUnavailable,
+        onOpenChanges: () => setActiveTool("changes"),
+        onOpenFiles: () => setActiveTool("files"),
+        onOpenPreview: () => setActiveTool("preview"),
+        onOpenProject: () => actions.openProjectPath({
+          projectId: project.id,
+          ...runtimeConversation,
+          relativePath: ".",
+          action: "open-externally",
+        }),
+        onRevealProject: () => actions.openProjectPath({
+          projectId: project.id,
+          ...runtimeConversation,
+          relativePath: ".",
+          action: "reveal",
+        }),
       },
       historicalDiff: workspaceTools.historicalDiff ? {
         diff: workspaceTools.historicalDiff,
@@ -640,7 +682,7 @@ export function createWorkspaceSceneModel({
       },
       filesKey: `files:${project.id}:${conversation?.id ?? "project"}`,
       terminal: {
-        visible: toolsVisible && activeTool === "terminal",
+        visible: toolsVisible && effectiveActiveTool === "terminal",
         projectId: project.id,
         ...runtimeConversation,
         projectName: project.name,

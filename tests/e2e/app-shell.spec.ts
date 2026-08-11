@@ -97,7 +97,8 @@ test("starts without a demo and adds the first real project", async () => {
     level: 3,
   })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "Environment summary" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Environment" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tabpanel", { name: "Environment" })).toBeVisible();
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toHaveCount(1);
 
@@ -111,8 +112,7 @@ test("starts without a demo and adds the first real project", async () => {
   };
   expect(conversationCount()).toBe(0);
 
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Terminal", exact: true }).click();
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   expect(conversationCount()).toBe(0);
   await page.locator(".workspace-panel")
@@ -121,10 +121,10 @@ test("starts without a demo and adds the first real project", async () => {
 
   await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
   await expect.poll(conversationCount).toBe(1);
-  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Open Environment" }).click();
+  await expect(page.getByRole("tab", { name: "Environment" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "Terminal", exact: true }).click();
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   const database = new Database(databasePath);
   const firstConversation = database.prepare(`
@@ -725,7 +725,9 @@ test("keeps the window alive and reconnects with a rotated capability after a ru
   );
   const beforeRuntimeGeneration = await page.locator(".app-shell").getAttribute("data-runtime-generation");
   expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "Open workspace tools" }).click();
+  }
   await page.getByRole("complementary", { name: "Workspace tools" })
     .getByRole("tab", { name: "Terminal", exact: true })
     .click();

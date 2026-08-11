@@ -493,8 +493,9 @@ export function startCodexAppServerRun(
       },
       phase: () => phase,
       hasObservedTurn: (turnId) => events.hasObservedTurn(turnId),
-      projectGoalResponse: (threadId, goal) =>
-        events.projectGoalResponse(threadId, goal),
+      goalProjectionSequence: () => events.goalProjectionSequence(),
+      projectGoalResponse: (threadId, goal, sequenceBeforeRequest) =>
+        events.projectGoalResponse(threadId, goal, sequenceBeforeRequest),
       setContinuationError: (error) => {
         continuationError = error;
       },
@@ -559,8 +560,13 @@ export function startCodexAppServerRun(
     if (input.tokenBudget !== undefined) {
       params.tokenBudget = input.tokenBudget;
     }
+    const sequenceBeforeRequest = events.goalProjectionSequence();
     const response = await request("thread/goal/set", params);
-    const parsed = events.projectGoalResponse(providerThreadId, response.goal);
+    const parsed = events.projectGoalResponse(
+      providerThreadId,
+      response.goal,
+      sequenceBeforeRequest,
+    );
     if (!parsed) throw new Error("Codex returned a malformed goal response.");
     return parsed;
   };
@@ -597,9 +603,11 @@ interface OpenCodexTurnOptions {
   setActiveTurnId: (turnId: string | undefined) => void;
   phase: () => CodexRunPhase;
   hasObservedTurn: (turnId: string) => boolean;
+  goalProjectionSequence: () => number;
   projectGoalResponse: (
     threadId: string,
     goal: unknown,
+    sequenceBeforeRequest: number,
   ) => ProviderGoalSnapshot | null;
   setContinuationError: (
     error: CodexAppServerResult["continuationError"],
@@ -624,6 +632,7 @@ export async function openCodexTurn({
   setActiveTurnId,
   phase,
   hasObservedTurn,
+  goalProjectionSequence,
   projectGoalResponse,
   setContinuationError,
   setPhase,
@@ -710,8 +719,13 @@ export async function openCodexTurn({
     if (options.goalStart.tokenBudget !== undefined) {
       params.tokenBudget = options.goalStart.tokenBudget;
     }
+    const sequenceBeforeRequest = goalProjectionSequence();
     const response = await request("thread/goal/set", params);
-    if (!projectGoalResponse(openedThreadId, response.goal)) {
+    if (!projectGoalResponse(
+      openedThreadId,
+      response.goal,
+      sequenceBeforeRequest,
+    )) {
       throw new Error("Codex returned a malformed goal response.");
     }
     if (isCancelRequested()) finish("cancelled", null, null);

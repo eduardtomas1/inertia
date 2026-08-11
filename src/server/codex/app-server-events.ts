@@ -150,7 +150,9 @@ export class CodexAppServerEvents {
   private goalContinuationTimer: NodeJS.Timeout | undefined;
   private readonly goalContinuationGraceMs: number;
   private nativeGoalStatus: AgentGoalStatus | null;
+  private nativeGoalSnapshot: ProviderGoalSnapshot | null = null;
   private nativeGoalUpdatedAt: string | null = null;
+  private nativeGoalSequence = 0;
 
   constructor(private readonly host: CodexAppServerEventHost) {
     this.subagentDrainTimeoutMs = codexSubagentDrainTimeoutMs(
@@ -188,6 +190,10 @@ export class CodexAppServerEvents {
   hasObservedTurn(turnId: string): boolean {
     return this.host.activeTurnId() === turnId
       || this.completedTurnIds.has(turnId);
+  }
+
+  goalProjectionSequence(): number {
+    return this.nativeGoalSequence;
   }
 
   settleInteractions(): void {
@@ -574,21 +580,33 @@ export class CodexAppServerEvents {
   projectGoalResponse(
     threadId: string,
     goal: unknown,
+    sequenceBeforeRequest: number,
   ): ProviderGoalSnapshot | null {
     const update = parseCodexGoalUpdatedNotification({ threadId, goal });
     if (!update || update.threadId !== this.host.providerThreadId()) {
       return null;
     }
-    this.acceptGoalUpdate(update.threadId, update.goal);
-    // A newer notification can legitimately arrive before its mutation
-    // response is observed. The response remains valid even when it must not
-    // move the live continuation state backwards.
+    // The decoder can accept later notifications before the awaiting request
+    // resumes. Prefer that sequenced snapshot when second-resolution provider
+    // timestamps cannot distinguish the response from the later update.
+    const supersededByNotification =
+      this.nativeGoalSequence > sequenceBeforeRequest
+      && this.nativeGoalUpdatedAt !== null
+      && update.goal.updatedAt <= this.nativeGoalUpdatedAt;
+    if (supersededByNotification) {
+      return this.nativeGoalSnapshot;
+    }
+    if (!this.acceptGoalUpdate(update.threadId, update.goal)) {
+      return this.nativeGoalSnapshot ?? update.goal;
+    }
     return update.goal;
   }
 
   projectGoalCleared(threadId: string): boolean {
     if (threadId !== this.host.providerThreadId()) return false;
     this.nativeGoalStatus = null;
+    this.nativeGoalSnapshot = null;
+    this.nativeGoalSequence += 1;
     this.host.options.onGoalCleared?.(threadId);
     this.finishAwaitingGoalContinuation();
     return true;
@@ -616,6 +634,8 @@ export class CodexAppServerEvents {
     ) return false;
     this.nativeGoalUpdatedAt = goal.updatedAt;
     this.nativeGoalStatus = goal.status;
+    this.nativeGoalSnapshot = goal;
+    this.nativeGoalSequence += 1;
     this.host.options.onGoalUpdated?.(threadId, goal);
     if (goal.status !== "active") {
       this.finishAwaitingGoalContinuation();

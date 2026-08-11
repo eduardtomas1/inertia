@@ -153,6 +153,31 @@ describe("Codex App Server goal event ordering", () => {
     }
   });
 
+  it("does not let an equal-revision response revive a later notification", () => {
+    const harness = eventHarness();
+    try {
+      const sequenceBeforeRequest = harness.events.goalProjectionSequence();
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("complete", 1_800_000_010),
+      );
+      const responseGoal = goalUpdate("active", 1_800_000_010).goal;
+
+      expect(harness.events.projectGoalResponse(
+        THREAD_ID,
+        responseGoal,
+        sequenceBeforeRequest,
+      )).toMatchObject({ status: "complete" });
+      harness.events.handleNotification("turn/completed", completedTurn());
+
+      expect(harness.goalStatuses).toEqual(["complete"]);
+      expect(harness.finish).toHaveBeenCalledWith("completed", 0, null);
+      expect(harness.phase()).toBe("settled");
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
   it("preserves a goal phase advanced by notifications in the response chunk", async () => {
     let phase: CodexRunPhase = "opening";
     let activeTurnId: string | undefined;
@@ -208,6 +233,7 @@ describe("Codex App Server goal event ordering", () => {
       },
       phase: () => phase,
       hasObservedTurn: (turnId) => turnId === TURN_ID,
+      goalProjectionSequence: () => 0,
       projectGoalResponse: () => null,
       setContinuationError: vi.fn(),
       setPhase: (value) => {

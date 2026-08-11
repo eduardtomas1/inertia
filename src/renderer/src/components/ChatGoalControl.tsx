@@ -136,7 +136,10 @@ export function ChatGoalControl({
   const [submitting, setSubmitting] = useState(false);
   const source = workflow?.goalCapability.kind ?? null;
   const goal = workflow ? currentRouteGoal(workflow) : null;
-  const recoveryBudgetFloor = goal?.tokensUsed ?? goal?.tokenBudget ?? 0;
+  const recoveryBudgetFloor = Math.max(
+    goal?.tokensUsed ?? 0,
+    goal?.tokenBudget ?? 0,
+  );
   const parsedRecoveryBudget = parseGoalTokenBudget(recoveryBudget);
   const validRecoveryBudget = typeof parsedRecoveryBudget === "number"
     && parsedRecoveryBudget > recoveryBudgetFloor;
@@ -281,6 +284,12 @@ export function ChatGoalControl({
               <X size={14} />
             </IconButton>
           </header>
+
+          {workflow && error && (
+            <div className="chat-goal-unavailable">
+              <p role="alert">{error}</p>
+            </div>
+          )}
 
           {!workflow ? (
             <div className="chat-goal-unavailable">

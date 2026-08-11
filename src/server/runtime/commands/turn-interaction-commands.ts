@@ -474,18 +474,28 @@ export function createTurnInteractionCommandHandler(
           throw error;
         }
       }
-      case "agent.stop":
-        if (
-          !dependencies.isolatedRuns.stopConversation(
-            command.payload.conversationId,
-          )
-          && !dependencies.turns.cancel(command.payload.conversationId)
-        ) {
+      case "agent.stop": {
+        const conversationId = command.payload.conversationId;
+        const isolatedStopped = dependencies.isolatedRuns.stopConversation(
+          conversationId,
+        );
+        const turnStopped = !isolatedStopped
+          && dependencies.turns.cancel(conversationId);
+        if (!isolatedStopped && !turnStopped) {
           throw new RuntimeRequestError(
             "This thread does not have an active run.",
           );
         }
+        if (turnStopped) {
+          await dependencies.turns.waitForProviderCleanup([conversationId]);
+          if (dependencies.turns.isActive(conversationId)) {
+            throw new RuntimeRequestError(
+              "Stop was requested, but provider cleanup could not be confirmed. Resume remains unavailable.",
+            );
+          }
+        }
         return "mutation";
+      }
       case "agent.subagent.stop":
         if (
           !await dependencies.turns.stopSubagent(

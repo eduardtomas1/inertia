@@ -48,7 +48,10 @@ import { requestTimelineFocus } from "../../utils/timelineFocus";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";
-import { goalExecutionStatus } from "../../utils/goalExecution";
+import {
+  goalControlsBusy,
+  goalExecutionStatus,
+} from "../../utils/goalExecution";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 
@@ -190,6 +193,7 @@ export interface WorkspaceSceneModelInput {
   workflow: {
     state: AgentWorkflowState | null;
     loading: boolean;
+    mutating: boolean;
     error: string | null;
     selectedSkillIds: readonly string[];
     refresh: (providerRefresh?: boolean) => Promise<void>;
@@ -253,6 +257,14 @@ export function createWorkspaceSceneModel({
   const currentGoalExecution = goalMutationSafetyLocked
     ? "idle"
     : goalExecutionStatus(projection.turns);
+  const currentGoalControlsBusy = goalControlsBusy({
+    connectionStatus: connection.status,
+    workflowLoading: workflow.loading,
+    safetyLocked: goalMutationSafetyLocked,
+    executionStatus: currentGoalExecution,
+    busyAction,
+  });
+  const goalMutationControlsBusy = currentGoalControlsBusy || workflow.mutating;
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
@@ -439,10 +451,7 @@ export function createWorkspaceSceneModel({
         workflow: currentWorkflow,
         executionStatus: currentGoalExecution,
         loading: workflow.loading,
-        busy: workflow.loading
-          || goalMutationSafetyLocked
-          || currentGoalExecution === "starting"
-          || busyAction?.startsWith("agent.goal") === true,
+        busy: goalMutationControlsBusy,
         error: workflow.error,
         onRetry: () => workflow.refresh(true),
         onSetGoal: setGoal,
@@ -674,15 +683,10 @@ export function createWorkspaceSceneModel({
         subagents: projection.subagents,
         turns: projection.turns,
         selectedSkillIds: workflow.selectedSkillIds,
-        busy: workflow.loading
-          || goalMutationSafetyLocked
-          || currentGoalExecution === "starting"
-          || busyAction?.startsWith("agent.goal") === true,
+        busy: goalMutationControlsBusy,
         onRetry: () => workflow.refresh(true),
         onSetGoal: setGoal,
-        onClearGoal: (goal) => {
-          void clearGoal(goal.source).catch(() => undefined);
-        },
+        onClearGoal: (goal) => clearGoal(goal.source),
         onToggleSkill: (skill) => actions.toggleSkill(skill),
         onRefreshSkills: () => {
           void actions.listSkills(true).catch((error) => setActionError(

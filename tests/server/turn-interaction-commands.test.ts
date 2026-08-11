@@ -245,6 +245,68 @@ function dependencies(options: {
   };
 }
 
+describe("turn stop cleanup", () => {
+  it("does not acknowledge Stop until provider cleanup is confirmed", async () => {
+    let release!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runtime = dependencies({
+      queue: vi.fn(),
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    const cancel = vi.fn(() => true);
+    const waitForProviderCleanup = vi.fn(async () => await cleanup);
+    Object.assign(runtime.turns, { cancel, waitForProviderCleanup });
+    vi.mocked(runtime.turns.isActive).mockReturnValue(false);
+    Object.assign(runtime.isolatedRuns, {
+      stopConversation: vi.fn(() => false),
+    });
+    const handler = createTurnInteractionCommandHandler(runtime);
+    let settled = false;
+    const result = handler({} as never, {
+      type: "agent.stop",
+      requestId: "33333333-3333-4333-8333-333333333333",
+      payload: { conversationId },
+    }).finally(() => {
+      settled = true;
+    });
+
+    await vi.waitFor(() => expect(waitForProviderCleanup).toHaveBeenCalledWith([
+      conversationId,
+    ]));
+    expect(settled).toBe(false);
+
+    release();
+    await expect(result).resolves.toBe("mutation");
+    expect(cancel).toHaveBeenCalledWith(conversationId);
+  });
+
+  it("reports that Resume remains unavailable when cleanup is unconfirmed", async () => {
+    const runtime = dependencies({
+      queue: vi.fn(),
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    Object.assign(runtime.turns, {
+      cancel: vi.fn(() => true),
+      waitForProviderCleanup: vi.fn(async () => undefined),
+    });
+    vi.mocked(runtime.turns.isActive).mockReturnValue(true);
+    Object.assign(runtime.isolatedRuns, {
+      stopConversation: vi.fn(() => false),
+    });
+    const handler = createTurnInteractionCommandHandler(runtime);
+
+    await expect(handler({} as never, {
+      type: "agent.stop",
+      requestId: "33333333-3333-4333-8333-333333333333",
+      payload: { conversationId },
+    })).rejects.toThrow(
+      "provider cleanup could not be confirmed. Resume remains unavailable",
+    );
+  });
+});
+
 describe("message attachment ownership transfer", () => {
   it.each([
     { label: "model rejection", queueRejects: false, supportsImages: false },

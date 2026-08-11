@@ -456,7 +456,7 @@ describe("AgentWorkflowController", () => {
     const limited = nativeGoal({
       status: "budgetLimited",
       tokenBudget: 2_000,
-      tokensUsed: 2_000,
+      tokensUsed: 1_500,
     });
     const runtime = harness({ goals: [limited] });
     const setNativeGoal = vi.fn(async () => ({
@@ -482,7 +482,7 @@ describe("AgentWorkflowController", () => {
       conversationId: "conversation-1",
       source: "codex-native",
       status: "active",
-      tokenBudget: 2_000,
+      tokenBudget: 1_600,
     })).rejects.toThrow("must be greater than the exhausted usage or prior limit");
 
     await expect(runtime.controller.setGoal({
@@ -665,6 +665,31 @@ describe("AgentWorkflowController", () => {
     expect(clearNativeGoal).toHaveBeenCalledWith("conversation-1");
     expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
     expect(runtime.goals).toEqual([]);
+  });
+
+  it("holds fallback control mutations inside the turn-admission gate", async () => {
+    const runtime = harness({ goals: [nativeGoal()] });
+    const mutationConversations: string[] = [];
+    const withNativeGoalMutation = async <T>(
+      _conversationId: string,
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      mutationConversations.push(_conversationId);
+      return await operation();
+    };
+    runtime.controller.attachNativeGoalRuntime({
+      withNativeGoalMutation,
+      setNativeGoal: vi.fn(async () => null),
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    await runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      status: "paused",
+    });
+
+    expect(mutationConversations).toEqual(["conversation-1"]);
   });
 
   it("preserves a native goal when a live clear is superseded", async () => {

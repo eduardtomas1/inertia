@@ -4,7 +4,6 @@ import {
   isAgentTurnTerminalStatus,
   type AgentApprovalDecision,
   type AgentApprovalRequest,
-  type AgentGoalStatus,
   type AgentInputRequest,
   type AgentPlan,
   type AgentTurn,
@@ -53,6 +52,8 @@ import {
 import { hasActiveTurnCheckout, providerConversationIds } from "./turn-checkout-activity";
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
+import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
+import { providerFailureCause } from "./turn-provider-result";
 
 interface ProviderStartAttempt {
   accepted: boolean;
@@ -96,6 +97,7 @@ export class TurnController {
   private readonly settlementTasks = new Set<Promise<unknown>>();
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
   private readonly providerRunOwnershipBarriers = new Map<string, Promise<void>>();
+  private readonly nativeGoalMutations = new TurnNativeGoalMutationGate();
   private closing = false;
 
   constructor(
@@ -201,18 +203,17 @@ export class TurnController {
         .length > 0;
   }
 
-  async setNativeGoal(input: {
-    conversationId: string;
-    objective?: string;
-    status: AgentGoalStatus;
-    tokenBudget?: number | null;
-  }): ReturnType<TurnNativeGoalCoordinator["set"]> {
+  async withNativeGoalMutation<T>(conversationId: string, operation: () => Promise<T>): Promise<T> {
+    return await this.nativeGoalMutations.run(conversationId, operation);
+  }
+
+  async setNativeGoal(
+    input: Parameters<TurnNativeGoalCoordinator["set"]>[0],
+  ): ReturnType<TurnNativeGoalCoordinator["set"]> {
     return this.nativeGoals.set(input);
   }
 
-  async clearNativeGoal(
-    conversationId: string,
-  ): Promise<boolean | "superseded" | null> {
+  async clearNativeGoal(conversationId: string): Promise<boolean | "superseded" | null> {
     return await this.nativeGoals.clear(conversationId);
   }
 
@@ -450,6 +451,12 @@ export class TurnController {
 
   queue(request: QueueTurnRequest): QueuedTurn {
     if (this.closing) throw new Error("The local runtime is shutting down.");
+    if (
+      !request.goalStart
+      && this.nativeGoalMutations.blocksTurnAdmission(request.conversationId)
+    ) {
+      throw new Error("A Codex goal update is in progress for this conversation.");
+    }
     this.store.assertDuoComparisonTurnAllowed(
       request.conversationId,
       request.authorizedDuoComparisonLaunchId,
@@ -476,6 +483,9 @@ export class TurnController {
     if (this.closing) throw new Error("The local runtime is shutting down.");
     for (const request of requests) {
       this.store.assertDuoComparisonTurnAllowed(request.conversationId);
+      if (this.nativeGoalMutations.blocksTurnAdmission(request.conversationId)) {
+        throw new Error("A Codex goal update is in progress for this conversation.");
+      }
       if (this.isActive(request.conversationId)) {
         throw new Error("A Duo conversation already has an active turn.");
       }
@@ -1064,16 +1074,10 @@ export class TurnController {
     } else if (result.status === "cancelled") {
       this.settle(active, "cancelled", "user-cancelled", "Stopped");
     } else {
-      const transportFailure = result.failure
-        ? result.failure.reason !== "codex-error"
-        : result.exitCode !== null || result.signal !== null;
-      const cause = transportFailure
-        ? "provider-process-exit"
-        : "provider-error";
       this.settle(
         active,
         "failed",
-        cause,
+        providerFailureCause(result),
         result.error ?? "The provider could not complete the request.",
         result.failure,
       );

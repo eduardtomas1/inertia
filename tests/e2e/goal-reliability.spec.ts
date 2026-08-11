@@ -187,6 +187,26 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
       .toBeDisabled();
     await expect(tools.getByText(/no Inertia run is connected/u))
       .toBeVisible();
+
+    await page.reload();
+    await expect(page.locator(".app-shell")).toHaveAttribute(
+      "data-connection-status",
+      "online",
+    );
+    await page.getByRole("button", { name: "Open workspace tools" }).click();
+    const reloadedTools = page.getByRole("complementary", {
+      name: "Workspace tools",
+    });
+    await reloadedTools.getByRole("tab", { name: /^Goal/u }).click();
+    await expect(reloadedTools.getByText("Ship the reliable goal flow", {
+      exact: true,
+    })).toBeVisible({ timeout: 10_000 });
+    await expect(reloadedTools.getByText("Active", { exact: true }))
+      .toBeVisible();
+    await expect(reloadedTools.getByRole("button", { name: "Resume goal" }))
+      .toBeVisible();
+    await expect(reloadedTools.getByRole("button", { name: "Resume goal" }))
+      .toBeDisabled();
     expect(app.rendererErrors).toEqual([]);
   } finally {
     await app.close();

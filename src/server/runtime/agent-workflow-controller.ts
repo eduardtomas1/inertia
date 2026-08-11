@@ -26,6 +26,10 @@ const NATIVE_GOAL_REFRESH_WARNING =
   "Codex native goal could not be refreshed. Showing saved goal data; local goals and skills remain available.";
 
 export interface NativeGoalRuntime {
+  withNativeGoalMutation?<T>(
+    conversationId: string,
+    operation: () => Promise<T>,
+  ): Promise<T>;
   setNativeGoal(input: {
     conversationId: string;
     objective?: string;
@@ -225,7 +229,10 @@ function assertRecoverableGoalBudget(
   }
   if (
     input.tokenBudget !== null
-    && input.tokenBudget <= (existing.tokensUsed ?? existing.tokenBudget ?? 0)
+    && input.tokenBudget <= Math.max(
+      existing.tokensUsed ?? 0,
+      existing.tokenBudget ?? 0,
+    )
   ) {
     throw new RuntimeRequestError(
       "The resumed token budget must be greater than the exhausted usage or prior limit.",
@@ -260,7 +267,10 @@ export class AgentWorkflowController {
     this.nativeGoalRuntime = runtime;
   }
 
-  state(conversationId: string): AgentWorkflowState {
+  state(
+    conversationId: string,
+    reconcileStaleNativeGoal = true,
+  ): AgentWorkflowState {
     const conversation = this.store.conversation(conversationId);
     this.pruneSkills();
     const native = isNativeCodexConversation(conversation);
@@ -287,7 +297,9 @@ export class AgentWorkflowController {
         conversation.providerSessionId
         && goal.providerSessionId === conversation.providerSessionId
       ) return true;
-      this.store.clearAgentGoal(conversationId, "codex-native");
+      if (reconcileStaleNativeGoal) {
+        this.store.clearAgentGoal(conversationId, "codex-native");
+      }
       return false;
     });
     return {
@@ -510,7 +522,7 @@ export class AgentWorkflowController {
           "The Codex goal runtime is unavailable.",
         );
       }
-      return await this.withNativeGoalOperation(
+      return await this.withNativeGoalMutationOperation(
         input.conversationId,
         async () => {
           const currentRoute = this.store.conversation(input.conversationId);
@@ -573,7 +585,7 @@ export class AgentWorkflowController {
       );
     }
     const providerSessionId = conversation.providerSessionId!;
-    return await this.withNativeGoalOperation(
+    return await this.withNativeGoalMutationOperation(
       input.conversationId,
       async () => {
         if (!this.hasNativeGoalSession(
@@ -696,7 +708,7 @@ export class AgentWorkflowController {
     if (source === "codex-native") {
       this.requireNativeCodexGoal(conversation);
       const providerSessionId = conversation.providerSessionId!;
-      return await this.withNativeGoalOperation(
+      return await this.withNativeGoalMutationOperation(
         conversationId,
         async () => {
           if (!this.hasNativeGoalSession(
@@ -809,6 +821,21 @@ export class AgentWorkflowController {
         this.nativeGoalOperations.delete(key);
       }
     }
+  }
+
+  private async withNativeGoalMutationOperation<T>(
+    conversationId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return await this.withNativeGoalOperation(
+      conversationId,
+      async () => this.nativeGoalRuntime?.withNativeGoalMutation
+        ? await this.nativeGoalRuntime.withNativeGoalMutation(
+          conversationId,
+          operation,
+        )
+        : await operation(),
+    );
   }
 
   async listSkills(

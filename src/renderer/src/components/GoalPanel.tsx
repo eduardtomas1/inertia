@@ -68,7 +68,7 @@ export interface GoalPanelProps {
   error?: string | null;
   onRetry?: () => Promise<void>;
   onSetGoal?: (input: GoalPanelGoalInput) => Promise<void>;
-  onClearGoal?: (goal: AgentGoal) => void;
+  onClearGoal?: (goal: AgentGoal) => void | Promise<void>;
   onToggleSkill?: (skill: AgentSkillSummary, selected: boolean) => void;
   onRefreshSkills?: () => void;
   canFollowUpSubagent?: (trace: SubagentTrace) => boolean;
@@ -166,11 +166,16 @@ function GoalCard({
   const progress = goalProgress(goal);
   const [recoveryBudget, setRecoveryBudget] = useState("");
   const [submittingBudget, setSubmittingBudget] = useState(false);
+  const [submittingAction, setSubmittingAction] = useState(false);
   const controlsBusy = busy
     || executionStatus === "starting"
-    || submittingBudget;
+    || submittingBudget
+    || submittingAction;
   const parsedRecoveryBudget = parseGoalTokenBudget(recoveryBudget);
-  const recoveryBudgetFloor = goal.tokensUsed ?? goal.tokenBudget ?? 0;
+  const recoveryBudgetFloor = Math.max(
+    goal.tokensUsed ?? 0,
+    goal.tokenBudget ?? 0,
+  );
   const validRecoveryBudget = typeof parsedRecoveryBudget === "number"
     && parsedRecoveryBudget > recoveryBudgetFloor;
   const resumeBudgetLimitedGoal = async (
@@ -189,6 +194,28 @@ function GoalCard({
       // The scene owns the public error surface.
     } finally {
       setSubmittingBudget(false);
+    }
+  };
+  const updateGoalStatus = async (status: AgentGoalStatus): Promise<void> => {
+    if (!onSetGoal || submittingAction) return;
+    setSubmittingAction(true);
+    try {
+      await onSetGoal({ source: goal.source, status });
+    } catch {
+      // The scene owns the public error surface.
+    } finally {
+      setSubmittingAction(false);
+    }
+  };
+  const clearGoal = async (): Promise<void> => {
+    if (!onClearGoal || submittingAction) return;
+    setSubmittingAction(true);
+    try {
+      await onClearGoal(goal);
+    } catch {
+      // The scene owns the public error surface.
+    } finally {
+      setSubmittingAction(false);
     }
   };
   return (
@@ -307,10 +334,7 @@ function GoalCard({
               className="goal-panel-text-button"
               disabled={controlsBusy}
               onClick={() => {
-                void onSetGoal({
-                  source: goal.source,
-                  status: action.status,
-                }).catch(() => undefined);
+                void updateGoalStatus(action.status);
               }}
             >
               {action.icon}
@@ -323,7 +347,7 @@ function GoalCard({
               className="goal-panel-icon-button"
               aria-label={`Clear ${sourceLabel(goal.source).toLowerCase()} goal`}
               disabled={controlsBusy}
-              onClick={() => onClearGoal(goal)}
+              onClick={() => void clearGoal()}
             >
               <Trash2 size={12} aria-hidden="true" />
             </button>

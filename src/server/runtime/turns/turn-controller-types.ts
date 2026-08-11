@@ -193,6 +193,7 @@ export type TurnTerminalCause =
   | "provider-error"
   | "provider-process-exit"
   | "provider-process-crash"
+  | "goal-continuation-timeout"
   | "user-cancelled"
   | "approval-cancelled"
   | "unsupported-interaction"

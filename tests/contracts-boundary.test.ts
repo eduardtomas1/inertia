@@ -77,6 +77,7 @@ describe("shared contracts boundary", () => {
       "conversation.delete",
       "message.send",
       "agent.workflow.load",
+      "agent.workflow.saved.load",
       "agent.goal.set",
       "agent.goal.clear",
       "agent.skills.list",

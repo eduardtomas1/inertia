@@ -222,13 +222,35 @@ describe("ChatGoalControl", () => {
       .toBeDisabled();
   });
 
+  it("explains why a saved goal cannot resume in recovery safety mode", () => {
+    render(
+      <ChatGoalControl
+        {...props(workflow(nativeCapability, [
+          goal("codex-native", "Survive the runtime restart"),
+        ]), {
+          executionStatus: "idle",
+          busy: true,
+          error: "Changes are unavailable in recovery safety mode.",
+        })}
+        {...openProps()}
+      />,
+    );
+
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    expect(within(surface).getByRole("alert")).toHaveTextContent(
+      "recovery safety mode",
+    );
+    expect(within(surface).getByRole("button", { name: "Resume goal" }))
+      .toBeDisabled();
+  });
+
   it("requires an explicit new or removed budget to resume a limited goal", async () => {
     const user = userEvent.setup();
     const onSetGoal = vi.fn(async () => undefined);
     const limited = {
       ...goal("codex-native", "Continue within a truthful budget", "budgetLimited"),
       tokenBudget: 2_000,
-      tokensUsed: 2_000,
+      tokensUsed: 1_500,
     };
     render(
       <ChatGoalControl
@@ -247,6 +269,9 @@ describe("ChatGoalControl", () => {
       name: "Resume with new budget",
     });
     expect(raised).toBeDisabled();
+    await user.type(budget, "1600");
+    expect(raised).toBeDisabled();
+    await user.clear(budget);
     await user.type(budget, "3000");
     await user.click(raised);
     expect(onSetGoal).toHaveBeenCalledWith({

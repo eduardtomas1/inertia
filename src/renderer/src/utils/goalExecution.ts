@@ -1,4 +1,5 @@
 import type { AgentTurn } from "@shared/contracts";
+import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 
 export type GoalExecutionStatus = "idle" | "starting" | "running";
 
@@ -18,4 +19,19 @@ export function goalExecutionStatus(
   return live.some(({ status }) => status === "queued" || status === "starting")
     ? "starting"
     : "running";
+}
+
+export function goalControlsBusy(input: {
+  connectionStatus: ConnectionStatus;
+  workflowLoading: boolean;
+  safetyLocked: boolean;
+  executionStatus: GoalExecutionStatus;
+  busyAction: string | null;
+}): boolean {
+  return input.connectionStatus !== "online"
+    || input.workflowLoading
+    || input.safetyLocked
+    || input.executionStatus === "starting"
+    || input.busyAction === "agent.stop"
+    || input.busyAction?.startsWith("agent.goal") === true;
 }

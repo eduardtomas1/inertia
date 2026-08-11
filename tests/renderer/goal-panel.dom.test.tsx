@@ -344,6 +344,24 @@ describe("GoalPanel", () => {
     })).toBeDisabled();
   });
 
+  it("latches a goal action until its mutation settles", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const onSetGoal = vi.fn(() => pending);
+    renderPanel({ onSetGoal });
+
+    const pause = screen.getByRole("button", { name: "Pause" });
+    await user.dblClick(pause);
+    expect(onSetGoal).toHaveBeenCalledOnce();
+    expect(pause).toBeDisabled();
+
+    release();
+    await waitFor(() => expect(pause).toBeEnabled());
+  });
+
   it("does not offer an ineffective active transition at the budget limit", async () => {
     const user = userEvent.setup();
     const onSetGoal = vi.fn(async () => undefined);
@@ -352,7 +370,7 @@ describe("GoalPanel", () => {
         goals: [goal({
           status: "budgetLimited",
           tokenBudget: 10_000,
-          tokensUsed: 10_000,
+          tokensUsed: 8_000,
         })],
       }),
       onSetGoal,
@@ -361,6 +379,11 @@ describe("GoalPanel", () => {
     expect(screen.queryByRole("button", { name: "Mark active" }))
       .not.toBeInTheDocument();
     const input = screen.getByRole("spinbutton", { name: "New token budget" });
+    await user.type(input, "9000");
+    expect(screen.getByRole("button", {
+      name: "Resume with new budget",
+    })).toBeDisabled();
+    await user.clear(input);
     await user.type(input, "12000");
     await user.click(screen.getByRole("button", {
       name: "Resume with new budget",

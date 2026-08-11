@@ -14,6 +14,7 @@ import type {
   ProviderGoalMutation,
   ProviderGoalSnapshot,
   ProviderRunCallbacks,
+  ProviderRunFailure,
   ProviderRunInput,
   ProviderRunResult,
 } from "../../src/server/provider/contracts";
@@ -63,7 +64,10 @@ class GoalProvider implements TurnProviderRuntime {
     this.callbacks?.onEvent?.(event);
   }
 
-  resolve(status: "completed" | "failed" = "completed"): void {
+  resolve(
+    status: "completed" | "failed" = "completed",
+    failure?: ProviderRunFailure,
+  ): void {
     if (!this.input) throw new Error("Provider has not started.");
     this.running = false;
     this.resolveResult?.({
@@ -75,6 +79,7 @@ class GoalProvider implements TurnProviderRuntime {
       exitCode: status === "completed" ? 0 : 1,
       signal: null,
       cleanupConfirmed: true,
+      ...(failure ? { failure } : {}),
     });
   }
 
@@ -241,6 +246,50 @@ afterEach(async () => {
 });
 
 describe("TurnController native goal lifecycle", () => {
+  it("blocks ordinary turn admission while an idle goal mutation owns the route", async () => {
+    const runtime = await goalRuntime();
+    let release!: () => void;
+    const pending = runtime.controller.withNativeGoalMutation(
+      runtime.conversationId,
+      async () => await new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+
+    expect(() => runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Do not race the control mutation.",
+    })).toThrow("A Codex goal update is in progress");
+
+    release();
+    await pending;
+    expect(runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Start after the control mutation.",
+    }).turn.status).toBe("queued");
+  });
+
+  it("persists continuation expiry as a goal timeout, not a process exit", async () => {
+    const runtime = await goalRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Continue the active goal.",
+    });
+    runtime.controller.start(queued.turn.id);
+
+    runtime.provider.resolve("failed", {
+      reason: "goal-continuation-timeout",
+      message: "Codex did not start the next goal turn in time.",
+    });
+
+    await vi.waitFor(() => expect(runtime.store.agentTurn(queued.turn.id))
+      .toMatchObject({
+        status: "failed",
+        terminalReason: "goal-continuation-timeout",
+      }));
+  });
+
   it("establishes a provider thread from a goal as the first action", async () => {
     const runtime = await goalRuntime();
     const pendingGoal = runtime.controller.setNativeGoal({

@@ -33,6 +33,11 @@ export class TurnNativeGoalCoordinator {
   }): Promise<ProviderGoalSnapshot | null> {
     const active = this.options.activeForConversation(input.conversationId);
     if (active && !active.settled) {
+      if (!active.providerRunStarted) {
+        throw new Error(
+          "The active Codex turn must finish starting before updating its goal.",
+        );
+      }
       if (!this.options.providers.setGoal) {
         throw new Error("The active provider cannot update native goals.");
       }
@@ -115,6 +120,11 @@ export class TurnNativeGoalCoordinator {
   ): Promise<boolean | "superseded" | null> {
     const active = this.options.activeForConversation(conversationId);
     if (!active || active.settled) return null;
+    if (!active.providerRunStarted) {
+      throw new Error(
+        "The active Codex turn must finish starting before clearing its goal.",
+      );
+    }
     if (!this.options.providers.clearGoal) {
       throw new Error("The active provider cannot clear native goals.");
     }

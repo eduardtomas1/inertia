@@ -1,5 +1,5 @@
 import { constants as fsConstants } from "node:fs";
-import { access, readdir, realpath, stat } from "node:fs/promises";
+import { access, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { ProviderId } from "./provider/contracts";
@@ -217,18 +217,71 @@ export async function loginShellEnvironment(): Promise<NodeJS.ProcessEnv> {
   return {};
 }
 
-async function boundedNvmExecutableDirectories(home: string): Promise<string[]> {
+async function boundedNvmDefaultVersion(home: string): Promise<readonly bigint[] | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    const versions = await readdir(join(home, ".nvm", "versions", "node"), {
+    const flags = fsConstants.O_RDONLY | (process.platform === "win32"
+      ? 0
+      : fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW);
+    handle = await open(join(home, ".nvm", "alias", "default"), flags);
+    const info = await handle.stat();
+    if (!info.isFile()) return null;
+    const buffer = Buffer.alloc(129);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead < 1 || bytesRead === buffer.length) return null;
+    const selector = buffer.subarray(0, bytesRead).toString("utf8").trim();
+    if (!/^v?\d+(?:\.\d+){0,2}$/u.test(selector)) return null;
+    return selector.replace(/^v/u, "").split(".").map((part) => BigInt(part));
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
+  }
+}
+
+function nvmVersionComponents(name: string): readonly [bigint, bigint, bigint] {
+  const parts = name.replace(/^v/u, "").split(".").map((part) => BigInt(part));
+  return [parts[0] ?? 0n, parts[1] ?? 0n, parts[2] ?? 0n];
+}
+
+async function boundedNvmExecutableDirectories(
+  home: string,
+  activeBin: string | undefined,
+): Promise<string[]> {
+  try {
+    const versionsRoot = join(home, ".nvm", "versions", "node");
+    const defaultVersion = await boundedNvmDefaultVersion(home);
+    const active = activeBin ? resolve(activeBin) : null;
+    const versions = await readdir(versionsRoot, {
       withFileTypes: true,
     });
     return versions
       .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
       .map((entry) => entry.name)
       .filter((name) => /^v?\d+(?:\.\d+){0,2}$/u.test(name))
-      .sort()
+      .map((name) => ({
+        bin: join(versionsRoot, name, "bin"),
+        components: nvmVersionComponents(name),
+      }))
+      .sort((left, right) => {
+        const activeOrder = Number(active === resolve(right.bin))
+          - Number(active === resolve(left.bin));
+        if (activeOrder !== 0) return activeOrder;
+        const leftDefault = defaultVersion?.every(
+          (part, index) => left.components[index] === part,
+        ) ?? false;
+        const rightDefault = defaultVersion?.every(
+          (part, index) => right.components[index] === part,
+        ) ?? false;
+        if (leftDefault !== rightDefault) return leftDefault ? -1 : 1;
+        for (let index = 0; index < left.components.length; index += 1) {
+          if (left.components[index] === right.components[index]) continue;
+          return left.components[index]! > right.components[index]! ? -1 : 1;
+        }
+        return left.bin.localeCompare(right.bin);
+      })
       .slice(0, 32)
-      .map((name) => join(home, ".nvm", "versions", "node", name, "bin"));
+      .map(({ bin }) => bin);
   } catch {
     return [];
   }
@@ -271,7 +324,10 @@ async function commonExecutableDirectories(
     join(home, ".asdf", "shims"),
     join(home, ".local", "share", "mise", "shims"),
     join(home, ".opencode", "bin"),
-    ...await boundedNvmExecutableDirectories(home),
+    ...await boundedNvmExecutableDirectories(
+      home,
+      environmentValue(environment, "NVM_BIN"),
+    ),
     join(home, "Library", "pnpm"),
     "/opt/homebrew/bin",
     "/usr/local/bin",

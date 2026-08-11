@@ -28,6 +28,7 @@ const ENVIRONMENT_KEYS = [
   "HTTPS_PROXY",
   "INERTIA_LOGIN_SHELL_MARKER",
   "LOCALAPPDATA",
+  "NVM_BIN",
   "NODE_EXTRA_CA_CERTS",
   "NO_PROXY",
   "OPENAI_API_KEY",
@@ -125,6 +126,54 @@ describe.sequential("provider environment discovery", () => {
         environment,
         home,
       )).resolves.toEqual([realpathSync.native(nvmCommand)]);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "prioritizes active, default, and newest NVM versions within the scan bound",
+    async () => {
+      const home = temporaryRoot();
+      const versionsRoot = join(home, ".nvm", "versions", "node");
+      for (let major = 1; major <= 40; major += 1) {
+        mkdirSync(join(versionsRoot, `v${major}.0.0`, "bin"), { recursive: true });
+      }
+      const activeBin = join(versionsRoot, "v3.0.0", "bin");
+      const defaultBin = join(versionsRoot, "v2.0.0", "bin");
+      const newestBin = join(versionsRoot, "v40.0.0", "bin");
+      const activeCommand = executable(activeBin, "nvm-active-agent");
+      const defaultCommand = executable(defaultBin, "nvm-default-agent");
+      const newestCommand = executable(newestBin, "nvm-newest-agent");
+      mkdirSync(join(home, ".nvm", "alias"), { recursive: true });
+      writeFileSync(join(home, ".nvm", "alias", "default"), "2\n");
+
+      setEnvironment({ HOME: home, NVM_BIN: activeBin, PATH: "/usr/bin:/bin" });
+      const environment = await providerEnvironment(true);
+      const scannedNvmBins = environment.pathEntries.filter(
+        (entry) => entry.startsWith(`${versionsRoot}/`),
+      );
+
+      expect(scannedNvmBins).toHaveLength(32);
+      expect(scannedNvmBins.slice(0, 3)).toEqual([
+        activeBin,
+        defaultBin,
+        newestBin,
+      ]);
+      expect(scannedNvmBins).not.toContain(join(versionsRoot, "v1.0.0", "bin"));
+      await expect(executableCandidates(
+        "nvm-active-agent",
+        environment,
+        home,
+      )).resolves.toEqual([realpathSync.native(activeCommand)]);
+      await expect(executableCandidates(
+        "nvm-default-agent",
+        environment,
+        home,
+      )).resolves.toEqual([realpathSync.native(defaultCommand)]);
+      await expect(executableCandidates(
+        "nvm-newest-agent",
+        environment,
+        home,
+      )).resolves.toEqual([realpathSync.native(newestCommand)]);
     },
   );
 

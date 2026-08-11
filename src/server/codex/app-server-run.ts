@@ -491,6 +491,8 @@ export function startCodexAppServerRun(
       setActiveTurnId: (turnId) => {
         activeTurnId = turnId;
       },
+      phase: () => phase,
+      hasObservedTurn: (turnId) => events.hasObservedTurn(turnId),
       projectGoalResponse: (threadId, goal) =>
         events.projectGoalResponse(threadId, goal),
       setContinuationError: (error) => {
@@ -593,6 +595,8 @@ interface OpenCodexTurnOptions {
   setProviderThreadId: (threadId: string) => void;
   activeTurnId: () => string | undefined;
   setActiveTurnId: (turnId: string | undefined) => void;
+  phase: () => CodexRunPhase;
+  hasObservedTurn: (turnId: string) => boolean;
   projectGoalResponse: (
     threadId: string,
     goal: unknown,
@@ -618,6 +622,8 @@ export async function openCodexTurn({
   setProviderThreadId,
   activeTurnId,
   setActiveTurnId,
+  phase,
+  hasObservedTurn,
   projectGoalResponse,
   setContinuationError,
   setPhase,
@@ -776,6 +782,15 @@ export async function openCodexTurn({
   const startedTurnId = boundedText(turn?.id, 512);
   if (!startedTurnId) {
     throw new Error("Codex did not return a turn identifier.");
+  }
+  // Notifications can share the response's stdout chunk and complete the
+  // turn before this await resumes. Preserve the event-driven phase instead
+  // of resurrecting a completed turn as running.
+  if (phase() !== "starting-turn") {
+    if (!hasObservedTurn(startedTurnId)) {
+      throw new Error("Codex returned inconsistent turn identifiers.");
+    }
+    return;
   }
   if (activeTurnId() && activeTurnId() !== startedTurnId) {
     throw new Error("Codex returned inconsistent turn identifiers.");

@@ -134,6 +134,7 @@ export class CodexAppServerEvents {
   private readonly pendingInputs = new Map<string, PendingInput>();
   private readonly deltaItems = new Set<string>();
   private readonly reasoningDeltaItems = new Set<string>();
+  private readonly completedTurnIds = new Set<string>();
   private readonly childParents = new Map<string, string>();
   private readonly childResults = new Map<string, CappedTextBuffer>();
   private readonly childDeltaItems = new Set<string>();
@@ -149,6 +150,7 @@ export class CodexAppServerEvents {
   private goalContinuationTimer: NodeJS.Timeout | undefined;
   private readonly goalContinuationGraceMs: number;
   private nativeGoalStatus: AgentGoalStatus | null;
+  private nativeGoalUpdatedAt: string | null = null;
 
   constructor(private readonly host: CodexAppServerEventHost) {
     this.subagentDrainTimeoutMs = codexSubagentDrainTimeoutMs(
@@ -173,6 +175,7 @@ export class CodexAppServerEvents {
     }
     this.pendingParentCompletion = null;
     this.liveSubagentIds.clear();
+    this.completedTurnIds.clear();
   }
 
   cancelPendingParentCompletion(): boolean {
@@ -180,6 +183,11 @@ export class CodexAppServerEvents {
     this.dispose();
     this.host.finish("cancelled", null, null);
     return true;
+  }
+
+  hasObservedTurn(turnId: string): boolean {
+    return this.host.activeTurnId() === turnId
+      || this.completedTurnIds.has(turnId);
   }
 
   settleInteractions(): void {
@@ -425,6 +433,7 @@ export class CodexAppServerEvents {
         !this.host.providerThreadId()
         || notificationThreadId !== this.host.providerThreadId()
         || !notificationTurnId
+        || this.completedTurnIds.has(notificationTurnId)
       ) return;
       if (
         phase !== "awaiting-goal-continuation"
@@ -507,6 +516,8 @@ export class CodexAppServerEvents {
       return;
     }
     if (method === "turn/completed") {
+      if (!notificationTurnId) return;
+      this.completedTurnIds.add(notificationTurnId);
       const turn = objectValue(params.turn);
       const status = stringValue(turn?.status);
       const turnError = objectValue(turn?.error);
@@ -564,7 +575,15 @@ export class CodexAppServerEvents {
     threadId: string,
     goal: unknown,
   ): ProviderGoalSnapshot | null {
-    return this.projectGoalUpdate({ threadId, goal });
+    const update = parseCodexGoalUpdatedNotification({ threadId, goal });
+    if (!update || update.threadId !== this.host.providerThreadId()) {
+      return null;
+    }
+    this.acceptGoalUpdate(update.threadId, update.goal);
+    // A newer notification can legitimately arrive before its mutation
+    // response is observed. The response remains valid even when it must not
+    // move the live continuation state backwards.
+    return update.goal;
   }
 
   projectGoalCleared(threadId: string): boolean {
@@ -582,12 +601,26 @@ export class CodexAppServerEvents {
     if (!update || update.threadId !== this.host.providerThreadId()) {
       return null;
     }
-    this.nativeGoalStatus = update.goal.status;
-    this.host.options.onGoalUpdated?.(update.threadId, update.goal);
-    if (update.goal.status !== "active") {
+    return this.acceptGoalUpdate(update.threadId, update.goal)
+      ? update.goal
+      : null;
+  }
+
+  private acceptGoalUpdate(
+    threadId: string,
+    goal: ProviderGoalSnapshot,
+  ): boolean {
+    if (
+      this.nativeGoalUpdatedAt
+      && goal.updatedAt < this.nativeGoalUpdatedAt
+    ) return false;
+    this.nativeGoalUpdatedAt = goal.updatedAt;
+    this.nativeGoalStatus = goal.status;
+    this.host.options.onGoalUpdated?.(threadId, goal);
+    if (goal.status !== "active") {
       this.finishAwaitingGoalContinuation();
     }
-    return update.goal;
+    return true;
   }
 
   private awaitGoalContinuation(): void {

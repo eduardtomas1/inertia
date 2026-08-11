@@ -17,13 +17,15 @@ class TestResizeObserver implements ResizeObserver {
   }
 }
 
-function LayoutHarness({ surface, forceStackedTools = false }: {
+function LayoutHarness({ surface, workspaceId = "conversation-1", forceStackedTools = false }: {
   surface: WorkspaceStartupSurface;
+  workspaceId?: string;
   forceStackedTools?: boolean;
 }): React.JSX.Element {
   const layout = useWorkspaceLayout("workspace", true, {
     startupSurface: surface,
     startupReady: true,
+    workspaceId,
     forceStackedTools,
   });
   return (
@@ -132,5 +134,30 @@ describe("workspace startup surface", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Prefer summary" }));
     expect(screen.getByLabelText("Tool width")).toHaveTextContent("360");
+  });
+
+  it("keeps open and selected panel state scoped to each task", async () => {
+    const view = render(
+      <LayoutHarness surface="summary" workspaceId="conversation-a" />,
+    );
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("environment");
+    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("changes");
+
+    view.rerender(
+      <LayoutHarness surface="summary" workspaceId="conversation-b" />,
+    );
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("environment");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle tools" }));
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("none");
+
+    view.rerender(
+      <LayoutHarness surface="summary" workspaceId="conversation-a" />,
+    );
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("changes");
+    view.rerender(
+      <LayoutHarness surface="summary" workspaceId="conversation-b" />,
+    );
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("none");
   });
 });

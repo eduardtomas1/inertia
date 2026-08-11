@@ -94,7 +94,9 @@ export function EnvironmentPanel({
       ? "Checking branch…"
       : summary.gitState === "unavailable"
         ? "No Git repository"
-        : "Branch unavailable");
+        : summary.gitState === "unknown"
+          ? "Repository not checked"
+          : "Branch unavailable");
   const repositoryLabel = summary.repository?.name
     ?? summary.projectName
     ?? summary.workspace?.value
@@ -105,7 +107,9 @@ export function EnvironmentPanel({
       ? "Unavailable"
       : summary.gitState === "unavailable"
         ? "Not a repository"
-        : null;
+        : summary.gitState === "unknown"
+          ? "Not checked"
+          : null;
 
   return (
     <section className="environment-panel" aria-label="Environment details">

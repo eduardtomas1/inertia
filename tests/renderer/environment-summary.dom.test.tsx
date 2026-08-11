@@ -234,7 +234,7 @@ describe("Environment panel", () => {
       .not.toBeInTheDocument();
   });
 
-  it("distinguishes clean, loading, unavailable, and failed repository states", () => {
+  it("distinguishes clean, loading, uninspected, unavailable, and failed repository states", () => {
     const actions = {
       onOpenChanges: vi.fn(),
       onOpenFiles: vi.fn(),
@@ -283,6 +283,22 @@ describe("Environment panel", () => {
     );
     expect(screen.getByLabelText("0 insertions and 0 deletions")).toBeVisible();
     expect(screen.getByText(/did not inspect every directory/u)).toBeVisible();
+
+    view.rerender(
+      <EnvironmentPanel
+        summary={{
+          ...summary,
+          branch: null,
+          changes: null,
+          gitState: "unknown",
+        }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Changes Not checked" }))
+      .toBeDisabled();
+    expect(screen.getByText("Repository not checked")).toBeVisible();
 
     view.rerender(
       <EnvironmentPanel

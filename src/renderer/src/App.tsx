@@ -216,6 +216,9 @@ export default function App(): React.JSX.Element {
   const workspaceLayout = useWorkspaceLayout(view, Boolean(project), {
     startupSurface: effectiveWorkspaceStartupSurface,
     startupReady: Boolean(connection.snapshot),
+    workspaceId: project
+      ? `${project.id}:${connection.snapshot?.activeConversationId ?? "draft"}`
+      : null,
     initialTool: legacyWorkspaceStartup?.tool,
   });
   const {

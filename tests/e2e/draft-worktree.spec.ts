@@ -64,6 +64,10 @@ test("keeps Environment available while an isolated draft worktree materializes"
     await expect(workspaceTools).toContainText(
       "Files, changes, and Terminal become available after the first message creates this isolated worktree.",
     );
+    await expect(workspaceTools.getByText("Repository not checked"))
+      .toBeVisible();
+    await expect(workspaceTools.getByText("No Git repository", { exact: true }))
+      .toHaveCount(0);
     await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
 
     const databasePath = join(

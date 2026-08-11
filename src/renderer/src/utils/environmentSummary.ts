@@ -28,7 +28,7 @@ export interface EnvironmentSummarySnapshot {
     deletions: number;
     repositories: number;
   } | null;
-  gitState: "loading" | "ready" | "unavailable" | "error";
+  gitState: "unknown" | "loading" | "ready" | "unavailable" | "error";
   gitNotice: string | null;
   branch: {
     label: "Branch" | "Branches";
@@ -90,33 +90,25 @@ function branchSummary(
   gitStatus: GitStatusSnapshot | null,
   workspaceGitStatus: WorkspaceGitSnapshot | null,
 ): EnvironmentSummarySnapshot["branch"] {
+  const readyRepositories = workspaceGitStatus?.repositories
+    .filter(({ state }) => state === "ready")
+    ?? [];
+  if (readyRepositories.length > 1) {
+    return {
+      label: "Branches",
+      value: `${readyRepositories.length} repositories`,
+    };
+  }
   if (gitStatus?.isRepository) {
     return {
       label: "Branch",
       value: gitStatus.branch ?? "Detached HEAD",
     };
   }
-  const readyRepositories = workspaceGitStatus?.repositories
-    .filter(({ state }) => state === "ready")
-    ?? [];
   if (readyRepositories.length === 1) {
     return {
       label: "Branch",
       value: readyRepositories[0]!.branch ?? "Detached HEAD",
-    };
-  }
-  const branches = new Set(
-    readyRepositories
-      .filter(({ branch }) => branch)
-      .map(({ branch }) => branch!)
-  );
-  if (branches.size === 1 && readyRepositories.every(({ branch }) => branch)) {
-    return { label: "Branch", value: [...branches][0]! };
-  }
-  if (readyRepositories.length > 1) {
-    return {
-      label: "Branches",
-      value: `${readyRepositories.length} repositories`,
     };
   }
   return null;
@@ -258,7 +250,9 @@ export function buildEnvironmentSummary({
         ? "error"
         : changes
           ? "ready"
-          : "unavailable",
+          : gitStatus || workspaceGitStatus
+            ? "unavailable"
+            : "unknown",
     gitNotice,
     branch: branchSummary(gitStatus, workspaceGitStatus),
     checks,

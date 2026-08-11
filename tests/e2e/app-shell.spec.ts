@@ -123,7 +123,6 @@ test("starts without a demo and adds the first real project", async () => {
   await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
   await expect.poll(conversationCount).toBe(1);
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
-  await page.getByRole("button", { name: "Open Environment" }).click();
   await expect(page.getByRole("tab", { name: "Environment" })).toHaveAttribute("aria-selected", "true");
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();

@@ -206,7 +206,7 @@ describe("environment summary projection", () => {
       workspace: null,
       repository: null,
       localServers: [],
-      gitState: "unavailable",
+      gitState: "unknown",
     });
   });
 
@@ -265,7 +265,18 @@ describe("environment summary projection", () => {
       projectName: "Inertia",
       conversationId: "conversation-1",
       connectionStatus: "online",
-      gitStatus: null,
+      gitStatus: {
+        isRepository: true,
+        root: "/workspace/inertia",
+        branch: "main",
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        hasRemote: false,
+        files: [],
+        insertions: 0,
+        deletions: 0,
+      },
       workspaceGitStatus: {
         repositories: [{
           repositoryPath: ".",

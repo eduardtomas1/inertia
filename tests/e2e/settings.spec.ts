@@ -8,6 +8,7 @@ import {
   expectComposerEndsAtDock,
 } from "./support/layout-assertions";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -43,7 +44,7 @@ async function ensureTerminalTools(): Promise<void> {
   if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
     await page.getByRole("button", { name: "Open workspace tools" }).click();
   }
-  await page.getByRole("tab", { name: "Terminal", exact: true }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
 }
 
 test("navigates settings, changes theme, and returns to chat", async () => {

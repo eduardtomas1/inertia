@@ -1,11 +1,13 @@
-import { useId, type ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
 import {
   Boxes,
+  ChevronDown,
   Files,
   Flag,
   GitCompareArrows,
   Globe2,
   ListChecks,
+  Settings,
   TerminalSquare,
   X,
 } from "lucide-react";
@@ -22,6 +24,7 @@ export type WorkspacePanelProps = {
   tabs?: readonly WorkspacePanelTab[];
   badges?: Partial<Record<WorkspacePanelTab, number>>;
   onClose?: () => void;
+  onOpenSettings?: () => void;
   visible?: boolean;
 };
 
@@ -52,14 +55,99 @@ export function WorkspacePanel({
   tabs = defaultTabs,
   badges,
   onClose,
+  onOpenSettings,
   visible = true,
 }: WorkspacePanelProps): React.JSX.Element {
   const activeMeta = tabMeta[activeTab];
   const panelId = useId();
+  const panelRef = useRef<HTMLElement>(null);
+  const environmentToolMenuRef = useRef<HTMLDetailsElement>(null);
+
+  const selectEnvironmentTool = (
+    tab: WorkspacePanelTab,
+    keyboardActivated: boolean,
+  ): void => {
+    environmentToolMenuRef.current?.removeAttribute("open");
+    onTabChange(tab);
+    if (!keyboardActivated) return;
+    window.requestAnimationFrame(() => {
+      panelRef.current
+        ?.querySelector<HTMLElement>(`[data-workspace-tab="${tab}"]`)
+        ?.focus();
+    });
+  };
 
   return (
-    <aside className="workspace-panel" aria-label="Workspace tools" hidden={!visible}>
-      <header className="workspace-panel-tabs">
+    <aside
+      ref={panelRef}
+      className="workspace-panel"
+      aria-label="Workspace tools"
+      data-active-workspace-tool={activeTab}
+      hidden={!visible}
+    >
+      {activeTab === "environment" ? (
+        <header className="workspace-panel-environment-header">
+          <div className="workspace-panel-environment-title">
+            <div className="workspace-panel-environment-tablist" role="tablist" aria-label="Workspace tools">
+              <button
+                type="button"
+                role="tab"
+                id={`${panelId}-tab-environment`}
+                aria-selected="true"
+                aria-controls={`${panelId}-content`}
+                data-workspace-tab="environment"
+                onFocus={() => prefetchWorkspaceTool("environment")}
+              >
+                Environment
+              </button>
+            </div>
+            {tabs.some((tab) => tab !== "environment") && (
+              <details
+                ref={environmentToolMenuRef}
+                className="workspace-panel-tool-chooser"
+                onBlur={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget)) return;
+                  environmentToolMenuRef.current?.removeAttribute("open");
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  environmentToolMenuRef.current?.removeAttribute("open");
+                  environmentToolMenuRef.current?.querySelector("summary")?.focus();
+                }}
+              >
+                <summary aria-label="Choose workspace tool" title="Choose workspace tool">
+                  <ChevronDown size={11} aria-hidden="true" />
+                </summary>
+                <div role="group" aria-label="Other workspace tools">
+                  {tabs.filter((tab) => tab !== "environment").map((tab) => {
+                    const meta = tabMeta[tab];
+                    return (
+                      <button
+                        type="button"
+                        onFocus={() => prefetchWorkspaceTool(tab)}
+                        onPointerEnter={() => prefetchWorkspaceTool(tab)}
+                        onClick={(event) => selectEnvironmentTool(tab, event.detail === 0)}
+                        key={tab}
+                      >
+                        {meta.icon}<span>{meta.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </details>
+            )}
+          </div>
+          <div className="workspace-panel-environment-actions">
+            {onOpenSettings && (
+              <IconButton label="Environment settings" onClick={onOpenSettings}>
+                <Settings size={14} />
+              </IconButton>
+            )}
+          </div>
+        </header>
+      ) : (
+        <header className="workspace-panel-tabs">
         <div
           className="workspace-panel-tablist"
           role="tablist"
@@ -116,7 +204,8 @@ export function WorkspacePanel({
             <X size={16} />
           </IconButton>
         )}
-      </header>
+        </header>
+      )}
       <div
         className="workspace-panel-content"
         id={`${panelId}-content`}

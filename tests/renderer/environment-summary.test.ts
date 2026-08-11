@@ -210,6 +210,26 @@ describe("environment summary projection", () => {
     });
   });
 
+  it("names a non-repository workspace as a project directory", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Notes",
+      conversationId: null,
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [],
+      subagents: [],
+      messages: [],
+      projectPath: "/workspace/notes",
+    });
+
+    expect(summary.workspace).toMatchObject({
+      label: "Project directory",
+      value: "notes",
+    });
+  });
+
   it("identifies a detached repository without inventing a branch name", () => {
     const summary = buildEnvironmentSummary({
       projectId: "project-1",
@@ -232,9 +252,11 @@ describe("environment summary projection", () => {
       runs: [],
       subagents: [],
       messages: [],
+      projectPath: "/workspace/inertia",
     });
 
     expect(summary.branch).toEqual({ label: "Branch", value: "Detached HEAD" });
+    expect(summary.workspace?.label).toBe("Worktree");
   });
 
   it("keeps mixed multi-repository branch state explicit", () => {
@@ -481,6 +503,56 @@ describe("environment summary projection", () => {
     expect(summary.gitNotice).toBe("Permission denied.");
   });
 
+  it("marks bounded scans incomplete even when an inspected repository is ready", () => {
+    for (const completeness of [
+      { partial: true, truncated: false },
+      { partial: false, truncated: true },
+    ]) {
+      const summary = buildEnvironmentSummary({
+        projectId: "project-1",
+        projectName: "Inertia",
+        conversationId: "conversation-1",
+        connectionStatus: "online",
+        gitStatus: null,
+        workspaceGitStatus: {
+          repositories: [{
+            repositoryPath: ".",
+            state: "ready",
+            error: null,
+            branch: "main",
+            upstream: null,
+            ahead: 0,
+            behind: 0,
+            hasRemote: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+            clean: true,
+            truncated: false,
+          }],
+          files: 0,
+          insertions: 0,
+          deletions: 0,
+          scannedDirectories: 128,
+          skippedDirectories: 1,
+          discoveredRepositories: 1,
+          repositoryLimit: 128,
+          ...completeness,
+          issues: [],
+        },
+        runs: [],
+        subagents: [],
+        messages: [],
+      });
+
+      expect(summary.changes).toMatchObject({ repositories: 1, files: 0 });
+      expect(summary.gitState).toBe("ready");
+      expect(summary.gitNotice).toBe(
+        "The repository scan did not inspect every directory.",
+      );
+    }
+  });
+
   it("keeps a message-less repository failure distinct from no repository", () => {
     const summary = buildEnvironmentSummary({
       projectId: "project-1",
@@ -522,7 +594,9 @@ describe("environment summary projection", () => {
 
     expect(summary.changes).toBeNull();
     expect(summary.gitState).toBe("error");
-    expect(summary.gitNotice).toBeNull();
+    expect(summary.gitNotice).toBe(
+      "The repository scan did not inspect every directory.",
+    );
   });
 
   it("treats a workspace scan issue without a repository result as an error", () => {

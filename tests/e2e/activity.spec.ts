@@ -9,6 +9,7 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -434,7 +435,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
       await page.getByRole("button", { name: "Open workspace tools" }).click();
     }
-    await page.getByRole("tab", { name: /Goal/ }).click();
+    await selectWorkspaceTool(page.locator(".workspace-panel"), "Goal");
     const goalPanel = page.getByRole("region", {
       name: "Goals and agent workflows",
     });

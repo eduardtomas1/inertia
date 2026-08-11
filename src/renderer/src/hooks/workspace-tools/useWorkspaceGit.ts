@@ -92,7 +92,11 @@ export function useWorkspaceGit({
   ): Promise<void> => {
     if (!project?.id) return Promise.resolve();
     const scope = options?.scope ?? "workspace";
-    if (options?.authoritative) requestGenerationRef.current += 1;
+    if (options?.authoritative) {
+      requestGenerationRef.current += 1;
+      setLoading(true);
+      setLoadError(null);
+    }
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     const identity = `${owner}:${ignoreWhitespace ? "ignore" : "exact"}`;
     const generation = requestGenerationRef.current;
@@ -140,12 +144,12 @@ export function useWorkspaceGit({
       }
     }
 
+    const ownsResponse = (): boolean => (
+      authorityRef.current === owner
+      && requestGenerationRef.current === generation
+    );
     let promise: Promise<void>;
     promise = (async () => {
-      const ownsResponse = (): boolean => (
-        authorityRef.current === owner
-        && requestGenerationRef.current === generation
-      );
       const statusRequest = request({
         type: "git.refresh",
         payload: {
@@ -201,9 +205,29 @@ export function useWorkspaceGit({
       if (ownsResponse() && diffEvent.result.kind === "git.diff") {
         setGitDiff(diffEvent.result.diff);
       }
-    })().finally(() => {
+    })().catch((error: unknown) => {
+      if (ownsResponse()) {
+        setLoadError(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Git changes could not be loaded.",
+        );
+      }
+      throw error;
+    }).finally(() => {
       if (loadGitInFlightRef.current?.promise === promise) {
         loadGitInFlightRef.current = null;
+      }
+      const trailing = trailingGitLoadRef.current;
+      if (
+        authorityRef.current === owner
+        && requestGenerationRef.current === generation
+        && !(
+          trailing?.identity === identity
+          && trailing.generation === generation
+        )
+      ) {
+        setLoading(false);
       }
     });
     loadGitInFlightRef.current = { identity, generation, scope, promise };
@@ -239,25 +263,30 @@ export function useWorkspaceGit({
       return;
     }
     let cancelled = false;
+    const owner = authority;
+    const generation = requestGenerationRef.current;
     setLoading(true);
     setLoadError(null);
     void loadGit({
       scope: loadWorkspaceOnMount ? "workspace" : "status",
     }).catch((error) => {
       if (!cancelled) {
+        if (
+          authorityRef.current !== owner
+          || requestGenerationRef.current !== generation
+        ) return;
         const message = error instanceof Error && error.message.trim()
           ? error.message
           : "Git changes could not be loaded.";
         setLoadError(message);
         setActionError(message);
       }
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
     });
     return () => {
       cancelled = true;
     };
   }, [
+    authority,
     enabled,
     loadGit,
     online,

@@ -6,6 +6,7 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -69,12 +70,7 @@ async function openPaneTool(
       name: `Open tools for ${chatTitle}`,
     }).click();
   }
-  await tools.getByRole("tab", {
-    name: tab === "Changes"
-      ? /Changes/u
-      : tab === "Goal" ? /^Goal/u : tab,
-    exact: tab !== "Changes" && tab !== "Goal",
-  }).click();
+  await selectWorkspaceTool(tools, tab);
   return tools;
 }
 

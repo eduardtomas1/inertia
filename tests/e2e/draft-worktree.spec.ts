@@ -4,6 +4,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 
 import { createAppFixture } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 test("keeps Environment available while an isolated draft worktree materializes", async () => {
   const app = await createAppFixture({
@@ -61,7 +62,7 @@ test("keeps Environment available while an isolated draft worktree materializes"
     await expect(workspaceTools.getByRole("tab", { name: /Files/u }))
       .toHaveCount(0);
     await expect(workspaceTools).toContainText(
-      "Files, changes, and Terminal will become available after this isolated worktree is created by the first message.",
+      "Files, changes, and Terminal become available after the first message creates this isolated worktree.",
     );
     await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
 
@@ -129,9 +130,9 @@ test("keeps Environment available while an isolated draft worktree materializes"
       name: "Environment",
     })).toHaveAttribute("aria-selected", "true");
     await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
-    const filesTab = workspaceTools.getByRole("tab", { name: /Files/u });
-    await expect(filesTab).toBeVisible();
-    await filesTab.click();
+    await expect(workspaceTools.getByLabel("Choose workspace tool"))
+      .toBeVisible();
+    await selectWorkspaceTool(workspaceTools, "Files");
     await expect(
       workspaceTools.getByRole("tree", { name: "Workspace files" }),
     ).toBeVisible();

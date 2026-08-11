@@ -1,73 +1,78 @@
-import { useId } from "react";
+import { useId, type MouseEvent } from "react";
 import {
-  Bot,
+  ChevronDown,
+  ChevronRight,
+  CloudUpload,
   ExternalLink,
-  Files,
-  FileText,
-  FolderOpen,
-  GitCompareArrows,
+  FileDiff,
+  Folder,
+  FolderGit2,
+  GitBranch,
+  GitFork,
   Globe2,
-  Image,
   Laptop,
-  ListChecks,
+  PanelLeft,
 } from "lucide-react";
 
-import { chatAttachmentKind } from "@shared/attachments";
+import type { HeaderGitAction } from "../utils/headerGitActions";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 
 interface EnvironmentPanelProps {
   summary: EnvironmentSummarySnapshot;
   workspaceToolsAvailable: boolean;
+  commitAction?: HeaderGitAction | null;
+  pushAction?: HeaderGitAction | null;
   onOpenChanges: () => void;
   onOpenFiles: () => void;
   onOpenPreview: () => void;
   onOpenProject: () => void;
   onRevealProject: () => void;
+  onRetryGit?: () => void;
+  onCommit?: () => void;
+  onPush?: () => void;
 }
 
-function subagentLabel(
-  trace: EnvironmentSummarySnapshot["subagents"][number],
-): string {
-  return trace.providerName
-    ?? trace.providerRole
-    ?? "Delegated agent";
+function activateWorkspaceTool(
+  event: MouseEvent<HTMLButtonElement>,
+  tab: "changes" | "files" | "preview",
+  activate: () => void,
+): void {
+  const keyboardActivated = event.detail === 0;
+  const panel = keyboardActivated
+    ? event.currentTarget.closest(".workspace-panel")
+    : null;
+  activate();
+  if (!keyboardActivated) return;
+  window.requestAnimationFrame(() => {
+    panel?.querySelector<HTMLButtonElement>(`[data-workspace-tab="${tab}"]`)
+      ?.focus();
+  });
+}
+
+function fileManagerLabel(): string {
+  const platform = window.inertia?.getPlatform?.();
+  if (platform === "darwin") return "Open in Finder";
+  if (platform === "win32") return "Open in Explorer";
+  return "Open in file manager";
 }
 
 export function EnvironmentPanel({
   summary,
   workspaceToolsAvailable,
+  commitAction = null,
+  pushAction = null,
   onOpenChanges,
   onOpenFiles,
   onOpenPreview,
   onOpenProject,
   onRevealProject,
+  onRetryGit,
+  onCommit,
+  onPush,
 }: EnvironmentPanelProps): React.JSX.Element {
   const panelId = useId();
-  const headingId = `${panelId}-heading`;
-  const changesHeadingId = `${panelId}-changes`;
-  const serversHeadingId = `${panelId}-servers`;
-  const activeWorkHeadingId = `${panelId}-active-work`;
-  const attachmentsHeadingId = `${panelId}-attachments`;
-  const changesTitle = summary.gitState === "loading"
-    ? "Checking working tree"
-    : summary.gitState === "error"
-      ? "Repository details unavailable"
-      : summary.changes
-        ? summary.changes.files === 0
-          ? "Working tree clean"
-          : `${summary.changes.files} changed ${summary.changes.files === 1 ? "file" : "files"}`
-        : "No Git repository";
-  const changesDetail = summary.gitState === "loading"
-    ? "Loading repository state…"
-    : summary.gitState === "error"
-      ? "Changes cannot be opened right now"
-      : summary.changes
-        ? summary.changes.files === 0
-          ? "Open Changes to review the repository"
-          : summary.changes.repositories > 1
-            ? `Review changes across ${summary.changes.repositories} repositories`
-            : "Open Changes to review the diff"
-        : "Changes are unavailable for this workspace";
+  const repositoryHeadingId = `${panelId}-repository`;
+  const editorHeadingId = `${panelId}-editor`;
   const runtimeAttention = summary.runtime.status === "online"
     ? null
     : summary.runtime.status === "connecting"
@@ -79,157 +84,197 @@ export function EnvironmentPanel({
         title: "Workspace runtime unavailable",
         detail: "Live environment details may be out of date.",
       };
-  const visibleRepository = summary.repository
-    && summary.repository.path !== summary.workspace?.path
-    ? summary.repository
-    : null;
-  const workspaceDisplay = summary.workspace?.label === "Project directory"
-    ? summary.workspace.path
-    : summary.workspace?.value;
+  const changesAvailable = Boolean(
+    workspaceToolsAvailable
+    && summary.gitState === "ready"
+    && summary.changes,
+  );
+  const branchLabel = summary.branch?.value
+    ?? (summary.gitState === "loading"
+      ? "Checking branch…"
+      : summary.gitState === "unavailable"
+        ? "No Git repository"
+        : "Branch unavailable");
+  const repositoryLabel = summary.repository?.name
+    ?? summary.projectName
+    ?? summary.workspace?.value
+    ?? "Repository unavailable";
+  const changeStateLabel = summary.gitState === "loading"
+    ? "Checking…"
+    : summary.gitState === "error"
+      ? "Unavailable"
+      : summary.gitState === "unavailable"
+        ? "Not a repository"
+        : null;
 
   return (
-    <section className="environment-panel" aria-labelledby={headingId}>
-      <header className="environment-panel-heading">
-        <div className="environment-panel-title">
-          <small>Environment</small>
-          <h2 id={headingId}>
-            {summary.projectName ?? summary.workspace?.value ?? "Workspace"}
-          </h2>
-        </div>
-
-        {(summary.workspace || summary.branch || visibleRepository) && (
-          <dl className="environment-context" aria-label="Workspace context">
-            {summary.workspace && (
-              <div>
-                <dt>{summary.workspace.label}</dt>
-                <dd title={summary.workspace.path}>{workspaceDisplay}</dd>
-              </div>
-            )}
-            {summary.branch && (
-              <div>
-                <dt>{summary.branch.label}</dt>
-                <dd title={summary.branch.value}>{summary.branch.value}</dd>
-              </div>
-            )}
-            {visibleRepository && (
-              <div>
-                <dt>Repository</dt>
-                <dd title={visibleRepository.path}>{visibleRepository.name}</dd>
-              </div>
-            )}
-          </dl>
-        )}
-
-        <div className="environment-panel-actions" aria-label="Environment actions">
-          <button type="button" onClick={onOpenProject} disabled={!summary.workspace}>
-            <FolderOpen size={14} aria-hidden="true" /><span>Open project</span>
-          </button>
-          <button type="button" onClick={onRevealProject} disabled={!summary.workspace}>
-            <ExternalLink size={14} aria-hidden="true" /><span>Reveal</span>
-          </button>
-          <button type="button" onClick={onOpenFiles} disabled={!workspaceToolsAvailable}>
-            <Files size={14} aria-hidden="true" /><span>Browse files</span>
-          </button>
-        </div>
-      </header>
-
-      <div className="environment-panel-body">
+    <section className="environment-panel" aria-label="Environment details">
+      <div className="environment-panel-scroll">
         {runtimeAttention && (
           <div
             className={`environment-runtime-attention is-${summary.runtime.status}`}
             role="status"
             aria-live="polite"
           >
-            <Laptop size={15} aria-hidden="true" />
+            <Laptop size={14} aria-hidden="true" />
             <span><strong>{runtimeAttention.title}</strong><small>{runtimeAttention.detail}</small></span>
           </div>
         )}
 
-        <section className="environment-panel-section" aria-labelledby={changesHeadingId}>
-          <h3 id={changesHeadingId}>Working tree</h3>
+        <div className="environment-primary-list">
           <button
             type="button"
-            className="environment-fact"
-            onClick={onOpenChanges}
-            disabled={!workspaceToolsAvailable || summary.gitState !== "ready" || !summary.changes}
+            className="environment-row"
+            onClick={(event) => activateWorkspaceTool(event, "changes", onOpenChanges)}
+            disabled={!changesAvailable}
           >
-            <GitCompareArrows size={16} aria-hidden="true" />
-            <span>
-              <strong>{changesTitle}</strong>
-              <small aria-live="polite">{changesDetail}</small>
-            </span>
-            {summary.gitState === "ready" && summary.changes && summary.changes.files > 0 && (
+            <FileDiff size={14} aria-hidden="true" />
+            <span>Changes</span>
+            {summary.gitState === "ready" && summary.changes ? (
               <span
                 className="environment-change-stats"
                 aria-label={`${summary.changes.insertions} insertions and ${summary.changes.deletions} deletions`}
               >
                 <b>+{summary.changes.insertions}</b><i>−{summary.changes.deletions}</i>
               </span>
+            ) : (
+              <small>{changeStateLabel}</small>
             )}
           </button>
-          {summary.gitNotice && (
-            <p className="environment-panel-notice" role="status">Some repository details are unavailable: {summary.gitNotice}</p>
-          )}
+
+          <div className="environment-row">
+            <GitFork size={14} aria-hidden="true" />
+            <span>{summary.workspace?.label ?? "Worktree"}</span>
+          </div>
+
+          <details className="environment-disclosure">
+            <summary>
+              <GitBranch size={14} aria-hidden="true" />
+              <span title={branchLabel}>{branchLabel}</span>
+              <ChevronDown className="environment-disclosure-chevron" size={13} aria-hidden="true" />
+            </summary>
+            <div className="environment-disclosure-content">
+              <small>{summary.workspace?.label ?? "Workspace"}</small>
+              <code title={summary.workspace?.path}>{summary.workspace?.path ?? "Unavailable"}</code>
+            </div>
+          </details>
+
+          <details className="environment-disclosure">
+            <summary>
+              <CloudUpload size={14} aria-hidden="true" />
+              <span>Commit and Push</span>
+              <ChevronDown className="environment-disclosure-chevron" size={13} aria-hidden="true" />
+            </summary>
+            <div className="environment-disclosure-actions">
+              <button
+                type="button"
+                onClick={(event) => activateWorkspaceTool(event, "changes", onOpenChanges)}
+                disabled={!workspaceToolsAvailable}
+              >
+                <span>Review changes</span><ChevronRight size={12} aria-hidden="true" />
+              </button>
+              {onCommit && commitAction && (
+                <button
+                  type="button"
+                  onClick={onCommit}
+                  disabled={commitAction.disabled}
+                  title={commitAction.detail}
+                >
+                  <span>{commitAction.label}</span><ChevronRight size={12} aria-hidden="true" />
+                </button>
+              )}
+              {onPush && pushAction && (
+                <button
+                  type="button"
+                  onClick={onPush}
+                  disabled={pushAction.disabled}
+                  title={pushAction.detail}
+                >
+                  <span>{pushAction.label}</span><ChevronRight size={12} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          </details>
+
+          <details className="environment-disclosure">
+            <summary>
+              <Globe2 size={14} aria-hidden="true" />
+              <span>Local Servers</span>
+              <small>{summary.localServers.length}</small>
+              <ChevronDown className="environment-disclosure-chevron" size={13} aria-hidden="true" />
+            </summary>
+            <div className="environment-disclosure-content is-servers">
+              {summary.localServers.length === 0 ? (
+                <p>No local servers detected.</p>
+              ) : summary.localServers.map((server) => (
+                <button
+                  type="button"
+                  onClick={(event) => activateWorkspaceTool(event, "preview", onOpenPreview)}
+                  key={server.url}
+                >
+                  <span title={server.url}>{server.url}</span>
+                  <ExternalLink size={12} aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          </details>
+        </div>
+
+        {summary.gitNotice && (
+          <div className="environment-panel-notice" role="status">
+            <span>{summary.gitNotice}</span>
+            {onRetryGit && (
+              <button type="button" onClick={onRetryGit}>Retry</button>
+            )}
+          </div>
+        )}
+
+        <section className="environment-panel-section" aria-labelledby={repositoryHeadingId}>
+          <h3 id={repositoryHeadingId}>Repository</h3>
+          <button
+            type="button"
+            className="environment-row"
+            onClick={onOpenProject}
+            disabled={!summary.workspace}
+            title={summary.repository?.path ?? summary.workspace?.path}
+            aria-label={`Open repository ${repositoryLabel} externally`}
+          >
+            <FolderGit2 size={14} aria-hidden="true" />
+            <span>{repositoryLabel}</span>
+            <ExternalLink size={12} aria-hidden="true" />
+          </button>
         </section>
 
-        {summary.localServers.length > 0 && (
-          <section className="environment-panel-section" aria-labelledby={serversHeadingId}>
-            <h3 id={serversHeadingId}>Local servers</h3>
-            {summary.localServers.map((server) => (
-              <button type="button" className="environment-link-row" onClick={onOpenPreview} key={server.url}>
-                <Globe2 size={15} aria-hidden="true" />
-                <span><strong>{server.url}</strong><small>Open in Preview</small></span>
-                <ExternalLink size={13} aria-hidden="true" />
-              </button>
-            ))}
-          </section>
-        )}
-
-        {(summary.checks.length > 0 || summary.subagents.length > 0) && (
-          <section className="environment-panel-section" aria-labelledby={activeWorkHeadingId}>
-            <h3 id={activeWorkHeadingId}>Active work</h3>
-            <ul className="environment-compact-list">
-              {summary.checks.map((check) => (
-                <li key={check.id}>
-                  <ListChecks size={14} aria-hidden="true" />
-                  <span>{check.label}</span>
-                  <small>{check.status === "waiting" ? "Waiting" : check.status === "failed" ? "Needs attention" : "Running"}</small>
-                </li>
-              ))}
-              {summary.subagents.map((trace) => (
-                <li key={trace.id}>
-                  <Bot size={14} aria-hidden="true" />
-                  <span>{subagentLabel(trace)}</span>
-                  <small>{trace.status[0].toUpperCase() + trace.status.slice(1)}</small>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {summary.attachments.length > 0 && (
-          <section className="environment-panel-section" aria-labelledby={attachmentsHeadingId}>
-            <h3 id={attachmentsHeadingId}>Recent attachments</h3>
-            <ul className="environment-compact-list">
-              {summary.attachments.map((attachment) => {
-                const image = chatAttachmentKind(attachment.mimeType) === "image";
-                return (
-                  <li key={attachment.id}>
-                    {image ? <Image size={14} aria-hidden="true" /> : <FileText size={14} aria-hidden="true" />}
-                    <span title={attachment.name}>{attachment.name}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
+        <section className="environment-panel-section" aria-labelledby={editorHeadingId}>
+          <h3 id={editorHeadingId}>Editor</h3>
+          <button
+            type="button"
+            className="environment-row"
+            onClick={(event) => activateWorkspaceTool(event, "files", onOpenFiles)}
+            disabled={!workspaceToolsAvailable}
+          >
+            <PanelLeft size={14} aria-hidden="true" />
+            <span>Editor view</span>
+          </button>
+          <button
+            type="button"
+            className="environment-row"
+            onClick={onRevealProject}
+            disabled={!summary.workspace}
+          >
+            <Folder size={14} aria-hidden="true" />
+            <span>{fileManagerLabel()}</span>
+            <ChevronRight size={12} aria-hidden="true" />
+          </button>
+        </section>
 
         {!workspaceToolsAvailable && (
-          <p className="environment-panel-notice" role="status">
-            Files, changes, and Terminal will become available after this isolated worktree is created by the first message.
-          </p>
+          <div className="environment-panel-notice" role="status">
+            <span>
+              Files, changes, and Terminal become available after the first message creates this isolated worktree.
+            </span>
+          </div>
         )}
-
       </div>
     </section>
   );

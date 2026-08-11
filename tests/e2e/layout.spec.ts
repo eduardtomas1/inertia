@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -44,11 +45,18 @@ test("opens Environment by default with reachable responsive geometry", async ({
       const environmentPanel = page.getByRole("tabpanel", { name: "Environment" });
       await expect(environmentTab).toHaveAttribute("aria-selected", "true");
       await expect(environmentPanel).toBeVisible();
-      await expect(environmentPanel.getByRole("heading", { name: "Inertia" })).toBeVisible();
-      await expect(environmentPanel.getByText(/changed file/u)).toBeVisible();
+      await expect(environmentPanel.getByRole("button", { name: /Changes/u })).toBeVisible();
+      await expect(environmentPanel.locator(
+        ".environment-primary-list > .environment-row",
+      ).filter({ hasText: "Worktree" })).toBeVisible();
+      await expect(environmentPanel.getByText("Commit and Push", { exact: true })).toBeVisible();
+      await expect(environmentPanel.getByText("Local Servers", { exact: true })).toBeVisible();
+      await expect(environmentPanel.getByRole("heading", { name: "Repository" })).toBeVisible();
+      await expect(environmentPanel.getByRole("heading", { name: "Editor" })).toBeVisible();
       await expect(environmentPanel.getByText("Ready", { exact: true })).toHaveCount(0);
+      await expect(environmentPanel.getByText("Usage", { exact: true })).toHaveCount(0);
+      await expect(environmentPanel.getByText("Recap", { exact: true })).toHaveCount(0);
       await expect(environmentPanel.getByRole("heading", { name: "Recent attachments" })).toHaveCount(0);
-      await expect(environmentPanel.getByRole("heading", { name: "Local servers" })).toHaveCount(0);
       await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
       await expectNoViewportOverflow();
 
@@ -70,6 +78,8 @@ test("opens Environment by default with reachable responsive geometry", async ({
         expect(geometry.environment.bottom).toBeLessThanOrEqual(geometry.frame.bottom + 1);
         if (size.width > 1024) {
           expect(geometry.chat.right).toBeLessThanOrEqual(geometry.environment.left + 1);
+          expect(geometry.environment.right - geometry.environment.left)
+            .toBeCloseTo(320, 0);
         } else {
           expect(geometry.chat.bottom).toBeLessThanOrEqual(geometry.environment.top + 1);
         }
@@ -82,6 +92,93 @@ test("opens Environment by default with reachable responsive geometry", async ({
         path: screenshotPath,
         contentType: "image/png",
       });
+
+      if (size.label === "wide") {
+        const panelBounds = await page.locator(".workspace-panel").boundingBox();
+        expect(panelBounds).not.toBeNull();
+        if (panelBounds) {
+          const comparisonLabel = `environment-codex-match-${theme}`;
+          const comparisonPath = testInfo.outputPath(`${comparisonLabel}.png`);
+          await page.screenshot({
+            animations: "disabled",
+            clip: {
+              x: panelBounds.x,
+              y: panelBounds.y,
+              width: panelBounds.width,
+              height: Math.min(634, panelBounds.height),
+            },
+            path: comparisonPath,
+          });
+          await testInfo.attach(comparisonLabel, {
+            path: comparisonPath,
+            contentType: "image/png",
+          });
+        }
+
+        if (theme === "dark") {
+          const changes = environmentPanel.getByRole("button", { name: /Changes/u });
+          const branchDisclosure = environmentPanel.locator("summary")
+            .filter({ hasText: "main" });
+          const commitDisclosure = environmentPanel.locator("summary")
+            .filter({ hasText: "Commit and Push" });
+          const serverDisclosure = environmentPanel.locator("summary")
+            .filter({ hasText: "Local Servers" });
+          const repository = environmentPanel.getByRole("button", {
+            name: /Open repository Inertia externally/u,
+          });
+          await changes.focus();
+          await page.keyboard.press("Tab");
+          await expect(branchDisclosure).toBeFocused();
+          await page.keyboard.press("Tab");
+          await expect(commitDisclosure).toBeFocused();
+          await page.keyboard.press("Tab");
+          await expect(serverDisclosure).toBeFocused();
+          await page.keyboard.press("Tab");
+          await expect(repository).toBeFocused();
+        }
+
+        for (const label of ["main", "Commit and Push", "Local Servers"]) {
+          await environmentPanel.getByText(label, { exact: true }).click();
+        }
+        await expect(environmentPanel.locator("code")).toContainText("/");
+        await expect(environmentPanel.getByRole("button", {
+          name: "Review changes",
+        })).toBeVisible();
+        await expect(environmentPanel.getByText("No local servers detected."))
+          .toBeVisible();
+        const expandedLabel = `environment-expanded-${theme}`;
+        const expandedPath = testInfo.outputPath(`${expandedLabel}.png`);
+        const expandedBounds = await page.locator(".workspace-panel").boundingBox();
+        expect(expandedBounds).not.toBeNull();
+        if (expandedBounds) {
+          await page.mouse.move(1, 1);
+          await page.screenshot({
+            animations: "disabled",
+            clip: {
+              x: expandedBounds.x,
+              y: expandedBounds.y,
+              width: expandedBounds.width,
+              height: Math.min(634, expandedBounds.height),
+            },
+            path: expandedPath,
+          });
+          await testInfo.attach(expandedLabel, {
+            path: expandedPath,
+            contentType: "image/png",
+          });
+        }
+        for (const label of ["main", "Commit and Push", "Local Servers"]) {
+          await environmentPanel.getByText(label, { exact: true }).click();
+        }
+
+        if (theme === "dark") {
+          const changes = environmentPanel.getByRole("button", { name: /Changes/u });
+          await changes.focus();
+          await changes.press("Enter");
+          await expect(page.getByRole("tab", { name: /Changes/u })).toBeFocused();
+          await selectWorkspaceTool(page.locator(".workspace-panel"), "Environment");
+        }
+      }
     }
   }
   if (!/current: dark/u.test(await themeButton.getAttribute("aria-label") ?? "")) {
@@ -95,7 +192,7 @@ test("opens Environment by default with reachable responsive geometry", async ({
 test("resizes and persists the internal workspace panes", async () => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
-  await page.getByRole("tab", { name: "Terminal", exact: true }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
 
   const sidebarHandle = page.getByRole("separator", { name: "Resize project navigation" });
   const sidebarBefore = Number(await sidebarHandle.getAttribute("aria-valuenow"));

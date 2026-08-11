@@ -7,6 +7,7 @@ import {
   type AppFixture,
   type RuntimeTestSnapshot,
 } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 interface ReaderAnchor {
   id: string;
@@ -164,7 +165,7 @@ test("never replaces mounted chats during a supervised runtime restart", async (
   const primaryTools = primary.getByRole("complementary", {
     name: "Workspace tools",
   });
-  await primaryTools.getByRole("tab", { name: "Files", exact: true }).click();
+  await selectWorkspaceTool(primaryTools, "Files");
   const sourceDirectory = primaryTools.getByRole("treeitem", {
     name: "src",
     exact: true,

@@ -15,6 +15,7 @@ import {
   type RuntimeTestSnapshot,
 } from "./support/app-fixture";
 import { seedViewedConversationContext } from "./support/viewed-conversation-context";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -112,7 +113,7 @@ test("starts without a demo and adds the first real project", async () => {
   };
   expect(conversationCount()).toBe(0);
 
-  await page.getByRole("tab", { name: "Terminal", exact: true }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   expect(conversationCount()).toBe(0);
   await page.locator(".workspace-panel")
@@ -124,7 +125,7 @@ test("starts without a demo and adds the first real project", async () => {
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
   await page.getByRole("button", { name: "Open Environment" }).click();
   await expect(page.getByRole("tab", { name: "Environment" })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("tab", { name: "Terminal", exact: true }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   const database = new Database(databasePath);
   const firstConversation = database.prepare(`
@@ -728,9 +729,10 @@ test("keeps the window alive and reconnects with a rotated capability after a ru
   if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
     await page.getByRole("button", { name: "Open workspace tools" }).click();
   }
-  await page.getByRole("complementary", { name: "Workspace tools" })
-    .getByRole("tab", { name: "Terminal", exact: true })
-    .click();
+  await selectWorkspaceTool(
+    page.getByRole("complementary", { name: "Workspace tools" }),
+    "Terminal",
+  );
   const terminal = page.locator("aside.terminal-panel").first();
   await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
   const beforeTerminalId = await terminal.getAttribute("data-terminal-id");

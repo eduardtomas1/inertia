@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const prefetchWorkspaceTool = vi.hoisted(() => vi.fn());
 
@@ -10,6 +10,47 @@ vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
 import { WorkspacePanel } from "../../src/renderer/src/components/WorkspacePanel";
 
 describe("workspace tool intent prefetch", () => {
+  beforeEach(() => {
+    prefetchWorkspaceTool.mockClear();
+  });
+
+  it("keeps Environment primary while exposing settings and the other tools", () => {
+    const onTabChange = vi.fn();
+    const onOpenSettings = vi.fn();
+    render(
+      <WorkspacePanel
+        activeTab="environment"
+        onTabChange={onTabChange}
+        onOpenSettings={onOpenSettings}
+        tabs={["environment", "changes", "terminal"]}
+      >
+        <span>Environment panel</span>
+      </WorkspacePanel>,
+    );
+
+    expect(screen.getByRole("tab", { name: "Environment" }))
+      .toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Environment settings" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+
+    const chooser = screen.getByLabelText("Choose workspace tool");
+    const disclosure = chooser.closest("details")!;
+    fireEvent.click(chooser);
+    expect(disclosure).toHaveAttribute("open");
+    const terminal = screen.getByRole("button", { name: "Terminal" });
+    fireEvent.pointerEnter(terminal);
+    fireEvent.focus(terminal);
+    expect(prefetchWorkspaceTool).toHaveBeenCalledWith("terminal");
+    fireEvent.click(terminal);
+    expect(onTabChange).toHaveBeenCalledWith("terminal");
+    expect(disclosure).not.toHaveAttribute("open");
+
+    fireEvent.click(chooser);
+    expect(disclosure).toHaveAttribute("open");
+    fireEvent.blur(disclosure, { relatedTarget: document.body });
+    expect(disclosure).not.toHaveAttribute("open");
+  });
+
   it("starts the local chunk before activating a tab", () => {
     render(
       <WorkspacePanel activeTab="changes" onTabChange={() => undefined}>

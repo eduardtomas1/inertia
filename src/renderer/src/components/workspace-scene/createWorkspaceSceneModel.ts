@@ -32,6 +32,7 @@ import type { useDesktopTools } from "../../hooks/useDesktopTools";
 import type { useInertiaConnection } from "../../hooks/useInertiaConnection";
 import type { useProviderMaintenance } from "../../hooks/useProviderMaintenance";
 import {
+  ENVIRONMENT_TOOLS_DEFAULT_WIDTH,
   TOOLS_MIN_HEIGHT,
   TOOLS_MIN_WIDTH,
   type useWorkspaceLayout,
@@ -45,6 +46,8 @@ import {
   isLiveSubagentTrace,
 } from "../../utils/subagentDisclosure";
 import { buildEnvironmentSummary } from "../../utils/environmentSummary";
+import { headerGitActions } from "../../utils/headerGitActions";
+import { rootGitMutationScope } from "../../utils/workspaceGit";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
 import type {
   TranscriptMessageSendAcceptance,
@@ -151,6 +154,8 @@ export interface WorkspaceSceneActions {
   connectProvider: (providerId: ProviderId) => void;
   openProviderSetup: (providerId: ProviderId) => void;
   openBackendSetup: (profileId: string) => void;
+  openSettings: () => void;
+  openCommitDialog?: () => void;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => void;
@@ -311,6 +316,17 @@ export function createWorkspaceSceneModel({
     gitLoading: workspaceTools.gitLoading,
     gitError: workspaceTools.gitError,
   });
+  const environmentGitActions = headerGitActions(
+    workspaceTools.gitStatus,
+    Boolean(busyAction?.startsWith("git.")),
+  );
+  const environmentCommitAction = environmentGitActions.find(
+    ({ id }) => id === "commit",
+  ) ?? null;
+  const environmentPushAction = environmentGitActions.find(
+    ({ id }) => id === "push",
+  ) ?? null;
+  const rootGitScope = rootGitMutationScope(workspaceTools.gitStatus);
   const canUpdatePlan = Boolean(
     conversation
     && conversation.status !== "running"
@@ -552,7 +568,11 @@ export function createWorkspaceSceneModel({
       value: stackedTools ? toolsLayout.height : toolsLayout.width,
       min: stackedTools ? TOOLS_MIN_HEIGHT : TOOLS_MIN_WIDTH,
       max: stackedTools ? toolsLayout.maxHeight : toolsLayout.maxWidth,
-      defaultValue: stackedTools ? 320 : 520,
+      defaultValue: stackedTools
+        ? 320
+        : effectiveActiveTool === "environment"
+          ? ENVIRONMENT_TOOLS_DEFAULT_WIDTH
+          : 520,
       onChange: stackedTools
         ? toolsLayout.onHeightChange
         : toolsLayout.onWidthChange,
@@ -579,10 +599,13 @@ export function createWorkspaceSceneModel({
           plan: planSteps.length,
         },
         onClose: () => setActiveTool(null),
+        onOpenSettings: actions.openSettings,
       },
       environment: {
         summary: environmentSummary,
         workspaceToolsAvailable: !workspaceToolsUnavailable,
+        commitAction: environmentCommitAction,
+        pushAction: environmentPushAction,
         onOpenChanges: () => setActiveTool("changes"),
         onOpenFiles: () => setActiveTool("files"),
         onOpenPreview: () => setActiveTool("preview"),
@@ -598,6 +621,35 @@ export function createWorkspaceSceneModel({
           relativePath: ".",
           action: "reveal",
         }),
+        onRetryGit: () => {
+          void workspaceTools.loadGit({ authoritative: true })
+            .catch((error) => setActionError(
+              error instanceof Error
+                ? error.message
+                : "Git changes could not be loaded.",
+            ));
+        },
+        ...(actions.openCommitDialog
+          ? { onCommit: actions.openCommitDialog }
+          : {}),
+        ...(rootGitScope
+          ? {
+            onPush: () => {
+              void actions.run("git.push", {
+                type: "git.push",
+                payload: {
+                  projectId: project.id,
+                  ...runtimeConversation,
+                  ...rootGitScope,
+                },
+              }).catch((error) => setActionError(
+                error instanceof Error
+                  ? error.message
+                  : "The branch could not be pushed.",
+              ));
+            },
+          }
+          : {}),
       },
       historicalDiff: workspaceTools.historicalDiff ? {
         diff: workspaceTools.historicalDiff,

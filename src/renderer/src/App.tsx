@@ -815,6 +815,8 @@ export default function App(): React.JSX.Element {
       connectProvider,
       openProviderSetup,
       openBackendSetup,
+      openSettings: () => navigateToView("settings"),
+      openCommitDialog: () => setCommitDialogOpen(true),
       openProjectPath,
       followUpSubagent: (trace: SubagentTrace) => {
         if (!conversation || !canFollowUpSubagentTrace(
@@ -917,6 +919,7 @@ export default function App(): React.JSX.Element {
       connectProvider,
       openProviderSetup,
       openBackendSetup,
+      openSettings: () => navigateToView("settings"),
       openProjectPath,
       sendMessageToConversation,
       updateConversationById,

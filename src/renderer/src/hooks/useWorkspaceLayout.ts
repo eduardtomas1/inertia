@@ -23,6 +23,7 @@ const CHAT_MIN_WIDTH = 340;
 const CHAT_MIN_HEIGHT = 320;
 export const TOOLS_MIN_WIDTH = 300;
 const TOOLS_MAX_WIDTH = 960;
+export const ENVIRONMENT_TOOLS_DEFAULT_WIDTH = 320;
 export const TOOLS_MIN_HEIGHT = 180;
 const TOOLS_MAX_HEIGHT = 720;
 
@@ -107,6 +108,11 @@ export function useWorkspaceLayout(
     520,
     { min: TOOLS_MIN_WIDTH, max: TOOLS_MAX_WIDTH },
   );
+  const [persistedEnvironmentWidth, setPersistedEnvironmentWidth] = usePersistedSize(
+    "inertia:layout:environment-width:v1",
+    ENVIRONMENT_TOOLS_DEFAULT_WIDTH,
+    { min: TOOLS_MIN_WIDTH, max: TOOLS_MAX_WIDTH },
+  );
   const [persistedToolsHeight, setPersistedToolsHeight] = usePersistedSize(
     "inertia:layout:workspace-tools-height:v1",
     320,
@@ -114,6 +120,9 @@ export function useWorkspaceLayout(
   );
   const [sidebarWidth, setSidebarWidth] = useState(persistedSidebarWidth);
   const [toolsWidth, setToolsWidth] = useState(persistedToolsWidth);
+  const [environmentWidth, setEnvironmentWidth] = useState(
+    persistedEnvironmentWidth,
+  );
   const [toolsHeight, setToolsHeight] = useState(persistedToolsHeight);
   const [shellWidth, setShellWidth] = useState(() => window.innerWidth);
   const [workspaceBodySize, setWorkspaceBodySize] = useState(() => ({
@@ -133,6 +142,10 @@ export function useWorkspaceLayout(
     [persistedSidebarWidth],
   );
   useEffect(() => setToolsWidth(persistedToolsWidth), [persistedToolsWidth]);
+  useEffect(
+    () => setEnvironmentWidth(persistedEnvironmentWidth),
+    [persistedEnvironmentWidth],
+  );
   useEffect(
     () => setToolsHeight(persistedToolsHeight),
     [persistedToolsHeight],
@@ -236,8 +249,9 @@ export function useWorkspaceLayout(
   const effectiveSidebarWidth = !mobileNavigation && sidebarCollapsed
     ? 0
     : clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, sidebarDynamicMax);
+  const environmentActive = activeToolState === "environment";
   const effectiveToolsWidth = clamp(
-    toolsWidth,
+    environmentActive ? environmentWidth : toolsWidth,
     TOOLS_MIN_WIDTH,
     toolsDynamicMaxWidth,
   );
@@ -279,9 +293,11 @@ export function useWorkspaceLayout(
       height: effectiveToolsHeight,
       maxWidth: toolsDynamicMaxWidth,
       maxHeight: toolsDynamicMaxHeight,
-      onWidthChange: setToolsWidth,
       onHeightChange: setToolsHeight,
-      onWidthCommit: setPersistedToolsWidth,
+      onWidthChange: environmentActive ? setEnvironmentWidth : setToolsWidth,
+      onWidthCommit: environmentActive
+        ? setPersistedEnvironmentWidth
+        : setPersistedToolsWidth,
       onHeightCommit: setPersistedToolsHeight,
     },
   }), [
@@ -289,8 +305,10 @@ export function useWorkspaceLayout(
     effectiveSidebarWidth,
     effectiveToolsHeight,
     effectiveToolsWidth,
+    environmentActive,
     mobileNavigation,
     setPersistedSidebarWidth,
+    setPersistedEnvironmentWidth,
     setPersistedToolsHeight,
     setPersistedToolsWidth,
     sidebarCollapsed,

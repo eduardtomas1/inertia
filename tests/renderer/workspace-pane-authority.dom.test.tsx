@@ -1325,7 +1325,9 @@ describe("workspace pane authority", () => {
     expect(setActionError).toHaveBeenCalledWith("Workspace scan timed out.");
 
     fail = false;
-    hook.rerender({ refreshVersion: 1 });
+    await act(async () => {
+      await hook.result.current.loadGit({ authoritative: true });
+    });
     await waitFor(() => {
       expect(hook.result.current.loading).toBe(false);
       expect(hook.result.current.loadError).toBeNull();
@@ -1391,6 +1393,57 @@ describe("workspace pane authority", () => {
     expect(deferred.request.mock.calls.filter(
       ([command]) => command.type === "git.workspace.refresh",
     )).toHaveLength(2);
+  });
+
+  it("stays loading while an invalidation queues a trailing workspace scan", async () => {
+    const deferred = deferredWorkspaceGitRequests();
+    let publishEvent: ((event: ServerEvent) => void) | null = null;
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: true,
+      loadStatusOnMount: true,
+      loadWorkspaceOnMount: true,
+      project: alpha,
+      conversation: alphaChat,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request: deferred.request,
+      run: async (_key, command) => await deferred.request(command),
+      subscribe: (listener) => {
+        publishEvent = listener;
+        return () => undefined;
+      },
+      setActionError,
+    }));
+
+    await waitFor(() => {
+      expect(deferred.request.mock.calls.filter(
+        ([command]) => command.type === "git.workspace.refresh",
+      )).toHaveLength(1);
+    });
+    act(() => publishEvent?.({
+      type: "workspace.git.invalidated",
+      requestId: "55555555-5555-4555-8555-555555555555",
+      projectId: alpha.id,
+      conversationId: alphaChat.id,
+    }));
+
+    act(() => deferred.settle(0, "/stale"));
+    await waitFor(() => {
+      expect(deferred.request.mock.calls.filter(
+        ([command]) => command.type === "git.workspace.refresh",
+      )).toHaveLength(2);
+    });
+    expect(hook.result.current.loading).toBe(true);
+    expect(hook.result.current.gitStatus).toBeNull();
+
+    act(() => deferred.settle(1, "/fresh"));
+    await waitFor(() => {
+      expect(hook.result.current.loading).toBe(false);
+      expect(hook.result.current.gitStatus?.root).toBe("/fresh");
+      expect(hook.result.current.workspaceGitStatus?.scannedDirectories).toBe(2);
+    });
   });
 
   it("retains a completed reversal under its initiating pane authority", async () => {
@@ -1783,7 +1836,17 @@ describe("workspace pane authority", () => {
     act(() => publishPreviewState?.({
       ownerId: "primary",
       contextId: alphaChat.id,
-      url: "https://example.com/docs",
+      url: "http://localhost:4173/docs",
+      loading: false,
+      canGoBack: true,
+      canGoForward: false,
+    }));
+    expect(hook.result.current.readyPreviewUrl).toBe("http://localhost:4173/docs");
+
+    act(() => publishPreviewState?.({
+      ownerId: "primary",
+      contextId: alphaChat.id,
+      url: "http://localhost:5173/docs",
       loading: false,
       canGoBack: true,
       canGoForward: false,

@@ -220,20 +220,27 @@ export function buildEnvironmentSummary({
     : [];
 
   const changes = changesSummary(gitStatus, workspaceGitStatus);
+  const workspaceScanIncomplete = Boolean(
+    workspaceGitStatus?.partial || workspaceGitStatus?.truncated,
+  );
   const gitNotice = gitError
     ?? workspaceGitStatus?.issues[0]?.message
     ?? workspaceGitStatus?.repositories.find(({ state }) =>
       state === "error")?.error
+    ?? (workspaceScanIncomplete
+      ? "The repository scan did not inspect every directory."
+      : null)
     ?? null;
   const gitFailed = Boolean(
-    workspaceGitStatus?.issues.length
+    workspaceScanIncomplete
+    || workspaceGitStatus?.issues.length
     || workspaceGitStatus?.repositories.some(({ state }) => state === "error"),
   );
   const workspacePath = worktreePath ?? projectPath;
   return {
     projectName,
     workspace: workspacePath ? {
-      label: worktreePath ? "Worktree" : "Project directory",
+      label: worktreePath || changes ? "Worktree" : "Project directory",
       value: pathName(workspacePath),
       path: workspacePath,
     } : null,

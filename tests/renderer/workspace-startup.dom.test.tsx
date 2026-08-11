@@ -30,9 +30,29 @@ function LayoutHarness({ surface, forceStackedTools = false }: {
     <>
       <output aria-label="Active tool">{layout.activeTool ?? "none"}</output>
       <output aria-label="Stacked tools">{String(layout.stackedTools)}</output>
+      <output aria-label="Tool width">{layout.tools.width}</output>
       <button type="button" onClick={layout.toggleWorkspaceTools}>Toggle tools</button>
       <button type="button" onClick={() => layout.showStartupSurface("summary")}>Prefer summary</button>
       <button type="button" onClick={() => layout.showStartupSurface("tools")}>Prefer tools</button>
+      <button type="button" onClick={() => layout.setActiveTool("changes")}>Show changes</button>
+      <button
+        type="button"
+        onClick={() => {
+          layout.tools.onWidthChange(360);
+          layout.tools.onWidthCommit(360);
+        }}
+      >
+        Resize to 360
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          layout.tools.onWidthChange(610);
+          layout.tools.onWidthCommit(610);
+        }}
+      >
+        Resize to 610
+      </button>
     </>
   );
 }
@@ -54,6 +74,10 @@ describe("workspace startup surface", () => {
       } satisfies Storage,
     });
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1600,
+    });
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
       media: "",
@@ -87,5 +111,26 @@ describe("workspace startup surface", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("Active tool")).toHaveTextContent("changes"));
     expect(screen.getByLabelText("Stacked tools")).toHaveTextContent("true");
+  });
+
+  it("keeps Environment narrow without overwriting the other tool width", async () => {
+    render(<LayoutHarness surface="summary" />);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Active tool")).toHaveTextContent("environment"));
+    expect(screen.getByLabelText("Tool width")).toHaveTextContent("320");
+
+    fireEvent.click(screen.getByRole("button", { name: "Resize to 360" }));
+    expect(screen.getByLabelText("Tool width")).toHaveTextContent("360");
+    expect(window.localStorage.getItem("inertia:layout:environment-width:v1"))
+      .toBe("360");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    expect(screen.getByLabelText("Tool width")).toHaveTextContent("520");
+    fireEvent.click(screen.getByRole("button", { name: "Resize to 610" }));
+    expect(window.localStorage.getItem("inertia:layout:workspace-tools-width:v1"))
+      .toBe("610");
+
+    fireEvent.click(screen.getByRole("button", { name: "Prefer summary" }));
+    expect(screen.getByLabelText("Tool width")).toHaveTextContent("360");
   });
 });

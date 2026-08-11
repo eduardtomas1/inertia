@@ -82,6 +82,7 @@ interface SplitWorkspaceActions
     | "connectProvider"
     | "openProviderSetup"
     | "openBackendSetup"
+    | "openSettings"
     | "openProjectPath"
   > {
   sendMessageToConversation: (

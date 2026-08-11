@@ -1,9 +1,17 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
 import { EnvironmentPanel } from "../../src/renderer/src/components/EnvironmentPanel";
+import { WorkspacePanel } from "../../src/renderer/src/components/WorkspacePanel";
 import type { Project } from "../../src/shared/contracts";
 import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
 
@@ -107,6 +115,35 @@ function HeaderHarness({
   );
 }
 
+function EnvironmentFocusHarness(): React.JSX.Element {
+  const [activeTab, setActiveTab] = useState<"environment" | "changes" | "files" | "preview">(
+    "environment",
+  );
+  return (
+    <WorkspacePanel
+      activeTab={activeTab}
+      onTabChange={(tab) => {
+        if (tab === "environment" || tab === "changes" || tab === "files" || tab === "preview") {
+          setActiveTab(tab);
+        }
+      }}
+      tabs={["environment", "changes", "files", "preview"]}
+    >
+      {activeTab === "environment" ? (
+        <EnvironmentPanel
+          summary={summary}
+          workspaceToolsAvailable
+          onOpenChanges={() => setActiveTab("changes")}
+          onOpenFiles={() => setActiveTab("files")}
+          onOpenPreview={() => setActiveTab("preview")}
+          onOpenProject={vi.fn()}
+          onRevealProject={vi.fn()}
+        />
+      ) : <p>{activeTab}</p>}
+    </WorkspacePanel>
+  );
+}
+
 describe("Environment panel", () => {
   beforeEach(() => {
     vi.stubGlobal("matchMedia", () => ({
@@ -128,31 +165,57 @@ describe("Environment panel", () => {
       onOpenPreview: vi.fn(),
       onOpenProject: vi.fn(),
       onRevealProject: vi.fn(),
+      onRetryGit: vi.fn(),
+      onCommit: vi.fn(),
+      onPush: vi.fn(),
     };
-    render(<EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />);
+    render(
+      <EnvironmentPanel
+        summary={summary}
+        workspaceToolsAvailable
+        commitAction={{
+          id: "commit",
+          label: "Commit",
+          detail: "Commit two changed files.",
+          disabled: false,
+        }}
+        pushAction={{
+          id: "push",
+          label: "Push 1",
+          detail: "Push one commit.",
+          disabled: false,
+        }}
+        {...actions}
+      />,
+    );
 
-    expect(screen.getByRole("heading", { name: "Inertia" })).toBeVisible();
-    expect(screen.getByText("environment-panel")).toBeVisible();
+    expect(screen.getAllByText("Worktree")[0]).toBeVisible();
     expect(screen.getByText("codex/summary")).toBeVisible();
-    expect(screen.getByText("inertia", { exact: true })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Repository" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Editor" })).toBeVisible();
     expect(screen.getByLabelText("9 insertions and 4 deletions")).toBeVisible();
-    expect(screen.getByText("reference.png")).toBeVisible();
-    expect(screen.getByText("requirements.pdf")).toBeVisible();
-    expect(screen.getByText("http://localhost:4173/")).toBeVisible();
-    expect(screen.getByText("Typecheck")).toBeVisible();
-    expect(screen.getByText("Review")).toBeVisible();
     expect(screen.queryByText("Ready", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("Usage", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("Recap", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("reference.png")).not.toBeInTheDocument();
+    expect(screen.queryByText("requirements.pdf")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /changed files/u }));
-    fireEvent.click(screen.getByRole("button", { name: /Browse files/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Changes/u }));
+    fireEvent.click(screen.getByText("Commit and Push").closest("summary")!);
+    fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Push 1" }));
+    fireEvent.click(screen.getByText("Local Servers").closest("summary")!);
     fireEvent.click(screen.getByRole("button", { name: /localhost:4173/u }));
-    fireEvent.click(screen.getByRole("button", { name: /Open project/u }));
-    fireEvent.click(screen.getByRole("button", { name: /Reveal/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Open repository inertia externally/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Editor view" }));
+    fireEvent.click(screen.getByRole("button", { name: /Open in/u }));
     expect(actions.onOpenChanges).toHaveBeenCalledOnce();
     expect(actions.onOpenFiles).toHaveBeenCalledOnce();
     expect(actions.onOpenPreview).toHaveBeenCalledOnce();
     expect(actions.onOpenProject).toHaveBeenCalledOnce();
     expect(actions.onRevealProject).toHaveBeenCalledOnce();
+    expect(actions.onCommit).toHaveBeenCalledOnce();
+    expect(actions.onPush).toHaveBeenCalledOnce();
   });
 
   it("routes the header Environment control to the panel", () => {
@@ -178,16 +241,17 @@ describe("Environment panel", () => {
       onOpenPreview: vi.fn(),
       onOpenProject: vi.fn(),
       onRevealProject: vi.fn(),
+      onRetryGit: vi.fn(),
     };
     const view = render(
       <EnvironmentPanel
-        summary={{ ...summary, gitState: "loading" }}
+        summary={{ ...summary, branch: null, gitState: "loading" }}
         workspaceToolsAvailable
         {...actions}
       />,
     );
-    expect(screen.getByText("Loading repository state…")).toBeVisible();
-    expect(screen.getByRole("button", { name: /Checking working tree/u })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Changes Checking…" })).toBeDisabled();
+    expect(screen.getByText("Checking branch…")).toBeVisible();
     expect(screen.queryByLabelText("9 insertions and 4 deletions"))
       .not.toBeInTheDocument();
 
@@ -202,12 +266,32 @@ describe("Environment panel", () => {
         {...actions}
       />,
     );
-    expect(screen.getByText("Working tree clean")).toBeVisible();
-    expect(screen.getByRole("button", { name: /Working tree clean/u })).toBeEnabled();
+    expect(screen.getByLabelText("0 insertions and 0 deletions")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Changes/u })).toBeEnabled();
 
     view.rerender(
       <EnvironmentPanel
-        summary={{ ...summary, changes: null, gitState: "unavailable" }}
+        summary={{
+          ...summary,
+          changes: { ...summary.changes!, files: 0, insertions: 0, deletions: 0 },
+          gitState: "ready",
+          gitNotice: "The repository scan did not inspect every directory.",
+        }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByLabelText("0 insertions and 0 deletions")).toBeVisible();
+    expect(screen.getByText(/did not inspect every directory/u)).toBeVisible();
+
+    view.rerender(
+      <EnvironmentPanel
+        summary={{
+          ...summary,
+          branch: null,
+          changes: null,
+          gitState: "unavailable",
+        }}
         workspaceToolsAvailable
         {...actions}
       />,
@@ -225,12 +309,13 @@ describe("Environment panel", () => {
         {...actions}
       />,
     );
-    expect(screen.getByText("Repository details unavailable")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Changes Unavailable" })).toBeDisabled();
     expect(screen.getByText(/Permission denied\./u)).toBeVisible();
-    expect(screen.getByRole("button", { name: /Repository details unavailable/u })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(screen.queryByLabelText("9 insertions and 4 deletions"))
       .not.toBeInTheDocument();
     expect(actions.onOpenChanges).not.toHaveBeenCalled();
+    expect(actions.onRetryGit).toHaveBeenCalledOnce();
   });
 
   it("only promotes runtime state when live details need attention", () => {
@@ -272,8 +357,36 @@ describe("Environment panel", () => {
     expect(screen.getByRole("status")).toHaveTextContent("may be out of date");
   });
 
-  it("omits empty secondary sections and keeps the main actions in keyboard order", async () => {
-    const user = userEvent.setup();
+  it("keeps detached state explicit and names the platform file manager", () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    try {
+      render(
+        <EnvironmentPanel
+          summary={{
+            ...summary,
+            branch: { label: "Branch", value: "Detached HEAD" },
+          }}
+          workspaceToolsAvailable
+          onOpenChanges={vi.fn()}
+          onOpenFiles={vi.fn()}
+          onOpenPreview={vi.fn()}
+          onOpenProject={vi.fn()}
+          onRevealProject={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Detached HEAD")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Open in Finder" }))
+        .toBeVisible();
+    } finally {
+      Reflect.deleteProperty(window, "inertia");
+    }
+  });
+
+  it("shows a truthful empty server disclosure without filler sections", () => {
     const actions = {
       onOpenChanges: vi.fn(),
       onOpenFiles: vi.fn(),
@@ -295,19 +408,43 @@ describe("Environment panel", () => {
       />,
     );
 
-    expect(screen.queryByRole("heading", { name: "Local servers" })).not.toBeInTheDocument();
+    expect(screen.getByText("Local Servers")).toBeVisible();
+    const localServers = screen.getByText("Local Servers").closest("details")!;
+    expect(localServers).not.toHaveAttribute("open");
+    expect(localServers.querySelector("summary")).toHaveTextContent("0");
+    fireEvent.click(localServers.querySelector("summary")!);
+    expect(localServers).toHaveAttribute("open");
+    expect(screen.getByText("No local servers detected.")).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Active work" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Recent attachments" })).not.toBeInTheDocument();
     expect(screen.queryByText(/No recent task attachments/u)).not.toBeInTheDocument();
 
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Open project" })).toHaveFocus();
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Reveal" })).toHaveFocus();
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Browse files" })).toHaveFocus();
-    await user.tab();
-    expect(screen.getByRole("button", { name: /changed files/u })).toHaveFocus();
+  });
+
+  it("moves keyboard focus to the selected tool tab after an Environment action", async () => {
+    const user = userEvent.setup();
+    render(<EnvironmentFocusHarness />);
+    const scenarios: Array<{ action: string | RegExp; tab: string }> = [
+      { action: /Changes/u, tab: "Changes" },
+      { action: "Editor view", tab: "Files" },
+      { action: /localhost:4173/u, tab: "Preview" },
+    ];
+
+    for (const [index, scenario] of scenarios.entries()) {
+      if (index > 0) {
+        await user.click(screen.getByRole("tab", { name: "Environment" }));
+      }
+      if (scenario.tab === "Preview") {
+        await user.click(screen.getByText("Local Servers"));
+      }
+      const action = within(screen.getByLabelText("Environment details"))
+        .getByRole("button", { name: scenario.action });
+      action.focus();
+      await user.keyboard("{Enter}");
+      const destination = screen.getByRole("tab", { name: scenario.tab });
+      expect(destination).toHaveAttribute("aria-selected", "true");
+      await waitFor(() => expect(destination).toHaveFocus());
+    }
   });
 
   it("keeps every labelled section unique when split panes both show Environment", () => {

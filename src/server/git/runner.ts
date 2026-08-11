@@ -15,6 +15,8 @@ import { GitError } from "./types";
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
 const PREPARED_ABORT_CLEANUP_MS = 500;
+const PROCESS_TREE_TERMINATION_FAILURE =
+  "Git stopped responding, and its process tree could not be confirmed stopped.";
 
 export interface GitProcessResult {
   stdout: Buffer;
@@ -48,6 +50,32 @@ export interface PreparedGitRefUpdateContext {
    * read-only callback can no longer enqueue filesystem work.
    */
   mutate(operation: () => undefined): void;
+}
+
+/**
+ * Returns the values from two settled parallel Git inspections, prioritizing
+ * a failed process-tree termination over an ordinary sibling cancellation or
+ * command failure when either inspection rejects.
+ */
+export function gitInspectionSettlementValues<First, Second>(
+  results: readonly [
+    PromiseSettledResult<First>,
+    PromiseSettledResult<Second>,
+  ],
+): [First, Second] {
+  const failures = results.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  const terminationFailure = failures.find(({ reason }) => (
+    reason instanceof GitError
+    && reason.code === "operation-failed"
+    && reason.message === PROCESS_TREE_TERMINATION_FAILURE
+  ));
+  if (terminationFailure) throw terminationFailure.reason;
+  if (failures.length > 0) throw failures[0]?.reason;
+  return results.map((result) => (
+    (result as PromiseFulfilledResult<First | Second>).value
+  )) as [First, Second];
 }
 
 function inspectionArguments(args: readonly string[]): string[] {
@@ -224,7 +252,7 @@ export function runGit(
         () => {
           finish(new GitError(
             "operation-failed",
-            "Git stopped responding, and its process tree could not be confirmed stopped.",
+            PROCESS_TREE_TERMINATION_FAILURE,
           ));
         },
       );
@@ -434,7 +462,7 @@ function runPreparedGitRefTransaction(
         () => finish(error),
         () => finish(new GitError(
           "operation-failed",
-          "Git stopped responding, and its process tree could not be confirmed stopped.",
+          PROCESS_TREE_TERMINATION_FAILURE,
         )),
       );
     };

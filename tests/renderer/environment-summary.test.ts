@@ -283,6 +283,8 @@ describe("environment summary projection", () => {
       .toBe(true);
     expect(summary.checks.find(({ id }) => id === "unrelated-service")?.contextLabel)
       .toBe("Website");
+    expect(summary.checks.find(({ id }) => id === "unrelated-service")?.canOpenPreview)
+      .toBe(false);
     expect(summary.checks.find(({ id }) => id === "unknown-service"))
       .toMatchObject({
         contextLabel: "Unavailable project",
@@ -300,6 +302,12 @@ describe("environment summary projection", () => {
       workspaceGitStatus: null,
       runs: [
         run({ id: "valid", kind: "service", port: 4173 }),
+        run({
+          id: "project-service",
+          kind: "service",
+          port: 3000,
+          conversationId: null,
+        }),
         run({ id: "invalid-port", kind: "service", port: 70_000 }),
         run({
           id: "settled",
@@ -326,6 +334,8 @@ describe("environment summary projection", () => {
     });
 
     expect(summary.checks.find(({ id }) => id === "valid")?.canOpenPreview)
+      .toBe(true);
+    expect(summary.checks.find(({ id }) => id === "project-service")?.canOpenPreview)
       .toBe(true);
     expect(summary.checks.find(({ id }) => id === "invalid-port")?.canOpenPreview)
       .toBe(false);

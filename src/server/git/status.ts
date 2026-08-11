@@ -1,7 +1,10 @@
 import { DEFAULT_OUTPUT_BYTES } from "./constants";
 import { repositoryRoot } from "./paths";
 import { inspectGitRemoteRouting } from "./remote-routing";
-import { runGitInspection } from "./runner";
+import {
+  gitInspectionSettlementValues,
+  runGitInspection,
+} from "./runner";
 import {
   GitError,
   type GitChangedFile,
@@ -165,7 +168,11 @@ export async function hasHead(
     });
     return true;
   } catch (error) {
-    if (error instanceof GitError && error.code === "operation-failed") {
+    if (
+      error instanceof GitError
+      && error.code === "operation-failed"
+      && !options.signal?.aborted
+    ) {
       return false;
     }
     throw error;
@@ -224,14 +231,10 @@ export async function getRepositoryStatus(
   ]);
   // Both branches own Git children. Wait for both to settle on cancellation
   // so this promise remains the process-tree ownership boundary.
-  if (statsInspection.status === "rejected") {
-    throw statsInspection.reason;
-  }
-  if (routingInspection.status === "rejected") {
-    throw routingInspection.reason;
-  }
-  const statsResult = statsInspection.value;
-  const remoteRouting = routingInspection.value;
+  const [statsResult, remoteRouting] = gitInspectionSettlementValues([
+    statsInspection,
+    routingInspection,
+  ]);
   const stats = parseNumstat(statsResult.stdout);
   for (const file of parsed.files) {
     const values = stats.get(file.path);

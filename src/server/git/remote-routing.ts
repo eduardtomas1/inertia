@@ -4,7 +4,10 @@ import type {
   GitPullRequestUnavailableReason,
 } from "../../shared/contracts";
 import { MAX_PATH_LENGTH } from "./constants";
-import { runGitInspection } from "./runner";
+import {
+  gitInspectionSettlementValues,
+  runGitInspection,
+} from "./runner";
 
 const MAX_REMOTE_OUTPUT_BYTES = 256 * 1024;
 
@@ -178,14 +181,10 @@ export async function inspectGitRemoteRouting(
   ]);
   // Both probes can own Git children. Await their cleanup together so a
   // failed or cancelled routing inspection cannot outlive this boundary.
-  if (remoteInspection.status === "rejected") {
-    throw remoteInspection.reason;
-  }
-  if (branchInspection.status === "rejected") {
-    throw branchInspection.reason;
-  }
-  const remoteResult = remoteInspection.value;
-  const branchResult = branchInspection.value;
+  const [remoteResult, branchResult] = gitInspectionSettlementValues([
+    remoteInspection,
+    branchInspection,
+  ]);
   const remotes = configuredRemotes(remoteResult.stdout);
   const hasRemote = remotes.size > 0;
   if (!branch) return unavailable(hasRemote, "no-branch");

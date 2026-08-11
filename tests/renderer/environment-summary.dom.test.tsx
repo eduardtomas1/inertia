@@ -21,6 +21,28 @@ const summary: EnvironmentSummarySnapshot = {
   attachments: [],
 };
 
+type EnvironmentCheck = EnvironmentSummarySnapshot["checks"][number];
+
+function environmentCheck(
+  overrides: Partial<EnvironmentCheck>,
+): EnvironmentCheck {
+  return {
+    id: "check",
+    kind: "check",
+    projectId: "project-1",
+    conversationId: null,
+    label: "Check",
+    status: "running",
+    canStop: false,
+    port: null,
+    contextLabel: null,
+    canOpenPreview: false,
+    canAcknowledge: false,
+    canDismiss: false,
+    ...overrides,
+  };
+}
+
 const project: Project = {
   id: "11111111-1111-4111-8111-111111111111",
   name: "Inertia",
@@ -215,6 +237,115 @@ describe("environment summary header popover", () => {
       name: "Dismiss Typecheck",
     }));
     expect(onDismissRun).toHaveBeenCalledWith(failed);
+  });
+
+  it("moves focus to the next run control when an action removes its row", () => {
+    const running = environmentCheck({
+      id: "running-check",
+      label: "Build",
+      canStop: true,
+    });
+    const failed = environmentCheck({
+      id: "failed-check",
+      label: "Typecheck",
+      status: "failed",
+      canAcknowledge: true,
+      canDismiss: true,
+    });
+    const view = render(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [running, failed],
+      }} />,
+    );
+    const stop = screen.getByRole("button", { name: "Stop Build" });
+    stop.focus();
+
+    fireEvent.click(stop);
+    view.rerender(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [failed],
+      }} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Acknowledge Typecheck" }))
+      .toHaveFocus();
+  });
+
+  it.each([
+    {
+      actionName: "Stop Build",
+      check: environmentCheck({
+        id: "running-check",
+        label: "Build",
+        canStop: true,
+      }),
+    },
+    {
+      actionName: "Acknowledge Typecheck",
+      check: environmentCheck({
+        id: "failed-check",
+        label: "Typecheck",
+        status: "failed",
+        canAcknowledge: true,
+      }),
+    },
+    {
+      actionName: "Dismiss Typecheck",
+      check: environmentCheck({
+        id: "failed-check",
+        label: "Typecheck",
+        status: "failed",
+        canDismiss: true,
+      }),
+    },
+  ])("returns focus to Environment after $actionName removes the final row", ({
+    actionName,
+    check,
+  }) => {
+    const view = render(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [check],
+      }} />,
+    );
+    const action = screen.getByRole("button", { name: actionName });
+    action.focus();
+
+    fireEvent.click(action);
+    view.rerender(
+      <HeaderHarness environmentSummary={{ ...summary, checks: [] }} />,
+    );
+
+    expect(screen.getByRole("button", {
+      name: "Close environment summary",
+    })).toHaveFocus();
+  });
+
+  it("does not steal focus when the user leaves a run action before its row disappears", () => {
+    const running = environmentCheck({
+      id: "running-check",
+      label: "Build",
+      canStop: true,
+    });
+    const view = render(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [running],
+      }} />,
+    );
+    const stop = screen.getByRole("button", { name: "Stop Build" });
+    const outside = screen.getByRole("button", { name: "Outside" });
+    stop.focus();
+    fireEvent.click(stop);
+    outside.focus();
+
+    view.rerender(
+      <HeaderHarness environmentSummary={{ ...summary, checks: [] }} />,
+    );
+
+    expect(outside).toHaveFocus();
   });
 
   it("routes the Private Connect indicator directly to Connections & devices settings", async () => {

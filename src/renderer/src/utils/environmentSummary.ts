@@ -181,6 +181,9 @@ export function buildEnvironmentSummary({
       ownerProjectId,
     ]),
   );
+  const projectsWithConversations = new Set(
+    conversations.map(({ projectId: ownerProjectId }) => ownerProjectId),
+  );
   let passiveRows = 0;
   const checks = [...runs]
     .sort((left, right) =>
@@ -207,7 +210,8 @@ export function buildEnvironmentSummary({
       const routeKnown = projectNames.has(run.projectId)
         && (
           run.conversationId === null
-          || knownConversations.get(run.conversationId) === run.projectId
+            ? projectsWithConversations.has(run.projectId)
+            : knownConversations.get(run.conversationId) === run.projectId
         );
       return {
         id: run.id,

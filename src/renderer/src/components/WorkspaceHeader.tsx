@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ChevronDown, FolderOpen, GitBranch, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -107,6 +107,11 @@ export function WorkspaceHeader({
   useNativePreviewSuspension(menu !== null);
   const headerActionsRef = useRef<HTMLDivElement>(null);
   const environmentAnchorRef = useRef<HTMLDivElement>(null);
+  const focusEnvironmentTrigger = useCallback((): void => {
+    environmentAnchorRef.current?.querySelector<HTMLButtonElement>(
+      ":scope > button",
+    )?.focus();
+  }, []);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
   const eyebrow = view === "settings"
     ? null
@@ -159,7 +164,7 @@ export function WorkspaceHeader({
     const closeOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       onSetEnvironmentOpen(false);
-      environmentAnchorRef.current?.querySelector("button")?.focus();
+      focusEnvironmentTrigger();
     };
     document.addEventListener("pointerdown", closeOnPointerDown);
     document.addEventListener("keydown", closeOnEscape);
@@ -167,7 +172,7 @@ export function WorkspaceHeader({
       document.removeEventListener("pointerdown", closeOnPointerDown);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [environmentOpen, onSetEnvironmentOpen]);
+  }, [environmentOpen, focusEnvironmentTrigger, onSetEnvironmentOpen]);
 
   useEffect(() => {
     if (!menu) return;
@@ -425,6 +430,7 @@ export function WorkspaceHeader({
                 onOpenRunPreview={onOpenRunPreview}
                 onAcknowledgeRun={onAcknowledgeRun}
                 onDismissRun={onDismissRun}
+                onRestoreActionFocus={focusEnvironmentTrigger}
               />
             </div>
           )}

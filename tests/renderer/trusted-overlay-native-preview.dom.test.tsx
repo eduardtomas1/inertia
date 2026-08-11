@@ -352,6 +352,7 @@ describe("trusted overlay native preview suspension", () => {
         onOpenRunPreview={vi.fn()}
         onAcknowledgeRun={vi.fn()}
         onDismissRun={vi.fn()}
+        onRestoreActionFocus={vi.fn()}
       />,
     );
 

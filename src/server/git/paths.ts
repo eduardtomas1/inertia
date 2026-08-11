@@ -11,6 +11,7 @@ import {
   MAX_PATH_LENGTH,
 } from "./constants";
 import {
+  gitInspectionSettlementValues,
   runGit,
   runGitInspection,
 } from "./runner";
@@ -154,7 +155,8 @@ export async function repositoryMetadataMarkerIdentity(
       "rev-parse",
       "--path-format=absolute",
       argument,
-    ]).catch(async () => {
+    ]).catch(async (error: unknown) => {
+      if (options.signal?.aborted) throw error;
       requirePathInspectionTime(options);
       return await inspect(["rev-parse", argument]);
     });
@@ -202,14 +204,10 @@ export async function repositoryMetadataMarkerIdentity(
   // Both inspections own Git children. Await both settlements even when one
   // marker probe fails so no sibling process retains a Windows cwd handle
   // after this identity inspection rejects.
-  if (gitDirectoryResult.status === "rejected") {
-    throw gitDirectoryResult.reason;
-  }
-  if (commonDirectoryResult.status === "rejected") {
-    throw commonDirectoryResult.reason;
-  }
-  const gitDirectory = gitDirectoryResult.value;
-  const commonDirectory = commonDirectoryResult.value;
+  const [gitDirectory, commonDirectory] = gitInspectionSettlementValues([
+    gitDirectoryResult,
+    commonDirectoryResult,
+  ]);
   return ["git-dir", gitDirectory, "git-common-dir", commonDirectory].join("\0");
 }
 

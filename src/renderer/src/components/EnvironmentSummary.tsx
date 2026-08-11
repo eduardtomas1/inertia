@@ -1,4 +1,9 @@
 import {
+  useLayoutEffect,
+  useRef,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import {
   Bot,
   Check,
   ExternalLink,
@@ -29,6 +34,7 @@ interface EnvironmentSummaryProps {
   onDismissRun: (
     run: EnvironmentSummarySnapshot["checks"][number],
   ) => void;
+  onRestoreActionFocus: () => void;
 }
 
 function subagentLabel(
@@ -55,8 +61,64 @@ export function EnvironmentSummary({
   onOpenRunPreview,
   onAcknowledgeRun,
   onDismissRun,
+  onRestoreActionFocus,
 }: EnvironmentSummaryProps): React.JSX.Element {
   useNativePreviewSuspension(true);
+  const pendingActionFocusRef = useRef<{
+    runId: string;
+    fallback: HTMLButtonElement | null;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingActionFocusRef.current;
+    if (!pending || summary.checks.some((check) => check.id === pending.runId)) {
+      return;
+    }
+    pendingActionFocusRef.current = null;
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLElement
+      && activeElement !== document.body
+      && activeElement.isConnected
+    ) {
+      return;
+    }
+    if (pending.fallback?.isConnected && !pending.fallback.disabled) {
+      pending.fallback.focus();
+      return;
+    }
+    onRestoreActionFocus();
+  }, [onRestoreActionFocus, summary.checks]);
+
+  const runAndPreserveFocus = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    check: EnvironmentSummarySnapshot["checks"][number],
+    action: (run: EnvironmentSummarySnapshot["checks"][number]) => void,
+  ): void => {
+    if (document.activeElement === event.currentTarget) {
+      const row = event.currentTarget.closest("li");
+      const siblingRows = row?.parentElement
+        ? Array.from(row.parentElement.children).filter(
+            (element): element is HTMLLIElement => element instanceof HTMLLIElement,
+          )
+        : [];
+      const rowIndex = row ? siblingRows.indexOf(row) : -1;
+      const candidateRows = rowIndex >= 0
+        ? [
+            ...siblingRows.slice(rowIndex + 1),
+            ...siblingRows.slice(0, rowIndex).reverse(),
+          ]
+        : [];
+      pendingActionFocusRef.current = {
+        runId: check.id,
+        fallback: candidateRows
+          .map((candidate) => candidate.querySelector<HTMLButtonElement>(
+            "button:not(:disabled)",
+          ))
+          .find((candidate) => candidate !== null) ?? null,
+      };
+    }
+    action(check);
+  };
   const hasWorkspaceDetails = Boolean(
     summary.changes
     || summary.branch
@@ -150,7 +212,11 @@ export function EnvironmentSummary({
                   {check.canAcknowledge && (
                     <IconButton
                       label={`Acknowledge ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
-                      onClick={() => onAcknowledgeRun(check)}
+                      onClick={(event) => runAndPreserveFocus(
+                        event,
+                        check,
+                        onAcknowledgeRun,
+                      )}
                     >
                       <Check size={12} />
                     </IconButton>
@@ -158,7 +224,11 @@ export function EnvironmentSummary({
                   {check.canDismiss && (
                     <IconButton
                       label={`Dismiss ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
-                      onClick={() => onDismissRun(check)}
+                      onClick={(event) => runAndPreserveFocus(
+                        event,
+                        check,
+                        onDismissRun,
+                      )}
                     >
                       <Trash2 size={12} />
                     </IconButton>
@@ -166,7 +236,11 @@ export function EnvironmentSummary({
                   {check.canStop && (
                     <IconButton
                       label={`Stop ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
-                      onClick={() => onStopRun(check)}
+                      onClick={(event) => runAndPreserveFocus(
+                        event,
+                        check,
+                        onStopRun,
+                      )}
                     >
                       <Square size={12} />
                     </IconButton>

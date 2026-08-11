@@ -151,6 +151,7 @@ export function activateNotificationConversation(
     showWorkspace: () => void;
     closeSidebar: () => void;
     closePalette: () => void;
+    closeEnvironment: () => void;
     closeCommitDialog: () => void;
     closePullRequestDialog: () => void;
     closeProviderAuth: () => void;
@@ -161,6 +162,7 @@ export function activateNotificationConversation(
   actions.closeProviderAuth();
   actions.closeSidebar();
   actions.closePalette();
+  actions.closeEnvironment();
   actions.selectConversation(conversation);
   actions.showWorkspace();
 }
@@ -369,6 +371,7 @@ export function AppLayout({
         showWorkspace: () => setView("workspace"),
         closeSidebar: () => setSidebarOpen(false),
         closePalette: () => setPaletteOpen(false),
+        closeEnvironment: () => setEnvironmentOpen(false),
         closeCommitDialog: () => setCommitDialogOpen(false),
         closePullRequestDialog: () => setPullRequestDialogOpen(false),
         closeProviderAuth: providerAuth.onClose,

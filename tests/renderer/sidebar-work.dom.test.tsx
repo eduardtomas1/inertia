@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Sidebar } from "../../src/renderer/src/components/Sidebar";
@@ -239,7 +239,12 @@ describe("compact Work sidebar", () => {
       expect(within(work).getByText("Review metadata")).toBeInTheDocument();
     }
 
-    for (const query of ["Studio", "acme-monorepo", "apps/studio"]) {
+    for (const query of [
+      "Studio",
+      "acme-monorepo",
+      "apps/studio",
+      "acme-monorepo/apps/studio",
+    ]) {
       fireEvent.change(search, { target: { value: query } });
       expect(within(work).getByText("Compact rows")).toBeInTheDocument();
       expect(within(work).getByText("Review metadata")).toBeInTheDocument();
@@ -247,13 +252,17 @@ describe("compact Work sidebar", () => {
 
     fireEvent.change(search, { target: { value: "legacy focus" } });
     expect(within(work).getByText("Audit legacy focus")).toBeInTheDocument();
-    expect(within(work).getByRole("button", { name: "Earlier 1" }))
-      .toHaveAttribute("aria-expanded", "true");
+    expect(within(work).queryByRole("button", { name: "Earlier 1" }))
+      .not.toBeInTheDocument();
+    expect(within(work).getByRole("heading", { name: "Earlier 1" }))
+      .toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: "completed cleanup" } });
     expect(within(work).getByText("Ship completed cleanup")).toBeInTheDocument();
-    expect(within(work).getByRole("button", { name: "Done 1" }))
-      .toHaveAttribute("aria-expanded", "true");
+    expect(within(work).queryByRole("button", { name: "Done 1" }))
+      .not.toBeInTheDocument();
+    expect(within(work).getByRole("heading", { name: "Done 1" }))
+      .toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: "no-such-work" } });
     expect(within(work).getByText("No matching work")).toBeInTheDocument();
@@ -280,6 +289,25 @@ describe("compact Work sidebar", () => {
       name: "Show more 1 older",
     }));
     expect(done?.querySelectorAll(".activity-thread")).toHaveLength(11);
+  });
+
+  it("refreshes local-day groups at midnight without a snapshot update", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 11, 23, 59, 59, 900);
+    vi.setSystemTime(start);
+    renderSidebar([
+      conversation("today", "Finish before midnight", new Date(2026, 7, 11, 12)),
+    ]);
+
+    expect(screen.getByRole("heading", { name: "Recent 1" }))
+      .toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(101);
+    });
+    expect(screen.queryByRole("heading", { name: "Recent 1" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Yesterday 1" }))
+      .toBeInTheDocument();
   });
 
   it("keeps empty and missing-project states explicit", () => {

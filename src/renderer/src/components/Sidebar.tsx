@@ -104,6 +104,20 @@ function groupingLabel(mode: ProjectGroupingMode): string {
   return "Keep separate";
 }
 
+function workRepositoryLabel(project: Project | undefined): string | null {
+  const repositoryName = project?.repositoryRoot
+    ?.split(/[\\/]/u)
+    .filter(Boolean)
+    .at(-1);
+  if (!repositoryName || !project) return null;
+  if (project.repositoryRelativePath && project.repositoryRelativePath !== ".") {
+    return `${repositoryName}/${project.repositoryRelativePath}`;
+  }
+  return repositoryName.toLocaleLowerCase() !== project.name.toLocaleLowerCase()
+    ? repositoryName
+    : null;
+}
+
 function SidebarView({
   snapshot,
   connectionStatus,
@@ -255,11 +269,13 @@ function SidebarView({
           const project = projectById.get(conversation.projectId);
           const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
             ?? agentRequestProviderName(conversation.providerId);
+          const repositoryLabel = workRepositoryLabel(project);
           return [
             conversation.title,
             conversation.branch,
             providerLabel,
             project?.name,
+            repositoryLabel,
             project?.path,
             project?.repositoryRoot,
             project?.repositoryRelativePath,
@@ -495,17 +511,7 @@ function SidebarView({
     const isActive = snapshot?.activeConversationId === conversation.id && view === "workspace";
     const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
       ?? agentRequestProviderName(conversation.providerId);
-    const repositoryName = project?.repositoryRoot
-      ?.split(/[\\/]/u)
-      .filter(Boolean)
-      .at(-1);
-    const repositoryLabel = repositoryName && project
-      ? project.repositoryRelativePath && project.repositoryRelativePath !== "."
-        ? `${repositoryName}/${project.repositoryRelativePath}`
-        : repositoryName.toLocaleLowerCase() !== project.name.toLocaleLowerCase()
-          ? repositoryName
-          : null
-      : null;
+    const repositoryLabel = workRepositoryLabel(project);
     const accessibleContext = [
       conversation.title,
       providerLabel,
@@ -824,13 +830,15 @@ function SidebarView({
               {workSections.map((section) => {
                 if (section.threads.length === 0) return null;
                 const collapsible = COLLAPSIBLE_WORK_SECTIONS.has(section.id);
-                const expanded = !collapsible || Boolean(query.trim()) || expandedWorkSections.has(section.id);
+                const searchActive = Boolean(query.trim());
+                const disclosure = collapsible && !searchActive;
+                const expanded = !collapsible || searchActive || expandedWorkSections.has(section.id);
                 const visibleThreads = section.id === "done"
                   ? section.threads.slice(0, doneVisible)
                   : section.threads;
                 return (
                   <section className={`work-thread-section is-${section.id}`} aria-labelledby={`work-section-${section.id}`} key={section.id}>
-                    {collapsible ? (
+                    {disclosure ? (
                       <h2 id={`work-section-${section.id}`}>
                         <button
                           type="button"

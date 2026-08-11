@@ -933,7 +933,11 @@ export class TurnController {
       ) {
         goalStart.latestGoal = null;
         goalStart.cleared = true;
-        this.queueNativeGoalStartSettlement(active, goalStart);
+        // A clear received before the initial goal-set response is an older
+        // tombstone if that response later confirms a recreation. Do not let
+        // the clear schedule rejection by itself: a previously queued update
+        // still observes `cleared`, while a later response-projected update or
+        // provider-run cleanup authoritatively settles the acknowledgement.
       }
       return true;
     } catch (error) {

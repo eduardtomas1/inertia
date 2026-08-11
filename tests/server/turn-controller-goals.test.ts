@@ -459,6 +459,53 @@ describe("TurnController native goal lifecycle", () => {
     expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([]);
   });
 
+  it("allows a confirmed goal recreation after a pre-response clear", async () => {
+    const runtime = await goalRuntime();
+    const warmup = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Establish the provider thread.",
+    });
+    runtime.controller.start(warmup.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "session",
+      sessionId: "thread-recreated-goal-start",
+    });
+    runtime.provider.resolve();
+    await vi.waitFor(() =>
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false));
+
+    const pendingGoal = runtime.controller.setNativeGoal({
+      conversationId: runtime.conversationId,
+      objective: "Recreate after a pre-response clear",
+      status: "active",
+      tokenBudget: 1_000,
+    });
+    await vi.waitFor(() => expect(runtime.provider.runCount).toBe(2));
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "goal-cleared",
+      sessionId: "thread-recreated-goal-start",
+    });
+    const recreatedGoal: ProviderGoalSnapshot = {
+      objective: "Recreate after a pre-response clear",
+      status: "active",
+      tokenBudget: 1_000,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    };
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "goal-updated",
+      sessionId: "thread-recreated-goal-start",
+      goal: recreatedGoal,
+    });
+
+    await expect(pendingGoal).resolves.toEqual(recreatedGoal);
+  });
+
   it("routes live mutations through the exact active turn identity", async () => {
     const runtime = await goalRuntime();
     const queued = runtime.controller.queue({

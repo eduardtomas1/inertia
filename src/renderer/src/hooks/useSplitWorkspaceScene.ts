@@ -60,13 +60,11 @@ type Connection = ReturnType<typeof useInertiaConnection>;
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
-type ActivityActions = ReturnType<typeof useActivityActions>;
 
 const ignoreLatestContentVisibility = (): void => undefined;
 
 export interface SplitWorkspaceSceneController {
   scene: WorkspaceSceneProps["splitScene"];
-  activityActions: ActivityActions;
 }
 
 interface SplitWorkspaceActions
@@ -112,7 +110,6 @@ interface UseSplitWorkspaceSceneOptions {
   busyAction: string | null;
   setBusyAction: Dispatch<SetStateAction<string | null>>;
   setActionError: Dispatch<SetStateAction<string | null>>;
-  setActivityOpen: (open: boolean) => void;
   gitRefreshVersion: number;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   actions: SplitWorkspaceActions;
@@ -145,7 +142,6 @@ export function useSplitWorkspaceScene({
   busyAction,
   setBusyAction,
   setActionError,
-  setActivityOpen,
   gitRefreshVersion,
   request,
   actions,
@@ -241,19 +237,11 @@ export function useSplitWorkspaceScene({
     previewContextId: splitConversation?.id ?? null,
   }));
   const activityActions = useStableController(useActivityActions({
-    snapshot: connection.snapshot,
     project: splitProject,
     conversationId: splitConversation?.id ?? null,
-    request,
     run,
     setActiveTool: layout.setActiveTool,
-    setActivityOpen,
     setActionError,
-    activateContext: (_activity, tool) => {
-      if (tool) layout.setActiveTool(tool);
-    },
-    openProjectPath: actions.openProjectPath,
-    navigatePreview: desktopTools.navigatePreview,
   }));
   const planSteps = useMemo(() => {
     if (!splitConversation) return [];
@@ -474,8 +462,5 @@ export function useSplitWorkspaceScene({
     splitConversation,
     splitProject,
   ]);
-  return useMemo(() => ({
-    scene,
-    activityActions,
-  }), [activityActions, scene]);
+  return useMemo(() => ({ scene }), [scene]);
 }

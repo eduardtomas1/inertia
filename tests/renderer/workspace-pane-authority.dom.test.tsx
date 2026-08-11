@@ -13,7 +13,6 @@ import type {
   Project,
   ProjectAction,
   ServerEvent,
-  WorkspaceRun,
 } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
@@ -1475,15 +1474,9 @@ describe("workspace pane authority", () => {
       conversationId: string;
     }) => useActivityActions({
       ...owner,
-      snapshot: null,
-      request: vi.fn(),
       run: vi.fn(),
       setActiveTool: vi.fn(),
-      setActivityOpen: vi.fn(),
       setActionError: vi.fn(),
-      activateContext: vi.fn(),
-      openProjectPath: vi.fn(),
-      navigatePreview: vi.fn(),
     }), {
       initialProps: {
         project: alpha,
@@ -1504,15 +1497,9 @@ describe("workspace pane authority", () => {
     const hook = renderHook((project: Project) => useActivityActions({
       project,
       conversationId: project.id === alpha.id ? alphaChat.id : betaChat.id,
-      snapshot: null,
-      request: vi.fn(),
       run: vi.fn(),
       setActiveTool: vi.fn(),
-      setActivityOpen: vi.fn(),
       setActionError: vi.fn(),
-      activateContext: vi.fn(),
-      openProjectPath: vi.fn(),
-      navigatePreview: vi.fn(),
     }), { initialProps: alpha });
 
     act(() => hook.result.current.requestProviderResume(alphaChat.id));
@@ -1521,66 +1508,6 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.pendingResumeConversationId).toBeNull();
     hook.rerender(alpha);
     expect(hook.result.current.pendingResumeConversationId).toBeNull();
-  });
-
-  it("waits for the target pane owner before navigating an activity preview", async () => {
-    const activateContext = vi.fn();
-    const navigateAlphaPreview = vi.fn();
-    const navigateBetaPreview = vi.fn();
-    const previewRun: WorkspaceRun = {
-      id: "55555555-5555-4555-8555-555555555555",
-      kind: "service",
-      projectId: beta.id,
-      conversationId: betaChat.id,
-      actionId: "preview",
-      label: "preview",
-      detail: "npm run preview",
-      status: "running",
-      attentionState: "acknowledged",
-      canStop: true,
-      port: 4173,
-      startedAt: "2026-07-28T12:00:00.000Z",
-      finishedAt: null,
-    };
-    const hook = renderHook((owner: {
-      project: Project;
-      conversationId: string;
-      navigatePreview: (url: string) => void;
-    }) => useActivityActions({
-      project: owner.project,
-      conversationId: owner.conversationId,
-      snapshot: null,
-      request: vi.fn(),
-      run: vi.fn(),
-      setActiveTool: vi.fn(),
-      setActivityOpen: vi.fn(),
-      setActionError: vi.fn(),
-      activateContext,
-      openProjectPath: vi.fn(),
-      navigatePreview: owner.navigatePreview,
-    }), {
-      initialProps: {
-        project: alpha,
-        conversationId: alphaChat.id,
-        navigatePreview: navigateAlphaPreview,
-      },
-    });
-
-    act(() => hook.result.current.openActivityPreview(previewRun));
-    expect(activateContext).toHaveBeenCalledWith(previewRun, "preview");
-    expect(navigateAlphaPreview).not.toHaveBeenCalled();
-
-    hook.rerender({
-      project: beta,
-      conversationId: betaChat.id,
-      navigatePreview: navigateBetaPreview,
-    });
-    await waitFor(() => {
-      expect(navigateBetaPreview).toHaveBeenCalledWith(
-        "http://127.0.0.1:4173",
-      );
-    });
-    expect(navigateAlphaPreview).not.toHaveBeenCalled();
   });
 
   it("closes and resets a native preview when its conversation changes", async () => {

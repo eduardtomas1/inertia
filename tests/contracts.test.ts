@@ -194,7 +194,7 @@ describe("client command contract", () => {
     }).success).toBe(false);
   });
 
-  it("accepts only scoped UUID targets for Activity Center mutations", () => {
+  it("accepts only scoped UUID targets for workspace-run mutations", () => {
     const runId = crypto.randomUUID();
     for (const type of [
       "activity.stop",

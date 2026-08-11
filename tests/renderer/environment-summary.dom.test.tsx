@@ -62,9 +62,6 @@ function HeaderHarness({
         branches={[]}
         actions={[]}
         busy={false}
-        activityOpen={false}
-        activeRunCount={0}
-        attentionRunCount={0}
         environmentSummary={summary}
         environmentOpen={open}
         onOpenSidebar={vi.fn()}
@@ -86,7 +83,6 @@ function HeaderHarness({
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onToggleActivity={vi.fn()}
       />
       <button type="button">Outside</button>
     </>

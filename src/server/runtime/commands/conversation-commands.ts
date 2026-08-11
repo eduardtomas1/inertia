@@ -29,6 +29,7 @@ import type { ProviderManager } from "../../providers";
 import { normalizeIdentityPath } from "../../project-identity";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
+import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import {
@@ -81,6 +82,10 @@ export interface ConversationCommandDependencies {
   workspaceRuns: WorkspaceRunController<WebSocket>;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   runtimeSync: RuntimeSyncHub<WebSocket>;
+  duoLaunches?: Pick<
+    DuoLaunchCoordinator,
+    "reconcileConversationDeletion"
+  >;
   deletedConversationIds: Set<string>;
   dataDirectory: string;
   rememberDeletedConversation(conversationId: string): void;
@@ -606,16 +611,29 @@ export function createConversationCommandHandler(
         const checkoutPath = conversation.worktreePath
           ?? ownership?.path
           ?? dependencies.store.projectPath(conversation.projectId);
+        const deletionReservationId = `conversation-delete:${command.requestId}`;
         if (!dependencies.providerTerminalResumes.acquireAtCheckout(
           conversation.id,
           conversation.projectId,
           checkoutPath,
+          deletionReservationId,
         )) {
           throw new RuntimeRequestError(
             "End the resumed provider terminal before deleting this thread.",
           );
         }
         try {
+          if (
+            dependencies.duoLaunches
+            && !await dependencies.duoLaunches.reconcileConversationDeletion(
+              conversation.id,
+              deletionReservationId,
+            )
+          ) {
+            throw new RuntimeRequestError(
+              "Cancel the active Duo launch, acknowledge an interrupted dispatch, or cancel the locked comparison before deleting this thread.",
+            );
+          }
           if (
             dependencies.store.hasRecordedActiveWorkspaceRunForConversation(
               conversation.id,

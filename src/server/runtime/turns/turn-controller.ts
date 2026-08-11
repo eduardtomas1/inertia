@@ -6,12 +6,13 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AgentPlan,
+  type AgentTurn,
   type AgentTurnStatus,
   type AgentTurnTerminalStatus,
   type ChatMessage,
   type SubagentTrace,
 } from "../../../shared/contracts";
-import { RuntimeStore } from "../../database";
+import { RecordNotFoundError, RuntimeStore } from "../../database";
 import type {
   ProviderEvent,
   ProviderRunFailure,
@@ -206,6 +207,215 @@ export class TurnController {
       if (barriers.length === 0) return;
       await Promise.allSettled(barriers);
     }
+  }
+
+  async reconcileInactiveDuoTurn(
+    launchId: string,
+    conversationId: string,
+    turnId: string,
+    options: {
+      providerCleanupConfirmed?: boolean;
+      allowProviderStop?: boolean;
+      authorizedCheckoutReservationId?: string | null;
+    } = {},
+  ): Promise<boolean> {
+    const providerCleanupConfirmed = options.providerCleanupConfirmed ?? false;
+    const allowProviderStop = options.allowProviderStop ?? true;
+    let turn: AgentTurn;
+    try {
+      const owner = this.store.pairedLaunchForTurn(turnId);
+      turn = this.store.agentTurn(turnId);
+      if (
+        owner?.launchId !== launchId
+        || turn.conversationId !== conversationId
+      ) return false;
+      const request = this.store.message(turn.userMessageId);
+      // Duo source and judge turns are deliberately attachment-free. Refuse
+      // future or malformed launch-owned turns that would require a lost
+      // ActiveTurn's private attachment-release state.
+      if (request.turnId !== turnId || request.attachments.length > 0) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+
+    if (this.hasEphemeralTurnOwner(conversationId, turnId)) return false;
+    let stopResult: Awaited<ReturnType<TurnProviderRuntime["stopOwned"]>>
+      | "confirmed" = "confirmed";
+    if (!providerCleanupConfirmed && allowProviderStop) {
+      try {
+        stopResult = await this.providers.stopOwned(conversationId, {
+          runId: turn.runId,
+          turnId,
+        });
+      } catch {
+        return false;
+      }
+      if (stopResult === "identity-mismatch") return false;
+    } else if (
+      !providerCleanupConfirmed
+      && this.providers.isRunning(conversationId)
+    ) {
+      return false;
+    }
+    await this.waitForProviderCleanup([conversationId]);
+
+    try {
+      const owner = this.store.pairedLaunchForTurn(turnId);
+      turn = this.store.agentTurn(turnId);
+      if (
+        owner?.launchId !== launchId
+        || turn.conversationId !== conversationId
+        || this.hasEphemeralTurnOwner(conversationId, turnId)
+        || (
+          stopResult === "missing"
+          && this.providers.isRunning(conversationId)
+        )
+        || (
+          !allowProviderStop
+          && this.providers.isRunning(conversationId)
+        )
+        || (
+          this.store.conversationWork.hasConversation(conversationId)
+          && !(
+            options.authorizedCheckoutReservationId
+            && this.store.conversationWork
+              .isSoleProviderReservationAtConversationCheckout(
+                options.authorizedCheckoutReservationId,
+                conversationId,
+              )
+          )
+        )
+      ) return false;
+      if (
+        providerCleanupConfirmed
+        && !isAgentTurnTerminalStatus(turn.status)
+      ) return false;
+
+      const conversationTurns = this.store.agentTurnsForConversation(
+        conversationId,
+      );
+      if (conversationTurns.some((candidate) => (
+        candidate.id !== turnId
+        && !isAgentTurnTerminalStatus(candidate.status)
+      ))) return false;
+
+      const activeRuns = this.store.workspaceRunsForConversation(
+        conversationId,
+      ).filter(({ status }) => status === "running" || status === "waiting");
+      if (activeRuns.some(({ id }) => id !== turn.runId)) return false;
+      let exactRun = null;
+      try {
+        exactRun = this.store.workspaceRun(turn.runId);
+      } catch (error) {
+        if (!(error instanceof RecordNotFoundError)) throw error;
+      }
+      const turnRun = exactRun && (
+        exactRun.status === "running" || exactRun.status === "waiting"
+      ) ? exactRun : null;
+      const conversation = this.store.conversation(conversationId);
+      if (turnRun && (
+        turnRun.kind !== "agent"
+        || turnRun.conversationId !== conversationId
+        || turnRun.projectId !== conversation.projectId
+      )) return false;
+
+      // No await occurs after this final ownership check. A new turn cannot be
+      // adopted in the middle of the authoritative settlement below.
+      if (this.hasEphemeralTurnOwner(conversationId, turnId)) return false;
+      const completedAt = this.now();
+      const settlement = isAgentTurnTerminalStatus(turn.status)
+        ? { settled: false, turn }
+        : this.store.settleAgentTurn(turnId, {
+            status: "cancelled",
+            terminalAssistantMessageId: null,
+            providerSessionAfter: turn.providerSessionBefore,
+            terminalReason: "duo-inactive-reconciliation",
+            checkpointId: null,
+            usageAtCompletion: null,
+            startedAt: turn.startedAt ?? completedAt,
+            completedAt,
+            updatedAt: completedAt,
+          });
+      turn = settlement.turn;
+
+      const detail = this.store.conversationDetail(conversationId);
+      if (!detail) return false;
+      const failed = turn.status === "failed" || turn.status === "interrupted";
+      for (const activity of detail.activities) {
+        if (activity.turnId === turnId && activity.status === "running") {
+          this.store.updateActivity(activity.id, {
+            status: failed ? "failed" : "completed",
+          });
+        }
+      }
+      for (const reasoning of detail.reasonings) {
+        if (reasoning.turnId === turnId && reasoning.status === "running") {
+          this.store.updateReasoning(reasoning.id, {
+            status: failed ? "failed" : "completed",
+          });
+        }
+      }
+      this.store.settleLiveSubagents(
+        turnId,
+        turn.status === "cancelled" ? "cancelled" : "lost",
+        completedAt,
+      );
+      if (turnRun) {
+        this.store.updateWorkspaceRun(turn.runId, {
+          status: turn.status === "completed"
+            ? "succeeded"
+            : turn.status === "cancelled"
+              ? "cancelled"
+              : "failed",
+        });
+      }
+      const latest = this.store.latestAgentTurnForConversation(conversationId);
+      if (latest?.id === turnId) {
+        this.store.updateConversation(conversationId, {
+          status: turn.status === "completed"
+            ? "completed"
+            : turn.status === "cancelled"
+              ? "idle"
+              : "failed",
+          attentionKind: null,
+        });
+      }
+      for (const [requestId, request] of this.pendingApprovals) {
+        if (request.turnId === turnId) this.pendingApprovals.delete(requestId);
+      }
+      for (const [requestId, request] of this.pendingInputs) {
+        if (request.turnId === turnId) this.pendingInputs.delete(requestId);
+      }
+      if (settlement.settled) {
+        this.hooks.broadcast({
+          type: "agent.completed",
+          conversationId,
+          runId: turn.runId,
+          turnId,
+        });
+      }
+      this.hooks.broadcast({
+        type: "conversation.detail.invalidated",
+        conversationId,
+      });
+      this.hooks.broadcastSnapshot();
+      return true;
+    } catch {
+      // A partial projection remains recoverable and deletion continues to
+      // fail closed on any active workspace row until an idempotent retry.
+      return false;
+    }
+  }
+
+  private hasEphemeralTurnOwner(
+    conversationId: string,
+    turnId: string,
+  ): boolean {
+    return this.activeByConversation.has(conversationId)
+      || this.activeByTurn.has(turnId)
+      || this.providerCleanupBarriers.has(conversationId);
   }
 
   activeConversationIds(): string[] {

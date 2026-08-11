@@ -23,6 +23,7 @@ import {
 } from "../../workspace";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { TurnController } from "../turns/turn-controller";
+import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -34,6 +35,7 @@ export interface ProjectWorkspaceCommandDependencies {
   turns: TurnController;
   providers: ProviderManager;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
+  duoLaunches?: Pick<DuoLaunchCoordinator, "reconcileProjectDeletion">;
   terminals: TerminalManager;
   secureFiles: RuntimeSecureFileBroker;
   secureFileAuthorities: SecureFileAuthorityRegistry;
@@ -84,7 +86,25 @@ export function createProjectWorkspaceCommandHandler(
       case "project.select":
         dependencies.store.selectProject(command.payload.projectId);
         return "mutation";
-      case "project.remove":
+      case "project.remove": {
+        if (dependencies.store.shellSnapshot().conversations.some((conversation) => (
+          conversation.projectId === command.payload.projectId
+          && dependencies.providerTerminalResumes.isActive(conversation.id)
+        ))) {
+          throw new RuntimeRequestError(
+            "End resumed provider terminals for this project before removing it.",
+          );
+        }
+        if (
+          dependencies.duoLaunches
+          && !await dependencies.duoLaunches.reconcileProjectDeletion(
+            command.payload.projectId,
+          )
+        ) {
+          throw new RuntimeRequestError(
+            "Cancel the active Duo launch, acknowledge an interrupted dispatch, or cancel the locked comparison before removing this project.",
+          );
+        }
         if (
           dependencies.store.hasActiveWorkspaceRunForProject(
             command.payload.projectId,
@@ -105,14 +125,6 @@ export function createProjectWorkspaceCommandHandler(
           ) throw new RuntimeRequestError(error.message);
           throw error;
         }
-        if (dependencies.store.shellSnapshot().conversations.some((conversation) => (
-          conversation.projectId === command.payload.projectId
-          && dependencies.providerTerminalResumes.isActive(conversation.id)
-        ))) {
-          throw new RuntimeRequestError(
-            "End resumed provider terminals for this project before removing it.",
-          );
-        }
         const removedConversationIds = dependencies.store.shellSnapshot()
           .conversations
           .filter((conversation) => (
@@ -125,6 +137,7 @@ export function createProjectWorkspaceCommandHandler(
           dependencies.forgetRemoteTranscript(conversationId);
         }
         return "mutation";
+      }
       case "project.update": {
         const { projectId, ...update } = command.payload;
         dependencies.store.updateProject(projectId, update);

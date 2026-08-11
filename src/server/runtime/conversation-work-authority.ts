@@ -109,6 +109,21 @@ export class ConversationWorkAuthority {
     return this.hasCheckout(workspace.checkoutPath);
   }
 
+  isSoleProviderReservationAtConversationCheckout(
+    reservationId: string,
+    conversationId: string,
+  ): boolean {
+    const reservation = this.workspaceByReservation.get(reservationId);
+    if (!reservation || reservation.kind !== "provider") return false;
+    const workspace = this.workspaceForConversation(conversationId);
+    const checkoutIdentity = canonicalCheckoutIdentity(workspace.checkoutPath);
+    const checkout = this.reservationsByCheckout.get(checkoutIdentity);
+    return reservation.checkoutIdentity === checkoutIdentity
+      && checkout?.kind === "provider"
+      && checkout.reservationIds.size === 1
+      && checkout.reservationIds.has(reservationId);
+  }
+
   hasCheckout(checkoutPath: string): boolean {
     return this.reservationsByCheckout.has(
       canonicalCheckoutIdentity(checkoutPath),

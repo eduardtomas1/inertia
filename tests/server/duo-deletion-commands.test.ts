@@ -368,7 +368,7 @@ describe("Duo deletion command preflights", () => {
     const store: Partial<RuntimeStore> = {
       hasActiveWorkspaceRunForProject: vi.fn(() => false),
       assertProjectDeletionAllowed,
-      shellSnapshot: vi.fn(),
+      shellSnapshot: vi.fn(() => ({ conversations: [] }) as never),
       removeProject: vi.fn(),
     };
     const dependencies = projectDependencies(store);
@@ -379,7 +379,7 @@ describe("Duo deletion command preflights", () => {
     );
 
     expect(assertProjectDeletionAllowed).toHaveBeenCalledWith(projectId);
-    expect(store.shellSnapshot).not.toHaveBeenCalled();
+    expect(store.shellSnapshot).toHaveBeenCalledOnce();
     expect(store.removeProject).not.toHaveBeenCalled();
     expect(dependencies.rememberDeletedConversation).not.toHaveBeenCalled();
     expect(dependencies.forgetRemoteTranscript).not.toHaveBeenCalled();

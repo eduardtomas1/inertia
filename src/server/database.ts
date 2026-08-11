@@ -525,7 +525,7 @@ export class RuntimeStore {
       limit,
     );
   }
-
+  pairedLaunchIdsForDeletionRecovery(scope: { conversationId: string } | { projectId: string }, limit: number) { return this.pairedLaunchRepository.deletionRecoveryLaunchIds(scope, limit); }
   assertConversationDeletionAllowed(conversationId: string): void {
     this.pairedLaunchRepository.assertConversationDeletionAllowed(
       conversationId,

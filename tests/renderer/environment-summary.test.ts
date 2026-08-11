@@ -133,6 +133,7 @@ describe("environment summary projection", () => {
           id: "failed",
           status: "failed",
           attentionState: "unseen",
+          canStop: false,
           finishedAt: now,
         }),
       ],
@@ -160,10 +161,85 @@ describe("environment summary projection", () => {
     });
     expect(summary.checks).toHaveLength(2);
     expect(summary.checks.map(({ id }) => id)).toContain("failed");
+    expect(summary.checks.find(({ id }) => id === "failed")?.canStop)
+      .toBe(false);
     expect(summary.subagents).toHaveLength(1);
     expect(summary.attachments.map(({ name }) => name))
       .toEqual(["notes.pdf", "old.png"]);
     expect(JSON.stringify(summary)).not.toContain("/private/");
+  });
+
+  it("keeps every stoppable project run while bounding passive status rows", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [
+        run({
+          id: "passive-1",
+          canStop: false,
+          startedAt: "2026-07-28T12:06:00.000Z",
+        }),
+        run({
+          id: "passive-2",
+          canStop: false,
+          startedAt: "2026-07-28T12:05:00.000Z",
+        }),
+        run({
+          id: "passive-3",
+          canStop: false,
+          startedAt: "2026-07-28T12:04:00.000Z",
+        }),
+        run({
+          id: "passive-hidden",
+          canStop: false,
+          startedAt: "2026-07-28T12:03:00.000Z",
+        }),
+        run({
+          id: "service-1",
+          canStop: true,
+          startedAt: "2026-07-28T12:02:00.000Z",
+        }),
+        run({
+          id: "service-2",
+          canStop: true,
+          startedAt: "2026-07-28T12:01:00.000Z",
+        }),
+        run({
+          id: "split-service",
+          projectId: "project-2",
+          label: "Docs preview",
+          detail: "npm run preview",
+          canStop: true,
+          startedAt: "2026-07-28T12:00:00.000Z",
+        }),
+        run({
+          id: "unrelated-service",
+          projectId: "project-3",
+          canStop: true,
+          startedAt: "2026-07-28T12:07:00.000Z",
+        }),
+      ],
+      subagents: [],
+      messages: [],
+      relatedProjects: [{ id: "project-2", name: "Docs" }],
+    });
+
+    expect(summary.checks.map(({ id }) => id)).toEqual([
+      "passive-1",
+      "passive-2",
+      "passive-3",
+      "service-1",
+      "service-2",
+      "split-service",
+    ]);
+    expect(summary.checks.filter(({ canStop }) => canStop).map(({ id }) => id))
+      .toEqual(["service-1", "service-2", "split-service"]);
+    expect(summary.checks.find(({ id }) => id === "split-service")?.contextLabel)
+      .toBe("Docs · npm run preview");
   });
 
   it("does not invent workspace details before they are available", () => {

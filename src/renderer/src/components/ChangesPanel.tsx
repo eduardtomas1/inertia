@@ -223,9 +223,14 @@ export function ChangesPanel({
     setStoppingAsk(false);
   }, [structured.fingerprint, selectedPath]);
 
+  useEffect(() => {
+    if (!questionRunning) setStoppingAsk(false);
+  }, [questionRunning]);
+
   const clearSelection = () => { setSelection(null); setReviewAction(null); setComment(""); setSelectionError(null); setStoppingAsk(false); };
   const stopActiveQuestion = () => {
     if (!onCancelAsk || stoppingAsk) return;
+    setSelectionError(null);
     setStoppingAsk(true);
     void onCancelAsk().catch((error) => {
       setSelectionError(error instanceof Error ? error.message : "The review question could not be stopped.");

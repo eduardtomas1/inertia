@@ -68,6 +68,9 @@ export function useWorkspaceReview({
   >(() => new Map());
   const [selectionReviewAnswer, setSelectionReviewAnswer] =
     useState<DiffSelectionReviewAnswer | null>(null);
+  const [selectionQuestionOwners, setSelectionQuestionOwners] = useState<
+    ReadonlyMap<string, number>
+  >(() => new Map());
   const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const authorityRef = useRef(authority);
   authorityRef.current = authority;
@@ -120,29 +123,45 @@ export function useWorkspaceReview({
     if (!project || !conversation) return;
     const owner = `${project.id}:${conversation.id}`;
     setSelectionReviewAnswer(null);
-    const event = await run("review.selection.ask", {
-      type: "review.selection.ask",
-      payload: {
-        projectId: project.id,
-        conversationId: conversation.id,
-        repositoryPath: selection.repositoryPath ?? ".",
-        fingerprint: selection.fingerprint,
-        filePath: selection.file.path,
-        hunkId: selection.hunk.id,
-        lineIds: selection.lineIds,
-        ...(comment.trim() ? { comment: comment.trim() } : {}),
-        ignoreWhitespace,
-      },
+    setSelectionQuestionOwners((current) => {
+      const next = new Map(current);
+      next.set(owner, (current.get(owner) ?? 0) + 1);
+      return next;
     });
-    if (event.type === "request.ok") return;
-    const result = resultEvent(event).result;
-    if (result.kind !== "review.selection.answer") {
-      throw new Error(
-        "The local service returned an unexpected review answer.",
-      );
-    }
-    if (authorityRef.current === owner) {
-      setSelectionReviewAnswer(result.answer);
+    try {
+      const event = await run("review.selection.ask", {
+        type: "review.selection.ask",
+        payload: {
+          projectId: project.id,
+          conversationId: conversation.id,
+          repositoryPath: selection.repositoryPath ?? ".",
+          fingerprint: selection.fingerprint,
+          filePath: selection.file.path,
+          hunkId: selection.hunk.id,
+          lineIds: selection.lineIds,
+          ...(comment.trim() ? { comment: comment.trim() } : {}),
+          ignoreWhitespace,
+        },
+      });
+      if (event.type === "request.ok") return;
+      const result = resultEvent(event).result;
+      if (result.kind !== "review.selection.answer") {
+        throw new Error(
+          "The local service returned an unexpected review answer.",
+        );
+      }
+      if (authorityRef.current === owner) {
+        setSelectionReviewAnswer(result.answer);
+      }
+    } finally {
+      setSelectionQuestionOwners((current) => {
+        const count = current.get(owner) ?? 0;
+        if (count === 0) return current;
+        const next = new Map(current);
+        if (count === 1) next.delete(owner);
+        else next.set(owner, count - 1);
+        return next;
+      });
     }
   }, [conversation, ignoreWhitespace, project, run]);
 
@@ -420,6 +439,8 @@ export function useWorkspaceReview({
     reviewSummary,
     reviewStates,
     reviewNotes,
+    selectionQuestionRunning:
+      (selectionQuestionOwners.get(authority) ?? 0) > 0,
     askAboutDiff,
     cancelDiffQuestion,
     requestDiffRevision,

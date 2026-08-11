@@ -210,6 +210,82 @@ describe("workspace pane authority", () => {
     });
   });
 
+  it("tracks concurrent selection questions under their initiating pane authority", async () => {
+    const patch = [
+      "diff --git a/src/value.ts b/src/value.ts",
+      "--- a/src/value.ts",
+      "+++ b/src/value.ts",
+      "@@ -1 +1 @@",
+      "-export const value = 1;",
+      "+export const value = 2;",
+    ].join("\n");
+    const structured = parseUnifiedDiff(patch);
+    const file = structured.files[0]!;
+    const hunk = file.hunks[0]!;
+    const selectedLine = hunk.lines.find(({ kind }) => kind === "addition")!;
+    const selection = {
+      fingerprint: structured.fingerprint,
+      file,
+      hunk,
+      lineIds: [selectedLine.id],
+      reference: file.path,
+      repositoryPath: ".",
+    };
+    const pending: Array<{
+      resolve: (event: ServerEvent) => void;
+      reject: (error: Error) => void;
+    }> = [];
+    const run = vi.fn(() => new Promise<ServerEvent>((resolve, reject) => {
+      pending.push({ resolve, reject });
+    }));
+    const review = renderHook((owner: {
+      project: Project;
+      conversation: Conversation;
+    }) => useWorkspaceReview({
+      ...owner,
+      detail: null,
+      gitDiff: { patch, truncated: false, files: [] },
+      ignoreWhitespace: false,
+      confirmDestructiveActions: false,
+      request: vi.fn(),
+      run,
+      setGitDiff: vi.fn(),
+    }), {
+      initialProps: { project: alpha, conversation: alphaChat },
+    });
+
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = review.result.current.askAboutDiff(selection, "first");
+      second = review.result.current.askAboutDiff(selection, "second");
+    });
+    await waitFor(() => {
+      expect(review.result.current.selectionQuestionRunning).toBe(true);
+      expect(pending).toHaveLength(2);
+    });
+
+    review.rerender({ project: beta, conversation: betaChat });
+    expect(review.result.current.selectionQuestionRunning).toBe(false);
+    review.rerender({ project: alpha, conversation: alphaChat });
+    expect(review.result.current.selectionQuestionRunning).toBe(true);
+
+    await act(async () => {
+      pending[0]!.resolve({
+        type: "request.ok",
+        requestId: crypto.randomUUID(),
+      });
+      await first;
+    });
+    expect(review.result.current.selectionQuestionRunning).toBe(true);
+
+    await act(async () => {
+      pending[1]!.reject(new Error("Provider disconnected"));
+      await expect(second).rejects.toThrow("Provider disconnected");
+    });
+    expect(review.result.current.selectionQuestionRunning).toBe(false);
+  });
+
   it("blocks root commit clicks and Enter when the complete diff is truncated", () => {
     const review = renderHook(() => useWorkspaceReview({
       project: alpha,
@@ -1533,6 +1609,65 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.pendingResumeConversationId).toBeNull();
     hook.rerender(alpha);
     expect(hook.result.current.pendingResumeConversationId).toBeNull();
+  });
+
+  it("stops the exact workspace run surfaced by the owning UI", async () => {
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.ok",
+      requestId: crypto.randomUUID(),
+    }));
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run,
+      setActiveTool: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.stopWorkspaceRun({
+      id: "55555555-5555-4555-8555-555555555555",
+      label: "Preview service",
+    }));
+
+    await waitFor(() => expect(run).toHaveBeenCalledWith(
+      "activity.stop:55555555-5555-4555-8555-555555555555",
+      {
+        type: "activity.stop",
+        payload: { runId: "55555555-5555-4555-8555-555555555555" },
+      },
+    ));
+  });
+
+  it.each([
+    {
+      failure: new Error("The run already finished."),
+      message: "Could not stop Review question: The run already finished.",
+    },
+    {
+      failure: "unknown failure",
+      message: "Could not stop Review question: The work could not be stopped.",
+    },
+  ])("surfaces an exact-run stop failure without hiding its owner", async ({
+    failure,
+    message,
+  }) => {
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run: vi.fn(async () => {
+        throw failure;
+      }),
+      setActiveTool: vi.fn(),
+      setActionError,
+    }));
+
+    act(() => hook.result.current.stopWorkspaceRun({
+      id: "66666666-6666-4666-8666-666666666666",
+      label: "Review question",
+    }));
+
+    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(message));
   });
 
   it("closes and resets a native preview when its conversation changes", async () => {

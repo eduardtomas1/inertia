@@ -1922,8 +1922,14 @@ textarea {
 
 .environment-summary-section li > small {
   flex: 0 0 auto;
+  margin-left: auto;
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
+}
+
+.environment-summary-section li > .icon-button {
+  width: 26px;
+  height: 26px;
 }
 
 .environment-attachments li {

@@ -209,6 +209,44 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(screen.getByRole("button", { name: "Ask about" })).toBeDisabled();
   });
 
+  it("clears a completed stop attempt before a later question starts", async () => {
+    const onCancelAsk = vi.fn(async () => undefined);
+    const panel = (questionRunning: boolean): React.JSX.Element => (
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{
+          patch: patchFor("README.md"),
+          truncated: false,
+          files: [changedFile("README.md")],
+        }}
+        selectedPath="README.md"
+        summary={null}
+        questionRunning={questionRunning}
+        onSelectFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onCancelAsk={onCancelAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />
+    );
+    const view = render(panel(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop asking" }));
+    expect(screen.getByRole("button", { name: /Stopping…$/u })).toBeDisabled();
+
+    view.rerender(panel(false));
+    expect(screen.queryByRole("button", { name: "Stop asking" }))
+      .not.toBeInTheDocument();
+    view.rerender(panel(true));
+    expect(screen.getByRole("button", { name: "Stop asking" })).toBeEnabled();
+  });
+
   it("switches one flat file navigator between repositories without losing identity", async () => {
     const onLoadRepositoryDiff = vi.fn(async (
       repositoryPath: string,

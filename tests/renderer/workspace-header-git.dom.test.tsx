@@ -98,6 +98,7 @@ function renderHeader(
       onPull={vi.fn()}
       onPush={onPush}
       onRunAction={vi.fn()}
+      onStopRun={vi.fn()}
     />,
   );
 }
@@ -200,6 +201,7 @@ describe("WorkspaceHeader Git pull request availability", () => {
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
+        onStopRun={vi.fn()}
       />,
     );
 
@@ -256,6 +258,7 @@ describe("WorkspaceHeader Git pull request availability", () => {
         onPull={onPull}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
+        onStopRun={vi.fn()}
       />,
     );
 

@@ -345,7 +345,12 @@ describe("trusted overlay native preview suspension", () => {
   });
 
   it("suspends for the mounted environment summary", async () => {
-    const view = render(<EnvironmentSummary summary={environmentSummary} />);
+    const view = render(
+      <EnvironmentSummary
+        summary={environmentSummary}
+        onStopRun={vi.fn()}
+      />,
+    );
 
     expect(screen.getByRole("dialog", { name: "Environment summary" }))
       .toBeInTheDocument();

@@ -50,6 +50,7 @@ type WorkspaceHeaderProps = {
   onPull: () => void;
   onPush: () => void;
   onRunAction: (action: ProjectAction) => void;
+  onStopRun: (run: EnvironmentSummarySnapshot["checks"][number]) => void;
 };
 
 export function WorkspaceHeader({
@@ -84,6 +85,7 @@ export function WorkspaceHeader({
   onPull,
   onPush,
   onRunAction,
+  onStopRun,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | "git" | null>(null);
   const privateConnectLoad = usePrivateConnectState();
@@ -405,7 +407,10 @@ export function WorkspaceHeader({
               className="environment-summary-popover"
               id="environment-summary-popover"
             >
-              <EnvironmentSummary summary={environmentSummary} />
+              <EnvironmentSummary
+                summary={environmentSummary}
+                onStopRun={onStopRun}
+              />
             </div>
           )}
         </div>

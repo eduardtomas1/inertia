@@ -98,6 +98,7 @@ interface AppLayoutActions {
     paths: string[],
   ) => Promise<void>;
   runProjectAction: (action: ProjectAction) => void;
+  stopWorkspaceRun: (run: Pick<WorkspaceRun, "id" | "label">) => void;
   acknowledgeActivity: (activity: WorkspaceRun) => void;
   dismissActivity: (activity: WorkspaceRun) => void;
 }
@@ -501,6 +502,7 @@ export function AppLayout({
               actions.mutateBranch("git.branch.create", name)}
             onCommit={() => setCommitDialogOpen(true)}
             onRunAction={actions.runProjectAction}
+            onStopRun={actions.stopWorkspaceRun}
             onCreateConversationOnBranch={(branch) =>
               actions.createConversation(project, { kind: "branch", branch })}
             onCreateConversationInWorktree={() => {

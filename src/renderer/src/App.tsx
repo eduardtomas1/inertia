@@ -458,7 +458,10 @@ export default function App(): React.JSX.Element {
     runs: connection.snapshot?.runs ?? [],
     subagents,
     messages,
+    relatedProjects: connection.snapshot?.projects.filter(({ id }) =>
+      id === splitConversation?.projectId && id !== project?.id) ?? [],
   }), [
+    connection.snapshot?.projects,
     connection.snapshot?.runs,
     connection.status,
     conversation?.id,
@@ -466,6 +469,7 @@ export default function App(): React.JSX.Element {
     messages,
     project?.id,
     project?.name,
+    splitConversation?.projectId,
     subagents,
     workspaceGitStatus,
   ]);
@@ -596,6 +600,7 @@ export default function App(): React.JSX.Element {
   );
   const {
     runProjectAction,
+    stopWorkspaceRun,
     acknowledgeActivity,
     dismissActivity,
   } = activityActions;
@@ -985,6 +990,7 @@ export default function App(): React.JSX.Element {
         commitReviewRevision: workspaceTools.commitReviewRevision,
         commit,
         runProjectAction,
+        stopWorkspaceRun,
         acknowledgeActivity,
         dismissActivity,
       }}

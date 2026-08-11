@@ -117,6 +117,7 @@ describe("WorkspaceHeader deferred Git menu", () => {
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
+        onStopRun={vi.fn()}
       />,
     );
 

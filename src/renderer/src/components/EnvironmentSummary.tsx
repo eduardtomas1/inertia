@@ -6,14 +6,17 @@ import {
   Image,
   Laptop,
   ListChecks,
+  Square,
 } from "lucide-react";
 
 import { chatAttachmentKind } from "@shared/attachments";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
+import { IconButton } from "./ui";
 
 interface EnvironmentSummaryProps {
   summary: EnvironmentSummarySnapshot;
+  onStopRun: (run: EnvironmentSummarySnapshot["checks"][number]) => void;
 }
 
 function subagentLabel(
@@ -26,6 +29,7 @@ function subagentLabel(
 
 export function EnvironmentSummary({
   summary,
+  onStopRun,
 }: EnvironmentSummaryProps): React.JSX.Element {
   useNativePreviewSuspension(true);
   const hasWorkspaceDetails = Boolean(
@@ -104,8 +108,19 @@ export function EnvironmentSummary({
           <ul>
             {summary.checks.map((check) => (
               <li key={check.id}>
-                <span>{check.label}</span>
+                <span title={`${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}>
+                  {check.label}
+                  {check.contextLabel ? ` · ${check.contextLabel}` : ""}
+                </span>
                 <small>{check.status === "waiting" ? "Waiting" : check.status === "failed" ? "Needs attention" : "Running"}</small>
+                {check.canStop && (
+                  <IconButton
+                    label={`Stop ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
+                    onClick={() => onStopRun(check)}
+                  >
+                    <Square size={12} />
+                  </IconButton>
+                )}
               </li>
             ))}
           </ul>

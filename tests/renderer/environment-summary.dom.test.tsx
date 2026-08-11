@@ -39,14 +39,20 @@ const project: Project = {
 
 function HeaderHarness({
   activeProject = null,
+  environmentSummary = summary,
   workspaceToolsUnavailableReason = null,
   onOpenSettings = vi.fn(),
   onOpenConnectionsSettings = vi.fn(),
+  onStopRun = vi.fn(),
 }: {
   activeProject?: Project | null;
+  environmentSummary?: EnvironmentSummarySnapshot;
   workspaceToolsUnavailableReason?: string | null;
   onOpenSettings?: () => void;
   onOpenConnectionsSettings?: () => void;
+  onStopRun?: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(true);
   return (
@@ -62,7 +68,7 @@ function HeaderHarness({
         branches={[]}
         actions={[]}
         busy={false}
-        environmentSummary={summary}
+        environmentSummary={environmentSummary}
         environmentOpen={open}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
@@ -83,6 +89,7 @@ function HeaderHarness({
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
+        onStopRun={onStopRun}
       />
       <button type="button">Outside</button>
     </>
@@ -122,6 +129,46 @@ describe("environment summary header popover", () => {
     expect(screen.getByRole("button", {
       name: "Open environment summary",
     })).toHaveFocus();
+  });
+
+  it("offers an accessible exact-run stop for every stoppable active item", () => {
+    const onStopRun = vi.fn();
+    const preview = {
+      id: "preview-service",
+      label: "Preview service",
+      status: "running" as const,
+      canStop: true,
+      contextLabel: "Docs · npm run preview",
+    };
+    render(
+      <HeaderHarness
+        environmentSummary={{
+          ...summary,
+          checks: [
+            preview,
+            {
+              id: "failed-check",
+              label: "Typecheck",
+              status: "failed",
+              canStop: false,
+              contextLabel: null,
+            },
+          ],
+        }}
+        onStopRun={onStopRun}
+      />,
+    );
+
+    const stop = screen.getByRole("button", {
+      name: "Stop Preview service · Docs · npm run preview",
+    });
+    stop.focus();
+    expect(stop).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Stop Typecheck" }))
+      .not.toBeInTheDocument();
+
+    fireEvent.click(stop);
+    expect(onStopRun).toHaveBeenCalledWith(preview);
   });
 
   it("routes the Private Connect indicator directly to Connections & devices settings", async () => {

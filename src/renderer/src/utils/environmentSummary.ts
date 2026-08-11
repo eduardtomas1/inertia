@@ -23,7 +23,10 @@ export interface EnvironmentSummarySnapshot {
     label: "Branch" | "Branches";
     value: string;
   } | null;
-  checks: Array<Pick<WorkspaceRun, "id" | "label" | "status">>;
+  checks: Array<Pick<
+    WorkspaceRun,
+    "id" | "label" | "status" | "canStop"
+  > & { contextLabel: string | null }>;
   subagents: Array<Pick<
     SubagentTrace,
     "id" | "providerName" | "providerRole" | "status"
@@ -45,6 +48,7 @@ interface EnvironmentSummaryInput {
   runs: readonly WorkspaceRun[];
   subagents: readonly SubagentTrace[];
   messages: readonly ChatMessage[];
+  relatedProjects?: readonly { id: string; name: string }[];
 }
 
 function runtimeLabel(status: ConnectionStatus): string {
@@ -129,11 +133,18 @@ export function buildEnvironmentSummary({
   runs,
   subagents,
   messages,
+  relatedProjects = [],
 }: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
+  const visibleProjectIds = new Set(
+    projectId ? [projectId, ...relatedProjects.map(({ id }) => id)] : [],
+  );
+  const relatedProjectNames = new Map(
+    relatedProjects.map(({ id, name }) => [id, name]),
+  );
   const checks = projectId
     ? runs
       .filter((run) =>
-        run.projectId === projectId
+        visibleProjectIds.has(run.projectId)
         && (
           run.status === "running"
           || run.status === "waiting"
@@ -144,8 +155,22 @@ export function buildEnvironmentSummary({
           )
         ))
       .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
-      .slice(0, 3)
-      .map(({ id, label, status }) => ({ id, label, status }))
+      .reduce<WorkspaceRun[]>((visible, run) => {
+        if (run.canStop || visible.length < 3) visible.push(run);
+        return visible;
+      }, [])
+      .map(({ id, projectId: runProjectId, label, detail, status, canStop }) => ({
+        id,
+        label,
+        status,
+        canStop,
+        contextLabel: [
+          runProjectId === projectId
+            ? null
+            : relatedProjectNames.get(runProjectId) ?? "Split project",
+          detail,
+        ].filter((part): part is string => Boolean(part)).join(" · ") || null,
+      }))
     : [];
   const activeSubagents = conversationId
     ? subagents

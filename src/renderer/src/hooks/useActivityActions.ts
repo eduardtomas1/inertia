@@ -68,6 +68,18 @@ export function useActivityActions({
     setActiveTool("terminal");
   }, [conversationId, project, setActiveTool]);
 
+  const stopWorkspaceRun = useCallback((activity: Pick<WorkspaceRun, "id" | "label">) => {
+    void run(`activity.stop:${activity.id}`, {
+      type: "activity.stop",
+      payload: { runId: activity.id },
+    }).catch((error) => {
+      const detail = error instanceof Error
+        ? error.message
+        : "The work could not be stopped.";
+      setActionError(`Could not stop ${activity.label}: ${detail}`);
+    });
+  }, [run, setActionError]);
+
   const acknowledgeActivity = useCallback((activity: WorkspaceRun) => {
     void run(`activity.acknowledge:${activity.id}`, {
       type: "activity.acknowledge",
@@ -112,6 +124,7 @@ export function useActivityActions({
     },
     clearPendingResume: () => setPendingResume(null),
     runProjectAction,
+    stopWorkspaceRun,
     acknowledgeActivity,
     dismissActivity,
   }), [
@@ -121,5 +134,6 @@ export function useActivityActions({
     pendingResumeConversationId,
     project,
     runProjectAction,
+    stopWorkspaceRun,
   ]);
 }

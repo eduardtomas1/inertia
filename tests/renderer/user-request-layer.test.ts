@@ -167,11 +167,16 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain(`<time dateTime="${requestedAt}">`);
     expect(html).toContain('class="message-revert"');
     expect(html).toContain('disabled=""');
-    expect(html).toContain('aria-label="Request context"');
+    expect(html).toContain('aria-label="Request attachments"');
     expect(html).toContain('data-request-context-kind="image"');
-    expect(html).toContain("PNG image · reference.png");
+    expect(html).toContain("PNG image · 1.0 KB");
+    expect(html).toContain('aria-label="Preview attachment reference.png"');
+    expect(html).toContain(
+      'src="inertia://bundle/attachment-preview/attachment-1"',
+    );
+    expect(html).toContain("1.0 KB");
     expect(html).not.toContain("/workspace/reference.png");
-    expect(html.indexOf("PNG image · reference.png"))
+    expect(html.indexOf("reference.png"))
       .toBeGreaterThan(html.indexOf("Please inspect this reference."));
   });
 
@@ -187,7 +192,8 @@ describe("Quiet Ledger user request layer", () => {
     });
 
     expect(html).toContain('data-request-context-kind="document"');
-    expect(html).toContain("PDF document · brief.pdf");
+    expect(html).toContain('aria-label="Preview attachment brief.pdf"');
+    expect(html).toContain("PDF document · 4.0 KB");
     expect(html).not.toContain("/private/runtime/brief.pdf");
     expect(html).not.toContain("Image · brief.pdf");
   });

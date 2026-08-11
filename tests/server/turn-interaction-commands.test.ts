@@ -183,6 +183,12 @@ function dependencies(options: {
       createMessage: vi.fn(() => ({ id: "message-id" })),
       updateConversation: vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["store"],
+    conversationAttachments: {
+      retain: vi.fn(async (payloads: Array<{
+        attachment: ChatAttachment;
+      }>) => payloads.map(({ attachment }) => attachment)),
+      release: vi.fn(async () => undefined),
+    } as unknown as TurnInteractionCommandDependencies["conversationAttachments"],
     backendProfileController: {
       validateSelection: vi.fn((selection) =>
         options.validatedSelection ?? selection),
@@ -212,6 +218,7 @@ function dependencies(options: {
         ]),
       }]),
       relinquishAll: options.relinquishAll,
+      releaseAll: vi.fn(async () => undefined),
     } as unknown as TurnInteractionCommandDependencies["attachmentResolver"],
     generatedAttachments: options.generatedAttachments ?? {
       release: vi.fn(async () => undefined),
@@ -603,6 +610,31 @@ describe("message attachment ownership transfer", () => {
     expect(handlerDependencies.broadcastSnapshot).toHaveBeenCalledOnce();
   });
 
+  it("queues providers against the retained copy and persists its identity", async () => {
+    const queue = vi.fn(() => queuedTurn());
+    const relinquishAll = vi.fn(async () => undefined);
+    const handlerDependencies = dependencies({ queue, relinquishAll });
+    const retainedAttachment: ChatAttachment = {
+      ...trustedAttachment,
+      path: "/private/conversation-attachments/request.png",
+    };
+    vi.mocked(handlerDependencies.conversationAttachments.retain)
+      .mockResolvedValueOnce([retainedAttachment]);
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).resolves.toBe("handled");
+
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+      attachments: [retainedAttachment],
+      imagePaths: [retainedAttachment.path],
+    }));
+    expect(relinquishAll).not.toHaveBeenCalled();
+    expect(handlerDependencies.conversationAttachments.release)
+      .not.toHaveBeenCalled();
+  });
+
   it("relinquishes ownership when provider readiness rejects the send", async () => {
     const relinquishAll = vi.fn(async () => undefined);
     const queue = vi.fn();
@@ -622,6 +654,8 @@ describe("message attachment ownership transfer", () => {
     expect(queue).not.toHaveBeenCalled();
     expect(relinquishAll).toHaveBeenCalledOnce();
     expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(handlerDependencies.conversationAttachments.release)
+      .not.toHaveBeenCalled();
   });
 
   it("keeps a rejected capability available for a renderer retry", async () => {
@@ -643,6 +677,8 @@ describe("message attachment ownership transfer", () => {
     expect(queue).toHaveBeenCalledTimes(1);
     expect(relinquishAll).toHaveBeenCalledOnce();
     expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(handlerDependencies.conversationAttachments.release)
+      .toHaveBeenCalledWith([trustedAttachment.id]);
 
     await expect(handler({} as never, messageCommand())).resolves.toBe(
       "handled",
@@ -652,6 +688,8 @@ describe("message attachment ownership transfer", () => {
       attachments: [trustedAttachment],
     }));
     expect(relinquishAll).toHaveBeenCalledOnce();
+    expect(handlerDependencies.conversationAttachments.retain)
+      .toHaveBeenCalledTimes(2);
   });
 
   it("rejects stale skills before attempting a reversal checkpoint", async () => {
@@ -802,6 +840,43 @@ describe("message attachment ownership transfer", () => {
       );
       expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
       expect(queue).toHaveBeenCalledOnce();
+      const { stdout } = await execFileAsync("git", [
+        "-C",
+        repository,
+        "for-each-ref",
+        "--format=%(refname)",
+        `refs/inertia/checkpoints/${conversationId}/`,
+      ]);
+      expect(stdout.trim()).toBe("");
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a captured checkpoint when durable attachment retention fails", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "inertia-attachment-retain-"));
+    try {
+      await execFileAsync("git", ["init", "--quiet", repository]);
+      await writeFile(join(repository, "request.txt"), "pending\n");
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+        conversationPath: repository,
+      });
+      vi.mocked(handlerDependencies.conversationAttachments.retain)
+        .mockRejectedValueOnce(new Error("Conversation attachment storage is full."));
+
+      await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        messageCommand(),
+      )).rejects.toThrow("Conversation attachment storage is full.");
+
+      expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+      expect(handlerDependencies.attachmentResolver?.relinquishAll)
+        .toHaveBeenCalledWith([trustedAttachment.id]);
+      expect(handlerDependencies.conversationAttachments.release)
+        .not.toHaveBeenCalled();
       const { stdout } = await execFileAsync("git", [
         "-C",
         repository,

@@ -148,6 +148,38 @@ describe("CompatibilityTimeline", () => {
     expect(screen.getByText(legacyMessage.content)).toBeInTheDocument();
   });
 
+  it("keeps attachments visible on provider-disabled recovered messages", () => {
+    const attachedMessage: ChatMessage = {
+      ...legacyMessage,
+      attachments: [{
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "recovered.png",
+        path: "/private/path-must-not-render/recovered.png",
+        mimeType: "image/png",
+        size: 1_024,
+      }],
+    };
+    const { container } = render(
+      <CompatibilityTimeline
+        compatibility={{
+          inferredTurns: [],
+          malformedTurns: [],
+          messages: [attachedMessage],
+          activities: [],
+          reasonings: [],
+          plans: [],
+          checkpoints: [],
+        }}
+        props={timelineProps([attachedMessage])}
+      />,
+    );
+
+    expect(screen.getByRole("button", {
+      name: "Preview attachment recovered.png",
+    })).toBeInTheDocument();
+    expect(container.textContent).not.toContain("/private/");
+  });
+
   it("does not mount a large recovered history until the disclosure is opened", () => {
     const { container } = render(
       <CompatibilityTimeline

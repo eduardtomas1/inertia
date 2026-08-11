@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 
+import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
 import type { ServerEvent } from "../../../shared/contracts";
 import {
   hasNativeProviderTerminalSession,
@@ -30,6 +31,7 @@ import {
 
 export interface ProjectWorkspaceCommandDependencies {
   store: RuntimeStore;
+  conversationAttachments: ConversationAttachmentStore;
   workspaceRuns: WorkspaceRunController<WebSocket>;
   turns: TurnController;
   providers: ProviderManager;
@@ -119,7 +121,20 @@ export function createProjectWorkspaceCommandHandler(
             conversation.projectId === command.payload.projectId
           ))
           .map(({ id }) => id);
+        const attachmentIds = removedConversationIds.flatMap((conversationId) =>
+          dependencies.store.attachments(conversationId).map(({ id }) => id));
         dependencies.store.removeProject(command.payload.projectId);
+        try {
+          const referencedAttachmentIds = new Set(
+            dependencies.store.attachments().map(({ id }) => id),
+          );
+          await dependencies.conversationAttachments.release(
+            attachmentIds.filter((attachmentId) =>
+              !referencedAttachmentIds.has(attachmentId)),
+          );
+        } catch {
+          // Startup reconciliation retries cleanup against authoritative SQL.
+        }
         for (const conversationId of removedConversationIds) {
           dependencies.rememberDeletedConversation(conversationId);
           dependencies.forgetRemoteTranscript(conversationId);

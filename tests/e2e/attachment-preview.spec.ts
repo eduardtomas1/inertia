@@ -288,7 +288,9 @@ test("opens secure image and Linux-style clipboard PDF previews", async ({
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("sends a Linux-style pasted PDF as verified agent context", async () => {
+test("sends a Linux-style pasted PDF as verified agent context", async ({
+  browserName: _browserName,
+}, testInfo) => {
   const pdfBytes = readablePdf();
   await app.resizeWindow(1_280, 820);
   const composer = page.locator(".composer");
@@ -325,6 +327,42 @@ test("sends a Linux-style pasted PDF as verified agent context", async () => {
   // seconds cold-loading the bounded PDF stack. Keep this assertion inside
   // the production initialization deadline instead of racing valid work.
   await expect(acceptedRequest).toBeVisible({ timeout: 30_000 });
+  const retainedDocument = page.getByRole("button", {
+    name: "Preview attachment linux-send.pdf",
+  });
+  await expect(retainedDocument).toBeVisible();
+  await expect(page.getByText(
+    `PDF document · ${pdfBytes.length} B`,
+    { exact: true },
+  ))
+    .toBeVisible();
+  const sentPdfScreenshot = testInfo.outputPath(
+    "sent-pdf-attachment-1280x820.png",
+  );
+  await page.screenshot({ animations: "disabled", path: sentPdfScreenshot });
+  await testInfo.attach("sent-pdf-attachment-1280x820", {
+    path: sentPdfScreenshot,
+    contentType: "image/png",
+  });
+  await retainedDocument.click();
+  const retainedDialog = page.getByRole("dialog", { name: "linux-send.pdf" });
+  await expect(retainedDialog.getByRole("img", {
+    name: "linux-send.pdf, page 1",
+  })).toBeVisible();
+  await electronApp.evaluate(() => {
+    Reflect.set(globalThis, "__openedAttachmentPath", null);
+  });
+  await retainedDialog.getByRole("button", { name: "Open in PDF app" })
+    .click();
+  await expect.poll(() => electronApp.evaluate(() =>
+    Reflect.get(globalThis, "__openedAttachmentPath") as string | null))
+    .not.toBeNull();
+  const retainedPath = await electronApp.evaluate(() =>
+    Reflect.get(globalThis, "__openedAttachmentPath") as string);
+  expect(basename(retainedPath)).toMatch(/^[0-9a-f-]{36}\.pdf$/u);
+  expect(retainedPath).toContain(join("conversation-attachments", ""));
+  expect(await retainedDialog.textContent()).not.toContain(retainedPath);
+  await page.keyboard.press("Escape");
   await expect(attachments).toHaveCount(0);
   await expect(textarea).toHaveValue("");
   await expect(page.getByRole("alert")).toHaveCount(0);

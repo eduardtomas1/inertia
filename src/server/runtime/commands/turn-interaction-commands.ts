@@ -2,6 +2,8 @@ import { join } from "node:path";
 
 import type WebSocket from "ws";
 
+import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
+
 import {
   type AgentApprovalRequest,
   type AgentInputRequest,
@@ -42,6 +44,7 @@ import {
 
 export interface TurnInteractionCommandDependencies {
   store: RuntimeStore;
+  conversationAttachments: ConversationAttachmentStore;
   backendProfileController: BackendProfileController;
   turns: TurnController;
   isolatedRuns: IsolatedRunController<WebSocket>;
@@ -147,21 +150,30 @@ export function createTurnInteractionCommandHandler(
             () => resolutionAbort.abort(),
           );
         }
-        const attachments = resolvedAttachments.map(
+        const sourceAttachments = resolvedAttachments.map(
           ({ attachment }) => attachment,
         );
+        let attachments = sourceAttachments;
+        let retainedAttachmentIds: string[] = [];
+        let retainedAttachmentsAccepted = false;
         let generatedAttachmentPaths: string[] = [];
         const relinquishAttachments = async () => {
           const generated = generatedAttachmentPaths;
           generatedAttachmentPaths = [];
           await Promise.all([
             dependencies.attachmentResolver?.relinquishAll(
-              attachments.map(({ id }) => id),
+              sourceAttachments.map(({ id }) => id),
             ),
+            !retainedAttachmentsAccepted && retainedAttachmentIds.length > 0
+              ? dependencies.conversationAttachments.release(
+                  retainedAttachmentIds,
+                )
+              : undefined,
             generated.length > 0
               ? dependencies.generatedAttachments.release(generated)
               : undefined,
           ]);
+          if (!retainedAttachmentsAccepted) retainedAttachmentIds = [];
         };
         let documentPreparation: PreparedDocumentAttachments;
         let extraction: Promise<PreparedDocumentAttachments> | null = null;
@@ -360,6 +372,38 @@ export function createTurnInteractionCommandHandler(
             }
           }
         }
+        try {
+          attachments = await dependencies.conversationAttachments.retain(
+            resolvedAttachments,
+          );
+          retainedAttachmentIds = attachments.map(({ id }) => id);
+          const durablePathBySourcePath = new Map(
+            sourceAttachments.map((source, index) => [
+              source.path,
+              attachments[index]?.path ?? source.path,
+            ]),
+          );
+          documentPreparation = {
+            ...documentPreparation,
+            imagePaths: documentPreparation.imagePaths.map((path) =>
+              durablePathBySourcePath.get(path) ?? path),
+          };
+          assertMessageSendPreparationPending(preparationDeadlineAt);
+        } catch (error) {
+          if (providerTransitionReserved) {
+            dependencies.providerTerminalResumes.release(conversation.id);
+            providerTransitionReserved = false;
+          }
+          if (pendingCheckpoint) {
+            await deleteCheckpoint(
+              pendingCheckpoint.repositoryPath,
+              pendingCheckpoint.ref,
+              conversation.id,
+            ).catch(() => undefined);
+          }
+          await relinquishAttachments();
+          throw error;
+        }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         try {
           if (pendingCheckpoint) {
@@ -387,6 +431,7 @@ export function createTurnInteractionCommandHandler(
                 skills: resolvedSkills.inputs,
               })
             : null;
+          retainedAttachmentsAccepted = queued !== null;
         } catch (error) {
           if (providerTransitionReserved) {
             dependencies.providerTerminalResumes.release(conversation.id);
@@ -417,7 +462,11 @@ export function createTurnInteractionCommandHandler(
               undefined,
               { activateConversation: command.payload.activate },
             );
+            retainedAttachmentsAccepted = true;
             attachmentOwnershipAccepted = true;
+            await dependencies.attachmentResolver?.releaseAll(
+              sourceAttachments.map(({ id }) => id),
+            );
           }
           if (
             conversation.title === "New chat"

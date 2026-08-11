@@ -27,6 +27,7 @@ import type {
   RuntimePrivateConnectForgetScope,
   RuntimePrivateConnectPromptPreparation,
 } from "../node/runtime-process-protocol";
+import { ConversationAttachmentStore } from "../node/conversation-attachment-store";
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "./runtime/turns/turn-recovery";
@@ -237,6 +238,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
     },
   );
+  const conversationAttachments = await ConversationAttachmentStore.open(
+    dataDirectory,
+  );
+  await conversationAttachments.reconcile(store.attachments());
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;
@@ -690,6 +695,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createConversationCommandHandler({
         store,
+        conversationAttachments,
         providers,
         backendProfileController,
         workspaceRuns,
@@ -706,6 +712,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createTurnInteractionCommandHandler({
         store,
+        conversationAttachments,
         backendProfileController,
         turns,
         isolatedRuns,
@@ -766,6 +773,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createProjectWorkspaceCommandHandler({
         store,
+        conversationAttachments,
         workspaceRuns,
         turns,
         providers,

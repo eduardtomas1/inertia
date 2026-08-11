@@ -24,7 +24,6 @@ import {
 } from "../shared/backend-credentials.js";
 import {
   MAX_CHAT_ATTACHMENTS,
-  chatAttachmentKind,
 } from "../shared/attachments.js";
 import {
   builtInKimiClaudeBackendProfile,
@@ -53,6 +52,12 @@ import {
   removeAttachmentStorageSession,
   type AttachmentStorageReservation,
 } from "./attachment-registry.js";
+import {
+  type ConversationAttachmentAccess,
+  openPdfAttachment,
+  openConversationAttachments,
+  resolveAttachmentPreviewResponse,
+} from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
@@ -172,6 +177,7 @@ const previewBroker = new PreviewBroker({
 });
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
+let conversationAttachments: ConversationAttachmentAccess | null = null;
 let attachmentCleanup: Promise<void> = Promise.resolve();
 let attachmentStorageDirectory: string | null = null;
 let runtimeDataDirectory: string | null = null;
@@ -303,23 +309,13 @@ function registerAppProtocol(): void {
       if (requestedPath.includes("\0")) throw new Error();
       const previewId = /^attachment-preview\/([0-9a-f-]{36})$/iu.exec(requestedPath)?.[1];
       if (previewId) {
-        const preview = await attachmentRegistry().preview(previewId);
-        if (
-          !preview
-          || (
-            chatAttachmentKind(preview.mimeType) !== "image"
-            && preview.mimeType !== "application/pdf"
-          )
-        ) throw new Error();
-        return new Response(new Uint8Array(preview.bytes).buffer, {
-          status: 200,
-          headers: {
-            "Content-Type": preview.mimeType,
-            "Content-Length": String(preview.size),
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "no-store",
-          },
-        });
+        const response = await resolveAttachmentPreviewResponse(
+          importedAttachments,
+          conversationAttachments,
+          previewId,
+        );
+        if (!response) throw new Error();
+        return response;
       }
       const target = resolve(rendererRoot, requestedPath);
       if (!isContained(rendererRoot, target)) throw new Error();
@@ -695,12 +691,11 @@ function registerIpcHandlers(): void {
     if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
       throw new Error("Invalid attachment.");
     }
-    const attachment = await attachmentRegistry().resolve(value);
-    if (!attachment || attachment.mimeType !== "application/pdf") {
-      throw new Error("The PDF attachment is unavailable.");
-    }
-    const openError = await shell.openPath(attachment.path);
-    if (openError) throw new Error("The platform PDF app could not open the attachment.");
+    await openPdfAttachment(
+      attachmentRegistry(),
+      conversationAttachments,
+      value,
+    );
   });
 
   ipcMain.handle(IPC.openProjectPath, async (event, ...args) => {
@@ -978,6 +973,7 @@ async function bootstrap(): Promise<void> {
     ? resolve(process.env.INERTIA_DATA_DIR)
     : join(app.getPath("userData"), "runtime");
   runtimeDataDirectory = dataDirectory;
+  conversationAttachments = openConversationAttachments(dataDirectory);
   const defaultWorkspacePath = process.env.INERTIA_WORKSPACE_DIR
     ? resolve(process.env.INERTIA_WORKSPACE_DIR)
     : join(app.getPath("home"), "Inertia");
@@ -997,6 +993,7 @@ async function bootstrap(): Promise<void> {
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
     createAttachmentStorageSession(attachmentStorageRoot()),
+    conversationAttachments,
   ]);
   attachmentStorageDirectory = attachmentStorage.directory;
   const orphanReservation = attachmentStorage.reservation;

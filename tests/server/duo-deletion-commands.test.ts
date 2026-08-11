@@ -93,7 +93,13 @@ function conversationDependencies(
   store: Partial<RuntimeStore>,
 ): ConversationCommandDependencies {
   return {
-    store: store as RuntimeStore,
+    store: {
+      attachments: vi.fn(() => []),
+      ...store,
+    } as RuntimeStore,
+    conversationAttachments: {
+      release: vi.fn(async () => undefined),
+    } as never,
     providers: {} as never,
     backendProfileController: {} as never,
     workspaceRuns: {} as never,
@@ -118,6 +124,9 @@ function projectDependencies(
 ): ProjectWorkspaceCommandDependencies {
   return {
     store: store as RuntimeStore,
+    conversationAttachments: {
+      release: vi.fn(async () => undefined),
+    } as never,
     workspaceRuns: {} as never,
     turns: { isActive: vi.fn(() => false) } as never,
     providers: {} as never,
@@ -178,9 +187,11 @@ describe("Duo deletion command preflights", () => {
     expect(dependencies.forgetRemoteTranscript).not.toHaveBeenCalled();
   });
 
-  it("deletes terminal paired history after the read-only chat preflight", async () => {
+  it("deletes terminal paired history when private attachment cleanup must retry on restart", async () => {
     const assertConversationDeletionAllowed = vi.fn();
     const deleteConversation = vi.fn();
+    const attachmentId = "88888888-8888-4888-8888-888888888888";
+    const sharedAttachmentId = "99999999-9999-4999-8999-999999999999";
     const store: Partial<RuntimeStore> = {
       conversation: vi.fn(() => conversation),
       hasActiveWorkspaceRunForConversation: vi.fn(() => false),
@@ -193,9 +204,16 @@ describe("Duo deletion command preflights", () => {
       shellSnapshot: vi.fn(() => ({
         conversations: [conversation],
       }) as AppSnapshot),
+      attachments: vi.fn((selectedConversationId?: string) => (
+        selectedConversationId
+          ? [{ id: attachmentId }, { id: sharedAttachmentId }]
+          : [{ id: sharedAttachmentId }]
+      ) as never),
       deleteConversation,
     };
     const dependencies = conversationDependencies(store);
+    vi.mocked(dependencies.conversationAttachments.release)
+      .mockRejectedValueOnce(new Error("transient cleanup failure"));
     const handler = createConversationCommandHandler(dependencies);
 
     await expect(handler({} as never, conversationDelete))
@@ -222,6 +240,8 @@ describe("Duo deletion command preflights", () => {
       conversationId,
     );
     expect(deleteConversation).toHaveBeenCalledWith(conversationId);
+    expect(dependencies.conversationAttachments.release)
+      .toHaveBeenCalledWith([attachmentId]);
     expect(dependencies.rememberDeletedConversation).toHaveBeenCalledWith(
       conversationId,
     );
@@ -388,12 +408,19 @@ describe("Duo deletion command preflights", () => {
   it("updates deletion caches only after terminal project removal succeeds", async () => {
     const assertProjectDeletionAllowed = vi.fn();
     const removeProject = vi.fn();
+    const removedAttachmentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const sharedAttachmentId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const store: Partial<RuntimeStore> = {
       hasActiveWorkspaceRunForProject: vi.fn(() => false),
       assertProjectDeletionAllowed,
       shellSnapshot: vi.fn(() => ({
         conversations: [conversation],
       }) as AppSnapshot),
+      attachments: vi.fn((selectedConversationId?: string) => (
+        selectedConversationId
+          ? [{ id: removedAttachmentId }, { id: sharedAttachmentId }]
+          : [{ id: sharedAttachmentId }]
+      ) as never),
       removeProject,
     };
     const dependencies = projectDependencies(store);
@@ -404,6 +431,8 @@ describe("Duo deletion command preflights", () => {
 
     expect(assertProjectDeletionAllowed).toHaveBeenCalledBefore(removeProject);
     expect(removeProject).toHaveBeenCalledWith(projectId);
+    expect(dependencies.conversationAttachments.release)
+      .toHaveBeenCalledWith([removedAttachmentId]);
     expect(removeProject).toHaveBeenCalledBefore(
       dependencies.rememberDeletedConversation as ReturnType<typeof vi.fn>,
     );

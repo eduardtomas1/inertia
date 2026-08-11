@@ -471,8 +471,15 @@ export class AttachmentRegistry {
       for (const attachment of deduplicated) {
         registered.push(await this.persist(attachment));
       }
-      return registered.map(({ digest: _digest, extension: _extension, ...attachment }) =>
-        attachment);
+      return registered.map(({
+        digest: _digest,
+        extension: _extension,
+        path: _path,
+        ...attachment
+      }) => ({
+        ...attachment,
+        path: attachment.id,
+      }));
     } catch (error) {
       await Promise.all(registered.map(async (attachment) => {
         this.records.delete(attachment.id);

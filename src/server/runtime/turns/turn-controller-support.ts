@@ -43,6 +43,7 @@ export function projectActionKind(name: string): "check" | "service" {
 export function boundaryUsage(
   usage: ThreadUsageSnapshot | undefined,
   capturedAt: string,
+  providerSessionBound: boolean,
 ): AgentTurnUsageSnapshot | null {
   if (!usage) return null;
   return {
@@ -56,23 +57,41 @@ export function boundaryUsage(
     outputTokens: usage.outputTokens,
     reasoningOutputTokens: usage.reasoningOutputTokens,
     compactsAutomatically: usage.compactsAutomatically,
+    providerSessionBound,
     capturedAt,
   };
+}
+
+export function updateActiveTurnProviderSession(
+  active: Pick<ActiveTurn, "lastUsage" | "sessionAfter">,
+  providerSessionId: string,
+): void {
+  if (active.lastUsage && active.sessionAfter !== providerSessionId) {
+    active.lastUsage = {
+      ...active.lastUsage,
+      providerSessionBound: false,
+    };
+  }
+  active.sessionAfter = providerSessionId;
 }
 
 export function previousTurnBoundaryUsage(
   previousTurn: Pick<
     AgentTurn,
-    "association" | "status" | "usageAtCompletion"
+    "association" | "providerSessionAfter" | "status" | "usageAtCompletion"
   > | null,
+  providerSessionId: string,
 ): AgentTurnUsageSnapshot | null {
   // The conversation-level usage projection may belong to an older turn.
-  // Only the preceding turn's immutable completion is a safe cumulative base.
+  // Only the preceding turn's immutable completion, captured while bound to
+  // the exact resumed provider session, is a safe cumulative base.
   if (
     !previousTurn
     || previousTurn.association !== "authoritative"
     || !isAgentTurnTerminalStatus(previousTurn.status)
     || !previousTurn.usageAtCompletion
+    || previousTurn.usageAtCompletion.providerSessionBound !== true
+    || previousTurn.providerSessionAfter !== providerSessionId
   ) {
     return null;
   }

@@ -907,7 +907,8 @@ function turnUsage(value: unknown): boolean {
     && (value.totalProcessedScope === null
       || oneOf(value, "totalProcessedScope", ["thread", "session", "run"]))
     && (value.compactsAutomatically === null
-      || booleanField(value, "compactsAutomatically"));
+      || booleanField(value, "compactsAutomatically"))
+    && (!("providerSessionBound" in value) || booleanField(value, "providerSessionBound"));
 }
 
 function agentTurn(value: unknown): boolean {

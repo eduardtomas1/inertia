@@ -208,7 +208,9 @@ export function resolveTurnRequest(
     accessMode: conversation.accessMode,
     providerSessionBefore: canResume ? conversation.providerSessionId : null,
     requestedAt,
-    usageAtStart: canResume ? previousTurnBoundaryUsage(latestTurn) : null,
+    usageAtStart: canResume
+      ? previousTurnBoundaryUsage(latestTurn, conversation.providerSessionId!)
+      : null,
     configurationRevision: modelSelection.backendConfigurationRevision,
     association: "authoritative",
   };

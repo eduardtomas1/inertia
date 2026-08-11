@@ -252,7 +252,9 @@ function hasComparableCumulativeProvenance(turn: UsageDashboardTurn): boolean {
   // policy proves that this immutable execution identity can resume it. A
   // changed session at settlement makes the two cumulative snapshots
   // incomparable, even when their broad provider scopes happen to match.
-  return turn.providerSessionBefore !== null
+  return turn.usageAtStart?.providerSessionBound === true
+    && turn.usageAtCompletion?.providerSessionBound === true
+    && turn.providerSessionBefore !== null
     && turn.providerSessionAfter === turn.providerSessionBefore
     && identity.harnessId === selection.harnessId
     && identity.backendProfileId === selection.backendProfileId

@@ -410,6 +410,9 @@ export function normalizeAgentTurnUsage(
 ): AgentTurnUsageSnapshot {
   return {
     ...validateProviderUsage(usage),
+    // Legacy snapshots have no durable session provenance and must never be
+    // promoted to a cumulative resume boundary.
+    providerSessionBound: usage.providerSessionBound === true,
     capturedAt: requireTimestamp(usage.capturedAt, "Turn usage capture time"),
   };
 }

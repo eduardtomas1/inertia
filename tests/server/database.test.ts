@@ -166,6 +166,10 @@ describe("RuntimeStore conversation lifecycle", () => {
       compactsAutomatically: true,
       capturedAt: requestedAt,
     };
+    const persistedUsageAtStart = {
+      ...usageAtStart,
+      providerSessionBound: false,
+    };
     const turn = store.createAgentTurn({
       id: "turn-authoritative-1",
       conversationId: conversation.id,
@@ -192,7 +196,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       terminalAssistantMessageId: null,
       providerSessionBefore: "session-before",
       providerSessionAfter: null,
-      usageAtStart,
+      usageAtStart: persistedUsageAtStart,
       usageAtCompletion: null,
       association: "authoritative",
     });
@@ -212,6 +216,10 @@ describe("RuntimeStore conversation lifecycle", () => {
       reasoningOutputTokens: 20,
       capturedAt: at(6_000),
     };
+    const persistedUsageAtCompletion = {
+      ...usageAtCompletion,
+      providerSessionBound: false,
+    };
     const completed = store.updateAgentTurnLifecycle(turn.id, {
       status: "completed",
       terminalAssistantMessageId: assistantMessage.id,
@@ -230,7 +238,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       terminalAssistantMessageId: assistantMessage.id,
       providerSessionAfter: "session-after",
       checkpointId: "checkpoint-1",
-      usageAtCompletion,
+      usageAtCompletion: persistedUsageAtCompletion,
     });
     const acknowledgedFollowUp = store.createAcknowledgedFollowUpMessage(
       conversation.id,
@@ -294,8 +302,8 @@ describe("RuntimeStore conversation lifecycle", () => {
         providerSessionBefore: "session-before",
         providerSessionAfter: "session-after",
         association: "authoritative",
-        usageAtStart,
-        usageAtCompletion,
+        usageAtStart: persistedUsageAtStart,
+        usageAtCompletion: persistedUsageAtCompletion,
       }),
     ]);
     expect(reopened.snapshot().agentTurns).toEqual([

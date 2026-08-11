@@ -41,6 +41,7 @@ function usage(
     outputTokens: null,
     reasoningOutputTokens: null,
     compactsAutomatically: null,
+    providerSessionBound: true,
     capturedAt,
     ...update,
   };
@@ -638,18 +639,52 @@ describe("usage dashboard projection", () => {
         totalProcessedScope: "thread",
       }),
     });
+    const unboundStart = turn({
+      id: "unbound-start",
+      providerId: "codex",
+      model: "gpt-unbound-start",
+      completedAt: "2026-06-20T14:00:00.000Z",
+      providerSessionBefore: "thread-unbound-start",
+      startUsage: usage("2026-06-20T13:59:00.000Z", {
+        totalProcessedTokens: 600,
+        totalProcessedScope: "thread",
+        providerSessionBound: false,
+      }),
+      completionUsage: usage("2026-06-20T14:00:00.000Z", {
+        totalProcessedTokens: 700,
+        totalProcessedScope: "thread",
+      }),
+    });
+    const unboundCompletion = turn({
+      id: "unbound-completion",
+      providerId: "cursor",
+      model: "cursor-managed",
+      completedAt: "2026-06-20T15:00:00.000Z",
+      providerSessionBefore: "cursor-unbound-completion",
+      startUsage: usage("2026-06-20T14:59:00.000Z", {
+        totalProcessedTokens: 800,
+        totalProcessedScope: "session",
+      }),
+      completionUsage: usage("2026-06-20T15:00:00.000Z", {
+        totalProcessedTokens: 900,
+        totalProcessedScope: "session",
+        providerSessionBound: false,
+      }),
+    });
 
     const dashboard = projectUsageDashboard([
       proven,
       staleAfterRouteChange,
       inconsistentIdentity,
       changedSession,
+      unboundStart,
+      unboundCompletion,
     ], range);
 
     expect(dashboard.totals.processedTokens).toEqual({
       value: 125,
       measuredRequests: 1,
-      totalRequests: 4,
+      totalRequests: 6,
       coverage: "partial",
     });
   });

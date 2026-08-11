@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentTurnUsageSnapshot } from "../../src/shared/contracts";
-import { previousTurnBoundaryUsage } from "../../src/server/runtime/turns/turn-controller-support";
+import {
+  previousTurnBoundaryUsage,
+  updateActiveTurnProviderSession,
+} from "../../src/server/runtime/turns/turn-controller-support";
 
 function usage(): AgentTurnUsageSnapshot {
   return {
@@ -15,6 +18,7 @@ function usage(): AgentTurnUsageSnapshot {
     outputTokens: 10,
     reasoningOutputTokens: 2,
     compactsAutomatically: false,
+    providerSessionBound: true,
     capturedAt: "2026-08-11T10:00:00.000Z",
   };
 }
@@ -24,9 +28,11 @@ describe("turn usage boundaries", () => {
     expect(previousTurnBoundaryUsage(
       {
         association: "authoritative",
+        providerSessionAfter: "session-1",
         status: "completed",
         usageAtCompletion: usage(),
       },
+      "session-1",
     )).toMatchObject({
       totalProcessedTokens: 100,
       totalProcessedScope: "thread",
@@ -35,24 +41,81 @@ describe("turn usage boundaries", () => {
     expect(previousTurnBoundaryUsage(
       {
         association: "authoritative",
+        providerSessionAfter: "session-1",
         status: "completed",
         usageAtCompletion: null,
       },
+      "session-1",
     )).toBeNull();
-    expect(previousTurnBoundaryUsage(null)).toBeNull();
+    expect(previousTurnBoundaryUsage(null, "session-1")).toBeNull();
     expect(previousTurnBoundaryUsage(
       {
         association: "authoritative",
+        providerSessionAfter: "session-1",
         status: "running",
         usageAtCompletion: usage(),
       },
+      "session-1",
     )).toBeNull();
     expect(previousTurnBoundaryUsage(
       {
         association: "inferred",
+        providerSessionAfter: "session-1",
         status: "completed",
         usageAtCompletion: usage(),
       },
+      "session-1",
     )).toBeNull();
+    expect(previousTurnBoundaryUsage(
+      {
+        association: "authoritative",
+        providerSessionAfter: "session-2",
+        status: "completed",
+        usageAtCompletion: usage(),
+      },
+      "session-1",
+    )).toBeNull();
+    expect(previousTurnBoundaryUsage(
+      {
+        association: "authoritative",
+        providerSessionAfter: "session-1",
+        status: "completed",
+        usageAtCompletion: {
+          ...usage(),
+          providerSessionBound: false,
+        },
+      },
+      "session-1",
+    )).toBeNull();
+  });
+
+  it("invalidates a captured boundary when the provider session changes", () => {
+    const active = {
+      sessionAfter: "session-1",
+      lastUsage: usage(),
+    };
+    updateActiveTurnProviderSession(active, "session-2");
+    expect(active).toMatchObject({
+      sessionAfter: "session-2",
+      lastUsage: { providerSessionBound: false },
+    });
+    expect(previousTurnBoundaryUsage({
+      association: "authoritative",
+      providerSessionAfter: "session-2",
+      status: "completed",
+      usageAtCompletion: active.lastUsage,
+    }, "session-2")).toBeNull();
+
+    active.lastUsage = usage();
+    updateActiveTurnProviderSession(active, "session-2");
+    expect(previousTurnBoundaryUsage({
+      association: "authoritative",
+      providerSessionAfter: "session-2",
+      status: "completed",
+      usageAtCompletion: active.lastUsage,
+    }, "session-2")).toMatchObject({
+      totalProcessedTokens: 100,
+      providerSessionBound: true,
+    });
   });
 });

@@ -10,7 +10,10 @@ import {
   agentActivityStatus,
 } from "../../runtime-snapshots";
 import type { TurnActivityProjection } from "./turn-activity-projection";
-import { boundaryUsage } from "./turn-controller-support";
+import {
+  boundaryUsage,
+  updateActiveTurnProviderSession,
+} from "./turn-controller-support";
 import type {
   ActiveTurn,
   TurnControllerHooks,
@@ -74,12 +77,16 @@ export class TurnProviderEventProjector {
           turnId: active.turn.id,
           ...event.usage,
         });
-        active.lastUsage = boundaryUsage(usage, this.options.now());
+        active.lastUsage = boundaryUsage(
+          usage,
+          this.options.now(),
+          active.sessionAfter !== null,
+        );
         this.options.hooks.broadcast({ type: "agent.usage", usage });
         break;
       }
       case "session":
-        active.sessionAfter = event.sessionId;
+        updateActiveTurnProviderSession(active, event.sessionId);
         this.options.store.updateConversation(active.conversation.id, {
           providerSessionId: event.sessionId,
           continuationIdentity: active.turn.continuationIdentity,

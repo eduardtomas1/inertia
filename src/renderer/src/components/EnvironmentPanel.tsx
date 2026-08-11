@@ -89,10 +89,10 @@ export function EnvironmentPanel({
     && summary.gitState === "ready"
     && summary.changes,
   );
-  const branchLabel = summary.branch?.value
-    ?? (summary.gitState === "loading"
-      ? "Checking branch…"
-      : summary.gitState === "unavailable"
+  const branchLabel = summary.gitState === "loading"
+    ? "Checking branch…"
+    : summary.branch?.value
+      ?? (summary.gitState === "unavailable"
         ? "No Git repository"
         : summary.gitState === "unknown"
           ? "Repository not checked"

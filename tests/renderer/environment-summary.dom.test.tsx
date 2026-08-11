@@ -246,13 +246,14 @@ describe("Environment panel", () => {
     };
     const view = render(
       <EnvironmentPanel
-        summary={{ ...summary, branch: null, gitState: "loading" }}
+        summary={{ ...summary, gitState: "loading" }}
         workspaceToolsAvailable
         {...actions}
       />,
     );
     expect(screen.getByRole("button", { name: "Changes Checking…" })).toBeDisabled();
     expect(screen.getByText("Checking branch…")).toBeVisible();
+    expect(screen.queryByText("codex/summary")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("9 insertions and 4 deletions"))
       .not.toBeInTheDocument();
 

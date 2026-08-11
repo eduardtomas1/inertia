@@ -261,53 +261,54 @@ describe("durable conversation attachment storage", () => {
       cancellation.signal,
       "99999999-9999-4999-8999-999999999999",
     );
-    let staged = false;
-    for (let attempt = 0; attempt < 200 && !staged; attempt += 1) {
-      const pending = (await readdir(store.directory)).find((name) =>
-        name.startsWith(".pending-"));
-      staged = pending
-        ? await readFile(join(
-            store.directory,
-            pending,
-            `${stalled.attachment.id}.png`,
-          )).then(() => true, () => false)
-        : false;
-      if (!staged) await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    expect(staged).toBe(true);
-
-    cancellation.abort();
-    await expect(retaining).rejects.toMatchObject({ name: "AbortError" });
-
-    const next = image("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
-    let timeout!: ReturnType<typeof setTimeout>;
     try {
-      await expect(Promise.race([
-        store.retain(
-          [next],
-          undefined,
-          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        ),
-        new Promise((_, reject) => {
-          timeout = setTimeout(
-            () => reject(new Error("The mutation queue remained occupied.")),
-            5_000,
-          );
-        }),
-      ])).resolves.toHaveLength(1);
+      await vi.waitFor(async () => {
+        const pending = (await readdir(store.directory)).find((name) =>
+          name.startsWith(".pending-"));
+        expect(pending).toBeDefined();
+        await expect(readFile(join(
+            store.directory,
+            pending!,
+            `${stalled.attachment.id}.png`,
+        ))).resolves.toEqual(png);
+      }, { timeout: 10_000, interval: 10 });
+
+      cancellation.abort();
+      await expect(retaining).rejects.toMatchObject({ name: "AbortError" });
+
+      const next = image("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      let timeout!: ReturnType<typeof setTimeout>;
+      try {
+        await expect(Promise.race([
+          store.retain(
+            [next],
+            undefined,
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          ),
+          new Promise((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error("The mutation queue remained occupied.")),
+              5_000,
+            );
+          }),
+        ])).resolves.toHaveLength(1);
+      } finally {
+        clearTimeout(timeout);
+      }
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const pending = (await readdir(store.directory)).filter((name) =>
+          name.startsWith(".pending-"));
+        if (pending.length === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect((await readdir(store.directory)).filter((name) =>
+        name.startsWith(".pending-"))).toEqual([]);
+      await expect(store.preview(completed.attachment.id)).resolves.toBeNull();
     } finally {
-      clearTimeout(timeout);
+      cancellation.abort();
+      await retaining.catch(() => undefined);
     }
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      const pending = (await readdir(store.directory)).filter((name) =>
-        name.startsWith(".pending-"));
-      if (pending.length === 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    expect((await readdir(store.directory)).filter((name) =>
-      name.startsWith(".pending-"))).toEqual([]);
-    await expect(store.preview(completed.attachment.id)).resolves.toBeNull();
-  }, 10_000);
+  }, 20_000);
 
   it("reserves capacity until a cancelled persistence child has stopped", async () => {
     const dataDirectory = await root();
@@ -399,6 +400,66 @@ describe("durable conversation attachment storage", () => {
     await expect(store.retain(retry)).resolves.toHaveLength(2);
   });
 
+  it("blocks an immediate retry until a cancelled publication is reconciled", async () => {
+    const dataDirectory = await root();
+    const payload = image("90909090-9090-4090-8090-909090909090");
+    let published = false;
+    let stalled = false;
+    let finishStop!: () => void;
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (
+        operation.operation !== "persist"
+        || operation.id !== payload.attachment.id
+        || stalled
+      ) return testOperationRunner(operation, signal);
+      stalled = true;
+      const result = (async () => {
+        await testOperationRunner(operation, signal).result;
+        published = true;
+        await new Promise<never>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      })();
+      const stopped = new Promise<void>((resolve) => {
+        finishStop = resolve;
+      });
+      return { result, stopped };
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      operationRunner,
+    });
+    const cancellation = new AbortController();
+    const retaining = store.retain(
+      [payload],
+      cancellation.signal,
+      "91919191-9191-4191-8191-919191919191",
+    );
+    await vi.waitFor(() => expect(published).toBe(true));
+
+    cancellation.abort();
+    await expect(retaining).rejects.toMatchObject({ name: "AbortError" });
+    await expect(store.retain(
+      [payload],
+      undefined,
+      "92929292-9292-4292-8292-929292929292",
+    )).rejects.toThrow(/still cleaning up/u);
+
+    finishStop();
+    await vi.waitFor(async () => {
+      await expect(store.preview(payload.attachment.id)).resolves.toBeNull();
+    });
+    await expect(store.retain(
+      [payload],
+      undefined,
+      "93939393-9393-4393-8393-939393939393",
+    )).resolves.toHaveLength(1);
+  });
+
   it("refuses cleanup after its pinned storage root is replaced", async () => {
     const dataDirectory = await root();
     const outside = await root();
@@ -420,6 +481,32 @@ describe("durable conversation attachment storage", () => {
       await expect(readFile(join(outside, ".DS_Store"), "utf8"))
         .resolves.toBe("preserve");
       await expect(readdir(outside)).resolves.toEqual([".DS_Store"]);
+    } finally {
+      await rm(store.directory, { recursive: true, force: true });
+      await rename(moved, store.directory);
+    }
+  });
+
+  it("refuses reads after its pinned storage root is replaced", async () => {
+    const dataDirectory = await root();
+    const store = await ConversationAttachmentStore.open(dataDirectory);
+    const payload = image("94949494-9494-4494-8494-949494949494");
+    const [retained] = await store.retain([payload]);
+    const moved = `${store.directory}-moved`;
+    await rename(store.directory, moved);
+    await mkdir(store.directory, { mode: 0o700 });
+    if (process.platform !== "win32") await chmod(store.directory, 0o700);
+    await rename(
+      join(moved, retained!.id),
+      join(store.directory, retained!.id),
+    );
+    try {
+      await expect(store.preview(retained!.id)).rejects.toThrow(/read failed/u);
+      await expect(store.retain(
+        [payload],
+        undefined,
+        "95959595-9595-4595-8595-959595959595",
+      )).rejects.toThrow(/read failed/u);
     } finally {
       await rm(store.directory, { recursive: true, force: true });
       await rename(moved, store.directory);

@@ -123,5 +123,5 @@ export interface CodexAppServerRun {
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   steer?: (content: string) => Promise<boolean>;
   setGoal: (input: ProviderGoalMutation) => Promise<ProviderGoalSnapshot>;
-  clearGoal: () => Promise<void>;
+  clearGoal: () => Promise<boolean>;
 }

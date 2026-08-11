@@ -93,6 +93,7 @@ const path = require("node:path");
 const readline = require("node:readline");
 const capture = (value) => fs.appendFileSync(process.env.INERTIA_APP_SERVER_CAPTURE, JSON.stringify(value) + "\\n");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sendBatch = (values) => process.stdout.write(values.map((value) => JSON.stringify(value)).join("\\n") + "\\n");
 if (process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed") {
   process.stdout.on("error", () => {});
 }
@@ -204,6 +205,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       createdAt: 1800000000,
       updatedAt: 1800000000,
     };
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering") {
+      const activeGoal = { ...goal, status: "active" };
+      const completedGoal = { ...goal, status: "complete" };
+      sendBatch([
+        { method: "thread/goal/updated", params: { threadId, turnId, goal: activeGoal } },
+        { id: message.id, result: { goal } },
+        { method: "thread/goal/updated", params: { threadId, turnId, goal: completedGoal } },
+        { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+      ]);
+      return;
+    }
     send({ id: message.id, result: { goal } });
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only") {
       setTimeout(() => send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } }), 10);
@@ -235,6 +247,28 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }, 10);
     return;
   }
+  if (message.method === "thread/goal/clear") {
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering") {
+      const activeGoal = {
+        threadId,
+        objective: "Goal created after clear response",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 200,
+        timeUsedSeconds: 2,
+        createdAt: 1800000000,
+        updatedAt: 1800000011,
+      };
+      sendBatch([
+        { id: message.id, result: {} },
+        { method: "thread/goal/updated", params: { threadId, turnId, goal: activeGoal } },
+      ]);
+      return;
+    }
+    send({ id: message.id, result: {} });
+    send({ method: "thread/goal/cleared", params: { threadId } });
+    return;
+  }
   if (message.method === "turn/start") {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
@@ -245,6 +279,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       );
     }
     send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    if (
+      process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering"
+    ) {
+      if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering") {
+        send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { threadId, objective: "Goal before clear response", status: "active", tokenBudget: null, tokensUsed: 100, timeUsedSeconds: 1, createdAt: 1800000000, updatedAt: 1800000010 } } });
+      }
+      return;
+    }
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "legacy-large-frame") {
       send({ method: "account/rateLimits/updated", params: { padding: "x".repeat(1024 * 1024 + 32) } });
       send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
@@ -1082,6 +1125,74 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       objective: "Finish from the live connection",
       status: "complete",
     })]);
+  });
+
+  it("orders goal mutations at the decoded response frame", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-set-response-ordering";
+    const updates: ProviderGoalSnapshot[] = [];
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the ordered mutation connection open",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-set-response-ordering",
+      onStatus: () => markRunning(),
+      onGoalUpdated: (_threadId, goal) => updates.push(goal),
+    });
+    await running;
+
+    await expect(run.setGoal({
+      objective: "Pause after current progress",
+      status: "paused",
+      tokenBudget: null,
+    })).resolves.toMatchObject({ status: "complete" });
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    expect(updates.map(({ status }) => status)).toEqual([
+      "active",
+      "complete",
+    ]);
+  });
+
+  it("preserves a goal notification decoded after a clear response", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-clear-response-ordering";
+    const updates: ProviderGoalSnapshot[] = [];
+    const clears: string[] = [];
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the ordered clear connection open",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-clear-response-ordering",
+      onStatus: () => markRunning(),
+      onGoalUpdated: (_threadId, goal) => updates.push(goal),
+      onGoalCleared: (threadId) => clears.push(threadId),
+    });
+    await running;
+
+    await expect(run.clearGoal()).resolves.toBe(false);
+    expect(clears).toEqual([]);
+    expect(updates.map(({ objective }) => objective)).toEqual([
+      "Goal before clear response",
+      "Goal created after clear response",
+    ]);
+    run.cancel(true);
+    await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
   });
 
   it("keeps a resumed active goal connected across provider continuations", async () => {

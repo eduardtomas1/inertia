@@ -50,6 +50,7 @@ function eventHarness() {
   let phase: CodexRunPhase = "running";
   let activeTurnId: string | undefined = TURN_ID;
   const goalStatuses: AgentGoalStatus[] = [];
+  const goalClears: string[] = [];
   const finish = vi.fn((status: "completed" | "failed" | "cancelled") => {
     phase = "settled";
     return status;
@@ -64,9 +65,11 @@ function eventHarness() {
       access: "full",
       goalContinuationExpected: true,
       goalContinuationGraceMs: 25,
+      subagentDrainTimeoutMs: 25,
       onGoalUpdated: (_threadId, goal) => {
         goalStatuses.push(goal.status);
       },
+      onGoalCleared: (threadId) => goalClears.push(threadId),
     },
     resultText: new CappedTextBuffer(1_024),
     isSettled: () => phase === "settled",
@@ -94,6 +97,7 @@ function eventHarness() {
   return {
     events,
     finish,
+    goalClears,
     goalStatuses,
     phase: () => phase,
     activeTurnId: () => activeTurnId,
@@ -178,6 +182,102 @@ describe("Codex App Server goal event ordering", () => {
     }
   });
 
+  it("lets an equal-revision response win over pre-response notifications", () => {
+    const harness = eventHarness();
+    try {
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("active", 1_800_000_010),
+      );
+      const sequenceAtResponse = harness.events.goalProjectionSequence();
+      const responseGoal = goalUpdate("paused", 1_800_000_010).goal;
+
+      expect(harness.events.projectGoalResponse(
+        THREAD_ID,
+        responseGoal,
+        sequenceAtResponse,
+      )).toMatchObject({ status: "paused" });
+      expect(harness.goalStatuses).toEqual(["active", "paused"]);
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
+  it("preserves a goal notification decoded after a clear response", () => {
+    const harness = eventHarness();
+    try {
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("active", 1_800_000_010),
+      );
+      const sequenceAtResponse = harness.events.goalProjectionSequence();
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("active", 1_800_000_011),
+      );
+
+      expect(harness.events.projectGoalClearResponse(
+        THREAD_ID,
+        sequenceAtResponse,
+      )).toBe(false);
+      expect(harness.goalClears).toEqual([]);
+      expect(harness.goalStatuses).toEqual(["active", "active"]);
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
+  it("cancels pending subagent-drain completion for a late continuation", () => {
+    vi.useFakeTimers();
+    const harness = eventHarness();
+    try {
+      harness.events.handleNotification(
+        "thread/goal/updated",
+        goalUpdate("active", 1_800_000_010),
+      );
+      harness.events.handleNotification("item/started", {
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        item: {
+          id: "spawn-late-continuation",
+          type: "collabAgentToolCall",
+          tool: "spawnAgent",
+          status: "inProgress",
+          senderThreadId: THREAD_ID,
+          receiverThreadIds: ["child-late-continuation"],
+          prompt: "Keep checking",
+          agentsStates: {
+            "child-late-continuation": {
+              status: "running",
+              message: "Still checking",
+            },
+          },
+        },
+      });
+      harness.events.handleNotification("turn/completed", completedTurn());
+      vi.advanceTimersByTime(25);
+      expect(harness.finish).not.toHaveBeenCalled();
+
+      harness.events.handleNotification("turn/started", {
+        threadId: THREAD_ID,
+        turn: {
+          id: "turn-late-continuation",
+          status: "inProgress",
+          items: [],
+          error: null,
+        },
+      });
+      vi.advanceTimersByTime(25);
+
+      expect(harness.finish).not.toHaveBeenCalled();
+      expect(harness.phase()).toBe("running");
+      expect(harness.activeTurnId()).toBe("turn-late-continuation");
+    } finally {
+      harness.events.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("preserves a goal phase advanced by notifications in the response chunk", async () => {
     let phase: CodexRunPhase = "opening";
     let activeTurnId: string | undefined;
@@ -196,7 +296,7 @@ describe("Codex App Server goal event ordering", () => {
         onStatus: (status) => statuses.push(status),
       },
       modelProvider: undefined,
-      request: (method) => {
+      request: (method, _params, onResponseFrame) => {
         if (method === "initialize") {
           return Promise.resolve({ userAgent: "fake" });
         }
@@ -209,6 +309,7 @@ describe("Codex App Server goal event ordering", () => {
         }
         if (method === "turn/start") {
           return new Promise((resolve) => {
+            onResponseFrame?.();
             resolve({
               turn: {
                 id: TURN_ID,

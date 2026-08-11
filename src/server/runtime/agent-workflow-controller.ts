@@ -32,7 +32,9 @@ export interface NativeGoalRuntime {
     status: AgentGoalStatus;
     tokenBudget?: number | null;
   }): Promise<ProviderGoalSnapshot | null>;
-  clearNativeGoal(conversationId: string): Promise<boolean | null>;
+  clearNativeGoal(
+    conversationId: string,
+  ): Promise<boolean | "superseded" | null>;
 }
 
 interface PrivateSkillCapability {
@@ -592,6 +594,9 @@ export class AgentWorkflowController {
             throw new RuntimeRequestError(
               "The active Codex run no longer owns this goal.",
             );
+          }
+          if (routed === "superseded") {
+            return false;
           }
           if (routed === null) {
             const context = await this.providers.codexControlContext(

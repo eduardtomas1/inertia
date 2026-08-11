@@ -235,7 +235,7 @@ describe("agent harness architecture", () => {
               createdAt: "2026-01-01T00:00:00.000Z",
               updatedAt: "2026-01-01T00:00:00.000Z",
             }),
-            clearGoal: async () => undefined,
+            clearGoal: async () => true,
           },
         };
       },
@@ -312,7 +312,7 @@ describe("agent harness architecture", () => {
               createdAt: "2026-01-01T00:00:00.000Z",
               updatedAt: "2026-01-01T00:00:00.000Z",
             }),
-            clearGoal: async () => undefined,
+            clearGoal: async () => true,
           },
         };
       },
@@ -387,6 +387,7 @@ describe("agent harness architecture", () => {
           },
           clearGoal: async () => {
             clearCount += 1;
+            return clearCount === 1;
           },
         },
       }),
@@ -412,13 +413,17 @@ describe("agent harness architecture", () => {
       "conversation-codex",
       { runId: "run-codex", turnId: "turn-codex" },
     )).resolves.toBe(true);
+    await expect(manager.clearGoal(
+      "conversation-codex",
+      { runId: "run-codex", turnId: "turn-codex" },
+    )).resolves.toBe("superseded");
 
     expect(goalInputs).toEqual([{
       objective: "Owned goal",
       status: "active",
       tokenBudget: 8_000,
     }]);
-    expect(clearCount).toBe(1);
+    expect(clearCount).toBe(2);
     resolveResult(resultForHarness(input("codex"), "Done"));
     await run;
   });

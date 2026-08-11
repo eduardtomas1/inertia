@@ -215,7 +215,7 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
         if (settled || cancelRequested) {
           throw new Error("The Codex goal connection is not active.");
         }
-        await codexRun.clearGoal();
+        return await codexRun.clearGoal();
       },
     },
   };

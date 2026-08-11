@@ -48,6 +48,7 @@ interface PendingClientRequest {
   resolve: (value: JsonObject) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
+  onResponseFrame?: () => void;
 }
 
 export function startCodexAppServerRun(
@@ -255,6 +256,7 @@ export function startCodexAppServerRun(
   const request = (
     method: string,
     params: JsonObject,
+    onResponseFrame?: () => void,
   ): Promise<JsonObject> => {
     const id = nextRequestId;
     nextRequestId += 1;
@@ -269,7 +271,13 @@ export function startCodexAppServerRun(
         reject(new Error(`${method} timed out.`));
       }, options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS);
       timeout.unref();
-      pendingRequests.set(id, { method, resolve, reject, timeout });
+      pendingRequests.set(id, {
+        method,
+        resolve,
+        reject,
+        timeout,
+        ...(onResponseFrame ? { onResponseFrame } : {}),
+      });
       if (!writeMessage({ method, id, params })) {
         clearTimeout(timeout);
         pendingRequests.delete(id);
@@ -370,6 +378,7 @@ export function startCodexAppServerRun(
       if (!pending) return;
       clearTimeout(pending.timeout);
       pendingRequests.delete(id);
+      pending.onResponseFrame?.();
       const error = objectValue(message.error);
       if (error) {
         const errorMessage =
@@ -560,23 +569,35 @@ export function startCodexAppServerRun(
     if (input.tokenBudget !== undefined) {
       params.tokenBudget = input.tokenBudget;
     }
-    const sequenceBeforeRequest = events.goalProjectionSequence();
-    const response = await request("thread/goal/set", params);
+    let sequenceAtResponse = events.goalProjectionSequence();
+    const response = await request("thread/goal/set", params, () => {
+      sequenceAtResponse = events.goalProjectionSequence();
+    });
     const parsed = events.projectGoalResponse(
       providerThreadId,
       response.goal,
-      sequenceBeforeRequest,
+      sequenceAtResponse,
     );
     if (!parsed) throw new Error("Codex returned a malformed goal response.");
     return parsed;
   };
 
-  const clearGoal = async (): Promise<void> => {
+  const clearGoal = async (): Promise<boolean> => {
     if (settled || cancelRequested || !providerThreadId) {
       throw new Error("The Codex goal connection is not active.");
     }
-    await request("thread/goal/clear", { threadId: providerThreadId });
-    events.projectGoalCleared(providerThreadId);
+    let sequenceAtResponse = events.goalProjectionSequence();
+    await request(
+      "thread/goal/clear",
+      { threadId: providerThreadId },
+      () => {
+        sequenceAtResponse = events.goalProjectionSequence();
+      },
+    );
+    return events.projectGoalClearResponse(
+      providerThreadId,
+      sequenceAtResponse,
+    );
   };
 
   return {
@@ -596,7 +617,11 @@ export function startCodexAppServerRun(
 interface OpenCodexTurnOptions {
   options: CodexAppServerOptions;
   modelProvider: CodexAppServerOptions["modelProvider"];
-  request: (method: string, params: JsonObject) => Promise<JsonObject>;
+  request: (
+    method: string,
+    params: JsonObject,
+    onResponseFrame?: () => void,
+  ) => Promise<JsonObject>;
   notify: (method: string, params?: JsonObject) => void;
   setProviderThreadId: (threadId: string) => void;
   activeTurnId: () => string | undefined;
@@ -607,7 +632,7 @@ interface OpenCodexTurnOptions {
   projectGoalResponse: (
     threadId: string,
     goal: unknown,
-    sequenceBeforeRequest: number,
+    sequenceAtResponse: number,
   ) => ProviderGoalSnapshot | null;
   setContinuationError: (
     error: CodexAppServerResult["continuationError"],
@@ -719,12 +744,14 @@ export async function openCodexTurn({
     if (options.goalStart.tokenBudget !== undefined) {
       params.tokenBudget = options.goalStart.tokenBudget;
     }
-    const sequenceBeforeRequest = goalProjectionSequence();
-    const response = await request("thread/goal/set", params);
+    let sequenceAtResponse = goalProjectionSequence();
+    const response = await request("thread/goal/set", params, () => {
+      sequenceAtResponse = goalProjectionSequence();
+    });
     if (!projectGoalResponse(
       openedThreadId,
       response.goal,
-      sequenceBeforeRequest,
+      sequenceAtResponse,
     )) {
       throw new Error("Codex returned a malformed goal response.");
     }

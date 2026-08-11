@@ -751,7 +751,7 @@ export class ProviderManager {
   async clearGoal(
     conversationId: string,
     identity: { runId: string; turnId: string },
-  ): Promise<boolean> {
+  ): Promise<boolean | "superseded"> {
     const active = this.activeRuns.get(conversationId);
     if (
       !active
@@ -762,8 +762,7 @@ export class ProviderManager {
     ) return false;
     const extension = active.harnessRun?.extension;
     if (!extension || extension.kind !== "codex-app-server") return false;
-    await extension.clearGoal();
-    return true;
+    return await extension.clearGoal() ? true : "superseded";
   }
 
   async stopSubagent(

@@ -356,6 +356,23 @@ describe("AgentWorkflowController", () => {
     expect(runtime.goals).toEqual([]);
   });
 
+  it("preserves a native goal when a live clear is superseded", async () => {
+    const runtime = harness({ goals: [nativeGoal()] });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => null),
+      clearNativeGoal: vi.fn(async () => "superseded" as const),
+    });
+    const controlCalls = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.clearGoal(
+      "conversation-1",
+      "codex-native",
+    )).resolves.toBe(false);
+
+    expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
+    expect(runtime.goals).toEqual([nativeGoal()]);
+  });
+
   it("serializes native goal mutations for one provider thread", async () => {
     let releaseFirst!: () => void;
     const firstResponse = new Promise<void>((resolve) => {

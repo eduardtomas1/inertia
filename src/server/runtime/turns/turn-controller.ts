@@ -256,7 +256,9 @@ export class TurnController {
     return await goal;
   }
 
-  async clearNativeGoal(conversationId: string): Promise<boolean | null> {
+  async clearNativeGoal(
+    conversationId: string,
+  ): Promise<boolean | "superseded" | null> {
     const active = this.activeByConversation.get(conversationId);
     if (!active || active.settled) return null;
     if (!this.providers.clearGoal) {

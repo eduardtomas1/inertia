@@ -245,7 +245,7 @@ export interface CodexAppServerRunExtension {
   /** Parent-turn steering; Codex exposes no truthful direct-child messaging. */
   steer?: (content: string) => Promise<boolean>;
   setGoal: (input: ProviderGoalMutation) => Promise<ProviderGoalSnapshot>;
-  clearGoal: () => Promise<void>;
+  clearGoal: () => Promise<boolean>;
 }
 
 export interface ProviderInteractiveRunExtension {

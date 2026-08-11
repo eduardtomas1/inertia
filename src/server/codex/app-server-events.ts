@@ -450,6 +450,9 @@ export class CodexAppServerEvents {
         clearTimeout(this.goalContinuationTimer);
         this.goalContinuationTimer = undefined;
       }
+      if (phase === "awaiting-goal-continuation") {
+        this.discardPendingParentCompletion();
+      }
       this.host.setActiveTurnId(notificationTurnId);
       this.host.setPhase("running");
       this.host.options.onStatus?.("running");
@@ -580,7 +583,7 @@ export class CodexAppServerEvents {
   projectGoalResponse(
     threadId: string,
     goal: unknown,
-    sequenceBeforeRequest: number,
+    sequenceAtResponse: number,
   ): ProviderGoalSnapshot | null {
     const update = parseCodexGoalUpdatedNotification({ threadId, goal });
     if (!update || update.threadId !== this.host.providerThreadId()) {
@@ -590,7 +593,7 @@ export class CodexAppServerEvents {
     // resumes. Prefer that sequenced snapshot when second-resolution provider
     // timestamps cannot distinguish the response from the later update.
     const supersededByNotification =
-      this.nativeGoalSequence > sequenceBeforeRequest
+      this.nativeGoalSequence > sequenceAtResponse
       && this.nativeGoalUpdatedAt !== null
       && update.goal.updatedAt <= this.nativeGoalUpdatedAt;
     if (supersededByNotification) {
@@ -610,6 +613,17 @@ export class CodexAppServerEvents {
     this.host.options.onGoalCleared?.(threadId);
     this.finishAwaitingGoalContinuation();
     return true;
+  }
+
+  projectGoalClearResponse(
+    threadId: string,
+    sequenceAtResponse: number,
+  ): boolean {
+    if (threadId !== this.host.providerThreadId()) return false;
+    if (this.nativeGoalSequence > sequenceAtResponse) {
+      return this.nativeGoalSnapshot === null;
+    }
+    return this.projectGoalCleared(threadId);
   }
 
   private projectGoalUpdate(
@@ -689,6 +703,14 @@ export class CodexAppServerEvents {
       this.subagentDrainTimer = undefined;
     }
     this.host.finish(completion.status, completion.exitCode, null);
+  }
+
+  private discardPendingParentCompletion(): void {
+    this.pendingParentCompletion = null;
+    if (this.subagentDrainTimer) {
+      clearTimeout(this.subagentDrainTimer);
+      this.subagentDrainTimer = undefined;
+    }
   }
 
   private emitActivity(

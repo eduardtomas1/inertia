@@ -76,7 +76,7 @@ export interface TurnProviderRuntime {
   clearGoal?(
     conversationId: string,
     identity: { runId: string; turnId: string },
-  ): Promise<boolean>;
+  ): Promise<boolean | "superseded">;
   stopSubagent?(
     conversationId: string,
     providerTaskId: string,

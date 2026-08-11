@@ -21,6 +21,10 @@ import type {
   AgentWorkflowState,
 } from "@shared/contracts";
 import { IconButton } from "./ui";
+import {
+  MAX_GOAL_TOKEN_BUDGET,
+  parseGoalTokenBudget,
+} from "../utils/goalBudget";
 
 interface GoalInput {
   source: AgentGoalSource;
@@ -104,10 +108,12 @@ export function ChatGoalControl({
   onDismiss,
 }: ChatGoalInlineProps): React.JSX.Element | null {
   const inputId = useId();
+  const budgetId = useId();
   const headingId = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const firstActionRef = useRef<HTMLButtonElement>(null);
   const [objective, setObjective] = useState("");
+  const [tokenBudget, setTokenBudget] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const source = workflow?.goalCapability.kind ?? null;
   const goal = workflow ? currentRouteGoal(workflow) : null;
@@ -122,6 +128,7 @@ export function ChatGoalControl({
     if (ownerKeyRef.current === ownerKey) return;
     ownerKeyRef.current = ownerKey;
     setObjective("");
+    setTokenBudget("");
     if (open) onDismiss("owner-change");
   }, [onDismiss, open, ownerKey]);
 
@@ -149,16 +156,23 @@ export function ChatGoalControl({
 
   const createGoal = async (): Promise<void> => {
     const nextObjective = objective.trim();
-    if (!source || !nextObjective || submitting) return;
+    const nextTokenBudget = parseGoalTokenBudget(tokenBudget);
+    if (
+      !source
+      || !nextObjective
+      || nextTokenBudget === undefined
+      || submitting
+    ) return;
     setSubmitting(true);
     try {
       await onSetGoal({
         source,
         objective: nextObjective,
         status: "active",
-        tokenBudget: null,
+        tokenBudget: nextTokenBudget,
       });
       setObjective("");
+      setTokenBudget("");
       onDismiss("action");
     } catch {
       // The workspace error surface owns the public failure message. Keep the
@@ -300,6 +314,23 @@ export function ChatGoalControl({
                 disabled={busy || submitting}
                 onChange={(event) => setObjective(event.currentTarget.value)}
               />
+              <div className="chat-goal-budget">
+                <label htmlFor={budgetId}>Token budget (optional)</label>
+                <input
+                  id={budgetId}
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={MAX_GOAL_TOKEN_BUDGET}
+                  step={1}
+                  value={tokenBudget}
+                  placeholder="No limit"
+                  disabled={busy || submitting}
+                  aria-invalid={parseGoalTokenBudget(tokenBudget) === undefined}
+                  onChange={(event) =>
+                    setTokenBudget(event.currentTarget.value)}
+                />
+              </div>
               <div className="chat-goal-notes">
                 <small>
                   {source === "codex-native"
@@ -312,7 +343,12 @@ export function ChatGoalControl({
               </div>
               <button
                 type="submit"
-                disabled={busy || submitting || objective.trim().length === 0}
+                disabled={
+                  busy
+                  || submitting
+                  || objective.trim().length === 0
+                  || parseGoalTokenBudget(tokenBudget) === undefined
+                }
               >
                 <Flag size={13} aria-hidden="true" />
                 {source === "codex-native" ? "Set Codex goal" : "Save local objective"}

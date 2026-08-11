@@ -4,6 +4,7 @@ import {
   isAgentTurnTerminalStatus,
   type AgentApprovalDecision,
   type AgentApprovalRequest,
+  type AgentGoalStatus,
   type AgentInputRequest,
   type AgentPlan,
   type AgentTurnStatus,
@@ -14,6 +15,7 @@ import {
 import { RuntimeStore } from "../../database";
 import type {
   ProviderEvent,
+  ProviderGoalSnapshot,
   ProviderRunFailure,
   ProviderRunResult,
 } from "../../provider/contracts";
@@ -170,6 +172,100 @@ export class TurnController {
 
   isActive(conversationId: string): boolean {
     return this.activeByConversation.has(conversationId);
+  }
+
+  async setNativeGoal(input: {
+    conversationId: string;
+    objective?: string;
+    status: AgentGoalStatus;
+    tokenBudget?: number | null;
+  }): Promise<ProviderGoalSnapshot | null> {
+    const active = this.activeByConversation.get(input.conversationId);
+    if (active && !active.settled) {
+      if (!this.providers.setGoal) {
+        throw new Error("The active provider cannot update native goals.");
+      }
+      const updated = await this.providers.setGoal(
+        input.conversationId,
+        {
+          ...(input.objective !== undefined
+            ? { objective: input.objective }
+            : {}),
+          status: input.status,
+          ...(input.tokenBudget !== undefined
+            ? { tokenBudget: input.tokenBudget }
+            : {}),
+        },
+        { runId: active.turn.runId, turnId: active.turn.id },
+      );
+      if (!updated) {
+        throw new Error("The active Codex run no longer owns this goal.");
+      }
+      return updated;
+    }
+    if (input.status !== "active") return null;
+
+    const savedGoal = this.store.agentGoals(input.conversationId)
+      .find(({ source }) => source === "codex-native");
+    const visibleObjective = input.objective?.trim() || savedGoal?.objective;
+    if (!visibleObjective) {
+      throw new Error("Define an objective before starting a Codex goal.");
+    }
+    const queued = this.queue({
+      conversationId: input.conversationId,
+      content: `/goal ${visibleObjective}`,
+      goalStart: {
+        ...(input.objective !== undefined
+          ? { objective: input.objective }
+          : {}),
+        ...(input.tokenBudget !== undefined
+          ? { tokenBudget: input.tokenBudget }
+          : {}),
+      },
+    });
+    const goal = new Promise<ProviderGoalSnapshot>((resolve, reject) => {
+      const owned = this.activeByTurn.get(queued.turn.id);
+      if (!owned || owned.settled) {
+        reject(new Error("The Codex goal run could not be prepared."));
+        return;
+      }
+      owned.nativeGoalStartAcknowledgement = {
+        ...(input.objective !== undefined
+          ? { objective: input.objective }
+          : {}),
+        ...(input.tokenBudget !== undefined
+          ? { tokenBudget: input.tokenBudget }
+          : {}),
+        resolve,
+        reject,
+      };
+    });
+    this.hooks.broadcast({
+      type: "conversation.detail.invalidated",
+      conversationId: input.conversationId,
+    });
+    this.hooks.broadcastSnapshot();
+    if (!this.start(queued.turn.id)) {
+      const owned = this.activeByTurn.get(queued.turn.id);
+      const acknowledgement = owned?.nativeGoalStartAcknowledgement;
+      if (owned) owned.nativeGoalStartAcknowledgement = null;
+      acknowledgement?.reject(
+        new Error("The Codex goal run could not start."),
+      );
+    }
+    return await goal;
+  }
+
+  async clearNativeGoal(conversationId: string): Promise<boolean | null> {
+    const active = this.activeByConversation.get(conversationId);
+    if (!active || active.settled) return null;
+    if (!this.providers.clearGoal) {
+      throw new Error("The active provider cannot clear native goals.");
+    }
+    return await this.providers.clearGoal(
+      conversationId,
+      { runId: active.turn.runId, turnId: active.turn.id },
+    );
   }
 
   isClosing(): boolean {
@@ -812,6 +908,19 @@ export class TurnController {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
       this.providerEvents.project(active, event);
+      const goalStart = active.nativeGoalStartAcknowledgement;
+      if (
+        goalStart
+        && event.type === "goal-updated"
+        && (goalStart.objective === undefined
+          || event.goal.objective === goalStart.objective)
+        && (goalStart.tokenBudget === undefined
+          || event.goal.tokenBudget === goalStart.tokenBudget)
+        && event.goal.status === "active"
+      ) {
+        active.nativeGoalStartAcknowledgement = null;
+        goalStart.resolve(event.goal);
+      }
       return true;
     } catch (error) {
       this.providers.cancel(active.conversation.id);
@@ -998,6 +1107,11 @@ export class TurnController {
   }
 
   private cleanup(active: ActiveTurn): void {
+    const goalStart = active.nativeGoalStartAcknowledgement;
+    active.nativeGoalStartAcknowledgement = null;
+    goalStart?.reject(
+      new Error("The Codex goal run ended before the goal was confirmed."),
+    );
     active.assistantStream.dispose();
     active.reasoningStream.dispose();
     for (const requestId of active.approvalIds) this.pendingApprovals.delete(requestId);

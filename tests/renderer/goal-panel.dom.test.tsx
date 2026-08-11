@@ -279,6 +279,7 @@ describe("GoalPanel", () => {
     );
 
     await user.type(screen.getByLabelText("Objective"), "  Keep the route honest  ");
+    await user.type(screen.getByLabelText("Token budget (optional)"), "8000");
     await user.click(screen.getByRole("button", {
       name: "Create inertia local goal",
     }));
@@ -286,7 +287,7 @@ describe("GoalPanel", () => {
       source: "inertia-local",
       objective: "Keep the route honest",
       status: "active",
-      tokenBudget: null,
+      tokenBudget: 8_000,
     });
 
     view.rerender(

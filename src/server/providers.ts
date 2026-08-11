@@ -47,6 +47,8 @@ import {
   type ProviderDetectionOptions,
   type ProviderBackendLaunchOptions,
   type ProviderId,
+  type ProviderGoalMutation,
+  type ProviderGoalSnapshot,
   type ProviderManagerOptions,
   type ProviderRunCallbacks,
   type ProviderRunInput,
@@ -726,6 +728,42 @@ export class ProviderManager {
     } catch {
       return false;
     }
+  }
+
+  async setGoal(
+    conversationId: string,
+    input: ProviderGoalMutation,
+    identity: { runId: string; turnId: string },
+  ): Promise<ProviderGoalSnapshot | null> {
+    const active = this.activeRuns.get(conversationId);
+    if (
+      !active
+      || active.settled
+      || active.cancelRequested
+      || active.runId !== identity.runId
+      || active.turnId !== identity.turnId
+    ) return null;
+    const extension = active.harnessRun?.extension;
+    if (!extension || extension.kind !== "codex-app-server") return null;
+    return await extension.setGoal(input);
+  }
+
+  async clearGoal(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): Promise<boolean> {
+    const active = this.activeRuns.get(conversationId);
+    if (
+      !active
+      || active.settled
+      || active.cancelRequested
+      || active.runId !== identity.runId
+      || active.turnId !== identity.turnId
+    ) return false;
+    const extension = active.harnessRun?.extension;
+    if (!extension || extension.kind !== "codex-app-server") return false;
+    await extension.clearGoal();
+    return true;
   }
 
   async stopSubagent(

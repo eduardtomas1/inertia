@@ -7,6 +7,7 @@ import {
   type ProviderAccessMode,
   type ProviderApprovalEvent,
   type ProviderGoalClearedEvent,
+  type ProviderGoalSnapshot,
   type ProviderGoalUpdatedEvent,
   type ProviderSubagentEvent,
 } from "../../src/server/providers";
@@ -188,6 +189,52 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     return;
   }
+  if (message.method === "thread/goal/set") {
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-error") {
+      send({ id: message.id, error: { code: -32000, message: "an unfinished goal already exists" } });
+      return;
+    }
+    const goal = {
+      threadId,
+      objective: message.params.objective || "Existing goal",
+      status: message.params.status,
+      tokenBudget: message.params.tokenBudget ?? null,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: 1800000000,
+      updatedAt: 1800000000,
+    };
+    send({ id: message.id, result: { goal } });
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only") {
+      setTimeout(() => send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } }), 10);
+      return;
+    }
+    send({ method: "thread/goal/updated", params: { threadId, goal } });
+    if (
+      process.env.INERTIA_APP_SERVER_SCENARIO !== "goal-continuation"
+      && process.env.INERTIA_APP_SERVER_SCENARIO !== "goal-wait-for-interrupt"
+    ) return;
+    turnId = "goal-turn-1";
+    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-wait-for-interrupt") return;
+    send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-message-1", delta: "First goal turn. " } });
+    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    setTimeout(() => {
+      turnId = "goal-turn-2";
+      send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-message-2", delta: "Second goal turn." } });
+      const completedGoal = {
+        ...goal,
+        status: "complete",
+        tokensUsed: 9000,
+        timeUsedSeconds: 8,
+        updatedAt: 1800000008,
+      };
+      send({ method: "thread/goal/updated", params: { threadId, turnId, goal: completedGoal } });
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    }, 10);
+    return;
+  }
   if (message.method === "turn/start") {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
@@ -239,6 +286,40 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           })),
         },
       });
+    }
+    if (
+      process.env.INERTIA_APP_SERVER_SCENARIO === "goal-resume-continuation"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-no-continuation"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-budget-limited"
+    ) {
+      const activeGoal = {
+        threadId,
+        objective: "Resume the existing goal",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 100,
+        timeUsedSeconds: 1,
+        createdAt: 1800000000,
+        updatedAt: 1800000001,
+      };
+      send({ method: "thread/goal/updated", params: { threadId, turnId, goal: activeGoal } });
+      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "resume-message-1", delta: "Resumed goal turn. " } });
+      if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-budget-limited") {
+        send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { ...activeGoal, status: "budgetLimited", tokenBudget: 12000, tokensUsed: 12000, timeUsedSeconds: 4, updatedAt: 1800000004 } } });
+      }
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      if (
+        process.env.INERTIA_APP_SERVER_SCENARIO === "goal-no-continuation"
+        || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-budget-limited"
+      ) return;
+      setTimeout(() => {
+        turnId = "goal-resume-turn-2";
+        send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+        send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "resume-message-2", delta: "Automatic continuation." } });
+        send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { ...activeGoal, status: "complete", tokensUsed: 500, timeUsedSeconds: 3, updatedAt: 1800000003 } } });
+        send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      }, 10);
+      return;
     }
     send({ method: "turn/completed", params: { threadId, turn: { id: "orphan-turn", status: "completed", items: [], error: null } } });
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "steer-and-collab") {
@@ -293,6 +374,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     if (
       process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only"
     ) return;
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-events") {
       return complete();
@@ -828,6 +910,265 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-goals",
       type: "goal-cleared",
     })]);
+  });
+
+  it("keeps the owned App Server connection across automatic goal turns", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-continuation";
+    const manager = trackedManager(fake.command);
+    const text: string[] = [];
+    const statuses: string[] = [];
+    const updates: ProviderGoalUpdatedEvent[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-continuation",
+      runId: "run-goal-continuation",
+      turnId: "turn-goal-continuation",
+      cwd: fake.root,
+      prompt: "/goal Ship the reliable flow",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-goal-continuation",
+      goalStart: {
+        objective: "Ship the reliable flow",
+        tokenBudget: 12_000,
+      },
+      goalContinuationExpected: true,
+    }), {
+      onText: (event) => text.push(event.text),
+      onStatus: (event) => statuses.push(event.status),
+      onGoalUpdated: (event) => updates.push(event),
+    });
+
+    expect(result).toMatchObject({
+      status: "completed",
+      sessionId: "thread-goal-continuation",
+      text: "First goal turn. Second goal turn.",
+    });
+    expect(text).toEqual(["First goal turn. ", "Second goal turn."]);
+    expect(statuses).toEqual([
+      "starting",
+      "running",
+      "completed",
+    ]);
+    expect(updates.some(({ goal }) =>
+      goal.objective === "Ship the reliable flow"
+      && goal.status === "active"
+      && goal.tokenBudget === 12_000
+      && goal.tokensUsed === 0)).toBe(true);
+    expect(updates.at(-1)?.goal).toMatchObject({
+      objective: "Ship the reliable flow",
+      status: "complete",
+      tokenBudget: 12_000,
+      tokensUsed: 9_000,
+    });
+
+    const messages = captured(fake.capturePath);
+    expect(messages.filter(({ method }) => method === "thread/goal/set"))
+      .toEqual([expect.objectContaining({
+        params: {
+          threadId: "thread-goal-continuation",
+          objective: "Ship the reliable flow",
+          status: "active",
+          tokenBudget: 12_000,
+        },
+      })]);
+    expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
+  });
+
+  it("fails a rejected goal start without converting it into an ordinary turn", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-set-error";
+    const manager = trackedManager(fake.command);
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-rejected",
+      cwd: fake.root,
+      prompt: "/goal Duplicate goal",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-goal-rejected",
+      goalStart: { objective: "Duplicate goal" },
+      goalContinuationExpected: true,
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "codex-error" },
+    });
+
+    const messages = captured(fake.capturePath);
+    expect(messages.filter(({ method }) => method === "thread/goal/set"))
+      .toHaveLength(1);
+    expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
+    expect(manager.isRunning("conversation-goal-rejected")).toBe(false);
+  });
+
+  it("interrupts an automatic goal turn while preserving its active snapshot", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-wait-for-interrupt";
+    const manager = trackedManager(fake.command, 500);
+    const updates: ProviderGoalUpdatedEvent[] = [];
+    let cancelled = false;
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-cancel",
+      cwd: fake.root,
+      prompt: "/goal Pause safely",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-cancel",
+      goalStart: { objective: "Pause safely" },
+      goalContinuationExpected: true,
+    }), {
+      onGoalUpdated: (event) => updates.push(event),
+      onStatus: (event) => {
+        if (event.status !== "running" || cancelled) return;
+        cancelled = manager.cancel(event.conversationId);
+      },
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    expect(cancelled).toBe(true);
+    expect(updates.at(-1)?.goal).toMatchObject({
+      objective: "Pause safely",
+      status: "active",
+    });
+    expect(captured(fake.capturePath).find(({ method }) =>
+      method === "turn/interrupt")).toMatchObject({
+      params: {
+        threadId: "thread-goal-cancel",
+        turnId: "goal-turn-1",
+      },
+    });
+  });
+
+  it("projects a live goal mutation response even without a duplicate notification", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-response-only";
+    const updates: ProviderGoalSnapshot[] = [];
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the ordinary turn open",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-live-update",
+      onStatus: () => markRunning(),
+      onGoalUpdated: (_threadId, goal) => updates.push(goal),
+    });
+    await running;
+
+    await expect(run.setGoal({
+      objective: "Finish from the live connection",
+      status: "complete",
+      tokenBudget: null,
+    })).resolves.toMatchObject({
+      objective: "Finish from the live connection",
+      status: "complete",
+    });
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    expect(updates).toEqual([expect.objectContaining({
+      objective: "Finish from the live connection",
+      status: "complete",
+    })]);
+  });
+
+  it("keeps a resumed active goal connected across provider continuations", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-resume-continuation";
+    const manager = trackedManager(fake.command);
+    const updates: ProviderGoalUpdatedEvent[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-resume",
+      cwd: fake.root,
+      prompt: "Continue the saved goal",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-resume",
+      goalContinuationExpected: true,
+    }), {
+      onGoalUpdated: (event) => updates.push(event),
+    });
+
+    expect(result).toMatchObject({
+      status: "completed",
+      text: "Resumed goal turn. Automatic continuation.",
+    });
+    expect(updates.map(({ goal }) => goal.status)).toEqual([
+      "active",
+      "complete",
+    ]);
+    const messages = captured(fake.capturePath);
+    expect(messages.filter(({ method }) => method === "turn/start"))
+      .toHaveLength(1);
+    expect(messages.some(({ method }) => method === "thread/goal/set"))
+      .toBe(false);
+  });
+
+  it("bounds the wait when an expected goal continuation never starts", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-no-continuation";
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Continue the saved goal",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-timeout",
+      goalContinuationExpected: true,
+      goalContinuationGraceMs: 25,
+    });
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "completed",
+      text: "Resumed goal turn. ",
+    });
+  });
+
+  it("settles without another turn when the provider exhausts the goal budget", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-budget-limited";
+    const manager = trackedManager(fake.command);
+    const updates: ProviderGoalUpdatedEvent[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-budget",
+      cwd: fake.root,
+      prompt: "Continue until the budget boundary",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-budget",
+      goalContinuationExpected: true,
+    }), {
+      onGoalUpdated: (event) => updates.push(event),
+    });
+
+    expect(result).toMatchObject({ status: "completed" });
+    expect(updates.at(-1)?.goal).toMatchObject({
+      status: "budgetLimited",
+      tokenBudget: 12_000,
+      tokensUsed: 12_000,
+    });
+    expect(captured(fake.capturePath).filter(({ method }) =>
+      method === "turn/start")).toHaveLength(1);
   });
 
   it("keeps full access on App Server while streaming rich plan-turn state", async () => {

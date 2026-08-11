@@ -193,6 +193,43 @@ describe("ChatGoalControl", () => {
     expect(surface).toHaveTextContent("One separately tracked goal");
   });
 
+  it("submits and validates an optional native token budget", async () => {
+    const user = userEvent.setup();
+    const onSetGoal = vi.fn(async () => undefined);
+    render(
+      <ChatGoalControl
+        {...props(workflow(nativeCapability), { onSetGoal })}
+        {...openProps()}
+      />,
+    );
+
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    const objective = within(surface).getByRole("textbox", {
+      name: "Objective",
+    });
+    const budget = within(surface).getByRole("spinbutton", {
+      name: "Token budget (optional)",
+    });
+    const submit = within(surface).getByRole("button", {
+      name: "Set Codex goal",
+    });
+    await user.type(objective, "Finish within the explicit budget");
+    await user.type(budget, "0");
+    expect(budget).toHaveAttribute("aria-invalid", "true");
+    expect(submit).toBeDisabled();
+    await user.clear(budget);
+    await user.type(budget, "12000");
+    expect(budget).toHaveAttribute("aria-invalid", "false");
+    await user.click(submit);
+
+    expect(onSetGoal).toHaveBeenCalledWith({
+      source: "codex-native",
+      objective: "Finish within the explicit budget",
+      status: "active",
+      tokenBudget: 12_000,
+    });
+  });
+
   it("dismisses on Escape and keeps split actions with their pane owner", async () => {
     const primarySetGoal = vi.fn(async () => undefined);
     const secondarySetGoal = vi.fn(async () => undefined);

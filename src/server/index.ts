@@ -655,6 +655,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       testOnlyStreamingTrace: streamingTrace,
     },
   );
+  agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
     store,
     providers,

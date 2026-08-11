@@ -3168,6 +3168,30 @@ textarea {
   text-transform: uppercase;
 }
 
+.chat-goal-budget {
+  display: grid;
+  max-width: 190px;
+  gap: 5px;
+}
+
+.chat-goal-budget input {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  outline: 0;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--ui-font-secondary);
+}
+
+.chat-goal-budget input:focus {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border-strong));
+  box-shadow: 0 0 0 3px var(--focus-ring-soft);
+}
+
 /*
  * `.composer textarea` strips the border, padding and resize affordance from
  * every textarea inside the composer, and it used to win here on equal

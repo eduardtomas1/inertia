@@ -9,6 +9,7 @@ import type {
   ProviderActivityEvent,
   ProviderGoalClearedEvent,
   ProviderGoalSnapshot,
+  ProviderGoalMutation,
   ProviderGoalUpdatedEvent,
   ProviderId,
   ProviderMetadataEvent,
@@ -243,6 +244,8 @@ export interface CodexAppServerRunExtension {
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Parent-turn steering; Codex exposes no truthful direct-child messaging. */
   steer?: (content: string) => Promise<boolean>;
+  setGoal: (input: ProviderGoalMutation) => Promise<ProviderGoalSnapshot>;
+  clearGoal: () => Promise<void>;
 }
 
 export interface ProviderInteractiveRunExtension {

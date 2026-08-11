@@ -94,6 +94,11 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
             ),
           }
         : {}),
+      ...(options.input.goalStart
+        ? { goalStart: options.input.goalStart }
+        : {}),
+      goalContinuationExpected:
+        options.input.goalContinuationExpected === true,
       planMode: options.input.interactionMode === "plan",
       access: options.input.access,
       onText: emitter.text,
@@ -200,6 +205,18 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
         !settled
         && !cancelRequested
         && Boolean(await codexRun.steer?.(content)),
+      setGoal: async (input) => {
+        if (settled || cancelRequested) {
+          throw new Error("The Codex goal connection is not active.");
+        }
+        return await codexRun.setGoal(input);
+      },
+      clearGoal: async () => {
+        if (settled || cancelRequested) {
+          throw new Error("The Codex goal connection is not active.");
+        }
+        await codexRun.clearGoal();
+      },
     },
   };
 }
@@ -233,6 +250,12 @@ function failedCodexRun(
       respondToApproval: () => false,
       respondToInput: () => false,
       steer: async () => false,
+      setGoal: async () => {
+        throw new Error("The Codex goal connection is not active.");
+      },
+      clearGoal: async () => {
+        throw new Error("The Codex goal connection is not active.");
+      },
     },
   };
 }

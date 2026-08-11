@@ -40,6 +40,10 @@ import { formatElapsed } from "../utils/responseTimeline";
 import { SubagentElapsed } from "./SubagentElapsed";
 import { SubagentTraceDetails } from "./SubagentTraceDetails";
 import { MAX_SELECTED_SKILLS } from "./composer/config";
+import {
+  MAX_GOAL_TOKEN_BUDGET,
+  parseGoalTokenBudget,
+} from "../utils/goalBudget";
 
 export interface GoalPanelGoalInput {
   source: AgentGoalSource;
@@ -222,20 +226,24 @@ function GoalComposer({
   onSetGoal: NonNullable<GoalPanelProps["onSetGoal"]>;
 }): React.JSX.Element {
   const objectiveId = useId();
+  const budgetId = useId();
   const [objective, setObjective] = useState("");
+  const [tokenBudget, setTokenBudget] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const submit = async (): Promise<void> => {
     const next = objective.trim();
-    if (!next || submitting) return;
+    const nextTokenBudget = parseGoalTokenBudget(tokenBudget);
+    if (!next || nextTokenBudget === undefined || submitting) return;
     setSubmitting(true);
     try {
       await onSetGoal({
         source,
         objective: next,
         status: "active",
-        tokenBudget: null,
+        tokenBudget: nextTokenBudget,
       });
       setObjective("");
+      setTokenBudget("");
     } catch {
       // The scene owns the public error surface. Preserve the draft for retry.
     } finally {
@@ -266,11 +274,30 @@ function GoalComposer({
           type="submit"
           className="goal-panel-icon-button"
           aria-label={`Create ${sourceName.toLowerCase()}`}
-          disabled={busy || submitting || objective.trim().length === 0}
+          disabled={
+            busy
+            || submitting
+            || objective.trim().length === 0
+            || parseGoalTokenBudget(tokenBudget) === undefined
+          }
         >
           <Flag size={13} aria-hidden="true" />
         </button>
       </div>
+      <label htmlFor={budgetId}>Token budget (optional)</label>
+      <input
+        id={budgetId}
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={MAX_GOAL_TOKEN_BUDGET}
+        step={1}
+        value={tokenBudget}
+        placeholder="No limit"
+        disabled={busy || submitting}
+        aria-invalid={parseGoalTokenBudget(tokenBudget) === undefined}
+        onChange={(event) => setTokenBudget(event.currentTarget.value)}
+      />
       <small>
         {source === "codex-native"
           ? "Shared with this Codex thread."

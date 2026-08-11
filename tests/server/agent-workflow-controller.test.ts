@@ -297,6 +297,65 @@ describe("AgentWorkflowController", () => {
     expect(updated.status).toBe("paused");
   });
 
+  it("starts an idle native goal through the durable turn runtime", async () => {
+    const runtime = harness();
+    const setNativeGoal = vi.fn(async () => ({
+      objective: "Run until verified",
+      status: "active" as const,
+      tokenBudget: 12_000,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    }));
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal,
+      clearNativeGoal: vi.fn(async () => null),
+    });
+    const controlCalls = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: "Run until verified",
+      status: "active",
+      tokenBudget: 12_000,
+    })).resolves.toMatchObject({
+      source: "codex-native",
+      providerSessionId: "thread-1",
+      objective: "Run until verified",
+      status: "active",
+      tokenBudget: 12_000,
+    });
+
+    expect(setNativeGoal).toHaveBeenCalledWith({
+      conversationId: "conversation-1",
+      objective: "Run until verified",
+      status: "active",
+      tokenBudget: 12_000,
+    });
+    expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
+  });
+
+  it("routes an active native goal clear through its exact live run", async () => {
+    const runtime = harness({ goals: [nativeGoal()] });
+    const clearNativeGoal = vi.fn(async () => true);
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => null),
+      clearNativeGoal,
+    });
+    const controlCalls = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.clearGoal(
+      "conversation-1",
+      "codex-native",
+    )).resolves.toBe(true);
+
+    expect(clearNativeGoal).toHaveBeenCalledWith("conversation-1");
+    expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
+    expect(runtime.goals).toEqual([]);
+  });
+
   it("serializes native goal mutations for one provider thread", async () => {
     let releaseFirst!: () => void;
     const firstResponse = new Promise<void>((resolve) => {

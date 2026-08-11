@@ -33,7 +33,11 @@ import type {
 import {
   sanitizeProviderActivityDetail,
 } from "../provider/activity-detail";
-import type { ProviderRunFailure } from "../provider/contracts";
+import type {
+  ProviderGoalMutation,
+  ProviderGoalSnapshot,
+  ProviderRunFailure,
+} from "../provider/contracts";
 import { providerProcessInvocation } from "../provider/process";
 import {
   createOwnedProcessTreeTermination,
@@ -487,6 +491,8 @@ export function startCodexAppServerRun(
       setActiveTurnId: (turnId) => {
         activeTurnId = turnId;
       },
+      projectGoalResponse: (threadId, goal) =>
+        events.projectGoalResponse(threadId, goal),
       setContinuationError: (error) => {
         continuationError = error;
       },
@@ -537,6 +543,34 @@ export function startCodexAppServerRun(
     }
   };
 
+  const setGoal = async (
+    input: ProviderGoalMutation,
+  ): Promise<ProviderGoalSnapshot> => {
+    if (settled || cancelRequested || !providerThreadId) {
+      throw new Error("The Codex goal connection is not active.");
+    }
+    const params: JsonObject = {
+      threadId: providerThreadId,
+      status: input.status,
+    };
+    if (input.objective !== undefined) params.objective = input.objective;
+    if (input.tokenBudget !== undefined) {
+      params.tokenBudget = input.tokenBudget;
+    }
+    const response = await request("thread/goal/set", params);
+    const parsed = events.projectGoalResponse(providerThreadId, response.goal);
+    if (!parsed) throw new Error("Codex returned a malformed goal response.");
+    return parsed;
+  };
+
+  const clearGoal = async (): Promise<void> => {
+    if (settled || cancelRequested || !providerThreadId) {
+      throw new Error("The Codex goal connection is not active.");
+    }
+    await request("thread/goal/clear", { threadId: providerThreadId });
+    events.projectGoalCleared(providerThreadId);
+  };
+
   return {
     child,
     result,
@@ -546,6 +580,8 @@ export function startCodexAppServerRun(
     respondToInput: (requestId, answers) =>
       events.respondToInput(requestId, answers),
     steer,
+    setGoal,
+    clearGoal,
   };
 }
 
@@ -556,7 +592,11 @@ interface OpenCodexTurnOptions {
   notify: (method: string, params?: JsonObject) => void;
   setProviderThreadId: (threadId: string) => void;
   activeTurnId: () => string | undefined;
-  setActiveTurnId: (turnId: string) => void;
+  setActiveTurnId: (turnId: string | undefined) => void;
+  projectGoalResponse: (
+    threadId: string,
+    goal: unknown,
+  ) => ProviderGoalSnapshot | null;
   setContinuationError: (
     error: CodexAppServerResult["continuationError"],
   ) => void;
@@ -578,6 +618,7 @@ export async function openCodexTurn({
   setProviderThreadId,
   activeTurnId,
   setActiveTurnId,
+  projectGoalResponse,
   setContinuationError,
   setPhase,
   isSettled,
@@ -648,6 +689,26 @@ export async function openCodexTurn({
   options.onSession?.(openedThreadId);
   if (isCancelRequested()) {
     finish("cancelled", null, null);
+    return;
+  }
+
+  if (options.goalStart) {
+    setPhase("starting-turn");
+    const params: JsonObject = {
+      threadId: openedThreadId,
+      status: "active",
+    };
+    if (options.goalStart.objective !== undefined) {
+      params.objective = options.goalStart.objective;
+    }
+    if (options.goalStart.tokenBudget !== undefined) {
+      params.tokenBudget = options.goalStart.tokenBudget;
+    }
+    const response = await request("thread/goal/set", params);
+    if (!projectGoalResponse(openedThreadId, response.goal)) {
+      throw new Error("Codex returned a malformed goal response.");
+    }
+    if (isCancelRequested()) finish("cancelled", null, null);
     return;
   }
 

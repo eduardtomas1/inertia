@@ -153,6 +153,11 @@ export function resolveTurnRequest(
     throw new Error(continuation.reason);
   }
   const canResume = continuation.action === "resume-session";
+  const goalContinuationExpected = request.goalStart !== undefined
+    || dependencies.store.agentGoals(conversation.id).some((goal) =>
+      goal.source === "codex-native"
+      && goal.providerSessionId === conversation.providerSessionId
+      && goal.status === "active");
   const providerInput = {
     providerId: route.providerId,
     harnessId: route.harnessId,
@@ -174,6 +179,8 @@ export function resolveTurnRequest(
     sessionId: canResume ? conversation.providerSessionId! : undefined,
     imagePaths: assembled.imagePaths,
     skills: request.skills,
+    ...(request.goalStart ? { goalStart: request.goalStart } : {}),
+    ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
   } satisfies ActiveTurn["providerInput"];
   const harnessId = dependencies.providers.harnessIdFor(providerInput);
   if (harnessId !== route.harnessId) {
@@ -234,6 +241,7 @@ export function resolveTurnRequest(
           workspaceRunCreated: false,
           providerRunStarted: false,
           providerStartAcknowledgement: null,
+          nativeGoalStartAcknowledgement: null,
           attachmentsReleased: false,
           attachmentRelease: null,
           acceptingProviderEvents: true,

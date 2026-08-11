@@ -514,6 +514,7 @@ export function startCodexAppServerRun(
         events.beginGoalMutation(activatesGoal),
       endGoalMutation: (activatesGoal) =>
         events.endGoalMutation(activatesGoal),
+      awaitInitialGoalTurn: () => events.awaitInitialGoalTurn(),
       projectGoalResponse: (threadId, goal, sequenceAtResponse) =>
         events.projectGoalResponse(threadId, goal, sequenceAtResponse),
       setContinuationError: (error) => {
@@ -655,6 +656,7 @@ interface OpenCodexTurnOptions {
   goalProjectionSequence: () => number;
   beginGoalMutation: (activatesGoal: boolean) => void;
   endGoalMutation: (activatesGoal: boolean) => void;
+  awaitInitialGoalTurn: () => void;
   projectGoalResponse: (
     threadId: string,
     goal: unknown,
@@ -686,6 +688,7 @@ export async function openCodexTurn({
   goalProjectionSequence,
   beginGoalMutation,
   endGoalMutation,
+  awaitInitialGoalTurn,
   projectGoalResponse,
   setContinuationError,
   setPhase,
@@ -791,7 +794,11 @@ export async function openCodexTurn({
     } finally {
       endGoalMutation(true);
     }
-    if (terminalGoalStart) finish("completed", 0, null);
+    if (terminalGoalStart) {
+      finish("completed", 0, null);
+    } else {
+      awaitInitialGoalTurn();
+    }
     return;
   }
 

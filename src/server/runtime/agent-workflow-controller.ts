@@ -503,6 +503,14 @@ export class AgentWorkflowController {
             ? { tokenBudget: input.tokenBudget }
             : {}),
         }) ?? null;
+        if (!this.hasNativeGoalSession(
+          input.conversationId,
+          providerSessionId,
+        )) {
+          throw new RuntimeRequestError(
+            "The Codex thread changed before the goal could be updated.",
+          );
+        }
         if (runtimeGoal) {
           const candidate: AgentGoal = {
             conversationId: input.conversationId,

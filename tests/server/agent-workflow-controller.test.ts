@@ -347,6 +347,41 @@ describe("AgentWorkflowController", () => {
     expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
   });
 
+  it("preserves the new session goal when an idle start rotates the thread", async () => {
+    const current = conversation();
+    const runtime = harness({ current });
+    const rotatedGoal = nativeGoal({
+      providerSessionId: "thread-2",
+      objective: "Goal owned by the resumed thread",
+    });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => {
+        current.providerSessionId = "thread-2";
+        runtime.goals.push(rotatedGoal);
+        return {
+          objective: "Stale acknowledgement",
+          status: "active" as const,
+          tokenBudget: 12_000,
+          tokensUsed: 0,
+          timeUsedSeconds: 0,
+          createdAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z",
+        };
+      }),
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: "Start across resume",
+      status: "active",
+    })).rejects.toThrow(
+      "The Codex thread changed before the goal could be updated.",
+    );
+    expect(runtime.goals).toEqual([rotatedGoal]);
+  });
+
   it("preserves a same-revision goal event newer than the start acknowledgement", async () => {
     const runtime = harness();
     const acknowledgement = {

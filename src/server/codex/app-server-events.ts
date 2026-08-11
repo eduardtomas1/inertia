@@ -244,6 +244,15 @@ export class CodexAppServerEvents {
     }
   }
 
+  awaitInitialGoalTurn(): void {
+    // The provider can start the first goal turn before the goal/set response
+    // continuation resumes. In that case the event-driven running phase owns
+    // the lifecycle already. Otherwise, bound the wait exactly like every
+    // later provider-authored goal continuation.
+    if (this.host.phase() !== "starting-turn") return;
+    this.awaitGoalContinuation();
+  }
+
   settleInteractions(): void {
     for (const { rpcId: id, request, protocol } of
       this.pendingApprovals.values()) {

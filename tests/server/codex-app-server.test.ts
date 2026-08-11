@@ -1061,6 +1061,31 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
   });
 
+  it("bounds the wait when the first provider-authored goal turn never starts", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-no-first-turn";
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "/goal Wait for the provider-owned turn",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-no-first-turn",
+      goalStart: { objective: "Wait for the provider-owned turn" },
+      goalContinuationExpected: true,
+      goalContinuationGraceMs: 25,
+    });
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "completed",
+      sessionId: "thread-goal-no-first-turn",
+    });
+    expect(captured(fake.capturePath).some(({ method }) =>
+      method === "turn/start")).toBe(false);
+  });
+
   it("fails a rejected goal start without converting it into an ordinary turn", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;

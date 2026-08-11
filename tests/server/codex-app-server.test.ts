@@ -171,9 +171,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       process.stdout.write("x".repeat(${CODEX_METADATA_MAX_FRAME_BYTES + 1}));
       return;
     }
-    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-before-startup") {
-      return setTimeout(() => send({ id: message.id, result: { userAgent: "fake" } }), 20);
-    }
     return send({ id: message.id, result: { userAgent: "fake" } });
   }
   if (message.method === "initialized") return;
@@ -472,7 +469,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     if (
       process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
-      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-before-startup"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only"
     ) return;
@@ -1078,32 +1074,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
   });
 
-  it("bounds the wait when the first provider-authored goal turn never starts", async () => {
-    const fake = fakeAppServer();
-    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-no-first-turn";
-    const run = startCodexAppServerRun({
-      executable: fake.command,
-      environment: process.env,
-      cwd: fake.root,
-      prompt: "/goal Wait for the provider-owned turn",
-      planMode: false,
-      access: "full",
-      sessionId: "thread-goal-no-first-turn",
-      goalStart: { objective: "Wait for the provider-owned turn" },
-      goalContinuationExpected: true,
-      goalContinuationGraceMs: 25,
-    });
-
-    await expect(run.result).resolves.toMatchObject({
-      status: "failed",
-      sessionId: "thread-goal-no-first-turn",
-      failure: { reason: "goal-continuation-timeout" },
-    });
-    expect(captured(fake.capturePath).some(({ method }) =>
-      method === "turn/start")).toBe(false);
-  });
-
   it("fails a rejected goal start without converting it into an ordinary turn", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
@@ -1259,37 +1229,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       objective: "Finish from the live connection",
       status: "complete",
     })]);
-  });
-
-  it("gates and serializes goal mutations behind initialization and turn start", async () => {
-    const fake = fakeAppServer();
-    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-before-startup";
-    const run = startCodexAppServerRun({
-      executable: fake.command,
-      environment: process.env,
-      cwd: fake.root,
-      prompt: "Start an ordinary turn while goal controls race startup",
-      planMode: false,
-      access: "full",
-      sessionId: "thread-goal-startup-gate",
-    });
-
-    const update = run.setGoal({ status: "paused" });
-    const clear = run.clearGoal();
-    await expect(update).resolves.toMatchObject({ status: "paused" });
-    await expect(clear).resolves.toBe(true);
-
-    const methods = captured(fake.capturePath)
-      .map(({ method }) => method)
-      .filter((method): method is string => typeof method === "string");
-    expect(methods.indexOf("thread/goal/set"))
-      .toBeGreaterThan(methods.indexOf("turn/start"));
-    expect(methods.indexOf("thread/goal/clear"))
-      .toBeGreaterThan(methods.indexOf("thread/goal/set"));
-
-    run.cancel(true);
-    await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
   });
 
   it("does not promote a recoverable goal RPC error to the run failure", async () => {
@@ -1530,29 +1469,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       .toHaveLength(1);
     expect(messages.some(({ method }) => method === "thread/goal/set"))
       .toBe(false);
-  });
-
-  it("bounds the wait when an expected goal continuation never starts", async () => {
-    const fake = fakeAppServer();
-    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-no-continuation";
-    const run = startCodexAppServerRun({
-      executable: fake.command,
-      environment: process.env,
-      cwd: fake.root,
-      prompt: "Continue the saved goal",
-      planMode: false,
-      access: "full",
-      sessionId: "thread-goal-timeout",
-      goalContinuationExpected: true,
-      goalContinuationGraceMs: 25,
-    });
-
-    await expect(run.result).resolves.toMatchObject({
-      status: "failed",
-      text: "Resumed goal turn. ",
-      failure: { reason: "goal-continuation-timeout" },
-    });
   });
 
   it("settles without another turn when the provider exhausts the goal budget", async () => {

@@ -45,13 +45,16 @@ import {
   type SidebarThreadStatus,
   type SidebarWorkSectionId,
 } from "../utils/sidebarModel";
-import { providerIcon } from "../utils/providerIcons";
+import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { IconButton, LoadingMark } from "./ui";
 import { loadMultiSpawnDialog, loadSettingsView } from "./lazySurfaceLoaders";
 
-const ACTIVITY_HISTORY_PAGE = 10;
+const WORK_DONE_PAGE_SIZE = 10;
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
-const COLLAPSIBLE_WORK_SECTIONS = new Set<SidebarWorkSectionId>(["earlier", "done"]);
+const COLLAPSIBLE_WORK_SECTIONS: ReadonlySet<SidebarWorkSectionId> = new Set([
+  "earlier",
+  "done",
+]);
 
 type SidebarProps = {
   snapshot: AppSnapshot | null;
@@ -141,7 +144,7 @@ function SidebarView({
   const [projectMenu, setProjectMenu] = useState<{ projectId: string; anchor: string } | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
-  const [historyVisible, setHistoryVisible] = useState(ACTIVITY_HISTORY_PAGE);
+  const [doneVisible, setDoneVisible] = useState(WORK_DONE_PAGE_SIZE);
   const [expandedWorkSections, setExpandedWorkSections] = useState<Set<SidebarWorkSectionId>>(
     new Set(),
   );
@@ -170,7 +173,7 @@ function SidebarView({
     });
   }, [snapshot?.activeProjectId]);
 
-  useEffect(() => setHistoryVisible(ACTIVITY_HISTORY_PAGE), [query, sidebarMode]);
+  useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query, sidebarMode]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -490,7 +493,6 @@ function SidebarView({
       ?? sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
     const project = projectById.get(conversation.projectId);
     const isActive = snapshot?.activeConversationId === conversation.id && view === "workspace";
-    const ProviderIcon = providerIcon(conversation.providerId);
     const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
       ?? agentRequestProviderName(conversation.providerId);
     const repositoryName = project?.repositoryRoot
@@ -511,6 +513,8 @@ function SidebarView({
       repositoryLabel ? `Repository ${repositoryLabel}` : null,
       conversation.branch ? `Branch ${conversation.branch}` : null,
       statusLabels[model.status],
+      conversation.pinnedAt ? "Pinned" : null,
+      model.unread ? "New completion" : null,
     ].filter((value): value is string => Boolean(value)).join(", ");
     return (
       <div
@@ -534,11 +538,14 @@ function SidebarView({
           >
             <span
               className="activity-thread-provider"
-              data-provider-id={conversation.providerId}
               title={`${providerLabel} provider`}
               aria-hidden="true"
             >
-              <ProviderIcon size={15} strokeWidth={1.9} />
+              <ProviderBrandIcon
+                providerId={conversation.providerId}
+                size={15}
+                decorative
+              />
               <span className="activity-thread-state-mark" />
             </span>
             <span className="activity-thread-copy">
@@ -819,7 +826,7 @@ function SidebarView({
                 const collapsible = COLLAPSIBLE_WORK_SECTIONS.has(section.id);
                 const expanded = !collapsible || Boolean(query.trim()) || expandedWorkSections.has(section.id);
                 const visibleThreads = section.id === "done"
-                  ? section.threads.slice(0, historyVisible)
+                  ? section.threads.slice(0, doneVisible)
                   : section.threads;
                 return (
                   <section className={`work-thread-section is-${section.id}`} aria-labelledby={`work-section-${section.id}`} key={section.id}>
@@ -847,7 +854,7 @@ function SidebarView({
                     )}
                     {expanded && visibleThreads.map(({ conversation }) => activityRow(conversation))}
                     {expanded && section.id === "done" && visibleThreads.length < section.threads.length && (
-                      <button type="button" className="activity-show-more" onClick={() => setHistoryVisible((count) => count + ACTIVITY_HISTORY_PAGE)}>
+                      <button type="button" className="activity-show-more" onClick={() => setDoneVisible((count) => count + WORK_DONE_PAGE_SIZE)}>
                         Show more <span>{section.threads.length - visibleThreads.length} older</span>
                       </button>
                     )}

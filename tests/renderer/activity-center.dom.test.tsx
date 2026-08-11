@@ -95,7 +95,9 @@ describe("ActivityCenter agent operation disclosure", () => {
 
     const row = screen.getByText("Quota and activity").closest("article");
     expect(row).not.toBeNull();
-    expect(row?.querySelector('[data-provider-id="codex"]')).not.toBeNull();
+    expect(row?.querySelector(
+      '[data-provider-id="codex"] [data-provider-brand="openai"][data-provider-icon-kind="official"]',
+    )).not.toBeNull();
     expect(row).toHaveTextContent("OpenAI");
     expect(row).toHaveTextContent("Inertia");
     expect(row).toHaveTextContent("main");

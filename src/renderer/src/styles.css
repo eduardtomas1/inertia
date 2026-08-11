@@ -298,6 +298,52 @@ svg.lucide {
   stroke-width: 1.75;
 }
 
+.provider-brand-icon {
+  --provider-icon-size: 16px;
+  display: inline-grid;
+  width: var(--provider-icon-size);
+  height: var(--provider-icon-size);
+  flex: 0 0 var(--provider-icon-size);
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.provider-brand-icon-source {
+  display: block;
+  width: 100%;
+  height: 100%;
+  grid-area: 1 / 1;
+  object-fit: contain;
+}
+
+.provider-brand-icon-source.is-dark {
+  display: none;
+}
+
+.provider-brand-icon[data-provider-brand="anthropic"] {
+  border-radius: 2px;
+  background: #fff;
+}
+
+:root[data-theme="dark"]
+  .provider-brand-icon.has-dark-source .provider-brand-icon-source.is-light {
+  display: none;
+}
+
+:root[data-theme="dark"]
+  .provider-brand-icon.has-dark-source .provider-brand-icon-source.is-dark {
+  display: block;
+}
+
+:root[data-theme="dark"]
+  .provider-brand-icon.is-dark-invert .provider-brand-icon-source {
+  filter: invert(1);
+}
+
+:root[data-theme="dark"] .provider-brand-icon[data-provider-brand="anthropic"] {
+  background: transparent;
+}
+
 html,
 body,
 #root {
@@ -1297,18 +1343,6 @@ textarea {
   color: var(--text-soft);
 }
 
-.activity-thread-provider[data-provider-id="claude"] {
-  color: #d97757;
-}
-
-.activity-thread-provider[data-provider-id="cursor"] {
-  color: color-mix(in srgb, var(--accent) 75%, var(--text));
-}
-
-.activity-thread-provider[data-provider-id="opencode"] {
-  color: var(--status-completed);
-}
-
 .activity-thread-state-mark {
   position: absolute;
   right: -1px;
@@ -1326,7 +1360,7 @@ textarea {
 .activity-thread.status-failed .activity-thread-state-mark { background: var(--status-failed); }
 .activity-thread.status-completed .activity-thread-state-mark { background: var(--status-completed); }
 
-.activity-thread.status-working .activity-thread-provider > svg {
+.activity-thread.status-working .activity-thread-provider > .provider-brand-icon {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
@@ -1394,7 +1428,8 @@ textarea {
 }
 
 .activity-thread-provider-label {
-  flex: 0 0 auto;
+  max-width: 72px;
+  flex: 0 1 auto;
 }
 
 .activity-thread-project-meta,
@@ -1460,7 +1495,7 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .activity-thread,
   .sidebar-mode-switch button,
-  .activity-thread.status-working .activity-thread-provider > svg,
+  .activity-thread.status-working .activity-thread-provider > .provider-brand-icon,
   .thread-status-dot.is-working {
     animation: none;
     transition: none;
@@ -10590,7 +10625,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after,
 .app-shell[data-document-active="false"]
   .response-turn.is-active .agent-activity.is-running svg,
-.app-shell[data-document-active="false"] .activity-thread.status-working .activity-thread-provider > svg,
+.app-shell[data-document-active="false"] .activity-thread.status-working .activity-thread-provider > .provider-brand-icon,
 .app-shell[data-document-active="false"] .thread-status-dot.is-working {
   animation-play-state: paused;
 }

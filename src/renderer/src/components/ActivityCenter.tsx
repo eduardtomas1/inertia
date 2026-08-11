@@ -42,7 +42,7 @@ import {
 } from "../utils/activityCenter";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { agentRequestProviderName } from "../utils/agentInput";
-import { providerIcon } from "../utils/providerIcons";
+import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { IconButton } from "./ui";
 
 type ActivityCenterProps = {
@@ -163,20 +163,20 @@ function RunIdentityIcon({
   run: WorkspaceRun;
   providerId: ProviderId | null;
 }): React.JSX.Element {
-  const IdentityIcon = providerId
-    ? providerIcon(providerId)
-    : run.kind === "source-control"
-      ? GitBranch
-      : run.kind === "check"
-        ? TerminalSquare
-        : Activity;
+  const IdentityIcon = run.kind === "source-control"
+    ? GitBranch
+    : run.kind === "check"
+      ? TerminalSquare
+      : Activity;
   return (
     <span
       className={`activity-run-identity${providerId ? " is-provider" : ""}`}
       data-provider-id={providerId ?? undefined}
       aria-hidden="true"
     >
-      <IdentityIcon size={14} strokeWidth={1.9} />
+      {providerId
+        ? <ProviderBrandIcon providerId={providerId} size={14} decorative />
+        : <IdentityIcon size={14} strokeWidth={1.9} />}
     </span>
   );
 }

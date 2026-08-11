@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { startRuntime, type RunningRuntime } from "../../src/server";
+import { RuntimeStore } from "../../src/server/database";
 import type { ServerEvent } from "../../src/shared/contracts";
 import { connectRuntime } from "../support/runtime-event-queue";
 import { startTestRuntime } from "../support/test-runtime";
@@ -100,8 +101,16 @@ describe("runtime shutdown authority", () => {
     runtimes.splice(runtimes.indexOf(runtime), 1);
   });
 
-  it("starts without mutation authority when the supervisor lease is missing", async () => {
+  it("serves exact detail reads without mutation authority when the supervisor lease is missing", async () => {
     const paths = await workspace();
+    const databasePath = join(paths.data, "inertia.sqlite");
+    const seed = new RuntimeStore(databasePath, paths.workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const project = seed.createProject("Safety project", paths.workspace);
+    const conversation = seed.createConversation(project.id, "Safety chat");
+    const before = seed.shellSnapshot();
+    seed.close();
     const runtime = await startRuntime({
       dataDirectory: paths.data,
       defaultWorkspacePath: paths.workspace,
@@ -114,17 +123,83 @@ describe("runtime shutdown authority", () => {
       (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
         event.type === "server.welcome",
     );
-    const requestId = randomUUID();
+
+    const subscriptionRequestId = randomUUID();
     client.socket.send(JSON.stringify({
-      type: "settings.update",
-      requestId,
-      payload: { theme: "dark" },
+      type: "conversation.detail.subscription",
+      requestId: subscriptionRequestId,
+      payload: { owner: "primary", conversationId: conversation.id },
     }));
-    const rejected = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
-        event.type === "request.error" && event.requestId === requestId,
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok"
+        && event.requestId === subscriptionRequestId,
     );
-    expect(rejected.message).toContain("recovery safety mode");
+
+    for (const [conversationId, state] of [
+      [conversation.id, "ready"],
+      [randomUUID(), "missing"],
+    ] as const) {
+      const requestId = randomUUID();
+      client.socket.send(JSON.stringify({
+        type: "conversation.detail.load",
+        requestId,
+        payload: { conversationId },
+      }));
+      const loaded = await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+          event.type === "request.result"
+          && event.requestId === requestId,
+      );
+      expect(loaded.result).toMatchObject({
+        kind: "conversation.detail",
+        conversationId,
+        state,
+      });
+    }
+
+    for (const command of [
+      {
+        type: "settings.update",
+        payload: { theme: "dark" },
+      },
+      {
+        type: "conversation.create",
+        payload: { projectId: project.id, title: "Blocked chat" },
+      },
+      {
+        type: "message.send",
+        payload: { conversationId: conversation.id, content: "Blocked" },
+      },
+      {
+        type: "project.update",
+        payload: { projectId: project.id, gitRepositoryLimit: 16 },
+      },
+      {
+        type: "provider.refresh",
+        payload: { providerId: "codex" },
+      },
+      {
+        type: "terminal.create",
+        payload: { projectId: project.id, cols: 80, rows: 24 },
+      },
+    ] as const) {
+      const requestId = randomUUID();
+      client.socket.send(JSON.stringify({ ...command, requestId }));
+      const rejected = await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+          event.type === "request.error" && event.requestId === requestId,
+      );
+      expect(rejected.message).toContain("recovery safety mode");
+    }
+
+    const reopened = new RuntimeStore(databasePath, paths.workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const after = reopened.shellSnapshot();
+    reopened.close();
+    expect(after.activeConversationId).toBe(before.activeConversationId);
+    expect(after.conversations).toEqual(before.conversations);
   });
 
   it("does not promise reboot recovery when boot evidence is unavailable", async () => {

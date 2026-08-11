@@ -1142,6 +1142,8 @@ async function bootstrap(): Promise<void> {
           process.kill(snapshot.pid, "SIGKILL");
           return snapshot;
         },
+        recycle: () => runtimeSupervisor?.testOnlyRecycle()
+          ?? Promise.reject(new Error("The test runtime is not running")),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);

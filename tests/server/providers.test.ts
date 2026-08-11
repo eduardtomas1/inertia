@@ -721,14 +721,20 @@ setInterval(() => {}, 1000);
 
     for (const fixture of fixtures) {
       const root = temporaryRoot();
-      const { command, program } = nodeProgram(root, `fake-${fixture.providerId}`, fixture.lines.map((line) => `console.log(${JSON.stringify(JSON.stringify(line))});`).join("\n"));
+      const { command, program } = nodeProgram(root, `fake-${fixture.providerId}`, `${fixture.lines.map((line) => `console.log(${JSON.stringify(JSON.stringify(line))});`).join("\n")}
+setInterval(() => {}, 1000);
+`);
       const manager = new ProviderManager(
         { commands: { [fixture.providerId]: command } },
         new AgentHarnessRegistry([createCliAgentHarness(fixture.providerId, { prefixArgs: [program] })]),
       );
-      const result = await manager.run(nativeProviderRunInput({ providerId: fixture.providerId, harnessId: `${fixture.providerId}-cli`, conversationId: `${fixture.providerId}-conversation`, cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" }));
-      expect(result).toMatchObject({ status: "completed", text: fixture.expectedText, sessionId: fixture.sessionId });
-      await manager.disposeAll();
+      try {
+        const result = await manager.run(nativeProviderRunInput({ providerId: fixture.providerId, harnessId: `${fixture.providerId}-cli`, conversationId: `${fixture.providerId}-conversation`, cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" }));
+        expect(result).toMatchObject({ status: "completed", text: fixture.expectedText, sessionId: fixture.sessionId, cleanupConfirmed: true });
+        expect(manager.isRunning(`${fixture.providerId}-conversation`)).toBe(false);
+      } finally {
+        await manager.disposeAll();
+      }
     }
   });
 
@@ -772,6 +778,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     const root = temporaryRoot();
     const { command, program } = nodeProgram(root, "acknowledged-codex-cli", `
 console.log(JSON.stringify({ type: "turn.completed" }));
+setInterval(() => {}, 1000);
 `);
     let releaseBackend!: (environment: NodeJS.ProcessEnv) => void;
     const backend = new Promise<NodeJS.ProcessEnv>((resolve) => {
@@ -793,23 +800,30 @@ console.log(JSON.stringify({ type: "turn.completed" }));
       acknowledgeStart = resolve;
     });
     const onStarted = vi.fn(acknowledgeStart);
-    const result = manager.run(nativeProviderRunInput({
-      providerId: "codex",
-      harnessId: "codex-cli",
-      conversationId: "acknowledged-cli",
-      cwd: root,
-      prompt: "Respond",
-      interactionMode: "build",
-      access: "full",
-    }), { onStarted });
-    await Promise.resolve();
-    expect(onStarted).not.toHaveBeenCalled();
+    try {
+      const result = manager.run(nativeProviderRunInput({
+        providerId: "codex",
+        harnessId: "codex-cli",
+        conversationId: "acknowledged-cli",
+        cwd: root,
+        prompt: "Respond",
+        interactionMode: "build",
+        access: "full",
+      }), { onStarted });
+      await Promise.resolve();
+      expect(onStarted).not.toHaveBeenCalled();
 
-    releaseBackend({});
-    await started;
-    expect(onStarted).toHaveBeenCalledTimes(1);
-    await expect(result).resolves.toMatchObject({ status: "completed" });
-    await manager.disposeAll();
+      releaseBackend({});
+      await started;
+      expect(onStarted).toHaveBeenCalledTimes(1);
+      await expect(result).resolves.toMatchObject({
+        status: "completed",
+        cleanupConfirmed: true,
+      });
+      expect(manager.isRunning("acknowledged-cli")).toBe(false);
+    } finally {
+      await manager.disposeAll();
+    }
   });
 
   it("does not acknowledge an async backend rejection before harness start", async () => {
@@ -908,6 +922,7 @@ console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block
 console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { text: "reply" } } }));
 console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Partial reply" }] } }));
 console.log(JSON.stringify({ type: "result", is_error: false }));
+setInterval(() => {}, 1000);
 `);
     const manager = new ProviderManager(
       {
@@ -922,11 +937,15 @@ console.log(JSON.stringify({ type: "result", is_error: false }));
       new AgentHarnessRegistry([createCliAgentHarness("claude", { prefixArgs: [program] })]),
     );
 
-    const result = await manager.run(nativeProviderRunInput({ providerId: "claude", harnessId: "claude-cli", conversationId: "claude-partial", cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" }));
+    try {
+      const result = await manager.run(nativeProviderRunInput({ providerId: "claude", harnessId: "claude-cli", conversationId: "claude-partial", cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" }));
 
-    expect(result).toMatchObject({ status: "completed", text: "Partial reply" });
-    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toContain("--include-partial-messages");
-    await manager.disposeAll();
+      expect(result).toMatchObject({ status: "completed", text: "Partial reply", cleanupConfirmed: true });
+      expect(manager.isRunning("claude-partial")).toBe(false);
+      expect(JSON.parse(readFileSync(capturePath, "utf8"))).toContain("--include-partial-messages");
+    } finally {
+      await manager.disposeAll();
+    }
   });
 
   it("classifies authentication failures from provider stderr", async () => {

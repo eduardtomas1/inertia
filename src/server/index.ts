@@ -77,6 +77,7 @@ import { WorkspaceRunController } from "./runtime/workspace-run-controller";
 import {
   createRuntimeCommandExecutor,
 } from "./runtime/commands/command-router";
+import { runtimeSafetyAllowsCommand } from "./runtime/commands/runtime-safety";
 import {
   createConversationCommandHandler,
 } from "./runtime/commands/conversation-commands";
@@ -901,7 +902,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
       return;
     }
-    if (runtimeSafetyLock) {
+    if (runtimeSafetyLock && !runtimeSafetyAllowsCommand(command.type)) {
       send(socket, {
         type: "request.error",
         requestId: command.requestId,

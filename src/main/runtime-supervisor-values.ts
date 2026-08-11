@@ -10,6 +10,7 @@ export const runtimeSupervisorDefaults = {
   databaseRecoveryTimeoutMs: 120_000,
   databaseRecoveryCancelTimeoutMs: 5_000,
   credentialRequestTimeoutMs: 10_000,
+  maxUnconfirmedRestarts: 2,
 } as const;
 
 export function runtimeRestartDelayMs(attempt: number): number {
@@ -32,4 +33,13 @@ export function publicProcessError(
   if (!(error instanceof Error)) return fallback;
   const message = error.message.trim().replace(/\s+/gu, " ").slice(0, 500);
   return message || fallback;
+}
+
+export function unconfirmedRuntimeCleanupMessage(
+  systemBootId: string,
+  prefix: string,
+): string {
+  return systemBootId === "unavailable"
+    ? `${prefix} Automatic reboot verification is unavailable on this system; keep the owned work unchanged until cleanup can be confirmed.`
+    : `${prefix} Restarting Inertia is not enough; a full computer restart lets Inertia prove the prior process ended before recovering its owned work.`;
 }

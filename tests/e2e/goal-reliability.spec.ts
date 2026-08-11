@@ -30,11 +30,11 @@ const statePath = path.join(
 );
 let threadId = "${providerSessionId}";
 let turnId = "goal-turn-1";
-const readGoal = () => {
+const readState = () => {
   try { return JSON.parse(fs.readFileSync(statePath, "utf8")); }
   catch { return null; }
 };
-const writeGoal = (goal) => fs.writeFileSync(statePath, JSON.stringify(goal));
+const writeState = (state) => fs.writeFileSync(statePath, JSON.stringify(state));
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
@@ -56,7 +56,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (message.method === "thread/goal/get") {
-    send({ id: message.id, result: { goal: readGoal() } });
+    send({ id: message.id, result: { goal: readState()?.goal ?? null } });
     return;
   }
   if (message.method === "thread/goal/clear") {
@@ -65,42 +65,39 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ method: "thread/goal/cleared", params: { threadId } });
     return;
   }
+  if (message.method === "turn/interrupt") {
+    send({ id: message.id, result: {} });
+    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
+    return;
+  }
   if (message.method !== "thread/goal/set") return;
+  const previous = readState();
+  const activationCount = (previous?.activationCount ?? 0) + 1;
+  turnId = "goal-turn-" + activationCount;
   const activeGoal = {
     threadId,
-    objective: message.params.objective,
+    objective: message.params.objective || previous?.goal?.objective,
     status: "active",
-    tokenBudget: message.params.tokenBudget ?? null,
-    tokensUsed: 0,
-    timeUsedSeconds: 0,
+    tokenBudget: message.params.tokenBudget !== undefined
+      ? message.params.tokenBudget
+      : previous?.goal?.tokenBudget ?? null,
+    tokensUsed: activationCount * 1000,
+    timeUsedSeconds: activationCount,
     createdAt: 1800000000,
-    updatedAt: 1800000000,
+    updatedAt: 1800000000 + activationCount,
   };
-  writeGoal(activeGoal);
+  writeState({ activationCount, goal: activeGoal });
   send({ id: message.id, result: { goal: activeGoal } });
   send({ method: "thread/goal/updated", params: { threadId, goal: activeGoal } });
   send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
-  send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-message-1", delta: "First automatic goal turn." } });
-  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
-  setTimeout(() => {
-    turnId = "goal-turn-2";
-    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
-    send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-message-2", delta: " Second automatic goal turn." } });
-    const completedGoal = {
-      ...activeGoal,
-      status: "complete",
-      tokensUsed: 9000,
-      timeUsedSeconds: 8,
-      updatedAt: 1800000008,
-    };
-    writeGoal(completedGoal);
-    send({ method: "thread/goal/updated", params: { threadId, turnId, goal: completedGoal } });
-    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
-  }, 50);
+  const output = activationCount === 1
+    ? "First-action goal run is active."
+    : "Resumed goal run is active.";
+  send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-message-" + activationCount, delta: output } });
 });
 `;
 
-test("runs and persists a budgeted native goal across automatic turns", async () => {
+test("starts a sessionless goal and recovers it after Stop and runtime crash", async () => {
   const app = await createAppFixture({
     name: "goal-reliability",
     initialState: "conversation",
@@ -122,7 +119,6 @@ test("runs and persists a budgeted native goal across automatic turns", async ()
       store.updateConversation(conversationId, {
         modelSelection: selection,
         continuationIdentity,
-        providerSessionId,
       });
       store.close();
     },
@@ -147,25 +143,23 @@ test("runs and persists a budgeted native goal across automatic turns", async ()
     await expect(page.getByText("/goal Ship the reliable goal flow", {
       exact: true,
     })).toBeVisible();
-    await expect(page.getByText("Second automatic goal turn.", {
-      exact: false,
-    })).toBeVisible({ timeout: 15_000 });
-
-    await composer.fill("/goal");
-    await page.getByRole("option", { name: /^\/goal/u }).click();
-    await expect(goalControl.getByText("Ship the reliable goal flow", {
+    await expect(page.getByText("First-action goal run is active.", {
       exact: true,
-    })).toBeVisible();
-    await expect(goalControl.getByText("Complete", { exact: true }))
-      .toBeVisible();
-    await page.keyboard.press("Escape");
+    })).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: "Open workspace tools" }).click();
     const tools = page.getByRole("complementary", { name: "Workspace tools" });
     await tools.getByRole("tab", { name: /^Goal/u }).click();
-    await expect(tools.getByRole("progressbar", {
-      name: "Goal token budget used",
-    })).toHaveAttribute("aria-valuenow", "75");
+    await expect(tools.getByRole("button", { name: "Pause" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Stop agent", exact: true }).click();
+    await expect(tools.getByRole("button", { name: "Resume goal" }))
+      .toBeVisible({ timeout: 10_000 });
+    await tools.getByRole("button", { name: "Resume goal" }).click();
+    await expect(page.getByText("Resumed goal run is active.", {
+      exact: true,
+    })).toBeVisible({ timeout: 15_000 });
+    await expect(tools.getByRole("button", { name: "Pause" })).toBeVisible();
 
     const before = await app.runtimeSnapshot();
     await app.electronApp.evaluate(() => {
@@ -186,7 +180,13 @@ test("runs and persists a budgeted native goal across automatic turns", async ()
     await expect(tools.getByText("Ship the reliable goal flow", {
       exact: true,
     })).toBeVisible({ timeout: 10_000 });
-    await expect(tools.getByText("Complete", { exact: true })).toBeVisible();
+    await expect(tools.getByText("Active", { exact: true })).toBeVisible();
+    await expect(tools.getByRole("button", { name: "Resume goal" }))
+      .toBeVisible({ timeout: 10_000 });
+    await expect(tools.getByRole("button", { name: "Resume goal" }))
+      .toBeDisabled();
+    await expect(tools.getByText(/no Inertia run is connected/u))
+      .toBeVisible();
     expect(app.rendererErrors).toEqual([]);
   } finally {
     await app.close();

@@ -741,6 +741,7 @@ describe("Codex App Server goal event ordering", () => {
       goalProjectionSequence: () => 0,
       beginGoalMutation: vi.fn(),
       endGoalMutation: vi.fn(),
+      awaitInitialGoalTurn: vi.fn(),
       projectGoalResponse: () => null,
       setContinuationError: vi.fn(),
       setPhase: (value) => {

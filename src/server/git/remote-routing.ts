@@ -146,11 +146,12 @@ function unavailable(
 export async function inspectGitRemoteRouting(
   root: string,
   branch: string | null,
-  options: { deadlineAt?: number } = {},
+  options: { deadlineAt?: number; signal?: AbortSignal } = {},
 ): Promise<GitRemoteRoutingInspection> {
-  const [remoteResult, branchResult] = await Promise.all([
+  const [remoteInspection, branchInspection] = await Promise.allSettled([
     runGitInspection(root, ["remote", "-v"], {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: MAX_REMOTE_OUTPUT_BYTES,
       failureMessage: "Unable to inspect repository remotes.",
     }),
@@ -164,6 +165,7 @@ export async function inspectGitRemoteRouting(
           ],
           {
             deadlineAt: options.deadlineAt,
+            signal: options.signal,
             maxOutputBytes: MAX_PATH_LENGTH,
             failureMessage: "Unable to inspect branch remote configuration.",
           },
@@ -174,6 +176,16 @@ export async function inspectGitRemoteRouting(
           truncated: false,
         }),
   ]);
+  // Both probes can own Git children. Await their cleanup together so a
+  // failed or cancelled routing inspection cannot outlive this boundary.
+  if (remoteInspection.status === "rejected") {
+    throw remoteInspection.reason;
+  }
+  if (branchInspection.status === "rejected") {
+    throw branchInspection.reason;
+  }
+  const remoteResult = remoteInspection.value;
+  const branchResult = branchInspection.value;
   const remotes = configuredRemotes(remoteResult.stdout);
   const hasRemote = remotes.size > 0;
   if (!branch) return unavailable(hasRemote, "no-branch");

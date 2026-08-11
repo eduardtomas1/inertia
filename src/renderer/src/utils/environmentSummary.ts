@@ -1,11 +1,31 @@
 import type {
   ChatMessage,
+  Conversation,
   GitStatusSnapshot,
+  Project,
   SubagentTrace,
   WorkspaceGitSnapshot,
   WorkspaceRun,
 } from "@shared/contracts";
+import { workspaceRunAttentionView } from "../../../shared/attention";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+
+export type EnvironmentSummaryCheck = Pick<
+  WorkspaceRun,
+  | "id"
+  | "kind"
+  | "projectId"
+  | "conversationId"
+  | "label"
+  | "status"
+  | "canStop"
+  | "port"
+> & {
+  contextLabel: string | null;
+  canOpenPreview: boolean;
+  canAcknowledge: boolean;
+  canDismiss: boolean;
+};
 
 export interface EnvironmentSummarySnapshot {
   projectName: string | null;
@@ -23,10 +43,7 @@ export interface EnvironmentSummarySnapshot {
     label: "Branch" | "Branches";
     value: string;
   } | null;
-  checks: Array<Pick<
-    WorkspaceRun,
-    "id" | "label" | "status" | "canStop"
-  > & { contextLabel: string | null }>;
+  checks: EnvironmentSummaryCheck[];
   subagents: Array<Pick<
     SubagentTrace,
     "id" | "providerName" | "providerRole" | "status"
@@ -48,7 +65,9 @@ interface EnvironmentSummaryInput {
   runs: readonly WorkspaceRun[];
   subagents: readonly SubagentTrace[];
   messages: readonly ChatMessage[];
-  relatedProjects?: readonly { id: string; name: string }[];
+  projects?: readonly Pick<Project, "id" | "name">[];
+  conversations?: readonly Pick<Conversation, "id" | "projectId">[];
+  visibleProjectIds?: readonly string[];
 }
 
 function runtimeLabel(status: ConnectionStatus): string {
@@ -123,6 +142,22 @@ function recentAttachments(
   return attachments;
 }
 
+export function workspaceRunPreviewUrl(
+  run: Pick<WorkspaceRun, "kind" | "status" | "port">,
+): string | null {
+  if (
+    run.kind !== "service"
+    || (run.status !== "running" && run.status !== "waiting")
+    || run.port === null
+    || !Number.isSafeInteger(run.port)
+    || run.port < 1
+    || run.port > 65_535
+  ) {
+    return null;
+  }
+  return `http://127.0.0.1:${run.port}`;
+}
+
 export function buildEnvironmentSummary({
   projectId,
   projectName,
@@ -133,45 +168,68 @@ export function buildEnvironmentSummary({
   runs,
   subagents,
   messages,
-  relatedProjects = [],
+  projects = [],
+  conversations = [],
+  visibleProjectIds: additionalVisibleProjectIds = [],
 }: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
-  const visibleProjectIds = new Set(
-    projectId ? [projectId, ...relatedProjects.map(({ id }) => id)] : [],
+  const visibleProjectIds = new Set(additionalVisibleProjectIds);
+  if (projectId) visibleProjectIds.add(projectId);
+  const projectNames = new Map(projects.map(({ id, name }) => [id, name]));
+  const knownConversations = new Map(
+    conversations.map(({ id, projectId: ownerProjectId }) => [
+      id,
+      ownerProjectId,
+    ]),
   );
-  const relatedProjectNames = new Map(
-    relatedProjects.map(({ id, name }) => [id, name]),
-  );
-  const checks = projectId
-    ? runs
-      .filter((run) =>
-        visibleProjectIds.has(run.projectId)
+  let passiveRows = 0;
+  const checks = [...runs]
+    .sort((left, right) =>
+      right.startedAt.localeCompare(left.startedAt)
+      || right.id.localeCompare(left.id))
+    .filter((run) => {
+      if (run.canStop) return true;
+      if (!visibleProjectIds.has(run.projectId) || passiveRows >= 3) {
+        return false;
+      }
+      const attention = workspaceRunAttentionView(run);
+      if (
+        run.status !== "running"
+        && run.status !== "waiting"
+        && !attention.needsAttention
+      ) {
+        return false;
+      }
+      passiveRows += 1;
+      return true;
+    })
+    .map((run): EnvironmentSummaryCheck => {
+      const attention = workspaceRunAttentionView(run);
+      const routeKnown = projectNames.has(run.projectId)
         && (
-          run.status === "running"
-          || run.status === "waiting"
-          || (
-            run.status === "failed"
-            && run.attentionState !== "acknowledged"
-            && run.attentionState !== "dismissed"
-          )
-        ))
-      .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
-      .reduce<WorkspaceRun[]>((visible, run) => {
-        if (run.canStop || visible.length < 3) visible.push(run);
-        return visible;
-      }, [])
-      .map(({ id, projectId: runProjectId, label, detail, status, canStop }) => ({
-        id,
-        label,
-        status,
-        canStop,
+          run.conversationId === null
+          || knownConversations.get(run.conversationId) === run.projectId
+        );
+      return {
+        id: run.id,
+        kind: run.kind,
+        projectId: run.projectId,
+        conversationId: run.conversationId,
+        label: run.label,
+        status: run.status,
+        canStop: run.canStop,
+        port: run.port,
         contextLabel: [
-          runProjectId === projectId
+          run.projectId === projectId
             ? null
-            : relatedProjectNames.get(runProjectId) ?? "Split project",
-          detail,
+            : projectNames.get(run.projectId) ?? "Unavailable project",
+          run.detail,
         ].filter((part): part is string => Boolean(part)).join(" · ") || null,
-      }))
-    : [];
+        canOpenPreview: routeKnown && workspaceRunPreviewUrl(run) !== null,
+        canAcknowledge:
+          attention.needsAttention && attention.canAcknowledge,
+        canDismiss: attention.canDismiss,
+      };
+    });
   const activeSubagents = conversationId
     ? subagents
       .filter((trace) =>

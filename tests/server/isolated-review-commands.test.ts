@@ -183,22 +183,28 @@ describe("isolated review revision authority", () => {
     expect(dependencies.send).not.toHaveBeenCalled();
   });
 
-  it("records cancellation while selection context is still being assembled", async () => {
+  it("aborts cancellation while selection context is still being assembled", async () => {
     const authority = new ConversationWorkAuthority(() => ({
       projectId,
       checkoutPath: "/private/inertia-worktree",
     }));
-    const context = deferred<{
-      visibleContent: string;
-      requestContext: { diffSelections: [] };
-      patch: string;
-      filePath: string;
-      hunkHeader: string;
-      selectedLineCount: number;
-      fingerprint: string;
-      hunkId: string;
-    }>();
-    reviewSupport.selectedReviewContext.mockReturnValue(context.promise);
+    let setupSignal: AbortSignal | undefined;
+    reviewSupport.selectedReviewContext.mockImplementation((
+      _store,
+      _selection,
+      _purpose,
+      _secureFiles,
+      signal?: AbortSignal,
+    ) => {
+      setupSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => reject(new Error("selection setup cancelled")),
+          { once: true },
+        );
+      });
+    });
     const { dependencies, runIsolated, stopConversation } = fixture(authority);
     const handler = createIsolatedReviewCommandHandler(dependencies);
     const socket = {} as WebSocket;
@@ -218,17 +224,8 @@ describe("isolated review revision authority", () => {
       requestId: turnId,
       payload: { conversationId },
     })).resolves.toBe("handled");
-
-    context.resolve({
-      visibleContent: "Can you check this?",
-      requestContext: { diffSelections: [] },
-      patch: "",
-      filePath: "src/example.ts",
-      hunkHeader: "@@ -1 +1 @@",
-      selectedLineCount: 1,
-      fingerprint: "a".repeat(64),
-      hunkId: "hunk-1",
-    });
+    expect(setupSignal).toBeInstanceOf(AbortSignal);
+    expect(setupSignal?.aborted).toBe(true);
     await expect(question).resolves.toBe("handled");
 
     expect(stopConversation).toHaveBeenCalledWith(

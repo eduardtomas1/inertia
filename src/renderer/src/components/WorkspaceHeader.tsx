@@ -51,6 +51,15 @@ type WorkspaceHeaderProps = {
   onPush: () => void;
   onRunAction: (action: ProjectAction) => void;
   onStopRun: (run: EnvironmentSummarySnapshot["checks"][number]) => void;
+  onOpenRunPreview: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onAcknowledgeRun: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onDismissRun: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
 };
 
 export function WorkspaceHeader({
@@ -86,6 +95,9 @@ export function WorkspaceHeader({
   onPush,
   onRunAction,
   onStopRun,
+  onOpenRunPreview,
+  onAcknowledgeRun,
+  onDismissRun,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | "git" | null>(null);
   const privateConnectLoad = usePrivateConnectState();
@@ -410,6 +422,9 @@ export function WorkspaceHeader({
               <EnvironmentSummary
                 summary={environmentSummary}
                 onStopRun={onStopRun}
+                onOpenRunPreview={onOpenRunPreview}
+                onAcknowledgeRun={onAcknowledgeRun}
+                onDismissRun={onDismissRun}
               />
             </div>
           )}

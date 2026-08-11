@@ -1,5 +1,7 @@
 import {
   Bot,
+  Check,
+  ExternalLink,
   FileText,
   GitBranch,
   GitCompareArrows,
@@ -7,6 +9,7 @@ import {
   Laptop,
   ListChecks,
   Square,
+  Trash2,
 } from "lucide-react";
 
 import { chatAttachmentKind } from "@shared/attachments";
@@ -17,6 +20,15 @@ import { IconButton } from "./ui";
 interface EnvironmentSummaryProps {
   summary: EnvironmentSummarySnapshot;
   onStopRun: (run: EnvironmentSummarySnapshot["checks"][number]) => void;
+  onOpenRunPreview: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onAcknowledgeRun: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onDismissRun: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
 }
 
 function subagentLabel(
@@ -27,9 +39,22 @@ function subagentLabel(
     ?? "Delegated agent";
 }
 
+function runStatusLabel(
+  status: EnvironmentSummarySnapshot["checks"][number]["status"],
+): string {
+  if (status === "waiting") return "Waiting";
+  if (status === "failed") return "Needs attention";
+  if (status === "succeeded") return "Completed";
+  if (status === "cancelled") return "Stopped";
+  return "Running";
+}
+
 export function EnvironmentSummary({
   summary,
   onStopRun,
+  onOpenRunPreview,
+  onAcknowledgeRun,
+  onDismissRun,
 }: EnvironmentSummaryProps): React.JSX.Element {
   useNativePreviewSuspension(true);
   const hasWorkspaceDetails = Boolean(
@@ -112,15 +137,41 @@ export function EnvironmentSummary({
                   {check.label}
                   {check.contextLabel ? ` · ${check.contextLabel}` : ""}
                 </span>
-                <small>{check.status === "waiting" ? "Waiting" : check.status === "failed" ? "Needs attention" : "Running"}</small>
-                {check.canStop && (
-                  <IconButton
-                    label={`Stop ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
-                    onClick={() => onStopRun(check)}
-                  >
-                    <Square size={12} />
-                  </IconButton>
-                )}
+                <small>{runStatusLabel(check.status)}</small>
+                <div className="environment-summary-run-actions">
+                  {check.canOpenPreview && (
+                    <IconButton
+                      label={`Open preview for ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
+                      onClick={() => onOpenRunPreview(check)}
+                    >
+                      <ExternalLink size={12} />
+                    </IconButton>
+                  )}
+                  {check.canAcknowledge && (
+                    <IconButton
+                      label={`Acknowledge ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
+                      onClick={() => onAcknowledgeRun(check)}
+                    >
+                      <Check size={12} />
+                    </IconButton>
+                  )}
+                  {check.canDismiss && (
+                    <IconButton
+                      label={`Dismiss ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
+                      onClick={() => onDismissRun(check)}
+                    >
+                      <Trash2 size={12} />
+                    </IconButton>
+                  )}
+                  {check.canStop && (
+                    <IconButton
+                      label={`Stop ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
+                      onClick={() => onStopRun(check)}
+                    >
+                      <Square size={12} />
+                    </IconButton>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

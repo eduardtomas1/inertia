@@ -49,10 +49,10 @@ function terminalPathOutput(output: Buffer): string {
 function requirePathInspectionTime(
   options: GitPathInspectionOptions,
 ): void {
-  if (
-    options.signal?.aborted
-    || (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt)
-  ) {
+  if (options.signal?.aborted) {
+    throw new GitError("timeout", "Git inspection was cancelled.");
+  }
+  if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
     throw new GitError(
       "timeout",
       "Git took too long to complete the operation.",
@@ -97,6 +97,7 @@ export async function repositoryRoot(
     ["rev-parse", "--show-toplevel"],
     {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: MAX_PATH_LENGTH,
       failureMessage: "Unable to inspect this Git repository.",
     },
@@ -141,6 +142,7 @@ export async function repositoryMetadataMarkerIdentity(
     args,
     {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: MAX_PATH_LENGTH,
       failureMessage: "Unable to inspect this Git repository identity.",
     },
@@ -152,7 +154,10 @@ export async function repositoryMetadataMarkerIdentity(
       "rev-parse",
       "--path-format=absolute",
       argument,
-    ]).catch(async () => await inspect(["rev-parse", argument]));
+    ]).catch(async () => {
+      requirePathInspectionTime(options);
+      return await inspect(["rev-parse", argument]);
+    });
     const reported = terminalPathOutput(result.stdout);
     if (!reported || reported.includes("\0")) {
       throw new GitError(

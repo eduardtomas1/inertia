@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import clsx from "clsx";
 import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Sparkles, Square, StickyNote, Trash2, WandSparkles, X } from "lucide-react";
 import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
@@ -170,6 +178,10 @@ export function ChangesPanel({
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [activeHunkId, setActiveHunkId] = useState<string | null>(null);
+  const toolbarRef = useRef<HTMLElement>(null);
+  const restoreQuestionFocusRef = useRef(false);
+  const questionStopVisible = questionRunning
+    || (reviewAction === "ask" && submitting);
   const persistentReview = capabilities?.persistentReview ?? true;
   const agentRevision = capabilities?.agentRevision ?? true;
   const selectiveRevert = capabilities?.selectiveRevert ?? true;
@@ -227,15 +239,38 @@ export function ChangesPanel({
     if (!questionRunning) setStoppingAsk(false);
   }, [questionRunning]);
 
+  useLayoutEffect(() => {
+    if (questionStopVisible || !restoreQuestionFocusRef.current) return;
+    restoreQuestionFocusRef.current = false;
+    if (
+      document.activeElement !== document.body
+      && document.activeElement !== null
+    ) {
+      return;
+    }
+    const refresh = toolbarRef.current?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Refresh changes"]:not(:disabled)',
+    );
+    (refresh ?? toolbarRef.current)?.focus({ preventScroll: true });
+  }, [questionStopVisible]);
+
   const clearSelection = () => { setSelection(null); setReviewAction(null); setComment(""); setSelectionError(null); setStoppingAsk(false); };
   const stopActiveQuestion = () => {
     if (!onCancelAsk || stoppingAsk) return;
     setSelectionError(null);
     setStoppingAsk(true);
     void onCancelAsk().catch((error) => {
+      restoreQuestionFocusRef.current = false;
       setSelectionError(error instanceof Error ? error.message : "The review question could not be stopped.");
       setStoppingAsk(false);
     });
+  };
+  const requestQuestionStop = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ): void => {
+    restoreQuestionFocusRef.current = document.activeElement
+      === event.currentTarget;
+    stopActiveQuestion();
   };
   const chooseLine = (hunk: DiffHunk, index: number, extend: boolean) => {
     const start = extend && selection?.hunkId === hunk.id ? Math.min(selection.anchor, index) : index;
@@ -350,7 +385,7 @@ export function ChangesPanel({
 
   return (
     <section className="changes-panel" aria-label="Workspace changes" aria-busy={diffBusy}>
-      <header className="panel-toolbar">
+      <header className="panel-toolbar" ref={toolbarRef} tabIndex={-1}>
         <div className="panel-heading">
           <GitCompareArrows size={17} aria-hidden="true" />
           <div className="panel-heading-copy"><h2>Changes</h2><span>{toolbarFiles} {toolbarFiles === 1 ? "file" : "files"}{headerMetrics?.repositories !== undefined ? ` in ${headerMetrics.repositories} ${headerMetrics.repositories === 1 ? "repository" : "repositories"}` : ""}</span></div>
@@ -379,7 +414,7 @@ export function ChangesPanel({
               type="button"
               className="subtle-button"
               disabled={stoppingAsk}
-              onClick={stopActiveQuestion}
+              onClick={requestQuestionStop}
             >
               {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={12} />}
               {stoppingAsk ? "Stopping…" : "Stop asking"}
@@ -534,7 +569,7 @@ export function ChangesPanel({
                                     type="button"
                                     className="subtle-button"
                                     disabled={stoppingAsk}
-                                    onClick={stopActiveQuestion}
+                                    onClick={requestQuestionStop}
                                   >
                                     {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={12} />}
                                     {stoppingAsk ? "Stopping…" : "Stop asking"}

@@ -349,6 +349,9 @@ describe("trusted overlay native preview suspension", () => {
       <EnvironmentSummary
         summary={environmentSummary}
         onStopRun={vi.fn()}
+        onOpenRunPreview={vi.fn()}
+        onAcknowledgeRun={vi.fn()}
+        onDismissRun={vi.fn()}
       />,
     );
 

@@ -29,7 +29,10 @@ import {
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useDraftConversation } from "./hooks/useDraftConversation";
-import { useActivityActions } from "./hooks/useActivityActions";
+import {
+  useActivityActions,
+  type PreviewWorkspaceRun,
+} from "./hooks/useActivityActions";
 import { useStableActions, useStableController } from "./hooks/useStableController";
 import { useAppUpdate } from "./app-update";
 import { useWorkspaceTools } from "./hooks/useWorkspaceTools";
@@ -458,9 +461,13 @@ export default function App(): React.JSX.Element {
     runs: connection.snapshot?.runs ?? [],
     subagents,
     messages,
-    relatedProjects: connection.snapshot?.projects.filter(({ id }) =>
-      id === splitConversation?.projectId && id !== project?.id) ?? [],
+    projects: connection.snapshot?.projects ?? [],
+    conversations: connection.snapshot?.conversations ?? [],
+    visibleProjectIds: splitConversation?.projectId
+      ? [splitConversation.projectId]
+      : [],
   }), [
+    connection.snapshot?.conversations,
     connection.snapshot?.projects,
     connection.snapshot?.runs,
     connection.status,
@@ -589,6 +596,30 @@ export default function App(): React.JSX.Element {
     setView("workspace");
     setSidebarOpen(false);
   };
+  const activatePrimaryRunContext = (
+    activity: PreviewWorkspaceRun,
+    tool: "preview",
+  ): boolean => {
+    const targetProject = connection.snapshot?.projects.find(
+      ({ id }) => id === activity.projectId,
+    );
+    const targetConversation = activity.conversationId === null
+      ? null
+      : connection.snapshot?.conversations.find(
+          ({ id, projectId: ownerProjectId }) =>
+            id === activity.conversationId
+            && ownerProjectId === activity.projectId,
+        ) ?? null;
+    if (!targetProject || (activity.conversationId && !targetConversation)) {
+      return false;
+    }
+    if (targetConversation) selectConversation(targetConversation);
+    else selectProject(targetProject);
+    setView("workspace");
+    setSidebarOpen(false);
+    sceneSetActiveTool(tool);
+    return true;
+  };
   const activityActions = useStableController(
     useActivityActions({
       project,
@@ -596,11 +627,14 @@ export default function App(): React.JSX.Element {
       run,
       setActiveTool: sceneSetActiveTool,
       setActionError,
+      activateContext: activatePrimaryRunContext,
+      navigatePreview: desktopTools.navigatePreview,
     }),
   );
   const {
     runProjectAction,
     stopWorkspaceRun,
+    openWorkspaceRunPreview: openPrimaryWorkspaceRunPreview,
     acknowledgeActivity,
     dismissActivity,
   } = activityActions;
@@ -912,6 +946,22 @@ export default function App(): React.JSX.Element {
     onSecondaryConversationCreated: updateSplitConversationId,
     onTerminal: () => setGitRefreshVersion((version) => version + 1),
   });
+  const openWorkspaceRunPreview = useCallback((run: PreviewWorkspaceRun) => {
+    workspaceLayout.setEnvironmentOpen(false);
+    if (
+      run.conversationId !== null
+      && run.conversationId === splitConversation?.id
+    ) {
+      splitWorkspace.openWorkspaceRunPreview(run);
+      return;
+    }
+    openPrimaryWorkspaceRunPreview(run);
+  }, [
+    openPrimaryWorkspaceRunPreview,
+    splitConversation?.id,
+    splitWorkspace,
+    workspaceLayout,
+  ]);
   const visibleWorkspaceScene = useMemo<WorkspaceSceneProps>(() => ({
     ...workspaceScene,
     chat: {
@@ -991,6 +1041,7 @@ export default function App(): React.JSX.Element {
         commit,
         runProjectAction,
         stopWorkspaceRun,
+        openWorkspaceRunPreview,
         acknowledgeActivity,
         dismissActivity,
       }}

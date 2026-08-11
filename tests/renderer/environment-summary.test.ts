@@ -89,7 +89,7 @@ function message(
 }
 
 describe("environment summary projection", () => {
-  it("uses truthful workspace-wide changes and only current active work", () => {
+  it("uses truthful workspace-wide changes and current passive work", () => {
     const workspaceGitStatus: WorkspaceGitSnapshot = {
       repositories: [{
         repositoryPath: ".",
@@ -127,8 +127,13 @@ describe("environment summary projection", () => {
       workspaceGitStatus,
       runs: [
         run(),
-        run({ id: "old", status: "succeeded", finishedAt: now }),
-        run({ id: "other", projectId: "project-2" }),
+        run({
+          id: "old",
+          status: "succeeded",
+          canStop: false,
+          finishedAt: now,
+        }),
+        run({ id: "other", projectId: "project-2", canStop: false }),
         run({
           id: "failed",
           status: "failed",
@@ -163,13 +168,15 @@ describe("environment summary projection", () => {
     expect(summary.checks.map(({ id }) => id)).toContain("failed");
     expect(summary.checks.find(({ id }) => id === "failed")?.canStop)
       .toBe(false);
+    expect(summary.checks.find(({ id }) => id === "failed"))
+      .toMatchObject({ canAcknowledge: true, canDismiss: true });
     expect(summary.subagents).toHaveLength(1);
     expect(summary.attachments.map(({ name }) => name))
       .toEqual(["notes.pdf", "old.png"]);
     expect(JSON.stringify(summary)).not.toContain("/private/");
   });
 
-  it("keeps every stoppable project run while bounding passive status rows", () => {
+  it("keeps every stoppable run globally while bounding visible passive rows", () => {
     const summary = buildEnvironmentSummary({
       projectId: "project-1",
       projectName: "Inertia",
@@ -210,25 +217,51 @@ describe("environment summary projection", () => {
         }),
         run({
           id: "split-service",
+          kind: "service",
           projectId: "project-2",
+          conversationId: "conversation-2",
           label: "Docs preview",
           detail: "npm run preview",
           canStop: true,
+          port: 4173,
           startedAt: "2026-07-28T12:00:00.000Z",
         }),
         run({
           id: "unrelated-service",
+          kind: "service",
           projectId: "project-3",
+          conversationId: null,
           canStop: true,
+          port: 3000,
           startedAt: "2026-07-28T12:07:00.000Z",
+        }),
+        run({
+          id: "unknown-service",
+          kind: "service",
+          projectId: "removed-project",
+          conversationId: null,
+          canStop: true,
+          port: 8080,
+          startedAt: "2026-07-28T12:08:00.000Z",
         }),
       ],
       subagents: [],
       messages: [],
-      relatedProjects: [{ id: "project-2", name: "Docs" }],
+      projects: [
+        { id: "project-1", name: "Inertia" },
+        { id: "project-2", name: "Docs" },
+        { id: "project-3", name: "Website" },
+      ],
+      conversations: [
+        { id: "conversation-1", projectId: "project-1" },
+        { id: "conversation-2", projectId: "project-2" },
+      ],
+      visibleProjectIds: ["project-2"],
     });
 
     expect(summary.checks.map(({ id }) => id)).toEqual([
+      "unknown-service",
+      "unrelated-service",
       "passive-1",
       "passive-2",
       "passive-3",
@@ -237,9 +270,69 @@ describe("environment summary projection", () => {
       "split-service",
     ]);
     expect(summary.checks.filter(({ canStop }) => canStop).map(({ id }) => id))
-      .toEqual(["service-1", "service-2", "split-service"]);
+      .toEqual([
+        "unknown-service",
+        "unrelated-service",
+        "service-1",
+        "service-2",
+        "split-service",
+      ]);
     expect(summary.checks.find(({ id }) => id === "split-service")?.contextLabel)
       .toBe("Docs · npm run preview");
+    expect(summary.checks.find(({ id }) => id === "split-service")?.canOpenPreview)
+      .toBe(true);
+    expect(summary.checks.find(({ id }) => id === "unrelated-service")?.contextLabel)
+      .toBe("Website");
+    expect(summary.checks.find(({ id }) => id === "unknown-service"))
+      .toMatchObject({
+        contextLabel: "Unavailable project",
+        canOpenPreview: false,
+      });
+  });
+
+  it("offers previews only for live, safely routed service ports", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [
+        run({ id: "valid", kind: "service", port: 4173 }),
+        run({ id: "invalid-port", kind: "service", port: 70_000 }),
+        run({
+          id: "settled",
+          kind: "service",
+          port: 3000,
+          status: "succeeded",
+          canStop: false,
+          finishedAt: now,
+        }),
+        run({
+          id: "missing-conversation",
+          kind: "service",
+          port: 8080,
+          conversationId: "missing",
+        }),
+      ],
+      subagents: [],
+      messages: [],
+      projects: [{ id: "project-1", name: "Inertia" }],
+      conversations: [{
+        id: "conversation-1",
+        projectId: "project-1",
+      }],
+    });
+
+    expect(summary.checks.find(({ id }) => id === "valid")?.canOpenPreview)
+      .toBe(true);
+    expect(summary.checks.find(({ id }) => id === "invalid-port")?.canOpenPreview)
+      .toBe(false);
+    expect(summary.checks.find(({ id }) => id === "settled"))
+      .toBeUndefined();
+    expect(summary.checks.find(({ id }) => id === "missing-conversation")?.canOpenPreview)
+      .toBe(false);
   });
 
   it("does not invent workspace details before they are available", () => {

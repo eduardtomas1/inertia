@@ -99,8 +99,15 @@ interface AppLayoutActions {
   ) => Promise<void>;
   runProjectAction: (action: ProjectAction) => void;
   stopWorkspaceRun: (run: Pick<WorkspaceRun, "id" | "label">) => void;
-  acknowledgeActivity: (activity: WorkspaceRun) => void;
-  dismissActivity: (activity: WorkspaceRun) => void;
+  openWorkspaceRunPreview: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  acknowledgeActivity: (
+    activity: Pick<WorkspaceRun, "id" | "label">,
+  ) => void;
+  dismissActivity: (
+    activity: Pick<WorkspaceRun, "id" | "label">,
+  ) => void;
 }
 
 interface AppLayoutProps {
@@ -503,6 +510,9 @@ export function AppLayout({
             onCommit={() => setCommitDialogOpen(true)}
             onRunAction={actions.runProjectAction}
             onStopRun={actions.stopWorkspaceRun}
+            onOpenRunPreview={actions.openWorkspaceRunPreview}
+            onAcknowledgeRun={actions.acknowledgeActivity}
+            onDismissRun={actions.dismissActivity}
             onCreateConversationOnBranch={(branch) =>
               actions.createConversation(project, { kind: "branch", branch })}
             onCreateConversationInWorktree={() => {

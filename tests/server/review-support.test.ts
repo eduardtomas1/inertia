@@ -26,6 +26,32 @@ afterEach(() => {
 });
 
 describe("selected review context", () => {
+  it("stops before repository inspection when the selection is cancelled", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-review-cancel-"));
+    roots.push(root);
+    const workspace = join(root, "workspace");
+    const data = join(root, "data");
+    mkdirSync(workspace);
+    mkdirSync(data);
+    const store = new RuntimeStore(join(data, "inertia.sqlite"), workspace);
+    const project = store.createProject("Review project", workspace);
+    const conversation = store.createConversation(project.id, "Review");
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(selectedReviewContext(store, {
+      projectId: project.id,
+      conversationId: conversation.id,
+      repositoryPath: ".",
+      fingerprint: "a".repeat(64),
+      filePath: "src/example.ts",
+      hunkId: "hunk-1",
+      lineIds: ["line-1"],
+    }, "ask", {} as RuntimeSecureFileBroker, controller.signal))
+      .rejects.toMatchObject({ code: "timeout" });
+    store.close();
+  });
+
   it("validates a file-scoped selection while retaining the full revision audit patch", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-review-support-"));
     roots.push(root);

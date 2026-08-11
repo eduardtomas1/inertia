@@ -1927,7 +1927,13 @@ textarea {
   font-size: var(--ui-font-micro);
 }
 
-.environment-summary-section li > .icon-button {
+.environment-summary-run-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.environment-summary-run-actions > .icon-button {
   width: 26px;
   height: 26px;
 }

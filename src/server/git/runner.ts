@@ -25,6 +25,7 @@ export interface GitProcessResult {
 export interface RunGitOptions {
   timeoutMs?: number;
   deadlineAt?: number;
+  signal?: AbortSignal;
   maxOutputBytes?: number;
   truncateOutput?: boolean;
   input?: Buffer;
@@ -147,6 +148,12 @@ export function runGit(
   const deadlineTimeoutMs = options.deadlineAt === undefined
     ? configuredTimeoutMs
     : Math.floor(options.deadlineAt - Date.now());
+  if (options.signal?.aborted) {
+    return Promise.reject(new GitError(
+      "timeout",
+      "Git inspection was cancelled.",
+    ));
+  }
   if (deadlineTimeoutMs <= 0) {
     return Promise.reject(new GitError(
       "timeout",
@@ -174,6 +181,11 @@ export function runGit(
     let settled = false;
     let termination: Promise<void> | undefined;
     let truncatedOutputDrainTimer: NodeJS.Timeout | undefined;
+    const abortError = new GitError(
+      "timeout",
+      "Git inspection was cancelled.",
+    );
+    const onAbort = (): void => terminateAndFinish(abortError);
 
     const finish = (
       error?: GitError,
@@ -185,6 +197,7 @@ export function runGit(
       if (truncatedOutputDrainTimer) {
         clearTimeout(truncatedOutputDrainTimer);
       }
+      options.signal?.removeEventListener("abort", onAbort);
       if (error) rejectProcess(error);
       else if (result) resolveProcess(result);
     };
@@ -224,6 +237,8 @@ export function runGit(
       ));
     }, timeoutMs);
     timer.unref();
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
     if (options.input && child.stdin) {
       child.stdin.on("error", () => undefined);
       child.stdin.end(options.input);

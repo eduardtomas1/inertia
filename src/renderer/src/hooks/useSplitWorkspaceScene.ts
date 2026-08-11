@@ -37,7 +37,10 @@ import {
 import { planFromText } from "../utils/planFromText";
 import { requestComposerPrefill } from "../utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "../utils/subagentDisclosure";
-import { useActivityActions } from "./useActivityActions";
+import {
+  useActivityActions,
+  type PreviewWorkspaceRun,
+} from "./useActivityActions";
 import {
   agentWorkflowRouteIdentity,
   useAgentWorkflows,
@@ -65,6 +68,7 @@ const ignoreLatestContentVisibility = (): void => undefined;
 
 export interface SplitWorkspaceSceneController {
   scene: WorkspaceSceneProps["splitScene"];
+  openWorkspaceRunPreview: (run: PreviewWorkspaceRun) => void;
 }
 
 interface SplitWorkspaceActions
@@ -236,12 +240,26 @@ export function useSplitWorkspaceScene({
     previewOwnerId: "secondary",
     previewContextId: splitConversation?.id ?? null,
   }));
+  const activatePreviewContext = useCallback((run: PreviewWorkspaceRun) => {
+    if (
+      !splitProject
+      || !splitConversation
+      || run.projectId !== splitProject.id
+      || run.conversationId !== splitConversation.id
+    ) {
+      return false;
+    }
+    layout.setActiveTool("preview");
+    return true;
+  }, [layout, splitConversation, splitProject]);
   const activityActions = useStableController(useActivityActions({
     project: splitProject,
     conversationId: splitConversation?.id ?? null,
     run,
     setActiveTool: layout.setActiveTool,
     setActionError,
+    activateContext: activatePreviewContext,
+    navigatePreview: desktopTools.navigatePreview,
   }));
   const planSteps = useMemo(() => {
     if (!splitConversation) return [];
@@ -462,5 +480,8 @@ export function useSplitWorkspaceScene({
     splitConversation,
     splitProject,
   ]);
-  return useMemo(() => ({ scene }), [scene]);
+  return useMemo(() => ({
+    scene,
+    openWorkspaceRunPreview: activityActions.openWorkspaceRunPreview,
+  }), [activityActions.openWorkspaceRunPreview, scene]);
 }

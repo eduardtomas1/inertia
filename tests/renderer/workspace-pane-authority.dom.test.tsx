@@ -13,6 +13,7 @@ import type {
   Project,
   ProjectAction,
   ServerEvent,
+  WorkspaceRun,
 } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
@@ -1636,6 +1637,183 @@ describe("workspace pane authority", () => {
         payload: { runId: "55555555-5555-4555-8555-555555555555" },
       },
     ));
+  });
+
+  it.each([
+    ["acknowledgeActivity", "activity.acknowledge"],
+    ["dismissActivity", "activity.dismiss"],
+  ] as const)("routes %s to the exact failed run", async (
+    action,
+    commandType,
+  ) => {
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.ok",
+      requestId: crypto.randomUUID(),
+    }));
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run,
+      setActiveTool: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+    const failedRun = {
+      id: "77777777-7777-4777-8777-777777777777",
+      label: "Typecheck",
+    };
+
+    act(() => hook.result.current[action](failedRun));
+
+    await waitFor(() => expect(run).toHaveBeenCalledWith(
+      `${commandType}:${failedRun.id}`,
+      {
+        type: commandType,
+        payload: { runId: failedRun.id },
+      },
+    ));
+  });
+
+  it.each([
+    [
+      "acknowledgeActivity",
+      new Error("The run was removed."),
+      "Could not acknowledge Typecheck: The run was removed.",
+    ],
+    [
+      "dismissActivity",
+      "unknown failure",
+      "Could not dismiss Typecheck: The run could not be dismissed.",
+    ],
+  ] as const)("reports %s failures without clearing the row", async (
+    action,
+    failure,
+    message,
+  ) => {
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run: vi.fn(async () => {
+        throw failure;
+      }),
+      setActiveTool: vi.fn(),
+      setActionError,
+    }));
+
+    act(() => hook.result.current[action]({
+      id: "88888888-8888-4888-8888-888888888888",
+      label: "Typecheck",
+    }));
+
+    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(message));
+  });
+
+  it("opens a service preview only after its exact pane context is active", async () => {
+    const navigatePreview = vi.fn();
+    const activateContext = vi.fn(() => true);
+    const previewRun: WorkspaceRun = {
+      id: "55555555-5555-4555-8555-555555555555",
+      kind: "service",
+      projectId: beta.id,
+      conversationId: betaChat.id,
+      actionId: "preview",
+      label: "Docs preview",
+      detail: "npm run preview",
+      status: "running",
+      attentionState: "acknowledged",
+      canStop: true,
+      port: 4173,
+      startedAt: "2026-07-28T12:00:00.000Z",
+      finishedAt: null,
+    };
+    const hook = renderHook((owner: {
+      project: Project;
+      conversationId: string;
+    }) => useActivityActions({
+      ...owner,
+      run: vi.fn(),
+      setActiveTool: vi.fn(),
+      setActionError: vi.fn(),
+      activateContext,
+      navigatePreview,
+    }), {
+      initialProps: {
+        project: alpha,
+        conversationId: alphaChat.id,
+      },
+    });
+
+    act(() => hook.result.current.openWorkspaceRunPreview(previewRun));
+    expect(activateContext).toHaveBeenCalledWith(previewRun, "preview");
+    expect(navigatePreview).not.toHaveBeenCalled();
+
+    hook.rerender({ project: beta, conversationId: betaChat.id });
+    await waitFor(() => expect(navigatePreview).toHaveBeenCalledWith(
+      "http://127.0.0.1:4173",
+    ));
+  });
+
+  it("rejects stale or invalid service previews without changing context", () => {
+    const activateContext = vi.fn(() => true);
+    const navigatePreview = vi.fn();
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run: vi.fn(),
+      setActiveTool: vi.fn(),
+      setActionError,
+      activateContext,
+      navigatePreview,
+    }));
+
+    act(() => hook.result.current.openWorkspaceRunPreview({
+      id: "66666666-6666-4666-8666-666666666666",
+      kind: "service",
+      projectId: alpha.id,
+      conversationId: alphaChat.id,
+      label: "Expired preview",
+      status: "succeeded",
+      port: 4173,
+    }));
+
+    expect(activateContext).not.toHaveBeenCalled();
+    expect(navigatePreview).not.toHaveBeenCalled();
+    expect(setActionError).toHaveBeenCalledWith(
+      "Could not open Expired preview: its preview is no longer available.",
+    );
+  });
+
+  it("rejects a live preview when its exact workspace context is unavailable", () => {
+    const activateContext = vi.fn(() => false);
+    const navigatePreview = vi.fn();
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run: vi.fn(),
+      setActiveTool: vi.fn(),
+      setActionError,
+      activateContext,
+      navigatePreview,
+    }));
+    const preview = {
+      id: "99999999-9999-4999-8999-999999999999",
+      kind: "service" as const,
+      projectId: beta.id,
+      conversationId: betaChat.id,
+      label: "Unavailable preview",
+      status: "running" as const,
+      port: 4173,
+    };
+
+    act(() => hook.result.current.openWorkspaceRunPreview(preview));
+
+    expect(activateContext).toHaveBeenCalledWith(preview, "preview");
+    expect(navigatePreview).not.toHaveBeenCalled();
+    expect(setActionError).toHaveBeenCalledWith(
+      "Could not open Unavailable preview: its preview is no longer available.",
+    );
   });
 
   it.each([

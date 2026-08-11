@@ -7,6 +7,18 @@ import type {
 } from "@shared/contracts";
 import type { WorkspacePanelTab } from "../components/WorkspacePanel";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import { workspaceRunPreviewUrl } from "../utils/environmentSummary";
+
+export type PreviewWorkspaceRun = Pick<
+  WorkspaceRun,
+  | "id"
+  | "kind"
+  | "projectId"
+  | "conversationId"
+  | "label"
+  | "status"
+  | "port"
+>;
 
 interface ActivityActionsOptions {
   project: Project | null;
@@ -14,6 +26,11 @@ interface ActivityActionsOptions {
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
   setActionError: (message: string | null) => void;
+  activateContext?: (
+    activity: PreviewWorkspaceRun,
+    tool: "preview",
+  ) => boolean;
+  navigatePreview?: (url: string) => void;
 }
 
 interface PendingProjectAction {
@@ -38,11 +55,15 @@ export function useActivityActions({
   run,
   setActiveTool,
   setActionError,
+  activateContext,
+  navigatePreview,
 }: ActivityActionsOptions) {
   const [pendingAction, setPendingAction] =
     useState<PendingProjectAction | null>(null);
   const [pendingResume, setPendingResume] =
     useState<PendingResumeRequest | null>(null);
+  const [pendingPreview, setPendingPreview] =
+    useState<PreviewWorkspaceRun | null>(null);
   useEffect(() => {
     setPendingAction((current) => (
       current
@@ -58,6 +79,27 @@ export function useActivityActions({
       current && current.projectId !== project?.id ? null : current);
   }, [project?.id]);
 
+  useEffect(() => {
+    if (
+      !pendingPreview
+      || project?.id !== pendingPreview.projectId
+      || (
+        pendingPreview.conversationId
+        && conversationId !== pendingPreview.conversationId
+      )
+    ) {
+      return;
+    }
+    const url = workspaceRunPreviewUrl(pendingPreview);
+    if (url && navigatePreview) navigatePreview(url);
+    setPendingPreview(null);
+  }, [
+    conversationId,
+    navigatePreview,
+    pendingPreview,
+    project?.id,
+  ]);
+
   const runProjectAction = useCallback((action: ProjectAction) => {
     if (!project) return;
     setPendingAction({
@@ -68,7 +110,9 @@ export function useActivityActions({
     setActiveTool("terminal");
   }, [conversationId, project, setActiveTool]);
 
-  const stopWorkspaceRun = useCallback((activity: Pick<WorkspaceRun, "id" | "label">) => {
+  const stopWorkspaceRun = useCallback((
+    activity: Pick<WorkspaceRun, "id" | "label">,
+  ) => {
     void run(`activity.stop:${activity.id}`, {
       type: "activity.stop",
       payload: { runId: activity.id },
@@ -80,7 +124,25 @@ export function useActivityActions({
     });
   }, [run, setActionError]);
 
-  const acknowledgeActivity = useCallback((activity: WorkspaceRun) => {
+  const openWorkspaceRunPreview = useCallback((
+    activity: PreviewWorkspaceRun,
+  ) => {
+    const url = workspaceRunPreviewUrl(activity);
+    if (
+      !url
+      || !navigatePreview
+      || !activateContext
+      || !activateContext(activity, "preview")
+    ) {
+      setActionError(`Could not open ${activity.label}: its preview is no longer available.`);
+      return;
+    }
+    setPendingPreview(activity);
+  }, [activateContext, navigatePreview, setActionError]);
+
+  const acknowledgeActivity = useCallback((
+    activity: Pick<WorkspaceRun, "id" | "label">,
+  ) => {
     void run(`activity.acknowledge:${activity.id}`, {
       type: "activity.acknowledge",
       payload: { runId: activity.id },
@@ -92,7 +154,9 @@ export function useActivityActions({
     });
   }, [run, setActionError]);
 
-  const dismissActivity = useCallback((activity: WorkspaceRun) => {
+  const dismissActivity = useCallback((
+    activity: Pick<WorkspaceRun, "id" | "label">,
+  ) => {
     void run(`activity.dismiss:${activity.id}`, {
       type: "activity.dismiss",
       payload: { runId: activity.id },
@@ -125,6 +189,7 @@ export function useActivityActions({
     clearPendingResume: () => setPendingResume(null),
     runProjectAction,
     stopWorkspaceRun,
+    openWorkspaceRunPreview,
     acknowledgeActivity,
     dismissActivity,
   }), [
@@ -132,6 +197,7 @@ export function useActivityActions({
     dismissActivity,
     pendingActionId,
     pendingResumeConversationId,
+    openWorkspaceRunPreview,
     project,
     runProjectAction,
     stopWorkspaceRun,

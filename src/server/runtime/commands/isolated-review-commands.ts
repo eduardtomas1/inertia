@@ -62,7 +62,10 @@ export interface IsolatedReviewCommandDependencies {
 export function createIsolatedReviewCommandHandler(
   dependencies: IsolatedReviewCommandDependencies,
 ): RuntimeCommandHandler {
-  const pendingSelectionQuestions = new Map<string, { cancelled: boolean }>();
+  const pendingSelectionQuestions = new Map<string, {
+    cancelled: boolean;
+    abort: AbortController;
+  }>();
   return defineRuntimeCommandHandler([
     "review.selection.ask",
     "review.selection.revise",
@@ -98,7 +101,10 @@ export function createIsolatedReviewCommandHandler(
               ?? "The selected review agent is unavailable.",
           );
         }
-        const pending = { cancelled: false };
+        const pending = {
+          cancelled: false,
+          abort: new AbortController(),
+        };
         pendingSelectionQuestions.set(conversation.id, pending);
         try {
           const context = await selectedReviewContext(
@@ -106,6 +112,7 @@ export function createIsolatedReviewCommandHandler(
             command.payload,
             "ask",
             dependencies.secureFiles,
+            pending.abort.signal,
           );
           if (pending.cancelled) {
             dependencies.send(socket, {
@@ -215,7 +222,10 @@ export function createIsolatedReviewCommandHandler(
           "selection-ask",
         );
         const pending = pendingSelectionQuestions.get(conversation.id);
-        if (pending) pending.cancelled = true;
+        if (pending) {
+          pending.cancelled = true;
+          pending.abort.abort();
+        }
         if (!stopped && !pending) {
           throw new RuntimeRequestError(
             "This thread does not have an active review question.",

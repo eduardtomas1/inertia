@@ -93,6 +93,107 @@ test("omits Runs and preserves adjacent toolbar navigation responsively", async 
   expect(rendererErrors).toEqual([]);
 });
 
+test("keeps preview and failed-run actions in Environment", async () => {
+  const databasePath = join(testDirectory, "data", "inertia.sqlite");
+  const store = new RuntimeStore(databasePath, workspaceDirectory, {
+    recoverInterruptedRuns: false,
+  });
+  const snapshot = store.shellSnapshot();
+  if (!snapshot.activeProjectId || !snapshot.activeConversationId) {
+    store.close();
+    throw new Error("Environment action fixture setup failed.");
+  }
+  const preview = store.createWorkspaceRun({
+    id: randomUUID(),
+    kind: "service",
+    projectId: snapshot.activeProjectId,
+    conversationId: snapshot.activeConversationId,
+    actionId: "preview",
+    label: "Docs preview",
+    detail: "npm run preview",
+    status: "running",
+    port: 4173,
+  });
+  const failure = store.createWorkspaceRun({
+    id: randomUUID(),
+    kind: "check",
+    projectId: snapshot.activeProjectId,
+    conversationId: snapshot.activeConversationId,
+    actionId: "typecheck",
+    attentionState: "unseen",
+    label: "Typecheck fixture",
+    detail: "npm run typecheck",
+    status: "failed",
+    port: null,
+  });
+  const dismissedFailure = store.createWorkspaceRun({
+    id: randomUUID(),
+    kind: "check",
+    projectId: snapshot.activeProjectId,
+    conversationId: snapshot.activeConversationId,
+    actionId: "lint",
+    attentionState: "unseen",
+    label: "Lint fixture",
+    detail: "npm run lint",
+    status: "failed",
+    port: null,
+  });
+  store.close();
+
+  try {
+    await page.reload();
+    await resizeWindow(420, 760);
+    const environment = page.getByRole("dialog", {
+      name: "Environment summary",
+    });
+    if (await environment.count() === 0) {
+      await page.getByRole("button", { name: /environment summary$/u })
+        .click();
+    }
+    await expect(environment.getByText("Docs preview", { exact: false }))
+      .toBeVisible();
+    await expect(environment.getByText("Typecheck fixture", { exact: false }))
+      .toBeVisible();
+    await expect(environment.getByText("Lint fixture", { exact: false }))
+      .toBeVisible();
+    await expectNoViewportOverflow();
+
+    await environment.getByRole("button", {
+      name: "Acknowledge Typecheck fixture · npm run typecheck",
+    }).click();
+    await expect(environment.getByText("Typecheck fixture", { exact: false }))
+      .toHaveCount(0);
+    await environment.getByRole("button", {
+      name: "Dismiss Lint fixture · npm run lint",
+    }).click();
+    await expect(environment.getByText("Lint fixture", { exact: false }))
+      .toHaveCount(0);
+
+    await environment.getByRole("button", {
+      name: "Open preview for Docs preview · npm run preview",
+    }).click();
+    await expect(page.getByRole("tab", { name: /Preview/u })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByRole("textbox", { name: "Preview address" }))
+      .toHaveValue("http://127.0.0.1:4173/");
+    await expectNoViewportOverflow();
+    expect(rendererErrors).toEqual([]);
+  } finally {
+    const cleanup = new RuntimeStore(databasePath, workspaceDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    cleanup.updateWorkspaceRun(preview.id, {
+      status: "succeeded",
+      finishedAt: new Date().toISOString(),
+    });
+    cleanup.dismissWorkspaceRun(failure.id);
+    cleanup.dismissWorkspaceRun(dismissedFailure.id);
+    cleanup.close();
+  }
+});
+
 test("keeps delegated-agent traces compact while the active composer accepts a parent follow-up", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const databasePath = join(testDirectory, "data", "inertia.sqlite");

@@ -132,6 +132,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
         selectedPath="README.md"
         summary={null}
         onSelectFile={vi.fn()}
+        onRefresh={vi.fn()}
         onAsk={onAsk}
         onCancelAsk={onCancelAsk}
         onRequestRevision={vi.fn(async () => undefined)}
@@ -163,6 +164,8 @@ describe("WorkspaceChangesPanel repository scope", () => {
     });
     await waitFor(() => expect(screen.queryByRole("button", { name: /Stopping…$/u }))
       .not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Refresh changes" }))
+      .toHaveFocus();
   });
 
   it("restores the stop control after selection UI unmounts and reports cancellation failure", async () => {
@@ -204,6 +207,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
       "The active review question was already released.",
     )).toHaveAttribute("role", "alert");
     expect(screen.getByRole("button", { name: "Stop asking" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Stop asking" })).toHaveFocus();
 
     fireEvent.click(screen.getByText("after").closest("button")!);
     expect(screen.getByRole("button", { name: "Ask about" })).toBeDisabled();

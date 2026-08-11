@@ -149,6 +149,7 @@ export function parseNumstat(
 
 export interface GitStatusOptions {
   deadlineAt?: number;
+  signal?: AbortSignal;
 }
 
 export async function hasHead(
@@ -158,6 +159,7 @@ export async function hasHead(
   try {
     await runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: 256,
       failureMessage: "Unable to inspect the current commit.",
     });
@@ -180,6 +182,7 @@ export async function getRepositoryStatus(
     ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
     {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: DEFAULT_OUTPUT_BYTES,
       truncateOutput: true,
       failureMessage: "Unable to read the repository status.",
@@ -187,7 +190,7 @@ export async function getRepositoryStatus(
   );
   const parsed = parsePorcelain(statusResult.stdout);
   const hasCurrentHead = await hasHead(root, options);
-  const [statsResult, remoteRouting] = await Promise.all([
+  const [statsInspection, routingInspection] = await Promise.allSettled([
     runGitInspection(
       root,
       hasCurrentHead
@@ -211,6 +214,7 @@ export async function getRepositoryStatus(
           ],
       {
         deadlineAt: options.deadlineAt,
+        signal: options.signal,
         maxOutputBytes: DEFAULT_OUTPUT_BYTES,
         truncateOutput: true,
         failureMessage: "Unable to calculate repository change totals.",
@@ -218,6 +222,16 @@ export async function getRepositoryStatus(
     ),
     inspectGitRemoteRouting(root, parsed.branch, options),
   ]);
+  // Both branches own Git children. Wait for both to settle on cancellation
+  // so this promise remains the process-tree ownership boundary.
+  if (statsInspection.status === "rejected") {
+    throw statsInspection.reason;
+  }
+  if (routingInspection.status === "rejected") {
+    throw routingInspection.reason;
+  }
+  const statsResult = statsInspection.value;
+  const remoteRouting = routingInspection.value;
   const stats = parseNumstat(statsResult.stdout);
   for (const file of parsed.files) {
     const values = stats.get(file.path);

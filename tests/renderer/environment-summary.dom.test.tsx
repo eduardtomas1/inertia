@@ -44,6 +44,9 @@ function HeaderHarness({
   onOpenSettings = vi.fn(),
   onOpenConnectionsSettings = vi.fn(),
   onStopRun = vi.fn(),
+  onOpenRunPreview = vi.fn(),
+  onAcknowledgeRun = vi.fn(),
+  onDismissRun = vi.fn(),
 }: {
   activeProject?: Project | null;
   environmentSummary?: EnvironmentSummarySnapshot;
@@ -51,6 +54,15 @@ function HeaderHarness({
   onOpenSettings?: () => void;
   onOpenConnectionsSettings?: () => void;
   onStopRun?: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onOpenRunPreview?: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onAcknowledgeRun?: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onDismissRun?: (
     run: EnvironmentSummarySnapshot["checks"][number],
   ) => void;
 }): React.JSX.Element {
@@ -90,6 +102,9 @@ function HeaderHarness({
         onPush={vi.fn()}
         onRunAction={vi.fn()}
         onStopRun={onStopRun}
+        onOpenRunPreview={onOpenRunPreview}
+        onAcknowledgeRun={onAcknowledgeRun}
+        onDismissRun={onDismissRun}
       />
       <button type="button">Outside</button>
     </>
@@ -133,29 +148,47 @@ describe("environment summary header popover", () => {
 
   it("offers an accessible exact-run stop for every stoppable active item", () => {
     const onStopRun = vi.fn();
+    const onOpenRunPreview = vi.fn();
+    const onAcknowledgeRun = vi.fn();
+    const onDismissRun = vi.fn();
     const preview = {
       id: "preview-service",
+      kind: "service" as const,
+      projectId: "project-2",
+      conversationId: "conversation-2",
       label: "Preview service",
       status: "running" as const,
       canStop: true,
+      port: 4173,
       contextLabel: "Docs · npm run preview",
+      canOpenPreview: true,
+      canAcknowledge: false,
+      canDismiss: false,
+    };
+    const failed = {
+      id: "failed-check",
+      kind: "check" as const,
+      projectId: "project-1",
+      conversationId: null,
+      label: "Typecheck",
+      status: "failed" as const,
+      canStop: false,
+      port: null,
+      contextLabel: null,
+      canOpenPreview: false,
+      canAcknowledge: true,
+      canDismiss: true,
     };
     render(
       <HeaderHarness
         environmentSummary={{
           ...summary,
-          checks: [
-            preview,
-            {
-              id: "failed-check",
-              label: "Typecheck",
-              status: "failed",
-              canStop: false,
-              contextLabel: null,
-            },
-          ],
+          checks: [preview, failed],
         }}
         onStopRun={onStopRun}
+        onOpenRunPreview={onOpenRunPreview}
+        onAcknowledgeRun={onAcknowledgeRun}
+        onDismissRun={onDismissRun}
       />,
     );
 
@@ -169,6 +202,19 @@ describe("environment summary header popover", () => {
 
     fireEvent.click(stop);
     expect(onStopRun).toHaveBeenCalledWith(preview);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Open preview for Preview service · Docs · npm run preview",
+    }));
+    expect(onOpenRunPreview).toHaveBeenCalledWith(preview);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Acknowledge Typecheck",
+    }));
+    expect(onAcknowledgeRun).toHaveBeenCalledWith(failed);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Dismiss Typecheck",
+    }));
+    expect(onDismissRun).toHaveBeenCalledWith(failed);
   });
 
   it("routes the Private Connect indicator directly to Connections & devices settings", async () => {

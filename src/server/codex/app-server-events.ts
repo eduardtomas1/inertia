@@ -149,12 +149,14 @@ export class CodexAppServerEvents {
   private readonly subagentDrainTimeoutMs: number;
   private goalContinuationTimer: NodeJS.Timeout | undefined;
   private readonly goalContinuationGraceMs: number;
+  private pendingGoalMutationCompletion: PendingParentCompletion | null = null;
   private nativeGoalStatus: AgentGoalStatus | null;
   private nativeGoalSnapshot: ProviderGoalSnapshot | null = null;
   private nativeGoalUpdatedAt: string | null = null;
   private nativeGoalSequence = 0;
   private nativeGoalFingerprint: string | null = null;
   private readonly nativeGoalRevisionFingerprints = new Set<string>();
+  private pendingGoalMutations = 0;
   private pendingGoalActivations = 0;
 
   constructor(private readonly host: CodexAppServerEventHost) {
@@ -179,6 +181,7 @@ export class CodexAppServerEvents {
       this.goalContinuationTimer = undefined;
     }
     this.pendingParentCompletion = null;
+    this.pendingGoalMutationCompletion = null;
     this.liveSubagentIds.clear();
     this.completedTurnIds.clear();
   }
@@ -199,18 +202,40 @@ export class CodexAppServerEvents {
     return this.nativeGoalSequence;
   }
 
-  beginGoalActivation(): void {
-    this.pendingGoalActivations += 1;
+  beginGoalMutation(activatesGoal: boolean): void {
+    this.pendingGoalMutations += 1;
+    if (activatesGoal) this.pendingGoalActivations += 1;
+    if (this.pendingParentCompletion) {
+      this.discardPendingParentCompletion();
+      this.host.setActiveTurnId(undefined);
+      this.host.setPhase("awaiting-goal-continuation");
+    }
+    if (this.host.phase() !== "awaiting-goal-continuation") return;
+    if (this.goalContinuationTimer) {
+      clearTimeout(this.goalContinuationTimer);
+      this.goalContinuationTimer = undefined;
+    }
+    this.discardPendingParentCompletion();
   }
 
-  endGoalActivation(): void {
-    if (this.pendingGoalActivations > 0) {
+  endGoalMutation(activatesGoal: boolean): void {
+    if (this.pendingGoalMutations > 0) {
+      this.pendingGoalMutations -= 1;
+    }
+    if (activatesGoal && this.pendingGoalActivations > 0) {
       this.pendingGoalActivations -= 1;
     }
-    if (
-      this.pendingGoalActivations === 0
-      && this.host.phase() === "awaiting-goal-continuation"
-    ) {
+    if (this.pendingGoalMutations === 0) {
+      const pendingCompletion = this.pendingGoalMutationCompletion;
+      if (pendingCompletion) {
+        this.pendingGoalMutationCompletion = null;
+        this.completeParentTurn(
+          pendingCompletion.status,
+          pendingCompletion.exitCode,
+        );
+        return;
+      }
+      if (this.host.phase() !== "awaiting-goal-continuation") return;
       if (this.nativeGoalStatus === "active") {
         this.armGoalContinuationTimer();
       } else {
@@ -591,7 +616,7 @@ export class CodexAppServerEvents {
       } else if (status === "completed") {
         if (
           this.nativeGoalStatus === "active"
-          || this.pendingGoalActivations > 0
+          || this.pendingGoalMutations > 0
         ) {
           this.awaitGoalContinuation();
         } else {
@@ -720,7 +745,7 @@ export class CodexAppServerEvents {
   private armGoalContinuationTimer(): void {
     if (
       this.goalContinuationTimer
-      || this.pendingGoalActivations > 0
+      || this.pendingGoalMutations > 0
       || this.host.phase() !== "awaiting-goal-continuation"
       || this.nativeGoalStatus !== "active"
     ) return;
@@ -737,6 +762,7 @@ export class CodexAppServerEvents {
       clearTimeout(this.goalContinuationTimer);
       this.goalContinuationTimer = undefined;
     }
+    if (this.pendingGoalMutations > 0) return;
     this.completeParentTurn("completed", 0);
   }
 
@@ -744,6 +770,10 @@ export class CodexAppServerEvents {
     status: CodexAppServerResult["status"],
     exitCode: number | null,
   ): void {
+    if (status !== "cancelled" && this.pendingGoalMutations > 0) {
+      this.pendingGoalMutationCompletion ??= { status, exitCode };
+      return;
+    }
     if (status !== "completed" || this.liveSubagentIds.size === 0) {
       this.host.finish(status, exitCode, null);
       return;

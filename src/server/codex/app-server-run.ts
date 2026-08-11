@@ -503,8 +503,10 @@ export function startCodexAppServerRun(
       phase: () => phase,
       hasObservedTurn: (turnId) => events.hasObservedTurn(turnId),
       goalProjectionSequence: () => events.goalProjectionSequence(),
-      beginGoalActivation: () => events.beginGoalActivation(),
-      endGoalActivation: () => events.endGoalActivation(),
+      beginGoalMutation: (activatesGoal) =>
+        events.beginGoalMutation(activatesGoal),
+      endGoalMutation: (activatesGoal) =>
+        events.endGoalMutation(activatesGoal),
       projectGoalResponse: (threadId, goal, sequenceAtResponse) =>
         events.projectGoalResponse(threadId, goal, sequenceAtResponse),
       setContinuationError: (error) => {
@@ -572,7 +574,7 @@ export function startCodexAppServerRun(
       params.tokenBudget = input.tokenBudget;
     }
     const activatesGoal = input.status === "active";
-    if (activatesGoal) events.beginGoalActivation();
+    events.beginGoalMutation(activatesGoal);
     try {
       let sequenceAtResponse = events.goalProjectionSequence();
       const response = await request("thread/goal/set", params, () => {
@@ -586,7 +588,7 @@ export function startCodexAppServerRun(
       if (!parsed) throw new Error("Codex returned a malformed goal response.");
       return parsed;
     } finally {
-      if (activatesGoal) events.endGoalActivation();
+      events.endGoalMutation(activatesGoal);
     }
   };
 
@@ -594,18 +596,23 @@ export function startCodexAppServerRun(
     if (settled || cancelRequested || !providerThreadId) {
       throw new Error("The Codex goal connection is not active.");
     }
-    let sequenceAtResponse = events.goalProjectionSequence();
-    await request(
-      "thread/goal/clear",
-      { threadId: providerThreadId },
-      () => {
-        sequenceAtResponse = events.goalProjectionSequence();
-      },
-    );
-    return events.projectGoalClearResponse(
-      providerThreadId,
-      sequenceAtResponse,
-    );
+    events.beginGoalMutation(false);
+    try {
+      let sequenceAtResponse = events.goalProjectionSequence();
+      await request(
+        "thread/goal/clear",
+        { threadId: providerThreadId },
+        () => {
+          sequenceAtResponse = events.goalProjectionSequence();
+        },
+      );
+      return events.projectGoalClearResponse(
+        providerThreadId,
+        sequenceAtResponse,
+      );
+    } finally {
+      events.endGoalMutation(false);
+    }
   };
 
   return {
@@ -637,8 +644,8 @@ interface OpenCodexTurnOptions {
   phase: () => CodexRunPhase;
   hasObservedTurn: (turnId: string) => boolean;
   goalProjectionSequence: () => number;
-  beginGoalActivation: () => void;
-  endGoalActivation: () => void;
+  beginGoalMutation: (activatesGoal: boolean) => void;
+  endGoalMutation: (activatesGoal: boolean) => void;
   projectGoalResponse: (
     threadId: string,
     goal: unknown,
@@ -668,8 +675,8 @@ export async function openCodexTurn({
   phase,
   hasObservedTurn,
   goalProjectionSequence,
-  beginGoalActivation,
-  endGoalActivation,
+  beginGoalMutation,
+  endGoalMutation,
   projectGoalResponse,
   setContinuationError,
   setPhase,
@@ -756,7 +763,7 @@ export async function openCodexTurn({
     if (options.goalStart.tokenBudget !== undefined) {
       params.tokenBudget = options.goalStart.tokenBudget;
     }
-    beginGoalActivation();
+    beginGoalMutation(true);
     try {
       let sequenceAtResponse = goalProjectionSequence();
       const response = await request("thread/goal/set", params, () => {
@@ -770,7 +777,7 @@ export async function openCodexTurn({
         throw new Error("Codex returned a malformed goal response.");
       }
     } finally {
-      endGoalActivation();
+      endGoalMutation(true);
     }
     return;
   }

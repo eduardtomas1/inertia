@@ -83,11 +83,15 @@ function breakdown(value: unknown, model = false): boolean {
     && Number(value.requestCount) >= 0
     && metricForRequests(value.runtime, Number(value.requestCount))
     && metricForRequests(value.processedTokens, Number(value.requestCount))
-    && (!model || recordWithStrings(
-      value,
-      "model",
-      "backendProfileId",
-      "backendLabel",
+    && (!model || (
+      recordWithStrings(
+        value,
+        "model",
+        "backendProfileId",
+        "backendLabel",
+      )
+      && integerField(value, "backendConfigurationRevision")
+      && Number(value.backendConfigurationRevision) >= 0
     ));
 }
 

@@ -2,11 +2,7 @@ import {
   AlertCircle,
   CalendarDays,
   CheckCircle2,
-  Clock3,
-  Coins,
-  DatabaseZap,
   RefreshCw,
-  Sigma,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type {
@@ -21,6 +17,7 @@ import type {
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
+import { ProviderMark } from "./ProviderMark";
 import { LoadingMark } from "./ui";
 import "./UsageView.css";
 
@@ -66,19 +63,26 @@ export function usageDashboardCommand(
   };
 }
 
-const countFormatter = new Intl.NumberFormat(undefined, {
+const countFormatter = new Intl.NumberFormat("en", {
   maximumFractionDigits: 0,
 });
-const compactFormatter = new Intl.NumberFormat(undefined, {
+const averageFormatter = new Intl.NumberFormat("en", {
+  maximumFractionDigits: 1,
+});
+const compactFormatter = new Intl.NumberFormat("en", {
   notation: "compact",
   maximumFractionDigits: 2,
 });
-const shortDateFormatter = new Intl.DateTimeFormat(undefined, {
+const percentFormatter = new Intl.NumberFormat("en", {
+  style: "percent",
+  maximumFractionDigits: 1,
+});
+const shortDateFormatter = new Intl.DateTimeFormat("en", {
   month: "short",
   day: "numeric",
   timeZone: "UTC",
 });
-const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
+const fullDateFormatter = new Intl.DateTimeFormat("en", {
   year: "numeric",
   month: "short",
   day: "numeric",
@@ -120,12 +124,18 @@ function coverageCopy(metric: UsageMeasuredValue): string {
   return "Not reported by these runs";
 }
 
-function CoverageBadge({ coverage }: { coverage: UsageCoverage }): React.JSX.Element {
+function CoverageState({ coverage }: { coverage: UsageCoverage }): React.JSX.Element {
   return (
     <span className={`usage-coverage is-${coverage}`}>
       {coverage === "complete" ? "Measured" : coverage === "partial" ? "Partial" : "Unavailable"}
     </span>
   );
+}
+
+function measuredShare(metric: UsageMeasuredValue): number {
+  return metric.totalRequests === 0
+    ? 0
+    : metric.measuredRequests / metric.totalRequests;
 }
 
 function MetricValue({
@@ -156,20 +166,30 @@ function DailyTrend({
 }): React.JSX.Element {
   const titleId = useId();
   const descriptionId = useId();
-  const width = 760;
-  const height = 230;
-  const padding = { top: 18, right: 18, bottom: 34, left: 52 };
+  const width = 900;
+  const height = 300;
+  const padding = { top: 28, right: 22, bottom: 38, left: 50 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const values = dashboard.daily.map((day) => trendValue(day, metric));
   const known = values.filter((value): value is number => value !== null);
-  const maximum = Math.max(1, ...known);
+  const peakValue = Math.max(0, ...known);
+  const maximum = Math.max(1, peakValue);
+  const peakIndex = Math.max(0, values.findIndex((value) => value === peakValue));
+  const average = known.length === 0
+    ? 0
+    : known.reduce((sum, value) => sum + value, 0) / known.length;
   const x = (index: number): number => padding.left
     + (dashboard.daily.length === 1
       ? 0
       : index / (dashboard.daily.length - 1) * plotWidth);
   const y = (value: number): number => padding.top
     + plotHeight - value / maximum * plotHeight;
+  const baseline = padding.top + plotHeight;
+  const barWidth = Math.max(
+    2.5,
+    Math.min(12, plotWidth / dashboard.daily.length * 0.48),
+  );
   let path = "";
   let previousKnown = false;
   values.forEach((value, index) => {
@@ -187,24 +207,42 @@ function DailyTrend({
   ])];
   const metricLabel = metric === "requests" ? "requests" : "measured tokens";
   const description = metric === "requests"
-    ? "Shows the number of terminal requests completed on each day."
-    : "Missing points mean no defensible processed-token total was available for that day.";
+    ? "Bars show the number of terminal requests completed on each day."
+    : "Points show measured processed-token totals. Missing points mean no defensible total was available for that day.";
+  const formattedPeak = metric === "requests"
+    ? formatCount(peakValue)
+    : formatCompact(peakValue);
+  const formattedAverage = metric === "requests"
+    ? averageFormatter.format(average)
+    : formatCompact(average);
 
   return (
     <figure className="usage-trend-figure">
       <figcaption className="visually-hidden" id={titleId}>Daily {metricLabel}</figcaption>
       <p className="visually-hidden" id={descriptionId}>{description}</p>
+      <div className="usage-chart-readings" aria-hidden="true">
+        <span>
+          <small>Peak</small>
+          <strong>{formattedPeak}</strong>
+          <em>{displayDate(dashboard.daily[peakIndex]!.date)}</em>
+        </span>
+        <span>
+          <small>{metric === "requests" ? "Daily average" : "Known-day average"}</small>
+          <strong>{formattedAverage}</strong>
+          <em>{metric === "requests" ? `${dashboard.range.days}-day range` : `${known.length} known ${known.length === 1 ? "day" : "days"}`}</em>
+        </span>
+      </div>
       <svg
         className="usage-trend-chart"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
         aria-labelledby={`${titleId} ${descriptionId}`}
       >
-        {[0, 0.5, 1].map((ratio) => {
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
           const gridY = padding.top + plotHeight * ratio;
           return (
             <line
-              className="usage-chart-grid"
+              className={`usage-chart-grid${ratio === 1 ? " is-baseline" : ""}`}
               x1={padding.left}
               x2={width - padding.right}
               y1={gridY}
@@ -217,19 +255,41 @@ function DailyTrend({
           {formatCompact(maximum)}
         </text>
         <text className="usage-chart-label" x={padding.left - 10} y={padding.top + plotHeight + 4} textAnchor="end">0</text>
-        {path && <path className="usage-chart-line" d={path} />}
-        {dashboard.daily.length <= 30 && values.map((value, index) => value === null ? null : (
-          <circle
-            className={`usage-chart-point${dashboard.daily[index]!.processedTokens.coverage === "partial" && metric === "tokens" ? " is-partial" : ""}`}
-            cx={x(index)}
-            cy={y(value)}
-            r="3.2"
+        {metric === "requests" && values.map((value, index) => value === null ? null : (
+          <rect
+            className={`usage-chart-bar${value === peakValue ? " is-peak" : ""}${value === 0 ? " is-zero" : ""}`}
+            x={x(index) - barWidth / 2}
+            y={value === 0 ? baseline - 1 : y(value)}
+            width={barWidth}
+            height={Math.max(1, baseline - y(value))}
             key={dashboard.daily[index]!.date}
           >
             <title>
-              {displayDate(dashboard.daily[index]!.date, true)}: {metric === "requests" ? formatCount(value) : formatCompact(value)} {metric === "requests" && value === 1 ? "request" : metricLabel}
+              {displayDate(dashboard.daily[index]!.date, true)}: {formatCount(value)} {value === 1 ? "request" : "requests"}
             </title>
-          </circle>
+          </rect>
+        ))}
+        {metric === "tokens" && path && <path className="usage-chart-line" d={path} />}
+        {metric === "tokens" && values.map((value, index) => value === null ? null : (
+          <g key={dashboard.daily[index]!.date}>
+            <line
+              className="usage-chart-stem"
+              x1={x(index)}
+              x2={x(index)}
+              y1={y(value)}
+              y2={baseline}
+            />
+            <circle
+              className={`usage-chart-point${dashboard.daily[index]!.processedTokens.coverage === "partial" ? " is-partial" : ""}`}
+              cx={x(index)}
+              cy={y(value)}
+              r="4"
+            >
+              <title>
+                {displayDate(dashboard.daily[index]!.date, true)}: {formatCompact(value)} measured tokens
+              </title>
+            </circle>
+          </g>
         ))}
         {labelIndexes.map((index) => (
           <text
@@ -263,15 +323,21 @@ function DailyTrend({
   );
 }
 
-function BreakdownMetric({
-  item,
+function requestShare(
+  item: UsageDashboardBreakdown,
+  totalRequests: number,
+): number {
+  return totalRequests === 0 ? 0 : item.requestCount / totalRequests;
+}
+
+function CoverageMeter({
+  metric,
 }: {
-  item: UsageDashboardBreakdown;
+  metric: UsageMeasuredValue;
 }): React.JSX.Element {
   return (
-    <span className="usage-breakdown-metric">
-      <strong>{item.processedTokens.value === null ? "—" : formatCompact(item.processedTokens.value)}</strong>
-      <small>{item.processedTokens.value === null ? "tokens unavailable" : "measured tokens"}</small>
+    <span className={`usage-coverage-meter is-${metric.coverage}`} aria-hidden="true">
+      <span style={{ width: `${measuredShare(metric) * 100}%` }} />
     </span>
   );
 }
@@ -290,6 +356,9 @@ function UsageDashboardContent({
     ["Output", dashboard.tokens.output],
     ["Reasoning output", dashboard.tokens.reasoningOutput],
   ] as const;
+  const providerShareCopy = dashboard.providers
+    .map((provider) => `${provider.providerLabel} ${percentFormatter.format(requestShare(provider, dashboard.totals.requestCount))}`)
+    .join(", ");
 
   return (
     <>
@@ -305,14 +374,14 @@ function UsageDashboardContent({
           <AlertCircle size={16} aria-hidden="true" />
           <span>
             <strong>Token totals are {dashboard.totals.processedTokens.coverage === "partial" ? "partial" : "unavailable"}.</strong>
-            Only direct run totals and proven same-scope deltas are counted; missing provider fields remain missing.
+            Only direct run totals and proven resumed-session deltas with matching scope and execution identity are counted; missing provider fields remain missing.
           </span>
         </div>
       )}
 
       <section className="usage-headline-grid" aria-label="Usage totals">
-        <article className="usage-headline-card">
-          <span className="usage-card-icon"><Sigma size={15} aria-hidden="true" /></span>
+        <article className="usage-headline-stat">
+          <span className="usage-stat-index" aria-hidden="true">01</span>
           <span className="usage-card-label">Requests</span>
           <strong>{formatCount(dashboard.totals.requestCount)}</strong>
           <small>
@@ -322,21 +391,21 @@ function UsageDashboardContent({
             {dashboard.totals.interruptedCount > 0 ? ` · ${formatCount(dashboard.totals.interruptedCount)} interrupted` : ""}
           </small>
         </article>
-        <article className="usage-headline-card">
-          <span className="usage-card-icon"><Clock3 size={15} aria-hidden="true" /></span>
+        <article className="usage-headline-stat">
+          <span className="usage-stat-index" aria-hidden="true">02</span>
           <span className="usage-card-label">Active runtime</span>
           <strong><MetricValue metric={dashboard.totals.runtime} format={formatDuration} /></strong>
           <small>{coverageCopy(dashboard.totals.runtime)}</small>
         </article>
-        <article className="usage-headline-card">
-          <span className="usage-card-icon"><DatabaseZap size={15} aria-hidden="true" /></span>
+        <article className="usage-headline-stat">
+          <span className="usage-stat-index" aria-hidden="true">03</span>
           <span className="usage-card-label">Processed tokens</span>
           <strong><MetricValue metric={dashboard.totals.processedTokens} format={formatCompact} /></strong>
           <small>{coverageCopy(dashboard.totals.processedTokens)}</small>
-          <CoverageBadge coverage={dashboard.totals.processedTokens.coverage} />
+          <CoverageState coverage={dashboard.totals.processedTokens.coverage} />
         </article>
-        <article className="usage-headline-card is-unavailable">
-          <span className="usage-card-icon"><Coins size={15} aria-hidden="true" /></span>
+        <article className="usage-headline-stat is-unavailable">
+          <span className="usage-stat-index" aria-hidden="true">04</span>
           <span className="usage-card-label">Estimated cost</span>
           <strong>Unavailable</strong>
           <small>{dashboard.cost.reason}</small>
@@ -345,16 +414,16 @@ function UsageDashboardContent({
 
       {dashboard.totals.requestCount === 0 ? (
         <section className="usage-empty-state" aria-labelledby="usage-empty-title">
-          <DatabaseZap size={24} aria-hidden="true" />
+          <span className="usage-empty-kicker">No observations</span>
           <h3 id="usage-empty-title">No terminal requests in this range</h3>
           <p>Usage will appear here after Inertia records a completed, failed, cancelled, or interrupted agent turn.</p>
         </section>
       ) : (
         <>
-          <section className="usage-panel usage-trend-panel" aria-labelledby="usage-trend-heading">
+          <section className="usage-analysis-section usage-trend-panel" aria-labelledby="usage-trend-heading">
             <div className="usage-panel-heading">
               <span>
-                <small>Daily trend</small>
+                <small>01 / Daily trend</small>
                 <h3 id="usage-trend-heading">Activity over time</h3>
               </span>
               <div className="usage-segmented" role="group" aria-label="Trend metric">
@@ -368,50 +437,106 @@ function UsageDashboardContent({
             )}
           </section>
 
-          <section className="usage-panel" aria-labelledby="usage-provider-heading">
+          <section className="usage-analysis-section usage-provider-section" aria-labelledby="usage-provider-heading">
             <div className="usage-panel-heading">
-              <span><small>Provider breakdown</small><h3 id="usage-provider-heading">Where requests ran</h3></span>
+              <span><small>02 / Provider share</small><h3 id="usage-provider-heading">Where requests ran</h3></span>
               <small>{dashboard.providers.length} {dashboard.providers.length === 1 ? "provider" : "providers"}</small>
+            </div>
+            <div
+              className="usage-provider-share-rail"
+              role="img"
+              aria-label={`Request share by provider. ${providerShareCopy}`}
+            >
+              {dashboard.providers.map((provider) => (
+                <span
+                  data-provider={provider.providerId}
+                  style={{ flexGrow: provider.requestCount }}
+                  title={`${provider.providerLabel}: ${percentFormatter.format(requestShare(provider, dashboard.totals.requestCount))}`}
+                  key={provider.key}
+                />
+              ))}
             </div>
             <div className="usage-provider-list">
               {dashboard.providers.map((provider) => (
                 <article className="usage-provider-row" data-provider={provider.providerId} key={provider.key}>
-                  <span className="usage-provider-mark" aria-hidden="true" />
+                  <ProviderMark providerId={provider.providerId} />
                   <span className="usage-provider-name">
                     <strong>{provider.providerLabel}</strong>
-                    <small>{formatCount(provider.requestCount)} {provider.requestCount === 1 ? "request" : "requests"} · {provider.runtime.value === null ? "runtime unavailable" : formatDuration(provider.runtime.value)}</small>
+                    <small>{formatCount(provider.requestCount)} {provider.requestCount === 1 ? "request" : "requests"}</small>
                   </span>
-                  <BreakdownMetric item={provider} />
+                  <span className="usage-provider-share">
+                    <strong>{percentFormatter.format(requestShare(provider, dashboard.totals.requestCount))}</strong>
+                    <small>of requests</small>
+                  </span>
+                  <span className="usage-breakdown-metric">
+                    <strong>{provider.processedTokens.value === null ? "—" : formatCompact(provider.processedTokens.value)}</strong>
+                    <small>{provider.processedTokens.value === null ? "tokens unavailable" : "measured tokens"}</small>
+                  </span>
+                  <span className="usage-breakdown-metric">
+                    <strong>{provider.runtime.value === null ? "—" : formatDuration(provider.runtime.value)}</strong>
+                    <small>{provider.runtime.value === null ? "runtime unavailable" : "active runtime"}</small>
+                  </span>
                 </article>
               ))}
             </div>
           </section>
 
-          <section className="usage-token-grid" aria-label="Observed token fields">
-            {tokenFields.map(([label, metric]) => (
-              <article key={label}>
-                <span>{label}</span>
-                <strong><MetricValue metric={metric} format={formatCompact} /></strong>
-                <small>{coverageCopy(metric)}</small>
-              </article>
-            ))}
+          <section className="usage-analysis-section usage-token-section" aria-labelledby="usage-token-heading">
+            <div className="usage-panel-heading">
+              <span><small>03 / Token fields</small><h3 id="usage-token-heading">What providers reported</h3></span>
+              <small>Categories can overlap</small>
+            </div>
+            <div className="usage-token-list" aria-label="Observed token fields">
+              {tokenFields.map(([label, metric]) => (
+                <article key={label}>
+                  <span className="usage-token-label">
+                    <strong>{label}</strong>
+                    <CoverageState coverage={metric.coverage} />
+                  </span>
+                  <span className="usage-token-value"><MetricValue metric={metric} format={formatCompact} /></span>
+                  <span className="usage-token-coverage">
+                    <CoverageMeter metric={metric} />
+                    <small>{coverageCopy(metric)}</small>
+                  </span>
+                </article>
+              ))}
+            </div>
           </section>
 
-          <section className="usage-panel usage-model-panel" aria-labelledby="usage-model-heading">
+          <section className="usage-analysis-section usage-model-panel" aria-labelledby="usage-model-heading">
             <div className="usage-panel-heading">
-              <span><small>Model breakdown</small><h3 id="usage-model-heading">Models and backends</h3></span>
+              <span><small>04 / Model detail</small><h3 id="usage-model-heading">Models and backends</h3></span>
               <small>Recorded provider and backend labels</small>
             </div>
-            <div className="usage-table-wrap" tabIndex={0} aria-label="Model usage table">
+            <div
+              className="usage-table-wrap"
+              role="region"
+              tabIndex={0}
+              aria-label="Model usage table"
+            >
               <table className="usage-model-table">
                 <thead>
-                  <tr><th>Model</th><th>Provider / backend</th><th>Requests</th><th>Measured tokens</th><th>Runtime</th></tr>
+                  <tr><th>Model</th><th>Provider / backend</th><th>Request share</th><th>Requests</th><th>Measured tokens</th><th>Runtime</th></tr>
                 </thead>
                 <tbody>
                   {dashboard.models.map((model) => (
                     <tr key={model.key}>
                       <th scope="row"><span>{model.model}</span></th>
-                      <td>{model.providerLabel}{model.backendLabel === model.providerLabel ? "" : ` · ${model.backendLabel}`}</td>
+                      <td>
+                        <span className="usage-model-provider">
+                          <ProviderMark providerId={model.providerId} />
+                          <span>
+                            {model.providerLabel}{model.backendLabel === model.providerLabel ? "" : ` · ${model.backendLabel}`}
+                            <small>Configuration revision {model.backendConfigurationRevision}</small>
+                          </span>
+                        </span>
+                      </td>
+                      <td>
+                        <span className="usage-model-share">
+                          <span aria-hidden="true"><i style={{ width: `${requestShare(model, dashboard.totals.requestCount) * 100}%` }} /></span>
+                          <small>{percentFormatter.format(requestShare(model, dashboard.totals.requestCount))}</small>
+                        </span>
+                      </td>
                       <td>{formatCount(model.requestCount)}</td>
                       <td>
                         {model.processedTokens.value === null ? "Unavailable" : formatCompact(model.processedTokens.value)}
@@ -427,15 +552,24 @@ function UsageDashboardContent({
         </>
       )}
 
-      <section className="usage-method-note" aria-labelledby="usage-method-heading">
-        <CheckCircle2 size={16} aria-hidden="true" />
-        <span>
-          <strong id="usage-method-heading">Measured locally, with explicit coverage</strong>
-          <small>
-            Only authoritative terminal turns are included and grouped by completion date; legacy inferred records are excluded. Runtime comes from turn boundaries. Processed tokens use direct run totals or same-scope deltas. Token-field cards sum only provider-reported completion fields and can overlap. No prompts, files, credentials, or new telemetry are collected.
-          </small>
-        </span>
-      </section>
+      <div className="usage-notes">
+        <section className="usage-method-note" aria-labelledby="usage-method-heading">
+          <CheckCircle2 size={16} aria-hidden="true" />
+          <span>
+            <strong id="usage-method-heading">Measured locally, with explicit coverage</strong>
+            <small>
+              Only authoritative terminal turns are included and grouped by completion date; legacy inferred records are excluded. Runtime comes from turn boundaries. Processed tokens use direct run totals or proven resumed-session deltas with matching scope and execution identity. Token-field totals sum only provider-reported completion fields and can overlap. No prompts, files, credentials, or new telemetry are collected.
+            </small>
+          </span>
+        </section>
+        <section className="usage-cost-note" aria-labelledby="usage-cost-heading">
+          <span className="usage-cost-rule" aria-hidden="true" />
+          <span>
+            <strong id="usage-cost-heading">Cost remains unavailable</strong>
+            <small>{dashboard.cost.reason} Inertia does not claim provider-invoice parity without that provenance.</small>
+          </span>
+        </section>
+      </div>
     </>
   );
 }

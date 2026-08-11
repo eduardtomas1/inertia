@@ -5,7 +5,10 @@ import {
   pullRequestCapabilityStateCoherent,
   runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent,
 } from "./server-event-discriminants";
-import { APP_SHORTCUT_KEYS, DEFAULT_APP_KEYBINDINGS } from "../keybindings";
+import {
+  APP_SHORTCUT_KEYS,
+  DEFAULT_APP_KEYBINDINGS,
+} from "../keybindings";
 import { modelSelectionSchema } from "../model-routing";
 import {
   modelBackendDefaultSchema,
@@ -1111,8 +1114,6 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
-type RequestResultValidator = (value: UnknownRecord) => boolean;
-
 const REQUEST_RESULT_VALIDATORS = {
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
@@ -1164,7 +1165,7 @@ const REQUEST_RESULT_VALIDATORS = {
     gitDiff(value.diff) && reversalOperation(value.operation),
   "review.selection.answer": (value) => reviewSelectionAnswer(value.answer),
   "review.summary": (value) => reviewSummary(value.summary),
-} satisfies Record<RequestResultKind, RequestResultValidator>;
+} satisfies Record<RequestResultKind, (value: UnknownRecord) => boolean>;
 
 function requestResult(value: unknown): value is RequestResult {
   if (!recordWithStrings(value, "kind")) return false;

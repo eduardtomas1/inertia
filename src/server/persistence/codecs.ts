@@ -99,7 +99,7 @@ export function legacyModelSelection(input: {
   });
 }
 
-function parseModelSelection(
+export function parseModelSelection(
   value: string | null,
   fallback: () => ModelSelection,
 ): ModelSelection {
@@ -149,7 +149,7 @@ function parseConversationContinuationIdentity(
   return legacyNativeContinuationIdentity(selection);
 }
 
-function parseAgentTurnContinuationIdentity(
+export function parseAgentTurnContinuationIdentity(
   value: string | null,
   selection: ModelSelection,
 ): ContinuationIdentity {
@@ -414,7 +414,7 @@ export function normalizeAgentTurnUsage(
   };
 }
 
-function parseAgentTurnUsage(
+export function parseAgentTurnUsage(
   value: string | null,
 ): AgentTurnUsageSnapshot | null {
   if (value === null) return null;

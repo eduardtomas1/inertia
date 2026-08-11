@@ -10,6 +10,7 @@ import type {
   ProviderId,
 } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
+import { usageDashboardSchema } from "../../src/shared/contracts/usage-dashboard-schema";
 import { RuntimeStore } from "../../src/server/database";
 import {
   projectUsageDashboard,
@@ -56,6 +57,10 @@ function turn(input: {
   completionUsage?: AgentTurnUsageSnapshot | null;
   backendProfileId?: string;
   backendLabel?: string;
+  backendConfigurationRevision?: number;
+  endpointIdentity?: string | null;
+  providerSessionBefore?: string | null;
+  providerSessionAfter?: string | null;
   association?: AgentTurn["association"];
 }): AgentTurn {
   const completedAt = input.completedAt;
@@ -71,6 +76,9 @@ function turn(input: {
     ...(input.backendLabel
       ? { backendProfileDisplayName: input.backendLabel }
       : {}),
+    ...(input.backendConfigurationRevision === undefined
+      ? {}
+      : { backendConfigurationRevision: input.backendConfigurationRevision }),
   };
   return {
     id: input.id,
@@ -85,7 +93,7 @@ function turn(input: {
       backendProfileId: selection.backendProfileId,
       backendConfigurationRevision: selection.backendConfigurationRevision,
       modelIdentity: selection.modelId,
-      endpointIdentity: null,
+      endpointIdentity: input.endpointIdentity ?? null,
     },
     harnessId: selection.harnessId,
     backendProfileId: selection.backendProfileId,
@@ -94,8 +102,10 @@ function turn(input: {
     reasoningEffort: "",
     interactionMode: "build",
     accessMode: "supervised",
-    providerSessionBefore: null,
-    providerSessionAfter: null,
+    providerSessionBefore: input.providerSessionBefore ?? null,
+    providerSessionAfter: input.providerSessionAfter
+      ?? input.providerSessionBefore
+      ?? null,
     requestedAt: runtimeMs === null
       ? completedAt
       : new Date(Date.parse(completedAt) - runtimeMs - 1_000).toISOString(),
@@ -128,6 +138,7 @@ describe("usage dashboard projection", () => {
         providerId: "codex",
         model: "gpt-unknown-preview",
         completedAt: "2026-06-10T09:00:00.000Z",
+        providerSessionBefore: "codex-thread-1",
         startUsage: usage("2026-06-10T08:59:00.000Z", {
           totalProcessedTokens: 1_000,
           totalProcessedScope: "thread",
@@ -379,6 +390,150 @@ describe("usage dashboard projection", () => {
     expect(dashboard.models).toEqual(expect.arrayContaining([
       expect.objectContaining({ model: "Unknown model" }),
     ]));
+  });
+
+  it("subtracts cumulative counters only with captured continuation provenance", () => {
+    const proven = turn({
+      id: "proven",
+      providerId: "codex",
+      model: "gpt-proven",
+      completedAt: "2026-06-20T10:00:00.000Z",
+      providerSessionBefore: "thread-proven",
+      startUsage: usage("2026-06-20T09:59:00.000Z", {
+        totalProcessedTokens: 1_000,
+        totalProcessedScope: "thread",
+      }),
+      completionUsage: usage("2026-06-20T10:00:00.000Z", {
+        totalProcessedTokens: 1_125,
+        totalProcessedScope: "thread",
+      }),
+    });
+    const staleAfterRouteChange = turn({
+      id: "stale-route",
+      providerId: "codex",
+      model: "gpt-new-route",
+      completedAt: "2026-06-20T11:00:00.000Z",
+      backendProfileId: "custom:new-route",
+      backendConfigurationRevision: 4,
+      endpointIdentity: "endpoint-new",
+      startUsage: usage("2026-06-20T10:59:00.000Z", {
+        totalProcessedTokens: 2_000,
+        totalProcessedScope: "thread",
+      }),
+      completionUsage: usage("2026-06-20T11:00:00.000Z", {
+        totalProcessedTokens: 2_250,
+        totalProcessedScope: "thread",
+      }),
+    });
+    const inconsistentIdentity = turn({
+      id: "inconsistent-identity",
+      providerId: "cursor",
+      model: "cursor-managed",
+      completedAt: "2026-06-20T12:00:00.000Z",
+      providerSessionBefore: "cursor-session",
+      startUsage: usage("2026-06-20T11:59:00.000Z", {
+        totalProcessedTokens: 300,
+        totalProcessedScope: "session",
+      }),
+      completionUsage: usage("2026-06-20T12:00:00.000Z", {
+        totalProcessedTokens: 350,
+        totalProcessedScope: "session",
+      }),
+    });
+    inconsistentIdentity.continuationIdentity = {
+      ...inconsistentIdentity.continuationIdentity,
+      backendConfigurationRevision: 99,
+    };
+    const changedSession = turn({
+      id: "changed-session",
+      providerId: "codex",
+      model: "gpt-session-transition",
+      completedAt: "2026-06-20T13:00:00.000Z",
+      providerSessionBefore: "thread-before",
+      providerSessionAfter: "thread-after",
+      startUsage: usage("2026-06-20T12:59:00.000Z", {
+        totalProcessedTokens: 400,
+        totalProcessedScope: "thread",
+      }),
+      completionUsage: usage("2026-06-20T13:00:00.000Z", {
+        totalProcessedTokens: 500,
+        totalProcessedScope: "thread",
+      }),
+    });
+
+    const dashboard = projectUsageDashboard([
+      proven,
+      staleAfterRouteChange,
+      inconsistentIdentity,
+      changedSession,
+    ], range);
+
+    expect(dashboard.totals.processedTokens).toEqual({
+      value: 125,
+      measuredRequests: 1,
+      totalRequests: 4,
+      coverage: "partial",
+    });
+  });
+
+  it("keeps immutable backend revisions separate in model aggregation", () => {
+    const dashboard = projectUsageDashboard([
+      turn({
+        id: "gateway-r1",
+        providerId: "claude",
+        model: "claude-sonnet",
+        completedAt: "2026-06-21T10:00:00.000Z",
+        backendProfileId: "custom:gateway",
+        backendLabel: "Gateway original",
+        backendConfigurationRevision: 1,
+        endpointIdentity: "endpoint-original",
+        completionUsage: usage("2026-06-21T10:00:00.000Z", {
+          totalProcessedTokens: 100,
+          totalProcessedScope: "run",
+        }),
+      }),
+      turn({
+        id: "gateway-r2",
+        providerId: "claude",
+        model: "claude-sonnet",
+        completedAt: "2026-06-21T11:00:00.000Z",
+        backendProfileId: "custom:gateway",
+        backendLabel: "Gateway renamed",
+        backendConfigurationRevision: 2,
+        endpointIdentity: "endpoint-reconfigured",
+        completionUsage: usage("2026-06-21T11:00:00.000Z", {
+          totalProcessedTokens: 250,
+          totalProcessedScope: "run",
+        }),
+      }),
+    ], range);
+
+    expect(dashboard.models).toHaveLength(2);
+    expect(usageDashboardSchema(dashboard)).toBe(true);
+    expect(JSON.stringify(dashboard)).not.toContain("endpoint-original");
+    expect(JSON.stringify(dashboard)).not.toContain("endpoint-reconfigured");
+    expect(dashboard.models).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        backendLabel: "Gateway original",
+        backendConfigurationRevision: 1,
+        processedTokens: expect.objectContaining({ value: 100 }),
+      }),
+      expect.objectContaining({
+        backendLabel: "Gateway renamed",
+        backendConfigurationRevision: 2,
+        processedTokens: expect.objectContaining({ value: 250 }),
+      }),
+    ]));
+    expect(usageDashboardSchema({
+      ...dashboard,
+      models: dashboard.models.map((model) => {
+        const {
+          backendConfigurationRevision: _backendConfigurationRevision,
+          ...withoutRevision
+        } = model;
+        return withoutRevision;
+      }),
+    })).toBe(false);
   });
 });
 

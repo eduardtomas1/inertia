@@ -88,6 +88,7 @@ function dashboard(days: UsageRangeDays = 30): UsageDashboard {
       model: "<synthetic>",
       backendProfileId: "preset:kimi",
       backendLabel: "Kimi",
+      backendConfigurationRevision: 3,
     }],
     tokens: {
       input: metric(1_740, 5, 6),
@@ -140,7 +141,7 @@ describe("UsageView", () => {
       }
       return result(dashboard(command.payload.days));
     });
-    render(<UsageView status="online" request={request} />);
+    const view = render(<UsageView status="online" request={request} />);
 
     expect(await screen.findByRole("heading", { name: "Activity over time" })).toBeVisible();
     const totals = screen.getByRole("region", { name: "Usage totals" });
@@ -150,18 +151,32 @@ describe("UsageView", () => {
     expect(screen.getByText(/Token totals are partial/u)).toBeVisible();
     expect(screen.getByText("<synthetic>", { exact: true })).toBeVisible();
     expect(screen.getByText(/Claude · Kimi/u)).toBeVisible();
+    expect(screen.getByText("Configuration revision 3", { exact: true }))
+      .toBeVisible();
+    expect(screen.getByRole("img", {
+      name: /Request share by provider\. Claude 100\s*%/u,
+    })).toBeVisible();
+    expect(view.container.querySelector(
+      '.usage-provider-list .usage-provider-mark[data-provider="claude"] svg',
+    )).toBeVisible();
+    expect(view.container.querySelector(
+      ".usage-token-list .usage-coverage-meter.is-partial > span",
+    )).toHaveStyle({ width: `${5 / 6 * 100}%` });
     expect(screen.getByText(/No prompts, files, credentials, or new telemetry/u)).toBeVisible();
-    expect(screen.getByLabelText("Model usage table")).toHaveAttribute(
+    expect(screen.getByRole("region", { name: "Model usage table" })).toHaveAttribute(
       "tabindex",
       "0",
     );
 
     const tokens = screen.getByRole("button", { name: "Tokens" });
-    await user.click(tokens);
+    tokens.focus();
+    await user.keyboard("[Enter]");
     expect(tokens).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(/Gaps are unavailable totals/u)).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "7 days" }));
+    const sevenDays = screen.getByRole("button", { name: "7 days" });
+    sevenDays.focus();
+    await user.keyboard(" ");
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
     expect(request.mock.calls[1]?.[0]).toMatchObject({
       type: "usage.dashboard.get",

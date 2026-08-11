@@ -47,6 +47,8 @@ export interface UsageDashboardModelBreakdown
   model: string;
   backendProfileId: string;
   backendLabel: string;
+  /** Immutable backend configuration revision captured for these turns. */
+  backendConfigurationRevision: number;
 }
 
 export interface UsageDashboard {

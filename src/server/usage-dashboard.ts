@@ -20,6 +20,22 @@ export interface UsageDashboardRange {
   timeZone: string;
 }
 
+export type UsageDashboardTurn = Pick<
+  AgentTurn,
+  | "providerId"
+  | "modelSelection"
+  | "continuationIdentity"
+  | "model"
+  | "providerSessionBefore"
+  | "providerSessionAfter"
+  | "startedAt"
+  | "completedAt"
+  | "status"
+  | "usageAtStart"
+  | "usageAtCompletion"
+  | "association"
+>;
+
 interface MeasuredAccumulator {
   value: number;
   measuredRequests: number;
@@ -41,9 +57,11 @@ interface ProviderBucket extends UsageBucket {
 }
 
 interface ModelBucket extends ProviderBucket {
+  key: string;
   model: string;
   backendProfileId: string;
   backendLabel: string;
+  backendConfigurationRevision: number;
 }
 
 const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
@@ -200,7 +218,26 @@ function validateRange(range: UsageDashboardRange): {
   return { from, to, formatter, dateKeys: keys };
 }
 
-function measuredProcessedTokens(turn: AgentTurn): number | null {
+function hasComparableCumulativeProvenance(turn: UsageDashboardTurn): boolean {
+  const selection = turn.modelSelection;
+  const identity = turn.continuationIdentity;
+  // Turn preparation records a session-before only after the continuation
+  // policy proves that this immutable execution identity can resume it. A
+  // changed session at settlement makes the two cumulative snapshots
+  // incomparable, even when their broad provider scopes happen to match.
+  return turn.providerSessionBefore !== null
+    && turn.providerSessionAfter === turn.providerSessionBefore
+    && identity.harnessId === selection.harnessId
+    && identity.backendProfileId === selection.backendProfileId
+    && identity.backendConfigurationRevision
+      === selection.backendConfigurationRevision
+    && (
+      identity.modelIdentity === null
+      || identity.modelIdentity === selection.modelId
+    );
+}
+
+function measuredProcessedTokens(turn: UsageDashboardTurn): number | null {
   const completion = turn.usageAtCompletion;
   const completionTotal = completion?.totalProcessedTokens;
   const scope = completion?.totalProcessedScope;
@@ -210,7 +247,8 @@ function measuredProcessedTokens(turn: AgentTurn): number | null {
   if (scope === "run") return completionTotal;
   const start = turn.usageAtStart;
   if (
-    start?.totalProcessedTokens === null
+    !hasComparableCumulativeProvenance(turn)
+    || start?.totalProcessedTokens === null
     || start?.totalProcessedTokens === undefined
     || start.totalProcessedScope !== scope
     || completionTotal < start.totalProcessedTokens
@@ -220,7 +258,7 @@ function measuredProcessedTokens(turn: AgentTurn): number | null {
   return completionTotal - start.totalProcessedTokens;
 }
 
-function measuredRuntime(turn: AgentTurn): number | null {
+function measuredRuntime(turn: UsageDashboardTurn): number | null {
   if (!turn.startedAt || !turn.completedAt) return null;
   const startedAt = Date.parse(turn.startedAt);
   const completedAt = Date.parse(turn.completedAt);
@@ -228,7 +266,7 @@ function measuredRuntime(turn: AgentTurn): number | null {
   return Number.isSafeInteger(duration) && duration >= 0 ? duration : null;
 }
 
-function addTurn(bucket: UsageBucket, turn: AgentTurn): void {
+function addTurn(bucket: UsageBucket, turn: UsageDashboardTurn): void {
   bucket.requestCount += 1;
   if (turn.status === "completed") bucket.completedCount += 1;
   else if (turn.status === "failed") bucket.failedCount += 1;
@@ -277,7 +315,7 @@ function breakdownSort(
  * It never projects conversation identity, prompts, paths, or provider payloads.
  */
 export function projectUsageDashboard(
-  turns: readonly AgentTurn[],
+  turns: readonly UsageDashboardTurn[],
   range: UsageDashboardRange,
   generatedAt = new Date().toISOString(),
 ): UsageDashboard {
@@ -321,16 +359,23 @@ export function projectUsageDashboard(
 
     const modelKey = JSON.stringify([
       turn.providerId,
+      turn.continuationIdentity.harnessId,
       turn.modelSelection.backendProfileId,
+      turn.modelSelection.backendProfileDisplayName,
+      turn.modelSelection.backendConfigurationRevision,
+      turn.continuationIdentity.endpointIdentity,
       turn.model,
     ]);
     const model = modelBuckets.get(modelKey) ?? {
       ...emptyUsageBucket(),
+      key: `model-${modelBuckets.size}`,
       providerId: turn.providerId,
       model: turn.model || "Unknown model",
       backendProfileId: turn.modelSelection.backendProfileId,
       backendLabel: turn.modelSelection.backendProfileDisplayName
         || PROVIDER_LABELS[turn.providerId],
+      backendConfigurationRevision:
+        turn.modelSelection.backendConfigurationRevision,
     };
     addTurn(model, turn);
     modelBuckets.set(modelKey, model);
@@ -368,12 +413,13 @@ export function projectUsageDashboard(
   }));
   const providers = [...providerBuckets].map(([key, bucket]) =>
     breakdownValue(key, bucket)).sort(breakdownSort);
-  const models: UsageDashboardModelBreakdown[] = [...modelBuckets].map(
-    ([key, bucket]) => ({
-      ...breakdownValue(key, bucket),
+  const models: UsageDashboardModelBreakdown[] = [...modelBuckets.values()].map(
+    (bucket) => ({
+      ...breakdownValue(bucket.key, bucket),
       model: bucket.model,
       backendProfileId: bucket.backendProfileId,
       backendLabel: bucket.backendLabel,
+      backendConfigurationRevision: bucket.backendConfigurationRevision,
     }),
   ).sort(breakdownSort);
 

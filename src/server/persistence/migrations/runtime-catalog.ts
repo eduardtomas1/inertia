@@ -1205,6 +1205,13 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
       conversationWorktreeOwnershipMigration,
       workspacePathAuthoritiesMigration,
       promptPresetMigrationDefinition,
+      {
+        name: "IndexUsageDashboardCompletedTurns",
+        up: `
+          CREATE INDEX IF NOT EXISTS agent_turns_usage_dashboard_completed_idx
+          ON agent_turns(association, completed_at ASC, id ASC);
+        `,
+      },
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

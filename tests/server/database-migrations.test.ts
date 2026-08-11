@@ -1454,6 +1454,62 @@ describe("runtime migration catalog", () => {
       .toThrow(/runtime schema catalog/iu);
   });
 
+  it("appends an indexed completed-turn range path without changing durable data", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "schema-54-usage-index.sqlite");
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const store = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Usage index", workspacePath);
+    store.close();
+
+    const schema54 = new Database(databasePath);
+    schema54.exec(`
+      DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      DELETE FROM schema_migrations WHERE version = 55;
+    `);
+    expect((schema54.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(54);
+    schema54.close();
+
+    migrateFixtureInPlace(databasePath);
+
+    const migrated = new Database(databasePath, { readonly: true });
+    const index = migrated.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'index'
+        AND name = 'agent_turns_usage_dashboard_completed_idx'
+    `).get() as { sql: string } | undefined;
+    expect(index?.sql).toMatch(/association, completed_at ASC, id ASC/iu);
+    const plan = migrated.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT provider_id, model_selection_json, continuation_identity_json,
+        harness_id, backend_profile_id, model, model_alias, reasoning_effort,
+        provider_session_before, provider_session_after, started_at,
+        completed_at, status,
+        usage_start_json, usage_completion_json, configuration_revision,
+        association
+      FROM agent_turns
+      WHERE completed_at >= ?
+        AND completed_at < ?
+        AND status IN ('completed', 'failed', 'cancelled', 'interrupted')
+        AND association = 'authoritative'
+      ORDER BY completed_at ASC, id ASC
+    `).all("2026-06-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z") as Array<{
+      detail: string;
+    }>;
+    expect(plan.some(({ detail }) =>
+      detail.includes("agent_turns_usage_dashboard_completed_idx"))).toBe(true);
+    expect((migrated.prepare(
+      "SELECT name FROM projects WHERE id = ?",
+    ).get(project.id) as { name: string }).name).toBe("Usage index");
+    expect(migrated.pragma("quick_check")).toEqual([{ quick_check: "ok" }]);
+    migrated.close();
+  });
+
   it("appends final-answer auto-scroll after the released schema-50 migration", async () => {
     const directory = await temporaryDirectory();
     const databasePath = join(directory, "schema-50-upgrade.sqlite");
@@ -1487,6 +1543,7 @@ describe("runtime migration catalog", () => {
       { version: 52 },
       { version: 53 },
       { version: 54 },
+      { version: 55 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

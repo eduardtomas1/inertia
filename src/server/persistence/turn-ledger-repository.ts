@@ -40,6 +40,10 @@ import type {
   CreateAgentTurnInput,
 } from "./types";
 import {
+  UsageDashboardRepository,
+  type UsageDashboardRange,
+} from "./usage-dashboard-repository";
+import {
   compactMessageContentForTurn,
   compactReasoningContentForTurn,
 } from "./stream-text-storage";
@@ -51,6 +55,10 @@ type TurnLedgerPersistenceContext = Pick<
 
 export class TurnLedgerRepository {
   constructor(private readonly context: TurnLedgerPersistenceContext) {}
+
+  usageDashboard(range: UsageDashboardRange) {
+    return new UsageDashboardRepository(this.context.database).read(range);
+  }
 
   create(input: CreateAgentTurnInput): AgentTurn {
     this.context.requireConversation(input.conversationId);
@@ -559,3 +567,5 @@ export class TurnLedgerRepository {
     }
   }
 }
+
+export type { UsageDashboardRange };

@@ -372,10 +372,19 @@ export function createTurnInteractionCommandHandler(
             }
           }
         }
+        const retentionAbort = new AbortController();
+        const retention = dependencies.conversationAttachments.retain(
+          resolvedAttachments,
+          retentionAbort.signal,
+        );
+        let retentionCompleted = false;
         try {
-          attachments = await dependencies.conversationAttachments.retain(
-            resolvedAttachments,
+          attachments = await awaitMessageSendPreparation(
+            retention,
+            preparationDeadlineAt,
+            () => retentionAbort.abort(),
           );
+          retentionCompleted = true;
           retainedAttachmentIds = attachments.map(({ id }) => id);
           const durablePathBySourcePath = new Map(
             sourceAttachments.map((source, index) => [
@@ -390,6 +399,13 @@ export function createTurnInteractionCommandHandler(
           };
           assertMessageSendPreparationPending(preparationDeadlineAt);
         } catch (error) {
+          if (!retentionCompleted) {
+            void retention.then(
+              (lateAttachments) => dependencies.conversationAttachments
+                .release(lateAttachments.map(({ id }) => id)),
+              () => undefined,
+            ).catch(() => undefined);
+          }
           if (providerTransitionReserved) {
             dependencies.providerTerminalResumes.release(conversation.id);
             providerTransitionReserved = false;

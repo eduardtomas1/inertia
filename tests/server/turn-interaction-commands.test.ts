@@ -561,6 +561,83 @@ describe("message attachment ownership transfer", () => {
     }
   });
 
+  it("aborts durable retention at the aggregate preparation deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const relinquishAll = vi.fn(async () => undefined);
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll,
+        enableProviders: false,
+      });
+      const abortObserved = vi.fn();
+      vi.mocked(handlerDependencies.conversationAttachments.retain)
+        .mockImplementation((_payloads, signal) => new Promise(
+          (_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              abortObserved();
+              reject(signal.reason);
+            }, { once: true });
+          },
+        ));
+      const handling = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      )({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+
+      await vi.advanceTimersByTimeAsync(
+        MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
+      );
+      await rejection;
+
+      expect(abortObserved).toHaveBeenCalledOnce();
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+      expect(handlerDependencies.store.createMessage).not.toHaveBeenCalled();
+      expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("releases durable retention that completes after its deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+        enableProviders: false,
+      });
+      let completeRetention!: (attachments: ChatAttachment[]) => void;
+      vi.mocked(handlerDependencies.conversationAttachments.retain)
+        .mockReturnValue(new Promise((resolve) => {
+          completeRetention = resolve;
+        }));
+      const handling = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      )({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+
+      await vi.advanceTimersByTimeAsync(
+        MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
+      );
+      await rejection;
+
+      completeRetention([{ ...trustedAttachment, path: "/durable/reference.png" }]);
+      await vi.waitFor(() => {
+        expect(handlerDependencies.conversationAttachments.release)
+          .toHaveBeenCalledWith([trustedAttachment.id]);
+      });
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+      expect(handlerDependencies.store.createMessage).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("projects an active follow-up without hydrating the live stream", async () => {
     const followUp: ChatMessage = {
       id: "77777777-7777-4777-8777-777777777777",

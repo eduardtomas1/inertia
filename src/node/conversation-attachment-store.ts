@@ -264,9 +264,11 @@ export class ConversationAttachmentStore {
 
   async retain(
     payloads: readonly ConversationAttachmentPayload[],
+    signal?: AbortSignal,
   ): Promise<ChatAttachment[]> {
     if (payloads.length === 0) return [];
     return await this.serialize(async () => {
+      signal?.throwIfAborted();
       const unique = new Map<string, ConversationAttachmentPayload>();
       for (const payload of payloads) {
         const prior = unique.get(payload.attachment.id);
@@ -294,9 +296,11 @@ export class ConversationAttachmentStore {
         throw new Error("Conversation attachments exceed the turn limit.");
       }
       const usage = await this.loadUsage();
+      signal?.throwIfAborted();
       const newPayloads: ConversationAttachmentPayload[] = [];
       for (const payload of unique.values()) {
         const current = await this.inspect(payload.attachment.id);
+        signal?.throwIfAborted();
         if (!current) {
           newPayloads.push(payload);
           continue;
@@ -323,7 +327,7 @@ export class ConversationAttachmentStore {
       const created: string[] = [];
       try {
         for (const payload of newPayloads) {
-          await this.persist(payload);
+          await this.persist(payload, signal);
           created.push(payload.attachment.id);
         }
       } catch (error) {
@@ -387,7 +391,8 @@ export class ConversationAttachmentStore {
       }
       for (const name of await readdir(this.directory)) {
         if (!UUID_PATTERN.test(name)) {
-          throw new Error("Conversation attachment storage contains an unexpected entry.");
+          await this.removeContainedEntry(name);
+          continue;
         }
         const expected = referenced.get(name);
         if (!expected) {
@@ -419,7 +424,8 @@ export class ConversationAttachmentStore {
     const records = new Map<string, number>();
     for (const name of await readdir(this.directory)) {
       if (!UUID_PATTERN.test(name)) {
-        throw new Error("Conversation attachment storage contains an unexpected entry.");
+        await this.removeContainedEntry(name);
+        continue;
       }
       const current = await this.inspectForMaintenance(name);
       if (!current) continue;
@@ -571,12 +577,18 @@ export class ConversationAttachmentStore {
     }
   }
 
-  private async persist(payload: ConversationAttachmentPayload): Promise<void> {
+  private async persist(
+    payload: ConversationAttachmentPayload,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const metadata = metadataFor(payload);
     const recordDirectory = join(this.directory, metadata.id);
+    signal?.throwIfAborted();
     await mkdir(recordDirectory, { mode: 0o700 });
-    if (process.platform !== "win32") await chmod(recordDirectory, 0o700);
     try {
+      signal?.throwIfAborted();
+      if (process.platform !== "win32") await chmod(recordDirectory, 0o700);
+      signal?.throwIfAborted();
       const contentPath = join(
         recordDirectory,
         `${metadata.id}.${metadata.extension}`,
@@ -587,12 +599,15 @@ export class ConversationAttachmentStore {
         0o600,
       );
       try {
-        await content.writeFile(payload.bytes);
+        await content.writeFile(payload.bytes, { signal });
+        signal?.throwIfAborted();
         await content.sync();
+        signal?.throwIfAborted();
       } finally {
         await content.close();
       }
       if (process.platform !== "win32") await chmod(contentPath, 0o600);
+      signal?.throwIfAborted();
       const metadataPath = join(recordDirectory, METADATA_FILE);
       const manifest = await open(
         metadataPath,
@@ -600,8 +615,13 @@ export class ConversationAttachmentStore {
         0o600,
       );
       try {
-        await manifest.writeFile(JSON.stringify(metadata), "utf8");
+        await manifest.writeFile(JSON.stringify(metadata), {
+          encoding: "utf8",
+          signal,
+        });
+        signal?.throwIfAborted();
         await manifest.sync();
+        signal?.throwIfAborted();
       } finally {
         await manifest.close();
       }
@@ -616,8 +636,19 @@ export class ConversationAttachmentStore {
     if (!UUID_PATTERN.test(id)) {
       throw new Error("Invalid conversation attachment identity.");
     }
-    const target = join(this.directory, id);
-    if (dirname(target) !== this.directory) {
+    await this.removeContainedEntry(id);
+  }
+
+  private async removeContainedEntry(name: string): Promise<void> {
+    const target = join(this.directory, name);
+    if (
+      name.length < 1
+      || name === "."
+      || name === ".."
+      || basename(name) !== name
+      || dirname(target) !== this.directory
+      || !contained(this.directory, target)
+    ) {
       throw new Error("Conversation attachment cleanup escaped storage.");
     }
     await rm(target, {

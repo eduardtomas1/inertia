@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -91,6 +92,17 @@ describe("durable conversation attachment storage", () => {
     });
   });
 
+  it("cleans contained unexpected entries without blocking restart", async () => {
+    const dataDirectory = await root();
+    const store = await ConversationAttachmentStore.open(dataDirectory);
+    await writeFile(join(store.directory, ".DS_Store"), "fixture", "utf8");
+    await mkdir(join(store.directory, "interrupted-maintenance"));
+
+    await expect(store.reconcile([])).resolves.toBeUndefined();
+
+    await expect(readdir(store.directory)).resolves.toEqual([]);
+  });
+
   it("rejects attachment identity reuse with different retained content", async () => {
     const dataDirectory = await root();
     const store = await ConversationAttachmentStore.open(dataDirectory);
@@ -135,6 +147,17 @@ describe("durable conversation attachment storage", () => {
 
     await expect(store.retain([malformed]))
       .rejects.toThrow(/invalid/u);
+    await expect(store.usage()).resolves.toEqual({ records: 0, bytes: 0 });
+  });
+
+  it("honors cancellation before durable filesystem mutation", async () => {
+    const dataDirectory = await root();
+    const store = await ConversationAttachmentStore.open(dataDirectory);
+    const cancellation = new AbortController();
+    cancellation.abort();
+
+    await expect(store.retain([image()], cancellation.signal))
+      .rejects.toMatchObject({ name: "AbortError" });
     await expect(store.usage()).resolves.toEqual({ records: 0, bytes: 0 });
   });
 

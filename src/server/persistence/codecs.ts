@@ -538,7 +538,13 @@ export function parseAttachments(value: string): ChatAttachment[] {
         || attachments.length >= MAX_CHAT_ATTACHMENTS
         || totalBytes + attachment.size > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
       ) continue;
-      attachments.push(attachment);
+      attachments.push({
+        id: attachment.id,
+        name: attachment.name,
+        path: attachment.path,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+      });
       ids.add(attachment.id);
       totalBytes += attachment.size;
     }

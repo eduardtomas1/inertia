@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type Dir } from "node:fs";
 import {
   lstat,
   mkdir,
   open,
+  opendir,
   readdir,
   realpath,
 } from "node:fs/promises";
@@ -40,6 +41,10 @@ export type {
 const STORE_DIRECTORY = "conversation-attachments";
 const MAX_PERSISTED_RECORDS = 256;
 const MAX_PERSISTED_BYTES = 512 * 1024 * 1024;
+const RECONCILIATION_BATCH_ENTRIES = 32;
+const RECONCILIATION_BATCH_TIMEOUT_MS = 250;
+const MAX_PARALLEL_CLEANUPS = 8;
+const CLEANUP_BATCH_TIMEOUT_MS = 30_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
@@ -85,6 +90,14 @@ export interface ConversationAttachmentStoreOptions {
     readonly attachmentId: string;
     readonly stallBeforePublishMs: number;
   };
+  readonly readFault?: {
+    readonly attachmentId: string;
+    readonly stallBeforeRecordRevalidateMs: number;
+    readonly onReady?: () => void;
+  };
+  /** Test-only bounds for deterministic incremental-reconciliation coverage. */
+  readonly reconciliationBatchEntries?: number;
+  readonly reconciliationBatchTimeoutMs?: number;
   /** Deterministic store-operation seam for unit tests; production uses the bounded child. */
   readonly operationRunner?: ConversationAttachmentStoreOperationRunner;
 }
@@ -94,6 +107,15 @@ interface StoreDirectoryAuthority {
   readonly dev: string;
   readonly ino: string;
   readonly uid: string | null;
+}
+
+interface AttachmentReconciliationState {
+  readonly directory: Dir;
+  readonly references: ReadonlyMap<string, ChatAttachment>;
+  readonly records: Map<string, number>;
+  readonly retryNames: string[];
+  directoryExhausted: boolean;
+  scheduled: boolean;
 }
 
 function contained(root: string, target: string): boolean {
@@ -267,6 +289,9 @@ export class ConversationAttachmentStore {
   private readonly maxRecords: number;
   private readonly validate?: ConversationAttachmentValidator;
   private readonly persistenceFault?: ConversationAttachmentStoreOptions["persistenceFault"];
+  private readonly readFault?: ConversationAttachmentStoreOptions["readFault"];
+  private readonly reconciliationBatchEntries: number;
+  private readonly reconciliationBatchTimeoutMs: number;
   private readonly operationRunner: ConversationAttachmentStoreOperationRunner;
   private readonly authoritativeRecords = new Set<string>();
   private readonly retentionRecords = new Map<string, Set<string>>();
@@ -274,6 +299,8 @@ export class ConversationAttachmentStore {
   private readonly activeStagingRecords = new Map<string, string>();
   private readonly pendingRecordBytes = new Map<string, number>();
   private readonly pendingRetentionRecords = new Map<string, Set<string>>();
+  private reconciliation: AttachmentReconciliationState | null = null;
+  private reconciliationFailure: Error | null = null;
   private records: Map<string, number> | null = null;
   private mutationTail: Promise<void> = Promise.resolve();
 
@@ -287,6 +314,19 @@ export class ConversationAttachmentStore {
     this.maxRecords = boundedLimit(options.maxRecords, MAX_PERSISTED_RECORDS);
     this.validate = options.validate;
     this.persistenceFault = options.persistenceFault;
+    this.readFault = options.readFault;
+    this.reconciliationBatchEntries = process.env.NODE_ENV === "test"
+      ? boundedLimit(
+          options.reconciliationBatchEntries,
+          RECONCILIATION_BATCH_ENTRIES,
+        )
+      : RECONCILIATION_BATCH_ENTRIES;
+    this.reconciliationBatchTimeoutMs = process.env.NODE_ENV === "test"
+      ? boundedLimit(
+          options.reconciliationBatchTimeoutMs,
+          RECONCILIATION_BATCH_TIMEOUT_MS,
+        )
+      : RECONCILIATION_BATCH_TIMEOUT_MS;
     this.operationRunner = process.env.NODE_ENV === "test"
       ? options.operationRunner ?? runStoreChild
       : runStoreChild;
@@ -313,6 +353,12 @@ export class ConversationAttachmentStore {
     if (payloads.length === 0) return [];
     return await this.serialize(async () => {
       signal?.throwIfAborted();
+      if (this.reconciliation) {
+        throw new Error("Conversation attachment storage is still reconciling.");
+      }
+      if (this.reconciliationFailure) {
+        throw new Error("Conversation attachment storage reconciliation failed.");
+      }
       if (
         this.retentionRecords.has(retentionId)
         || this.pendingRetentionRecords.has(retentionId)
@@ -461,6 +507,7 @@ export class ConversationAttachmentStore {
       const attachmentIds = this.retentionRecords.get(retentionId);
       if (!attachmentIds) return;
       this.retentionRecords.delete(retentionId);
+      const removable: string[] = [];
       for (const id of attachmentIds) {
         const retentions = this.recordRetentions.get(id);
         retentions?.delete(retentionId);
@@ -469,39 +516,48 @@ export class ConversationAttachmentStore {
           !this.authoritativeRecords.has(id)
           && !this.recordRetentions.has(id)
         ) {
-          await this.removeRecord(id);
-          this.records?.delete(id);
+          removable.push(id);
         }
       }
+      const cleanup = await this.cleanupRecords(removable);
+      for (const id of cleanup.removed) {
+        this.records?.delete(id);
+        this.reconciliation?.records.delete(id);
+      }
+      if (cleanup.failure) throw cleanup.failure;
     });
   }
 
   async release(ids: readonly string[]): Promise<void> {
     await this.serialize(async () => {
-      for (const id of new Set(ids)) {
+      const unique = [...new Set(ids)];
+      for (const id of unique) {
         if (!UUID_PATTERN.test(id)) {
           throw new Error("Invalid conversation attachment identity.");
         }
-        this.authoritativeRecords.delete(id);
-        for (const retentionId of this.recordRetentions.get(id) ?? []) {
-          const attachmentIds = this.retentionRecords.get(retentionId);
-          attachmentIds?.delete(id);
-          if (attachmentIds?.size === 0) {
-            this.retentionRecords.delete(retentionId);
-          }
-        }
-        this.recordRetentions.delete(id);
-        await this.removeRecord(id);
-        this.records?.delete(id);
       }
+      const removable: string[] = [];
+      for (const id of unique) {
+        this.authoritativeRecords.delete(id);
+        if (!this.recordRetentions.has(id)) removable.push(id);
+      }
+      const cleanup = await this.cleanupRecords(removable);
+      for (const id of cleanup.removed) {
+        this.records?.delete(id);
+        this.reconciliation?.records.delete(id);
+      }
+      if (cleanup.failure) throw cleanup.failure;
     });
   }
 
   async reconcile(references: readonly ChatAttachment[]): Promise<void> {
     await this.serialize(async () => {
+      if (this.reconciliation) {
+        throw new Error("Conversation attachment storage is already reconciling.");
+      }
+      await this.assertStoreRootAuthority();
       const referenced = new Map<string, ChatAttachment>();
       const conflicted = new Set<string>();
-      const records = new Map<string, number>();
       for (const attachment of references) {
         if (!UUID_PATTERN.test(attachment.id)) continue;
         if (conflicted.has(attachment.id)) continue;
@@ -520,38 +576,183 @@ export class ConversationAttachmentStore {
         }
         referenced.set(attachment.id, attachment);
       }
-      for (const name of await readdir(this.directory)) {
-        if (this.activeStagingRecords.has(name)) continue;
-        if (!UUID_PATTERN.test(name)) {
-          await this.removeContainedEntry(name);
-          continue;
-        }
-        const expected = referenced.get(name);
-        if (!expected) {
-          await this.removeRecord(name);
-          continue;
-        }
-        const current = await this.inspectForMaintenance(name);
-        if (!current) continue;
-        if (
-          current.attachment.name !== expected.name
-          || current.attachment.mimeType !== expected.mimeType
-          || current.attachment.size !== expected.size
-        ) {
-          await this.removeRecord(name);
-        } else {
-          records.set(name, current.attachment.size);
-        }
+      const directory = await opendir(this.directory, {
+        bufferSize: this.reconciliationBatchEntries,
+      });
+      this.reconciliationFailure = null;
+      const state: AttachmentReconciliationState = {
+        directory,
+        references: referenced,
+        records: new Map<string, number>(),
+        retryNames: [],
+        directoryExhausted: false,
+        scheduled: false,
+      };
+      this.reconciliation = state;
+      try {
+        await this.advanceReconciliation(state);
+      } catch (error) {
+        this.reconciliationFailure = error instanceof Error
+          ? error
+          : new Error(String(error));
+        await this.closeReconciliation(state);
+        throw error;
       }
-      this.records = records;
-      this.reconcilePendingRecords(records);
-      this.authoritativeRecords.clear();
-      for (const id of records.keys()) this.authoritativeRecords.add(id);
+      if (this.reconciliation === state) {
+        this.scheduleReconciliation(state);
+      }
     });
   }
 
   async usage(): Promise<{ bytes: number; records: number }> {
-    return await this.serialize(() => this.loadUsage());
+    return await this.serialize(() => (
+      this.reconciliation || this.reconciliationFailure
+    )
+      ? Promise.resolve({
+          bytes: this.maxBytes,
+          records: this.maxRecords,
+        })
+      : this.loadUsage());
+  }
+
+  private async assertStoreRootAuthority(): Promise<void> {
+    const named = await lstat(this.directory, { bigint: true });
+    const canonical = await realpath(this.directory);
+    if (
+      canonical !== this.directoryAuthority.path
+      || !named.isDirectory()
+      || named.isSymbolicLink()
+      || String(named.dev) !== this.directoryAuthority.dev
+      || String(named.ino) !== this.directoryAuthority.ino
+      || (
+        process.platform !== "win32"
+        && (
+          !isPrivateExactEntry(named, 0o700)
+          || String(named.uid) !== this.directoryAuthority.uid
+        )
+      )
+    ) throw new Error("Conversation attachment storage authority changed.");
+  }
+
+  private async advanceReconciliation(
+    state: AttachmentReconciliationState,
+  ): Promise<void> {
+    if (this.reconciliation !== state) return;
+    await this.assertStoreRootAuthority();
+    const deadline = new AbortController();
+    const timer = setTimeout(() => {
+      deadline.abort(new Error("Conversation attachment reconciliation yielded."));
+    }, this.reconciliationBatchTimeoutMs);
+    timer.unref();
+    try {
+      let processed = 0;
+      while (
+        processed < this.reconciliationBatchEntries
+        && !deadline.signal.aborted
+      ) {
+        let name = state.retryNames.shift();
+        if (!name && !state.directoryExhausted) {
+          const entry = await state.directory.read();
+          if (entry) name = entry.name;
+          else state.directoryExhausted = true;
+        }
+        if (!name) {
+          await this.assertStoreRootAuthority();
+          await state.directory.close();
+          if (this.reconciliation !== state) return;
+          this.records = state.records;
+          this.reconcilePendingRecords(state.records);
+          this.authoritativeRecords.clear();
+          for (const id of state.records.keys()) {
+            this.authoritativeRecords.add(id);
+          }
+          this.reconciliation = null;
+          return;
+        }
+        if (deadline.signal.aborted) {
+          state.retryNames.push(name);
+          break;
+        }
+        processed += 1;
+        try {
+          await this.reconcileEntry(state, name, deadline.signal);
+        } catch (error) {
+          state.retryNames.push(name);
+          if (!deadline.signal.aborted) throw error;
+          break;
+        }
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async reconcileEntry(
+    state: AttachmentReconciliationState,
+    name: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (this.activeStagingRecords.has(name)) {
+      state.retryNames.push(name);
+      return;
+    }
+    if (!UUID_PATTERN.test(name)) {
+      await this.removeContainedEntry(name, signal);
+      return;
+    }
+    const expected = state.references.get(name);
+    if (!expected) {
+      await this.removeRecord(name, signal);
+      state.records.delete(name);
+      return;
+    }
+    const current = await this.inspectForMaintenance(name, signal);
+    if (!current) {
+      state.records.delete(name);
+      return;
+    }
+    if (
+      current.attachment.name !== expected.name
+      || current.attachment.mimeType !== expected.mimeType
+      || current.attachment.size !== expected.size
+    ) {
+      await this.removeRecord(name, signal);
+      state.records.delete(name);
+      return;
+    }
+    state.records.set(name, current.attachment.size);
+  }
+
+  private scheduleReconciliation(state: AttachmentReconciliationState): void {
+    if (this.reconciliation !== state || state.scheduled) return;
+    state.scheduled = true;
+    const scheduled = setTimeout(() => {
+      state.scheduled = false;
+      void this.serialize(async () => {
+        if (this.reconciliation !== state) return;
+        await this.advanceReconciliation(state);
+      }).then(
+        () => {
+          if (this.reconciliation === state) {
+            this.scheduleReconciliation(state);
+          }
+        },
+        (error: unknown) => {
+          this.reconciliationFailure = error instanceof Error
+            ? error
+            : new Error(String(error));
+          return this.closeReconciliation(state);
+        },
+      );
+    }, 25);
+    scheduled.unref();
+  }
+
+  private async closeReconciliation(
+    state: AttachmentReconciliationState,
+  ): Promise<void> {
+    if (this.reconciliation === state) this.reconciliation = null;
+    await state.directory.close().catch(() => undefined);
   }
 
   private async loadUsage(): Promise<{ bytes: number; records: number }> {
@@ -577,6 +778,10 @@ export class ConversationAttachmentStore {
     signal?: AbortSignal,
   ): Promise<ConversationAttachmentPreview | null> {
     if (!UUID_PATTERN.test(id)) return null;
+    const configuredReadStall = process.env.NODE_ENV === "test"
+      && this.readFault?.attachmentId === id
+      ? this.readFault.stallBeforeRecordRevalidateMs
+      : 0;
     const reading = runStoreChild({
       operation: "read",
       root: this.directory,
@@ -584,7 +789,21 @@ export class ConversationAttachmentStore {
       rootIno: this.directoryAuthority.ino,
       rootUid: this.directoryAuthority.uid,
       id,
+      stallBeforeRecordRevalidateMs: Math.max(
+        0,
+        Math.min(Math.trunc(configuredReadStall), 60_000),
+      ),
     }, signal);
+    if (
+      process.env.NODE_ENV === "test"
+      && configuredReadStall > 0
+      && this.readFault?.onReady
+    ) {
+      const onReady = this.readFault.onReady;
+      void reading.ready.then((observed) => {
+        if (observed) onReady();
+      }, () => undefined);
+    }
     const receipt = await reading.result;
     if (receipt.missing) return null;
     let metadata: PersistedAttachmentMetadata | null;
@@ -626,13 +845,15 @@ export class ConversationAttachmentStore {
 
   private async inspectForMaintenance(
     id: string,
+    signal?: AbortSignal,
   ): Promise<ConversationAttachmentPreview | null> {
     try {
-      const current = await this.inspect(id);
-      if (!current) await this.removeRecord(id);
+      const current = await this.inspect(id, signal);
+      if (!current) await this.removeRecord(id, signal);
       return current;
-    } catch {
-      await this.removeRecord(id);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      await this.removeRecord(id, signal);
       return null;
     }
   }
@@ -700,7 +921,10 @@ export class ConversationAttachmentStore {
         const recordRemoved = await this.removeRecord(id)
           .then(() => true, () => false);
         cleaned &&= recordRemoved;
-        if (recordRemoved) this.records?.delete(id);
+        if (recordRemoved) {
+          this.records?.delete(id);
+          this.reconciliation?.records.delete(id);
+        }
       }
       return cleaned;
     });
@@ -719,20 +943,70 @@ export class ConversationAttachmentStore {
           .then(() => true, () => false);
         if (removed) {
           this.records?.delete(id);
+          this.reconciliation?.records.delete(id);
           this.clearPendingRecord(id);
         }
       }
     });
   }
 
-  private async removeRecord(id: string): Promise<void> {
+  private async removeRecord(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (!UUID_PATTERN.test(id)) {
       throw new Error("Invalid conversation attachment identity.");
     }
-    await this.removeContainedEntry(id);
+    await this.removeContainedEntry(id, signal);
   }
 
-  private async removeContainedEntry(name: string): Promise<void> {
+  private async cleanupRecords(
+    ids: readonly string[],
+  ): Promise<{ readonly removed: Set<string>; readonly failure?: Error }> {
+    if (ids.length === 0) return { removed: new Set<string>() };
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort(new Error("Conversation attachment cleanup timed out."));
+    }, CLEANUP_BATCH_TIMEOUT_MS);
+    timer.unref();
+    const removed = new Set<string>();
+    let failed = false;
+    let failure: Error | undefined;
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (nextIndex < ids.length && !controller.signal.aborted) {
+        const id = ids[nextIndex++]!;
+        try {
+          await this.removeRecord(id, controller.signal);
+          removed.add(id);
+        } catch (error) {
+          if (!failed) {
+            failure = error instanceof Error ? error : new Error(String(error));
+          }
+          failed = true;
+        }
+      }
+    };
+    try {
+      await Promise.all(Array.from(
+        { length: Math.min(ids.length, MAX_PARALLEL_CLEANUPS) },
+        () => worker(),
+      ));
+    } finally {
+      clearTimeout(timer);
+    }
+    return failed
+      ? {
+          removed,
+          failure: failure ?? new Error("Conversation attachment cleanup failed."),
+        }
+      : { removed };
+  }
+
+  private async removeContainedEntry(
+    name: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const target = join(this.directory, name);
     if (
       name.length < 1
@@ -751,7 +1025,7 @@ export class ConversationAttachmentStore {
       rootIno: this.directoryAuthority.ino,
       rootUid: this.directoryAuthority.uid,
       name,
-    });
+    }, signal);
     await cleanup.result;
   }
 

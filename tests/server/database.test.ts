@@ -98,7 +98,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       { ...valid, mimeType: "application/zip" },
       { ...valid, size: 0 },
       { ...valid, name: "../reference.png" },
-      valid,
+      { ...valid, unexpected: "/private/extra-path" },
     ]))).toEqual([valid]);
 
     const bounded = Array.from({ length: 9 }, (_, index) => ({

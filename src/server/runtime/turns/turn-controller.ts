@@ -278,7 +278,11 @@ export class TurnController {
     }
   }
 
-  queue(request: QueueTurnRequest): QueuedTurn {
+  queue(
+    request: QueueTurnRequest,
+    /** Synchronous ownership handoff after commit and before live adoption. */
+    onPersisted?: () => void,
+  ): QueuedTurn {
     if (this.closing) throw new Error("The local runtime is shutting down.");
     this.store.assertDuoComparisonTurnAllowed(
       request.conversationId,
@@ -295,7 +299,7 @@ export class TurnController {
       id: this.id,
       now: () => this.now(),
       clock: this.clock,
-    }, request);
+    }, request, onPersisted);
     return this.adoptPreparedTurn(prepared);
   }
 

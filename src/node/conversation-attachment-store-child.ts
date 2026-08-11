@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 
 import {
   CHAT_ATTACHMENT_MIME_TYPES,
@@ -45,6 +46,7 @@ interface ConversationAttachmentStoreReadOperation {
   readonly rootIno: string;
   readonly rootUid: string | null;
   readonly id: string;
+  readonly stallBeforeRecordRevalidateMs: number;
 }
 
 type ConversationAttachmentStoreReadReceipt = {
@@ -61,7 +63,7 @@ export type ConversationAttachmentStoreOperationRunner = (
 ) => { readonly result: Promise<void>; readonly stopped: Promise<void> };
 
 const STORE_CHILD_SOURCE = `
-  const { constants } = require("node:fs");
+  const { constants, writeSync } = require("node:fs");
   const { chmod, lstat, mkdir, open, realpath, rename, rm } = require("node:fs/promises");
   const { join } = require("node:path");
 
@@ -153,6 +155,11 @@ const STORE_CHILD_SOURCE = `
         || before.dev !== named.dev
         || before.ino !== named.ino
         || before.size !== named.size
+        || before.mode !== named.mode
+        || before.uid !== named.uid
+        || before.mtimeNs !== named.mtimeNs
+        || before.ctimeNs !== named.ctimeNs
+        || !privateEntry(before, 0o600)
       ) throw new Error("The attachment file changed.");
       const expectedSize = Number(before.size);
       const bytes = Buffer.alloc(expectedSize);
@@ -178,14 +185,35 @@ const STORE_CHILD_SOURCE = `
       if (
         offset !== expectedSize
         || overflowBytes !== 0
+        || after.dev !== before.dev
+        || after.ino !== before.ino
         || after.size !== before.size
+        || after.mode !== before.mode
+        || after.uid !== before.uid
         || after.mtimeNs !== before.mtimeNs
         || after.ctimeNs !== before.ctimeNs
+        || !privateEntry(after, 0o600)
       ) throw new Error("The attachment file changed.");
-      return bytes;
+      return { bytes, named };
     } finally {
       await file.close();
     }
+  }
+
+  async function verifyNamedFile(path, expected) {
+    const current = await lstat(path, { bigint: true });
+    if (
+      !current.isFile()
+      || current.isSymbolicLink()
+      || current.dev !== expected.dev
+      || current.ino !== expected.ino
+      || current.size !== expected.size
+      || current.mode !== expected.mode
+      || current.uid !== expected.uid
+      || current.mtimeNs !== expected.mtimeNs
+      || current.ctimeNs !== expected.ctimeNs
+      || !privateEntry(current, 0o600)
+    ) throw new Error("The attachment file name changed.");
   }
 
   async function readRecord(input) {
@@ -197,6 +225,9 @@ const STORE_CHILD_SOURCE = `
       || typeof input.rootDev !== "string"
       || typeof input.rootIno !== "string"
       || !(input.rootUid === null || typeof input.rootUid === "string")
+      || !Number.isSafeInteger(input.stallBeforeRecordRevalidateMs)
+      || input.stallBeforeRecordRevalidateMs < 0
+      || input.stallBeforeRecordRevalidateMs > 60_000
     ) throw new Error("The read request is invalid.");
     await verifyRoot(input);
     let named;
@@ -221,13 +252,13 @@ const STORE_CHILD_SOURCE = `
       || !privateEntry(opened, 0o700)
     ) throw new Error("The attachment record changed.");
     await verifyRoot(input, "..");
-    const metadataBytes = await readBoundedFile(
+    const metadataRead = await readBoundedFile(
       ${JSON.stringify(METADATA_FILE)},
       ${MAX_METADATA_BYTES},
       false,
       0,
     );
-    const metadata = metadataBytes.toString("utf8");
+    const metadata = metadataRead.bytes.toString("utf8");
     let parsed;
     try {
       parsed = JSON.parse(metadata);
@@ -243,15 +274,33 @@ const STORE_CHILD_SOURCE = `
       || parsed.size < 1
       || parsed.size > MAX_ATTACHMENT_BYTES
     ) return { missing: true };
-    const bytes = await readBoundedFile(
-      input.id + "." + parsed.extension,
+    const contentPath = input.id + "." + parsed.extension;
+    const contentRead = await readBoundedFile(
+      contentPath,
       MAX_ATTACHMENT_BYTES,
       true,
     );
+    const bytes = contentRead.bytes;
     if (bytes.length !== parsed.size) {
       throw new Error("The attachment content changed.");
     }
+    if (input.stallBeforeRecordRevalidateMs > 0) {
+      writeSync(3, ${JSON.stringify("read-ready\n")});
+      await new Promise((resolve) => {
+        setTimeout(resolve, input.stallBeforeRecordRevalidateMs);
+      });
+    }
+    const rebound = await lstat(join("..", input.id), { bigint: true });
+    if (
+      !rebound.isDirectory()
+      || rebound.isSymbolicLink()
+      || rebound.dev !== named.dev
+      || rebound.ino !== named.ino
+      || !privateEntry(rebound, 0o700)
+    ) throw new Error("The attachment record name changed.");
     await verifyRoot(input, "..");
+    await verifyNamedFile(${JSON.stringify(METADATA_FILE)}, metadataRead.named);
+    await verifyNamedFile(contentPath, contentRead.named);
     return {
       missing: false,
       metadata,
@@ -401,13 +450,18 @@ function storeChildEnvironment(): NodeJS.ProcessEnv {
 export function runConversationAttachmentStoreChild(
   input: ConversationAttachmentStoreOperation,
   signal?: AbortSignal,
-): { readonly result: Promise<void>; readonly stopped: Promise<void> };
+): {
+  readonly result: Promise<void>;
+  readonly stopped: Promise<void>;
+  readonly ready: Promise<boolean>;
+};
 export function runConversationAttachmentStoreChild(
   input: ConversationAttachmentStoreReadOperation,
   signal?: AbortSignal,
 ): {
   readonly result: Promise<ConversationAttachmentStoreReadReceipt>;
   readonly stopped: Promise<void>;
+  readonly ready: Promise<boolean>;
 };
 export function runConversationAttachmentStoreChild(
   input:
@@ -417,16 +471,23 @@ export function runConversationAttachmentStoreChild(
 ): {
   readonly result: Promise<void | ConversationAttachmentStoreReadReceipt>;
   readonly stopped: Promise<void>;
+  readonly ready: Promise<boolean>;
 } {
   let stopReceipt!: () => void;
+  let readyReceipt!: (observed: boolean) => void;
   const stopped = new Promise<void>((resolveStopped) => {
     stopReceipt = resolveStopped;
   });
+  const ready = new Promise<boolean>((resolveReady) => {
+    readyReceipt = resolveReady;
+  });
   if (signal?.aborted) {
     stopReceipt();
+    readyReceipt(false);
     return {
       result: Promise.reject(cancellationError(signal)),
       stopped,
+      ready,
     };
   }
   const encodedInput = JSON.stringify(input.operation === "persist"
@@ -438,24 +499,30 @@ export function runConversationAttachmentStoreChild(
     : input);
   if (Buffer.byteLength(encodedInput, "utf8") > MAX_STORE_CHILD_INPUT_BYTES) {
     stopReceipt();
+    readyReceipt(false);
     return {
       result: Promise.reject(new Error("Conversation attachment operation input is too large.")),
       stopped,
+      ready,
     };
   }
   const child = spawn(process.execPath, ["--no-warnings", "-e", STORE_CHILD_SOURCE], {
     cwd: input.root,
     env: storeChildEnvironment(),
     shell: false,
-    stdio: ["pipe", "pipe", "ignore"],
+    stdio: ["pipe", "pipe", "ignore", "pipe"] as const,
     windowsHide: true,
   });
+  const childInput = child.stdin as Writable;
+  const childOutput = child.stdout as Readable;
+  const readiness = child.stdio[3] as Readable;
   const result = new Promise<void | ConversationAttachmentStoreReadReceipt>((
     resolveOperation,
     rejectOperation,
   ) => {
     const outputChunks: string[] = [];
     let outputBytes = 0;
+    let readReadyObserved = false;
     let settled = false;
 
     const cleanup = (): void => {
@@ -473,7 +540,7 @@ export function runConversationAttachmentStoreChild(
       else resolveOperation(receipt);
     };
     const kill = (): void => {
-      child.stdin.destroy();
+      childInput.destroy();
       child.unref();
       if (process.platform === "win32") child.kill();
       else child.kill("SIGKILL");
@@ -495,8 +562,13 @@ export function runConversationAttachmentStoreChild(
       abort();
       return;
     }
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
+    childOutput.setEncoding("utf8");
+    readiness.setEncoding("utf8");
+    readiness.once("data", () => {
+      readReadyObserved = true;
+      readyReceipt(true);
+    });
+    childOutput.on("data", (chunk: string) => {
       if (settled) return;
       outputChunks.push(chunk);
       outputBytes += Buffer.byteLength(chunk, "utf8");
@@ -513,6 +585,7 @@ export function runConversationAttachmentStoreChild(
     });
     child.once("close", (code) => {
       stopReceipt();
+      readyReceipt(readReadyObserved);
       if (settled) return;
       let receipt: unknown;
       try {
@@ -567,8 +640,8 @@ export function runConversationAttachmentStoreChild(
         bytes,
       });
     });
-    child.stdin.on("error", () => undefined);
-    child.stdin.end(encodedInput, "utf8");
+    childInput.on("error", () => undefined);
+    childInput.end(encodedInput, "utf8");
   });
-  return { result, stopped };
+  return { result, stopped, ready };
 }

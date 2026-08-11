@@ -220,7 +220,9 @@ export class TranscriptRepository {
           ORDER BY messages.created_at ASC, messages.id ASC
         `).all(conversationId)) as Array<Pick<MessageRow, "attachments_json">>;
     return rows
-      .flatMap((row) => parseAttachments(row.attachments_json));
+      .flatMap((row) => rendererSafeAttachments(
+        parseAttachments(row.attachments_json),
+      ));
   }
 
   message(messageId: string): ChatMessage {

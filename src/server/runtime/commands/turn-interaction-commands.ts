@@ -159,6 +159,13 @@ export function createTurnInteractionCommandHandler(
         let attachmentRetentionStarted = false;
         let retainedAttachmentsAccepted = false;
         let generatedAttachmentPaths: string[] = [];
+        const acceptRetainedAttachments = () => {
+          if (retainedAttachmentsAccepted) return;
+          dependencies.conversationAttachments.acceptRetention(
+            attachmentRetentionId,
+          );
+          retainedAttachmentsAccepted = true;
+        };
         const relinquishAttachments = async () => {
           const generated = generatedAttachmentPaths;
           generatedAttachmentPaths = [];
@@ -449,13 +456,10 @@ export function createTurnInteractionCommandHandler(
                 context: command.payload.context,
                 checkpointId,
                 skills: resolvedSkills.inputs,
-              })
+              }, () => acceptRetainedAttachments())
             : null;
           if (queued !== null) {
-            dependencies.conversationAttachments.acceptRetention(
-              attachmentRetentionId,
-            );
-            retainedAttachmentsAccepted = true;
+            acceptRetainedAttachments();
           }
         } catch (error) {
           if (providerTransitionReserved) {
@@ -487,10 +491,7 @@ export function createTurnInteractionCommandHandler(
               undefined,
               { activateConversation: command.payload.activate },
             );
-            dependencies.conversationAttachments.acceptRetention(
-              attachmentRetentionId,
-            );
-            retainedAttachmentsAccepted = true;
+            acceptRetainedAttachments();
             attachmentOwnershipAccepted = true;
             await dependencies.attachmentResolver?.releaseAll(
               sourceAttachments.map(({ id }) => id),

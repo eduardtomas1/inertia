@@ -711,10 +711,13 @@ describe("message attachment ownership transfer", () => {
       messageCommand(),
     )).resolves.toBe("handled");
 
-    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
-      attachments: [retainedAttachment],
-      imagePaths: [retainedAttachment.path],
-    }));
+    expect(queue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [retainedAttachment],
+        imagePaths: [retainedAttachment.path],
+      }),
+      expect.any(Function),
+    );
     expect(relinquishAll).not.toHaveBeenCalled();
     expect(handlerDependencies.conversationAttachments.acceptRetention)
       .toHaveBeenCalledOnce();
@@ -771,12 +774,38 @@ describe("message attachment ownership transfer", () => {
       "handled",
     );
     expect(queue).toHaveBeenCalledTimes(2);
-    expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({
-      attachments: [trustedAttachment],
-    }));
+    expect(queue).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        attachments: [trustedAttachment],
+      }),
+      expect.any(Function),
+    );
     expect(relinquishAll).toHaveBeenCalledOnce();
     expect(handlerDependencies.conversationAttachments.retain)
       .toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps retention accepted when live queue adoption fails after persistence", async () => {
+    const queue = vi.fn((
+      _request: unknown,
+      onPersisted: () => void,
+    ) => {
+      onPersisted();
+      throw new Error("queue adoption failed after persistence");
+    });
+    const relinquishAll = vi.fn(async () => undefined);
+    const handlerDependencies = dependencies({ queue, relinquishAll });
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).rejects.toThrow("queue adoption failed after persistence");
+
+    expect(handlerDependencies.conversationAttachments.acceptRetention)
+      .toHaveBeenCalledOnce();
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
+      .not.toHaveBeenCalled();
+    expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
   });
 
   it("rejects stale skills before attempting a reversal checkpoint", async () => {
@@ -821,9 +850,10 @@ describe("message attachment ownership transfer", () => {
     const handler = createTurnInteractionCommandHandler(handlerDependencies);
 
     await expect(handler({} as never, command)).resolves.toBe("handled");
-    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
-      skills: [skill],
-    }));
+    expect(queue).toHaveBeenCalledWith(
+      expect.objectContaining({ skills: [skill] }),
+      expect.any(Function),
+    );
     expect(resolveSkills.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(handlerDependencies.store.conversationPath)
         .mock.invocationCallOrder[0]!,
@@ -1014,10 +1044,13 @@ describe("message attachment ownership transfer", () => {
     await expect(handler({} as never, messageCommand(false))).resolves.toBe(
       "handled",
     );
-    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
-      conversationId,
-      activateConversation: false,
-    }));
+    expect(queue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId,
+        activateConversation: false,
+      }),
+      expect.any(Function),
+    );
   });
 
   it("settles an accepted queued turn if acknowledgement work throws before start", async () => {

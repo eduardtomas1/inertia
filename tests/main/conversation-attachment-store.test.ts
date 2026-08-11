@@ -161,6 +161,58 @@ describe("durable conversation attachment storage", () => {
     await expect(readdir(store.directory)).resolves.toEqual([]);
   });
 
+  it("bounds startup reconciliation and defers stalled cleanup", async () => {
+    const dataDirectory = await root();
+    let cleanupBlocked = true;
+    let cleanupAttempts = 0;
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (operation.operation !== "remove" || !cleanupBlocked) {
+        return testOperationRunner(operation, signal);
+      }
+      cleanupAttempts += 1;
+      const result = new Promise<void>((_resolve, reject) => {
+        const abort = () => reject(
+          signal?.reason ?? new Error("Reconciliation was cancelled."),
+        );
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) abort();
+      });
+      return {
+        result,
+        stopped: result.then(() => undefined, () => undefined),
+      };
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      maxBytes: png.length * 2,
+      maxRecords: 2,
+      operationRunner,
+      reconciliationBatchEntries: 1,
+      reconciliationBatchTimeoutMs: 25,
+    });
+    await writeFile(join(store.directory, ".stalled-cleanup"), "one", "utf8");
+    await writeFile(join(store.directory, ".deferred-cleanup"), "two", "utf8");
+
+    const startedAt = Date.now();
+    await expect(store.reconcile([])).resolves.toBeUndefined();
+
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(cleanupAttempts).toBe(1);
+    await expect(store.usage()).resolves.toEqual({
+      bytes: png.length * 2,
+      records: 2,
+    });
+    await expect(store.retain([image()])).rejects.toThrow(/reconciling/u);
+
+    cleanupBlocked = false;
+    await vi.waitFor(async () => {
+      await expect(readdir(store.directory)).resolves.toEqual([]);
+      await expect(store.usage()).resolves.toEqual({ bytes: 0, records: 0 });
+    }, { timeout: 5_000, interval: 10 });
+  });
+
   it("rejects attachment identity reuse with different retained content", async () => {
     const dataDirectory = await root();
     const store = await openTestStore(dataDirectory);
@@ -243,6 +295,87 @@ describe("durable conversation attachment storage", () => {
     store.acceptRetention(retryRetention);
     await store.releaseRetention(firstRetention);
     await expect(store.preview(first!.id)).resolves.not.toBeNull();
+  });
+
+  it("bounds concurrent cleanup across many independent records", async () => {
+    const dataDirectory = await root();
+    let activeRemovals = 0;
+    let maximumActiveRemovals = 0;
+    const finishRemovals: Array<() => void> = [];
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (operation.operation !== "remove") {
+        return testOperationRunner(operation, signal);
+      }
+      activeRemovals += 1;
+      maximumActiveRemovals = Math.max(
+        maximumActiveRemovals,
+        activeRemovals,
+      );
+      const result = new Promise<void>((resolve) => {
+        finishRemovals.push(() => {
+          activeRemovals -= 1;
+          resolve();
+        });
+      });
+      return {
+        result,
+        stopped: result.then(() => undefined),
+      };
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      operationRunner,
+    });
+    const payloads = Array.from({ length: 9 }, (_, index) => image(
+      `${String(index + 20).padStart(8, "0")}-2020-4020-8020-${String(
+        index + 20,
+      ).padStart(12, "0")}`,
+    ));
+    const firstRetention = "15151515-1515-4515-8515-151515151515";
+    const secondRetention = "19191919-1919-4919-8919-191919191919";
+    const retained = await store.retain(
+      payloads.slice(0, 8),
+      undefined,
+      firstRetention,
+    );
+    retained.push(...await store.retain(
+      payloads.slice(8),
+      undefined,
+      secondRetention,
+    ));
+    store.acceptRetention(firstRetention);
+    store.acceptRetention(secondRetention);
+
+    const releasing = store.release(retained.map(({ id }) => id));
+    await vi.waitFor(() => expect(activeRemovals).toBe(8));
+    expect(maximumActiveRemovals).toBe(8);
+    finishRemovals.splice(0).forEach((finish) => finish());
+    await vi.waitFor(() => expect(activeRemovals).toBe(1));
+    finishRemovals.splice(0).forEach((finish) => finish());
+    await expect(releasing).resolves.toBeUndefined();
+    await expect(store.usage()).resolves.toEqual({ bytes: 0, records: 0 });
+  });
+
+  it("preserves an in-flight retry lease during authoritative deletion", async () => {
+    const dataDirectory = await root();
+    const store = await openTestStore(dataDirectory);
+    const authoritativeLease = "16161616-1616-4616-8616-161616161616";
+    const retryLease = "17171717-1717-4717-8717-171717171717";
+    const [retained] = await store.retain(
+      [image()],
+      undefined,
+      authoritativeLease,
+    );
+    store.acceptRetention(authoritativeLease);
+    await store.retain([image()], undefined, retryLease);
+
+    await store.release([retained!.id]);
+
+    await expect(store.preview(retained!.id)).resolves.not.toBeNull();
+    store.acceptRetention(retryLease);
+    await expect(store.preview(retained!.id)).resolves.not.toBeNull();
   });
 
   it("releases the mutation queue when durable publication is cancelled", async () => {
@@ -474,7 +607,7 @@ describe("durable conversation attachment storage", () => {
       process.platform === "win32" ? "junction" : "dir",
     );
     try {
-      await expect(store.reconcile([])).rejects.toThrow(/failed/u);
+      await expect(store.reconcile([])).rejects.toThrow(/changed|failed/u);
       await expect(store.retain([
         image("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
       ])).rejects.toThrow(/failed/u);
@@ -513,12 +646,60 @@ describe("durable conversation attachment storage", () => {
     }
   });
 
+  it.runIf(process.platform !== "win32")(
+    "rejects a record name rebound during an anchored read",
+    async () => {
+      const dataDirectory = await root();
+      const payload = image("96969696-9696-4696-8696-969696969696");
+      let signalReadReady!: () => void;
+      const readReady = new Promise<void>((resolve) => {
+        signalReadReady = resolve;
+      });
+      const store = await ConversationAttachmentStore.open(dataDirectory, {
+        readFault: {
+          attachmentId: payload.attachment.id,
+          stallBeforeRecordRevalidateMs: 10_000,
+          onReady: signalReadReady,
+        },
+      });
+      const [retained] = await store.retain([payload]);
+      const record = join(store.directory, retained!.id);
+      const moved = `${record}-opened`;
+      const metadata = await readFile(join(record, "metadata.json"));
+      const reading = store.preview(retained!.id);
+
+      await readReady;
+      await rename(record, moved);
+      await mkdir(record, { mode: 0o700 });
+      await writeFile(retained!.path, png, { mode: 0o600 });
+      await writeFile(join(record, "metadata.json"), metadata, { mode: 0o600 });
+      if (process.platform !== "win32") {
+        await chmod(record, 0o700);
+        await chmod(retained!.path, 0o600);
+        await chmod(join(record, "metadata.json"), 0o600);
+      }
+      try {
+        await expect(reading).rejects.toThrow(/read failed/u);
+      } finally {
+        await rm(record, { recursive: true, force: true });
+        await rename(moved, record);
+      }
+    },
+    15_000,
+  );
+
   it("fails closed when retained bytes or their private record are replaced", async () => {
     const dataDirectory = await root();
     const store = await openTestStore(dataDirectory, {
       validate: validateAttachmentImport,
     });
-    const [retained] = await store.retain([image()]);
+    const retentionId = "18181818-1818-4818-8818-181818181818";
+    const [retained] = await store.retain(
+      [image()],
+      undefined,
+      retentionId,
+    );
+    store.acceptRetention(retentionId);
     await writeFile(retained!.path, Buffer.from("tampered", "utf8"));
 
     await expect(store.preview(retained!.id)).rejects.toThrow(/changed|invalid/u);

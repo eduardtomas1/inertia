@@ -22,7 +22,10 @@ const summary: EnvironmentSummarySnapshot = {
     value: "environment-panel",
     path: "/workspace/worktrees/environment-panel",
   },
-  openTarget: { name: "inertia", path: "/workspace/inertia" },
+  openTarget: {
+    name: "inertia",
+    path: "/workspace/worktrees/environment-panel",
+  },
   runtime: { status: "online" },
   changes: {
     files: 2,

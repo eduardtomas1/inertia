@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   captureGitCommitReview,
@@ -906,7 +906,7 @@ setInterval(() => {}, 1000);
     const head = git(root, "rev-parse", "HEAD");
     const foreignLock = join(root, ".git", "foreign-operation.lock");
     writeFileSync(foreignLock, "foreign lock\n");
-    const deadlineAt = Date.now() + 2_000;
+    const deadlineAt = Date.now() + 5_000;
 
     let failure: unknown;
     try {
@@ -919,9 +919,11 @@ setInterval(() => {}, 1000);
           deadlineAt,
           testHooks: {
             duringPreparedMutation: () => {
-              while (Date.now() <= deadlineAt + 5) {
-                // Cross the aggregate deadline without yielding to its timer.
-              }
+              const dateNow = vi.spyOn(Date, "now")
+                .mockReturnValue(deadlineAt + 5);
+              // Cross the aggregate deadline synchronously, then let abort and
+              // lock cleanup observe the real clock on the next microtask.
+              queueMicrotask(() => dateNow.mockRestore());
             },
           },
         },

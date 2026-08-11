@@ -329,8 +329,8 @@ export class PreviewBroker {
       target.sendInputEvent(forwardedKeyboardInput(input));
     });
     hardenDesktopSession(view.webContents.session);
-    view.webContents.on("did-start-loading", () => {
-      this.#publish(ownerId, contextId, false);
+    view.webContents.on("did-start-navigation", (details) => {
+      if (details.isMainFrame) this.#publish(ownerId, contextId, false);
     });
     view.webContents.on("did-stop-loading", () => {
       this.#publish(ownerId, contextId);

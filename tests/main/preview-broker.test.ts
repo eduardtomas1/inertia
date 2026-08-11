@@ -124,15 +124,35 @@ describe("preview broker isolation", () => {
     const contents = electronMocks.views[0]!.webContents;
 
     contents.loading = true;
-    contents.emit("did-start-loading");
+    contents.emit("did-start-navigation", {
+      url: contents.url,
+      isSameDocument: false,
+      isMainFrame: true,
+      frame: null,
+    });
     expect(updates.at(-1)).toMatchObject({ loading: true, ready: false });
 
     contents.loading = false;
     contents.emit("did-navigate");
     expect(updates.at(-1)).toMatchObject({ loading: false, ready: true });
 
+    const updateCountBeforeSubframe = updates.length;
+    contents.emit("did-start-navigation", {
+      url: `${contents.url}/frame`,
+      isSameDocument: false,
+      isMainFrame: false,
+      frame: null,
+    });
+    expect(updates).toHaveLength(updateCountBeforeSubframe);
+    expect(updates.at(-1)).toMatchObject({ loading: false, ready: true });
+
     contents.loading = true;
-    contents.emit("did-start-loading");
+    contents.emit("did-start-navigation", {
+      url: contents.url,
+      isSameDocument: false,
+      isMainFrame: true,
+      frame: null,
+    });
     contents.loading = false;
     contents.emit("did-fail-load", {}, -102, "Connection refused", contents.url, true);
     contents.emit("did-stop-loading");

@@ -16,6 +16,11 @@ const outputPath = resolve(
     ?? join(repositoryRoot, "resources", "generated", "THIRD_PARTY_NOTICES.txt"),
 );
 const fixtureTreePath = process.env.INERTIA_NOTICES_TREE_PATH;
+const vendoredAssetNoticesPath = join(
+  repositoryRoot,
+  "resources",
+  "provider-icon-notices.txt",
+);
 
 function fail(message) {
   throw new Error(`Third-party notice generation failed: ${message}`);
@@ -181,7 +186,15 @@ function collectPackages(tree) {
   return [...identities.values()].sort((left, right) => left.identity.localeCompare(right.identity, "en"));
 }
 
-function render(packages) {
+function vendoredAssetNotices() {
+  const notices = readFileSync(vendoredAssetNoticesPath, "utf8")
+    .replace(/\r\n?/gu, "\n")
+    .trim();
+  if (!notices) fail("vendored provider icon notices are empty");
+  return notices;
+}
+
+function render(packages, assetNotices) {
   const documentsByHash = new Map();
   for (const pkg of packages) {
     for (const document of pkg.documents) {
@@ -203,7 +216,7 @@ function render(packages) {
   const lines = [
     "INERTIA THIRD-PARTY NOTICES",
     "",
-    "This file lists production dependencies present in this packaged build.",
+    "This file lists production dependencies and vendored assets present in this packaged build.",
     "License text is reproduced from each installed package when supplied by that package.",
     "",
     "PACKAGES",
@@ -218,7 +231,17 @@ function render(packages) {
     );
   }
 
-  lines.push("", "LICENSE AND NOTICE TEXTS", "");
+  lines.push(
+    "",
+    "VENDORED ASSET LICENSE AND NOTICE TEXTS",
+    "",
+    assetNotices,
+    "",
+    "--------------------------------------------------------------------------------",
+    "",
+    "PACKAGE LICENSE AND NOTICE TEXTS",
+    "",
+  );
   for (const [hash, record] of [...documentsByHash.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     lines.push(
       `${documentIds.get(hash)} · SHA-256 ${hash}`,
@@ -234,7 +257,7 @@ function render(packages) {
 }
 
 try {
-  const output = render(collectPackages(productionTree()));
+  const output = render(collectPackages(productionTree()), vendoredAssetNotices());
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, output, "utf8");
   console.log(`Generated ${outputPath}`);

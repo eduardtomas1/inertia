@@ -215,6 +215,10 @@ export function SettingsView({
   onSetBackendDefault,
   onClearBackendDefault,
 }: SettingsViewProps): React.JSX.Element {
+  const rootRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    rootRef.current?.focus();
+  }, []);
   const onUpdate = (updates: Partial<AppSettings>): void => {
     void updateSettingsRequest(updates).catch(() => undefined);
   };
@@ -408,7 +412,12 @@ export function SettingsView({
   };
 
   return (
-    <main className="settings-view">
+    <main
+      ref={rootRef}
+      className="settings-view"
+      aria-label="Settings"
+      tabIndex={-1}
+    >
       <aside className="settings-navigation" aria-label="Settings sections">
         <nav>
           {sections.map((item) => {
@@ -456,10 +465,10 @@ export function SettingsView({
                 </div>
               </div>
               <div className="response-density-setting">
-                <span><strong>Workspace startup</strong><small>Begin with a compact environment summary or open the last workspace tool.</small></span>
+                <span><strong>Workspace startup</strong><small>Begin in Environment or restore the last workspace panel you used.</small></span>
                 <div role="radiogroup" aria-label="Workspace startup surface">
-                  <button type="button" role="radio" aria-checked={settings.workspaceStartupSurface === "summary"} className={clsx(settings.workspaceStartupSurface === "summary" && "is-active")} disabled={disabled} onClick={() => onUpdate({ workspaceStartupSurface: "summary" })}>Summary</button>
-                  <button type="button" role="radio" aria-checked={settings.workspaceStartupSurface === "tools"} className={clsx(settings.workspaceStartupSurface === "tools" && "is-active")} disabled={disabled} onClick={() => onUpdate({ workspaceStartupSurface: "tools" })}>Workspace tools</button>
+                  <button type="button" role="radio" aria-checked={settings.workspaceStartupSurface === "summary"} className={clsx(settings.workspaceStartupSurface === "summary" && "is-active")} disabled={disabled} onClick={() => onUpdate({ workspaceStartupSurface: "summary" })}>Environment</button>
+                  <button type="button" role="radio" aria-checked={settings.workspaceStartupSurface === "tools"} className={clsx(settings.workspaceStartupSurface === "tools" && "is-active")} disabled={disabled} onClick={() => onUpdate({ workspaceStartupSurface: "tools" })}>Last panel</button>
                 </div>
               </div>
               <div className="response-density-setting project-grouping-setting">

@@ -106,7 +106,7 @@ export function legacyModelSelection(input: {
   });
 }
 
-function parseModelSelection(
+export function parseModelSelection(
   value: string | null,
   fallback: () => ModelSelection,
 ): ModelSelection {
@@ -156,7 +156,7 @@ function parseConversationContinuationIdentity(
   return legacyNativeContinuationIdentity(selection);
 }
 
-function parseAgentTurnContinuationIdentity(
+export function parseAgentTurnContinuationIdentity(
   value: string | null,
   selection: ModelSelection,
 ): ContinuationIdentity {
@@ -417,11 +417,14 @@ export function normalizeAgentTurnUsage(
 ): AgentTurnUsageSnapshot {
   return {
     ...validateProviderUsage(usage),
+    // Legacy snapshots have no durable session provenance and must never be
+    // promoted to a cumulative resume boundary.
+    providerSessionBound: usage.providerSessionBound === true,
     capturedAt: requireTimestamp(usage.capturedAt, "Turn usage capture time"),
   };
 }
 
-function parseAgentTurnUsage(
+export function parseAgentTurnUsage(
   value: string | null,
 ): AgentTurnUsageSnapshot | null {
   if (value === null) return null;

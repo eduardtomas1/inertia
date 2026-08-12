@@ -44,13 +44,15 @@ import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
-import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
+import {
+  focusWorkspacePreviewAddress,
+  routeWorkspaceRunPreview,
+} from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { planFromText } from "./utils/planFromText";
-import { buildEnvironmentSummary } from "./utils/environmentSummary";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
 import { finishLegacyWorkspaceStartupMigration, readLegacyWorkspaceStartup } from "./utils/workspaceStartup";
 import {
@@ -63,6 +65,7 @@ import { createWorkspaceSceneModel } from "./components/workspace-scene/createWo
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
 import { requestComposerPrefill } from "./utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "./utils/subagentDisclosure";
+import type { AppView } from "./appView";
 
 const focusPrimaryPreview = (): void => {
   focusWorkspacePreviewAddress("primary");
@@ -121,7 +124,7 @@ export default function App(): React.JSX.Element {
       connection.subscribe,
     ),
   );
-  const [view, setView] = useState<"workspace" | "settings">("workspace");
+  const [view, setView] = useState<AppView>("workspace");
   const [settingsTarget, setSettingsTarget] = useState<{
     section: "providers" | "backends" | "connections";
     profileId?: string;
@@ -221,6 +224,9 @@ export default function App(): React.JSX.Element {
   const workspaceLayout = useWorkspaceLayout(view, Boolean(project), {
     startupSurface: effectiveWorkspaceStartupSurface,
     startupReady: Boolean(connection.snapshot),
+    workspaceId: project
+      ? `${project.id}:${connection.snapshot?.activeConversationId ?? "draft"}`
+      : null,
     initialTool: legacyWorkspaceStartup?.tool,
   });
   const {
@@ -245,6 +251,7 @@ export default function App(): React.JSX.Element {
   const sceneToggleWorkspaceTools = splitConversation
     ? primaryPaneLayout.toggleWorkspaceTools
     : toggleWorkspaceTools;
+  const sceneOpenEnvironment = () => sceneSetActiveTool("environment");
   const conversationProjection = useStableController(
     useConversationProjection({
       snapshot: connection.snapshot,
@@ -267,7 +274,6 @@ export default function App(): React.JSX.Element {
     refreshDetail,
     messages,
     plans,
-    subagents,
     streamingText,
   } = conversationProjection;
   const authProvider = useMemo(
@@ -362,8 +368,8 @@ export default function App(): React.JSX.Element {
     type: "conversation.select",
     payload: { conversationId },
   }), [selectionCommandQueue]);
-  const navigateToView = useCallback((nextView: "workspace" | "settings") => {
-    if (nextView === "settings") {
+  const navigateToView = useCallback((nextView: AppView) => {
+    if (nextView !== "workspace") {
       conversationSelectionGenerationRef.current += 1;
     }
     setView(nextView);
@@ -410,6 +416,18 @@ export default function App(): React.JSX.Element {
   });
   const workspaceToolsUnavailableReason = draftWorkspaceToolsUnavailableReason(draftConversation.requiresWorkspaceMaterialization);
   const workspaceToolsUnavailable = Boolean(workspaceToolsUnavailableReason);
+  const sceneHeaderActiveTool = workspaceToolsUnavailable && sceneActiveTool
+    ? "environment"
+    : sceneActiveTool;
+  useEffect(() => {
+    if (
+      workspaceToolsUnavailable
+      && sceneActiveTool
+      && sceneActiveTool !== "environment"
+    ) {
+      sceneSetActiveTool("environment");
+    }
+  }, [sceneActiveTool, sceneSetActiveTool, workspaceToolsUnavailable]);
   const workspaceTools = useStableController(
     useWorkspaceTools({
       enabled: !workspaceToolsUnavailable,
@@ -430,7 +448,7 @@ export default function App(): React.JSX.Element {
         !workspaceToolsUnavailable
         && (
           sceneActiveTool === "changes"
-          || workspaceLayout.environmentOpen
+          || sceneActiveTool === "environment"
         ),
       loadFilesOnMount:
         !workspaceToolsUnavailable && sceneActiveTool === "files",
@@ -455,38 +473,7 @@ export default function App(): React.JSX.Element {
     mutateBranch,
     commit,
     projectActions,
-    workspaceGitStatus,
   } = workspaceTools;
-  const environmentSummary = useMemo(() => buildEnvironmentSummary({
-    projectId: project?.id ?? null,
-    projectName: project?.name ?? null,
-    conversationId: conversation?.id ?? null,
-    connectionStatus: connection.status,
-    gitStatus,
-    workspaceGitStatus,
-    runs: connection.snapshot?.runs ?? [],
-    subagents,
-    messages,
-    projects: connection.snapshot?.projects ?? [],
-    conversations: connection.snapshot?.conversations ?? [],
-    visibleProjectIds: splitConversation?.projectId
-      ? [splitConversation.projectId]
-      : [],
-  }), [
-    connection.snapshot?.conversations,
-    connection.snapshot?.projects,
-    connection.snapshot?.runs,
-    connection.status,
-    conversation?.id,
-    gitStatus,
-    messages,
-    project?.id,
-    project?.name,
-    splitConversation?.projectId,
-    subagents,
-    workspaceGitStatus,
-  ]);
-
   useEffect(() => {
     const run = visibleConversationRun;
     if (!run || pendingSeenRunsRef.current.has(run.id)) return;
@@ -499,7 +486,6 @@ export default function App(): React.JSX.Element {
         workspaceVisible: view === "workspace",
         latestContentVisible,
         obstructed: workspaceAttentionObstructed({
-          environmentOpen: workspaceLayout.environmentOpen,
           paletteOpen, commitDialogOpen,
           authProviderOpen: authProviderId !== null,
           multiSpawnOpen: multiSpawn.open,
@@ -520,7 +506,6 @@ export default function App(): React.JSX.Element {
     authProviderId,
     commitDialogOpen,
     conversation?.id,
-    workspaceLayout.environmentOpen,
     latestContentVisible,
     mobileNavigation, multiSpawn.open,
     paletteOpen,
@@ -642,7 +627,6 @@ export default function App(): React.JSX.Element {
   );
   const {
     runProjectAction,
-    stopWorkspaceRun,
     openWorkspaceRunPreview: openPrimaryWorkspaceRunPreview,
     acknowledgeActivity,
     dismissActivity,
@@ -802,7 +786,7 @@ export default function App(): React.JSX.Element {
   }, [navigateToView]);
 
   useEffect(() => {
-    if (view === "workspace" && settingsTarget) setSettingsTarget(null);
+    if (view !== "settings" && settingsTarget) setSettingsTarget(null);
   }, [settingsTarget, view]);
 
   const visibleError = actionError ?? connection.error;
@@ -847,6 +831,7 @@ export default function App(): React.JSX.Element {
       connectProvider,
       openProviderSetup,
       openBackendSetup,
+      openSettings: () => navigateToView("settings"),
       openProjectPath,
       followUpSubagent: (trace: SubagentTrace) => {
         if (!conversation || !canFollowUpSubagentTrace(
@@ -873,7 +858,7 @@ export default function App(): React.JSX.Element {
       run,
   });
   const workspaceScene = useMemo(() => createWorkspaceSceneModel({
-    view,
+    view: view === "settings" ? "settings" : "workspace",
     settingsTarget,
     settings,
     busyAction,
@@ -948,6 +933,7 @@ export default function App(): React.JSX.Element {
       connectProvider,
       openProviderSetup,
       openBackendSetup,
+      openSettings: () => navigateToView("settings"),
       openProjectPath,
       sendMessageToConversation,
       compactConversation: compactConversationById,
@@ -963,21 +949,35 @@ export default function App(): React.JSX.Element {
     onTerminal: () => setGitRefreshVersion((version) => version + 1),
   });
   const openWorkspaceRunPreview = useCallback((run: PreviewWorkspaceRun) => {
-    workspaceLayout.setEnvironmentOpen(false);
-    if (
-      run.conversationId !== null
-      && run.conversationId === splitConversation?.id
-    ) {
-      splitWorkspace.openWorkspaceRunPreview(run);
-      return;
-    }
-    openPrimaryWorkspaceRunPreview(run);
+    routeWorkspaceRunPreview(
+      run,
+      splitConversation?.id ?? null,
+      openPrimaryWorkspaceRunPreview,
+      splitWorkspace.openWorkspaceRunPreview,
+    );
   }, [
     openPrimaryWorkspaceRunPreview,
     splitConversation?.id,
     splitWorkspace,
-    workspaceLayout,
   ]);
+  const visibleSplitScene = useMemo(() => {
+    const splitScene = splitWorkspace.scene;
+    const secondaryTools = splitScene?.secondary.tools;
+    if (!splitScene || !secondaryTools) return splitScene;
+    return {
+      ...splitScene,
+      secondary: {
+        ...splitScene.secondary,
+        tools: {
+          ...secondaryTools,
+          environment: {
+            ...secondaryTools.environment,
+            onOpenRunPreview: openWorkspaceRunPreview,
+          },
+        },
+      },
+    };
+  }, [openWorkspaceRunPreview, splitWorkspace.scene]);
   const visibleWorkspaceScene = useMemo<WorkspaceSceneProps>(() => ({
     ...workspaceScene,
     chat: {
@@ -986,11 +986,19 @@ export default function App(): React.JSX.Element {
         ? sendingConversationIds.has(conversation.id)
         : false,
     },
-    splitScene: splitWorkspace.scene,
+    tools: workspaceScene.tools ? {
+      ...workspaceScene.tools,
+      environment: {
+        ...workspaceScene.tools.environment,
+        onOpenRunPreview: openWorkspaceRunPreview,
+      },
+    } : null,
+    splitScene: visibleSplitScene,
   }), [
     conversation,
+    openWorkspaceRunPreview,
     sendingConversationIds,
-    splitWorkspace.scene,
+    visibleSplitScene,
     workspaceScene,
   ]);
 
@@ -1015,16 +1023,17 @@ export default function App(): React.JSX.Element {
       project={project}
       conversation={conversation}
       splitConversationId={splitConversation?.id ?? null}
-      sceneActiveTool={workspaceToolsUnavailable ? null : sceneActiveTool}
+      sceneActiveTool={sceneHeaderActiveTool}
       sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
+      sceneOpenEnvironment={sceneOpenEnvironment}
       workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-      environmentSummary={environmentSummary}
       gitStatus={gitStatus}
       branches={branches}
       projectActions={projectActions}
       reviewStates={reviewStates}
       multiSpawn={multiSpawn}
       scene={visibleWorkspaceScene}
+      usage={{ status: connection.status, request }}
       providerAuth={{
         provider: authProvider,
         status: connection.status,
@@ -1056,8 +1065,6 @@ export default function App(): React.JSX.Element {
         commitReviewRevision: workspaceTools.commitReviewRevision,
         commit,
         runProjectAction,
-        stopWorkspaceRun,
-        openWorkspaceRunPreview,
         acknowledgeActivity,
         dismissActivity,
       }}

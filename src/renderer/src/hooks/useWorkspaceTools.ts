@@ -130,6 +130,8 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     ...files,
     ...review,
     ...artifacts,
+    gitLoading: git.loading,
+    gitError: git.loadError,
     toolsLoading: git.loading || artifacts.loading,
   };
 }

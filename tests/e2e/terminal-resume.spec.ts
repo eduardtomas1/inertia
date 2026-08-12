@@ -8,6 +8,7 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 const primarySessionId = "11111111-1111-4111-8111-111111111111";
 const secondarySessionId = "22222222-2222-4222-8222-222222222222";
@@ -97,7 +98,7 @@ async function openTerminal(
   if (!await tools.isVisible().catch(() => false)) {
     await pane.getByRole("button", { name: `Open tools for ${title}` }).click();
   }
-  await tools.getByRole("tab", { name: "Terminal", exact: true }).click();
+  await selectWorkspaceTool(tools, "Terminal");
   return tools;
 }
 

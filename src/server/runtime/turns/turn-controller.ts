@@ -33,6 +33,7 @@ import {
   providerLabel,
   providerPromiseFailure,
   publicTurnError,
+  updateActiveTurnProviderSession,
 } from "./turn-controller-support";
 import {
   prepareTurnRequest,
@@ -1063,7 +1064,7 @@ export class TurnController {
       this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
     }
     if (result.sessionId) {
-      active.sessionAfter = result.sessionId;
+      updateActiveTurnProviderSession(active, result.sessionId);
       this.store.updateConversation(active.conversation.id, {
         providerSessionId: result.sessionId,
         continuationIdentity: active.turn.continuationIdentity,

@@ -1,4 +1,5 @@
 export type WorkspaceShortcutTool =
+  | "environment"
   | "changes"
   | "files"
   | "terminal"

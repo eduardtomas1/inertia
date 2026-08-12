@@ -320,14 +320,109 @@ describe("work-first chat model", () => {
       "completed",
       "idle",
     ]);
-    expect(groupWorkThreads(sortActivityThreads(entries, null)).map(({ id, threads }) => ({
+    const today = new Date(2026, 6, 20, 12).getTime();
+    expect(groupWorkThreads(sortActivityThreads(entries, null), today).map(({ id, threads }) => ({
       id,
       threads: threads.map(({ conversation: entry }) => entry.id),
     }))).toEqual([
-      { id: "needs-you", threads: ["approval", "input", "failed"] },
-      { id: "in-progress", threads: ["working"] },
-      { id: "recent", threads: ["completed", "idle"] },
+      { id: "recent", threads: ["approval", "input", "failed", "working", "completed", "idle"] },
+      { id: "yesterday", threads: [] },
+      { id: "earlier", threads: [] },
+      { id: "done", threads: [] },
+      { id: "snoozed", threads: [] },
     ]);
+  });
+
+  it("groups calm work by local day while keeping stale urgent work visible", () => {
+    const now = new Date(2026, 7, 11, 12).getTime();
+    const entries = [
+      conversation({
+        id: "today",
+        projectId: "p",
+        updatedAt: new Date(2026, 7, 11, 9).toISOString(),
+      }),
+      conversation({
+        id: "yesterday",
+        projectId: "p",
+        updatedAt: new Date(2026, 7, 10, 17).toISOString(),
+      }),
+      conversation({
+        id: "earlier",
+        projectId: "p",
+        updatedAt: new Date(2026, 7, 7, 17).toISOString(),
+      }),
+      conversation({
+        id: "stale-running",
+        projectId: "p",
+        status: "running",
+        updatedAt: new Date(2026, 7, 5, 17).toISOString(),
+      }),
+      conversation({
+        id: "done",
+        projectId: "p",
+        settledAt: new Date(2026, 7, 9, 17).toISOString(),
+        updatedAt: new Date(2026, 7, 9, 17).toISOString(),
+      }),
+    ];
+
+    expect(groupWorkThreads(sortActivityThreads(entries, null), now).map((section) => ({
+      id: section.id,
+      threads: section.threads.map(({ conversation: entry }) => entry.id),
+    }))).toEqual([
+      { id: "recent", threads: ["stale-running", "today"] },
+      { id: "yesterday", threads: ["yesterday"] },
+      { id: "earlier", threads: ["earlier"] },
+      { id: "done", threads: ["done"] },
+      { id: "snoozed", threads: [] },
+    ]);
+  });
+
+  it("groups ordinary snoozed work separately while keeping actionable snoozed work visible", () => {
+    const now = new Date(2026, 7, 11, 12).getTime();
+    const snoozedUntil = new Date(2026, 7, 12, 12).toISOString();
+    const entries = [
+      conversation({ id: "idle", projectId: "p", snoozedUntil }),
+      conversation({
+        id: "done",
+        projectId: "p",
+        settledAt: new Date(2026, 7, 10, 12).toISOString(),
+        snoozedUntil,
+      }),
+      conversation({ id: "working", projectId: "p", status: "running", snoozedUntil }),
+      conversation({
+        id: "approval",
+        projectId: "p",
+        status: "needs-input",
+        attentionKind: "approval",
+        snoozedUntil,
+      }),
+      conversation({
+        id: "dismissed",
+        projectId: "p",
+        settledAt: new Date(2026, 7, 10, 12).toISOString(),
+        snoozedUntil,
+      }),
+    ];
+    const runs = [workspaceRun("dismissed", {
+      status: "failed",
+      attentionState: "dismissed",
+    })];
+
+    expect(groupWorkThreads(sortActivityThreads(entries, null, runs), now).map((section) => ({
+      id: section.id,
+      threads: section.threads.map(({ conversation: entry }) => entry.id),
+    }))).toEqual([
+      { id: "recent", threads: ["approval", "working"] },
+      { id: "yesterday", threads: [] },
+      { id: "earlier", threads: [] },
+      { id: "done", threads: [] },
+      { id: "snoozed", threads: ["idle", "dismissed", "done"] },
+    ]);
+    expect(groupWorkThreads(
+      sortActivityThreads(entries, null, runs),
+      Date.parse(snoozedUntil) + 1,
+    ).flatMap(({ threads }) => threads.map(({ conversation: entry }) => entry.id)))
+      .not.toContain("dismissed");
   });
 
   it("keeps actionable work above pins and pins above ordinary recency", () => {
@@ -391,13 +486,16 @@ describe("work-first chat model", () => {
       unread: true,
       needsAttention: false,
     });
-    expect(groupWorkThreads(threads).map(({ id, threads: sectionThreads }) => ({
+    const today = new Date(2026, 6, 20, 12).getTime();
+    expect(groupWorkThreads(threads, today).map(({ id, threads: sectionThreads }) => ({
       id,
       threads: sectionThreads.map(({ conversation: entry }) => entry.id),
     }))).toEqual([
-      { id: "needs-you", threads: ["failed"] },
-      { id: "in-progress", threads: ["working"] },
-      { id: "recent", threads: ["acknowledged", "completed"] },
+      { id: "recent", threads: ["failed", "working", "acknowledged", "completed"] },
+      { id: "yesterday", threads: [] },
+      { id: "earlier", threads: [] },
+      { id: "done", threads: [] },
+      { id: "snoozed", threads: [] },
     ]);
   });
 

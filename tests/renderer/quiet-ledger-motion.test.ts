@@ -52,9 +52,9 @@ function cssBlock(source: string, marker: string): string {
 }
 
 describe("Quiet Ledger active-to-settled motion", () => {
-  it("keeps frequent overlays opaque while reserving backdrop blur for rare dialogs", () => {
+  it("keeps frequent surfaces opaque while reserving backdrop blur for rare dialogs", () => {
     for (const selector of [
-      ".environment-summary-popover {",
+      ".environment-panel {",
       ".palette-backdrop {",
       ".composer-suggestion-menu,",
     ]) {

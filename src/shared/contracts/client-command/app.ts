@@ -41,6 +41,17 @@ const duoComparisonSchema = conversationCreatePayloadSchema.omit({
 
 export const appCommandSchemas = [
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
+  z.object({
+    ...requestBase,
+    type: z.literal("usage.dashboard.get"),
+    payload: z.object({
+      days: z.union([z.literal(7), z.literal(30), z.literal(90)]),
+      fromInclusive: z.string().datetime({ offset: true }),
+      toExclusive: z.string().datetime({ offset: true }),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+      timeZone: z.string().trim().min(1).max(100),
+    }).strict(),
+  }).strict(),
   z
     .object({
       ...requestBase,

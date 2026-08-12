@@ -12,6 +12,7 @@ import {
 } from "./support/app-fixture";
 import { expectRuntimeCrashSafety } from "./support/runtime-crash-safety";
 import { seedViewedConversationContext } from "./support/viewed-conversation-context";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -65,7 +66,8 @@ test("starts without a demo and adds the first real project", async () => {
     level: 3,
   })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "Environment summary" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Environment" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tabpanel", { name: "Environment" })).toBeVisible();
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toHaveCount(1);
 
@@ -79,8 +81,7 @@ test("starts without a demo and adds the first real project", async () => {
   };
   expect(conversationCount()).toBe(0);
 
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   expect(conversationCount()).toBe(0);
   await page.locator(".workspace-panel")
@@ -89,10 +90,9 @@ test("starts without a demo and adds the first real project", async () => {
 
   await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
   await expect.poll(conversationCount).toBe(1);
-  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Environment" })).toHaveAttribute("aria-selected", "true");
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   const database = new Database(databasePath);
   const firstConversation = database.prepare(`

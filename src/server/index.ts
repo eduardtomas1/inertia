@@ -96,11 +96,10 @@ import {
 import {
   createSettingsBackendCommandHandler,
 } from "./runtime/commands/settings-backend-commands";
-import {
-  createSourceControlCommandHandler,
-} from "./runtime/commands/source-control-commands";
+import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
 import { createTurnInteractionCommandHandler } from "./runtime/commands/turn-interaction-commands";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
+import { createUsageCommandHandler } from "./runtime/commands/usage-commands";
 import {
   createAgentWorkflowCommandHandler,
 } from "./runtime/commands/agent-workflow-commands";
@@ -790,6 +789,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         refreshProviderInfo,
         send,
       }),
+      createUsageCommandHandler({ store, send }),
       createConversationCommandHandler({
         store, conversationAttachments,
         providers,

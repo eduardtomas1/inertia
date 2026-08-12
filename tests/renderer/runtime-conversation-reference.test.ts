@@ -103,9 +103,10 @@ describe("runtime conversation references", () => {
       "draftConversation: draftConversation.conversation,\n"
       + "    workspaceToolsUnavailable,",
     );
-    expect(sceneSource).toContain(
-      "tools: project && !workspaceToolsUnavailable ?",
-    );
+    expect(sceneSource).toContain("tools: project ?");
+    expect(sceneSource).toContain('{ tabs: ["environment"] as const }');
+    expect(sceneSource).toContain("gitLoading: workspaceTools.gitLoading");
+    expect(sceneSource).toContain("gitError: workspaceTools.gitError");
   });
 
   it("loads expensive workspace Git discovery only for visible Git surfaces", () => {
@@ -114,7 +115,7 @@ describe("runtime conversation references", () => {
     );
     expect(appSource).toContain(
       'sceneActiveTool === "changes"\n'
-      + "          || workspaceLayout.environmentOpen",
+      + '          || sceneActiveTool === "environment"',
     );
     expect(appSource).not.toContain(
       "loadGitOnMount: !workspaceToolsUnavailable,",

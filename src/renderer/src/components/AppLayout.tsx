@@ -25,13 +25,13 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { useStableActions } from "../hooks/useStableController";
 import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
-import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { Sidebar } from "./Sidebar";
+import { LoadingMark } from "./ui";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
   WorkspaceScene,
@@ -40,10 +40,13 @@ import {
 } from "./WorkspaceScene";
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
+import type { AppView } from "../appView";
+import type { UsageViewProps } from "./UsageView";
 import {
   loadCommitDialog,
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
+  loadUsageView,
 } from "./lazySurfaceLoaders";
 
 const RootCommitDialog = lazy(async () => ({
@@ -55,6 +58,9 @@ const MultiSpawnDialog = lazy(async () => ({
 const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
 const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
+}));
+const UsageView = lazy(async () => ({
+  default: (await loadUsageView()).UsageView,
 }));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -98,10 +104,6 @@ interface AppLayoutActions {
     paths: string[],
   ) => Promise<void>;
   runProjectAction: (action: ProjectAction) => void;
-  stopWorkspaceRun: (run: Pick<WorkspaceRun, "id" | "label">) => void;
-  openWorkspaceRunPreview: (
-    run: EnvironmentSummarySnapshot["checks"][number],
-  ) => void;
   acknowledgeActivity: (
     activity: Pick<WorkspaceRun, "id" | "label">,
   ) => void;
@@ -118,8 +120,8 @@ interface AppLayoutProps {
   appUpdate: AppUpdate;
   providerQuotaNotices: ProviderQuotaNoticeController;
   workspaceLayout: WorkspaceLayout;
-  view: "workspace" | "settings";
-  setView: (view: "workspace" | "settings") => void;
+  view: AppView;
+  setView: (view: AppView) => void;
   busyAction: string | null;
   visibleError: string | null;
   setActionError: Dispatch<SetStateAction<string | null>>;
@@ -132,14 +134,15 @@ interface AppLayoutProps {
   splitConversationId: string | null;
   sceneActiveTool: WorkspacePanelTab | null;
   sceneToggleWorkspaceTools: () => void;
+  sceneOpenEnvironment: () => void;
   workspaceToolsUnavailableReason: string | null;
-  environmentSummary: EnvironmentSummarySnapshot;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
   projectActions: ProjectAction[];
   reviewStates: CommitDialogProps["reviewStates"];
   multiSpawn: MultiSpawnController;
   scene: WorkspaceSceneProps;
+  usage: UsageViewProps;
   providerAuth: Parameters<typeof AppStatusOverlays>[0]["providerAuth"];
   actions: AppLayoutActions;
 }
@@ -151,7 +154,6 @@ export function activateNotificationConversation(
     showWorkspace: () => void;
     closeSidebar: () => void;
     closePalette: () => void;
-    closeEnvironment: () => void;
     closeCommitDialog: () => void;
     closePullRequestDialog: () => void;
     closeProviderAuth: () => void;
@@ -162,7 +164,6 @@ export function activateNotificationConversation(
   actions.closeProviderAuth();
   actions.closeSidebar();
   actions.closePalette();
-  actions.closeEnvironment();
   actions.selectConversation(conversation);
   actions.showWorkspace();
 }
@@ -175,8 +176,7 @@ export function formatAppShortcutLabel(
 }
 
 export function activeConversationIsVisible(input: {
-  view: "workspace" | "settings";
-  environmentOpen: boolean;
+  view: AppView;
   commitDialogOpen: boolean;
   pullRequestDialogOpen: boolean;
   multiSpawnOpen: boolean;
@@ -185,7 +185,6 @@ export function activeConversationIsVisible(input: {
   mobileSidebarOpen: boolean;
 }): boolean {
   return input.view === "workspace"
-    && !input.environmentOpen
     && !input.commitDialogOpen
     && !input.pullRequestDialogOpen
     && !input.multiSpawnOpen
@@ -216,14 +215,15 @@ export function AppLayout({
   splitConversationId,
   sceneActiveTool,
   sceneToggleWorkspaceTools,
+  sceneOpenEnvironment,
   workspaceToolsUnavailableReason,
-  environmentSummary,
   gitStatus,
   branches,
   projectActions,
   reviewStates,
   multiSpawn,
   scene,
+  usage,
   providerAuth,
   actions,
 }: AppLayoutProps): React.JSX.Element {
@@ -235,8 +235,6 @@ export function AppLayout({
     setSidebarOpen,
     sidebarCollapsed,
     setSidebarCollapsed,
-    environmentOpen,
-    setEnvironmentOpen,
     stackedTools,
     mobileNavigation,
     toolsVisible,
@@ -371,7 +369,6 @@ export function AppLayout({
         showWorkspace: () => setView("workspace"),
         closeSidebar: () => setSidebarOpen(false),
         closePalette: () => setPaletteOpen(false),
-        closeEnvironment: () => setEnvironmentOpen(false),
         closeCommitDialog: () => setCommitDialogOpen(false),
         closePullRequestDialog: () => setPullRequestDialogOpen(false),
         closeProviderAuth: providerAuth.onClose,
@@ -384,7 +381,6 @@ export function AppLayout({
   }, [connection.status]);
   const activeConversationVisible = activeConversationIsVisible({
     view,
-    environmentOpen,
     commitDialogOpen,
     pullRequestDialogOpen,
     multiSpawnOpen: multiSpawn.open,
@@ -487,15 +483,13 @@ export function AppLayout({
             branches={branches}
             actions={projectActions}
             busy={Boolean(busyAction)}
-            environmentSummary={environmentSummary}
-            environmentOpen={environmentOpen}
             onOpenSidebar={() => {
               if (mobileNavigation) setSidebarOpen(true);
               else setSidebarCollapsed((collapsed) => !collapsed);
             }}
             onToggleTools={sceneToggleWorkspaceTools}
             workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-            onSetEnvironmentOpen={setEnvironmentOpen}
+            onOpenEnvironment={sceneOpenEnvironment}
             onCycleTheme={actions.cycleTheme}
             onOpenSettings={() => setView("settings")}
             onOpenConnectionsSettings={actions.openConnectionsSettings}
@@ -515,10 +509,6 @@ export function AppLayout({
               actions.mutateBranch("git.branch.create", name)}
             onCommit={() => setCommitDialogOpen(true)}
             onRunAction={actions.runProjectAction}
-            onStopRun={actions.stopWorkspaceRun}
-            onOpenRunPreview={actions.openWorkspaceRunPreview}
-            onAcknowledgeRun={actions.acknowledgeActivity}
-            onDismissRun={actions.dismissActivity}
             onCreateConversationOnBranch={(branch) =>
               actions.createConversation(project, { kind: "branch", branch })}
             onCreateConversationInWorktree={() => {
@@ -586,7 +576,17 @@ export function AppLayout({
               : ""}`}
             style={workspaceBodyStyle}
           >
-            <WorkspaceScene {...scene} />
+            {view === "usage" ? (
+              <Suspense fallback={(
+                <div className="workspace-tool-loading usage-surface-loading">
+                  <LoadingMark label="Loading usage" />
+                </div>
+              )}>
+                <UsageView {...usage} />
+              </Suspense>
+            ) : (
+              <WorkspaceScene {...scene} />
+            )}
           </div>
         </div>
       </section>

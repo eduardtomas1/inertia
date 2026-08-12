@@ -5,6 +5,7 @@ import { PreviewPanel } from "../../src/renderer/src/components/PreviewPanel";
 import {
   focusWorkspacePreviewAddress,
   registerWorkspacePreviewAddress,
+  routeWorkspaceRunPreview,
 } from "../../src/renderer/src/utils/workspacePreviewFocus";
 
 afterEach(() => {
@@ -21,6 +22,29 @@ function address(parent: HTMLElement = document.body): HTMLInputElement {
 }
 
 describe("workspace preview focus", () => {
+  it("routes primary and sibling service previews to their owning pane", () => {
+    const openPrimary = vi.fn();
+    const openSecondary = vi.fn();
+    const primary = { id: "primary-run", conversationId: "primary-chat" };
+    const sibling = { id: "sibling-run", conversationId: "secondary-chat" };
+
+    routeWorkspaceRunPreview(
+      primary,
+      "secondary-chat",
+      openPrimary,
+      openSecondary,
+    );
+    routeWorkspaceRunPreview(
+      sibling,
+      "secondary-chat",
+      openPrimary,
+      openSecondary,
+    );
+
+    expect(openPrimary).toHaveBeenCalledWith(primary);
+    expect(openSecondary).toHaveBeenCalledWith(sibling);
+  });
+
   it("focuses the standalone primary preview address", () => {
     const input = address();
 

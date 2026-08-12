@@ -209,6 +209,7 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "ambiguous",
   },
   "terminal.resize": shortMutation,
+  "usage.dashboard.get": shortRetrySafe,
   "workspace.entries": workspaceEntryRead,
   "workspace.file.read": workspaceFileRead,
   "workspace.file.write": {

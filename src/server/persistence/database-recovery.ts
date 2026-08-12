@@ -22,6 +22,7 @@ import {
   indexColumns,
   validProviderRunOwnershipSchema,
 } from "./provider-run-ownership-schema";
+import { validUsageDashboardIndex } from "./usage-dashboard-index-schema";
 
 export const DATABASE_BACKUP_INTERVAL_MS = 60 * 60 * 1_000;
 export const DATABASE_INITIAL_BACKUP_QUIET_MS = 30 * 1_000;
@@ -130,6 +131,7 @@ export type DatabaseValidation =
   | "corrupt";
 
 type AutomaticBackupTrigger = "hourly" | "initial" | "retry";
+type DatabaseSchemaValidator = (database: Database.Database) => boolean;
 
 export class DatabaseBackupCancelledError extends Error {
   constructor() {
@@ -193,12 +195,9 @@ function validateOpenDatabase(
   requiredTablesBySchemaVersion: readonly (
     readonly [number, readonly string[]]
   )[],
-  providerRunOwnershipSchemaIsValid: (
-    database: Database.Database,
-  ) => boolean,
-  attachmentCapabilitiesAreValid: (
-    database: Database.Database,
-  ) => boolean,
+  providerRunOwnershipSchemaIsValid: DatabaseSchemaValidator,
+  attachmentCapabilitiesAreValid: DatabaseSchemaValidator,
+  usageDashboardIndexIsValid: DatabaseSchemaValidator,
 ): DatabaseValidation {
   const integrityResult = database.prepare(`PRAGMA ${check}`).get() as
     | Record<string, unknown>
@@ -465,6 +464,7 @@ function validateOpenDatabase(
   if (version >= 56 && !attachmentCapabilitiesAreValid(database)) {
     return "corrupt";
   }
+  if (version >= 57 && !usageDashboardIndexIsValid(database)) return "corrupt";
   return "valid-current";
 }
 
@@ -483,6 +483,7 @@ function validateDatabase(
       REQUIRED_TABLES_BY_SCHEMA_VERSION,
       validProviderRunOwnershipSchema,
       validAttachmentCapabilities,
+      validUsageDashboardIndex,
     );
   } catch {
     return "corrupt";
@@ -503,6 +504,7 @@ function validateDatabaseOffThread(
     const indexColumns = ${indexColumns.toString()};
     const validProviderRunOwnershipSchema = ${validProviderRunOwnershipSchema.toString()};
     const validAttachmentCapabilities = ${validAttachmentCapabilities.toString()};
+    const validUsageDashboardIndex = ${validUsageDashboardIndex.toString()};
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
     let result = "corrupt";
@@ -515,6 +517,7 @@ function validateDatabaseOffThread(
         workerData.requiredTablesBySchemaVersion,
         validProviderRunOwnershipSchema,
         validAttachmentCapabilities,
+        validUsageDashboardIndex,
       );
     } catch {
       result = "corrupt";

@@ -132,6 +132,9 @@ export function ComposerInputZone({
   ) ?? (matchingSlashCommands.length === 1 ? matchingSlashCommands[0] : null);
   const slashCommandDisabled = (item: ComposerSlashCommand): boolean =>
     disabled || item.disabled || (running && item.disabledWhileRunning);
+  const composerContextItemCount = attachments.length
+    + Number(Boolean(promptContext))
+    + Number(Boolean(previewContextUrl));
   const activateSlashCommand = (item: ComposerSlashCommand): void => {
     if (slashCommandDisabled(item)) return;
     if (item.action) {
@@ -192,54 +195,64 @@ export function ComposerInputZone({
             )}
           </div>
         )}
-        {promptContext && (
-          <div
-            className="composer-context"
-            aria-label={promptContext.startsWith("Local review note for ")
-              ? "Selected review note context"
-              : "Selected diff context"}
-          >
-            <MessageSquarePlus size={13} />
-            <span>
-              <strong>
-                {promptContext.startsWith("Local review note for ")
-                  ? "Review note "
-                  : "Diff selection "}
-              </strong>
-              <small>{promptContextDetail(promptContext)}</small>
-            </span>
-            <button
-              type="button"
-              aria-label={promptContext.startsWith("Local review note for ")
-                ? "Remove selected review note context"
-                : "Remove selected diff context"}
-              onClick={onClearPromptContext}
-            >
-              <X size={12} />
-            </button>
-          </div>
+        {composerContextItemCount > 0 && (
+          <section className="composer-context-tray" aria-label="Composer context">
+            <header className="composer-context-tray-heading">
+              <strong>Context</strong>
+              <small>{composerContextItemCount} {composerContextItemCount === 1 ? "item" : "items"}</small>
+            </header>
+            <div className="composer-context-tray-items">
+              {promptContext && (
+                <div
+                  className="composer-context"
+                  aria-label={promptContext.startsWith("Local review note for ")
+                    ? "Selected review note context"
+                    : "Selected diff context"}
+                >
+                  <MessageSquarePlus size={13} />
+                  <span>
+                    <strong>
+                      {promptContext.startsWith("Local review note for ")
+                        ? "Review note "
+                        : "Diff selection "}
+                    </strong>
+                    <small>{promptContextDetail(promptContext)}</small>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={promptContext.startsWith("Local review note for ")
+                      ? "Remove selected review note context"
+                      : "Remove selected diff context"}
+                    onClick={onClearPromptContext}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+              {previewContextUrl && (
+                <button
+                  type="button"
+                  className={clsx(
+                    "composer-preview-context",
+                    previewContextSelected && "is-selected",
+                  )}
+                  aria-pressed={previewContextSelected}
+                  onClick={onTogglePreviewContext}
+                >
+                  <span>
+                    <strong>{previewContextSelected ? "Preview attached" : "Attach current preview"}</strong>
+                    <small>{previewContextUrl}</small>
+                  </span>
+                  <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
+                </button>
+              )}
+              <ComposerAttachmentList
+                attachments={attachments}
+                onRemove={onRemoveAttachment}
+              />
+            </div>
+          </section>
         )}
-        {previewContextUrl && (
-          <button
-            type="button"
-            className={clsx(
-              "composer-preview-context",
-              previewContextSelected && "is-selected",
-            )}
-            aria-pressed={previewContextSelected}
-            onClick={onTogglePreviewContext}
-          >
-            <span>
-              <strong>{previewContextSelected ? "Preview attached" : "Attach current preview"}</strong>
-              <small>{previewContextUrl}</small>
-            </span>
-            <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
-          </button>
-        )}
-        <ComposerAttachmentList
-          attachments={attachments}
-          onRemove={onRemoveAttachment}
-        />
         {pendingRoute && (
           <RouteChangeConfirmation
             pendingRoute={pendingRoute}

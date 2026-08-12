@@ -112,6 +112,49 @@ const snapshot: WorkspaceGitSnapshot = {
 };
 
 describe("WorkspaceChangesPanel repository scope", () => {
+  it("filters review hunks with counted status chips", async () => {
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{
+          patch: patchFor("README.md"),
+          truncated: false,
+          files: [changedFile("README.md")],
+        }}
+        selectedPath="README.md"
+        summary={null}
+        onSelectFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("after");
+    const filters = screen.getByRole("group", { name: "Filter review state" });
+    const all = within(filters).getByRole("button", { name: /All\s*1/u });
+    const unreviewed = within(filters).getByRole("button", {
+      name: /Unreviewed\s*1/u,
+    });
+    const reviewed = within(filters).getByRole("button", {
+      name: /Reviewed\s*0/u,
+    });
+
+    expect(all).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(reviewed);
+    expect(reviewed).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("after")).not.toBeInTheDocument();
+    fireEvent.click(unreviewed);
+    expect(unreviewed).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByText("after")).toBeInTheDocument();
+  });
+
   it("keeps a keyboard-focusable stop control beside an active selection question", async () => {
     let finishQuestion: (() => void) | undefined;
     let finishCancellation: (() => void) | undefined;

@@ -38,6 +38,7 @@ describe("composer input and control zones", () => {
     expect(controlsStart).toBeGreaterThan(-1);
     expect(inputZone).toContain('data-composer-zone="input"');
     expect(inputZone).toContain('className="provider-readiness"');
+    expect(inputZone).toContain('className="composer-context-tray"');
     expect(inputZone).toContain('className="composer-context"');
     expect(inputZone).toContain("<ComposerAttachmentList");
     expect(inputZone).toContain("<RouteChangeConfirmation");
@@ -115,7 +116,13 @@ describe("composer input and control zones", () => {
     );
   });
 
-  it("integrates previews and notices without nested card surfaces", () => {
+  it("groups context in one tray while keeping each context item visually quiet", () => {
+    const tray = css.match(
+      /\.composer-context-tray\s*\{(?<body>[^}]*)\}/u,
+    )?.groups?.body ?? "";
+    expect(tray).toContain("border: 1px solid var(--border-subtle)");
+    expect(tray).toContain("background: color-mix");
+
     for (const selector of [
       "composer-attachment",
       "composer-context",

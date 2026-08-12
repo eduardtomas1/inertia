@@ -421,14 +421,35 @@ textarea {
   display: inline-block;
   width: 14px;
   height: 14px;
-  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: spin 750ms linear infinite;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 3px;
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, currentColor 28%, transparent) 8%,
+    currentColor 48%,
+    color-mix(in srgb, currentColor 28%, transparent) 88%
+  );
+  background-size: 220% 100%;
+  -webkit-mask: radial-gradient(circle, #000 1.45px, transparent 1.7px) 0 0 / 5px 5px;
+  mask: radial-gradient(circle, #000 1.45px, transparent 1.7px) 0 0 / 5px 5px;
+  animation: loading-grid-shimmer 900ms linear infinite;
+}
+
+@keyframes loading-grid-shimmer {
+  from { background-position: 110% 0; }
+  to { background-position: -110% 0; }
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-mark {
+    animation: none;
+    background-position: 50% 0;
+  }
 }
 
 /* Sidebar */
@@ -2611,12 +2632,14 @@ textarea {
   --agent-request-surface: var(--approval-surface);
   container-type: inline-size;
   margin-top: 7px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--agent-request-accent) 24%, var(--border));
   border-inline-start: 2px solid var(--agent-request-accent);
   border-radius: var(--radius-medium);
   background: var(--agent-request-surface);
-  box-shadow: none;
+  box-shadow:
+    0 12px 28px -28px color-mix(in srgb, var(--agent-request-accent) 42%, transparent),
+    inset 0 1px color-mix(in srgb, var(--text) 5%, transparent);
 }
 
 .agent-request-card.is-question {
@@ -2636,8 +2659,10 @@ textarea {
   height: 22px;
   flex: 0 0 auto;
   place-items: center;
+  border: 1px solid color-mix(in srgb, var(--agent-request-accent) 22%, var(--border));
+  border-radius: 7px;
   color: var(--agent-request-accent);
-  background: transparent;
+  background: color-mix(in srgb, var(--agent-request-accent) 8%, var(--surface));
 }
 
 .agent-request-heading > span:last-child {
@@ -2708,7 +2733,9 @@ textarea {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 5px;
-  margin-top: 7px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--agent-request-accent) 14%, var(--border));
 }
 
 .agent-request-actions .primary-button,
@@ -2779,7 +2806,7 @@ textarea {
   align-items: flex-start;
   gap: 7px;
   padding: 5px 7px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border-subtle);
   border-radius: 7px;
   color: var(--text-soft);
   background: color-mix(in srgb, var(--surface-strong) 72%, transparent);
@@ -2793,8 +2820,8 @@ textarea {
   outline-offset: 1px;
 }
 .agent-input-options label:has(input:checked) {
-  border-color: color-mix(in srgb, var(--question-accent) 28%, var(--border));
-  background: color-mix(in srgb, var(--question-accent) 7%, var(--surface-strong));
+  border-color: color-mix(in srgb, var(--question-accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--question-accent) 11%, var(--surface-strong));
 }
 .agent-input-options input { width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--question-accent); }
 .agent-input-options label > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
@@ -3797,6 +3824,37 @@ textarea {
   .attachment-preview-footer > span:first-child {
     flex-basis: 100%;
   }
+}
+
+.composer-context-tray {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: color-mix(in srgb, var(--surface-raised) 74%, transparent);
+}
+
+.composer-context-tray-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.composer-context-tray-heading strong {
+  color: var(--text-soft);
+  font-weight: 650;
+}
+
+.composer-context-tray-items {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
 }
 
 .composer-context {
@@ -6376,9 +6434,13 @@ textarea {
   white-space: nowrap;
 }
 .diff-selection-help { margin: 0; padding: 5px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); background: var(--surface); font: 7.5px/1.4 var(--font-sans); }
-.diff-review-toolbar { display: flex; min-height: 34px; align-items: center; gap: 7px; padding: 5px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); background: var(--surface-subtle); font-size: 8px; }
+.diff-review-toolbar { display: flex; min-height: 34px; flex-wrap: wrap; align-items: center; gap: 7px; padding: 5px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); background: var(--surface-subtle); font-size: 8px; }
 .diff-review-toolbar progress { width: min(120px, 20vw); height: 5px; accent-color: var(--accent); }
-.diff-review-toolbar select { min-height: 27px; margin-left: auto; padding: 0 22px 0 7px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-soft); background: var(--surface); font-size: 8px; }
+.diff-review-filters { display: flex; min-width: 0; align-items: center; gap: 3px; margin-left: auto; overflow-x: auto; }
+.diff-review-filters button { display: inline-flex; min-height: 27px; flex: 0 0 auto; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid transparent; border-radius: 999px; color: var(--text-muted); background: transparent; font-size: 8px; }
+.diff-review-filters button:hover { color: var(--text); background: var(--surface-hover); }
+.diff-review-filters button[aria-pressed="true"] { border-color: var(--border-strong); color: var(--text); background: var(--surface-strong); box-shadow: var(--glass-inset); }
+.diff-review-filters small { color: var(--text-muted); font-size: 7px; font-variant-numeric: tabular-nums; }
 .diff-review-toolbar .icon-button { width: 27px; height: 27px; }
 .diff-file-review-heading { display: flex; align-items: center; gap: 5px; padding: 7px 10px; border-bottom: 1px solid var(--border); background: var(--surface); font: 8px/1.4 var(--font-sans); }
 .diff-file-review-heading > span { display: flex; min-width: 0; flex: 1; flex-direction: column; }
@@ -6441,8 +6503,10 @@ textarea {
 .diff-line-prefix { color: var(--text-muted); text-align: center; user-select: none; }
 .diff-code .diff-line-content { padding-left: 4px; }
 .diff-selection-popover { position: sticky; z-index: 4; left: 8px; width: min(430px, calc(100% - 16px)); margin: 5px 8px 8px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--glass-float); box-shadow: var(--shadow), var(--glass-inset); font-family: var(--font-sans); }
+.diff-selection-popover:not(:has(form)) { width: fit-content; max-width: calc(100% - 16px); border-radius: 999px; }
 .diff-selection-actions { display: flex; align-items: center; gap: 3px; }
 .diff-selection-actions > button { display: inline-flex; min-height: 27px; align-items: center; gap: 4px; padding: 0 7px; border-radius: 7px; color: var(--text-soft); background: transparent; font-size: 7.5px; white-space: nowrap; }
+.diff-selection-actions > button + button:not(.icon-button) { border-left: 1px solid var(--border); border-radius: 0 7px 7px 0; }
 .diff-selection-actions > button:hover { color: var(--text); background: var(--surface-hover); }
 .diff-selection-actions > button:disabled { opacity: 0.4; }
 .diff-selection-actions .icon-button { width: 27px; height: 27px; margin-left: auto; }
@@ -12792,7 +12856,7 @@ button.sent-attachment-open:focus-visible {
 }
 
 .diff-review-toolbar,
-.diff-review-toolbar select,
+.diff-review-filters button,
 .diff-file-review-heading button,
 .diff-hunk-actions button,
 .diff-review-note > button,

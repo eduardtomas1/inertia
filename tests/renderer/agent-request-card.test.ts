@@ -212,18 +212,18 @@ describe("agent input answers", () => {
     const alignment = cssBlock(".agent-run-flow > .agent-request-card");
 
     expect(card).toContain("--agent-request-accent: var(--approval-accent)");
-    expect(card).toContain("padding: 8px 10px");
+    expect(card).toContain("padding: 10px 12px");
     expect(card).toContain("border-inline-start: 2px solid var(--agent-request-accent)");
     expect(card).toContain("--agent-request-surface: var(--approval-surface)");
     expect(card).toContain("background: var(--agent-request-surface)");
     expect(question).toContain(
       "--agent-request-surface: var(--question-surface)",
     );
-    expect(card).toContain("box-shadow: none");
+    expect(card).toContain("inset 0 1px");
     expect(card).not.toContain("3px solid");
     expect(question).toContain("--agent-request-accent: var(--question-accent)");
     expect(icon).toContain("color: var(--agent-request-accent)");
-    expect(icon).toContain("background: transparent");
+    expect(icon).toContain("background: color-mix");
     expect(alignment).toContain("max-width: var(--answer-max-width)");
 
     expect(styles).toContain(':root[data-theme="dark"]');

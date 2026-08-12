@@ -431,11 +431,23 @@ export function ChangesPanel({
         <div className="diff-review-toolbar">
           <span><strong>{reviewedHunks}/{totalHunks}</strong> hunks reviewed</span>
           <progress aria-label={`${reviewedHunks} of ${totalHunks} hunks reviewed`} max={totalHunks} value={reviewedHunks} />
-          <select aria-label="Filter review state" value={reviewFilter} onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)}>
-            <option value="all">All changes</option>
-            <option value="unreviewed">Unreviewed</option>
-            <option value="reviewed">Reviewed</option>
-          </select>
+          <div className="diff-review-filters" role="group" aria-label="Filter review state">
+            {([
+              ["all", "All", totalHunks],
+              ["unreviewed", "Unreviewed", totalHunks - reviewedHunks],
+              ["reviewed", "Reviewed", reviewedHunks],
+            ] as const).map(([filter, label, count]) => (
+              <button
+                type="button"
+                aria-pressed={reviewFilter === filter}
+                onClick={() => setReviewFilter(filter)}
+                key={filter}
+              >
+                <span>{label}</span>
+                <small>{count}</small>
+              </button>
+            ))}
+          </div>
           <IconButton label="Previous review hunk (P)" onClick={() => navigateHunk(-1)}><ChevronUp size={14} /></IconButton>
           <IconButton label="Next review hunk (N)" onClick={() => navigateHunk(1)}><ChevronDown size={14} /></IconButton>
         </div>

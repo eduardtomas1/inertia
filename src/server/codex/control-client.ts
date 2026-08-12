@@ -36,6 +36,8 @@ export interface CodexControlClientOptions {
   terminateProcessTree?: ProcessTreeTerminator;
   processLabel?: string;
   spawnProcess?: typeof spawn;
+  signal?: AbortSignal;
+  onNotification?: (method: string, params: JsonObject) => void;
 }
 
 function boundedErrorMessage(value: unknown): string | undefined {
@@ -54,6 +56,9 @@ export async function withCodexControlClient<T>(
   options: CodexControlClientOptions,
   runWithClient: (client: CodexControlClient) => Promise<T>,
 ): Promise<T> {
+  if (options.signal?.aborted) {
+    throw new Error("Codex control request was cancelled.");
+  }
   const timeoutMs = Math.max(500, Math.min(options.timeoutMs ?? 6_000, 30_000));
   const terminateProcessTree = options.terminateProcessTree
     ?? terminateProcessTreeAndWait;
@@ -112,6 +117,10 @@ export async function withCodexControlClient<T>(
     rejectConnection(error);
     void stopProcessTree().catch(() => undefined);
   };
+  const abortConnection = (): void => {
+    failConnection(new Error("Codex control request was cancelled."));
+  };
+  options.signal?.addEventListener("abort", abortConnection, { once: true });
   child.stdin.on("error", () => {
     failConnection(new Error("Codex control input stream failed."));
   });
@@ -173,7 +182,22 @@ export async function withCodexControlClient<T>(
     }
     const message = objectValue(parsed);
     const id = typeof message?.id === "number" ? message.id : undefined;
-    if (id === undefined) return;
+    if (id === undefined) {
+      const method = typeof message?.method === "string"
+        ? message.method
+        : undefined;
+      if (method) {
+        try {
+          options.onNotification?.(
+            method,
+            objectValue(message?.params) ?? {},
+          );
+        } catch {
+          // Control observers cannot interrupt the owned protocol lifecycle.
+        }
+      }
+      return;
+    }
     const active = pending.get(id);
     if (!active) return;
     pending.delete(id);
@@ -230,6 +254,7 @@ export async function withCodexControlClient<T>(
       connectionFailure,
     ]);
   } finally {
+    options.signal?.removeEventListener("abort", abortConnection);
     await close();
   }
 }

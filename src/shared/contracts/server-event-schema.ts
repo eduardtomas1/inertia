@@ -1119,6 +1119,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
     && oneOf(value, "disposition", ["new-turn", "follow-up"]),
+  "conversation.compacted": (value) => recordWithStrings(value, "conversationId", "providerId", "message") && oneOf(value, "providerId", ["codex", "claude", "cursor", "opencode"]) && booleanField(value, "instructionForwarded"),
   "backend.profile": (value) => backendProfile(value.profile, true),
   "backend.profile.probe": (value) => backendProfile(value.profile, true),
   "backend.default": (value) => value.value === null || backendDefault(value.value),

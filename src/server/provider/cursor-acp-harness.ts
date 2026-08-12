@@ -125,6 +125,7 @@ function startCursorRun(
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
   let supportsImages = false;
+  let availableCommandNames: Set<string> | null = null;
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
   const toolActivities = new Map<
     string,
@@ -168,6 +169,12 @@ function startCursorRun(
     })
     .onNotification(acp.methods.client.session.update, ({ params }) => {
       if (!sessionId || params.sessionId !== sessionId) return;
+      if (params.update.sessionUpdate === "available_commands_update") {
+        availableCommandNames = new Set(
+          params.update.availableCommands.map(({ name }) =>
+            name.replace(/^\//u, "").toLowerCase()),
+        );
+      }
       handleCursorUpdate(
         params,
         resultText,
@@ -295,7 +302,18 @@ function startCursorRun(
       options.input.reasoningEffort,
     );
     emitCursorMetadata(configuredOptions, supportsImages, emitter.rich);
-    const prompt = await cursorPrompt(options.input.prompt, options.input.imagePaths ?? [], initialized);
+    if (
+      options.input.operation?.kind === "compact"
+      && !availableCommandNames?.has("summarize")
+    ) {
+      throw new Error(
+        "This Cursor ACP session does not advertise its summarize command.",
+      );
+    }
+    const providerPrompt = options.input.operation?.kind === "compact"
+      ? "/summarize"
+      : options.input.prompt;
+    const prompt = await cursorPrompt(providerPrompt, options.input.imagePaths ?? [], initialized);
     emitter.status("running");
     const response = await context.request(acp.methods.agent.session.prompt, { sessionId, prompt });
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter.rich);

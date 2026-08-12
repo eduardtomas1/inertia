@@ -174,6 +174,110 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("compacts with optional focus text without sending a chat turn", async () => {
+    const current = conversation("07070707-0707-4707-8707-070707070707");
+    const operation = deferred<{
+      message: string;
+      instructionForwarded: boolean;
+    }>();
+    const onCompact = vi.fn(() => operation.promise);
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, { onCompact, onSend })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, {
+      target: { value: "/compact remember exactly how retrieval works" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onCompact).toHaveBeenCalledWith(
+      "remember exactly how retrieval works",
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("Compacting provider context…")).toBeVisible();
+    expect(input).toHaveAttribute("readonly");
+
+    operation.resolve({
+      message: "Context compacted with the focus instruction.",
+      instructionForwarded: true,
+    });
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(screen.getByText("Context compacted with the focus instruction."))
+      .toBeVisible();
+  });
+
+  it("runs the uniquely matched partial compact command without sending it", async () => {
+    const current = conversation("08080808-0808-4808-8808-080808080808");
+    const onCompact = vi.fn(async () => ({
+      message: "Context compacted.",
+      instructionForwarded: false,
+    }));
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, { onCompact, onSend })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "/comp" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(onCompact).toHaveBeenCalledWith(undefined));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps the compact command when attached context makes it unsafe", async () => {
+    const current = conversation("06060606-0606-4606-8606-060606060606");
+    const onCompact = vi.fn(async () => ({
+      message: "Context compacted.",
+      instructionForwarded: false,
+    }));
+    render(<Composer {...composerProps(current, {
+      onCompact,
+      promptContext: "Selected diff context",
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "/compact" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onCompact).not.toHaveBeenCalled();
+    expect(input).toHaveValue("/compact");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Remove attachments, preview or diff context",
+    );
+  });
+
+  it("never turns a compact command into an active-run follow-up", async () => {
+    const current = conversation("05050505-0505-4505-8505-050505050505");
+    const onCompact = vi.fn(async () => ({
+      message: "Context compacted.",
+      instructionForwarded: false,
+    }));
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      running: true,
+      latestTurn: {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        harnessId: "codex-app-server",
+      },
+      onCompact,
+      onSend,
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, {
+      target: { value: "/compact preserve the retrieval implementation" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onCompact).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue(
+      "/compact preserve the retrieval implementation",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Wait for the current provider turn",
+    );
+  });
+
   it("opens goal and folder resume flows directly from slash commands", async () => {
     const current = conversation("08080808-0808-4808-8808-080808080808");
     const onOpenResume = vi.fn();
@@ -195,6 +299,8 @@ describe("composer asynchronous ownership", () => {
     fireEvent.change(input, { target: { value: "/" } });
     expect(screen.getByRole("listbox", { name: "Composer commands" }))
       .toHaveTextContent("/goal");
+    expect(screen.getByRole("listbox", { name: "Composer commands" }))
+      .toHaveTextContent("/compact");
     expect(screen.getByRole("listbox", { name: "Composer commands" }))
       .toHaveTextContent("/resume");
     expect(screen.getByRole("option", { name: /\/plan/u })).toBeDisabled();

@@ -123,6 +123,39 @@ describe("Codex control client", () => {
       .toHaveBeenCalledWith(fixture.child, true);
   });
 
+  it("delivers bounded App Server notifications to the control observer", async () => {
+    const onNotification = vi.fn();
+    const fixture = fakeChild((text) => {
+      const message = JSON.parse(text) as {
+        id?: number;
+        method: string;
+      };
+      if (message.id === undefined) return;
+      fixture.stdout.write(`${JSON.stringify({
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          item: { type: "contextCompaction", id: "compact-1" },
+        },
+      })}\n`);
+      fixture.stdout.write(`${JSON.stringify({
+        id: message.id,
+        result: {},
+      })}\n`);
+    });
+
+    await expect(withCodexControlClient({
+      ...options(fixture.child),
+      onNotification,
+    }, async ({ request }) => await request("thread/compact/start", {
+      threadId: "thread-1",
+    }))).resolves.toEqual({});
+    expect(onNotification).toHaveBeenCalledWith(
+      "item/completed",
+      expect.objectContaining({ threadId: "thread-1" }),
+    );
+  });
+
   it("bounds an unanswered request and still terminates exactly once", async () => {
     vi.useFakeTimers();
     try {

@@ -376,6 +376,8 @@ function startClaudeRun(
     typeof stageClaudeSkillPlugin
   >> = null;
   let selectedSkillsVerified = false;
+  let compactSucceeded = false;
+  let compactFailure: string | undefined;
   const ownedProcess = createClaudeOwnedQueryProcess(
     "Claude Code process tree",
     lifecycleDependencies,
@@ -524,7 +526,12 @@ function startClaudeRun(
       );
   const providerResult = (async (): Promise<ProviderRunResult> => {
     try {
-      const prompt = await claudePrompt(options.input.prompt, options.input.imagePaths ?? []);
+      const promptText = options.input.operation?.kind === "compact"
+        ? `/compact${options.input.operation.instruction
+          ? ` ${options.input.operation.instruction}`
+          : ""}`
+        : options.input.prompt;
+      const prompt = await claudePrompt(promptText, options.input.imagePaths ?? []);
       if (!promptChannel.push(prompt)) {
         return finishResult("cancelled");
       }
@@ -722,7 +729,23 @@ function startClaudeRun(
           }
           continue;
         }
+        if (message.type === "system" && message.subtype === "status") {
+          if (message.compact_result === "success" && !compactFailure) {
+            compactSucceeded = true;
+          }
+          if (message.compact_result === "failed") {
+            compactSucceeded = false;
+            compactFailure = message.compact_error?.trim()
+              || "Claude reported that context compaction failed.";
+          }
+          continue;
+        }
         if (message.type === "system" && message.subtype === "compact_boundary") {
+          if (
+            options.input.operation?.kind === "compact"
+            && message.compact_metadata.trigger === "manual"
+            && !compactFailure
+          ) compactSucceeded = true;
           refreshContextUsage();
           continue;
         }
@@ -745,6 +768,18 @@ function startClaudeRun(
         throw new Error("Claude did not confirm the selected isolated skills.");
       }
       if (cancelRequested) return finishResult("cancelled");
+      if (
+        options.input.operation?.kind === "compact"
+        && (compactFailure || !compactSucceeded)
+      ) {
+        return finishResult(
+          "failed",
+          routeFailure(
+            compactFailure
+              ?? "Claude did not confirm that context compaction completed.",
+          ),
+        );
+      }
       const completion = delegateLifecycle.complete();
       if (completion.kind === "incomplete") {
         return finishResult(

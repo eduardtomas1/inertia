@@ -119,6 +119,10 @@ export interface WorkspaceSceneActions {
     context?: TurnRequestContext,
     skillIds?: readonly string[],
   ) => Promise<TranscriptMessageSendAcceptance | null>;
+  compactConversation: (instruction?: string) => Promise<{
+    message: string;
+    instructionForwarded: boolean;
+  }>;
   listSkills: (forceReload?: boolean) => Promise<void>;
   toggleSkill: (skill: AgentSkillSummary) => void;
   clearSelectedSkills: () => void;
@@ -483,6 +487,7 @@ export function createWorkspaceSceneModel({
       onAddProject: () => void actions.importProject(),
       onCreateConversation: () => actions.createConversation(),
       onSendMessage: actions.sendMessage,
+      onCompactConversation: actions.compactConversation,
       onListSkills: actions.listSkills,
       onToggleSkill: actions.toggleSkill,
       onClearSelectedSkills: actions.clearSelectedSkills,

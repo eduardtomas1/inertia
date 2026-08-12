@@ -21,6 +21,7 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 
 type LifecycleScenario =
   | "resume"
+  | "compact"
   | "cancel"
   | "stuck-cancel"
   | "oversized"
@@ -94,6 +95,14 @@ const server = http.createServer((req, res) => {
       if (scenario === "endless") setInterval(() => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "heartbeat", sessionID, role: "assistant" } } });
       }, 50);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/compact") {
+      json(res, undefined, 204);
+      if (scenario === "compact") setTimeout(() => {
+        sendEvent({ id: "compact-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "summary-1", reason: "manual" } });
+        sendEvent({ id: "compact-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "summary-1", reason: "manual", text: "Summary", recent: "" } });
+      }, 10);
       return;
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/abort") {
@@ -613,6 +622,45 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(captured.some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);
     expect(captured.some(({ method, path }) => method === "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
     expect(captured.some(({ method, path }) => method !== "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
+  });
+
+  it("uses the native v2 compaction endpoint and waits for its completion event", async () => {
+    const root = portableFixtureRoot("OpenCode compact");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "compact"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-compact",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), "remember retrieval exactly")).resolves.toMatchObject({
+      status: "completed",
+      instructionForwarded: false,
+      message: expect.stringContaining("was not forwarded"),
+    });
+    const capture = readStableCapture<{
+      captured: Array<{ method: string; path: string }>;
+    }>(capturePath);
+    expect(capture.captured.some(({ method, path }) =>
+      method === "POST"
+      && path === "/api/session/opencode-lifecycle-session/compact"
+    )).toBe(true);
+    expect(capture.captured.some(({ path }) => path.endsWith("/prompt_async")))
+      .toBe(false);
   });
 
   it("does not emit completion when owned-server cleanup is unconfirmed", async () => {

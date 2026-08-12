@@ -57,6 +57,8 @@ import {
   COMPOSER_PREFILL_EVENT,
   type ComposerPrefillDetail,
 } from "../../utils/composerPrefill";
+import { parseCompactComposerCommand } from "../../utils/composerCommands";
+import { useComposerCompaction } from "./useComposerCompaction";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -77,6 +79,9 @@ export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 export const DRAFT_PERSISTENCE_MAX_WAIT_MS = 1_000;
 
 const ignorePromptPresetMutation = (): Promise<void> => Promise.resolve();
+const unavailableCompaction = (): Promise<never> => Promise.reject(
+  new Error("Context compaction is unavailable for this chat."),
+);
 
 export const Composer = memo(function Composer({
   conversation,
@@ -101,6 +106,7 @@ export const Composer = memo(function Composer({
   providerIdentityLabels,
   goal,
   onSend,
+  onCompact = unavailableCompaction,
   onListSkills,
   onToggleSkill,
   onClearSelectedSkills,
@@ -488,6 +494,7 @@ export const Composer = memo(function Composer({
     markEditorChanged();
     draftValueRef.current = next;
     persistDraftChange(conversation.id, previous, next);
+    clearCompactNotice();
     setMessage(next);
   };
 
@@ -512,6 +519,11 @@ export const Composer = memo(function Composer({
   };
 
   const submit = async () => {
+    const compactCommand = parseCompactComposerCommand(message);
+    if (compactCommand) {
+      await compact(compactCommand);
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -778,6 +790,27 @@ export const Composer = memo(function Composer({
     stopping,
   });
   const canSend = primaryAction === "send-ready";
+  const { compactNotice, clearCompactNotice, compact } = useComposerCompaction({
+    conversationId: conversation.id,
+    message,
+    canSend,
+    running,
+    blocked: attachments.length > 0
+      || Boolean(promptContext)
+      || previewContextSelected
+      || fileReferences.length > 0
+      || selectedSkillIds.length > 0,
+    flushDraftPersistence,
+    editorRevisions: editorRevisionsRef,
+    conversationIdRef,
+    mountedRef,
+    submittingRef,
+    draftValueRef,
+    textareaRef,
+    setMessage,
+    setSubmitting,
+    onCompact,
+  });
   const followUpState = composerFollowUpState({
     running,
     harnessId: latestTurn?.harnessId ?? null,
@@ -1117,6 +1150,8 @@ export const Composer = memo(function Composer({
           mentionResults={mentionResults}
           onAddFileReference={addFileReference}
           slashMatch={slashMatch}
+          onCompactCommand={() => void compact({ kind: "compact" })}
+          compactNotice={compactNotice}
           goalAvailable={Boolean(goal)}
           onOpenGoal={() => {
             updateMessage("");

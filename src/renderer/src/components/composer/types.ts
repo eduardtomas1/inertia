@@ -49,6 +49,10 @@ export interface ComposerProps {
     context?: TurnRequestContext,
     skillIds?: readonly string[],
   ) => Promise<void>;
+  onCompact?: (instruction?: string) => Promise<{
+    message: string;
+    instructionForwarded: boolean;
+  }>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onToggleSkill: (skill: AgentSkillSummary) => void;
   onClearSelectedSkills: () => void;

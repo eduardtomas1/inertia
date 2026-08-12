@@ -523,6 +523,28 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       );
     }
   }
+  if (input.operation) {
+    const instruction = input.operation.instruction?.trim();
+    if (
+      input.operation.kind !== "compact"
+      || !input.sessionId
+      || input.turnId !== undefined
+      || input.goalStart !== undefined
+      || input.goalContinuationExpected !== undefined
+      || (input.imagePaths?.length ?? 0) > 0
+      || (input.skills?.length ?? 0) > 0
+      || (input.operation.instruction !== undefined && (
+        !instruction
+        || instruction.length > 4_000
+        || instruction.includes("\0")
+      ))
+    ) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        "The provider compaction request is invalid.",
+      );
+    }
+  }
   for (const value of [input.runId, input.turnId, input.model, input.sessionId]) {
     if (value !== undefined && (!value.trim() || value.length > 512 || value.includes("\0"))) {
       throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");

@@ -318,6 +318,7 @@ export default function App(): React.JSX.Element {
     run,
     openProjectPath,
     sendMessageToConversation,
+    compactConversation: compactConversationById,
     updateConversationById,
     sendingConversationIds,
   } = useAppRuntimeActions({
@@ -826,6 +827,12 @@ export default function App(): React.JSX.Element {
       createConversation,
       createConversationForSelection,
       sendMessage,
+      compactConversation: async (instruction?: string) => {
+        if (!conversation) {
+          throw new Error("This chat is not ready to compact.");
+        }
+        return await compactConversationById(conversation.id, instruction);
+      },
       listSkills: agentWorkflows.listSkills,
       toggleSkill: agentWorkflows.toggleSkill,
       clearSelectedSkills: agentWorkflows.clearSelectedSkills,
@@ -943,6 +950,7 @@ export default function App(): React.JSX.Element {
       openBackendSetup,
       openProjectPath,
       sendMessageToConversation,
+      compactConversation: compactConversationById,
       updateConversationById,
     },
     sendingConversationIds,

@@ -42,6 +42,34 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return command;
 }
 
+function compactingCursorAgent(
+  root: string,
+  name: string,
+  capturePath: string,
+  advertisedCommands: readonly string[] | null = null,
+): string {
+  const command = portableNodeExecutable(root, name);
+  writeNodeSubcommand(root, "acp", `
+const fs = require("node:fs");
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sessionId = "cursor-compact-session";
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/load") {
+    ${advertisedCommands === null ? "" : `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: ${JSON.stringify(advertisedCommands.map((entry) => ({ name: entry, description: entry })))} } } });`}
+    return send({ jsonrpc: "2.0", id: message.id, result: { modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  }
+  if (message.method === "session/prompt") {
+    fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(message.params.prompt));
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+  return command;
+}
+
 function permissionSequenceCursorAgent(root: string, name: string): string {
   const command = portableNodeExecutable(root, name);
   writeNodeSubcommand(root, "acp", `
@@ -141,6 +169,98 @@ describe.sequential("Cursor ACP harness", () => {
         ],
       }],
     })).toThrow("duplicate option ID");
+  });
+
+  it("bridges compaction through Cursor's summarize command without forwarding focus text", async () => {
+    const root = portableFixtureRoot("cursor ACP compact");
+    roots.push(root);
+    const capturePath = join(root, "compact-prompt.json");
+    const command = compactingCursorAgent(
+      root,
+      "cursor-compact",
+      capturePath,
+      ["summarize"],
+    );
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-compact",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "cursor-compact-session",
+    }), "remember retrieval exactly")).resolves.toMatchObject({
+      status: "completed",
+      instructionForwarded: false,
+      message: expect.stringContaining("was not forwarded"),
+    });
+    const captured = readFileSync(capturePath, "utf8");
+    expect(captured).toContain("/summarize");
+    expect(captured).not.toContain("remember retrieval exactly");
+  });
+
+  it("rejects compaction when Cursor explicitly omits summarize", async () => {
+    const root = portableFixtureRoot("cursor ACP compact unsupported");
+    roots.push(root);
+    const capturePath = join(root, "compact-prompt.json");
+    const command = compactingCursorAgent(
+      root,
+      "cursor-compact-unsupported",
+      capturePath,
+      ["agent_help"],
+    );
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-compact-unsupported",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "cursor-compact-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("does not advertise"),
+    });
+    expect(() => readFileSync(capturePath, "utf8")).toThrow();
+  });
+
+  it("rejects unproven compaction when Cursor advertises no commands", async () => {
+    const root = portableFixtureRoot("cursor ACP compact unproven");
+    roots.push(root);
+    const capturePath = join(root, "compact-prompt.json");
+    const command = compactingCursorAgent(
+      root,
+      "cursor-compact-unproven",
+      capturePath,
+    );
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-compact-unproven",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "cursor-compact-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("does not advertise"),
+    });
+    expect(() => readFileSync(capturePath, "utf8")).toThrow();
   });
 
   it("uses one complete file-mutation classification for ACP permissions", () => {

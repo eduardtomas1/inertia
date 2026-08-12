@@ -49,6 +49,7 @@ import {
   type ProviderId,
   type ProviderGoalMutation,
   type ProviderGoalSnapshot,
+  type ProviderCompactionResult,
   type ProviderManagerOptions,
   type ProviderRunCallbacks,
   type ProviderRunInput,
@@ -70,6 +71,7 @@ import {
   providerTerminalResumeLaunch,
   type ProviderTerminalResumeLaunch,
 } from "./provider/terminal-resume";
+import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../shared/runtime-command-timeouts";
 
 export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider, detectProviders };
 export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
@@ -742,6 +744,46 @@ export class ProviderManager {
     );
     active.result = result;
     return result;
+  }
+
+  compact(
+    input: ProviderRunInput,
+    instruction?: string,
+    callbacks: ProviderRunCallbacks = {},
+  ): Promise<ProviderCompactionResult> {
+    const operationInput: ProviderRunInput = {
+      ...input,
+      prompt: "/compact",
+      operation: {
+        kind: "compact",
+        ...(instruction ? { instruction } : {}),
+      },
+    };
+    const instructionForwarded = operationInput.providerId === "claude"
+      && instruction !== undefined;
+    const providerResult = this.run(operationInput, callbacks);
+    const timer = setTimeout(() => {
+      this.cancel(input.conversationId ?? input.threadId ?? "");
+    }, PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS);
+    timer.unref();
+    return providerResult.then((result) => {
+      const message = result.status !== "completed"
+        ? result.error ?? "The provider could not compact this chat."
+        : instruction && !instructionForwarded
+          ? `${PROVIDER_INFO[result.providerId].name} compacted the context, but does not accept a focus instruction through this integration, so the instruction was not forwarded.`
+          : instructionForwarded
+            ? "Context compacted with the focus instruction."
+            : "Context compacted.";
+      return {
+        providerId: result.providerId,
+        conversationId: result.conversationId,
+        status: result.status,
+        instructionForwarded,
+        message,
+        ...(result.error ? { error: result.error } : {}),
+        cleanupConfirmed: result.cleanupConfirmed,
+      };
+    }).finally(() => clearTimeout(timer));
   }
 
   cancel(conversationId: string): boolean {

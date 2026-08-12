@@ -98,6 +98,13 @@ interface SplitWorkspaceActions
     skillIds?: readonly string[],
     activate?: boolean,
   ) => Promise<MessageSendAcceptance | null>;
+  compactConversation: (
+    conversationId: string,
+    instruction?: string,
+  ) => Promise<{
+    message: string;
+    instructionForwarded: boolean;
+  }>;
   updateConversationById: (
     conversationId: string,
     update: Parameters<WorkspaceSceneActions["updateConversation"]>[0],
@@ -347,6 +354,15 @@ export function useSplitWorkspaceScene({
         context,
         skillIds,
         false,
+      );
+    },
+    compactConversation: async (instruction?: string) => {
+      if (!splitConversation) {
+        throw new Error("This chat is not ready to compact.");
+      }
+      return await actions.compactConversation(
+        splitConversation.id,
+        instruction,
       );
     },
     listSkills: workflow.listSkills,

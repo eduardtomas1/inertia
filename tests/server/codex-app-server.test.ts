@@ -190,6 +190,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     return;
   }
+  if (message.method === "thread/compact/start") {
+    send({ id: message.id, result: {} });
+    send({ method: "item/completed", params: { threadId, item: { id: "compact-1", type: "contextCompaction" } } });
+    return;
+  }
   if (message.method === "thread/goal/set") {
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-live-mutation-error") {
       sendBatch([

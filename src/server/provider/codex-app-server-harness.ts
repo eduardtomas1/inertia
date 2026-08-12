@@ -1,5 +1,17 @@
 import { startCodexAppServerRun } from "../codex-app-server";
+import { withCodexControlClient } from "../codex/control-client";
+import {
+  codexAccessPolicy,
+  validateCodexModelProvider,
+} from "../codex/app-server-config";
+import {
+  boundedText,
+  objectValue,
+  type JsonObject,
+} from "../codex/protocol";
+import { isProcessTreeTerminationUnconfirmed } from "../process-lifecycle";
 import { staleProviderSessionDecision } from "../../shared/continuation-policy";
+import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../../shared/runtime-command-timeouts";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -49,6 +61,9 @@ export function createCodexAppServerHarness(): AgentHarness {
 }
 
 function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
+  if (options.input.operation?.kind === "compact") {
+    return startCodexCompaction(options);
+  }
   const providerId = "codex" as const;
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
@@ -223,6 +238,176 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   };
 }
 
+function startCodexCompaction(
+  options: AgentHarnessStartOptions,
+): AgentHarnessRun {
+  const conversationId = options.input.conversationId
+    ?? options.input.threadId
+    ?? "";
+  const sessionId = options.input.sessionId!;
+  const emitter = createAgentHarnessEmitter(
+    "codex",
+    conversationId,
+    options.callbacks,
+    options.input.runId ?? conversationId,
+    null,
+    options.input.cwd,
+  );
+  const abortController = new AbortController();
+  let settled = false;
+  let cancelRequested = false;
+  emitter.status("starting");
+
+  const result = (async (): Promise<ProviderRunResult> => {
+    let completionTimer: NodeJS.Timeout | undefined;
+    try {
+      if (
+        options.harnessConfiguration
+        && options.harnessConfiguration.kind !== "codex-responses"
+      ) {
+        throw new Error("Codex received an incompatible harness configuration.");
+      }
+      const modelProvider = validateCodexModelProvider({
+        environment: options.environment,
+        modelProvider: options.harnessConfiguration,
+      });
+      let resolveCompaction!: () => void;
+      const compacted = new Promise<void>((resolve, reject) => {
+        resolveCompaction = resolve;
+        completionTimer = setTimeout(
+          () => reject(new Error("Codex context compaction timed out.")),
+          PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS,
+        );
+        completionTimer.unref();
+      });
+      await withCodexControlClient({
+        executable: options.executable,
+        environment: options.environment,
+        cwd: options.input.cwd,
+        timeoutMs: 30_000,
+        processLabel: "Codex compaction process tree",
+        signal: abortController.signal,
+        onNotification: (method, params) => {
+          if (method !== "item/completed") return;
+          if (params.threadId !== sessionId) return;
+          const item = objectValue(params.item);
+          if (item?.type === "contextCompaction") resolveCompaction();
+        },
+      }, async (client) => {
+        const accessPolicy = codexAccessPolicy({
+          access: options.input.access,
+          planMode: options.input.interactionMode === "plan",
+        });
+        const threadConfig: JsonObject = {
+          cwd: options.input.cwd,
+          approvalPolicy: accessPolicy.approvalPolicy,
+          approvalsReviewer: "user",
+          sandbox: accessPolicy.threadSandbox,
+          ...(options.input.model ? { model: options.input.model } : {}),
+          ...(options.input.reasoningEffort
+            ? { effort: options.input.reasoningEffort }
+            : {}),
+          ...(modelProvider ? {
+            modelProvider: modelProvider.providerId,
+            config: {
+              [`model_providers.${modelProvider.providerId}`]: {
+                name: modelProvider.displayName,
+                base_url: modelProvider.baseUrl,
+                wire_api: "responses",
+                requires_openai_auth: false,
+                ...(modelProvider.credentialEnvironmentKey
+                  ? { env_key: modelProvider.credentialEnvironmentKey }
+                  : {}),
+              },
+            },
+          } : {}),
+        };
+        const resumed = await client.request("thread/resume", {
+          threadId: sessionId,
+          excludeTurns: true,
+          ...threadConfig,
+        });
+        const resumedThreadId = boundedText(
+          objectValue(resumed.thread)?.id,
+          512,
+        );
+        if (resumedThreadId !== sessionId) {
+          throw new Error(
+            "Codex did not resume the exact thread selected for compaction.",
+          );
+        }
+        emitter.status("running");
+        await client.request("thread/compact/start", { threadId: sessionId });
+        await compacted;
+      });
+      emitter.status("completed");
+      return {
+        providerId: "codex",
+        conversationId,
+        status: "completed",
+        sessionId,
+        text: "",
+        textTruncated: false,
+        exitCode: null,
+        signal: null,
+        cleanupConfirmed: true,
+      };
+    } catch (error) {
+      const cleanupConfirmed = !isProcessTreeTerminationUnconfirmed(error);
+      const status = cancelRequested || abortController.signal.aborted
+        ? "cancelled" as const
+        : "failed" as const;
+      const message = error instanceof Error
+        ? error.message
+        : "Codex could not compact the context.";
+      emitter.status(status, status === "failed" ? message : undefined);
+      return {
+        providerId: "codex",
+        conversationId,
+        status,
+        sessionId,
+        text: "",
+        textTruncated: false,
+        exitCode: null,
+        signal: null,
+        ...(status === "failed" ? { error: message } : {}),
+        cleanupConfirmed,
+      };
+    } finally {
+      settled = true;
+      if (completionTimer) clearTimeout(completionTimer);
+    }
+  })();
+
+  return {
+    harnessId: "codex-app-server",
+    providerId: "codex",
+    result,
+    cancel: () => {
+      if (settled || cancelRequested) return;
+      cancelRequested = true;
+      emitter.status("cancelling");
+      abortController.abort();
+    },
+    extension: inactiveCodexExtension(),
+  };
+}
+
+function inactiveCodexExtension(): AgentHarnessRun["extension"] {
+  return {
+    kind: "codex-app-server",
+    respondToApproval: () => false,
+    respondToInput: () => false,
+    steer: async () => false,
+    setGoal: async () => {
+      throw new Error("The Codex goal connection is not active.");
+    },
+    clearGoal: async () => {
+      throw new Error("The Codex goal connection is not active.");
+    },
+  };
+}
+
 function failedCodexRun(
   conversationId: string,
   sessionId: string | undefined,
@@ -248,17 +433,6 @@ function failedCodexRun(
       cleanupConfirmed: true,
     }),
     cancel: () => undefined,
-    extension: {
-      kind: "codex-app-server",
-      respondToApproval: () => false,
-      respondToInput: () => false,
-      steer: async () => false,
-      setGoal: async () => {
-        throw new Error("The Codex goal connection is not active.");
-      },
-      clearGoal: async () => {
-        throw new Error("The Codex goal connection is not active.");
-      },
-    },
+    extension: inactiveCodexExtension(),
   };
 }

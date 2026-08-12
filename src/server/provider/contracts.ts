@@ -89,6 +89,11 @@ interface ProviderRunRequest {
   /** Saved evidence used only to keep a resumed Codex run alive long enough
    * for an active goal's provider-authored continuation to start. */
   goalContinuationExpected?: boolean;
+  /** Provider-owned control operation that must never become a durable turn. */
+  operation?: {
+    kind: "compact";
+    instruction?: string;
+  };
 }
 
 export type ProviderRunInput = ProviderRunRequest &
@@ -321,6 +326,16 @@ export interface ProviderRunResult {
   error?: string;
   failure?: ProviderRunFailure;
   /** True only after authoritative complete process-tree cleanup. */
+  cleanupConfirmed: boolean;
+}
+
+export interface ProviderCompactionResult {
+  providerId: ProviderId;
+  conversationId: string;
+  status: "completed" | "failed" | "cancelled";
+  instructionForwarded: boolean;
+  message: string;
+  error?: string;
   cleanupConfirmed: boolean;
 }
 

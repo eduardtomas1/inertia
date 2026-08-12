@@ -182,6 +182,15 @@ export interface MessageSendAcceptance {
   disposition: "new-turn" | "follow-up";
 }
 
+/** Definite acknowledgement for one provider-owned session compaction. */
+export interface ConversationCompactionResult {
+  kind: "conversation.compacted";
+  conversationId: string;
+  providerId: ProviderId;
+  instructionForwarded: boolean;
+  message: string;
+}
+
 export interface AgentReasoning {
   id: string;
   conversationId: string;

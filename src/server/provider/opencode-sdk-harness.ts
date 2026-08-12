@@ -473,6 +473,7 @@ function startOpenCodeRun(
       usageState.maxTokens = finite(effectiveModel?.limit.context);
       const subscribed = await client.event.subscribe({ directory: options.input.cwd }, { signal: eventAbort.signal, throwOnError: true });
       armEventInactivityDeadline();
+      const compacting = options.input.operation?.kind === "compact";
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
         onActivity: armEventInactivityDeadline,
         onEvent: (event) => handleOpenCodeEvent(
@@ -489,21 +490,30 @@ function startOpenCodeRun(
           eventState,
           failInteraction,
         ),
-        isDone: (event) => event.type === "session.idle" || event.type === "session.error",
+        isDone: (event) => compacting
+          ? event.type === "session.compacted"
+            || event.type === "session.next.compaction.ended"
+            || event.type === "session.error"
+          : event.type === "session.idle" || event.type === "session.error",
       });
-      const prompt = client.session.promptAsync({
-        sessionID: sessionId,
-        directory: options.input.cwd,
-        ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
-        ...(agent ? { agent: agent.name } : {}),
-        ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
-        parts: [
-          { type: "text", text: options.input.prompt },
-          ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),
-        ],
-      }, { throwOnError: true });
-      const completion = Promise.all([prompt, pump]);
-      await Promise.race([prompt, completion, runInterrupted]);
+      const providerOperation = compacting
+        ? client.v2.session.compact(
+            { sessionID: sessionId },
+            { signal: eventAbort.signal, throwOnError: true },
+          )
+        : client.session.promptAsync({
+            sessionID: sessionId,
+            directory: options.input.cwd,
+            ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
+            ...(agent ? { agent: agent.name } : {}),
+            ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
+            parts: [
+              { type: "text", text: options.input.prompt },
+              ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),
+            ],
+          }, { throwOnError: true });
+      const completion = Promise.all([providerOperation, pump]);
+      await Promise.race([providerOperation, completion, runInterrupted]);
       if (!cancelRequested && !terminalError) emitter.status("running");
       await Promise.race([completion, runInterrupted]);
       outcome = cancelRequested
@@ -773,7 +783,10 @@ function handleOpenCodeEvent(
     const message = error ? errorMessage(error) : "OpenCode reported a session error.";
     emitter.activity("system", "failed", bounded(message));
     throw new Error(message);
-  } else if (event.type === "session.compacted") {
+  } else if (
+    event.type === "session.compacted"
+    || event.type === "session.next.compaction.ended"
+  ) {
     usageState.currentContextTokens = null;
     emitOpenCodeUsageSnapshot(usageState, emitter.rich);
     emitter.activity("system", "info", "OpenCode compacted the session context");

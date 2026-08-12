@@ -41,11 +41,22 @@ test("switches between Projects and Work and manages chat history", async () => 
   await expect(projectMenu.getByText("Grouping behavior", { exact: true })).toBeVisible();
   await projectMenu.getByRole("menuitemradio", { name: "Keep separate", exact: true }).click();
 
+  const branchName = (await page
+    .locator('[data-header-menu="branch"] > button span')
+    .first()
+    .textContent())?.trim();
+  if (!branchName) {
+    throw new Error("Current Git branch is unavailable");
+  }
+  const newChatAccessibleName = `New chat, Codex, Inertia, Branch ${branchName}, Idle`;
+
   await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Work", exact: true }).click();
   await expect(sidebar).toHaveClass(/sidebar-mode-activity/u);
   await expect(sidebar.getByRole("heading", { name: "Recent" })).toBeVisible();
-  const activityCard = sidebar.locator(".activity-thread.is-card.is-active");
-  const threadCard = activityCard.getByRole("button", { name: "New chat, Idle" });
+  const activityCard = sidebar.locator(".activity-thread.is-active");
+  const threadCard = activityCard.getByRole("button", {
+    name: newChatAccessibleName,
+  });
   await expect(threadCard).toBeVisible();
   const relativeTime = activityCard.locator(".activity-thread-topline time");
   await expect(relativeTime).toHaveCSS("opacity", "1");
@@ -59,12 +70,18 @@ test("switches between Projects and Work and manages chat history", async () => 
 
   await activityCard.getByRole("button", { name: "Thread actions for New chat" }).click();
   await sidebar.getByRole("menuitem", { name: "Done" }).click();
-  await expect(sidebar.getByText("History", { exact: true })).toBeVisible();
-  const historyCard = sidebar.locator(".activity-thread.is-history.is-active");
-  await expect(historyCard.getByRole("button", { name: "New chat, Idle" })).toBeVisible();
-  await historyCard.getByRole("button", { name: "Thread actions for New chat" }).click();
+  const doneToggle = sidebar.getByRole("button", { name: "Done 1" });
+  await expect(doneToggle).toHaveAttribute("aria-expanded", "false");
+  await doneToggle.click();
+  const doneCard = sidebar.locator(".work-thread-section.is-done .activity-thread.is-active");
+  await expect(doneCard.getByRole("button", {
+    name: newChatAccessibleName,
+  })).toBeVisible();
+  await doneCard.getByRole("button", { name: "Thread actions for New chat" }).click();
   await sidebar.getByRole("menuitem", { name: "Reopen" }).click();
-  await expect(sidebar.locator(".activity-thread.is-card.is-active").getByRole("button", { name: "New chat, Idle" })).toBeVisible();
+  await expect(sidebar.locator(".work-thread-section.is-recent .activity-thread.is-active").getByRole("button", {
+    name: newChatAccessibleName,
+  })).toBeVisible();
 
   await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Projects", exact: true }).click();
   await expect(sidebar).toHaveClass(/sidebar-mode-classic/u);

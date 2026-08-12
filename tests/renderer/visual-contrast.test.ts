@@ -87,6 +87,7 @@ describe("visual contrast system", () => {
         "danger",
         "warning",
         "status-working",
+        "status-approval",
         "status-input",
         "status-failed",
         "status-completed",

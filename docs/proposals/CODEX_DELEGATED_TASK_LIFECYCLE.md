@@ -1,7 +1,9 @@
 # Proposal: reliable Codex delegated-task lifecycle
 
-**Status:** Draft proposal  
-**Scope:** Codex App Server delegated agents, persistence semantics, regression coverage, and truthful presentation  
+**Status:** Draft proposal
+
+**Scope:** Codex App Server delegated agents, persistence semantics, regression coverage, and truthful presentation
+
 **Runtime changes in this pull request:** None
 
 ## Executive summary
@@ -194,6 +196,16 @@ A contradictory relationship should be ignored and recorded only as a bounded sa
 
 The adapter should add a narrowly scoped parser for the Codex activity/item shape that represents child creation, interaction, waiting, resumption, and shutdown.
 
+The parser must be version-tolerant without guessing. At proposal review time,
+the CLI-generated v2 schema exposes `collabAgentToolCall` with
+`receiverThreadIds`/`agentsStates` plus `subAgentActivity`, while the current
+[official App Server documentation](https://developers.openai.com/codex/app-server/)
+describes the newer `collabToolCall` shape with singular
+`receiverThreadId`/`newThreadId`/`agentStatus` fields. Treat these as explicit,
+separately tested wire variants that normalize to one internal structure. An
+unknown item type or an incomplete hybrid of the two shapes remains ordinary
+bounded activity and must not register ownership.
+
 The parser should return a normalized internal structure rather than exposing raw JSON beyond the protocol layer:
 
 ```ts
@@ -216,6 +228,12 @@ interface ParsedCodexCollaborationActivity {
 
 The exact accepted field names must be derived from a captured, redacted Codex App Server fixture. Unknown or future activity shapes should remain ordinary bounded activity and must not be guessed into lifecycle transitions.
 
+Collaboration prompts and raw reasoning are not display metadata. They may be
+used transiently by Codex itself, but the adapter must not copy them into a
+delegated trace description, progress, result, diagnostic, log, or renderer
+event. A trace can use bounded explicit role/name metadata, an allowlisted
+provider status message, final child agent output, or neutral local copy.
+
 When the activity identifies a child:
 
 1. register ownership;
@@ -234,9 +252,19 @@ Recommended limits:
 - maximum 1 MiB of serialized bounded notification data;
 - maximum age equal to the existing child-drain window or another explicit value no greater than a few seconds.
 
-Only notification methods already recognized as possible child lifecycle methods should be buffered. Approval requests, credential-bearing data, arbitrary server requests, and unrelated notifications must never enter this buffer.
+Only notification methods and item variants already recognized as possible
+child lifecycle evidence should be buffered. Parse them first into a bounded,
+allowlisted internal envelope containing only the required thread/turn/item
+identities, lifecycle status/error metadata, and sanitized final child-agent
+text. Do not retain whole JSON-RPC params merely because their method is
+allowlisted: raw reasoning content, collaboration prompts, command input or
+output, paths, environment data, approvals, credentials, arbitrary server
+requests, and unrelated item bodies must never enter this buffer.
 
-On valid ownership registration, replay the notifications synchronously in arrival order through the same child-notification handler used for normally ordered traffic.
+On valid ownership registration, replay the normalized envelopes
+synchronously in original arrival order through the same child lifecycle
+projector used for normally ordered traffic. Replay must not reconstruct or
+re-emit discarded raw fields.
 
 On timeout, contradictory ownership, parent cancellation, transport close, or disposal, discard the pending candidate without persisting raw content.
 
@@ -328,7 +356,29 @@ The timeout must never become unbounded and must not delay cancellation.
 
 A child that has already emitted a confirmed successful terminal event must never be changed to `lost` by parent settlement.
 
-### H. Keep `lost` as internal uncertainty, not failure
+### H. Define reconnect, restart, and cleanup ownership
+
+The ownership registry and pending buffer are transport-owned, in-memory state;
+they are never restored from the database or transferred to a replacement
+provider process.
+
+- A renderer reconnect reloads the already persisted delegated traces for the
+  active run and does not reset adapter sequence, duplicate registration, or
+  replay raw provider traffic.
+- A Codex transport close, cancellation, or adapter disposal clears every
+  pending envelope, child result accumulator, drain timer, and ownership link
+  before provider cleanup can be reported complete.
+- A utility-runtime restart must not revive the previous transport registry.
+  Existing recovery semantics settle the interrupted parent and any still-live
+  delegated traces once, using `cancelled` only with cancellation evidence and
+  the neutral uncertainty fallback otherwise.
+- Notifications from an old transport generation cannot be accepted by a new
+  run or mutate its traces, even when provider thread IDs are reused.
+
+These are cleanup and ownership barriers, not a request to persist raw wire
+traffic or silently reconnect an interrupted provider process.
+
+### I. Keep `lost` as internal uncertainty, not failure
 
 The first implementation can keep the existing persisted `lost` value to avoid an unnecessary database migration, but its user-facing meaning should change.
 
@@ -351,7 +401,7 @@ The detail for `lost` should explain the cause when known, for example:
 
 Do not claim the delegated work failed.
 
-### I. Coordinate with PR #92 without coupling the protocol fix to it
+### J. Coordinate with PR #92 without coupling the protocol fix to it
 
 Draft PR #92 proposes a broader visual language for truthful main-agent states. This implementation should reuse compatible tokens and copy where practical.
 
@@ -411,6 +461,10 @@ The fixture suite should cover:
 13. cancellation settles live children as cancelled;
 14. unowned child traffic is discarded after bounds expire;
 15. malformed or oversized collaboration activity is ignored safely.
+16. both the generated `collabAgentToolCall` variant and documented
+    `collabToolCall` variant normalize to the same ownership transition;
+17. reasoning, collaboration prompts, commands, paths, and unrelated item
+    bodies never enter pending envelopes or persisted/renderer traces.
 
 ---
 
@@ -451,6 +505,19 @@ Verify that normalized provider events:
 - survive snapshot reload;
 - remain attached to the authoritative conversation/run/turn identity;
 - do not leak raw provider data.
+
+### Reconnect, restart, and cleanup tests
+
+Verify that:
+
+- renderer reconnect hydrates one copy of each persisted child trace while the
+  active adapter continues with monotonic sequence;
+- transport close and cancellation discard pending envelopes and child result
+  accumulators before cleanup is confirmed;
+- utility-runtime restart settles interrupted live children once and cannot
+  replay an old transport generation into a resumed conversation;
+- snapshot reload preserves confirmed terminal child outcomes and neutral
+  uncertainty copy without requiring raw-wire persistence.
 
 ### Renderer tests
 
@@ -496,6 +563,13 @@ The implementation is complete when all of the following are true:
 - [ ] Confirmed failure, cancellation, and interruption remain distinct.
 - [ ] `lost` is presented as outcome unavailable, not as confirmed failure.
 - [ ] A sanitized real-wire fixture reproduces the original failure before the fix and passes after it.
+- [ ] Generated and documented collaboration-item variants normalize without
+      guessing at unknown or hybrid payloads.
+- [ ] Pending buffering, persistence, diagnostics, and renderer events exclude
+      raw reasoning, collaboration prompts, commands, paths, and unrelated item
+      bodies.
+- [ ] Renderer reconnect and utility-runtime restart preserve exact ownership,
+      cleanup, and no-stale-replay barriers.
 - [ ] Claude, Cursor, and OpenCode delegated-agent tests remain green.
 - [ ] `npm run check` and `npm run test:portable` pass.
 

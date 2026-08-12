@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, lstatSync, realpathSync } from "node:fs";
 import {
   lstat,
   open,
@@ -9,6 +9,7 @@ import {
   basename,
   isAbsolute,
   relative,
+  resolve,
   sep,
 } from "node:path";
 
@@ -26,6 +27,7 @@ import { AttachmentResolutionError } from "./attachment-errors.js";
 export interface RuntimeAttachmentBroker {
   resolve(
     attachmentId: string,
+    handoffId: string,
     signal?: AbortSignal,
   ): Promise<TrustedRuntimeAttachment | null>;
   release(
@@ -61,37 +63,66 @@ function sameIdentity(
 }
 
 function publicAttachmentError(): Error {
-  return new AttachmentResolutionError(
-    "The selected attachment is no longer available or could not be verified.",
-  );
+  return new AttachmentResolutionError();
 }
 
 export class TrustedAttachmentResolver {
+  private readonly trustedRoot: string;
+  private readonly rootAuthority: {
+    readonly dev: number;
+    readonly ino: number;
+    readonly uid: number | null;
+  };
+
   constructor(
-    private readonly trustedRoot: string,
+    trustedRoot: string,
     private readonly broker: RuntimeAttachmentBroker,
-  ) {}
+  ) {
+    const requested = resolve(trustedRoot);
+    const named = lstatSync(requested);
+    const canonical = realpathSync(requested);
+    if (
+      canonical !== requested
+      || !named.isDirectory()
+      || named.isSymbolicLink()
+      || (
+        process.platform !== "win32"
+        && (
+          (named.mode & 0o777) !== 0o700
+          || (
+            typeof process.getuid === "function"
+            && named.uid !== process.getuid()
+          )
+        )
+      )
+    ) throw publicAttachmentError();
+    this.trustedRoot = canonical;
+    this.rootAuthority = {
+      dev: named.dev,
+      ino: named.ino,
+      uid: typeof process.getuid === "function" ? named.uid : null,
+    };
+  }
 
   async resolveAll(
     requested: readonly ChatAttachment[],
+    handoffId: string,
     signal?: AbortSignal,
   ): Promise<ChatAttachment[]> {
-    return (await this.resolvePayloads(requested, signal))
+    return (await this.resolvePayloads(requested, handoffId, signal))
       .map(({ attachment }) => attachment);
   }
 
   async resolvePayloads(
     requested: readonly ChatAttachment[],
+    handoffId: string,
     signal?: AbortSignal,
   ): Promise<ResolvedAttachmentPayload[]> {
     if (requested.length > MAX_CHAT_ATTACHMENTS) throw publicAttachmentError();
     if (requested.length === 0) return [];
-    let canonicalRoot: string;
-    try {
-      canonicalRoot = await realpath(this.trustedRoot);
-    } catch {
-      throw publicAttachmentError();
-    }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+      .test(handoffId)) throw publicAttachmentError();
+    const canonicalRoot = await this.assertRootAuthority();
     const claimedIds: string[] = [];
     try {
       const seenIds = new Set<string>();
@@ -102,7 +133,11 @@ export class TrustedAttachmentResolver {
         if (signal?.aborted) throw publicAttachmentError();
         if (seenIds.has(untrusted.id)) throw publicAttachmentError();
         seenIds.add(untrusted.id);
-        const trusted = await this.broker.resolve(untrusted.id, signal);
+        const trusted = await this.broker.resolve(
+          untrusted.id,
+          handoffId,
+          signal,
+        );
         if (!trusted || trusted.id !== untrusted.id) throw publicAttachmentError();
         claimedIds.push(untrusted.id);
         const payload = await this.revalidate(canonicalRoot, trusted, signal);
@@ -179,6 +214,7 @@ export class TrustedAttachmentResolver {
       } finally {
         await file.close();
       }
+      await this.assertRootAuthority();
       return {
         attachment: {
           id: trusted.id,
@@ -189,6 +225,32 @@ export class TrustedAttachmentResolver {
         },
         bytes,
       };
+    } catch {
+      throw publicAttachmentError();
+    }
+  }
+
+  private async assertRootAuthority(): Promise<string> {
+    try {
+      const named = await lstat(this.trustedRoot);
+      const canonical = await realpath(this.trustedRoot);
+      if (
+        canonical !== this.trustedRoot
+        || !named.isDirectory()
+        || named.isSymbolicLink()
+        || !sameIdentity(named, this.rootAuthority)
+        || (
+          process.platform !== "win32"
+          && (
+            (named.mode & 0o777) !== 0o700
+            || (
+              this.rootAuthority.uid !== null
+              && named.uid !== this.rootAuthority.uid
+            )
+          )
+        )
+      ) throw publicAttachmentError();
+      return canonical;
     } catch {
       throw publicAttachmentError();
     }

@@ -104,6 +104,8 @@ const IPC = {
   checkAppUpdate: "inertia:check-app-update",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
+  prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
+  finishAttachmentHandoff: "inertia:finish-attachment-handoff",
   releaseAttachment: "inertia:release-attachment",
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
@@ -677,6 +679,42 @@ function registerIpcHandlers(): void {
     return await attachmentRegistry().import(value);
   });
 
+  ipcMain.handle(IPC.prepareAttachmentHandoff, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const [value] = args;
+    if (
+      typeof value !== "object"
+      || value === null
+      || Array.isArray(value)
+      || Object.keys(value).length !== 2
+      || !("requestId" in value)
+      || typeof value.requestId !== "string"
+      || !UUID_PATTERN.test(value.requestId)
+      || !("attachmentIds" in value)
+      || !Array.isArray(value.attachmentIds)
+      || value.attachmentIds.length < 1
+      || value.attachmentIds.length > MAX_CHAT_ATTACHMENTS
+      || new Set(value.attachmentIds).size !== value.attachmentIds.length
+      || value.attachmentIds.some((id) =>
+        typeof id !== "string" || !UUID_PATTERN.test(id))
+    ) {
+      throw new Error("Invalid attachment handoff.");
+    }
+    await attachmentRegistry().prepareHandoff(
+      value.requestId,
+      value.attachmentIds,
+    );
+  });
+
+  ipcMain.handle(IPC.finishAttachmentHandoff, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const [value] = args;
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      throw new Error("Invalid attachment handoff.");
+    }
+    attachmentRegistry().finishHandoff(value);
+  });
+
   ipcMain.handle(IPC.releaseAttachment, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     const [value] = args;
@@ -1028,8 +1066,12 @@ async function bootstrap(): Promise<void> {
   runtimeSupervisor = new RuntimeSupervisor({
     systemBootId: bootstrapSafety.systemBootId,
     attachmentBroker: {
-      resolve: (attachmentId, signal) =>
-        attachmentRegistry().resolveForRuntime(attachmentId, signal),
+      resolve: (attachmentId, handoffId, signal) =>
+        attachmentRegistry().resolveForRuntime(
+          attachmentId,
+          handoffId,
+          signal,
+        ),
       release: (attachmentId) =>
         attachmentRegistry().release(attachmentId),
     },

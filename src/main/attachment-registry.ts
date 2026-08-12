@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   constants,
+  lstatSync,
+  realpathSync,
 } from "node:fs";
 import {
   type FileHandle,
@@ -24,7 +26,10 @@ import {
   sep,
 } from "node:path";
 
-import { MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from "../shared/attachments.js";
+import {
+  MAX_CHAT_ATTACHMENTS,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+} from "../shared/attachments.js";
 import type { ChatAttachment } from "../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments.js";
 import {
@@ -36,11 +41,7 @@ const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 const ATTACHMENT_RELEASE_ATTEMPTS = 3;
 const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
-// Renderer cleanup can cross the utility-process attachment claim while a
-// submitted message is moving between IPC queues. Keep deletion revocable for
-// one short turn of the event loop so the authoritative runtime resolve can
-// adopt the capability without racing a stale renderer cleanup.
-const ATTACHMENT_RELEASE_GRACE_MS = 250;
+const ATTACHMENT_HANDOFF_TIMEOUT_MS = 30_000;
 const ATTACHMENT_SESSION_PREFIX = "session-";
 const ATTACHMENT_SESSION_DIRECTORY =
   /^session-[A-Za-z0-9_-]{6}$/u;
@@ -52,14 +53,31 @@ const TRANSIENT_UNLINK_CODES = new Set([
 ]);
 const OWNED_ATTACHMENT_FILE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json)$/iu;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
   readonly extension: string;
+  readonly dev: number;
+  readonly ino: number;
 }
 
 interface PendingAttachmentRelease {
   readonly promise: Promise<boolean>;
-  cancel(): void;
+  begin(): boolean;
+  cancel(): boolean;
+}
+
+interface PendingAttachmentHandoff {
+  readonly attachmentIds: Set<string>;
+  readonly timer: ReturnType<typeof setTimeout>;
+}
+
+interface AttachmentDirectoryAuthority {
+  readonly path: string;
+  readonly dev: number;
+  readonly ino: number;
+  readonly uid: number | null;
 }
 
 export interface ValidatedAttachmentPreview {
@@ -78,6 +96,8 @@ export interface AttachmentRegistryLimits {
   readonly maxBytes?: number;
   readonly reservedRecords?: number;
   readonly reservedBytes?: number;
+  /** Test-only bound for deterministic handoff expiry coverage. */
+  readonly handoffTimeoutMs?: number;
 }
 
 export interface AttachmentStorageReservation {
@@ -185,6 +205,30 @@ function sameIdentity(
   right: { dev: number; ino: number },
 ): boolean {
   return left.dev === right.dev && left.ino === right.ino;
+}
+
+function captureAttachmentDirectoryAuthority(
+  directory: string,
+): AttachmentDirectoryAuthority {
+  const requested = resolve(directory);
+  const named = lstatSync(requested);
+  const canonical = realpathSync(requested);
+  assertOwnedDirectory(named);
+  if (
+    canonical !== requested
+    || (
+      process.platform !== "win32"
+      && (named.mode & 0o777) !== 0o700
+    )
+  ) {
+    throw new Error("Temporary attachment storage authority is invalid.");
+  }
+  return {
+    path: canonical,
+    dev: named.dev,
+    ino: named.ino,
+    uid: typeof process.getuid === "function" ? named.uid : null,
+  };
 }
 
 function assertOwnedDirectory(
@@ -368,6 +412,14 @@ function boundedLimit(value: number | undefined, maximum: number): number {
     : maximum;
 }
 
+function boundedHandoffTimeout(value: number | undefined): number {
+  return process.env.NODE_ENV === "test"
+    && typeof value === "number"
+    && Number.isFinite(value)
+    ? Math.max(1, Math.min(Math.trunc(value), ATTACHMENT_HANDOFF_TIMEOUT_MS))
+    : ATTACHMENT_HANDOFF_TIMEOUT_MS;
+}
+
 function errorCode(error: unknown): string | null {
   return typeof error === "object"
     && error !== null
@@ -417,22 +469,29 @@ function fullReservation(): AttachmentStorageReservation {
 export class AttachmentRegistry {
   private readonly records = new Map<string, AttachmentRegistryRecord>();
   private readonly releases = new Map<string, PendingAttachmentRelease>();
+  private readonly handoffs = new Map<string, PendingAttachmentHandoff>();
+  private readonly attachmentHandoffs = new Map<string, Set<string>>();
   private readonly revokedAttachmentIds = new Set<string>();
+  private readonly directory: string;
+  private readonly directoryAuthority: AttachmentDirectoryAuthority;
   private readonly maxRecords: number;
   private readonly maxBytes: number;
   private readonly reservedRecords: number;
   private readonly reservedBytes: number;
+  private readonly handoffTimeoutMs: number;
   private importTail: Promise<void> = Promise.resolve();
   private disposed = false;
   private disposal: Promise<void> | null = null;
 
   constructor(
-    private readonly directory: string,
+    directory: string,
     limits: AttachmentRegistryLimits = {},
     private readonly unlinkFile: (path: string) => Promise<void> = unlink,
     private readonly waitForRetry:
       (delayMs: number) => Promise<void> = waitForReleaseRetry,
   ) {
+    this.directoryAuthority = captureAttachmentDirectoryAuthority(directory);
+    this.directory = this.directoryAuthority.path;
     this.maxRecords = boundedLimit(
       limits.maxRecords,
       MAX_SESSION_ATTACHMENT_RECORDS,
@@ -449,6 +508,7 @@ export class AttachmentRegistry {
       0,
       Math.min(Math.trunc(limits.reservedBytes ?? 0), this.maxBytes),
     );
+    this.handoffTimeoutMs = boundedHandoffTimeout(limits.handoffTimeoutMs);
   }
 
   usage(): AttachmentStorageReservation {
@@ -459,6 +519,59 @@ export class AttachmentRegistry {
         0,
       ),
     };
+  }
+
+  async prepareHandoff(
+    handoffId: string,
+    attachmentIds: readonly string[],
+  ): Promise<void> {
+    if (
+      this.disposed
+      || !UUID_PATTERN.test(handoffId)
+      || attachmentIds.length < 1
+      || attachmentIds.length > MAX_CHAT_ATTACHMENTS
+      || new Set(attachmentIds).size !== attachmentIds.length
+      || attachmentIds.some((id) => !UUID_PATTERN.test(id))
+    ) {
+      throw new Error("Invalid attachment handoff.");
+    }
+    await this.importTail;
+    await this.assertDirectoryAuthority();
+    if (this.disposed || this.handoffs.has(handoffId)) {
+      throw new Error("Attachment handoff is unavailable.");
+    }
+    for (const id of attachmentIds) {
+      if (
+        !this.records.has(id)
+        || this.revokedAttachmentIds.has(id)
+        || this.releases.has(id)
+        || (this.attachmentHandoffs.get(id)?.size ?? 0) > 0
+      ) {
+        throw new Error("Attachment handoff is unavailable.");
+      }
+    }
+    const handoff: PendingAttachmentHandoff = {
+      attachmentIds: new Set(attachmentIds),
+      timer: setTimeout(() => this.finishHandoff(handoffId), this.handoffTimeoutMs),
+    };
+    handoff.timer.unref();
+    this.handoffs.set(handoffId, handoff);
+    for (const id of attachmentIds) {
+      this.attachmentHandoffs.set(id, new Set([handoffId]));
+    }
+  }
+
+  finishHandoff(handoffId: string): void {
+    const handoff = this.handoffs.get(handoffId);
+    if (!handoff) return;
+    this.handoffs.delete(handoffId);
+    clearTimeout(handoff.timer);
+    for (const id of handoff.attachmentIds) {
+      this.detachHandoffAttachment(handoffId, id);
+      if (!this.attachmentHandoffs.has(id)) {
+        this.releases.get(id)?.begin();
+      }
+    }
   }
 
   async import(values: readonly unknown[]): Promise<ChatAttachment[]> {
@@ -521,7 +634,7 @@ export class AttachmentRegistry {
     } catch (error) {
       await Promise.all(registered.map(async (attachment) => {
         this.records.delete(attachment.id);
-        await unlink(attachment.path).catch(() => undefined);
+        await this.unlinkOwnedRecord(attachment).catch(() => undefined);
       }));
       throw error;
     }
@@ -549,16 +662,17 @@ export class AttachmentRegistry {
   }
 
   /**
-   * Claims a capability for an accepted runtime send. Unlike preview and
-   * ordinary resolve operations, this may revoke a renderer cleanup that
-   * crossed the runtime request in another IPC queue.
+   * Claims a capability for exactly one renderer-prepared message send. The
+   * send request UUID binds the cross-IPC handoff, so an unrelated runtime
+   * resolve cannot revive a genuine renderer deletion.
    */
   async resolveForRuntime(
     id: string,
+    handoffId: string,
     signal?: AbortSignal,
   ): Promise<TrustedRuntimeAttachment | null> {
     assertNotAborted(signal);
-    this.cancelPendingRelease(id);
+    if (!this.consumeHandoff(handoffId, id)) return null;
     return await this.resolve(id, signal);
   }
 
@@ -570,11 +684,14 @@ export class AttachmentRegistry {
     if (this.revokedAttachmentIds.has(id)) return null;
     const record = this.records.get(id);
     if (!record) return null;
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    const canonicalRoot = await this.assertDirectoryAuthority();
     if (this.revokedAttachmentIds.has(id)) return null;
-    const canonicalRoot = await realpath(this.directory);
     const pathInfo = await lstat(record.path);
-    if (!pathInfo.isFile() || pathInfo.isSymbolicLink()) {
+    if (
+      !pathInfo.isFile()
+      || pathInfo.isSymbolicLink()
+      || !sameIdentity(record, pathInfo)
+    ) {
       throw new Error("The registered attachment is not a safe regular file.");
     }
     const canonicalPath = await realpath(record.path);
@@ -598,6 +715,7 @@ export class AttachmentRegistry {
       if (
         !before.isFile()
         || !sameIdentity(pathInfo, before)
+        || !sameIdentity(record, before)
         || before.size !== record.size
       ) {
         throw new Error("The registered attachment changed after import.");
@@ -608,6 +726,7 @@ export class AttachmentRegistry {
       assertNotAborted(signal);
       if (
         after.size !== before.size
+        || !sameIdentity(record, after)
         || after.mtimeMs !== before.mtimeMs
         || after.ctimeMs !== before.ctimeMs
       ) {
@@ -625,6 +744,7 @@ export class AttachmentRegistry {
       ) {
         throw new Error("The registered attachment metadata no longer matches its content.");
       }
+      await this.assertDirectoryAuthority();
       return {
         attachment: {
           id: record.id,
@@ -642,46 +762,46 @@ export class AttachmentRegistry {
   }
 
   async release(id: string): Promise<boolean> {
-    return await this.startRelease(id, false);
+    return await this.startRelease(id, true);
   }
 
   async releaseFromRenderer(id: string): Promise<boolean> {
-    return await this.startRelease(id, true);
+    return await this.startRelease(id, !this.attachmentHandoffs.has(id));
   }
 
   private async startRelease(
     id: string,
-    allowRuntimeClaim: boolean,
+    beginImmediately: boolean,
   ): Promise<boolean> {
     const pending = this.releases.get(id);
     if (pending) return await pending.promise;
     const record = this.records.get(id);
     if (!record) return false;
     this.revokedAttachmentIds.add(id);
-    let cancelRelease = (): void => undefined;
+    let beginRelease = (): boolean => false;
+    let cancelRelease = (): boolean => false;
     const releasePromise = new Promise<boolean>((resolveRelease, rejectRelease) => {
       let settled = false;
-      const beginRelease = () => {
+      beginRelease = () => {
+        if (settled) return false;
         settled = true;
         void this.releaseRecord(record).then(resolveRelease, rejectRelease);
+        return true;
       };
-      const timer = allowRuntimeClaim
-        ? setTimeout(beginRelease, ATTACHMENT_RELEASE_GRACE_MS)
-        : null;
-      timer?.unref();
       cancelRelease = () => {
-        if (settled) return;
+        if (settled) return false;
         settled = true;
-        if (timer) clearTimeout(timer);
         resolveRelease(false);
+        return true;
       };
-      if (!allowRuntimeClaim) beginRelease();
     });
     const release: PendingAttachmentRelease = {
       promise: releasePromise,
+      begin: beginRelease,
       cancel: cancelRelease,
     };
     this.releases.set(id, release);
+    if (beginImmediately) release.begin();
     try {
       return await release.promise;
     } finally {
@@ -700,31 +820,123 @@ export class AttachmentRegistry {
 
   private async disposeExclusive(): Promise<void> {
     await this.importTail;
+    for (const handoff of this.handoffs.values()) clearTimeout(handoff.timer);
+    this.handoffs.clear();
+    this.attachmentHandoffs.clear();
     const releases = [...this.releases.values()];
     for (const release of releases) release.cancel();
     await Promise.allSettled(releases.map(({ promise }) => promise));
     const records = [...this.records.values()];
     this.records.clear();
     this.revokedAttachmentIds.clear();
-    await Promise.all(records.map(({ path }) =>
-      unlink(path).catch(() => undefined)));
+    await Promise.all(records.map((record) =>
+      this.unlinkOwnedRecord(record).catch(() => undefined)));
   }
 
-  private cancelPendingRelease(id: string): void {
+  private cancelPendingRelease(id: string): boolean {
     const pending = this.releases.get(id);
-    if (!pending) return;
-    pending.cancel();
+    if (!pending || !pending.cancel()) return false;
     if (this.releases.get(id) === pending) this.releases.delete(id);
     this.revokedAttachmentIds.delete(id);
+    return true;
+  }
+
+  private consumeHandoff(handoffId: string, attachmentId: string): boolean {
+    const handoff = this.handoffs.get(handoffId);
+    if (!handoff?.attachmentIds.has(attachmentId)) return false;
+    const pending = this.releases.get(attachmentId);
+    if (pending && !this.cancelPendingRelease(attachmentId)) return false;
+    handoff.attachmentIds.delete(attachmentId);
+    this.detachHandoffAttachment(handoffId, attachmentId);
+    if (handoff.attachmentIds.size === 0) {
+      this.handoffs.delete(handoffId);
+      clearTimeout(handoff.timer);
+    }
+    return true;
+  }
+
+  private detachHandoffAttachment(
+    handoffId: string,
+    attachmentId: string,
+  ): void {
+    const handoffs = this.attachmentHandoffs.get(attachmentId);
+    handoffs?.delete(handoffId);
+    if (handoffs?.size === 0) this.attachmentHandoffs.delete(attachmentId);
+  }
+
+  private dropAttachmentHandoffs(attachmentId: string): void {
+    const handoffIds = this.attachmentHandoffs.get(attachmentId);
+    this.attachmentHandoffs.delete(attachmentId);
+    for (const handoffId of handoffIds ?? []) {
+      const handoff = this.handoffs.get(handoffId);
+      handoff?.attachmentIds.delete(attachmentId);
+      if (handoff?.attachmentIds.size === 0) {
+        this.handoffs.delete(handoffId);
+        clearTimeout(handoff.timer);
+      }
+    }
+  }
+
+  private async assertDirectoryAuthority(): Promise<string> {
+    const named = await lstat(this.directory);
+    const canonical = await realpath(this.directory);
+    if (
+      canonical !== this.directoryAuthority.path
+      || !named.isDirectory()
+      || named.isSymbolicLink()
+      || !sameIdentity(this.directoryAuthority, named)
+      || (
+        process.platform !== "win32"
+        && (named.mode & 0o777) !== 0o700
+      )
+      || (
+        this.directoryAuthority.uid !== null
+        && named.uid !== this.directoryAuthority.uid
+      )
+    ) {
+      throw new Error("Temporary attachment storage authority changed.");
+    }
+    return canonical;
+  }
+
+  private async unlinkOwnedRecord(
+    record: AttachmentRegistryRecord,
+  ): Promise<void> {
+    const canonicalRoot = await this.assertDirectoryAuthority();
+    let named: Awaited<ReturnType<typeof lstat>>;
+    try {
+      named = await lstat(record.path);
+    } catch (error) {
+      if (errorCode(error) === "ENOENT") return;
+      throw error;
+    }
+    const canonicalPath = await realpath(record.path);
+    if (
+      !named.isFile()
+      || named.isSymbolicLink()
+      || !sameIdentity(record, named)
+      || canonicalPath !== join(
+        canonicalRoot,
+        `${record.id}.${record.extension}`,
+      )
+    ) {
+      throw new Error("Temporary attachment storage authority changed.");
+    }
+    await this.unlinkFile(record.path);
   }
 
   private async releaseRecord(
     record: AttachmentRegistryRecord,
   ): Promise<boolean> {
-    await unlinkWithRetry(record.path, this.unlinkFile, this.waitForRetry);
+    await unlinkWithRetry(
+      record.path,
+      async () => this.unlinkOwnedRecord(record),
+      this.waitForRetry,
+    );
     if (this.records.get(record.id) === record) {
       this.records.delete(record.id);
     }
+    this.dropAttachmentHandoffs(record.id);
     this.revokedAttachmentIds.delete(record.id);
     return true;
   }
@@ -732,25 +944,77 @@ export class AttachmentRegistry {
   private async persist(
     attachment: ValidatedAttachmentImport,
   ): Promise<AttachmentRegistryRecord> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    const canonicalRoot = await this.assertDirectoryAuthority();
     const id = randomUUID();
     const path = join(this.directory, `${id}.${attachment.extension}`);
-    const file = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+    const file = await open(
+      path,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow,
+      0o600,
+    );
+    let identity: Awaited<ReturnType<FileHandle["stat"]>> | null = null;
     try {
       await file.writeFile(attachment.bytes);
+      identity = await file.stat();
+      if (
+        !identity.isFile()
+        || identity.size !== attachment.size
+        || (
+          process.platform !== "win32"
+          && (identity.mode & 0o777) !== 0o600
+        )
+      ) {
+        throw new Error("Temporary attachment storage changed during import.");
+      }
     } finally {
       await file.close();
     }
-    const record: AttachmentRegistryRecord = {
-      id,
-      name: attachment.displayName,
-      path,
-      mimeType: attachment.mimeType,
-      size: attachment.size,
-      digest: attachment.digest,
-      extension: attachment.extension,
-    };
-    this.records.set(id, record);
-    return record;
+    try {
+      await this.assertDirectoryAuthority();
+      const named = await lstat(path);
+      const canonicalPath = await realpath(path);
+      if (
+        !identity
+        || !named.isFile()
+        || named.isSymbolicLink()
+        || !sameIdentity(identity, named)
+        || canonicalPath !== join(
+          canonicalRoot,
+          `${id}.${attachment.extension}`,
+        )
+      ) {
+        throw new Error("Temporary attachment storage changed during import.");
+      }
+      const record: AttachmentRegistryRecord = {
+        id,
+        name: attachment.displayName,
+        path,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        digest: attachment.digest,
+        extension: attachment.extension,
+        dev: identity.dev,
+        ino: identity.ino,
+      };
+      this.records.set(id, record);
+      return record;
+    } catch (error) {
+      if (identity) {
+        const partial: AttachmentRegistryRecord = {
+          id,
+          name: attachment.displayName,
+          path,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          digest: attachment.digest,
+          extension: attachment.extension,
+          dev: identity.dev,
+          ino: identity.ino,
+        };
+        await this.unlinkOwnedRecord(partial).catch(() => undefined);
+      }
+      throw error;
+    }
   }
 }

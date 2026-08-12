@@ -268,6 +268,7 @@ export type RuntimeWorkerEvent =
       type: "runtime.attachment-request";
       requestId: string;
       attachmentId: string;
+      handoffId: string;
     }
   | {
       type: "runtime.attachment-release-request";
@@ -680,9 +681,25 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     };
   }
   if (
+    value.type === "runtime.attachment-request"
+    && Object.keys(value).length === 4
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+    && typeof value.attachmentId === "string"
+    && UUID_PATTERN.test(value.attachmentId)
+    && typeof value.handoffId === "string"
+    && UUID_PATTERN.test(value.handoffId)
+  ) {
+    return {
+      type: value.type,
+      requestId: value.requestId,
+      attachmentId: value.attachmentId,
+      handoffId: value.handoffId,
+    };
+  }
+  if (
     (
-      value.type === "runtime.attachment-request"
-      || value.type === "runtime.attachment-release-request"
+      value.type === "runtime.attachment-release-request"
       || value.type === "runtime.attachment-cleanup-request"
       || value.type === "runtime.attachment-relinquish-request"
     )

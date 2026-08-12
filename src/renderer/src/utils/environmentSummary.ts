@@ -248,7 +248,8 @@ export function buildEnvironmentSummary({
                 ? ownerProject.name
                 : `${ownerProject.name} (${ownerProject.path})`
               : "Unavailable project",
-          run.canStop && run.conversationId
+          run.conversationId
+            && (run.canStop || run.conversationId !== conversationId)
             ? ownerConversation
               ? conversationRunOwnerLabel(ownerConversation)
               : "Unavailable conversation"

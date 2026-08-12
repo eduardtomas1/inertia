@@ -380,6 +380,74 @@ describe("environment summary projection", () => {
     );
   });
 
+  it("identifies passive attention owned by another chat in the active project", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [
+        run({
+          id: "active-chat-failure",
+          status: "failed",
+          attentionState: "unseen",
+          canStop: false,
+          finishedAt: now,
+          startedAt: "2026-07-28T12:02:00.000Z",
+        }),
+        run({
+          id: "sibling-chat-failure",
+          conversationId: "conversation-2",
+          status: "failed",
+          attentionState: "unseen",
+          canStop: false,
+          finishedAt: now,
+          startedAt: "2026-07-28T12:01:00.000Z",
+        }),
+      ],
+      subagents: [],
+      messages: [],
+      projects: [{
+        id: "project-1",
+        name: "Inertia",
+        path: "/workspace/inertia",
+      }],
+      conversations: [
+        {
+          id: "conversation-1",
+          projectId: "project-1",
+          title: "Current chat",
+          branch: "main",
+          worktreePath: null,
+        },
+        {
+          id: "conversation-2",
+          projectId: "project-1",
+          title: "Release chat",
+          branch: "codex/release",
+          worktreePath: "/workspace/.inertia/worktrees/release",
+        },
+      ],
+    });
+
+    expect(summary.checks).toMatchObject([
+      {
+        id: "active-chat-failure",
+        contextLabel: null,
+        canAcknowledge: true,
+        canDismiss: true,
+      },
+      {
+        id: "sibling-chat-failure",
+        contextLabel: "Release chat (codex/release)",
+        canAcknowledge: true,
+        canDismiss: true,
+      },
+    ]);
+  });
+
   it("offers previews only for live, safely routed service ports", () => {
     const summary = buildEnvironmentSummary({
       projectId: "project-1",

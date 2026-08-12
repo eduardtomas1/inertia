@@ -213,6 +213,7 @@ export function runGit(
     let truncated = false;
     let settled = false;
     let termination: Promise<void> | undefined;
+    let terminalError: GitError | undefined;
     let truncatedOutputDrainTimer: NodeJS.Timeout | undefined;
     const abortError = new GitError(
       "timeout",
@@ -242,7 +243,9 @@ export function runGit(
     });
 
     const terminateAndFinish = (error?: GitError): void => {
-      if (settled || termination) return;
+      if (settled) return;
+      terminalError ??= error;
+      if (termination) return;
       termination = requireProcessTreeTermination(
         terminateProcessTree,
         child,
@@ -251,7 +254,7 @@ export function runGit(
       );
       void termination.then(
         () => {
-          if (error) finish(error);
+          if (terminalError) finish(terminalError);
           else finish(undefined, bufferedResult());
         },
         () => {

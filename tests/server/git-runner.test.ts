@@ -813,6 +813,55 @@ setInterval(() => {}, 1000);
     }
   });
 
+  it("preserves an abort that arrives during bounded-output termination", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-bounded-abort-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(
+      directory,
+      "status",
+      'process.stdout.write("x".repeat(64 * 1024)); setInterval(() => {}, 1000);',
+    );
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    let allowTermination!: () => void;
+    const terminationGate = new Promise<void>((resolve) => {
+      allowTermination = resolve;
+    });
+    const terminateProcessTree = vi.fn(async (child, force) => {
+      await terminationGate;
+      return terminateProcessTreeAndWait(child, force);
+    });
+    try {
+      const controller = new AbortController();
+      const running = runGit(directory, ["status"], {
+        signal: controller.signal,
+        timeoutMs: 5_000,
+        maxOutputBytes: 1_024,
+        truncateOutput: true,
+        failureMessage: "Git status failed.",
+      }, {
+        terminateProcessTree,
+      });
+
+      await waitFor(
+        "bounded-output process-tree termination to start",
+        () => terminateProcessTree.mock.calls.length === 1,
+      );
+      controller.abort();
+      allowTermination();
+
+      await expect(running).rejects.toMatchObject({
+        code: "timeout",
+        message: "Git inspection was cancelled.",
+      } satisfies Partial<GitError>);
+      expect(terminateProcessTree).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
   it.skipIf(process.platform === "win32")(
     "removes a detached POSIX Git descendant that escaped the root process group",
     async () => {

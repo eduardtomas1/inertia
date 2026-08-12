@@ -239,6 +239,42 @@ describe("environment summary header popover", () => {
     expect(onDismissRun).toHaveBeenCalledWith(failed);
   });
 
+  it("disambiguates actions for identical failures owned by sibling chats", () => {
+    const currentFailure = environmentCheck({
+      id: "current-failure",
+      conversationId: "conversation-1",
+      label: "Typecheck",
+      status: "failed",
+      canAcknowledge: true,
+      canDismiss: true,
+    });
+    const siblingFailure = environmentCheck({
+      id: "sibling-failure",
+      conversationId: "conversation-2",
+      label: "Typecheck",
+      status: "failed",
+      contextLabel: "Release chat (codex/release)",
+      canAcknowledge: true,
+      canDismiss: true,
+    });
+
+    render(<HeaderHarness environmentSummary={{
+      ...summary,
+      checks: [currentFailure, siblingFailure],
+    }} />);
+
+    expect(screen.getByRole("button", { name: "Acknowledge Typecheck" }))
+      .toBeVisible();
+    expect(screen.getByRole("button", {
+      name: "Acknowledge Typecheck · Release chat (codex/release)",
+    })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Dismiss Typecheck" }))
+      .toBeVisible();
+    expect(screen.getByRole("button", {
+      name: "Dismiss Typecheck · Release chat (codex/release)",
+    })).toBeVisible();
+  });
+
   it("moves focus to the next run control when an action removes its row", () => {
     const running = environmentCheck({
       id: "running-check",

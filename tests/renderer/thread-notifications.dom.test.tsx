@@ -83,7 +83,7 @@ describe("thread notification lifecycle", () => {
                 showWorkspace: vi.fn(),
                 closeSidebar: vi.fn(),
                 closePalette: vi.fn(),
-                closeActivity: vi.fn(),
+                closeEnvironment: vi.fn(),
                 closeCommitDialog: vi.fn(),
                 closePullRequestDialog: vi.fn(),
                 closeProviderAuth: () => setProviderAuthOpen(false),

@@ -15,6 +15,8 @@ import { GitError } from "./types";
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
 const PREPARED_ABORT_CLEANUP_MS = 500;
+const PROCESS_TREE_TERMINATION_FAILURE =
+  "Git stopped responding, and its process tree could not be confirmed stopped.";
 
 export interface GitProcessResult {
   stdout: Buffer;
@@ -25,6 +27,7 @@ export interface GitProcessResult {
 export interface RunGitOptions {
   timeoutMs?: number;
   deadlineAt?: number;
+  signal?: AbortSignal;
   maxOutputBytes?: number;
   truncateOutput?: boolean;
   input?: Buffer;
@@ -47,6 +50,37 @@ export interface PreparedGitRefUpdateContext {
    * read-only callback can no longer enqueue filesystem work.
    */
   mutate(operation: () => undefined): void;
+}
+
+/**
+ * Returns the values from two settled parallel Git inspections, prioritizing
+ * a failed process-tree termination over an ordinary sibling cancellation or
+ * command failure when either inspection rejects.
+ */
+export function isGitProcessTreeTerminationFailure(
+  error: unknown,
+): error is GitError {
+  return error instanceof GitError
+    && error.code === "operation-failed"
+    && error.message === PROCESS_TREE_TERMINATION_FAILURE;
+}
+
+export function gitInspectionSettlementValues<First, Second>(
+  results: readonly [
+    PromiseSettledResult<First>,
+    PromiseSettledResult<Second>,
+  ],
+): [First, Second] {
+  const failures = results.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  const terminationFailure = failures.find(({ reason }) =>
+    isGitProcessTreeTerminationFailure(reason));
+  if (terminationFailure) throw terminationFailure.reason;
+  if (failures.length > 0) throw failures[0]?.reason;
+  return results.map((result) => (
+    (result as PromiseFulfilledResult<First | Second>).value
+  )) as [First, Second];
 }
 
 function inspectionArguments(args: readonly string[]): string[] {
@@ -147,6 +181,12 @@ export function runGit(
   const deadlineTimeoutMs = options.deadlineAt === undefined
     ? configuredTimeoutMs
     : Math.floor(options.deadlineAt - Date.now());
+  if (options.signal?.aborted) {
+    return Promise.reject(new GitError(
+      "timeout",
+      "Git inspection was cancelled.",
+    ));
+  }
   if (deadlineTimeoutMs <= 0) {
     return Promise.reject(new GitError(
       "timeout",
@@ -173,7 +213,13 @@ export function runGit(
     let truncated = false;
     let settled = false;
     let termination: Promise<void> | undefined;
+    let terminalError: GitError | undefined;
     let truncatedOutputDrainTimer: NodeJS.Timeout | undefined;
+    const abortError = new GitError(
+      "timeout",
+      "Git inspection was cancelled.",
+    );
+    const onAbort = (): void => terminateAndFinish(abortError);
 
     const finish = (
       error?: GitError,
@@ -185,6 +231,7 @@ export function runGit(
       if (truncatedOutputDrainTimer) {
         clearTimeout(truncatedOutputDrainTimer);
       }
+      options.signal?.removeEventListener("abort", onAbort);
       if (error) rejectProcess(error);
       else if (result) resolveProcess(result);
     };
@@ -196,7 +243,9 @@ export function runGit(
     });
 
     const terminateAndFinish = (error?: GitError): void => {
-      if (settled || termination) return;
+      if (settled) return;
+      terminalError ??= error;
+      if (termination) return;
       termination = requireProcessTreeTermination(
         terminateProcessTree,
         child,
@@ -205,13 +254,13 @@ export function runGit(
       );
       void termination.then(
         () => {
-          if (error) finish(error);
+          if (terminalError) finish(terminalError);
           else finish(undefined, bufferedResult());
         },
         () => {
           finish(new GitError(
             "operation-failed",
-            "Git stopped responding, and its process tree could not be confirmed stopped.",
+            PROCESS_TREE_TERMINATION_FAILURE,
           ));
         },
       );
@@ -224,6 +273,8 @@ export function runGit(
       ));
     }, timeoutMs);
     timer.unref();
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
     if (options.input && child.stdin) {
       child.stdin.on("error", () => undefined);
       child.stdin.end(options.input);
@@ -419,7 +470,7 @@ function runPreparedGitRefTransaction(
         () => finish(error),
         () => finish(new GitError(
           "operation-failed",
-          "Git stopped responding, and its process tree could not be confirmed stopped.",
+          PROCESS_TREE_TERMINATION_FAILURE,
         )),
       );
     };

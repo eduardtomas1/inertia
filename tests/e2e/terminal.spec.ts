@@ -103,17 +103,6 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(true);
 
-  await page.getByRole("button", { name: /^Open runs/u }).click();
-  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
-  await expect(page.getByRole("dialog", { name: "Runs" })).toBeVisible();
-  await expect.poll(
-    () => app.nativePreviewIsVisible(hostilePreviewUrl),
-  ).toBe(false);
-  await page.getByRole("button", { name: "Close runs" }).click();
-  await expect.poll(
-    () => app.nativePreviewIsVisible(hostilePreviewUrl),
-  ).toBe(true);
-
   await page.keyboard.press(
     process.platform === "darwin" ? "Meta+K" : "Control+K",
   );

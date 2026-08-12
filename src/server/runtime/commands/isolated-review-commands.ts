@@ -9,7 +9,7 @@ import {
   parseUnifiedDiff,
 } from "../../../shared/diff-review";
 import type { RuntimeStore } from "../../database";
-import { getUnifiedDiff } from "../../git";
+import { getUnifiedDiff, GitError } from "../../git";
 import {
   buildReviewSummaryPrompt,
   DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS,
@@ -62,9 +62,14 @@ export interface IsolatedReviewCommandDependencies {
 export function createIsolatedReviewCommandHandler(
   dependencies: IsolatedReviewCommandDependencies,
 ): RuntimeCommandHandler {
+  const pendingSelectionQuestions = new Map<string, {
+    cancelled: boolean;
+    abort: AbortController;
+  }>();
   return defineRuntimeCommandHandler([
     "review.selection.ask",
     "review.selection.revise",
+    "review.selection.cancel",
     "review.summary.generate",
     "review.summary.cancel",
   ], async (socket, command) => {
@@ -81,6 +86,7 @@ export function createIsolatedReviewCommandHandler(
         if (
           dependencies.turns.isActive(conversation.id)
           || dependencies.isolatedRuns.has(conversation.id)
+          || pendingSelectionQuestions.has(conversation.id)
         ) {
           throw new RuntimeRequestError(
             "Wait for the current agent or review turn to finish first.",
@@ -95,19 +101,32 @@ export function createIsolatedReviewCommandHandler(
               ?? "The selected review agent is unavailable.",
           );
         }
-        const context = await selectedReviewContext(
-          dependencies.store,
-          command.payload,
-          "ask",
-          dependencies.secureFiles,
-        );
-        const assembled = assembleReadOnlyReviewRequest(
-          dependencies.store.conversationPath(conversation.id),
-          context.visibleContent,
-          context.requestContext,
-        );
+        const pending = {
+          cancelled: false,
+          abort: new AbortController(),
+        };
+        pendingSelectionQuestions.set(conversation.id, pending);
         try {
-          const completion = await dependencies.isolatedRuns.run({
+          const context = await selectedReviewContext(
+            dependencies.store,
+            command.payload,
+            "ask",
+            dependencies.secureFiles,
+            pending.abort.signal,
+          );
+          if (pending.cancelled) {
+            dependencies.send(socket, {
+              type: "request.ok",
+              requestId: command.requestId,
+            });
+            return "handled";
+          }
+          const assembled = assembleReadOnlyReviewRequest(
+            dependencies.store.conversationPath(conversation.id),
+            context.visibleContent,
+            context.requestContext,
+          );
+          const completionPromise = dependencies.isolatedRuns.run({
             kind: "selection-ask",
             projectId: conversation.projectId,
             conversationId: conversation.id,
@@ -149,6 +168,14 @@ export function createIsolatedReviewCommandHandler(
               };
             },
           });
+          const completion = await completionPromise;
+          if (pending.cancelled) {
+            dependencies.send(socket, {
+              type: "request.ok",
+              requestId: command.requestId,
+            });
+            return "handled";
+          }
           dependencies.send(socket, {
             type: "request.result",
             requestId: command.requestId,
@@ -158,6 +185,16 @@ export function createIsolatedReviewCommandHandler(
             },
           });
         } catch (error) {
+          if (
+            pending.cancelled
+            && !(error instanceof GitError && error.code === "operation-failed")
+          ) {
+            dependencies.send(socket, {
+              type: "request.ok",
+              requestId: command.requestId,
+            });
+            return "handled";
+          }
           if (
             error instanceof IsolatedRunError
             && error.reason === "cancelled"
@@ -172,7 +209,35 @@ export function createIsolatedReviewCommandHandler(
             throw new RuntimeRequestError(error.message);
           }
           throw error;
+        } finally {
+          if (pendingSelectionQuestions.get(conversation.id) === pending) {
+            pendingSelectionQuestions.delete(conversation.id);
+          }
         }
+        return "handled";
+      }
+      case "review.selection.cancel": {
+        const conversation = dependencies.store.conversation(
+          command.payload.conversationId,
+        );
+        const stopped = dependencies.isolatedRuns.stopConversation(
+          conversation.id,
+          "selection-ask",
+        );
+        const pending = pendingSelectionQuestions.get(conversation.id);
+        if (pending) {
+          pending.cancelled = true;
+          pending.abort.abort();
+        }
+        if (!stopped && !pending) {
+          throw new RuntimeRequestError(
+            "This thread does not have an active review question.",
+          );
+        }
+        dependencies.send(socket, {
+          type: "request.ok",
+          requestId: command.requestId,
+        });
         return "handled";
       }
       case "review.selection.revise": {

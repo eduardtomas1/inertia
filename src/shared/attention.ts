@@ -19,7 +19,7 @@ function terminalRun(run: WorkspaceRun): boolean {
 }
 
 /**
- * Canonical operational attention selector shared by Work and Runs.
+ * Canonical operational attention selector shared by workspace projections.
  *
  * Waiting requests remain actionable regardless of a corrupt or stale
  * disposition. A seen failure still requires an explicit acknowledgement;

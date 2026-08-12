@@ -269,12 +269,6 @@ describe("visual contrast system", () => {
     );
   });
 
-  it("uses the theme-aware foreground for Runs badges", () => {
-    expect(css).toMatch(
-      /\.activity-count\s*\{[^}]*color:\s*var\(--accent-text\);[^}]*background:\s*var\(--accent\);/su,
-    );
-  });
-
   it("animates only active ultra composer frames and honors reduced motion", () => {
     const ultraFrame = cssBlock(
       '.chat-workspace[data-reasoning-effort="ultra"] .composer::after',

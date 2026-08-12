@@ -120,6 +120,37 @@ process.stdout.write(JSON.stringify({
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
+  it("does not start Git for a pre-aborted inspection", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-pre-abort-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    const markerPath = join(directory, "started.txt");
+    writeNodeSubcommand(
+      directory,
+      "status",
+      `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "started");`,
+    );
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    try {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(runGit(directory, ["status"], {
+        signal: controller.signal,
+        failureMessage: "Git status failed.",
+      })).rejects.toMatchObject({
+        code: "timeout",
+        message: "Git inspection was cancelled.",
+      });
+      await expect(readFile(markerPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
   it("settles a ref-update timeout when a prepared callback never settles", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-timeout-"));
     temporaryDirectories.push(directory);
@@ -566,6 +597,58 @@ process.stdin.on("data", (chunk) => {
     }
   });
 
+  it("removes Git descendants before an aborted inspection settles", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-abort-tree-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    const pidPath = join(directory, "descendant.pid");
+    writeNodeSubcommand(directory, "status", `
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const descendant = spawn(
+  process.execPath,
+  ["-e", "setInterval(() => {}, 1000)"],
+  { stdio: "ignore" },
+);
+fs.writeFileSync(${JSON.stringify(pidPath)}, String(descendant.pid));
+setInterval(() => {}, 1000);
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    try {
+      const controller = new AbortController();
+      const running = runGit(directory, ["status"], {
+        signal: controller.signal,
+        timeoutMs: 5_000,
+        failureMessage: "Git status failed.",
+      });
+      await waitFor("the Git descendant PID", async () => {
+        try {
+          return (await readFile(pidPath, "utf8")).trim().length > 0;
+        } catch {
+          return false;
+        }
+      });
+      const descendantPid = Number(await readFile(pidPath, "utf8"));
+      descendantPids.push(descendantPid);
+
+      controller.abort();
+      await expect(running).rejects.toMatchObject({
+        code: "timeout",
+        message: "Git inspection was cancelled.",
+      } satisfies Partial<GitError>);
+      await waitFor(
+        "the aborted Git descendant to stop",
+        () => !processExists(descendantPid),
+      );
+      await rm(directory, { force: true, recursive: true });
+      temporaryDirectories.splice(temporaryDirectories.indexOf(directory), 1);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
   it.each([
     {
       label: "timeout",
@@ -724,6 +807,55 @@ setInterval(() => {}, 1000);
           throw error;
         }
       });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("preserves an abort that arrives during bounded-output termination", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-bounded-abort-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(
+      directory,
+      "status",
+      'process.stdout.write("x".repeat(64 * 1024)); setInterval(() => {}, 1000);',
+    );
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    let allowTermination!: () => void;
+    const terminationGate = new Promise<void>((resolve) => {
+      allowTermination = resolve;
+    });
+    const terminateProcessTree = vi.fn(async (child, force) => {
+      await terminationGate;
+      return terminateProcessTreeAndWait(child, force);
+    });
+    try {
+      const controller = new AbortController();
+      const running = runGit(directory, ["status"], {
+        signal: controller.signal,
+        timeoutMs: 5_000,
+        maxOutputBytes: 1_024,
+        truncateOutput: true,
+        failureMessage: "Git status failed.",
+      }, {
+        terminateProcessTree,
+      });
+
+      await waitFor(
+        "bounded-output process-tree termination to start",
+        () => terminateProcessTree.mock.calls.length === 1,
+      );
+      controller.abort();
+      allowTermination();
+
+      await expect(running).rejects.toMatchObject({
+        code: "timeout",
+        message: "Git inspection was cancelled.",
+      } satisfies Partial<GitError>);
+      expect(terminateProcessTree).toHaveBeenCalledTimes(1);
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;

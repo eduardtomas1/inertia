@@ -64,6 +64,9 @@ async function untrackedPreview(
       truncated: false,
     };
   } catch {
+    if (signal?.aborted) {
+      throw new GitError("timeout", "Git inspection was cancelled.");
+    }
     return {
       text: `Unable to preview untracked file ${path}.\n`,
       truncated: true,
@@ -82,13 +85,14 @@ export async function getUnifiedDiff(
     throw new Error("Secure repository file access is unavailable.");
   }
   if (options.signal?.aborted) {
-    throw new GitError("timeout", "Git inspection took too long.");
+    throw new GitError("timeout", "Git inspection was cancelled.");
   }
   if (secureRoot) {
     await secureFiles!.verifyRoot(secureRoot, options.signal);
   }
   const root = secureRoot?.root ?? await repositoryRoot(repositoryPath, {
     deadlineAt: options.deadlineAt,
+    signal: options.signal,
   });
   const maxFiles = boundedInteger(
     options.maxFiles,
@@ -102,9 +106,13 @@ export async function getUnifiedDiff(
   );
   const status = await getRepositoryStatus(root, {
     deadlineAt: options.deadlineAt,
+    signal: options.signal,
   });
   const requested = options.paths
-    ? await validatedPaths(root, options.paths)
+    ? await validatedPaths(root, options.paths, {
+        deadlineAt: options.deadlineAt,
+        signal: options.signal,
+      })
     : null;
   const requestedSet = requested ? new Set(requested) : null;
   const candidates = status.files.filter(
@@ -130,11 +138,15 @@ export async function getUnifiedDiff(
       "--unified=3",
       ...(options.ignoreWhitespace ? ["--ignore-all-space"] : []),
     ];
-    const args = (await hasHead(root, { deadlineAt: options.deadlineAt }))
+    const args = (await hasHead(root, {
+      deadlineAt: options.deadlineAt,
+      signal: options.signal,
+    }))
       ? [...baseArgs, "HEAD", "--", ...tracked]
       : [...baseArgs, "--cached", "--", ...tracked];
     const result = await runGitInspection(root, args, {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: maxBytes,
       truncateOutput: true,
       failureMessage: "Unable to generate the repository diff.",
@@ -146,8 +158,11 @@ export async function getUnifiedDiff(
   for (const file of selected) {
     if (file.status !== "untracked") continue;
     if (
-      options.deadlineAt !== undefined
-      && Date.now() >= options.deadlineAt
+      options.signal?.aborted
+      || (
+        options.deadlineAt !== undefined
+        && Date.now() >= options.deadlineAt
+      )
     ) {
       throw new GitError(
         "timeout",

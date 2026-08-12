@@ -45,6 +45,29 @@ function unavailable(message = "The secure file operation could not be completed
   return new SecureFileError("unavailable", message);
 }
 
+function cancelled(): Error {
+  return unavailable("The secure file operation was cancelled.");
+}
+
+async function beforeSecureFileAbort<T>(
+  operation: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return await operation();
+  let rejectCancellation!: (error: Error) => void;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const onAbort = (): void => rejectCancellation(cancelled());
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    if (signal.aborted) throw cancelled();
+    return await Promise.race([operation(), cancellation]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 function missingPath(error: unknown): boolean {
   return typeof error === "object"
     && error !== null
@@ -118,8 +141,14 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
     signal?: AbortSignal,
   ): Promise<SecureFileRootCapability> {
     if (this.closed || signal?.aborted) throw unavailable();
-    const canonicalRoot = await realpath(root);
-    const rootInfo = await this.inspectRoot(canonicalRoot);
+    const canonicalRoot = await beforeSecureFileAbort(
+      () => realpath(root),
+      signal,
+    );
+    const rootInfo = await beforeSecureFileAbort(
+      () => this.inspectRoot(canonicalRoot),
+      signal,
+    );
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {
       throw new SecureFileError(
         "unsafe",
@@ -138,7 +167,10 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
     signal?: AbortSignal,
   ): Promise<void> {
     if (this.closed || signal?.aborted) throw unavailable();
-    const rootInfo = await this.inspectRoot(root.root);
+    const rootInfo = await beforeSecureFileAbort(
+      () => this.inspectRoot(root.root),
+      signal,
+    );
     if (
       !rootInfo.isDirectory()
       || rootInfo.isSymbolicLink()
@@ -208,19 +240,25 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
         "The secure file path was invalid.",
       );
     }
-    await this.verifyRoot(root);
+    await this.verifyRoot(root, signal);
     const basename = segments.pop();
     if (!basename) throw unavailable();
     const parentIdentities: SecureFileIdentity[] = [];
     let cursor = root.root;
     for (const segment of segments) {
       cursor = resolve(cursor, segment);
-      const info = await lstat(cursor, { bigint: true });
+      const info = await beforeSecureFileAbort(
+        () => lstat(cursor, { bigint: true }),
+        signal,
+      );
       if (!info.isDirectory() || info.isSymbolicLink()) throw unavailable();
       parentIdentities.push(this.identity(info));
     }
     const targetPath = resolve(cursor, basename);
-    let target = await lstat(targetPath, { bigint: true }).catch((error) => {
+    let target = await beforeSecureFileAbort(
+      () => lstat(targetPath, { bigint: true }),
+      signal,
+    ).catch((error) => {
       if (missingPath(error)) return null;
       throw error;
     });
@@ -232,7 +270,10 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
         parentIdentities,
         path,
       }, signal);
-      target = await lstat(targetPath, { bigint: true }).catch((error) => {
+      target = await beforeSecureFileAbort(
+        () => lstat(targetPath, { bigint: true }),
+        signal,
+      ).catch((error) => {
         if (missingPath(error)) return null;
         throw error;
       });

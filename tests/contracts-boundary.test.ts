@@ -113,6 +113,7 @@ describe("shared contracts boundary", () => {
       "git.selection.revert",
       "git.selection.undo",
       "review.selection.ask",
+      "review.selection.cancel",
       "review.selection.revise",
       "review.state.set",
       "review.note.create",

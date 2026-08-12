@@ -159,6 +159,13 @@ export const gitCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("review.selection.cancel"),
+      payload: z.object({ conversationId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("review.selection.revise"),
       payload: diffReviewSelectionSchema,
     })

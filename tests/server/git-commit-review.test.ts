@@ -906,20 +906,25 @@ setInterval(() => {}, 1000);
     const head = git(root, "rev-parse", "HEAD");
     const foreignLock = join(root, ".git", "foreign-operation.lock");
     writeFileSync(foreignLock, "foreign lock\n");
+    let deadlineAt = Date.now() + 20_000;
     let preparedMutationStarted = false;
     const options: Parameters<typeof commitReviewedChanges>[4] = {
       // Keep review/checkpoint setup outside the prepared-mutation deadline.
       // Loaded Windows runners can otherwise expire before this test reaches
       // the synchronous mutation seam it is intended to exercise.
-      deadlineAt: Date.now() + 30_000,
+      get deadlineAt() {
+        return deadlineAt;
+      },
     };
     options.testHooks = {
       beforeTransactionLock: () => {
-        options.deadlineAt = Date.now() + 2_000;
+        // Measure the prepared-transaction deadline from the boundary
+        // under test, not from the unrelated review setup above.
+        deadlineAt = Date.now() + 2_000;
       },
       duringPreparedMutation: () => {
         preparedMutationStarted = true;
-        while (Date.now() <= (options.deadlineAt ?? 0) + 5) {
+        while (Date.now() <= deadlineAt + 5) {
           // Cross the aggregate deadline without yielding to its timer.
         }
       },

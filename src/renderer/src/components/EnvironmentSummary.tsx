@@ -1,19 +1,40 @@
 import {
+  useLayoutEffect,
+  useRef,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import {
   Bot,
+  Check,
+  ExternalLink,
   FileText,
   GitBranch,
   GitCompareArrows,
   Image,
   Laptop,
   ListChecks,
+  Square,
+  Trash2,
 } from "lucide-react";
 
 import { chatAttachmentKind } from "@shared/attachments";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
+import { IconButton } from "./ui";
 
 interface EnvironmentSummaryProps {
   summary: EnvironmentSummarySnapshot;
+  onStopRun: (run: EnvironmentSummarySnapshot["checks"][number]) => void;
+  onOpenRunPreview: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onAcknowledgeRun: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onDismissRun: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onRestoreActionFocus: () => void;
 }
 
 function subagentLabel(
@@ -24,10 +45,93 @@ function subagentLabel(
     ?? "Delegated agent";
 }
 
+function runStatusLabel(
+  status: EnvironmentSummarySnapshot["checks"][number]["status"],
+): string {
+  if (status === "waiting") return "Waiting";
+  if (status === "failed") return "Needs attention";
+  if (status === "succeeded") return "Completed";
+  if (status === "cancelled") return "Stopped";
+  return "Running";
+}
+
 export function EnvironmentSummary({
   summary,
+  onStopRun,
+  onOpenRunPreview,
+  onAcknowledgeRun,
+  onDismissRun,
+  onRestoreActionFocus,
 }: EnvironmentSummaryProps): React.JSX.Element {
   useNativePreviewSuspension(true);
+  const pendingActionFocusRef = useRef<{
+    runId: string;
+    row: HTMLLIElement | null;
+    source: HTMLButtonElement;
+    fallback: HTMLButtonElement | null;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingActionFocusRef.current;
+    if (!pending || pending.source.isConnected) {
+      return;
+    }
+    pendingActionFocusRef.current = null;
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLElement
+      && activeElement !== document.body
+      && activeElement.isConnected
+    ) {
+      return;
+    }
+    const remainingRowAction = summary.checks.some(
+      (check) => check.id === pending.runId,
+    ) && pending.row?.isConnected
+      ? pending.row.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      : null;
+    if (remainingRowAction) {
+      remainingRowAction.focus();
+      return;
+    }
+    if (pending.fallback?.isConnected && !pending.fallback.disabled) {
+      pending.fallback.focus();
+      return;
+    }
+    onRestoreActionFocus();
+  }, [onRestoreActionFocus, summary.checks]);
+
+  const runAndPreserveFocus = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    check: EnvironmentSummarySnapshot["checks"][number],
+    action: (run: EnvironmentSummarySnapshot["checks"][number]) => void,
+  ): void => {
+    if (document.activeElement === event.currentTarget) {
+      const row = event.currentTarget.closest("li");
+      const siblingRows = row?.parentElement
+        ? Array.from(row.parentElement.children).filter(
+            (element): element is HTMLLIElement => element instanceof HTMLLIElement,
+          )
+        : [];
+      const rowIndex = row ? siblingRows.indexOf(row) : -1;
+      const candidateRows = rowIndex >= 0
+        ? [
+            ...siblingRows.slice(rowIndex + 1),
+            ...siblingRows.slice(0, rowIndex).reverse(),
+          ]
+        : [];
+      pendingActionFocusRef.current = {
+        runId: check.id,
+        row,
+        source: event.currentTarget,
+        fallback: candidateRows
+          .map((candidate) => candidate.querySelector<HTMLButtonElement>(
+            "button:not(:disabled)",
+          ))
+          .find((candidate) => candidate !== null) ?? null,
+      };
+    }
+    action(check);
+  };
   const hasWorkspaceDetails = Boolean(
     summary.changes
     || summary.branch
@@ -104,8 +208,57 @@ export function EnvironmentSummary({
           <ul>
             {summary.checks.map((check) => (
               <li key={check.id}>
-                <span>{check.label}</span>
-                <small>{check.status === "waiting" ? "Waiting" : check.status === "failed" ? "Needs attention" : "Running"}</small>
+                <span title={`${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}>
+                  {check.label}
+                  {check.contextLabel ? ` · ${check.contextLabel}` : ""}
+                </span>
+                <small>{runStatusLabel(check.status)}</small>
+                <div className="environment-summary-run-actions">
+                  {check.canOpenPreview && (
+                    <IconButton
+                      label={`Open preview for ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
+                      onClick={() => onOpenRunPreview(check)}
+                    >
+                      <ExternalLink size={12} />
+                    </IconButton>
+                  )}
+                  {check.canAcknowledge && (
+                    <IconButton
+                      label={`Acknowledge ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
+                      onClick={(event) => runAndPreserveFocus(
+                        event,
+                        check,
+                        onAcknowledgeRun,
+                      )}
+                    >
+                      <Check size={12} />
+                    </IconButton>
+                  )}
+                  {check.canDismiss && (
+                    <IconButton
+                      label={`Dismiss ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
+                      onClick={(event) => runAndPreserveFocus(
+                        event,
+                        check,
+                        onDismissRun,
+                      )}
+                    >
+                      <Trash2 size={12} />
+                    </IconButton>
+                  )}
+                  {check.canStop && (
+                    <IconButton
+                      label={`Stop ${check.label}${check.contextLabel ? ` · ${check.contextLabel}` : ""}`}
+                      onClick={(event) => runAndPreserveFocus(
+                        event,
+                        check,
+                        onStopRun,
+                      )}
+                    >
+                      <Square size={12} />
+                    </IconButton>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

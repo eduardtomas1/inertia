@@ -597,6 +597,7 @@ export function createWorkspaceSceneModel({
         reviewStates: workspaceTools.reviewStates,
         notes: workspaceTools.reviewNotes,
         summaryLoading: busyAction === "review.summary.generate",
+        questionRunning: workspaceTools.selectionQuestionRunning,
         wrapLines: settings.wrapDiffs,
         lastReversal: workspaceTools.lastDiffReversal,
         onRefresh: () => {
@@ -616,6 +617,7 @@ export function createWorkspaceSceneModel({
         onGenerateSummary: workspaceTools.generateReviewSummary,
         onCancelSummary: workspaceTools.cancelReviewSummary,
         onAsk: workspaceTools.askAboutDiff,
+        onCancelAsk: workspaceTools.cancelDiffQuestion,
         onRequestRevision: workspaceTools.requestDiffRevision,
         onRevert: workspaceTools.revertDiffSelection,
         onUndoReversal: workspaceTools.undoDiffReversal,

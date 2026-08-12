@@ -1,8 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import Database from "better-sqlite3";
-
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
@@ -32,256 +30,172 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test("opens and dismisses the prioritized Runs surface accessibly", async () => {
-  const trigger = page.getByRole("button", { name: /^Open runs/u });
-  await trigger.focus();
-  await trigger.click();
-  const center = page.getByRole("dialog", { name: "Runs" });
-  await expect(center).toBeVisible();
-  await expect(center).toBeFocused();
-  await expect(center.getByRole("heading", { name: "Runs" })).toBeVisible();
+test("omits Runs and preserves adjacent toolbar navigation responsively", async () => {
+  const verifyToolbar = async (): Promise<void> => {
+    const header = page.locator(".workspace-header");
+    const environment = header.getByRole("button", {
+      name: /environment summary$/u,
+    });
+    const theme = header.getByRole("button", {
+      name: /^Change theme/u,
+    });
+    const tools = header.getByRole("button", {
+      name: /workspace tools$/u,
+    });
 
-  const runRows = center.locator(".activity-run");
-  if (await runRows.count()) {
-    const timestamp = runRows.first().locator("time");
-    await expect(timestamp).toHaveCSS("opacity", "1");
-    await runRows.first().hover();
-    await expect(timestamp).toHaveCSS("opacity", "1");
-  } else {
-    await expect(center.getByRole("status")).toContainText("All clear");
-  }
+    await expect(header.getByRole("button", { name: /^Open runs/u }))
+      .toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Runs" })).toHaveCount(0);
+    await expect(environment).toBeVisible();
+    await expect(theme).toBeVisible();
+    await expect(tools).toBeVisible();
 
-  const runsControls = center.locator("button:not([disabled])");
-  const firstRunsControl = runsControls.first();
-  const lastRunsControl = runsControls.last();
-  await lastRunsControl.focus();
-  await page.keyboard.press("Tab");
-  await expect(firstRunsControl).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
-  await expect(lastRunsControl).toBeFocused();
+    if (await environment.getAttribute("aria-pressed") === "true") {
+      await environment.click();
+      await expect(page.getByRole("dialog", { name: "Environment summary" }))
+        .toHaveCount(0);
+    }
+    await environment.click();
+    await expect(page.getByRole("dialog", { name: "Environment summary" }))
+      .toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(environment).toBeFocused();
 
-  await page.keyboard.press("Escape");
-  await expect(center).toHaveCount(0);
-  await expect(trigger).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(theme).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(tools).toBeFocused();
 
-  await trigger.click();
-  await expect(page.getByRole("dialog", { name: "Runs" })).toBeVisible();
-  await page.locator(".activity-center-backdrop").click({ position: { x: 3, y: 3 } });
-  await expect(page.getByRole("dialog", { name: "Runs" })).toHaveCount(0);
+    const gaps = await Promise.all([
+      environment.evaluate((button) => {
+        const current = button.getBoundingClientRect();
+        const next = button.closest(".environment-summary-anchor")
+          ?.nextElementSibling?.getBoundingClientRect();
+        return next ? next.left - current.right : Number.NaN;
+      }),
+      theme.evaluate((button) => {
+        const current = button.getBoundingClientRect();
+        const next = button.nextElementSibling?.getBoundingClientRect();
+        return next ? next.left - current.right : Number.NaN;
+      }),
+    ]);
+    for (const gap of gaps) {
+      expect(gap).toBeGreaterThanOrEqual(0);
+      expect(gap).toBeLessThanOrEqual(6);
+    }
+    await expectNoViewportOverflow();
+  };
+
+  await resizeWindow(1440, 920);
+  await verifyToolbar();
+  await resizeWindow(420, 760);
+  await verifyToolbar();
   expect(rendererErrors).toEqual([]);
 });
 
-test("presents chronological activity with provider, project, and branch identity", async ({ browserName: _browserName }, testInfo) => {
-  await resizeWindow(1440, 920);
+test("keeps preview and failed-run actions in Environment", async () => {
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspaceDirectory, {
     recoverInterruptedRuns: false,
   });
-  let snapshot = store.shellSnapshot();
-  const project = snapshot.projects.find(
-    ({ id }) => id === snapshot.activeProjectId,
-  ) ?? snapshot.projects[0] ?? store.createProject("Inertia", workspaceDirectory);
-  snapshot = store.shellSnapshot();
-  const conversation = store.createConversation(
-    project.id,
-    "Review provider activity",
-  );
-  store.updateConversation(conversation.id, { branch: "codex/activity-list" });
+  const snapshot = store.shellSnapshot();
+  if (!snapshot.activeProjectId || !snapshot.activeConversationId) {
+    store.close();
+    throw new Error("Environment action fixture setup failed.");
+  }
+  const preview = store.createWorkspaceRun({
+    id: randomUUID(),
+    kind: "service",
+    projectId: snapshot.activeProjectId,
+    conversationId: snapshot.activeConversationId,
+    actionId: "preview",
+    label: "Docs preview",
+    detail: "npm run preview",
+    status: "running",
+    port: 4173,
+  });
+  const failure = store.createWorkspaceRun({
+    id: randomUUID(),
+    kind: "check",
+    projectId: snapshot.activeProjectId,
+    conversationId: snapshot.activeConversationId,
+    actionId: "typecheck",
+    attentionState: "unseen",
+    label: "Typecheck fixture",
+    detail: "npm run typecheck",
+    status: "failed",
+    port: null,
+  });
+  const dismissedFailure = store.createWorkspaceRun({
+    id: randomUUID(),
+    kind: "check",
+    projectId: snapshot.activeProjectId,
+    conversationId: snapshot.activeConversationId,
+    actionId: "lint",
+    attentionState: "unseen",
+    label: "Lint fixture",
+    detail: "npm run lint",
+    status: "failed",
+    port: null,
+  });
   store.close();
 
-  const recent = new Date();
-  const yesterday = new Date(recent);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const earlier = new Date(recent);
-  earlier.setDate(earlier.getDate() - 3);
-  const database = new Database(databasePath);
-  const insertRun = database.prepare(`
-    INSERT INTO workspace_runs (
-      id, kind, project_id, conversation_id, action_id, label, detail,
-      status, attention_state, port, started_at, finished_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'succeeded', 'acknowledged', NULL, ?, ?)
-  `);
-  insertRun.run(
-    randomUUID(),
-    "agent",
-    project.id,
-    conversation.id,
-    null,
-    "Codex · GPT-5",
-    conversation.title,
-    new Date(recent.getTime() - 5_000).toISOString(),
-    recent.toISOString(),
-  );
-  insertRun.run(
-    randomUUID(),
-    "check",
-    project.id,
-    conversation.id,
-    "typecheck",
-    "Typecheck workspace",
-    "npm run typecheck",
-    new Date(yesterday.getTime() - 5_000).toISOString(),
-    yesterday.toISOString(),
-  );
-  insertRun.run(
-    randomUUID(),
-    "source-control",
-    project.id,
-    conversation.id,
-    null,
-    "Publish reviewed branch",
-    "Push completed",
-    new Date(earlier.getTime() - 5_000).toISOString(),
-    earlier.toISOString(),
-  );
-  database.close();
+  try {
+    await page.reload();
+    await resizeWindow(420, 760);
+    const environment = page.getByRole("dialog", {
+      name: "Environment summary",
+    });
+    if (await environment.count() === 0) {
+      await page.getByRole("button", { name: /environment summary$/u })
+        .click();
+    }
+    await expect(environment.getByText("Docs preview", { exact: false }))
+      .toBeVisible();
+    await expect(environment.getByText("Typecheck fixture", { exact: false }))
+      .toBeVisible();
+    await expect(environment.getByText("Lint fixture", { exact: false }))
+      .toBeVisible();
+    await expectNoViewportOverflow();
 
-  await page.reload();
-  await page.getByRole("button", { name: /^Open runs/u }).click();
-  const center = page.getByRole("dialog", { name: "Runs" });
-  await expect(center.getByRole("heading", { name: "Recent" })).toBeVisible();
-  await expect(center.getByRole("heading", { name: "Yesterday" })).toBeVisible();
-  await expect(center.getByRole("heading", { name: "Earlier" })).toBeVisible();
-  const providerIcon = center.locator('[data-provider-id="codex"]').first();
-  const providerRun = providerIcon.locator("..").locator("..");
-  await expect(providerIcon).toBeVisible();
-  await expect(providerRun).toContainText("Codex");
-  await expect(providerRun).toContainText("Inertia");
-  await expect(providerRun).toContainText("codex/activity-list");
-  await expectNoViewportOverflow();
+    await environment.getByRole("button", {
+      name: "Acknowledge Typecheck fixture · npm run typecheck",
+    }).click();
+    await expect(environment.getByText("Typecheck fixture", { exact: false }))
+      .toHaveCount(0);
+    await environment.getByRole("button", {
+      name: "Dismiss Lint fixture · npm run lint",
+    }).click();
+    await expect(environment.getByText("Lint fixture", { exact: false }))
+      .toHaveCount(0);
 
-  const screenshotPath = testInfo.outputPath("activity-list-wide.png");
-  await page.screenshot({ animations: "disabled", path: screenshotPath });
-  await testInfo.attach("activity-list-wide", {
-    path: screenshotPath,
-    contentType: "image/png",
-  });
-
-  const panelWidth = await center.evaluate((panel) => panel.getBoundingClientRect().width);
-  expect(panelWidth).toBeGreaterThanOrEqual(400);
-  expect(panelWidth).toBeLessThanOrEqual(421);
-  const narrowProviderRun = center.locator(
-    '.activity-run:has([data-provider-id="codex"])',
-  );
-  await expect(narrowProviderRun.locator(".activity-run-provider-meta")).toBeVisible();
-  await expect(narrowProviderRun.locator(".activity-run-project-meta")).toBeVisible();
-  await expect(narrowProviderRun.locator(".activity-run-branch-meta")).toBeVisible();
-  expect(await narrowProviderRun.evaluate((row) => {
-    const panel = row.closest(".activity-center")?.getBoundingClientRect();
-    const essential = [
-      ".activity-run-provider-meta",
-      ".activity-run-project-meta",
-      ".activity-run-branch-meta",
-    ].map((selector) => row.querySelector(selector)?.getBoundingClientRect());
-    return Boolean(panel && essential.every((rect) => (
-      rect && rect.width > 0 && rect.left >= panel.left && rect.right <= panel.right
-    )));
-  })).toBe(true);
-  const narrowCheckRun = center.locator(".activity-run").filter({
-    hasText: "Typecheck workspace",
-  });
-  await expect(narrowCheckRun.locator(".activity-run-provider-meta")).toBeVisible();
-  await expect(narrowCheckRun.locator(".activity-run-project-meta")).toBeVisible();
-  await expect(narrowCheckRun.locator(".activity-run-branch-meta")).toBeVisible();
-  await expect(narrowCheckRun.locator(".activity-run-context-meta")).toBeHidden();
-  expect(await narrowCheckRun.evaluate((row) => {
-    const provider = row.querySelector<HTMLElement>(".activity-run-provider-meta");
-    const projectMeta = row.querySelector<HTMLElement>(".activity-run-project-meta");
-    const branch = row.querySelector<HTMLElement>(".activity-run-branch-meta");
-    return Boolean(
-      provider && provider.clientWidth >= provider.scrollWidth
-      && projectMeta && projectMeta.clientWidth >= projectMeta.scrollWidth
-      && branch && branch.clientWidth > 0,
+    const openPreview = environment.getByRole("button", {
+      name: "Open preview for Docs preview · npm run preview",
+    });
+    await openPreview.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("tab", { name: /Preview/u })).toHaveAttribute(
+      "aria-selected",
+      "true",
     );
-  })).toBe(true);
-  await expectNoViewportOverflow();
-
-  const narrowScreenshotPath = testInfo.outputPath("activity-list-420px-panel.png");
-  await page.screenshot({ animations: "disabled", path: narrowScreenshotPath });
-  await testInfo.attach("activity-list-420px-panel", {
-    path: narrowScreenshotPath,
-    contentType: "image/png",
-  });
-  await page.keyboard.press("Escape");
-  expect(rendererErrors).toEqual([]);
-});
-
-test("keeps seen distinct from explicit acknowledgement and preserves dismissed run history", async () => {
-  const runId = randomUUID();
-  const databasePath = join(testDirectory, "data", "inertia.sqlite");
-  const fixtureStore = new RuntimeStore(databasePath, workspaceDirectory, {
-    recoverInterruptedRuns: false,
-  });
-  let fixtureSnapshot = fixtureStore.shellSnapshot();
-  const fixtureProject = fixtureSnapshot.projects.find(
-    ({ id }) => id === fixtureSnapshot.activeProjectId,
-  ) ?? fixtureSnapshot.projects[0]
-    ?? fixtureStore.createProject("Inertia", workspaceDirectory);
-  fixtureSnapshot = fixtureStore.shellSnapshot();
-  const fixtureConversation = fixtureSnapshot.conversations.find(
-    ({ id }) => id === fixtureSnapshot.activeConversationId,
-  ) ?? fixtureSnapshot.conversations.find(
-    ({ projectId }) => projectId === fixtureProject.id,
-  ) ?? fixtureStore.createConversation(fixtureProject.id, "Runs fixture");
-  fixtureStore.selectConversation(fixtureConversation.id);
-  fixtureStore.close();
-
-  let database = new Database(databasePath);
-  const now = new Date().toISOString();
-  database.prepare(`
-    INSERT INTO workspace_runs (
-      id, kind, project_id, conversation_id, action_id, label, detail,
-      status, attention_state, port, started_at, finished_at
-    ) VALUES (?, 'source-control', ?, ?, NULL, 'Simulated push failure',
-      'The remote rejected this test push.', 'failed', 'unseen', NULL, ?, ?)
-  `).run(runId, fixtureProject.id, fixtureConversation.id, now, now);
-  database.close();
-
-  await page.reload();
-  const trigger = page.getByRole("button", { name: /^Open runs/u });
-  await expect(trigger).toHaveAccessibleName(/1 item needs attention/u);
-  await trigger.click();
-  const center = page.getByRole("dialog", { name: "Runs" });
-  const row = center.locator(".activity-run").filter({ hasText: "Simulated push failure" });
-  await expect(row.getByText("New", { exact: true })).toBeVisible();
-
-  await row.getByRole("button", { name: "View details" }).click();
-  await expect(row.getByText("The remote rejected this test push.")).toBeVisible();
-  await expect.poll(() => {
-    database = new Database(databasePath, { readonly: true });
-    const attention = (database.prepare(
-      "SELECT attention_state AS state FROM workspace_runs WHERE id = ?",
-    ).get(runId) as { state: string }).state;
-    database.close();
-    return attention;
-  }).toBe("seen");
-  await expect(row).toBeVisible();
-
-  await row.getByRole("button", { name: "Acknowledge Simulated push failure" }).click();
-  await expect.poll(() => {
-    database = new Database(databasePath, { readonly: true });
-    const attention = (database.prepare(
-      "SELECT attention_state AS state FROM workspace_runs WHERE id = ?",
-    ).get(runId) as { state: string }).state;
-    database.close();
-    return attention;
-  }).toBe("acknowledged");
-  await expect(trigger).not.toHaveAccessibleName(/needs attention/u);
-
-  await row.getByRole("button", { name: "Dismiss Simulated push failure" }).click();
-  await expect(row).toHaveCount(0);
-  database = new Database(databasePath, { readonly: true });
-  expect(database.prepare(
-    "SELECT status, attention_state AS attentionState, detail FROM workspace_runs WHERE id = ?",
-  ).get(runId)).toEqual({
-    status: "failed",
-    attentionState: "dismissed",
-    detail: "The remote rejected this test push.",
-  });
-  database.close();
-  await page.keyboard.press("Escape");
-  await expect(center).toHaveCount(0);
-  expect(rendererErrors).toEqual([]);
+    await expect(page.getByRole("textbox", { name: "Preview address" }))
+      .toHaveValue("http://127.0.0.1:4173/");
+    await expect(page.getByRole("textbox", { name: "Preview address" }))
+      .toBeFocused();
+    await expectNoViewportOverflow();
+    expect(rendererErrors).toEqual([]);
+  } finally {
+    const cleanup = new RuntimeStore(databasePath, workspaceDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    cleanup.updateWorkspaceRun(preview.id, {
+      status: "succeeded",
+      finishedAt: new Date().toISOString(),
+    });
+    cleanup.dismissWorkspaceRun(failure.id);
+    cleanup.dismissWorkspaceRun(dismissedFailure.id);
+    cleanup.close();
+  }
 });
 
 test("keeps delegated-agent traces compact while the active composer accepts a parent follow-up", async ({ browserName: _browserName }, testInfo) => {

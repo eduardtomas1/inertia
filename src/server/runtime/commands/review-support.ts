@@ -110,6 +110,7 @@ export async function selectedReviewContext(
   selection: ReviewSelectionPayload,
   purpose: "ask" | "revision",
   secureFiles: RuntimeSecureFileBroker,
+  signal?: AbortSignal,
 ): Promise<SelectedReviewContext> {
   const conversation = store.conversation(selection.conversationId);
   if (conversation.projectId !== selection.projectId) {
@@ -127,10 +128,13 @@ export async function selectedReviewContext(
   const repository = await resolveWorkspaceGitRepository(
     workspaceRoot,
     repositoryPath,
+    undefined,
+    signal,
   );
   let selectionDiff = await getUnifiedDiff(repository.root, {
     paths: [selection.filePath],
     ignoreWhitespace: selection.ignoreWhitespace,
+    signal,
   }, undefined, secureFiles);
   if (selectionDiff.truncated) {
     throw new RuntimeRequestError(
@@ -142,6 +146,7 @@ export async function selectedReviewContext(
   if (structured.fingerprint !== selection.fingerprint) {
     fullDiff = await getUnifiedDiff(repository.root, {
       ignoreWhitespace: selection.ignoreWhitespace,
+      signal,
     }, undefined, secureFiles);
     if (fullDiff.truncated) {
       throw new RuntimeRequestError(
@@ -181,6 +186,7 @@ export async function selectedReviewContext(
   if (purpose === "revision" && !fullDiff) {
     fullDiff = await getUnifiedDiff(repository.root, {
       ignoreWhitespace: selection.ignoreWhitespace,
+      signal,
     }, undefined, secureFiles);
     if (fullDiff.truncated) {
       throw new RuntimeRequestError(

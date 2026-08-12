@@ -1,9 +1,6 @@
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import { createSurfaceLoader } from "../utils/surfaceLoader";
 
-export const loadActivityCenter = createSurfaceLoader(async () => ({
-  default: (await import("./ActivityCenter")).ActivityCenter,
-}));
 export const loadCommandPalette = createSurfaceLoader(async () => ({
   default: (await import("./CommandPalette")).CommandPalette,
 }));
@@ -22,7 +19,6 @@ export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPan
 export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));
 
 const frequentSurfaceLoads = [
-  loadActivityCenter,
   loadCommandPalette,
   loadSettingsView,
 ] as const;

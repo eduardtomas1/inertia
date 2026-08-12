@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 
 import { WorkspaceChangesPanel } from "../../src/renderer/src/components/WorkspaceChangesPanel";
+import { ChangesPanel } from "../../src/renderer/src/components/ChangesPanel";
 import type { ChangedFile, ServerEvent, WorkspaceGitSnapshot } from "../../src/shared/contracts";
 
 const reviewReceipt = {
@@ -111,6 +112,145 @@ const snapshot: WorkspaceGitSnapshot = {
 };
 
 describe("WorkspaceChangesPanel repository scope", () => {
+  it("keeps a keyboard-focusable stop control beside an active selection question", async () => {
+    let finishQuestion: (() => void) | undefined;
+    let finishCancellation: (() => void) | undefined;
+    const onAsk = vi.fn(() => new Promise<void>((resolve) => {
+      finishQuestion = resolve;
+    }));
+    const onCancelAsk = vi.fn(() => new Promise<void>((resolve) => {
+      finishCancellation = resolve;
+    }));
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{
+          patch: patchFor("README.md"),
+          truncated: false,
+          files: [changedFile("README.md")],
+        }}
+        selectedPath="README.md"
+        summary={null}
+        onSelectFile={vi.fn()}
+        onRefresh={vi.fn()}
+        onAsk={onAsk}
+        onCancelAsk={onCancelAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+
+    fireEvent.click((await screen.findByText("after")).closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask agent" }));
+
+    const stop = await screen.findByRole("button", { name: "Stop asking" });
+    stop.focus();
+    expect(document.activeElement).toBe(stop);
+    expect(screen.queryByRole("button", { name: "Ask agent" })).not.toBeInTheDocument();
+    fireEvent.click(stop);
+    expect(onCancelAsk).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Stopping…$/u })).toBeDisabled();
+
+    await act(async () => {
+      finishCancellation?.();
+      finishQuestion?.();
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Stopping…$/u }))
+      .not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Refresh changes" }))
+      .toHaveFocus();
+  });
+
+  it("restores the stop control after selection UI unmounts and reports cancellation failure", async () => {
+    const onCancelAsk = vi.fn(async () => {
+      throw new Error("The active review question was already released.");
+    });
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{
+          patch: patchFor("README.md"),
+          truncated: false,
+          files: [changedFile("README.md")],
+        }}
+        selectedPath="README.md"
+        summary={null}
+        questionRunning
+        onSelectFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onCancelAsk={onCancelAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+
+    const stop = screen.getByRole("button", { name: "Stop asking" });
+    stop.focus();
+    expect(document.activeElement).toBe(stop);
+    fireEvent.click(stop);
+
+    expect(onCancelAsk).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(
+      "The active review question was already released.",
+    )).toHaveAttribute("role", "alert");
+    expect(screen.getByRole("button", { name: "Stop asking" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Stop asking" })).toHaveFocus();
+
+    fireEvent.click(screen.getByText("after").closest("button")!);
+    expect(screen.getByRole("button", { name: "Ask about" })).toBeDisabled();
+  });
+
+  it("clears a completed stop attempt before a later question starts", async () => {
+    const onCancelAsk = vi.fn(async () => undefined);
+    const panel = (questionRunning: boolean): React.JSX.Element => (
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{
+          patch: patchFor("README.md"),
+          truncated: false,
+          files: [changedFile("README.md")],
+        }}
+        selectedPath="README.md"
+        summary={null}
+        questionRunning={questionRunning}
+        onSelectFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onCancelAsk={onCancelAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />
+    );
+    const view = render(panel(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop asking" }));
+    expect(screen.getByRole("button", { name: /Stopping…$/u })).toBeDisabled();
+
+    view.rerender(panel(false));
+    expect(screen.queryByRole("button", { name: "Stop asking" }))
+      .not.toBeInTheDocument();
+    view.rerender(panel(true));
+    expect(screen.getByRole("button", { name: "Stop asking" })).toBeEnabled();
+  });
+
   it("switches one flat file navigator between repositories without losing identity", async () => {
     const onLoadRepositoryDiff = vi.fn(async (
       repositoryPath: string,

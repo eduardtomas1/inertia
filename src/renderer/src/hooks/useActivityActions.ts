@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
-  AppSnapshot,
   Project,
   ProjectAction,
   ServerEvent,
@@ -8,24 +7,31 @@ import type {
 } from "@shared/contracts";
 import type { WorkspacePanelTab } from "../components/WorkspacePanel";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import { workspaceRunPreviewUrl } from "../utils/environmentSummary";
+
+export type PreviewWorkspaceRun = Pick<
+  WorkspaceRun,
+  | "id"
+  | "kind"
+  | "projectId"
+  | "conversationId"
+  | "label"
+  | "status"
+  | "port"
+>;
 
 interface ActivityActionsOptions {
-  snapshot: AppSnapshot | null;
   project: Project | null;
   conversationId: string | null;
-  request: (command: CommandWithoutId) => Promise<ServerEvent>;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
-  setActivityOpen: (open: boolean) => void;
   setActionError: (message: string | null) => void;
-  activateContext: (
-    activity: WorkspaceRun,
-    tool?: WorkspacePanelTab,
-  ) => void;
-  openProjectPath: (
-    request: Parameters<typeof window.inertia.openProjectPath>[0],
-  ) => void;
-  navigatePreview: (url: string) => void;
+  activateContext?: (
+    activity: PreviewWorkspaceRun,
+    tool: "preview",
+  ) => boolean;
+  navigatePreview?: (url: string, onSettled?: () => void) => void;
+  focusPreview?: () => void;
 }
 
 interface PendingProjectAction {
@@ -45,27 +51,21 @@ interface PendingResumeRequest {
 }
 
 export function useActivityActions({
-  snapshot,
   project,
   conversationId,
-  request,
   run,
   setActiveTool,
-  setActivityOpen,
   setActionError,
   activateContext,
-  openProjectPath,
   navigatePreview,
+  focusPreview,
 }: ActivityActionsOptions) {
   const [pendingAction, setPendingAction] =
     useState<PendingProjectAction | null>(null);
   const [pendingResume, setPendingResume] =
     useState<PendingResumeRequest | null>(null);
-  const [pendingActivityAction, setPendingActivityAction] =
-    useState<WorkspaceRun | null>(null);
-  const [pendingPreviewActivity, setPendingPreviewActivity] =
-    useState<WorkspaceRun | null>(null);
-
+  const [pendingPreview, setPendingPreview] =
+    useState<PreviewWorkspaceRun | null>(null);
   useEffect(() => {
     setPendingAction((current) => (
       current
@@ -83,36 +83,25 @@ export function useActivityActions({
 
   useEffect(() => {
     if (
-      !pendingActivityAction?.actionId
-      || project?.id !== pendingActivityAction.projectId
-    ) return;
-    if (
-      pendingActivityAction.conversationId
-      && conversationId !== pendingActivityAction.conversationId
-    ) return;
-    setPendingAction({
-      actionId: pendingActivityAction.actionId,
-      projectId: pendingActivityAction.projectId,
-      conversationId: pendingActivityAction.conversationId,
-    });
-    setPendingActivityAction(null);
-  }, [conversationId, pendingActivityAction, project?.id]);
-
-  useEffect(() => {
-    if (
-      !pendingPreviewActivity?.port
-      || project?.id !== pendingPreviewActivity.projectId
-    ) return;
-    if (
-      pendingPreviewActivity.conversationId
-      && conversationId !== pendingPreviewActivity.conversationId
-    ) return;
-    navigatePreview(`http://127.0.0.1:${pendingPreviewActivity.port}`);
-    setPendingPreviewActivity(null);
+      !pendingPreview
+      || project?.id !== pendingPreview.projectId
+      || (
+        pendingPreview.conversationId
+        && conversationId !== pendingPreview.conversationId
+      )
+    ) {
+      return;
+    }
+    const url = workspaceRunPreviewUrl(pendingPreview);
+    if (url && navigatePreview) {
+      navigatePreview(url, focusPreview);
+    }
+    setPendingPreview(null);
   }, [
     conversationId,
+    focusPreview,
     navigatePreview,
-    pendingPreviewActivity,
+    pendingPreview,
     project?.id,
   ]);
 
@@ -126,58 +115,39 @@ export function useActivityActions({
     setActiveTool("terminal");
   }, [conversationId, project, setActiveTool]);
 
-  const openActivityLocation = useCallback((activity: WorkspaceRun) => {
-    const targetProject = snapshot?.projects.find(
-      ({ id }) => id === activity.projectId,
-    );
-    const targetConversation = snapshot?.conversations.find(
-      ({ id }) => id === activity.conversationId,
-    );
-    if (!targetProject) return;
-    openProjectPath({
-      projectId: targetProject.id,
-      ...(targetConversation
-        ? { conversationId: targetConversation.id }
-        : {}),
-      relativePath: ".",
-      action: "open-externally",
-    });
-  }, [openProjectPath, snapshot?.conversations, snapshot?.projects]);
-
-  const openActivityPreview = useCallback((activity: WorkspaceRun) => {
-    if (!activity.port) return;
-    setPendingPreviewActivity(activity);
-    activateContext(activity, "preview");
-    setActivityOpen(false);
-  }, [activateContext, setActivityOpen]);
-
-  const stopActivity = useCallback((activity: WorkspaceRun) => {
+  const stopWorkspaceRun = useCallback((
+    activity: Pick<WorkspaceRun, "id" | "label">,
+  ) => {
     void run(`activity.stop:${activity.id}`, {
       type: "activity.stop",
       payload: { runId: activity.id },
     }).catch((error) => {
       const detail = error instanceof Error
         ? error.message
-        : "The run could not be stopped.";
+        : "The work could not be stopped.";
       setActionError(`Could not stop ${activity.label}: ${detail}`);
     });
   }, [run, setActionError]);
 
-  const rerunActivity = useCallback((activity: WorkspaceRun) => {
-    if (!activity.actionId) return;
-    setPendingActivityAction(activity);
-    activateContext(activity, "terminal");
-    setActivityOpen(false);
-  }, [activateContext, setActivityOpen]);
+  const openWorkspaceRunPreview = useCallback((
+    activity: PreviewWorkspaceRun,
+  ) => {
+    const url = workspaceRunPreviewUrl(activity);
+    if (
+      !url
+      || !navigatePreview
+      || !activateContext
+      || !activateContext(activity, "preview")
+    ) {
+      setActionError(`Could not open ${activity.label}: its preview is no longer available.`);
+      return;
+    }
+    setPendingPreview(activity);
+  }, [activateContext, navigatePreview, setActionError]);
 
-  const markActivitySeen = useCallback((activity: WorkspaceRun) => {
-    void request({
-      type: "activity.mark-seen",
-      payload: { runId: activity.id },
-    }).catch(() => undefined);
-  }, [request]);
-
-  const acknowledgeActivity = useCallback((activity: WorkspaceRun) => {
+  const acknowledgeActivity = useCallback((
+    activity: Pick<WorkspaceRun, "id" | "label">,
+  ) => {
     void run(`activity.acknowledge:${activity.id}`, {
       type: "activity.acknowledge",
       payload: { runId: activity.id },
@@ -189,7 +159,9 @@ export function useActivityActions({
     });
   }, [run, setActionError]);
 
-  const dismissActivity = useCallback((activity: WorkspaceRun) => {
+  const dismissActivity = useCallback((
+    activity: Pick<WorkspaceRun, "id" | "label">,
+  ) => {
     void run(`activity.dismiss:${activity.id}`, {
       type: "activity.dismiss",
       payload: { runId: activity.id },
@@ -221,24 +193,18 @@ export function useActivityActions({
     },
     clearPendingResume: () => setPendingResume(null),
     runProjectAction,
-    openActivityLocation,
-    openActivityPreview,
-    stopActivity,
-    rerunActivity,
-    markActivitySeen,
+    stopWorkspaceRun,
+    openWorkspaceRunPreview,
     acknowledgeActivity,
     dismissActivity,
   }), [
     acknowledgeActivity,
     dismissActivity,
-    markActivitySeen,
-    openActivityLocation,
-    openActivityPreview,
     pendingActionId,
     pendingResumeConversationId,
+    openWorkspaceRunPreview,
     project,
-    rerunActivity,
     runProjectAction,
-    stopActivity,
+    stopWorkspaceRun,
   ]);
 }

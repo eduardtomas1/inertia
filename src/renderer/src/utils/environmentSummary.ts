@@ -1,11 +1,31 @@
 import type {
   ChatMessage,
+  Conversation,
   GitStatusSnapshot,
+  Project,
   SubagentTrace,
   WorkspaceGitSnapshot,
   WorkspaceRun,
 } from "@shared/contracts";
+import { workspaceRunAttentionView } from "../../../shared/attention";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+
+export type EnvironmentSummaryCheck = Pick<
+  WorkspaceRun,
+  | "id"
+  | "kind"
+  | "projectId"
+  | "conversationId"
+  | "label"
+  | "status"
+  | "canStop"
+  | "port"
+> & {
+  contextLabel: string | null;
+  canOpenPreview: boolean;
+  canAcknowledge: boolean;
+  canDismiss: boolean;
+};
 
 export interface EnvironmentSummarySnapshot {
   projectName: string | null;
@@ -23,7 +43,7 @@ export interface EnvironmentSummarySnapshot {
     label: "Branch" | "Branches";
     value: string;
   } | null;
-  checks: Array<Pick<WorkspaceRun, "id" | "label" | "status">>;
+  checks: EnvironmentSummaryCheck[];
   subagents: Array<Pick<
     SubagentTrace,
     "id" | "providerName" | "providerRole" | "status"
@@ -45,12 +65,28 @@ interface EnvironmentSummaryInput {
   runs: readonly WorkspaceRun[];
   subagents: readonly SubagentTrace[];
   messages: readonly ChatMessage[];
+  projects?: readonly Pick<Project, "id" | "name" | "path">[];
+  conversations?: readonly Pick<
+    Conversation,
+    "id" | "projectId" | "title" | "branch" | "worktreePath"
+  >[];
+  visibleProjectIds?: readonly string[];
 }
 
 function runtimeLabel(status: ConnectionStatus): string {
   if (status === "online") return "Ready";
   if (status === "connecting") return "Connecting";
   return "Offline";
+}
+
+function conversationRunOwnerLabel(
+  conversation: Pick<Conversation, "title" | "branch" | "worktreePath">,
+): string {
+  const title = conversation.title.trim() || "Untitled chat";
+  if (!conversation.worktreePath) return title;
+  const worktreeLabel = conversation.branch?.trim()
+    || conversation.worktreePath.split(/[\\/]/u).filter(Boolean).at(-1);
+  return worktreeLabel ? `${title} (${worktreeLabel})` : title;
 }
 
 function branchSummary(
@@ -119,6 +155,22 @@ function recentAttachments(
   return attachments;
 }
 
+export function workspaceRunPreviewUrl(
+  run: Pick<WorkspaceRun, "kind" | "status" | "port">,
+): string | null {
+  if (
+    run.kind !== "service"
+    || (run.status !== "running" && run.status !== "waiting")
+    || run.port === null
+    || !Number.isSafeInteger(run.port)
+    || run.port < 1
+    || run.port > 65_535
+  ) {
+    return null;
+  }
+  return `http://127.0.0.1:${run.port}`;
+}
+
 export function buildEnvironmentSummary({
   projectId,
   projectName,
@@ -129,24 +181,87 @@ export function buildEnvironmentSummary({
   runs,
   subagents,
   messages,
+  projects = [],
+  conversations = [],
+  visibleProjectIds: additionalVisibleProjectIds = [],
 }: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
-  const checks = projectId
-    ? runs
-      .filter((run) =>
-        run.projectId === projectId
+  const visibleProjectIds = new Set(additionalVisibleProjectIds);
+  if (projectId) visibleProjectIds.add(projectId);
+  const knownProjects = new Map(projects.map((project) => [project.id, project]));
+  const projectNameCounts = new Map<string, number>();
+  for (const { name } of projects) {
+    projectNameCounts.set(name, (projectNameCounts.get(name) ?? 0) + 1);
+  }
+  const knownConversations = new Map(
+    conversations.map((conversation) => [conversation.id, conversation]),
+  );
+  const projectsWithConversations = new Set(
+    conversations.map(({ projectId: ownerProjectId }) => ownerProjectId),
+  );
+  let passiveRows = 0;
+  const checks = [...runs]
+    .sort((left, right) =>
+      right.startedAt.localeCompare(left.startedAt)
+      || right.id.localeCompare(left.id))
+    .filter((run) => {
+      if (run.canStop) return true;
+      if (!visibleProjectIds.has(run.projectId) || passiveRows >= 3) {
+        return false;
+      }
+      const attention = workspaceRunAttentionView(run);
+      if (
+        run.status !== "running"
+        && run.status !== "waiting"
+        && !attention.needsAttention
+      ) {
+        return false;
+      }
+      passiveRows += 1;
+      return true;
+    })
+    .map((run): EnvironmentSummaryCheck => {
+      const attention = workspaceRunAttentionView(run);
+      const ownerConversation = run.conversationId
+        ? knownConversations.get(run.conversationId)
+        : undefined;
+      const ownerProject = knownProjects.get(run.projectId);
+      const routeKnown = ownerProject !== undefined
         && (
-          run.status === "running"
-          || run.status === "waiting"
-          || (
-            run.status === "failed"
-            && run.attentionState !== "acknowledged"
-            && run.attentionState !== "dismissed"
-          )
-        ))
-      .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
-      .slice(0, 3)
-      .map(({ id, label, status }) => ({ id, label, status }))
-    : [];
+          run.conversationId === null
+            ? projectsWithConversations.has(run.projectId)
+            : ownerConversation?.projectId === run.projectId
+        );
+      return {
+        id: run.id,
+        kind: run.kind,
+        projectId: run.projectId,
+        conversationId: run.conversationId,
+        label: run.label,
+        status: run.status,
+        canStop: run.canStop,
+        port: run.port,
+        contextLabel: [
+          run.projectId === projectId
+            ? null
+            : ownerProject
+              ? projectNameCounts.get(ownerProject.name) === 1
+                ? ownerProject.name
+                : `${ownerProject.name} (${ownerProject.path})`
+              : "Unavailable project",
+          run.conversationId
+            && (run.canStop || run.conversationId !== conversationId)
+            ? ownerConversation
+              ? conversationRunOwnerLabel(ownerConversation)
+              : "Unavailable conversation"
+            : null,
+          run.detail,
+        ].filter((part): part is string => Boolean(part)).join(" · ") || null,
+        canOpenPreview: routeKnown && workspaceRunPreviewUrl(run) !== null,
+        canAcknowledge:
+          attention.needsAttention && attention.canAcknowledge,
+        canDismiss: attention.canDismiss,
+      };
+    });
   const activeSubagents = conversationId
     ? subagents
       .filter((trace) =>

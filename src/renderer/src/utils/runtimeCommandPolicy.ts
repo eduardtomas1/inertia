@@ -187,6 +187,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "review.note.delete": shortMutation,
   "review.note.update": shortMutation,
   "review.selection.ask": reviewOperation,
+  "review.selection.cancel": shortMutation,
   "review.selection.revise": reviewOperation,
   "review.state.set": shortMutation,
   "review.summary.cancel": shortMutation,

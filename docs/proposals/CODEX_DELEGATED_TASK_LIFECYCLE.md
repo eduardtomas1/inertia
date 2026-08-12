@@ -237,8 +237,14 @@ provider status message, final child agent output, or neutral local copy.
 When the activity identifies a child:
 
 1. register ownership;
-2. emit or enrich a normalized subagent trace;
-3. replay buffered child notifications for that child in original arrival order.
+2. replay buffered child notifications for that child in original arrival
+   order, because they preceded the registering activity on the wire;
+3. emit or enrich a normalized subagent trace from the registering activity,
+   subject to the same authority/sequence guard as any later state snapshot.
+
+Reversing steps 2 and 3 can make an earlier buffered `turn/started` look like a
+new resume after a later terminal collaboration snapshot. Ownership discovery
+must not reorder lifecycle evidence.
 
 ### C. Add a bounded pre-registration notification buffer
 
@@ -551,6 +557,8 @@ The implementation is complete when all of the following are true:
 - [ ] Parent-side Codex collaboration activity can authoritatively register a child thread.
 - [ ] Explicit child `thread/started` registration remains supported.
 - [ ] Child notifications received shortly before registration are replayed within strict bounds.
+- [ ] Buffered child notifications remain ordered before the later activity or
+      thread event that registered their ownership.
 - [ ] The root thread cannot appear in its own delegated-agent tree.
 - [ ] Ownership cycles and contradictory parent assignments are rejected.
 - [ ] Nested delegated agents retain correct parentage.

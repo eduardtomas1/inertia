@@ -11,12 +11,15 @@ export const MAX_CODEX_DIAGNOSTIC_CHARS = 32 * 1024;
 export const CODEX_RPC_TIMEOUT_MS = 30_000;
 export const CODEX_TRANSPORT_CLOSE_GRACE_MS = 100;
 export const CODEX_SUBAGENT_DRAIN_TIMEOUT_MS = 2_000;
+export const CODEX_GOAL_CONTINUATION_GRACE_MS = 30_000;
 const MIN_CODEX_SUBAGENT_DRAIN_TIMEOUT_MS = 25;
+const MIN_CODEX_GOAL_CONTINUATION_GRACE_MS = 25;
 
 export type CodexRunPhase =
   | "opening"
   | "starting-turn"
   | "running"
+  | "awaiting-goal-continuation"
   | "settled";
 
 export interface CodexAccessPolicy {
@@ -38,6 +41,22 @@ export function codexSubagentDrainTimeoutMs(
   return Math.max(
     MIN_CODEX_SUBAGENT_DRAIN_TIMEOUT_MS,
     Math.min(value, CODEX_SUBAGENT_DRAIN_TIMEOUT_MS),
+  );
+}
+
+export function codexGoalContinuationGraceMs(
+  value: CodexAppServerOptions["goalContinuationGraceMs"],
+): number {
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value < 1
+  ) {
+    return CODEX_GOAL_CONTINUATION_GRACE_MS;
+  }
+  return Math.max(
+    MIN_CODEX_GOAL_CONTINUATION_GRACE_MS,
+    Math.min(value, CODEX_GOAL_CONTINUATION_GRACE_MS),
   );
 }
 

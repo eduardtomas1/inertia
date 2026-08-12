@@ -65,6 +65,12 @@ export function openConversationAttachments(
   });
 }
 
+export async function closeConversationAttachmentAccess(
+  retained: ConversationAttachmentAccess | null,
+): Promise<void> {
+  await retained?.then((store) => store.close());
+}
+
 export async function resolveAttachmentPreviewResponse(
   temporary: AttachmentRegistry | null,
   retained: ConversationAttachmentAccess | null,

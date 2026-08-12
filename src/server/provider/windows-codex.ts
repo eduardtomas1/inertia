@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { win32 } from "node:path";
 
@@ -7,10 +6,6 @@ import {
   executableCandidates,
   type ProviderEnvironment,
 } from "../environment";
-import { CappedProviderBuffer } from "./io";
-
-const WHERE_TIMEOUT_MS = 2_500;
-const MAX_WHERE_OUTPUT_BYTES = 64 * 1024;
 
 function uniqueWindowsPaths(paths: readonly string[]): string[] {
   const seen = new Set<string>();
@@ -69,63 +64,14 @@ export function windowsCodexKnownPaths(environment: NodeJS.ProcessEnv): string[]
   ]);
 }
 
-export function parseWhereExecutableOutput(output: string): string[] {
-  return uniqueWindowsPaths(output
-    .split(/\r?\n/u)
-    .slice(0, 128)
-    .map((line) => line.trim().replace(/^"(.*)"$/u, "$1"))
-    .filter((line) => win32.isAbsolute(line) && !line.includes("\0")));
-}
-
-async function whereCodex(environment: ProviderEnvironment, cwd: string): Promise<string[]> {
-  const systemRoot = environmentValue(environment.env, "SystemRoot", "win32");
-  const whereExecutable = systemRoot ? win32.join(systemRoot, "System32", "where.exe") : "where.exe";
-  return await new Promise<string[]>((resolve) => {
-    const output = new CappedProviderBuffer(MAX_WHERE_OUTPUT_BYTES);
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
-    const finish = (paths: string[]): void => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolve(paths);
-    };
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(whereExecutable, ["codex"], {
-        cwd,
-        env: environment.env,
-        shell: false,
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-    } catch {
-      finish([]);
-      return;
-    }
-    child.stdout?.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
-    child.once("error", () => finish([]));
-    child.once("close", (code) => finish(code === 0 ? parseWhereExecutableOutput(output.toString()) : []));
-    timer = setTimeout(() => {
-      try { child.kill(); } catch { /* The utility may already have exited. */ }
-      finish([]);
-    }, WHERE_TIMEOUT_MS);
-    timer.unref();
-  });
-}
-
 export async function windowsCodexExecutableCandidates(
   environment: ProviderEnvironment,
   cwd: string,
 ): Promise<string[]> {
-  const [pathCandidates, whereCandidates] = await Promise.all([
-    executableCandidates("codex", environment, cwd),
-    whereCodex(environment, cwd),
-  ]);
+  const pathCandidates = await executableCandidates("codex", environment, cwd);
   const candidates = uniqueWindowsPaths([
     ...windowsCodexKnownPaths(environment.env),
     ...pathCandidates,
-    ...whereCandidates,
   ]);
   const validated = await Promise.all(candidates.map(async (candidate) =>
     await executableCandidates(candidate, environment, cwd)));

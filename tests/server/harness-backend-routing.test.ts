@@ -308,6 +308,7 @@ describe("ProviderManager harness backend routing", () => {
             textTruncated: false,
             exitCode: 0,
             signal: null,
+          cleanupConfirmed: true,
           }),
         };
       },

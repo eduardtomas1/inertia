@@ -16,10 +16,17 @@ export class RecoveryRepository {
       SELECT DISTINCT conversations.id
       FROM conversations
       LEFT JOIN agent_turns ON agent_turns.conversation_id = conversations.id
-      WHERE conversations.status IN ('running', 'needs-input')
-         OR agent_turns.status IN (
+      WHERE (
+        conversations.status IN ('running', 'needs-input')
+        OR agent_turns.status IN (
            'queued', 'starting', 'running', 'waiting-for-approval', 'waiting-for-input'
          )
+      )
+        AND NOT EXISTS (
+          SELECT 1 FROM provider_run_ownership AS cleanup
+          WHERE cleanup.turn_id = agent_turns.id
+             OR cleanup.conversation_id = conversations.id
+        )
     `).all() as Array<{ id: string }>;
     const interruptedRunByConversation = new Map(
       (this.database.prepare(`
@@ -28,6 +35,7 @@ export class RecoveryRepository {
         WHERE kind = 'agent'
           AND conversation_id IS NOT NULL
           AND status IN ('running', 'waiting')
+          AND id NOT IN (SELECT run_id FROM provider_run_ownership)
         ORDER BY started_at ASC, id ASC
       `).all() as Array<{ conversation_id: string; id: string }>)
         .map(({ conversation_id, id }) => [conversation_id, id] as const),
@@ -57,6 +65,7 @@ export class RecoveryRepository {
           ),
           finished_at = ?
       WHERE status IN ('running', 'waiting')
+        AND id NOT IN (SELECT run_id FROM provider_run_ownership)
     `);
     const markSubagents = this.database.prepare(`
       UPDATE subagent_traces
@@ -71,6 +80,7 @@ export class RecoveryRepository {
             'queued', 'starting', 'running',
             'waiting-for-approval', 'waiting-for-input'
           )
+            AND id NOT IN (SELECT turn_id FROM provider_run_ownership)
         )
     `);
 
@@ -98,6 +108,7 @@ export class RecoveryRepository {
           updated_at = ?
       WHERE id = ?
         AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+        AND id NOT IN (SELECT turn_id FROM provider_run_ownership)
     `);
     const addRecoveryActivity = this.database.prepare(`
       INSERT INTO activities (id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at)
@@ -109,6 +120,7 @@ export class RecoveryRepository {
       WHERE conversation_id = ?
         AND run_id = ?
         AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+        AND id NOT IN (SELECT turn_id FROM provider_run_ownership)
       LIMIT 1
     `);
     const latestExplicitTurn = this.database.prepare(`
@@ -116,6 +128,7 @@ export class RecoveryRepository {
       FROM agent_turns
       WHERE conversation_id = ?
         AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+        AND id NOT IN (SELECT turn_id FROM provider_run_ownership)
       ORDER BY requested_at DESC, id DESC
       LIMIT 1
     `);

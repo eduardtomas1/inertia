@@ -45,6 +45,7 @@ const RECONCILIATION_BATCH_ENTRIES = 32;
 const RECONCILIATION_BATCH_TIMEOUT_MS = 250;
 const MAX_PARALLEL_CLEANUPS = 8;
 const CLEANUP_BATCH_TIMEOUT_MS = 30_000;
+const CHILD_STOP_CONFIRMATION_TIMEOUT_MS = 250;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
@@ -300,9 +301,16 @@ export class ConversationAttachmentStore {
   private readonly pendingRecordBytes = new Map<string, number>();
   private readonly pendingRetentionRecords = new Map<string, Set<string>>();
   private reconciliation: AttachmentReconciliationState | null = null;
+  private reconciliationTimer: ReturnType<typeof setTimeout> | null = null;
   private reconciliationFailure: Error | null = null;
   private records: Map<string, number> | null = null;
   private mutationTail: Promise<void> = Promise.resolve();
+  private readonly lifecycle = new AbortController();
+  private readonly activeOperationStops = new Set<Promise<void>>();
+  private operationStopFailure: Error | null = null;
+  private operationStopUnconfirmed = false;
+  private closing = false;
+  private closePromise: Promise<void> | null = null;
 
   private constructor(
     directoryAuthority: StoreDirectoryAuthority,
@@ -347,11 +355,13 @@ export class ConversationAttachmentStore {
     signal?: AbortSignal,
     retentionId = randomUUID(),
   ): Promise<ChatAttachment[]> {
+    this.assertOpen();
     if (!UUID_PATTERN.test(retentionId)) {
       throw new Error("Invalid conversation attachment retention identity.");
     }
     if (payloads.length === 0) return [];
     return await this.serialize(async () => {
+      this.assertOpen();
       signal?.throwIfAborted();
       if (this.reconciliation) {
         throw new Error("Conversation attachment storage is still reconciling.");
@@ -480,10 +490,12 @@ export class ConversationAttachmentStore {
   }
 
   async preview(id: string): Promise<ConversationAttachmentPreview | null> {
+    this.assertOpen();
     return await this.inspect(id);
   }
 
   acceptRetention(retentionId: string): void {
+    this.assertOpen();
     if (!UUID_PATTERN.test(retentionId)) {
       throw new Error("Invalid conversation attachment retention identity.");
     }
@@ -499,11 +511,13 @@ export class ConversationAttachmentStore {
   }
 
   async releaseRetention(retentionId: string): Promise<void> {
+    this.assertOpen();
     if (!UUID_PATTERN.test(retentionId)) {
       throw new Error("Invalid conversation attachment retention identity.");
     }
     if (!this.retentionRecords.has(retentionId)) return;
     await this.serialize(async () => {
+      this.assertOpen();
       const attachmentIds = this.retentionRecords.get(retentionId);
       if (!attachmentIds) return;
       const removable: string[] = [];
@@ -544,7 +558,9 @@ export class ConversationAttachmentStore {
   }
 
   async release(ids: readonly string[]): Promise<void> {
+    this.assertOpen();
     await this.serialize(async () => {
+      this.assertOpen();
       const unique = [...new Set(ids)];
       for (const id of unique) {
         if (!UUID_PATTERN.test(id)) {
@@ -566,7 +582,9 @@ export class ConversationAttachmentStore {
   }
 
   async reconcile(references: readonly ChatAttachment[]): Promise<void> {
+    this.assertOpen();
     await this.serialize(async () => {
+      this.assertOpen();
       if (this.reconciliation) {
         throw new Error("Conversation attachment storage is already reconciling.");
       }
@@ -620,6 +638,7 @@ export class ConversationAttachmentStore {
   }
 
   async usage(): Promise<{ bytes: number; records: number }> {
+    this.assertOpen();
     return await this.serialize(() => (
       this.reconciliation || this.reconciliationFailure
     )
@@ -628,6 +647,35 @@ export class ConversationAttachmentStore {
           records: this.maxRecords,
         })
       : this.loadUsage());
+  }
+
+  /** Cancels new work and proves every spawned store child has stopped. */
+  async close(): Promise<void> {
+    if (this.closePromise) return await this.closePromise;
+    this.closing = true;
+    this.lifecycle.abort(new Error("Conversation attachment storage is closing."));
+    if (this.reconciliationTimer) {
+      clearTimeout(this.reconciliationTimer);
+      this.reconciliationTimer = null;
+    }
+    this.closePromise = (async () => {
+      while (true) {
+        const tail = this.mutationTail;
+        await tail;
+        const stops = [...this.activeOperationStops];
+        await Promise.all(stops);
+        await Promise.resolve();
+        if (
+          tail === this.mutationTail
+          && this.activeOperationStops.size === 0
+        ) break;
+      }
+      if (this.reconciliation) {
+        await this.closeReconciliation(this.reconciliation);
+      }
+      if (this.operationStopFailure) throw this.operationStopFailure;
+    })();
+    return await this.closePromise;
   }
 
   private async assertStoreRootAuthority(): Promise<void> {
@@ -653,6 +701,7 @@ export class ConversationAttachmentStore {
     state: AttachmentReconciliationState,
   ): Promise<void> {
     if (this.reconciliation !== state) return;
+    this.assertOpen();
     await this.assertStoreRootAuthority();
     const deadline = new AbortController();
     const timer = setTimeout(() => {
@@ -739,10 +788,14 @@ export class ConversationAttachmentStore {
   }
 
   private scheduleReconciliation(state: AttachmentReconciliationState): void {
-    if (this.reconciliation !== state || state.scheduled) return;
+    if (this.closing || this.reconciliation !== state || state.scheduled) return;
     state.scheduled = true;
     const scheduled = setTimeout(() => {
+      if (this.reconciliationTimer === scheduled) {
+        this.reconciliationTimer = null;
+      }
       state.scheduled = false;
+      if (this.closing) return;
       void this.serialize(async () => {
         if (this.reconciliation !== state) return;
         await this.advanceReconciliation(state);
@@ -760,6 +813,7 @@ export class ConversationAttachmentStore {
         },
       );
     }, 25);
+    this.reconciliationTimer = scheduled;
     scheduled.unref();
   }
 
@@ -797,7 +851,7 @@ export class ConversationAttachmentStore {
       && this.readFault?.attachmentId === id
       ? this.readFault.stallBeforeRecordRevalidateMs
       : 0;
-    const reading = runStoreChild({
+    const reading = this.trackOperation(runStoreChild({
       operation: "read",
       root: this.directory,
       rootDev: this.directoryAuthority.dev,
@@ -808,7 +862,7 @@ export class ConversationAttachmentStore {
         0,
         Math.min(Math.trunc(configuredReadStall), 60_000),
       ),
-    }, signal);
+    }, this.operationSignal(signal)));
     if (
       process.env.NODE_ENV === "test"
       && configuredReadStall > 0
@@ -887,7 +941,7 @@ export class ConversationAttachmentStore {
       : 0;
     let persistence: ReturnType<ConversationAttachmentStoreOperationRunner>;
     try {
-      persistence = this.operationRunner({
+      persistence = this.trackOperation(this.operationRunner({
         operation: "persist",
         root: this.directory,
         rootDev: this.directoryAuthority.dev,
@@ -902,7 +956,7 @@ export class ConversationAttachmentStore {
           0,
           Math.min(Math.trunc(configuredStall), 60_000),
         ),
-      }, signal);
+      }, this.operationSignal(signal)));
     } catch (error) {
       this.activeStagingRecords.delete(stagingName);
       this.clearPendingRecord(metadata.id);
@@ -1037,20 +1091,21 @@ export class ConversationAttachmentStore {
     ) {
       throw new Error("Conversation attachment cleanup escaped storage.");
     }
-    const cleanup = this.operationRunner({
+    const cleanup = this.trackOperation(this.operationRunner({
       operation: "remove",
       root: this.directory,
       rootDev: this.directoryAuthority.dev,
       rootIno: this.directoryAuthority.ino,
       rootUid: this.directoryAuthority.uid,
       name,
-    }, signal);
+    }, this.operationSignal(signal)));
     try {
       await cleanup.result;
     } catch (error) {
-      await cleanup.stopped;
+      await this.confirmOperationStopped(cleanup.stopped);
       throw error;
     }
+    await this.confirmOperationStopped(cleanup.stopped);
   }
 
   private usageFromRecords(): { bytes: number; records: number } {
@@ -1099,6 +1154,65 @@ export class ConversationAttachmentStore {
       return await operation();
     } finally {
       unlock();
+    }
+  }
+
+  private assertOpen(): void {
+    if (this.closing) {
+      throw new Error("Conversation attachment storage is closing.");
+    }
+    if (this.operationStopUnconfirmed && this.activeOperationStops.size > 0) {
+      throw new Error("A prior conversation attachment operation is still stopping.");
+    }
+    if (this.operationStopFailure) throw this.operationStopFailure;
+  }
+
+  private operationSignal(signal?: AbortSignal): AbortSignal {
+    return signal
+      ? AbortSignal.any([signal, this.lifecycle.signal])
+      : this.lifecycle.signal;
+  }
+
+  private trackOperation<T extends {
+    readonly result: Promise<unknown>;
+    readonly stopped: Promise<void>;
+  }>(operation: T): T {
+    const stopped = operation.stopped.catch((error: unknown) => {
+      this.operationStopFailure ??= error instanceof Error
+        ? error
+        : new Error(String(error));
+      throw error;
+    });
+    this.activeOperationStops.add(stopped);
+    void stopped.then(
+      () => {
+        this.activeOperationStops.delete(stopped);
+        if (this.activeOperationStops.size === 0) {
+          this.operationStopUnconfirmed = false;
+        }
+      },
+      () => this.activeOperationStops.delete(stopped),
+    );
+    return operation;
+  }
+
+  private async confirmOperationStopped(stopped: Promise<void>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        stopped,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error(
+            "Conversation attachment child shutdown is unconfirmed.",
+          )), CHILD_STOP_CONFIRMATION_TIMEOUT_MS);
+          timer.unref();
+        }),
+      ]);
+    } catch (error) {
+      this.operationStopUnconfirmed = true;
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 }

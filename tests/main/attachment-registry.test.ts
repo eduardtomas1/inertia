@@ -318,6 +318,98 @@ describe("main-owned attachment registry", () => {
     }])).resolves.toHaveLength(1);
   });
 
+  it.skipIf(process.platform === "win32")(
+    "removes an orphan symlink session without touching its target",
+    async () => {
+      const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
+      directories.push(parent);
+      const root = join(parent, "attachments");
+      const previous = join(root, "session-Abc123");
+      const outside = join(parent, "outside-attachment.txt");
+      const link = join(
+        previous,
+        "00000000-0000-4000-8000-000000000000.txt",
+      );
+      await mkdir(previous, { recursive: true });
+      await writeFile(outside, "outside");
+      await symlink(outside, link);
+
+      const storage = await createAttachmentStorageSession(root);
+
+      expect(storage.reservation).toEqual({ records: 0, bytes: 0 });
+      await expect(lstat(link)).rejects.toThrow();
+      await expect(lstat(previous)).rejects.toThrow();
+      await expect(readFile(outside, "utf8")).resolves.toBe("outside");
+      await removeAttachmentStorageSession(storage.directory);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "preserves an orphan symlink session and reserves full capacity",
+    async () => {
+      const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
+      directories.push(parent);
+      const root = join(parent, "attachments");
+      const previous = join(root, "session-Abc123");
+      const outside = join(parent, "retained-attachment.txt");
+      const link = join(
+        previous,
+        "00000000-0000-4000-8000-000000000000.txt",
+      );
+      await mkdir(previous, { recursive: true });
+      await writeFile(outside, "retained");
+      await symlink(outside, link);
+
+      const storage = await createAttachmentStorageSession(root, {
+        preserveExisting: true,
+      });
+
+      expect(storage.reservation).toEqual({
+        records: 256,
+        bytes: 512 * 1024 * 1024,
+      });
+      expect((await lstat(link)).isSymbolicLink()).toBe(true);
+      expect((await lstat(previous)).isDirectory()).toBe(true);
+      await expect(readFile(outside, "utf8")).resolves.toBe("retained");
+      await removeAttachmentStorageSession(storage.directory);
+    },
+  );
+
+  it("reserves full capacity while an unconfirmed prior session can still grow", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
+    directories.push(parent);
+    const root = join(parent, "attachments");
+    const previous = join(root, "session-Abc123");
+    const owned = join(
+      previous,
+      "00000000-0000-4000-8000-000000000000.png",
+    );
+    const foreign = join(previous, "foreign-entry.bin");
+    await mkdir(previous, { recursive: true });
+    await writeFile(owned, png);
+    await writeFile(foreign, "prior-runtime-owned");
+
+    const storage = await createAttachmentStorageSession(root, {
+      preserveExisting: true,
+    });
+    await writeFile(owned, Buffer.alloc(1_024 * 1_024));
+
+    expect(storage.reservation).toEqual({
+      records: 256,
+      bytes: 512 * 1024 * 1024,
+    });
+    const registry = new AttachmentRegistry(storage.directory, {
+      reservedRecords: storage.reservation.records,
+      reservedBytes: storage.reservation.bytes,
+    });
+    await expect(registry.import([{
+      name: "must-wait-for-confirmed-cleanup.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+    await expect(readFile(foreign, "utf8")).resolves.toBe("prior-runtime-owned");
+  });
+
   it("retries transient startup orphan deletion before reserving capacity", async () => {
     const { directory, registry: previousProcess } = await registry();
     const [orphan] = await previousProcess.import([{

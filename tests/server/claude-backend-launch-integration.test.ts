@@ -86,6 +86,7 @@ function completedResult(input: ProviderRunInput): ProviderRunResult {
     textTruncated: false,
     exitCode: 0,
     signal: null,
+  cleanupConfirmed: true,
   };
 }
 

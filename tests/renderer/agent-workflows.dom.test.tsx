@@ -264,6 +264,119 @@ describe("useAgentWorkflows", () => {
     });
   });
 
+  it("rehydrates saved goals when recovery safety blocks provider refresh", async () => {
+    const saved = {
+      ...workflow({
+        kind: "codex-native" as const,
+        available: true,
+        label: "Codex native goal",
+      }),
+      goals: [{
+        conversationId: "conversation-1",
+        source: "codex-native" as const,
+        providerSessionId: "thread-1",
+        objective: "Survive the runtime restart",
+        status: "active" as const,
+        tokenBudget: 12_000,
+        tokensUsed: 1_000,
+        timeUsedSeconds: 5,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:05.000Z",
+        synchronizedAt: "2030-01-01T00:00:05.000Z",
+      }],
+    };
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "agent.workflow.load") {
+        throw new Error(
+          "Changes are unavailable in recovery safety mode.",
+        );
+      }
+      if (command.type !== "agent.workflow.saved.load") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: { kind: "agent.workflow", workflow: saved },
+      };
+    });
+    const hook = renderHook(() => useAgentWorkflows({
+      conversationId: "conversation-1",
+      routeIdentity: "codex-app-server\0thread-1",
+      status: "online",
+      request,
+      subscribe: () => () => undefined,
+    }));
+
+    await waitFor(() => expect(hook.result.current.state?.goals)
+      .toEqual(saved.goals));
+    expect(hook.result.current.error).toContain("recovery safety mode");
+    expect(request).toHaveBeenNthCalledWith(1, {
+      type: "agent.workflow.load",
+      payload: { conversationId: "conversation-1", refresh: true },
+    });
+    expect(request).toHaveBeenNthCalledWith(2, {
+      type: "agent.workflow.saved.load",
+      payload: { conversationId: "conversation-1" },
+    });
+  });
+
+  it("shares one goal-mutation latch across every surface", async () => {
+    let releaseMutation!: () => void;
+    const mutation = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "agent.workflow.load") {
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "agent.workflow",
+            workflow: workflow({
+              kind: "codex-native",
+              available: true,
+              label: "Codex native goal",
+            }),
+          },
+        };
+      }
+      if (command.type === "agent.goal.set") {
+        await mutation;
+        return { type: "request.ok", requestId: crypto.randomUUID() };
+      }
+      throw new Error(`Unexpected command: ${command.type}`);
+    });
+    const hook = renderHook(() => useAgentWorkflows({
+      conversationId: "conversation-1",
+      routeIdentity: "codex-app-server\0thread-1",
+      status: "online",
+      request,
+      subscribe: () => () => undefined,
+    }));
+    await waitFor(() => expect(hook.result.current.state).not.toBeNull());
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = hook.result.current.setGoal({
+        source: "codex-native",
+        status: "paused",
+      });
+    });
+    await waitFor(() => expect(hook.result.current.mutating).toBe(true));
+    await expect(hook.result.current.clearGoal("codex-native"))
+      .rejects.toThrow("Another goal change is already in progress");
+    expect(request).toHaveBeenCalledTimes(2);
+
+    releaseMutation();
+    await act(async () => await pending);
+    expect(hook.result.current.mutating).toBe(false);
+  });
+
   it("clears a native refresh warning when an authoritative goal event arrives", async () => {
     let emit!: (event: ServerEvent) => void;
     const request = vi.fn(async (): Promise<ServerEvent> => ({

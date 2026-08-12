@@ -1,6 +1,6 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -11,10 +11,6 @@ import {
   providerChildEnvironment,
   providerEnvironment,
 } from "../../src/server/environment";
-import {
-  ProcessTreeTerminationError,
-  type ProcessTreeTerminator,
-} from "../../src/server/process-lifecycle";
 import { portableNodeExecutable } from "../helpers/portable-provider-fixture";
 
 const ENVIRONMENT_KEYS = [
@@ -32,6 +28,7 @@ const ENVIRONMENT_KEYS = [
   "HTTPS_PROXY",
   "INERTIA_LOGIN_SHELL_MARKER",
   "LOCALAPPDATA",
+  "NVM_BIN",
   "NODE_EXTRA_CA_CERTS",
   "NO_PROXY",
   "OPENAI_API_KEY",
@@ -47,7 +44,6 @@ const ENVIRONMENT_KEYS = [
 
 describe.sequential("provider environment discovery", () => {
   const roots: string[] = [];
-  const descendantPids: number[] = [];
   const originalEnvironment = Object.fromEntries(ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));
 
   function temporaryRoot(): string {
@@ -69,9 +65,6 @@ describe.sequential("provider environment discovery", () => {
   }
 
   afterEach(async () => {
-    for (const pid of descendantPids.splice(0)) {
-      try { process.kill(pid, "SIGKILL"); } catch { /* Timeout cleanup may already have stopped it. */ }
-    }
     for (const key of ENVIRONMENT_KEYS) {
       const value = originalEnvironment[key];
       if (value === undefined) delete process.env[key];
@@ -81,200 +74,17 @@ describe.sequential("provider environment discovery", () => {
     await providerEnvironment(true);
   });
 
-  it.skipIf(process.platform === "win32")("removes login-shell descendants after environment discovery times out", async () => {
+  it("does not execute arbitrary login-shell startup files", async () => {
     const home = temporaryRoot();
-    const pidPath = join(home, "descendant.pid");
-    const descendant = join(home, "descendant.cjs");
+    const marker = join(home, "login-shell-ran");
     const shell = join(home, "zsh");
-    writeFileSync(
-      descendant,
-      `require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 1_000);\n`,
-    );
-    writeFileSync(
-      shell,
-      `#!/bin/sh\n${JSON.stringify(process.execPath)} ${JSON.stringify(descendant)} &\nwait\n`,
-    );
-    chmodSync(shell, 0o700);
-
+    writeFileSync(shell, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\n`);
     setEnvironment({ HOME: home, SHELL: shell, PATH: "/usr/bin:/bin" });
+
+    await expect(loginShellEnvironment()).resolves.toEqual({});
     await providerEnvironment(true);
-    const pid = Number.parseInt(readFileSync(pidPath, "utf8"), 10);
-    descendantPids.push(pid);
-
-    expect(() => process.kill(pid, 0)).toThrow();
-  }, 10_000);
-
-  it.skipIf(process.platform === "win32")("fails closed when login-shell cleanup cannot be confirmed", async () => {
-    const home = temporaryRoot();
-    const shell = join(home, "zsh");
-    writeFileSync(shell, "#!/bin/sh\nsleep 30\n");
-    chmodSync(shell, 0o700);
-    setEnvironment({ HOME: home, SHELL: shell, PATH: "/usr/bin:/bin" });
-    const terminate: ProcessTreeTerminator = async (child) => {
-      if (child.pid) {
-        try { process.kill(-child.pid, "SIGKILL"); } catch { /* Best-effort test cleanup. */ }
-      }
-      return false;
-    };
-
-    await expect(loginShellEnvironment(terminate)).rejects.toBeInstanceOf(
-      ProcessTreeTerminationError,
-    );
-  }, 10_000);
-
-  it.skipIf(process.platform === "win32")("recovers commands exported by the login shell from a stripped GUI PATH", async () => {
-    const home = temporaryRoot();
-    const shellBin = join(home, "shell-bin");
-    mkdirSync(shellBin, { recursive: true });
-    const command = executable(shellBin, "login-shell-agent");
-    const shell = join(home, "zsh");
-    writeFileSync(
-      shell,
-      `#!/bin/sh\nPATH=${JSON.stringify(`${shellBin}${delimiter}/usr/bin${delimiter}/bin`)} INERTIA_LOGIN_SHELL_MARKER=ready /usr/bin/env -0\n`,
-    );
-    chmodSync(shell, 0o700);
-
-    setEnvironment({ HOME: home, SHELL: shell, PATH: "/usr/bin:/bin" });
-    const environment = await providerEnvironment(true);
-    const candidates = await executableCandidates("login-shell-agent", environment, home);
-
-    expect(environment.env.INERTIA_LOGIN_SHELL_MARKER).toBeUndefined();
-    expect(environment.pathEntries[0]).toBe(shellBin);
-    expect(candidates).toEqual([realpathSync.native(command)]);
+    expect(() => realpathSync.native(marker)).toThrow();
   });
-
-  it.skipIf(process.platform === "win32")(
-    "recovers only allowlisted provider, proxy, and CA values from the login shell",
-    async () => {
-      const home = temporaryRoot();
-      const shell = join(home, "zsh");
-      const shellValues = {
-        PATH: "/usr/bin:/bin",
-        HTTPS_PROXY: "http://shell-proxy.test:8443",
-        NO_PROXY: "127.0.0.1,localhost",
-        NODE_EXTRA_CA_CERTS: join(home, "provider-ca.pem"),
-        SSL_CERT_FILE: join(home, "provider-cert.pem"),
-        OPENAI_API_KEY: "shell-openai",
-        CODEX_HOME: "~/.codex-shell",
-        ANTHROPIC_API_KEY: "shell-anthropic",
-        CLAUDE_CODE_USE_BEDROCK: "1",
-        AWS_SECRET_ACCESS_KEY: "shell-bedrock",
-        CURSOR_API_KEY: "shell-cursor",
-        OPENROUTER_API_KEY: "shell-openrouter",
-        OPENCODE_CONFIG: join(home, "opencode.json"),
-        AWS_ACCESS_KEY_ID: "shell-bedrock-access",
-        GOOGLE_APPLICATION_CREDENTIALS: join(
-          home,
-          "vertex-service-account.json",
-        ),
-        GOOGLE_CLOUD_PROJECT: "shell-vertex-project",
-        VERTEX_LOCATION: "europe-west4",
-        GITHUB_TOKEN: "unrelated-github-secret",
-        DATABASE_URL: "postgres://unrelated-secret",
-        INERTIA_LOGIN_SHELL_MARKER: "unrelated-shell-export",
-      };
-      const assignments = Object.entries(shellValues)
-        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-        .join(" ");
-      writeFileSync(shell, `#!/bin/sh\n${assignments} /usr/bin/env -0\n`);
-      chmodSync(shell, 0o700);
-
-      setEnvironment({
-        HOME: home,
-        SHELL: shell,
-        PATH: "/usr/bin:/bin",
-        HTTPS_PROXY: "http://stale-gui-proxy.test",
-        NODE_EXTRA_CA_CERTS: join(home, "stale-gui-ca.pem"),
-        OPENAI_API_KEY: "stale-gui-openai",
-      });
-      const environment = await providerEnvironment(true);
-
-      expect(environment.env).toMatchObject({
-        HTTPS_PROXY: shellValues.HTTPS_PROXY,
-        NO_PROXY: shellValues.NO_PROXY,
-        NODE_EXTRA_CA_CERTS: shellValues.NODE_EXTRA_CA_CERTS,
-        SSL_CERT_FILE: shellValues.SSL_CERT_FILE,
-        OPENAI_API_KEY: shellValues.OPENAI_API_KEY,
-        CODEX_HOME: join(home, ".codex-shell"),
-        ANTHROPIC_API_KEY: shellValues.ANTHROPIC_API_KEY,
-        CLAUDE_CODE_USE_BEDROCK: shellValues.CLAUDE_CODE_USE_BEDROCK,
-        AWS_SECRET_ACCESS_KEY: shellValues.AWS_SECRET_ACCESS_KEY,
-        CURSOR_API_KEY: shellValues.CURSOR_API_KEY,
-        OPENROUTER_API_KEY: shellValues.OPENROUTER_API_KEY,
-        OPENCODE_CONFIG: shellValues.OPENCODE_CONFIG,
-      });
-      expect(environment.env).not.toHaveProperty("GITHUB_TOKEN");
-      expect(environment.env).not.toHaveProperty("DATABASE_URL");
-      expect(environment.env).not.toHaveProperty(
-        "INERTIA_LOGIN_SHELL_MARKER",
-      );
-
-      const baseline = {
-        HTTPS_PROXY: shellValues.HTTPS_PROXY,
-        NO_PROXY: shellValues.NO_PROXY,
-        NODE_EXTRA_CA_CERTS: shellValues.NODE_EXTRA_CA_CERTS,
-        SSL_CERT_FILE: shellValues.SSL_CERT_FILE,
-      };
-      const cases = [
-        {
-          providerId: "codex" as const,
-          allowed: ["OPENAI_API_KEY", "CODEX_HOME"],
-        },
-        {
-          providerId: "claude" as const,
-          allowed: [
-            "ANTHROPIC_API_KEY",
-            "CLAUDE_CODE_USE_BEDROCK",
-            "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY",
-          ],
-        },
-        {
-          providerId: "cursor" as const,
-          allowed: ["CURSOR_API_KEY"],
-        },
-        {
-          providerId: "opencode" as const,
-          allowed: [
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "OPENROUTER_API_KEY",
-            "OPENCODE_CONFIG",
-            "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY",
-            "GOOGLE_APPLICATION_CREDENTIALS",
-            "GOOGLE_CLOUD_PROJECT",
-            "VERTEX_LOCATION",
-          ],
-        },
-      ];
-      const providerSentinels = [
-        "OPENAI_API_KEY",
-        "CODEX_HOME",
-        "ANTHROPIC_API_KEY",
-        "CLAUDE_CODE_USE_BEDROCK",
-        "AWS_SECRET_ACCESS_KEY",
-        "CURSOR_API_KEY",
-        "OPENROUTER_API_KEY",
-        "OPENCODE_CONFIG",
-        "AWS_ACCESS_KEY_ID",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_CLOUD_PROJECT",
-        "VERTEX_LOCATION",
-      ];
-      for (const { providerId, allowed } of cases) {
-        const child = providerChildEnvironment(providerId, environment.env);
-        expect(child).toMatchObject(baseline);
-        for (const key of providerSentinels) {
-          if (allowed.includes(key)) expect(child).toHaveProperty(key);
-          else expect(child).not.toHaveProperty(key);
-        }
-        expect(child).not.toHaveProperty("GITHUB_TOKEN");
-        expect(child).not.toHaveProperty("DATABASE_URL");
-        expect(child).not.toHaveProperty("INERTIA_LOGIN_SHELL_MARKER");
-      }
-    },
-  );
 
   it("searches known per-user CLI directories when the shell PATH is minimal", async () => {
     const home = temporaryRoot();
@@ -289,6 +99,83 @@ describe.sequential("provider environment discovery", () => {
     expect(environment.pathEntries).toContain(localBin);
     expect(candidates).toEqual([realpathSync.native(command)]);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "searches reviewed version-manager directories without running a shell",
+    async () => {
+      const home = temporaryRoot();
+      const voltaBin = join(home, ".volta", "bin");
+      const nvmBin = join(home, ".nvm", "versions", "node", "v22.18.0", "bin");
+      mkdirSync(voltaBin, { recursive: true });
+      mkdirSync(nvmBin, { recursive: true });
+      const voltaCommand = executable(voltaBin, "volta-agent");
+      const nvmCommand = executable(nvmBin, "nvm-agent");
+
+      setEnvironment({ HOME: home, PATH: "/usr/bin:/bin" });
+      const environment = await providerEnvironment(true);
+
+      expect(environment.pathEntries).toContain(voltaBin);
+      expect(environment.pathEntries).toContain(nvmBin);
+      await expect(executableCandidates(
+        "volta-agent",
+        environment,
+        home,
+      )).resolves.toEqual([realpathSync.native(voltaCommand)]);
+      await expect(executableCandidates(
+        "nvm-agent",
+        environment,
+        home,
+      )).resolves.toEqual([realpathSync.native(nvmCommand)]);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "prioritizes active, default, and newest NVM versions within the scan bound",
+    async () => {
+      const home = temporaryRoot();
+      const versionsRoot = join(home, ".nvm", "versions", "node");
+      for (let major = 1; major <= 40; major += 1) {
+        mkdirSync(join(versionsRoot, `v${major}.0.0`, "bin"), { recursive: true });
+      }
+      const activeBin = join(versionsRoot, "v3.0.0", "bin");
+      const defaultBin = join(versionsRoot, "v2.0.0", "bin");
+      const newestBin = join(versionsRoot, "v40.0.0", "bin");
+      const activeCommand = executable(activeBin, "nvm-active-agent");
+      const defaultCommand = executable(defaultBin, "nvm-default-agent");
+      const newestCommand = executable(newestBin, "nvm-newest-agent");
+      mkdirSync(join(home, ".nvm", "alias"), { recursive: true });
+      writeFileSync(join(home, ".nvm", "alias", "default"), "2\n");
+
+      setEnvironment({ HOME: home, NVM_BIN: activeBin, PATH: "/usr/bin:/bin" });
+      const environment = await providerEnvironment(true);
+      const scannedNvmBins = environment.pathEntries.filter(
+        (entry) => entry.startsWith(`${versionsRoot}/`),
+      );
+
+      expect(scannedNvmBins).toHaveLength(32);
+      expect(scannedNvmBins.slice(0, 3)).toEqual([
+        activeBin,
+        defaultBin,
+        newestBin,
+      ]);
+      expect(scannedNvmBins).not.toContain(join(versionsRoot, "v1.0.0", "bin"));
+      await expect(executableCandidates(
+        "nvm-active-agent",
+        environment,
+        home,
+      )).resolves.toEqual([realpathSync.native(activeCommand)]);
+      await expect(executableCandidates(
+        "nvm-default-agent",
+        environment,
+        home,
+      )).resolves.toEqual([realpathSync.native(defaultCommand)]);
+      await expect(executableCandidates(
+        "nvm-newest-agent",
+        environment,
+        home,
+      )).resolves.toEqual([realpathSync.native(newestCommand)]);
+    },
+  );
 
   it.skipIf(process.platform === "win32")("ignores non-executable and malformed command candidates", async () => {
     const root = temporaryRoot();

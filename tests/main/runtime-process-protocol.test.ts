@@ -24,6 +24,8 @@ const packageSmokePdfInput = resolve(tmpdir(), "inertia package smoke.pdf");
 const packageSmokePdfResult = resolve(tmpdir(), "inertia package smoke result.json");
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
+const runtimeGenerationId = "33333333-3333-4333-8333-333333333333:1";
+const systemBootId = "test:44444444-4444-4444-8444-444444444444";
 
 describe("runtime process protocol", () => {
   it("accepts only strict correlated Private Connect requests and responses", () => {
@@ -165,6 +167,8 @@ describe("runtime process protocol", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        runtimeGenerationId,
+        systemBootId,
       },
     })).toEqual({
       type: "runtime.start",
@@ -172,8 +176,31 @@ describe("runtime process protocol", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        runtimeGenerationId,
+        systemBootId,
       },
     });
+    const priorCleanupUnconfirmed = {
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        runtimeGenerationId,
+        systemBootId,
+        priorRuntimeCleanupUnconfirmed: true,
+      },
+    } as const;
+    expect(parseRuntimeWorkerCommand(priorCleanupUnconfirmed)).toEqual(
+      priorCleanupUnconfirmed,
+    );
+    expect(parseRuntimeWorkerCommand({
+      ...priorCleanupUnconfirmed,
+      options: {
+        ...priorCleanupUnconfirmed.options,
+        priorRuntimeCleanupUnconfirmed: false,
+      },
+    })).toBeNull();
     expect(parseRuntimeWorkerCommand({ type: "runtime.start", options: { dataDirectory: "relative", defaultWorkspacePath: workspaceDirectory, enableProviders: false } })).toBeNull();
     expect(parseRuntimeWorkerCommand({
       type: "runtime.start",
@@ -181,6 +208,8 @@ describe("runtime process protocol", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: true,
+        runtimeGenerationId,
+        systemBootId,
         codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
         attachmentRoot,
       },
@@ -190,6 +219,8 @@ describe("runtime process protocol", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: true,
+        runtimeGenerationId,
+        systemBootId,
         codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
         attachmentRoot,
       },
@@ -225,6 +256,8 @@ describe("runtime process protocol", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: true,
+        runtimeGenerationId,
+        systemBootId,
         codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
         kimiClaudeProfiles: [profile],
       },
@@ -255,6 +288,8 @@ describe("runtime process protocol", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        runtimeGenerationId,
+        systemBootId,
         packageSmokePdf: {
           inputPath: packageSmokePdfInput,
           resultPath: packageSmokePdfResult,
@@ -293,6 +328,8 @@ describe("runtime process protocol", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        runtimeGenerationId,
+        systemBootId,
         recoveryImportFault: {
           phase: "after-staging-publish",
           markerPath: resolve(tmpdir(), "recovery-fault.marker"),

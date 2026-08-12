@@ -31,6 +31,7 @@ import type { ProviderManager } from "../../providers";
 import { normalizeIdentityPath } from "../../project-identity";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
+import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import {
@@ -84,6 +85,10 @@ export interface ConversationCommandDependencies {
   workspaceRuns: WorkspaceRunController<WebSocket>;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   runtimeSync: RuntimeSyncHub<WebSocket>;
+  duoLaunches?: Pick<
+    DuoLaunchCoordinator,
+    "reconcileConversationDeletion"
+  >;
   deletedConversationIds: Set<string>;
   dataDirectory: string;
   rememberDeletedConversation(conversationId: string): void;
@@ -609,16 +614,36 @@ export function createConversationCommandHandler(
         const checkoutPath = conversation.worktreePath
           ?? ownership?.path
           ?? dependencies.store.projectPath(conversation.projectId);
+        const deletionReservationId = `conversation-delete:${command.requestId}`;
         if (!dependencies.providerTerminalResumes.acquireAtCheckout(
           conversation.id,
           conversation.projectId,
           checkoutPath,
+          deletionReservationId,
         )) {
           throw new RuntimeRequestError(
             "End the resumed provider terminal before deleting this thread.",
           );
         }
         try {
+          if (dependencies.store.providerRunOwnership.forConversation(
+            conversation.id,
+          ).length > 0) {
+            throw new RuntimeRequestError(
+              "Provider process cleanup is unconfirmed. Keep this thread and its checkout until Inertia confirms the prior runtime process tree stopped.",
+            );
+          }
+          if (
+            dependencies.duoLaunches
+            && !await dependencies.duoLaunches.reconcileConversationDeletion(
+              conversation.id,
+              deletionReservationId,
+            )
+          ) {
+            throw new RuntimeRequestError(
+              "Cancel the active Duo launch, acknowledge an interrupted dispatch, or cancel the locked comparison before deleting this thread.",
+            );
+          }
           if (
             dependencies.store.hasRecordedActiveWorkspaceRunForConversation(
               conversation.id,
@@ -708,11 +733,14 @@ export function createConversationCommandHandler(
             dependencies.store.projectPath(conversation.projectId),
             conversation.id,
           ).catch(() => undefined);
+          const finalConversation = dependencies.store.conversation(
+            command.payload.conversationId,
+          );
           const attachmentIds = dependencies.store
-            .attachments(conversation.id)
+            .attachments(finalConversation.id)
             .map(({ id }) => id);
           dependencies.store.deleteConversation(
-            command.payload.conversationId,
+            finalConversation.id,
           );
           try {
             const referencedAttachmentIds = new Set(
@@ -726,9 +754,9 @@ export function createConversationCommandHandler(
             // Startup reconciliation retries cleanup against authoritative SQL.
           }
           dependencies.rememberDeletedConversation(
-            command.payload.conversationId,
+            finalConversation.id,
           );
-          dependencies.forgetRemoteTranscript(command.payload.conversationId);
+          dependencies.forgetRemoteTranscript(finalConversation.id);
           return "mutation";
         } finally {
           dependencies.providerTerminalResumes.release(conversation.id);

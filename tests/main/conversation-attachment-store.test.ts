@@ -600,6 +600,144 @@ describe("durable conversation attachment storage", () => {
     ])).resolves.toHaveLength(1);
   });
 
+  it("does not close until an aborted persistence child and cleanup have stopped", async () => {
+    const dataDirectory = await root();
+    const payload = image("10101010-1010-4010-8010-101010101010");
+    let started = false;
+    let finishStop!: () => void;
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (operation.operation !== "persist") {
+        return testOperationRunner(operation, signal);
+      }
+      started = true;
+      const result = new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+      const stopped = new Promise<void>((resolve) => {
+        finishStop = resolve;
+      });
+      return { result, stopped };
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      operationRunner,
+    });
+    const retaining = store.retain([payload]);
+    await vi.waitFor(() => expect(started).toBe(true));
+
+    let closed = false;
+    const closing = store.close().then(() => { closed = true; });
+    await expect(retaining).rejects.toThrow(/closing/u);
+    await Promise.resolve();
+    expect(closed).toBe(false);
+
+    finishStop();
+    await expect(closing).resolves.toBeUndefined();
+    expect(closed).toBe(true);
+    await expect(store.preview(payload.attachment.id)).rejects.toThrow(/closing/u);
+  });
+
+  it("cancels and drains an active durable preview read during close", async () => {
+    const dataDirectory = await root();
+    const payload = image("20202020-2020-4020-8020-202020202020");
+    let readReady!: () => void;
+    const ready = new Promise<void>((resolve) => { readReady = resolve; });
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      operationRunner: testOperationRunner,
+      readFault: {
+        attachmentId: payload.attachment.id,
+        stallBeforeRecordRevalidateMs: 60_000,
+        onReady: readReady,
+      },
+    });
+    await store.retain([payload]);
+    const preview = store.preview(payload.attachment.id);
+    await ready;
+
+    const closing = store.close();
+    await expect(preview).rejects.toThrow(/closing/u);
+    await expect(closing).resolves.toBeUndefined();
+  });
+
+  it("cancels reconciliation and drains its active child before closing", async () => {
+    const dataDirectory = await root();
+    const storeDirectory = join(dataDirectory, "conversation-attachments");
+    await mkdir(storeDirectory, { recursive: true });
+    await mkdir(join(storeDirectory, "foreign-entry"));
+    let started = false;
+    let finishStop!: () => void;
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (operation.operation !== "remove") {
+        return testOperationRunner(operation, signal);
+      }
+      started = true;
+      const result = new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+      const stopped = new Promise<void>((resolve) => {
+        finishStop = resolve;
+      });
+      return { result, stopped };
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      operationRunner,
+    });
+    const reconciling = store.reconcile([]);
+    await vi.waitFor(() => expect(started).toBe(true));
+
+    let closed = false;
+    const closing = store.close().then(() => { closed = true; });
+    const settledBeforeStop = await Promise.race([
+      Promise.allSettled([reconciling, closing]).then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 25)),
+    ]);
+    expect(settledBeforeStop).toBe(false);
+    expect(closed).toBe(false);
+    finishStop();
+    await expect(reconciling).rejects.toThrow(/closing/u);
+    await expect(closing).resolves.toBeUndefined();
+    expect(closed).toBe(true);
+  });
+
+  it("bounds a cleanup whose child never confirms it stopped", async () => {
+    const dataDirectory = await root();
+    const storeDirectory = join(dataDirectory, "conversation-attachments");
+    await mkdir(storeDirectory, { recursive: true });
+    await writeFile(join(storeDirectory, "foreign-entry"), "foreign");
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (operation.operation !== "remove") {
+        return testOperationRunner(operation, signal);
+      }
+      const result = new Promise<void>((_resolve, reject) => {
+        const abort = () => reject(signal?.reason ?? new Error("aborted"));
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) abort();
+      });
+      return { result, stopped: new Promise<void>(() => undefined) };
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      operationRunner,
+      reconciliationBatchTimeoutMs: 25,
+    });
+
+    const startedAt = Date.now();
+    await expect(store.reconcile([])).resolves.toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    await expect(store.usage()).rejects.toThrow(/still stopping/u);
+  });
+
   it("keeps failed-cleanup bytes reserved until reconciliation succeeds", async () => {
     const dataDirectory = await root();
     const first = image("12121212-1212-4212-8212-121212121212");

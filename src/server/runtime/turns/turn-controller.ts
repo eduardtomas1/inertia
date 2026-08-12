@@ -6,6 +6,7 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AgentPlan,
+  type AgentTurn,
   type AgentTurnStatus,
   type AgentTurnTerminalStatus,
   type ChatMessage,
@@ -44,6 +45,15 @@ import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
 import { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
 import { TurnProviderEventProjector } from "./turn-provider-event-projector";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
+import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
+import {
+  quarantineActiveDuoTurn,
+} from "../duo/duo-active-turn-quarantine";
+import { hasActiveTurnCheckout, providerConversationIds } from "./turn-checkout-activity";
+import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
+import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
+import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
+import { providerFailureCause } from "./turn-provider-result";
 
 interface ProviderStartAttempt {
   accepted: boolean;
@@ -75,15 +85,19 @@ export class TurnController {
   private readonly clock: () => Date;
   private readonly id: () => string;
   private readonly turnTimeoutMs: number;
+  private readonly runtimeGenerationId: string;
+  private readonly systemBootId: string;
   private readonly streams: TurnStreamProjection;
   private readonly activities: TurnActivityProjection;
   private readonly artifacts: TurnArtifactSequencer;
   private readonly interactions: TurnInteractionCoordinator;
   private readonly settlement: TurnSettlementCoordinator;
   private readonly providerEvents: TurnProviderEventProjector;
+  private readonly nativeGoals: TurnNativeGoalCoordinator;
   private readonly settlementTasks = new Set<Promise<unknown>>();
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
-  private readonly providerCleanupBarriers = new Map<string, Promise<void>>();
+  private readonly providerRunOwnershipBarriers = new Map<string, Promise<void>>();
+  private readonly nativeGoalMutations = new TurnNativeGoalMutationGate();
   private closing = false;
 
   constructor(
@@ -98,12 +112,16 @@ export class TurnController {
       clock?: () => Date;
       id?: () => string;
       turnTimeoutMs?: number;
+      runtimeGenerationId?: string;
+      systemBootId?: string;
     } = {},
   ) {
     this.scheduler = options.scheduler ?? defaultTurnScheduler();
     this.clock = options.clock ?? (() => new Date());
     this.id = options.id ?? randomUUID;
     this.turnTimeoutMs = Math.max(1, options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
+    this.runtimeGenerationId = options.runtimeGenerationId ?? `${randomUUID()}:1`;
+    this.systemBootId = options.systemBootId ?? `test:${randomUUID()}`;
     this.activities = new TurnActivityProjection({
       store: this.store,
       hooks: this.hooks,
@@ -166,10 +184,37 @@ export class TurnController {
       now: () => this.now(),
       transition: (active, status) => this.transition(active, status),
     });
+    this.nativeGoals = new TurnNativeGoalCoordinator({
+      store: this.store,
+      providers: this.providers,
+      hooks: this.hooks,
+      activeForConversation: (conversationId) =>
+        this.activeByConversation.get(conversationId),
+      activeForTurn: (turnId) => this.activeByTurn.get(turnId),
+      queue: (request) => this.queue(request),
+      start: (turnId) => this.start(turnId),
+    });
   }
 
   isActive(conversationId: string): boolean {
-    return this.activeByConversation.has(conversationId);
+    return this.activeByConversation.has(conversationId)
+      || this.providers.isRunning(conversationId)
+      || this.store.providerRunOwnership.forConversation(conversationId)
+        .length > 0;
+  }
+
+  async withNativeGoalMutation<T>(conversationId: string, operation: () => Promise<T>): Promise<T> {
+    return await this.nativeGoalMutations.run(conversationId, operation);
+  }
+
+  async setNativeGoal(
+    input: Parameters<TurnNativeGoalCoordinator["set"]>[0],
+  ): ReturnType<TurnNativeGoalCoordinator["set"]> {
+    return this.nativeGoals.set(input);
+  }
+
+  async clearNativeGoal(conversationId: string): Promise<boolean | "superseded" | null> {
+    return await this.nativeGoals.clear(conversationId);
   }
 
   isClosing(): boolean {
@@ -177,15 +222,12 @@ export class TurnController {
   }
 
   hasActiveCheckout(checkoutPath: string): boolean {
-    const conversationIds = new Set([
-      ...this.activeByConversation.keys(),
-      ...this.providerCleanupBarriers.keys(),
-    ]);
-    return [...conversationIds].some((conversationId) =>
-      this.store.conversationWork.conversationMatchesCheckout(
-        conversationId,
-        checkoutPath,
-      ));
+    const tracked = [
+      ...this.activeByConversation.keys(), ...this.providerRunOwnershipBarriers.keys(),
+      ...this.store.providerRunOwnership.all().map(({ conversationId }) =>
+        conversationId),
+    ];
+    return hasActiveTurnCheckout(this.store, this.providers, tracked, checkoutPath);
   }
 
   /**
@@ -200,7 +242,7 @@ export class TurnController {
     const expected = new Set(conversationIds);
     await Promise.resolve();
     while (true) {
-      const barriers = [...this.providerCleanupBarriers.entries()]
+      const barriers = [...this.providerRunOwnershipBarriers.entries()]
         .filter(([conversationId]) => expected.has(conversationId))
         .map(([, barrier]) => barrier);
       if (barriers.length === 0) return;
@@ -208,8 +250,137 @@ export class TurnController {
     }
   }
 
+  async reconcileInactiveDuoTurn(
+    launchId: string,
+    conversationId: string,
+    turnId: string,
+    options: {
+      providerRunOwnershipConfirmed?: boolean;
+      allowProviderStop?: boolean;
+      authorizedCheckoutReservationIds?: readonly string[];
+    } = {},
+  ): Promise<boolean> {
+    const providerRunOwnershipConfirmed = options.providerRunOwnershipConfirmed ?? false;
+    const allowProviderStop = options.allowProviderStop ?? true;
+    let turn: AgentTurn;
+    try {
+      const owner = this.store.pairedLaunchForTurn(turnId);
+      turn = this.store.agentTurn(turnId);
+      if (
+        owner?.launchId !== launchId
+        || turn.conversationId !== conversationId
+      ) return false;
+      const request = this.store.message(turn.userMessageId);
+      // Duo source and judge turns are deliberately attachment-free. Refuse
+      // future or malformed launch-owned turns that would require a lost
+      // ActiveTurn's private attachment-release state.
+      if (request.turnId !== turnId || request.attachments.length > 0) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+    const exactActive = this.activeByConversation.get(conversationId);
+    if (
+      exactActive
+      && (
+        exactActive.turn.id !== turnId
+        || exactActive.turn.runId !== turn.runId
+      )
+    ) return false;
+    const ownedRuns = this.store.providerRunOwnership.forConversation(conversationId);
+    if (
+      ownedRuns.length > 0
+      && !(
+        ownedRuns.length === 1
+        && exactActive
+        && ownedRuns[0]?.turnId === turnId
+        && ownedRuns[0]?.runId === turn.runId
+        && ownedRuns[0]?.runtimeGenerationId === this.runtimeGenerationId
+      )
+    ) return false;
+    if (
+      allowProviderStop
+      && this.providers.isRunning(conversationId)
+    ) {
+      if (!this.providers.ownsRun?.(conversationId, {
+        runId: turn.runId,
+        turnId,
+      })) return false;
+      this.store.providerRunOwnership.record(
+        turn.id,
+        turn.conversationId,
+        turn.runId,
+        this.runtimeGenerationId,
+        this.systemBootId,
+        this.now(),
+      );
+    }
+    if (exactActive && !exactActive.providerRunStarted) {
+      this.settle(exactActive, "cancelled", "user-cancelled", "Stopped");
+    }
+    if (exactActive?.providerRunStarted) {
+      quarantineActiveDuoTurn(exactActive, {
+        scheduler: this.scheduler,
+        pendingApprovals: this.pendingApprovals,
+        pendingInputs: this.pendingInputs,
+        hooks: this.hooks,
+      });
+    }
+    if (this.providerRunOwnershipBarriers.has(conversationId) && !exactActive) {
+      await this.waitForProviderCleanup([conversationId]);
+    }
+    const cleanup = await confirmDuoProviderCleanup(
+      this.providers,
+      conversationId,
+      { runId: turn.runId, turnId },
+      {
+        cleanupAlreadyConfirmed: providerRunOwnershipConfirmed,
+        allowStop: allowProviderStop,
+      },
+    );
+    if (cleanup !== "confirmed") return false;
+    if (exactActive && !exactActive.settled) {
+      this.settle(exactActive, "cancelled", "user-cancelled", "Stopped");
+    }
+    if (exactActive) await this.releaseTurnAttachmentsWithRetry(exactActive);
+    this.store.providerRunOwnership.clear(turn.id, turn.runId);
+    await this.waitForProviderCleanup([conversationId]);
+
+    return settleInactiveDuoTurn(this.store, {
+      launchId,
+      conversationId,
+      turnId,
+      providerRunOwnershipConfirmed,
+      authorizedCheckoutReservationIds:
+        options.authorizedCheckoutReservationIds ?? [],
+      hasEphemeralOwner: () =>
+        this.hasEphemeralTurnOwner(conversationId, turnId),
+      now: () => this.now(),
+      pendingApprovals: this.pendingApprovals,
+      pendingInputs: this.pendingInputs,
+      hooks: this.hooks,
+    });
+  }
+
+  private hasEphemeralTurnOwner(
+    conversationId: string,
+    turnId: string,
+  ): boolean {
+    return this.activeByConversation.has(conversationId)
+      || this.activeByTurn.has(turnId)
+      || this.providerRunOwnershipBarriers.has(conversationId)
+      || this.providers.isRunning(conversationId)
+      || this.store.providerRunOwnership.forConversation(conversationId)
+        .length > 0;
+  }
+
   activeConversationIds(): string[] {
-    return [...this.activeByConversation.keys()];
+    return [...new Set([
+      ...this.activeByConversation.keys(), ...providerConversationIds(this.store, this.providers),
+      ...this.store.providerRunOwnership.all().map(({ conversationId }) =>
+        conversationId),
+    ])];
   }
 
   /**
@@ -278,17 +449,20 @@ export class TurnController {
     }
   }
 
-  queue(
-    request: QueueTurnRequest,
-    /** Synchronous ownership handoff after commit and before live adoption. */
-    onPersisted?: () => void,
-  ): QueuedTurn {
+  /** Synchronous ownership handoff runs after commit and before live adoption. */
+  queue(request: QueueTurnRequest, onPersisted?: () => void): QueuedTurn {
     if (this.closing) throw new Error("The local runtime is shutting down.");
+    if (
+      !request.goalStart
+      && this.nativeGoalMutations.blocksTurnAdmission(request.conversationId)
+    ) {
+      throw new Error("A Codex goal update is in progress for this conversation.");
+    }
     this.store.assertDuoComparisonTurnAllowed(
       request.conversationId,
       request.authorizedDuoComparisonLaunchId,
     );
-    if (this.activeByConversation.has(request.conversationId)) {
+    if (this.isActive(request.conversationId)) {
       throw new Error("This conversation already has an active turn.");
     }
 
@@ -310,7 +484,10 @@ export class TurnController {
     if (this.closing) throw new Error("The local runtime is shutting down.");
     for (const request of requests) {
       this.store.assertDuoComparisonTurnAllowed(request.conversationId);
-      if (this.activeByConversation.has(request.conversationId)) {
+      if (this.nativeGoalMutations.blocksTurnAdmission(request.conversationId)) {
+        throw new Error("A Codex goal update is in progress for this conversation.");
+      }
+      if (this.isActive(request.conversationId)) {
         throw new Error("A Duo conversation already has an active turn.");
       }
     }
@@ -468,7 +645,7 @@ export class TurnController {
     if (!active || active.settled || this.closing) return false;
     this.beginStart(active);
 
-    const priorProviderCleanup = this.providerCleanupBarriers.get(
+    const priorProviderCleanup = this.providerRunOwnershipBarriers.get(
       active.conversation.id,
     );
     if (priorProviderCleanup) {
@@ -518,7 +695,7 @@ export class TurnController {
   }
 
   private async awaitProviderStartReady(active: ActiveTurn): Promise<boolean> {
-    const priorProviderCleanup = this.providerCleanupBarriers.get(
+    const priorProviderCleanup = this.providerRunOwnershipBarriers.get(
       active.conversation.id,
     );
     if (priorProviderCleanup) await priorProviderCleanup.catch(() => undefined);
@@ -563,12 +740,19 @@ export class TurnController {
       resolveStarted(value);
     };
     active.providerStartAcknowledgement = acknowledge;
-    // Provider callbacks may fire synchronously from run()/harness.start().
-    // Claim ownership before invoking the provider so any callback-triggered
-    // settlement uses bounded exact-run cleanup instead of releasing resources
-    // while the provider is still alive.
-    active.providerRunStarted = true;
     try {
+      // Persist exact process ownership before run()/harness.start() can create
+      // a child or synchronously invoke a callback. Abrupt worker exits therefore
+      // leave a generation-bound deletion/recovery fence behind.
+      this.store.providerRunOwnership.record(
+        active.turn.id,
+        active.conversation.id,
+        active.turn.runId,
+        this.runtimeGenerationId,
+        this.systemBootId,
+        this.now(),
+      );
+      active.providerRunStarted = true;
       const result = this.providers.run(active.providerInput, {
         onStarted: () => {
           if (active.settled || this.closing) {
@@ -577,7 +761,13 @@ export class TurnController {
             return;
           }
           acknowledge(true);
-          if (this.store.agentTurn(active.turn.id).status === "starting") {
+          // App Server harness acceptance happens before initialize/thread open
+          // and, for ordinary turns, before turn/start is acknowledged. Keep
+          // Codex truthfully `starting` until its protocol emits `running`.
+          if (
+            active.turn.harnessId !== "codex-app-server"
+            && this.store.agentTurn(active.turn.id).status === "starting"
+          ) {
             if (this.transition(active, "running")) {
               this.broadcastConversationShell(active);
             }
@@ -604,18 +794,33 @@ export class TurnController {
           );
         },
       ).finally(() => {
+        const cleanupConfirmed = !this.providers.isRunning(
+          active.conversation.id,
+        );
+        if (cleanupConfirmed) {
+          this.store.providerRunOwnership.clear(
+            active.turn.id,
+            active.turn.runId,
+          );
+        }
         // Cancellation owns an exact stop barrier which releases attachments
         // only after the provider process has detached. The provider promise
         // may settle before stopOwned(), so it must not race that barrier.
-        if (!this.providerCleanupBarriers.has(active.conversation.id)) {
+        if (
+          cleanupConfirmed
+          && !this.providerRunOwnershipBarriers.has(active.conversation.id)
+        ) {
           this.track(this.releaseTurnAttachmentsWithRetry(active));
         }
       })
         .catch(() => undefined);
     } catch (error) {
       acknowledge(false);
-      if (active.providerRunStarted) {
+      if (this.providers.isRunning(active.conversation.id)) {
         this.providers.cancel(active.conversation.id);
+      } else {
+        this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
+        active.providerRunStarted = false;
       }
       this.settle(active, "failed", "turn-start-failed", this.publicError(error));
       return { accepted: false, started };
@@ -800,8 +1005,11 @@ export class TurnController {
           : "The local runtime crashed before this turn completed.",
       );
     }
-    await this.providers.disposeAll();
-    await this.drainSettlementTasks();
+    try {
+      await this.providers.disposeAll();
+    } finally {
+      await this.drainSettlementTasks();
+    }
   }
 
   /**
@@ -816,6 +1024,7 @@ export class TurnController {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
       this.providerEvents.project(active, event);
+      this.nativeGoals.handleEvent(active, event);
       return true;
     } catch (error) {
       this.providers.cancel(active.conversation.id);
@@ -866,16 +1075,10 @@ export class TurnController {
     } else if (result.status === "cancelled") {
       this.settle(active, "cancelled", "user-cancelled", "Stopped");
     } else {
-      const transportFailure = result.failure
-        ? result.failure.reason !== "codex-error"
-        : result.exitCode !== null || result.signal !== null;
-      const cause = transportFailure
-        ? "provider-process-exit"
-        : "provider-error";
       this.settle(
         active,
         "failed",
-        cause,
+        providerFailureCause(result),
         result.error ?? "The provider could not complete the request.",
         result.failure,
       );
@@ -907,6 +1110,8 @@ export class TurnController {
     failure?: ProviderRunFailure,
   ): boolean {
     active.providerStartAcknowledgement?.(false);
+    const requiresOwnedStop = active.providerRunStarted
+      && this.providers.isRunning(active.conversation.id);
     const wasSettled = active.settled;
     const settled = this.settlement.settle(
       active,
@@ -918,37 +1123,37 @@ export class TurnController {
     if (wasSettled) return settled;
     if (!active.providerRunStarted) {
       this.track(this.releaseTurnAttachmentsWithRetry(active));
-    } else if (this.requiresOwnedProviderStop(cause)) {
+    } else if (requiresOwnedStop) {
       this.stopOwnedProviderAndRelease(active);
     }
     return settled;
   }
 
-  private requiresOwnedProviderStop(cause: TurnTerminalCause): boolean {
-    return cause !== "provider-completed"
-      && cause !== "provider-error"
-      && cause !== "provider-process-exit"
-      && cause !== "provider-process-crash";
-  }
-
   private stopOwnedProviderAndRelease(active: ActiveTurn): void {
     const conversationId = active.conversation.id;
     const task = (async () => {
+      let cleanupConfirmed = false;
       try {
-        await this.providers.stopOwned(conversationId, {
+        const result = await this.providers.stopOwned(conversationId, {
           runId: active.turn.runId,
           turnId: active.turn.id,
         });
-      } finally {
+        cleanupConfirmed = result === "settled"
+          || (result === "missing" && !this.providers.isRunning(conversationId));
+      } catch {
+        // The durable pre-stop marker intentionally remains fail-closed.
+      }
+      if (cleanupConfirmed) {
+        this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
         await this.releaseTurnAttachmentsWithRetry(active);
       }
     })();
     const barrier = task.finally(() => {
-      if (this.providerCleanupBarriers.get(conversationId) === barrier) {
-        this.providerCleanupBarriers.delete(conversationId);
+      if (this.providerRunOwnershipBarriers.get(conversationId) === barrier) {
+        this.providerRunOwnershipBarriers.delete(conversationId);
       }
     });
-    this.providerCleanupBarriers.set(conversationId, barrier);
+    this.providerRunOwnershipBarriers.set(conversationId, barrier);
     this.track(barrier);
   }
 
@@ -1002,6 +1207,7 @@ export class TurnController {
   }
 
   private cleanup(active: ActiveTurn): void {
+    this.nativeGoals.cleanup(active);
     active.assistantStream.dispose();
     active.reasoningStream.dispose();
     for (const requestId of active.approvalIds) this.pendingApprovals.delete(requestId);

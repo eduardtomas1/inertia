@@ -38,6 +38,7 @@ export interface AppFixture {
   previewUrl: string;
   nativePreviewIsVisible: (url: string) => Promise<boolean>;
   runtimeSnapshot: () => Promise<RuntimeTestSnapshot>;
+  recycleRuntime: () => Promise<void>;
   resizeWindow: (width: number, height: number) => Promise<void>;
   expectNoViewportOverflow: () => Promise<void>;
   restart: () => Promise<{
@@ -468,6 +469,16 @@ export async function createAppFixture(
     }
     return snapshot;
   };
+  const recycleRuntime = async (): Promise<void> => {
+    const confirmed = await currentApp().evaluate(async () => {
+      const runtime = Reflect.get(
+        globalThis,
+        "__inertiaTestRuntime",
+      ) as { recycle?: () => Promise<boolean> } | undefined;
+      return await runtime?.recycle?.() ?? false;
+    });
+    if (!confirmed) throw new Error("The test runtime did not recycle cleanly.");
+  };
   const resizeWindow = async (width: number, height: number): Promise<void> => {
     await currentApp().evaluate(
       ({ BrowserWindow }, size) => {
@@ -510,6 +521,7 @@ export async function createAppFixture(
     previewUrl: preview.url,
     nativePreviewIsVisible,
     runtimeSnapshot,
+    recycleRuntime,
     resizeWindow,
     expectNoViewportOverflow: () => expectPageNoViewportOverflow(page),
     restart: async () => {

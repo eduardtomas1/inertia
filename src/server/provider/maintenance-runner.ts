@@ -32,6 +32,7 @@ export interface ProviderMaintenanceRunResult
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   message: string;
+  cleanupConfirmed: boolean;
 }
 
 export interface ProviderMaintenanceRunnerOptions {
@@ -182,10 +183,13 @@ export async function runProviderMaintenanceAction(
       if (settled || finalizing) return;
       finalizing = true;
       void (async () => {
+        let cleanupConfirmed = termination === undefined;
         if (termination) {
           try {
             await termination;
+            cleanupConfirmed = true;
           } catch {
+            cleanupConfirmed = false;
             status = "failed";
             exitCode = child.exitCode ?? exitCode;
             signal = child.signalCode ?? signal;
@@ -201,6 +205,7 @@ export async function runProviderMaintenanceAction(
           exitCode,
           signal,
           message,
+          cleanupConfirmed,
           output: publicOutput(output),
           outputTruncated,
         });

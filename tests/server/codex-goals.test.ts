@@ -74,4 +74,19 @@ describe("Codex native goal notifications", () => {
       threadId: "\0thread-1",
     })).toBeNull();
   });
+
+  it("preserves every provider terminal and resumable goal status", () => {
+    for (const status of [
+      "paused",
+      "blocked",
+      "complete",
+      "usageLimited",
+      "budgetLimited",
+    ] as const) {
+      expect(parseCodexGoalUpdatedNotification({
+        threadId: "thread-1",
+        goal: { ...goal, status },
+      })?.goal.status).toBe(status);
+    }
+  });
 });

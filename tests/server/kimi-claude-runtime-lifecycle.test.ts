@@ -51,7 +51,8 @@ import {
 import { AgentHarnessRegistry } from "../../src/server/provider/agent-harness-registry";
 import { CLAUDE_AGENT_SDK_CAPABILITIES } from "../../src/server/provider/claude-agent-sdk-harness";
 import type { ProviderRunResult } from "../../src/server/provider/contracts";
-import { startRuntime, type RunningRuntime } from "../../src/server";
+import type { RunningRuntime } from "../../src/server";
+import { startTestRuntime as startRuntime } from "../support/test-runtime";
 
 const SECRET_REFERENCE = "secret:kimi-runtime-lifecycle";
 const SECRET_VALUE = "kimi-runtime-lifecycle-secret";
@@ -234,6 +235,7 @@ function capturingClaudeHarness(
         textTruncated: false,
         exitCode: 0,
         signal: null,
+      cleanupConfirmed: true,
       };
       return {
         harnessId: "claude-agent-sdk",
@@ -312,6 +314,8 @@ describe("Kimi through Claude runtime lifecycle", () => {
       dataDirectory,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
       kimiClaudeProfiles: [profile],
       backendCredentials,
       agentHarnessRegistry: registry,
@@ -574,6 +578,8 @@ describe("Kimi through Claude runtime lifecycle", () => {
       dataDirectory,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
       kimiClaudeProfiles: [profile],
       backendCredentials,
       agentHarnessRegistry: registry,

@@ -23,4 +23,21 @@ describe("provider run event budget", () => {
       16,
     ).observe("long")).toThrow("Provider sent an oversized event.");
   });
+
+  it("fails closed for values that cannot be serialized", () => {
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+    expect(() => new ProviderRunEventBudget(
+      "Provider",
+      16,
+      4,
+      64,
+    ).observe(circular)).toThrow("Provider sent an unserializable event.");
+    expect(() => new ProviderRunEventBudget(
+      "Provider",
+      16,
+      4,
+      64,
+    ).observe(undefined)).toThrow("Provider sent an unserializable event.");
+  });
 });

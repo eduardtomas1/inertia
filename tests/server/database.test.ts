@@ -119,7 +119,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       .toEqual(countBounded.slice(0, 8));
   });
 
-  it("upgrades schema 54 attachment paths to opaque capabilities", async () => {
+  it("appends schema 56 attachment sanitization after provider ownership", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     const conversation = store.snapshot().conversations[0]!;
     const attachment = {
@@ -837,8 +837,12 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.close();
 
     const legacy = new Database(databasePath);
-    legacy.exec("DROP TABLE agent_turns");
-    legacy.prepare("DELETE FROM schema_migrations WHERE version = 16").run();
+    legacy.exec(`
+      DROP TABLE provider_run_ownership;
+      DROP INDEX agent_turns_provider_run_identity_idx;
+      DROP TABLE agent_turns;
+      DELETE FROM schema_migrations WHERE version IN (16, 55);
+    `);
     legacy.close();
     migrateFixtureInPlace(databasePath);
 
@@ -1109,6 +1113,10 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.close();
 
     const beforeInterfaceScale = new Database(databasePath);
+    beforeInterfaceScale.exec(`
+      DROP TABLE provider_run_ownership;
+      DROP INDEX agent_turns_provider_run_identity_idx;
+    `);
     beforeInterfaceScale.exec("ALTER TABLE app_state DROP COLUMN usage_display_mode");
     beforeInterfaceScale.exec("ALTER TABLE app_state DROP COLUMN interface_scale");
     beforeInterfaceScale.prepare("DELETE FROM schema_migrations WHERE version >= 14").run();
@@ -2265,6 +2273,10 @@ describe("RuntimeStore conversation lifecycle", () => {
     const { databasePath, workspacePath, store } = await createStore();
     store.close();
     const legacy = new Database(databasePath);
+    legacy.exec(`
+      DROP TABLE provider_run_ownership;
+      DROP INDEX agent_turns_provider_run_identity_idx;
+    `);
     legacy.exec("DROP TABLE provider_metadata_scoped_cache");
     legacy.prepare("DELETE FROM schema_migrations WHERE version >= 26").run();
     legacy.prepare(`

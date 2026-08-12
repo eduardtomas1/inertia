@@ -17,6 +17,7 @@ import {
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentMimeTypeForName,
+  chatAttachmentStorageExtension,
 } from "../../../shared/attachments.js";
 import type { ChatAttachment } from "../../../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../../../shared/runtime-attachments.js";
@@ -60,22 +61,6 @@ function sameIdentity(
 
 function publicAttachmentError(): Error {
   return new Error("The selected attachment is no longer available or could not be verified.");
-}
-
-function storageExtension(
-  mimeType: TrustedRuntimeAttachment["mimeType"],
-): string {
-  switch (mimeType) {
-    case "image/png": return "png";
-    case "image/jpeg": return "jpg";
-    case "image/webp": return "webp";
-    case "image/gif": return "gif";
-    case "application/pdf": return "pdf";
-    case "text/plain": return "txt";
-    case "text/markdown": return "md";
-    case "text/csv": return "csv";
-    case "application/json": return "json";
-  }
 }
 
 export class TrustedAttachmentResolver {
@@ -137,6 +122,11 @@ export class TrustedAttachmentResolver {
       this.broker.relinquish(attachmentId)));
   }
 
+  async releaseAll(attachmentIds: readonly string[]): Promise<void> {
+    await Promise.allSettled(attachmentIds.map((attachmentId) =>
+      this.broker.release(attachmentId)));
+  }
+
   private async revalidate(
     canonicalRoot: string,
     trusted: TrustedRuntimeAttachment,
@@ -156,7 +146,7 @@ export class TrustedAttachmentResolver {
         !isContained(canonicalRoot, canonicalPath)
         || canonicalPath !== trusted.path
         || basename(canonicalPath)
-          !== `${trusted.id}.${storageExtension(trusted.mimeType)}`
+          !== `${trusted.id}.${chatAttachmentStorageExtension(trusted.mimeType)}`
       ) throw publicAttachmentError();
       const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
       const nonBlocking =

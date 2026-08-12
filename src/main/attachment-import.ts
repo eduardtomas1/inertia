@@ -6,6 +6,7 @@ import {
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   MAX_TEXT_ATTACHMENT_BYTES,
   chatAttachmentMimeTypeForName,
+  chatAttachmentStorageExtension,
   isPotentialChatAttachment,
   type ChatAttachmentMimeType,
   type DocumentAttachmentMimeType,
@@ -20,18 +21,6 @@ export interface ValidatedAttachmentImport {
   readonly size: number;
   readonly digest: string;
 }
-
-const extensionForMimeType: Readonly<Record<ChatAttachmentMimeType, string>> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/webp": "webp",
-  "image/gif": "gif",
-  "application/pdf": "pdf",
-  "text/plain": "txt",
-  "text/markdown": "md",
-  "text/csv": "csv",
-  "application/json": "json",
-};
 
 export interface SelectedAttachmentStat {
   readonly size: number;
@@ -118,7 +107,7 @@ export function validateSelectedAttachmentStats(
 
 function fallbackName(mimeType: ChatAttachmentMimeType): string {
   const kind = mimeType.startsWith("image/") ? "image" : "document";
-  return `${kind}.${extensionForMimeType[mimeType]}`;
+  return `${kind}.${chatAttachmentStorageExtension(mimeType)}`;
 }
 
 function safeDisplayName(value: unknown, mimeType: ChatAttachmentMimeType): string {
@@ -230,7 +219,7 @@ export function validateAttachmentImport(value: unknown): ValidatedAttachmentImp
   return {
     displayName: safeDisplayName(item.name, mimeType),
     mimeType,
-    extension: extensionForMimeType[mimeType],
+    extension: chatAttachmentStorageExtension(mimeType),
     bytes,
     size: bytes.length,
     digest: createHash("sha256").update(bytes).digest("hex"),

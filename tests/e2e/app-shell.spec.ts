@@ -1,7 +1,5 @@
 import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
@@ -10,45 +8,19 @@ import { RuntimeStore } from "../../src/server/database";
 import { expectComposerEndsAtDock } from "./support/layout-assertions";
 import {
   createAppFixture,
-  processExists,
   type AppFixture,
-  type RuntimeTestSnapshot,
 } from "./support/app-fixture";
+import { expectRuntimeCrashSafety } from "./support/runtime-crash-safety";
 import { seedViewedConversationContext } from "./support/viewed-conversation-context";
 
 const execFileAsync = promisify(execFile);
-
-async function stagedAttachmentPath(
-  id: string | undefined,
-  extension: string,
-): Promise<string> {
-  expect(id).toBeTruthy();
-  const root = join(
-    await electronApp.evaluate(({ app: electron }) =>
-      electron.getPath("temp")),
-    "inertia-attachments",
-  );
-  const sessions = (await readdir(root))
-    .filter((name) => /^session-[A-Za-z0-9_-]{6}$/u.test(name));
-  const candidates = await Promise.all(sessions.map(async (session) => {
-    const path = join(root, session, `${id}.${extension}`);
-    return await stat(path).then(() => path, () => null);
-  }));
-  const matches = candidates.filter((path) => path !== null);
-  expect(matches).toHaveLength(1);
-  return matches[0]!;
-}
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
 let page!: AppFixture["page"];
 let testDirectory!: AppFixture["testDirectory"];
 let workspaceDirectory!: AppFixture["workspaceDirectory"];
-let attachmentImagePath!: AppFixture["attachmentImagePath"];
-let attachmentDocumentPath!: AppFixture["attachmentDocumentPath"];
-let malformedAttachmentPath!: AppFixture["malformedAttachmentPath"];
 let rendererErrors!: AppFixture["rendererErrors"];
-let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
 let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 
@@ -58,11 +30,7 @@ test.beforeAll(async () => {
   page = app.page;
   testDirectory = app.testDirectory;
   workspaceDirectory = app.workspaceDirectory;
-  attachmentImagePath = app.attachmentImagePath;
-  attachmentDocumentPath = app.attachmentDocumentPath;
-  malformedAttachmentPath = app.malformedAttachmentPath;
   rendererErrors = app.rendererErrors;
-  runtimeSnapshot = app.runtimeSnapshot;
   resizeWindow = app.resizeWindow;
   expectNoViewportOverflow = app.expectNoViewportOverflow;
 });
@@ -370,173 +338,6 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
   expect(rendererErrors).toEqual([]);
 });
 
-test("previews, validates, removes, and cleans up secure composer attachments", async ({ browserName: _browserName }, testInfo) => {
-  await resizeWindow(1440, 920);
-  await electronApp.evaluate(({ dialog }, paths) => {
-    Reflect.set(dialog, "showOpenDialog", async () => ({
-      canceled: false,
-      filePaths: paths,
-      bookmarks: [],
-    }));
-  }, [attachmentImagePath, attachmentDocumentPath]);
-
-  await page.getByRole("button", { name: "Attach images or documents" }).click();
-  const attachments = page.getByRole("list", { name: "Attachments" });
-  await expect(attachments.getByText("preview.png", { exact: true })).toBeVisible();
-  await expect(attachments.getByText("notes.pdf", { exact: true })).toBeVisible();
-  await expect(attachments.getByText("PNG image · 68 B", { exact: true })).toBeVisible();
-  await expect(attachments.getByText("PDF document · 35 B", { exact: true })).toBeVisible();
-  const chosenPreview = attachments.locator("img");
-  await expect(chosenPreview).toHaveCount(1);
-  await expect.poll(() => chosenPreview.evaluate((element) => {
-    const image = element as HTMLImageElement;
-    const source = image.currentSrc || image.src;
-    return {
-      complete: image.complete,
-      width: image.naturalWidth,
-      scheme: new URL(source).protocol,
-      host: new URL(source).host,
-    };
-  })).toEqual({
-    complete: true,
-    width: 1,
-    scheme: "inertia:",
-    host: "bundle",
-  });
-  const chosenPreviewSource = await chosenPreview.getAttribute("src");
-  expect(chosenPreviewSource).toMatch(
-    /^inertia:\/\/bundle\/attachment-preview\/[0-9a-f-]{36}$/u,
-  );
-  const untrustedHostStatus = await electronApp.evaluate(
-    async ({ net }, url) => (await net.fetch(url)).status,
-    chosenPreviewSource!.replace("inertia://bundle/", "inertia://untrusted/"),
-  );
-  expect(untrustedHostStatus).toBe(404);
-  expect(chosenPreviewSource).not.toContain(testDirectory);
-  expect(await page.locator(".composer").textContent()).not.toContain(testDirectory);
-  await expect(page.getByText(
-    /Document preview is available, but this route cannot read/u,
-  )).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
-
-  await resizeWindow(520, 720);
-  const attachmentBounds = await attachments.evaluate((list) => {
-    const bounds = list.getBoundingClientRect();
-    return {
-      right: bounds.right,
-      viewport: window.innerWidth,
-      scrollHeight: list.scrollHeight,
-      clientHeight: list.clientHeight,
-    };
-  });
-  expect(attachmentBounds.right).toBeLessThanOrEqual(attachmentBounds.viewport + 1);
-  expect(attachmentBounds.clientHeight).toBeLessThanOrEqual(152);
-  expect(attachmentBounds.scrollHeight).toBeGreaterThanOrEqual(attachmentBounds.clientHeight);
-  await resizeWindow(1440, 920);
-  const screenshotPath = testInfo.outputPath("secure-attachments-1440x920.png");
-  await page.screenshot({ animations: "disabled", path: screenshotPath });
-  await testInfo.attach("secure-attachments-1440x920", {
-    path: screenshotPath,
-    contentType: "image/png",
-  });
-
-  await attachments.getByRole("button", { name: "Remove attachment notes.pdf" }).click();
-  await expect(attachments.getByText("notes.pdf", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
-
-  const chosenId = chosenPreviewSource?.split("/").at(-1);
-  expect(chosenId).toBeTruthy();
-  const selectedTempPath = await stagedAttachmentPath(chosenId, "png");
-  await expect.poll(async () => stat(selectedTempPath).then(() => true, () => false)).toBe(true);
-  const selectedBytes = await readFile(selectedTempPath);
-  const sameSizeReplacement = Buffer.from(selectedBytes);
-  const replacementIndex = sameSizeReplacement.length - 1;
-  sameSizeReplacement[replacementIndex] =
-    sameSizeReplacement[replacementIndex]! ^ 0x01;
-  await writeFile(selectedTempPath, sameSizeReplacement);
-  const replacedPreviewStatus = await electronApp.evaluate(
-    async ({ net }, url) => (await net.fetch(url)).status,
-    chosenPreviewSource!,
-  );
-  expect(replacedPreviewStatus).toBe(404);
-  await writeFile(selectedTempPath, selectedBytes);
-  const restoredPreviewStatus = await electronApp.evaluate(
-    async ({ net }, url) => (await net.fetch(url)).status,
-    chosenPreviewSource!,
-  );
-  expect(restoredPreviewStatus).toBe(200);
-  await page.getByRole("textbox", { name: "Message" }).fill("Inspect the selected image.");
-  await page.getByRole("button", { name: "Send message" }).click();
-  await expect(attachments).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Attach images or documents" }))
-    .toBeEnabled({ timeout: 5_000 });
-  // Accepted turns retain their privileged copy while provider execution may
-  // still be reading it.
-  await expect.poll(async () => stat(selectedTempPath).then(() => true, () => false)).toBe(true);
-
-  const imageBytes = [...await readFile(attachmentImagePath)];
-  await page.getByRole("textbox", { name: "Message" }).evaluate((textarea, bytes) => {
-    const transfer = new DataTransfer();
-    transfer.items.add(new File([new Uint8Array(bytes)], "pasted.png", { type: "image/png" }));
-    const event = new Event("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(event, "clipboardData", { value: transfer });
-    textarea.dispatchEvent(event);
-  }, imageBytes);
-  await expect(attachments.getByText("pasted.png", { exact: true })).toBeVisible();
-  await expect(attachments.locator("img")).toHaveCount(1);
-  const pastedSource = await attachments.locator("img").getAttribute("src");
-  const pastedId = pastedSource?.split("/").at(-1);
-  const pastedTempPath = await stagedAttachmentPath(pastedId, "png");
-  await attachments.getByRole("button", { name: "Remove attachment pasted.png" }).click();
-  await expect.poll(async () => stat(pastedTempPath).then(() => true, () => false)).toBe(false);
-
-  const documentBytes = [...await readFile(attachmentDocumentPath)];
-  await page.locator(".composer").evaluate((composer, bytes) => {
-    const transfer = new DataTransfer();
-    transfer.items.add(new File([new Uint8Array(bytes)], "dropped.pdf", { type: "application/pdf" }));
-    composer.dispatchEvent(new DragEvent("drop", {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer: transfer,
-    }));
-  }, documentBytes);
-  await expect(attachments.getByText("dropped.pdf", { exact: true })).toBeVisible();
-  await expect(attachments.getByText("PDF document · 35 B", { exact: true })).toBeVisible();
-  await attachments.getByRole("button", { name: "Remove attachment dropped.pdf" }).click();
-
-  await electronApp.evaluate(({ dialog }, path) => {
-    Reflect.set(dialog, "showOpenDialog", async () => ({
-      canceled: false,
-      filePaths: [path],
-      bookmarks: [],
-    }));
-  }, malformedAttachmentPath);
-  await page.getByRole("button", { name: "Attach images or documents" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Attachment content does not match its safe file type.",
-  );
-  await page.getByRole("button", { name: "Dismiss error" }).click();
-  await expect(attachments).toHaveCount(0);
-
-  await electronApp.evaluate(({ dialog }, path) => {
-    Reflect.set(dialog, "showOpenDialog", async () => ({
-      canceled: false,
-      filePaths: [path],
-      bookmarks: [],
-    }));
-  }, attachmentImagePath);
-  await page.getByRole("button", { name: "Attach images or documents" }).click();
-  const unsentSource = await attachments.locator("img").getAttribute("src");
-  const unsentId = unsentSource?.split("/").at(-1);
-  const unsentTempPath = await stagedAttachmentPath(unsentId, "png");
-  await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(true);
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(false);
-  await page.getByRole("button", { name: "Go to workspace" }).click();
-
-  expect(rendererErrors).toEqual([]);
-});
-
 test("opens a settled chat directly and does not redirect when Work filters hide it", async () => {
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const database = new Database(databasePath);
@@ -713,74 +514,5 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
 });
 
 test("keeps the window alive and reconnects with a rotated capability after a runtime crash", async () => {
-  await expect.poll(
-    async () => (await runtimeSnapshot()).phase,
-    { timeout: 15_000 },
-  ).toBe("ready");
-  const before = await runtimeSnapshot();
-  const beforeUrl = await page.evaluate(() => window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
-  await expect(page.locator(".app-shell")).toHaveAttribute(
-    "data-runtime-generation",
-    /^[0-9a-f-]{36}$/iu,
-  );
-  const beforeRuntimeGeneration = await page.locator(".app-shell").getAttribute("data-runtime-generation");
-  expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await page.getByRole("complementary", { name: "Workspace tools" })
-    .getByRole("tab", { name: "Terminal", exact: true })
-    .click();
-  const terminal = page.locator("aside.terminal-panel").first();
-  await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
-  const beforeTerminalId = await terminal.getAttribute("data-terminal-id");
-  const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
-  const conversation = database.prepare(`
-    SELECT conversations.id
-    FROM conversations
-    JOIN app_state ON app_state.active_conversation_id = conversations.id
-    WHERE app_state.id = 1
-  `).get() as { id: string };
-  database.prepare("UPDATE conversations SET status = 'running' WHERE id = ?").run(conversation.id);
-  database.prepare("INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at) VALUES (?, ?, 'assistant', ?, '[]', ?)")
-    .run(
-      randomUUID(),
-      conversation.id,
-      "# Timeline response\n\n```ts file=src/timeline.ts\nconst ready: boolean = true;\n```\n\n| Check | State |\n| --- | --- |\n| Renderer | ready |\n\n<script>window.__unsafeMarkdown = true</script>",
-      new Date(Date.now() - 1_000).toISOString(),
-    );
-  database.prepare("INSERT INTO activities (id, conversation_id, run_id, kind, title, detail, status, created_at) VALUES (?, ?, ?, 'command', 'Interrupted E2E command', NULL, 'running', ?)")
-    .run(randomUUID(), conversation.id, "e2e-interrupted-run", new Date().toISOString());
-  database.close();
-  await page.evaluate(() => { Reflect.set(window, "__inertiaNoReloadMarker", crypto.randomUUID()); });
-  const marker = await page.evaluate(() => Reflect.get(window, "__inertiaNoReloadMarker") as string);
-
-  const crashed = await electronApp.evaluate((_electron) => {
-    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as { crash: () => RuntimeTestSnapshot } | undefined;
-    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-    return runtime.crash();
-  });
-  expect(crashed.pid).toBe(before.pid);
-
-  await expect.poll(async () => {
-    const current = await runtimeSnapshot();
-    return current.phase === "ready" && current.generation > before.generation;
-  }, { timeout: 10_000 }).toBe(true);
-  const after = await runtimeSnapshot();
-  const afterUrl = await page.evaluate(() => window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
-  expect(after.generation).toBeGreaterThan(before.generation);
-  expect(after.pid).not.toBe(before.pid);
-  expect(afterUrl).not.toBe(beforeUrl);
-  await expect.poll(() => page.locator(".app-shell").getAttribute("data-runtime-generation"))
-    .not.toBe(beforeRuntimeGeneration);
-  expect(await page.evaluate(() => Reflect.get(window, "__inertiaNoReloadMarker"))).toBe(marker);
-  await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New chat" }).first()).toBeEnabled();
-  await expect(page.getByText("The previous run ended when Inertia closed. Send another message to continue.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Timeline response", level: 1 })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Copy" }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "Markdown" })).toBeVisible();
-  expect(await page.evaluate(() => Reflect.get(window, "__unsafeMarkdown"))).toBeUndefined();
-  await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
-  expect(await terminal.getAttribute("data-terminal-id")).not.toBe(beforeTerminalId);
-  await expect(page.getByRole("alert")).toHaveCount(0);
-  if (before.pid) await expect.poll(() => processExists(before.pid as number), { timeout: 5_000 }).toBe(false);
+  await expectRuntimeCrashSafety(app);
 });

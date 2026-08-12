@@ -330,6 +330,7 @@ function startCursorRun(
         exitCode: child.exitCode,
         signal: child.signalCode,
         error,
+        cleanupConfirmed: false,
       };
     }
     emitter.status(outcome.status, outcome.error);
@@ -350,6 +351,7 @@ function startCursorRun(
       textTruncated: resultText.truncated,
       exitCode: child.exitCode,
       signal: child.signalCode,
+      cleanupConfirmed: true,
       ...(error ? { error } : {}),
     };
   }
@@ -821,7 +823,7 @@ function failedCursorRun(conversationId: string, message: string, emitter: Retur
   return {
     harnessId: "cursor-acp",
     providerId: "cursor",
-    result: Promise.resolve({ providerId: "cursor", conversationId, status: "failed", text: "", textTruncated: false, exitCode: null, signal: null, error: message }),
+    result: Promise.resolve({ providerId: "cursor", conversationId, status: "failed", text: "", textTruncated: false, exitCode: null, signal: null, error: message, cleanupConfirmed: true }),
     cancel: () => {},
     extension: { kind: "cursor-acp", respondToApproval: () => false, respondToInput: () => false },
   };

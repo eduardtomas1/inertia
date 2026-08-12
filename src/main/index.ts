@@ -24,7 +24,6 @@ import {
 } from "../shared/backend-credentials.js";
 import {
   MAX_CHAT_ATTACHMENTS,
-  chatAttachmentKind,
 } from "../shared/attachments.js";
 import {
   builtInKimiClaudeBackendProfile,
@@ -53,6 +52,13 @@ import {
   removeAttachmentStorageSession,
   type AttachmentStorageReservation,
 } from "./attachment-registry.js";
+import {
+  closeConversationAttachmentAccess,
+  type ConversationAttachmentAccess,
+  openPdfAttachment,
+  openConversationAttachments,
+  resolveAttachmentPreviewResponse,
+} from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
@@ -67,6 +73,7 @@ import {
   hardenDesktopSession,
 } from "./preview-broker.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import { stopRuntimeAndPrivateConnect } from "./runtime-shutdown-coordination.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
@@ -172,6 +179,7 @@ const previewBroker = new PreviewBroker({
 });
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
+let conversationAttachments: ConversationAttachmentAccess | null = null;
 let attachmentCleanup: Promise<void> = Promise.resolve();
 let attachmentStorageDirectory: string | null = null;
 let runtimeDataDirectory: string | null = null;
@@ -303,23 +311,13 @@ function registerAppProtocol(): void {
       if (requestedPath.includes("\0")) throw new Error();
       const previewId = /^attachment-preview\/([0-9a-f-]{36})$/iu.exec(requestedPath)?.[1];
       if (previewId) {
-        const preview = await attachmentRegistry().preview(previewId);
-        if (
-          !preview
-          || (
-            chatAttachmentKind(preview.mimeType) !== "image"
-            && preview.mimeType !== "application/pdf"
-          )
-        ) throw new Error();
-        return new Response(new Uint8Array(preview.bytes).buffer, {
-          status: 200,
-          headers: {
-            "Content-Type": preview.mimeType,
-            "Content-Length": String(preview.size),
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "no-store",
-          },
-        });
+        const response = await resolveAttachmentPreviewResponse(
+          importedAttachments,
+          conversationAttachments,
+          previewId,
+        );
+        if (!response) throw new Error();
+        return response;
       }
       const target = resolve(rendererRoot, requestedPath);
       if (!isContained(rendererRoot, target)) throw new Error();
@@ -695,12 +693,11 @@ function registerIpcHandlers(): void {
     if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
       throw new Error("Invalid attachment.");
     }
-    const attachment = await attachmentRegistry().resolve(value);
-    if (!attachment || attachment.mimeType !== "application/pdf") {
-      throw new Error("The PDF attachment is unavailable.");
-    }
-    const openError = await shell.openPath(attachment.path);
-    if (openError) throw new Error("The platform PDF app could not open the attachment.");
+    await openPdfAttachment(
+      attachmentRegistry(),
+      conversationAttachments,
+      value,
+    );
   });
 
   ipcMain.handle(IPC.openProjectPath, async (event, ...args) => {
@@ -955,11 +952,7 @@ function finishQuitAfterCleanup(): void {
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
   setImmediate(() => runtimeDiagnostics?.record("app.start"));
-  const testUpdateVersion = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_TEST_APP_UPDATE_VERSION === "string"
-    && /^v?\d+\.\d+\.\d+$/u.test(process.env.INERTIA_TEST_APP_UPDATE_VERSION)
-      ? process.env.INERTIA_TEST_APP_UPDATE_VERSION
-      : app.getVersion();
+  const testUpdateVersion = runtimeBootstrap.runtimeUpdateVersion(app.getVersion());
   appUpdateService = new AppUpdateService({
     currentVersion: app.getVersion(),
     fetch: process.env.NODE_ENV === "test"
@@ -974,13 +967,11 @@ async function bootstrap(): Promise<void> {
       resolveWindowBackground(windowThemePreference, nativeTheme.shouldUseDarkColors),
     );
   });
-  const dataDirectory = process.env.INERTIA_DATA_DIR
-    ? resolve(process.env.INERTIA_DATA_DIR)
-    : join(app.getPath("userData"), "runtime");
+  const dataDirectory = runtimeBootstrap.runtimeDataPath(process.env.INERTIA_DATA_DIR, app.getPath("userData"));
   runtimeDataDirectory = dataDirectory;
-  const defaultWorkspacePath = process.env.INERTIA_WORKSPACE_DIR
-    ? resolve(process.env.INERTIA_WORKSPACE_DIR)
-    : join(app.getPath("home"), "Inertia");
+  const bootstrapSafety = runtimeBootstrap.prepareRuntimeBootstrapSafety(dataDirectory);
+  conversationAttachments = openConversationAttachments(dataDirectory);
+  const defaultWorkspacePath = runtimeBootstrap.runtimeWorkspacePath(process.env.INERTIA_WORKSPACE_DIR, app.getPath("home"));
   credentialVault = new CredentialVault(
     new ElectronSafeStorageBackend(safeStorage),
     new FileCredentialVaultPersistence(
@@ -996,7 +987,10 @@ async function bootstrap(): Promise<void> {
     createWindow(),
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
-    createAttachmentStorageSession(attachmentStorageRoot()),
+    createAttachmentStorageSession(attachmentStorageRoot(), {
+      preserveExisting: bootstrapSafety.preserveAttachments,
+    }),
+    conversationAttachments,
   ]);
   attachmentStorageDirectory = attachmentStorage.directory;
   const orphanReservation = attachmentStorage.reservation;
@@ -1032,6 +1026,7 @@ async function bootstrap(): Promise<void> {
     : null;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
+    systemBootId: bootstrapSafety.systemBootId,
     attachmentBroker: {
       resolve: (attachmentId, signal) =>
         attachmentRegistry().resolve(attachmentId, signal),
@@ -1145,6 +1140,8 @@ async function bootstrap(): Promise<void> {
           process.kill(snapshot.pid, "SIGKILL");
           return snapshot;
         },
+        recycle: () => runtimeSupervisor?.testOnlyRecycle()
+          ?? Promise.reject(new Error("The test runtime is not running")),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);
@@ -1214,7 +1211,11 @@ if (!hasSingleInstanceLock) {
           "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
         );
       }
-    })().finally(finishQuitAfterCleanup);
+      const retainedAttachments = conversationAttachments;
+      conversationAttachments = null;
+      await closeConversationAttachmentAccess(retainedAttachments);
+    })().then(finishQuitAfterCleanup, (error: unknown) => {
+      console.error("Failed to finish privileged shutdown", error); });
   });
 
   void app

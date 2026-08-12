@@ -395,6 +395,14 @@ parentPort.on("message", (messageEvent) => {
   starting = true;
   void startRuntime({
     ...command.options,
+    onCleanupReceiptConsumed: (
+      receiptRuntimeGenerationId,
+      currentRuntimeGenerationId,
+    ) => post({
+      type: "runtime.cleanup-receipt-consumed",
+      receiptRuntimeGenerationId,
+      currentRuntimeGenerationId,
+    }),
     backendCredentials: credentials,
     attachments,
     secureFiles,

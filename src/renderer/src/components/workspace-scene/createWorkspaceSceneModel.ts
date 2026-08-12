@@ -48,6 +48,10 @@ import { requestTimelineFocus } from "../../utils/timelineFocus";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";
+import {
+  goalControlsBusy,
+  goalExecutionStatus,
+} from "../../utils/goalExecution";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 
@@ -189,6 +193,7 @@ export interface WorkspaceSceneModelInput {
   workflow: {
     state: AgentWorkflowState | null;
     loading: boolean;
+    mutating: boolean;
     error: string | null;
     selectedSkillIds: readonly string[];
     refresh: (providerRefresh?: boolean) => Promise<void>;
@@ -247,6 +252,19 @@ export function createWorkspaceSceneModel({
     === persistedConversation?.id
     ? workflow.state
     : null;
+  const goalMutationSafetyLocked = workflow.error
+    ?.includes("recovery safety mode") === true;
+  const currentGoalExecution = goalMutationSafetyLocked
+    ? "idle"
+    : goalExecutionStatus(projection.turns);
+  const currentGoalControlsBusy = goalControlsBusy({
+    connectionStatus: connection.status,
+    workflowLoading: workflow.loading,
+    safetyLocked: goalMutationSafetyLocked,
+    executionStatus: currentGoalExecution,
+    busyAction,
+  });
+  const goalMutationControlsBusy = currentGoalControlsBusy || workflow.mutating;
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
@@ -431,9 +449,9 @@ export function createWorkspaceSceneModel({
       promptPresets: connection.snapshot?.promptPresets ?? [],
       goal: persistedConversation ? {
         workflow: currentWorkflow,
+        executionStatus: currentGoalExecution,
         loading: workflow.loading,
-        busy: workflow.loading
-          || busyAction?.startsWith("agent.goal") === true,
+        busy: goalMutationControlsBusy,
         error: workflow.error,
         onRetry: () => workflow.refresh(true),
         onSetGoal: setGoal,
@@ -661,18 +679,16 @@ export function createWorkspaceSceneModel({
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,
       goal: {
         workflow: currentWorkflow,
+        executionStatus: currentGoalExecution,
         error: workflow.error,
         plan: latestPlan,
         subagents: projection.subagents,
         turns: projection.turns,
         selectedSkillIds: workflow.selectedSkillIds,
-        busy: workflow.loading
-          || busyAction?.startsWith("agent.goal") === true,
+        busy: goalMutationControlsBusy,
         onRetry: () => workflow.refresh(true),
         onSetGoal: setGoal,
-        onClearGoal: (goal) => {
-          void clearGoal(goal.source).catch(() => undefined);
-        },
+        onClearGoal: (goal) => clearGoal(goal.source),
         onToggleSkill: (skill) => actions.toggleSkill(skill),
         onRefreshSkills: () => {
           void actions.listSkills(true).catch((error) => setActionError(

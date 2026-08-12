@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderModel, ProviderRateLimit } from "../../src/shared/contracts";
 import { ProviderManager } from "../../src/server/providers";
+import { ProcessTreeTerminationError } from "../../src/server/process-lifecycle";
 import {
   ProviderMetadataCache,
   providerMetadataScopeKey,
@@ -188,6 +189,27 @@ describe("provider metadata cache", () => {
     await cache.metadata("opencode", openCodeExecutableTwo, {}, workspacePath);
     expect(reads).toBe(2);
     expect(cache.current("opencode").models[0]?.id).toBe("model-2");
+  });
+
+  it("retains cleanup failures that metadata refresh otherwise serves as stale", async () => {
+    const cache = new ProviderMetadataCache({
+      read: async () => {
+        throw new ProcessTreeTerminationError("Provider metadata process tree");
+      },
+    });
+    const manager = new ProviderManager({ metadataCache: cache });
+
+    await expect(cache.metadata(
+      "codex",
+      codexExecutable,
+      {},
+      workspacePath,
+      { force: true },
+    )).resolves.toMatchObject({ models: [], rateLimits: [] });
+    expect(cache.processCleanupConfirmed()).toBe(false);
+    await expect(manager.disposeAll()).rejects.toThrow(
+      "Provider process cleanup could not be confirmed.",
+    );
   });
 
   it("discards an in-flight response when provider correlation changes", async () => {

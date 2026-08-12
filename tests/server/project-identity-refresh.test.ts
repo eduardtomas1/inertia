@@ -304,6 +304,33 @@ describe("project identity refresher", () => {
     });
   });
 
+  it("drains the underlying inspection after dispose settles its public refresh", async () => {
+    let releaseInspection = (): void => undefined;
+    const refresher = new ProjectIdentityRefresher({
+      inspect: async (path) => {
+        await new Promise<void>((resolve) => {
+          releaseInspection = resolve;
+        });
+        return identity(path);
+      },
+      apply: () => undefined,
+    });
+    const publicRefresh = refresher.refresh({
+      id: "blocked-project",
+      path: "/mnt/disconnected",
+    });
+    refresher.dispose();
+    await expect(publicRefresh).resolves.toMatchObject({ freshness: "stale" });
+
+    let drained = false;
+    const drain = refresher.drain().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    releaseInspection();
+    await drain;
+    expect(drained).toBe(true);
+  });
+
   it("does not apply an identity that resolves after dispose", async () => {
     const applied: string[] = [];
     let release = (): void => undefined;

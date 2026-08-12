@@ -5,7 +5,6 @@ import { RuntimeStore } from "../../src/server/database";
 import {
   createAppFixture,
   type AppFixture,
-  type RuntimeTestSnapshot,
 } from "./support/app-fixture";
 
 interface ReaderAnchor {
@@ -259,13 +258,7 @@ test("never replaces mounted chats during a supervised runtime restart", async (
   const before = await app.runtimeSnapshot();
   const beforeRuntimeGeneration = await page.locator(".app-shell")
     .getAttribute("data-runtime-generation");
-  await app.electronApp.evaluate(() => {
-    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-      crash: () => RuntimeTestSnapshot;
-    } | undefined;
-    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-    runtime.crash();
-  });
+  await app.recycleRuntime();
 
   await expect.poll(async () => {
     const current = await app.runtimeSnapshot();

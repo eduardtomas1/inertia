@@ -38,8 +38,13 @@ export interface AppFixture {
   previewUrl: string;
   nativePreviewIsVisible: (url: string) => Promise<boolean>;
   runtimeSnapshot: () => Promise<RuntimeTestSnapshot>;
+  recycleRuntime: () => Promise<void>;
   resizeWindow: (width: number, height: number) => Promise<void>;
   expectNoViewportOverflow: () => Promise<void>;
+  restart: () => Promise<{
+    electronApp: ElectronApplication;
+    page: Page;
+  }>;
   close: () => Promise<void>;
 }
 
@@ -376,32 +381,40 @@ export async function createAppFixture(
   });
   const rendererErrors: string[] = [];
   const startupDiagnostics: string[] = [];
+  const launchOptions = {
+    args: [".", `--user-data-dir=${join(testDirectory, "electron-profile")}`],
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      INERTIA_DATA_DIR: join(testDirectory, "data"),
+      INERTIA_WORKSPACE_DIR: workspace.workspaceDirectory,
+      ...(options.codexAppServerSource
+        ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
+        : {}),
+    },
+  };
+  const appendDiagnostic = (source: string, chunk: Buffer | string): void => {
+    startupDiagnostics.push(`${source}: ${String(chunk)}`.slice(0, 16_384));
+    if (startupDiagnostics.length > 40) startupDiagnostics.shift();
+  };
+  const observeApp = (current: ElectronApplication, currentPage: Page): void => {
+    current.process().stdout?.on("data", (chunk: Buffer) => {
+      appendDiagnostic("stdout", chunk);
+    });
+    current.process().stderr?.on("data", (chunk: Buffer) => {
+      appendDiagnostic("stderr", chunk);
+    });
+    currentPage.on("console", (message) => {
+      if (message.type() === "error") rendererErrors.push(message.text());
+    });
+    currentPage.on("pageerror", (error) => rendererErrors.push(error.message));
+  };
   let electronApp: ElectronApplication | null = null;
   let page: Page;
   try {
-    electronApp = await electron.launch({
-      args: [".", `--user-data-dir=${join(testDirectory, "electron-profile")}`],
-      env: {
-        ...process.env,
-        NODE_ENV: "test",
-        INERTIA_DATA_DIR: join(testDirectory, "data"),
-        INERTIA_WORKSPACE_DIR: workspace.workspaceDirectory,
-        ...(options.codexAppServerSource
-          ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
-          : {}),
-      },
-    });
-    const appendDiagnostic = (source: string, chunk: Buffer | string): void => {
-      startupDiagnostics.push(`${source}: ${String(chunk)}`.slice(0, 16_384));
-      if (startupDiagnostics.length > 40) startupDiagnostics.shift();
-    };
-    electronApp.process().stdout?.on("data", (chunk: Buffer) => {
-      appendDiagnostic("stdout", chunk);
-    });
-    electronApp.process().stderr?.on("data", (chunk: Buffer) => {
-      appendDiagnostic("stderr", chunk);
-    });
+    electronApp = await electron.launch(launchOptions);
     page = await electronApp.firstWindow();
+    observeApp(electronApp, page);
     if (options.windowDisplay === "primary") {
       await electronApp.evaluate(
         ({ BrowserWindow, screen }) => {
@@ -410,10 +423,6 @@ export async function createAppFixture(
         },
       );
     }
-    page.on("console", (message) => {
-      if (message.type() === "error") rendererErrors.push(message.text());
-    });
-    page.on("pageerror", (error) => rendererErrors.push(error.message));
     await page.locator(
       '.app-shell[data-connection-status="online"]',
     ).waitFor();
@@ -443,8 +452,12 @@ export async function createAppFixture(
     );
   }
 
+  const currentApp = (): ElectronApplication => {
+    if (!electronApp) throw new Error("The Electron fixture is unavailable");
+    return electronApp;
+  };
   const runtimeSnapshot = async (): Promise<RuntimeTestSnapshot> => {
-    const snapshot = await electronApp.evaluate(() => {
+    const snapshot = await currentApp().evaluate(() => {
       const runtime = Reflect.get(
         globalThis,
         "__inertiaTestRuntime",
@@ -456,8 +469,18 @@ export async function createAppFixture(
     }
     return snapshot;
   };
+  const recycleRuntime = async (): Promise<void> => {
+    const confirmed = await currentApp().evaluate(async () => {
+      const runtime = Reflect.get(
+        globalThis,
+        "__inertiaTestRuntime",
+      ) as { recycle?: () => Promise<boolean> } | undefined;
+      return await runtime?.recycle?.() ?? false;
+    });
+    if (!confirmed) throw new Error("The test runtime did not recycle cleanly.");
+  };
   const resizeWindow = async (width: number, height: number): Promise<void> => {
-    await electronApp.evaluate(
+    await currentApp().evaluate(
       ({ BrowserWindow }, size) => {
         const window = BrowserWindow.getAllWindows()[0];
         window?.setContentSize(size.width, size.height);
@@ -467,7 +490,7 @@ export async function createAppFixture(
     await page.waitForTimeout(250);
   };
   const nativePreviewIsVisible = async (url: string): Promise<boolean> =>
-    await electronApp.evaluate(
+    await currentApp().evaluate(
       ({ BrowserWindow }, previewUrl) => {
         const window = BrowserWindow.getAllWindows()[0];
         if (!window) return false;
@@ -485,8 +508,12 @@ export async function createAppFixture(
     );
 
   return {
-    electronApp,
-    page,
+    get electronApp() {
+      return currentApp();
+    },
+    get page() {
+      return page;
+    },
     testDirectory,
     ...workspace,
     secondWorkspaceDirectory,
@@ -494,20 +521,61 @@ export async function createAppFixture(
     previewUrl: preview.url,
     nativePreviewIsVisible,
     runtimeSnapshot,
+    recycleRuntime,
     resizeWindow,
     expectNoViewportOverflow: () => expectPageNoViewportOverflow(page),
-    close: async () => {
-      preview.server.closeAllConnections();
-      await new Promise<void>((resolve) => preview.server.close(() => resolve()));
-      const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid ?? null;
-      await electronApp.evaluate(() => {
+    restart: async () => {
+      const previousApp = electronApp;
+      if (!previousApp) throw new Error("The Electron fixture is unavailable");
+      const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid
+        ?? null;
+      await previousApp.evaluate(() => {
         const runtime = Reflect.get(
           globalThis,
           "__inertiaTestRuntime",
         ) as { quit?: () => unknown } | undefined;
         runtime?.quit?.();
       }).catch(() => undefined);
-      await electronApp.close();
+      await previousApp.close();
+      if (runtimePid) {
+        await expect.poll(
+          () => processExists(runtimePid),
+          { timeout: 5_000 },
+        ).toBe(false);
+      }
+
+      const nextApp = await electron.launch(launchOptions);
+      electronApp = nextApp;
+      const nextPage = await nextApp.firstWindow();
+      page = nextPage;
+      observeApp(nextApp, nextPage);
+      if (options.windowDisplay === "primary") {
+        await nextApp.evaluate(
+          ({ BrowserWindow, screen }) => {
+            const origin = screen.getPrimaryDisplay().workArea;
+            BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
+          },
+        );
+      }
+      await nextPage.locator(
+        '.app-shell[data-connection-status="online"]',
+      ).waitFor();
+      await nextPage.getByRole("textbox", { name: "Message" }).waitFor();
+      return { electronApp: nextApp, page: nextPage };
+    },
+    close: async () => {
+      preview.server.closeAllConnections();
+      await new Promise<void>((resolve) => preview.server.close(() => resolve()));
+      const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid ?? null;
+      const activeApp = currentApp();
+      await activeApp.evaluate(() => {
+        const runtime = Reflect.get(
+          globalThis,
+          "__inertiaTestRuntime",
+        ) as { quit?: () => unknown } | undefined;
+        runtime?.quit?.();
+      }).catch(() => undefined);
+      await activeApp.close();
       if (runtimePid) {
         await expect.poll(
           () => processExists(runtimePid),

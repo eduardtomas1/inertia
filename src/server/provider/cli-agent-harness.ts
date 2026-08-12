@@ -171,6 +171,8 @@ function startCliRun(
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   let overflowReported = false;
   let spawnError: NodeJS.ErrnoException | undefined;
+  let terminationRequested = false;
+  let requestProcessTermination!: (force: boolean) => void;
 
   const emitText = (text: string): void => {
     resultText.append(text);
@@ -178,7 +180,19 @@ function startCliRun(
   };
   const decoder = new ProviderNdjsonDecoder(
     MAX_NDJSON_LINE_CHARS,
-    (line) => normalizeProviderLine(providerId, line, parserState, emitText, emitter.activity, emitter.session),
+    (line) => {
+      normalizeProviderLine(
+        providerId,
+        line,
+        parserState,
+        emitText,
+        emitter.activity,
+        emitter.session,
+      );
+      if (parserState.sawTerminalEvent && !terminationRequested) {
+        requestProcessTermination(true);
+      }
+    },
     () => {
       if (overflowReported) return;
       overflowReported = true;
@@ -226,7 +240,6 @@ function startCliRun(
   let cancelRequested = false;
   let settled = false;
   let finalizing = false;
-  let terminationRequested = false;
   let resolveResult!: (result: ProviderRunResult) => void;
   const result = new Promise<ProviderRunResult>((resolve) => {
     resolveResult = resolve;
@@ -260,9 +273,33 @@ function startCliRun(
             exitCode: child.exitCode ?? exitCode,
             signal: child.signalCode ?? signal,
             error: message,
+            cleanupConfirmed: false,
           });
           return;
         }
+      } else {
+        const message = providerFailureMessage(
+          providerId,
+          spawnError,
+          stderr.toString(),
+          parserState.failureText,
+          options.input.backendProfile,
+        );
+        settled = true;
+        emitter.status("failed", message);
+        resolveResult({
+          providerId,
+          conversationId,
+          status: "failed",
+          sessionId: parserState.sessionId,
+          text: resultText.toString(),
+          textTruncated: resultText.truncated,
+          exitCode,
+          signal,
+          error: message,
+          cleanupConfirmed: false,
+        });
+        return;
       }
       settled = true;
 
@@ -277,11 +314,16 @@ function startCliRun(
           textTruncated: resultText.truncated,
           exitCode: child.exitCode ?? exitCode,
           signal: child.signalCode ?? signal,
+          cleanupConfirmed: true,
         });
         return;
       }
 
-      if (spawnError || exitCode !== 0 || parserState.hadErrorEvent) {
+      if (
+        spawnError
+        || (!parserState.sawTerminalEvent && exitCode !== 0)
+        || parserState.hadErrorEvent
+      ) {
         const message = providerFailureMessage(
           providerId,
           spawnError,
@@ -300,6 +342,7 @@ function startCliRun(
           exitCode,
           signal,
           error: message,
+          cleanupConfirmed: true,
         });
         return;
       }
@@ -314,10 +357,11 @@ function startCliRun(
         textTruncated: resultText.truncated,
         exitCode,
         signal,
+        cleanupConfirmed: true,
       });
     })();
   };
-  const requestProcessTermination = (force: boolean): void => {
+  requestProcessTermination = (force: boolean): void => {
     terminationRequested = true;
     void terminateOwnedProcessTree(force).then(
       () => finish(child.exitCode, child.signalCode),
@@ -390,6 +434,7 @@ function settledCliRun(
       exitCode: null,
       signal: null,
       error,
+      cleanupConfirmed: true,
     }),
     cancel: () => undefined,
     extension: { kind: "cli", providerId },

@@ -2,7 +2,15 @@ import { _electron as electron } from "@playwright/test";
 import Database from "better-sqlite3";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -47,8 +55,48 @@ async function capture(page, filename) {
   console.log(`Captured ${filename}`);
 }
 
+async function closeWorkspaceTools(page) {
+  const tools = page.locator(".workspace-panel").first();
+  if (!await tools.isVisible()) return;
+  await page.getByRole("button", { name: "Close workspace tools" }).first().click();
+  await tools.waitFor({ state: "hidden" });
+}
+
+async function selectWorkspaceTool(page, name) {
+  const panel = page.locator(".workspace-panel");
+  const tab = panel.locator(`[data-workspace-tab="${name.toLowerCase()}"]`);
+  if (await tab.isVisible()) {
+    await tab.click();
+    return;
+  }
+  await panel.getByLabel("Choose workspace tool").click();
+  await panel.getByRole("button", { name, exact: true }).click();
+}
+
+async function workspacePathReceipt(path) {
+  const canonicalPath = await realpath(path);
+  const info = await lstat(canonicalPath, { bigint: true });
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error("The README workspace fixture is not a direct directory.");
+  }
+  return JSON.stringify({
+    version: 1,
+    canonicalPath,
+    directoryIdentity: {
+      device: info.dev.toString(),
+      inode: info.ino.toString(),
+      birthtimeNs: info.birthtimeNs.toString(),
+    },
+    repository: null,
+  });
+}
+
 async function seedShowcaseData() {
   const database = new Database(databasePath);
+  const projectPathReceipt = await workspacePathReceipt(workspaceDirectory);
+  const companionPathReceipt = await workspacePathReceipt(
+    companionWorkspaceDirectory,
+  );
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const conversationId = randomUUID();
@@ -81,6 +129,53 @@ async function seedShowcaseData() {
     modelIdentity: null,
     endpointIdentity: null,
   };
+  const workThreads = [
+    {
+      id: randomUUID(),
+      title: "Harden sent attachment recovery",
+      providerId: "claude",
+      branch: "codex/attachment-recovery",
+      updatedAt: new Date(Date.now() - 15 * 60_000).toISOString(),
+      selection: {
+        ...modelSelection,
+        harnessId: "claude-agent-sdk",
+        backendProfileId: "builtin:anthropic",
+        backendProfileDisplayName: "Anthropic",
+        modelId: "claude-sonnet-4-5",
+        alias: "Claude Sonnet 4.5",
+      },
+    },
+    {
+      id: randomUUID(),
+      title: "Verify Environment actions",
+      providerId: "cursor",
+      branch: "codex/environment-panel",
+      updatedAt: new Date(Date.now() - 55 * 60_000).toISOString(),
+      selection: {
+        ...modelSelection,
+        harnessId: "cursor-acp",
+        backendProfileId: "builtin:cursor",
+        backendProfileDisplayName: "Cursor",
+        modelId: "cursor-managed",
+        alias: "Cursor managed",
+      },
+    },
+    {
+      id: randomUUID(),
+      title: "Audit usage aggregation",
+      providerId: "opencode",
+      branch: "codex/usage-dashboard",
+      updatedAt: new Date(Date.now() - 24 * 60 * 60_000).toISOString(),
+      selection: {
+        ...modelSelection,
+        harnessId: "opencode-sdk",
+        backendProfileId: "builtin:opencode",
+        backendProfileDisplayName: "OpenCode",
+        modelId: "provider-default",
+        alias: null,
+      },
+    },
+  ];
   const historicalPatch = [
     "diff --git a/welcome.ts b/welcome.ts",
     "--- a/welcome.ts",
@@ -138,6 +233,17 @@ async function seedShowcaseData() {
       now,
     );
     database.prepare(`
+      INSERT INTO project_path_authorities (project_id, path, receipt_json)
+      VALUES (?, ?, ?), (?, ?, ?)
+    `).run(
+      projectId,
+      workspaceDirectory,
+      projectPathReceipt,
+      companionProjectId,
+      companionWorkspaceDirectory,
+      companionPathReceipt,
+    );
+    database.prepare(`
       INSERT INTO conversations (
         id, project_id, title, provider_id, model_selection_json,
         continuation_identity_json, model, reasoning_effort,
@@ -174,6 +280,38 @@ async function seedShowcaseData() {
       requestedAt,
       now,
     );
+    database.prepare(`
+      UPDATE conversations SET branch = 'codex/release-0.0.31'
+      WHERE id = ?
+    `).run(conversationId);
+    database.prepare(`
+      UPDATE conversations SET branch = 'main'
+      WHERE id = ?
+    `).run(companionConversationId);
+    const insertWorkThread = database.prepare(`
+      INSERT INTO conversations (
+        id, project_id, title, provider_id, model_selection_json,
+        continuation_identity_json, model, reasoning_effort,
+        interaction_mode, access_mode, status, branch, completed_at,
+        last_viewed_at, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, NULL, ?, 'high', 'build', 'supervised', 'idle', ?,
+        NULL, NULL, ?, ?
+      )
+    `);
+    for (const thread of workThreads) {
+      insertWorkThread.run(
+        thread.id,
+        projectId,
+        thread.title,
+        thread.providerId,
+        JSON.stringify(thread.selection),
+        thread.selection.modelId,
+        thread.branch,
+        thread.updatedAt,
+        thread.updatedAt,
+      );
+    }
     database.prepare(`
       UPDATE app_state
       SET theme = 'dark',
@@ -646,12 +784,9 @@ try {
   await page.getByRole("heading", { name: "Welcome to Inertia", level: 1 }).waitFor();
   await page.locator(".app-shell[data-runtime-generation]").waitFor();
   await sizeWindow();
-  await page.getByRole("dialog", { name: "Environment summary" }).waitFor();
+  await page.getByRole("tabpanel", { name: "Environment" }).waitFor();
   await capture(page, "inertia-dark.png");
 
-  await page.getByRole("button", {
-    name: "Close environment summary",
-  }).click();
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
     exact: true,
@@ -711,9 +846,13 @@ try {
     name: "Welcome to Inertia",
     level: 1,
   }).waitFor();
-  await page.getByRole("button", {
-    name: "Close environment summary",
-  }).click();
+  await sidebar.getByRole("button", { name: "Work", exact: true }).click();
+  await sidebar.getByRole("button", {
+    name: /^Harden sent attachment recovery,/u,
+  }).waitFor();
+  await capture(page, "inertia-work.png");
+  await sidebar.getByRole("button", { name: "Projects", exact: true }).click();
+  await closeWorkspaceTools(page);
   const activeTurn = page.locator(`[data-turn-id="${activeTurnId}"]`);
   await activeTurn.scrollIntoViewIfNeeded();
   await activeTurn.locator(".turn-execution-rail.is-live").waitFor();
@@ -724,7 +863,7 @@ try {
   await capture(page, "inertia-workstream.png");
 
   await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await page.getByRole("tab", { name: /Goal/u }).click();
+  await selectWorkspaceTool(page, "Goal");
   const goalPanel = page.getByRole("region", {
     name: "Goals and agent workflows",
   });
@@ -741,7 +880,7 @@ try {
   await page.getByRole("radio", { name: "Light" }).click();
   await page.getByRole("button", { name: "Go to workspace" }).click();
   await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await page.getByRole("tab", { name: /Changes/u }).click();
+  await selectWorkspaceTool(page, "Changes");
   await capture(page, "inertia-light.png");
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();

@@ -3,6 +3,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -1111,6 +1112,56 @@ describe("database backup and startup recovery", () => {
     upgraded.close();
   });
 
+  it("restores the released V0.0.6 fixture through schema 58 without losing data", () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const paths = databaseRecoveryPaths(databasePath);
+    mkdirSync(paths.backupsDirectory, { recursive: true });
+    const backupFilename = "inertia-20260812T000000000Z.sqlite";
+    const backupPath = join(paths.backupsDirectory, backupFilename);
+    copyFileSync(join(
+      import.meta.dirname,
+      "..",
+      "fixtures",
+      "database",
+      "v0.0.6.sqlite",
+    ), backupPath);
+    const released = new Database(backupPath, { readonly: true });
+    const messagesBefore = released.prepare(
+      "SELECT id, role, content, created_at FROM messages ORDER BY id",
+    ).all();
+    released.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backupFilename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.snapshot().agentTurns).toHaveLength(2);
+    expect(recovered.snapshot().agentTurns.every(
+      ({ association }) => association === "inferred",
+    )).toBe(true);
+    recovered.close();
+
+    const upgraded = new Database(databasePath, { readonly: true });
+    expect(upgraded.prepare(
+      "SELECT id, role, content, created_at FROM messages ORDER BY id",
+    ).all()).toEqual(messagesBefore);
+    expect((upgraded.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(58);
+    expect(upgraded.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'index'
+        AND name = 'agent_turns_usage_dashboard_completed_idx'
+    `).get()).toEqual({ name: "agent_turns_usage_dashboard_completed_idx" });
+    upgraded.close();
+  });
+
   it("restores schema 55 provider ownership before applying attachment sanitization", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1146,9 +1197,10 @@ describe("database backup and startup recovery", () => {
       mimeType: "image/png",
       size: 8,
     }]), message.id);
-    schema55.prepare(
-      "DELETE FROM schema_migrations WHERE version = 56",
-    ).run();
+    schema55.exec(`
+      DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      DELETE FROM schema_migrations WHERE version >= 56;
+    `);
     schema55.close();
     writeFileSync(databasePath, "invalid primary");
 
@@ -1173,7 +1225,9 @@ describe("database backup and startup recovery", () => {
     const upgraded = new Database(databasePath, { readonly: true });
     expect((upgraded.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(56);
+    ).get() as { version: number }).version).toBe(
+      CURRENT_DATABASE_SCHEMA_VERSION,
+    );
     expect((upgraded.prepare(
       "SELECT attachments_json FROM messages WHERE id = ?",
     ).get(message.id) as { attachments_json: string }).attachments_json)
@@ -1203,6 +1257,14 @@ describe("database backup and startup recovery", () => {
     const newer = await store.createBackup();
     store.close();
     const paths = databaseRecoveryPaths(databasePath);
+    for (const backup of [older, newer]) {
+      const schema56 = new Database(join(paths.backupsDirectory, backup.filename));
+      schema56.exec(`
+        DROP INDEX agent_turns_usage_dashboard_completed_idx;
+        DELETE FROM schema_migrations WHERE version >= 57;
+      `);
+      schema56.close();
+    }
     const tampered = new Database(join(paths.backupsDirectory, newer.filename));
     tampered.prepare(`
       UPDATE messages SET attachments_json = ? WHERE id = ?
@@ -1250,6 +1312,32 @@ describe("database backup and startup recovery", () => {
     await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
     expect(readdirSync(databaseRecoveryPaths(databasePath).backupsDirectory))
       .toEqual([]);
+    primary.close();
+  });
+
+  it("validates the exact schema 58 Usage index off thread", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "usage index validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.exec(`
+      DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      CREATE INDEX agent_turns_usage_dashboard_completed_idx
+      ON agent_turns(association, completed_at COLLATE NOCASE, id);
+    `);
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    primary.exec(`
+      DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      CREATE INDEX agent_turns_usage_dashboard_completed_idx
+      ON agent_turns(association, completed_at ASC, id ASC);
+    `);
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
     primary.close();
   });
 
@@ -1449,6 +1537,22 @@ describe("database backup and startup recovery", () => {
           DROP INDEX agent_turns_provider_run_identity_idx;
           CREATE INDEX agent_turns_provider_run_identity_idx
             ON agent_turns(id, conversation_id, run_id);
+        `);
+      },
+    },
+    {
+      label: "the Usage dashboard completed-turn range index",
+      mutate: (database: Database.Database) => {
+        database.exec("DROP INDEX agent_turns_usage_dashboard_completed_idx");
+      },
+    },
+    {
+      label: "the exact Usage dashboard completed-turn range index",
+      mutate: (database: Database.Database) => {
+        database.exec(`
+          DROP INDEX agent_turns_usage_dashboard_completed_idx;
+          CREATE INDEX agent_turns_usage_dashboard_completed_idx
+          ON agent_turns(association, completed_at COLLATE NOCASE, id);
         `);
       },
     },

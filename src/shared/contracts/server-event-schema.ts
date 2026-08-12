@@ -24,6 +24,7 @@ import {
   DUO_LAUNCH_STATES,
 } from "./duo";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
+import { usageDashboardSchema } from "./usage-dashboard-schema";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -906,7 +907,8 @@ function turnUsage(value: unknown): boolean {
     && (value.totalProcessedScope === null
       || oneOf(value, "totalProcessedScope", ["thread", "session", "run"]))
     && (value.compactsAutomatically === null
-      || booleanField(value, "compactsAutomatically"));
+      || booleanField(value, "compactsAutomatically"))
+    && (!("providerSessionBound" in value) || booleanField(value, "providerSessionBound"));
 }
 
 function agentTurn(value: unknown): boolean {
@@ -1113,8 +1115,6 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
-type RequestResultValidator = (value: UnknownRecord) => boolean;
-
 const REQUEST_RESULT_VALIDATORS = {
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
@@ -1126,6 +1126,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) =>
     providerMaintenanceOperation(value.operation),
+  "usage.dashboard": (value) => usageDashboardSchema(value.dashboard),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "project.created": (value) => stringField(value, "projectId"),
   "git.action": (value) => stringField(value, "message"),
@@ -1165,7 +1166,7 @@ const REQUEST_RESULT_VALIDATORS = {
     gitDiff(value.diff) && reversalOperation(value.operation),
   "review.selection.answer": (value) => reviewSelectionAnswer(value.answer),
   "review.summary": (value) => reviewSummary(value.summary),
-} satisfies Record<RequestResultKind, RequestResultValidator>;
+} satisfies Record<RequestResultKind, (value: UnknownRecord) => boolean>;
 
 function requestResult(value: unknown): value is RequestResult {
   if (!recordWithStrings(value, "kind")) return false;

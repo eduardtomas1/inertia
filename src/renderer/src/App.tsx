@@ -65,6 +65,7 @@ import { createWorkspaceSceneModel } from "./components/workspace-scene/createWo
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
 import { requestComposerPrefill } from "./utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "./utils/subagentDisclosure";
+import type { AppView } from "./appView";
 
 const focusPrimaryPreview = (): void => {
   focusWorkspacePreviewAddress("primary");
@@ -123,7 +124,7 @@ export default function App(): React.JSX.Element {
       connection.subscribe,
     ),
   );
-  const [view, setView] = useState<"workspace" | "settings">("workspace");
+  const [view, setView] = useState<AppView>("workspace");
   const [settingsTarget, setSettingsTarget] = useState<{
     section: "providers" | "backends" | "connections";
     profileId?: string;
@@ -366,8 +367,8 @@ export default function App(): React.JSX.Element {
     type: "conversation.select",
     payload: { conversationId },
   }), [selectionCommandQueue]);
-  const navigateToView = useCallback((nextView: "workspace" | "settings") => {
-    if (nextView === "settings") {
+  const navigateToView = useCallback((nextView: AppView) => {
+    if (nextView !== "workspace") {
       conversationSelectionGenerationRef.current += 1;
     }
     setView(nextView);
@@ -784,7 +785,7 @@ export default function App(): React.JSX.Element {
   }, [navigateToView]);
 
   useEffect(() => {
-    if (view === "workspace" && settingsTarget) setSettingsTarget(null);
+    if (view !== "settings" && settingsTarget) setSettingsTarget(null);
   }, [settingsTarget, view]);
 
   const visibleError = actionError ?? connection.error;
@@ -850,7 +851,7 @@ export default function App(): React.JSX.Element {
       run,
   });
   const workspaceScene = useMemo(() => createWorkspaceSceneModel({
-    view,
+    view: view === "settings" ? "settings" : "workspace",
     settingsTarget,
     settings,
     busyAction,
@@ -1024,6 +1025,7 @@ export default function App(): React.JSX.Element {
       reviewStates={reviewStates}
       multiSpawn={multiSpawn}
       scene={visibleWorkspaceScene}
+      usage={{ status: connection.status, request }}
       providerAuth={{
         provider: authProvider,
         status: connection.status,

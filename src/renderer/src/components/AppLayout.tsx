@@ -31,6 +31,7 @@ import { AppStatusOverlays } from "./AppStatusOverlays";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { Sidebar } from "./Sidebar";
+import { LoadingMark } from "./ui";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
   WorkspaceScene,
@@ -39,10 +40,13 @@ import {
 } from "./WorkspaceScene";
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
+import type { AppView } from "../appView";
+import type { UsageViewProps } from "./UsageView";
 import {
   loadCommitDialog,
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
+  loadUsageView,
 } from "./lazySurfaceLoaders";
 
 const RootCommitDialog = lazy(async () => ({
@@ -54,6 +58,9 @@ const MultiSpawnDialog = lazy(async () => ({
 const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
 const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
+}));
+const UsageView = lazy(async () => ({
+  default: (await loadUsageView()).UsageView,
 }));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -113,8 +120,8 @@ interface AppLayoutProps {
   appUpdate: AppUpdate;
   providerQuotaNotices: ProviderQuotaNoticeController;
   workspaceLayout: WorkspaceLayout;
-  view: "workspace" | "settings";
-  setView: (view: "workspace" | "settings") => void;
+  view: AppView;
+  setView: (view: AppView) => void;
   busyAction: string | null;
   visibleError: string | null;
   setActionError: Dispatch<SetStateAction<string | null>>;
@@ -135,6 +142,7 @@ interface AppLayoutProps {
   reviewStates: CommitDialogProps["reviewStates"];
   multiSpawn: MultiSpawnController;
   scene: WorkspaceSceneProps;
+  usage: UsageViewProps;
   providerAuth: Parameters<typeof AppStatusOverlays>[0]["providerAuth"];
   actions: AppLayoutActions;
 }
@@ -168,7 +176,7 @@ export function formatAppShortcutLabel(
 }
 
 export function activeConversationIsVisible(input: {
-  view: "workspace" | "settings";
+  view: AppView;
   commitDialogOpen: boolean;
   pullRequestDialogOpen: boolean;
   multiSpawnOpen: boolean;
@@ -215,6 +223,7 @@ export function AppLayout({
   reviewStates,
   multiSpawn,
   scene,
+  usage,
   providerAuth,
   actions,
 }: AppLayoutProps): React.JSX.Element {
@@ -567,7 +576,17 @@ export function AppLayout({
               : ""}`}
             style={workspaceBodyStyle}
           >
-            <WorkspaceScene {...scene} />
+            {view === "usage" ? (
+              <Suspense fallback={(
+                <div className="workspace-tool-loading usage-surface-loading">
+                  <LoadingMark label="Loading usage" />
+                </div>
+              )}>
+                <UsageView {...usage} />
+              </Suspense>
+            ) : (
+              <WorkspaceScene {...scene} />
+            )}
           </div>
         </div>
       </section>

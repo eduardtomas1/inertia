@@ -125,6 +125,8 @@ export interface AgentTurnUsageSnapshot {
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
   compactsAutomatically: boolean | null;
+  /** True only while this snapshot remains bound to the turn's final provider session. */
+  providerSessionBound?: boolean;
   capturedAt: string;
 }
 

@@ -5665,6 +5665,8 @@ button.environment-row:focus-visible,
   place-items: center;
 }
 
+.usage-surface-loading { flex: 1; }
+
 @container (max-width: 430px) {
   .workspace-panel-tab span:not(.workspace-panel-badge) { display: none; }
   .workspace-panel-tab { width: 31px; justify-content: center; padding: 0; }

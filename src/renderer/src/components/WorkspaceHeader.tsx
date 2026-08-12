@@ -11,6 +11,7 @@ import { primaryHeaderGitAction } from "../utils/primaryHeaderGitAction";
 import {
   loadCommitDialog,
 } from "./lazySurfaceLoaders";
+import type { AppView } from "../appView";
 
 const loadWorkspaceGitActionMenu = () => import("./WorkspaceGitActionMenu");
 const WorkspaceGitActionMenu = lazy(loadWorkspaceGitActionMenu);
@@ -18,7 +19,7 @@ const WorkspaceGitActionMenu = lazy(loadWorkspaceGitActionMenu);
 type WorkspaceHeaderProps = {
   project: Project | null;
   conversation: Conversation | null;
-  view: "workspace" | "settings";
+  view: AppView;
   activeTool: WorkspacePanelTab | null;
   sidebarCollapsed: boolean;
   theme: ThemePreference;
@@ -85,8 +86,12 @@ export function WorkspaceHeader({
   const pendingPrivateConnectPairing = privateConnect?.pendingPairings[0] ?? null;
   useNativePreviewSuspension(menu !== null);
   const headerActionsRef = useRef<HTMLDivElement>(null);
-  const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
-  const eyebrow = view === "settings"
+  const title = view === "settings"
+    ? "Settings"
+    : view === "usage"
+      ? "Usage"
+      : conversation?.title ?? project?.name ?? "Workspace";
+  const eyebrow = view !== "workspace"
     ? null
     : project?.name && conversation ? project.name : "Inertia";
   const contextMismatch = conversationContextMismatch(project, conversation, gitStatus);
@@ -378,8 +383,10 @@ export function WorkspaceHeader({
           >
             {activeTool ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
           </IconButton>
-        ) : (
+        ) : view === "settings" ? (
           <IconButton label="Settings" aria-current="page" onClick={onOpenSettings}><Settings size={17} /></IconButton>
+        ) : (
+          <IconButton label="Open settings" onClick={onOpenSettings}><Settings size={17} /></IconButton>
         )}
       </div>
     </header>

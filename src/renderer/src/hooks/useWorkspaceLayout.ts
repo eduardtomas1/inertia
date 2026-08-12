@@ -15,6 +15,7 @@ import {
 } from "../utils/workspaceStartup";
 import { useMediaQuery } from "./useMediaQuery";
 import { usePersistedSize } from "./usePersistedSize";
+import type { AppView } from "../appView";
 
 const RESIZE_HANDLE_SIZE = 7;
 export const SIDEBAR_MIN_WIDTH = 220;
@@ -132,7 +133,7 @@ export interface WorkspaceLayout {
 }
 
 export function useWorkspaceLayout(
-  view: "workspace" | "settings",
+  view: AppView,
   hasProject: boolean,
   options: WorkspaceLayoutOptions = {},
 ): WorkspaceLayout {

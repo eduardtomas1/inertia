@@ -108,6 +108,10 @@ interface OpenCodeUsageState {
 interface OpenCodeEventState {
   retainedPartChars: number;
 }
+interface OpenCodeManualCompactionProof {
+  initiatedAt: number | null;
+  messageId: string | null;
+}
 
 export interface OpenCodeSdkHarnessOptions {
   /**
@@ -474,6 +478,10 @@ function startOpenCodeRun(
       const subscribed = await client.event.subscribe({ directory: options.input.cwd }, { signal: eventAbort.signal, throwOnError: true });
       armEventInactivityDeadline();
       const compacting = options.input.operation?.kind === "compact";
+      const manualCompaction: OpenCodeManualCompactionProof = {
+        initiatedAt: null,
+        messageId: null,
+      };
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
         onActivity: armEventInactivityDeadline,
         onEvent: (event) => handleOpenCodeEvent(
@@ -491,16 +499,18 @@ function startOpenCodeRun(
           failInteraction,
         ),
         isDone: (event) => compacting
-          ? event.type === "session.compacted"
-            || event.type === "session.next.compaction.ended"
-            || event.type === "session.error"
+          ? event.type === "session.error"
+            || completesRequestedOpenCodeCompaction(event, manualCompaction)
           : event.type === "session.idle" || event.type === "session.error",
       });
       const providerOperation = compacting
-        ? client.v2.session.compact(
-            { sessionID: sessionId },
-            { signal: eventAbort.signal, throwOnError: true },
-          )
+        ? (() => {
+            manualCompaction.initiatedAt = Date.now();
+            return client!.v2.session.compact(
+              { sessionID: sessionId },
+              { signal: eventAbort.signal, throwOnError: true },
+            );
+          })()
         : client.session.promptAsync({
             sessionID: sessionId,
             directory: options.input.cwd,
@@ -612,6 +622,30 @@ function startOpenCodeRun(
     cancel: cancelOwnedRun,
     extension: { kind: "opencode-sdk", respondToApproval: settleApproval, respondToInput: settleInput },
   };
+}
+
+function completesRequestedOpenCodeCompaction(
+  event: Event,
+  proof: OpenCodeManualCompactionProof,
+): boolean {
+  if (
+    proof.initiatedAt === null
+    || (
+      event.type !== "session.next.compaction.started"
+      && event.type !== "session.next.compaction.ended"
+    )
+  ) return false;
+  const properties = event.properties;
+  if (
+    properties.reason !== "manual"
+    || properties.timestamp < proof.initiatedAt
+  ) return false;
+  if (event.type === "session.next.compaction.started") {
+    proof.messageId = properties.messageID;
+    return false;
+  }
+  return proof.messageId !== null
+    && properties.messageID === proof.messageId;
 }
 
 async function pumpOpenCodeEvents(

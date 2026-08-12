@@ -140,7 +140,7 @@ export interface ProviderEventBase {
   conversationId: string;
   /** Always present on callbacks; legacy direct runs fall back to conversationId. */
   runId: string;
-  /** Null only for legacy direct runs that do not own a durable turn. */
+  /** Null for legacy direct runs and owned control operations without a durable turn. */
   turnId: string | null;
 }
 

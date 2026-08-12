@@ -206,6 +206,45 @@ describe("composer asynchronous ownership", () => {
       .toBeVisible();
   });
 
+  it("settles the hidden compaction owner without touching the active draft", async () => {
+    const first = conversation("17171717-1717-4717-8717-171717171717");
+    const second = conversation("27272727-2727-4727-8727-272727272727");
+    const operation = deferred<{
+      message: string;
+      instructionForwarded: boolean;
+    }>();
+    const onCompact = vi.fn(() => operation.promise);
+    const view = render(<Composer {...composerProps(first, { onCompact })} />);
+    const firstInput = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(firstInput, { target: { value: "/compact" } });
+    fireEvent.keyDown(firstInput, { key: "Enter" });
+    expect(screen.getByText("Compacting provider context…")).toBeVisible();
+
+    window.localStorage.setItem(
+      `inertia:draft:${second.id}`,
+      "Second chat draft",
+    );
+    view.rerender(<Composer {...composerProps(second, { onCompact })} />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Second chat draft"));
+
+    await act(async () => operation.resolve({
+      message: "First chat context compacted.",
+      instructionForwarded: false,
+    }));
+    expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Second chat draft");
+    expect(screen.queryByText("First chat context compacted."))
+      .not.toBeInTheDocument();
+
+    view.rerender(<Composer {...composerProps(first, { onCompact })} />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue(""));
+    expect(screen.queryByText("Compacting provider context…"))
+      .not.toBeInTheDocument();
+    expect(screen.getByText("First chat context compacted.")).toBeVisible();
+  });
+
   it("runs the uniquely matched partial compact command without sending it", async () => {
     const current = conversation("08080808-0808-4808-8808-080808080808");
     const onCompact = vi.fn(async () => ({

@@ -767,8 +767,14 @@ export class ProviderManager {
     }, PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS);
     timer.unref();
     return providerResult.then((result) => {
-      const message = result.status !== "completed"
-        ? result.error ?? "The provider could not compact this chat."
+      const requestedSessionId = operationInput.sessionId!;
+      const sessionError = result.sessionId === requestedSessionId
+        ? undefined
+        : "The provider did not confirm compaction of the exact selected session.";
+      const status = sessionError ? "failed" as const : result.status;
+      const error = sessionError ?? result.error;
+      const message = status !== "completed"
+        ? error ?? "The provider could not compact this chat."
         : instruction && !instructionForwarded
           ? `${PROVIDER_INFO[result.providerId].name} compacted the context, but does not accept a focus instruction through this integration, so the instruction was not forwarded.`
           : instructionForwarded
@@ -777,10 +783,10 @@ export class ProviderManager {
       return {
         providerId: result.providerId,
         conversationId: result.conversationId,
-        status: result.status,
+        status,
         instructionForwarded,
         message,
-        ...(result.error ? { error: result.error } : {}),
+        ...(error ? { error } : {}),
         cleanupConfirmed: result.cleanupConfirmed,
       };
     }).finally(() => clearTimeout(timer));

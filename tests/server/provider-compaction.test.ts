@@ -19,6 +19,7 @@ import {
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import {
+  CLAUDE_PROTOCOL_SESSION_ID,
   claudeSuccessResult,
   claudeSystem,
   fixtureClaudeQuery,
@@ -136,7 +137,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       prompt: "/compact",
       interactionMode: "build",
       access: "supervised",
-      sessionId: "claude-session",
+      sessionId: CLAUDE_PROTOCOL_SESSION_ID,
     }), "remember retrieval exactly")).resolves.toMatchObject({
       status: "completed",
       instructionForwarded: true,
@@ -162,7 +163,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       prompt: "/compact",
       interactionMode: "build",
       access: "supervised",
-      sessionId: "claude-session",
+      sessionId: CLAUDE_PROTOCOL_SESSION_ID,
     }))).resolves.toMatchObject({
       status: "failed",
       message: expect.stringContaining("did not confirm"),
@@ -196,10 +197,43 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       prompt: "/compact",
       interactionMode: "build",
       access: "supervised",
-      sessionId: "claude-session",
+      sessionId: CLAUDE_PROTOCOL_SESSION_ID,
     }))).resolves.toMatchObject({
       status: "failed",
       message: expect.stringContaining("Compaction rejected"),
+    });
+  });
+
+  it("rejects a successful provider result for a different session", async () => {
+    const root = portableFixtureRoot("Claude compact wrong session");
+    roots.push(root);
+    const manager = new ProviderManager(
+      { commands: { claude: "/fake/claude" } },
+      new AgentHarnessRegistry([createClaudeAgentSdkHarness({
+        createQuery: () => fixtureClaudeQuery(
+          (async function* (): AsyncGenerator<SDKMessage> {
+            yield claudeSystem("status", {
+              status: null,
+              compact_result: "success",
+            });
+            yield claudeSuccessResult("Compacted");
+          })(),
+        ),
+      })]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-compact-wrong-session",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "different-claude-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("exact selected session"),
+      cleanupConfirmed: true,
     });
   });
 });

@@ -22,6 +22,9 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 type LifecycleScenario =
   | "resume"
   | "compact"
+  | "compact-stale"
+  | "compact-auto"
+  | "compact-wrong-message"
   | "cancel"
   | "stuck-cancel"
   | "oversized"
@@ -102,6 +105,18 @@ const server = http.createServer((req, res) => {
       if (scenario === "compact") setTimeout(() => {
         sendEvent({ id: "compact-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "summary-1", reason: "manual" } });
         sendEvent({ id: "compact-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "summary-1", reason: "manual", text: "Summary", recent: "" } });
+      }, 10);
+      if (scenario === "compact-stale") setTimeout(() => {
+        sendEvent({ id: "compact-stale-1", type: "session.next.compaction.started", properties: { timestamp: Date.now() - 60000, sessionID, messageID: "stale-summary", reason: "manual" } });
+        sendEvent({ id: "compact-stale-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now() - 60000, sessionID, messageID: "stale-summary", reason: "manual", text: "Stale", recent: "" } });
+      }, 10);
+      if (scenario === "compact-auto") setTimeout(() => {
+        sendEvent({ id: "compact-auto-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "auto-summary", reason: "auto" } });
+        sendEvent({ id: "compact-auto-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "auto-summary", reason: "auto", text: "Automatic", recent: "" } });
+      }, 10);
+      if (scenario === "compact-wrong-message") setTimeout(() => {
+        sendEvent({ id: "compact-wrong-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "requested-summary", reason: "manual" } });
+        sendEvent({ id: "compact-wrong-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "different-summary", reason: "manual", text: "Wrong", recent: "" } });
       }, 10);
       return;
     }
@@ -661,6 +676,44 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     )).toBe(true);
     expect(capture.captured.some(({ path }) => path.endsWith("/prompt_async")))
       .toBe(false);
+  });
+
+  it.each([
+    ["compact-stale", "stale pre-request"],
+    ["compact-auto", "automatic"],
+    ["compact-wrong-message", "wrong-message"],
+  ] as const)("does not accept %s events as manual compaction proof (%s)", async (
+    scenario,
+    _label,
+  ) => {
+    const root = portableFixtureRoot(`OpenCode ${scenario}`);
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, scenario),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        eventInactivityDeadlineMs: 100,
+      })]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: `opencode-${scenario}`,
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("event stream became inactive"),
+    });
   });
 
   it("does not emit completion when owned-server cleanup is unconfirmed", async () => {

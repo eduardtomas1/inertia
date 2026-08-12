@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useRef,
   useState,
   type Dispatch,
   type MutableRefObject,
@@ -35,38 +36,47 @@ export function useComposerCompaction(options: {
   clearCompactNotice: () => void;
   compact: (command: CompactComposerCommand) => Promise<void>;
 } {
-  const [compactNoticeState, setCompactNoticeState] = useState<{
-    conversationId: string;
-    notice: ComposerCompactNotice;
-  } | null>(null);
-  const compactNotice = compactNoticeState?.conversationId === options.conversationId
-    ? compactNoticeState.notice
-    : null;
-  const clearCompactNotice = useCallback(() => setCompactNoticeState(null), []);
-  const setCompactNotice = (notice: ComposerCompactNotice): void => {
-    setCompactNoticeState({
-      conversationId: options.conversationId,
-      notice,
+  const [compactNotices, setCompactNotices] = useState<Readonly<
+    Record<string, ComposerCompactNotice>
+  >>({});
+  const operationSequence = useRef(0);
+  const activeOperations = useRef(new Map<string, number>());
+  const compactNotice = compactNotices[options.conversationId] ?? null;
+  const clearCompactNotice = useCallback(() => {
+    setCompactNotices((current) => {
+      if (!(options.conversationId in current)) return current;
+      const next = { ...current };
+      delete next[options.conversationId];
+      return next;
     });
+  }, [options.conversationId]);
+  const setCompactNotice = (
+    conversationId: string,
+    notice: ComposerCompactNotice,
+  ): void => {
+    setCompactNotices((current) => ({
+      ...current,
+      [conversationId]: notice,
+    }));
   };
   const compact = async (command: CompactComposerCommand): Promise<void> => {
     if (options.submittingRef.current) return;
     if (options.running) {
-      setCompactNotice({
+      setCompactNotice(options.conversationId, {
         kind: "error",
         message: "Wait for the current provider turn to finish before compacting this chat.",
       });
       return;
     }
     if (!options.canSend) {
-      setCompactNotice({
+      setCompactNotice(options.conversationId, {
         kind: "error",
         message: "This chat's provider route is not ready for context compaction.",
       });
       return;
     }
     if (options.blocked) {
-      setCompactNotice({
+      setCompactNotice(options.conversationId, {
         kind: "error",
         message: "Remove attachments, preview or diff context, file references, and selected skills before compacting.",
       });
@@ -76,12 +86,22 @@ export function useComposerCompaction(options: {
     const ownerId = options.conversationId;
     const submittedDraft = options.message;
     const submittedRevision = options.editorRevisions.current.get(ownerId) ?? 0;
+    operationSequence.current += 1;
+    const operationId = operationSequence.current;
+    activeOperations.current.set(ownerId, operationId);
     options.submittingRef.current = true;
     options.setSubmitting(true);
-    setCompactNotice({ kind: "working", message: "Compacting provider context…" });
+    setCompactNotice(ownerId, {
+      kind: "working",
+      message: "Compacting provider context…",
+    });
     try {
       const result = await options.onCompact(command.instruction);
-      if (!options.mountedRef.current || options.conversationIdRef.current !== ownerId) return;
+      if (
+        !options.mountedRef.current
+        || activeOperations.current.get(ownerId) !== operationId
+      ) return;
+      const ownsVisibleComposer = options.conversationIdRef.current === ownerId;
       if ((options.editorRevisions.current.get(ownerId) ?? 0) === submittedRevision) {
         try {
           const key = `inertia:draft:${ownerId}`;
@@ -91,25 +111,38 @@ export function useComposerCompaction(options: {
         } catch {
           // The completed in-memory command can still settle without storage.
         }
-        options.draftValueRef.current = "";
-        options.setMessage("");
+        if (ownsVisibleComposer) {
+          options.draftValueRef.current = "";
+          options.setMessage("");
+        }
       }
-      setCompactNotice({ kind: "success", message: result.message });
-      options.textareaRef.current?.focus();
+      setCompactNotice(ownerId, { kind: "success", message: result.message });
+      if (ownsVisibleComposer) options.textareaRef.current?.focus();
     } catch (error) {
-      if (options.mountedRef.current && options.conversationIdRef.current === ownerId) {
-        setCompactNotice({
+      if (
+        options.mountedRef.current
+        && activeOperations.current.get(ownerId) === operationId
+      ) {
+        setCompactNotice(ownerId, {
           kind: "error",
           message: error instanceof Error
             ? error.message
             : "The provider could not compact this chat.",
         });
-        options.textareaRef.current?.focus();
+        if (options.conversationIdRef.current === ownerId) {
+          options.textareaRef.current?.focus();
+        }
       }
     } finally {
-      if (options.mountedRef.current && options.conversationIdRef.current === ownerId) {
-        options.submittingRef.current = false;
-        options.setSubmitting(false);
+      if (activeOperations.current.get(ownerId) === operationId) {
+        activeOperations.current.delete(ownerId);
+        if (
+          options.mountedRef.current
+          && options.conversationIdRef.current === ownerId
+        ) {
+          options.submittingRef.current = false;
+          options.setSubmitting(false);
+        }
       }
     }
   };

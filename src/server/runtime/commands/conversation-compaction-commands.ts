@@ -88,6 +88,25 @@ function invalidateStaleContextUsage(
   });
 }
 
+async function confirmCompactionCleanup(
+  dependencies: ConversationCompactionCommandDependencies,
+  conversationId: string,
+  runId: string,
+): Promise<boolean> {
+  if (!dependencies.providers.isRunning(conversationId)) return true;
+  try {
+    const stopped = await dependencies.providers.stopOwned(
+      conversationId,
+      { runId, turnId: null },
+    );
+    return stopped === "settled"
+      || (stopped === "missing"
+        && !dependencies.providers.isRunning(conversationId));
+  } catch {
+    return false;
+  }
+}
+
 export function createConversationCompactionCommandHandler(
   dependencies: ConversationCompactionCommandDependencies,
 ): RuntimeCommandHandler {
@@ -106,6 +125,15 @@ export function createConversationCompactionCommandHandler(
     if (!conversation.providerSessionId) {
       throw new RuntimeRequestError(
         "This chat does not have a provider session to compact yet.",
+      );
+    }
+    try {
+      dependencies.store.assertDuoComparisonTurnAllowed(conversation.id);
+    } catch (error) {
+      throw new RuntimeRequestError(
+        error instanceof Error
+          ? error.message
+          : "That judge chat is reserved for a Duo comparison.",
       );
     }
     if (
@@ -171,6 +199,8 @@ export function createConversationCompactionCommandHandler(
         "Wait for the current provider or workspace operation to finish before compacting this chat.",
       );
     }
+    let releaseAuthority = true;
+    const compactionRunId = randomUUID();
     try {
       if (
         dependencies.turns.isActive(conversation.id)
@@ -189,30 +219,58 @@ export function createConversationCompactionCommandHandler(
         );
       }
       let usageObserved = false;
-      const result = await dependencies.providers.compact({
-        providerId: route.providerId,
-        harnessId: route.harnessId,
-        backendProfile: route.backendProfile,
-        backendCompatibility: route.compatibility,
-        modelSelection: selection,
-        continuationIdentity: route.continuationIdentity,
-        conversationId: conversation.id,
-        runId: randomUUID(),
-        cwd: dependencies.store.conversationPath(conversation.id),
-        prompt: "/compact",
-        model: selection.modelId === "provider-default"
-          ? undefined
-          : selection.modelId,
-        reasoningEffort: selection.reasoningEffort || undefined,
-        interactionMode: currentConversation.interactionMode,
-        access: currentConversation.accessMode,
-        sessionId: currentConversation.providerSessionId!,
-      }, command.payload.instruction, {
-        onUsage: (event) => {
-          projectUsage(dependencies, conversation.id, event.usage);
-          usageObserved = true;
-        },
-      });
+      let result: Awaited<ReturnType<ProviderManager["compact"]>>;
+      try {
+        result = await dependencies.providers.compact({
+          providerId: route.providerId,
+          harnessId: route.harnessId,
+          backendProfile: route.backendProfile,
+          backendCompatibility: route.compatibility,
+          modelSelection: selection,
+          continuationIdentity: route.continuationIdentity,
+          conversationId: conversation.id,
+          runId: compactionRunId,
+          cwd: dependencies.store.conversationPath(conversation.id),
+          prompt: "/compact",
+          model: selection.modelId === "provider-default"
+            ? undefined
+            : selection.modelId,
+          reasoningEffort: selection.reasoningEffort || undefined,
+          interactionMode: currentConversation.interactionMode,
+          access: currentConversation.accessMode,
+          sessionId: currentConversation.providerSessionId!,
+        }, command.payload.instruction, {
+          onUsage: (event) => {
+            projectUsage(dependencies, conversation.id, event.usage);
+            usageObserved = true;
+          },
+        });
+      } catch (error) {
+        if (!await confirmCompactionCleanup(
+          dependencies,
+          conversation.id,
+          compactionRunId,
+        )) {
+          releaseAuthority = false;
+          throw new RuntimeRequestError(
+            "Provider process cleanup could not be confirmed. This chat and checkout remain locked until the local runtime restarts safely.",
+          );
+        }
+        throw error;
+      }
+      if (
+        !result.cleanupConfirmed
+        && !await confirmCompactionCleanup(
+          dependencies,
+          conversation.id,
+          compactionRunId,
+        )
+      ) {
+        releaseAuthority = false;
+        throw new RuntimeRequestError(
+          "Provider process cleanup could not be confirmed. This chat and checkout remain locked until the local runtime restarts safely.",
+        );
+      }
       if (result.status !== "completed") {
         throw new RuntimeRequestError(result.message);
       }
@@ -232,7 +290,9 @@ export function createConversationCompactionCommandHandler(
       });
       return "handled";
     } finally {
-      dependencies.providerTerminalResumes.release(conversation.id);
+      if (releaseAuthority) {
+        dependencies.providerTerminalResumes.release(conversation.id);
+      }
     }
   });
 }

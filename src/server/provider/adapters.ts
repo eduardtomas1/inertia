@@ -550,7 +550,13 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");
     }
   }
-  if ((input.runId === undefined) !== (input.turnId === undefined)) {
+  const ownsTurnlessControlOperation = input.operation !== undefined
+    && input.runId !== undefined
+    && input.turnId === undefined;
+  if (
+    (input.runId === undefined) !== (input.turnId === undefined)
+    && !ownsTurnlessControlOperation
+  ) {
     throw new ProviderRuntimeError("invalid_input", "Run and turn identities must be provided together.");
   }
   const imagePaths = input.imagePaths ?? [];

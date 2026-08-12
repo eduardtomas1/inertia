@@ -93,7 +93,6 @@ async function confirmCompactionCleanup(
   conversationId: string,
   runId: string,
 ): Promise<boolean> {
-  if (!dependencies.providers.isRunning(conversationId)) return true;
   try {
     const stopped = await dependencies.providers.stopOwned(
       conversationId,

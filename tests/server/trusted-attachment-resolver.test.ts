@@ -17,6 +17,7 @@ import {
   TrustedAttachmentResolver,
   type RuntimeAttachmentBroker,
 } from "../../src/server/runtime/attachments/trusted-attachment-resolver";
+import { publicRuntimeError } from "../../src/server/runtime-errors";
 
 const directories: string[] = [];
 const id = "11111111-1111-4111-8111-111111111111";
@@ -98,6 +99,10 @@ describe("trusted runtime attachment resolution", () => {
       /no longer available|verified/u,
     );
     expect(attachmentBroker.relinquish).toHaveBeenCalledWith(id);
+    await expect(resolver.resolveAll([trusted])).rejects.toSatisfy(
+      (error: unknown) => publicRuntimeError(error)
+        === "The selected attachment is no longer available or could not be verified.",
+    );
   });
 
   it.each([

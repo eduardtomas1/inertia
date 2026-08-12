@@ -10,12 +10,14 @@ import { BackendProfileControllerError } from "./runtime/backends/backend-profil
 import { ProviderMaintenanceError } from "./provider/maintenance-controller";
 import { WorkspacePathAuthorityError } from "./workspace-path-authority";
 import { PromptPresetRepositoryError } from "./persistence/prompt-preset-repository";
+import { AttachmentResolutionError } from "./runtime/attachments/attachment-errors";
 
 export class RuntimeRequestError extends Error {}
 
 export function publicRuntimeError(error: unknown): string {
   if (
     error instanceof RuntimeRequestError
+    || error instanceof AttachmentResolutionError
     || error instanceof RecordNotFoundError
     || error instanceof ConversationWorktreeRemovalError
     || error instanceof TerminalError

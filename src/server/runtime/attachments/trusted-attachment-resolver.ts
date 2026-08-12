@@ -21,6 +21,7 @@ import {
 } from "../../../shared/attachments.js";
 import type { ChatAttachment } from "../../../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../../../shared/runtime-attachments.js";
+import { AttachmentResolutionError } from "./attachment-errors.js";
 
 export interface RuntimeAttachmentBroker {
   resolve(
@@ -60,7 +61,9 @@ function sameIdentity(
 }
 
 function publicAttachmentError(): Error {
-  return new Error("The selected attachment is no longer available or could not be verified.");
+  return new AttachmentResolutionError(
+    "The selected attachment is no longer available or could not be verified.",
+  );
 }
 
 export class TrustedAttachmentResolver {

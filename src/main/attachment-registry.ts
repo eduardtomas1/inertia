@@ -36,6 +36,11 @@ const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 const ATTACHMENT_RELEASE_ATTEMPTS = 3;
 const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
+// Renderer cleanup can cross the utility-process attachment claim while a
+// submitted message is moving between IPC queues. Keep deletion revocable for
+// one short turn of the event loop so the authoritative runtime resolve can
+// adopt the capability without racing a stale renderer cleanup.
+const ATTACHMENT_RELEASE_GRACE_MS = 250;
 const ATTACHMENT_SESSION_PREFIX = "session-";
 const ATTACHMENT_SESSION_DIRECTORY =
   /^session-[A-Za-z0-9_-]{6}$/u;
@@ -50,6 +55,11 @@ const OWNED_ATTACHMENT_FILE =
 
 interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
   readonly extension: string;
+}
+
+interface PendingAttachmentRelease {
+  readonly promise: Promise<boolean>;
+  cancel(): void;
 }
 
 export interface ValidatedAttachmentPreview {
@@ -406,7 +416,7 @@ function fullReservation(): AttachmentStorageReservation {
 
 export class AttachmentRegistry {
   private readonly records = new Map<string, AttachmentRegistryRecord>();
-  private readonly releases = new Map<string, Promise<boolean>>();
+  private readonly releases = new Map<string, PendingAttachmentRelease>();
   private readonly revokedAttachmentIds = new Set<string>();
   private readonly maxRecords: number;
   private readonly maxBytes: number;
@@ -538,6 +548,20 @@ export class AttachmentRegistry {
     return (await this.readValidated(id, signal))?.attachment ?? null;
   }
 
+  /**
+   * Claims a capability for an accepted runtime send. Unlike preview and
+   * ordinary resolve operations, this may revoke a renderer cleanup that
+   * crossed the runtime request in another IPC queue.
+   */
+  async resolveForRuntime(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<TrustedRuntimeAttachment | null> {
+    assertNotAborted(signal);
+    this.cancelPendingRelease(id);
+    return await this.resolve(id, signal);
+  }
+
   private async readValidated(
     id: string,
     signal?: AbortSignal,
@@ -618,15 +642,48 @@ export class AttachmentRegistry {
   }
 
   async release(id: string): Promise<boolean> {
+    return await this.startRelease(id, false);
+  }
+
+  async releaseFromRenderer(id: string): Promise<boolean> {
+    return await this.startRelease(id, true);
+  }
+
+  private async startRelease(
+    id: string,
+    allowRuntimeClaim: boolean,
+  ): Promise<boolean> {
     const pending = this.releases.get(id);
-    if (pending) return await pending;
+    if (pending) return await pending.promise;
     const record = this.records.get(id);
     if (!record) return false;
     this.revokedAttachmentIds.add(id);
-    const release = this.releaseRecord(record);
+    let cancelRelease = (): void => undefined;
+    const releasePromise = new Promise<boolean>((resolveRelease, rejectRelease) => {
+      let settled = false;
+      const beginRelease = () => {
+        settled = true;
+        void this.releaseRecord(record).then(resolveRelease, rejectRelease);
+      };
+      const timer = allowRuntimeClaim
+        ? setTimeout(beginRelease, ATTACHMENT_RELEASE_GRACE_MS)
+        : null;
+      timer?.unref();
+      cancelRelease = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolveRelease(false);
+      };
+      if (!allowRuntimeClaim) beginRelease();
+    });
+    const release: PendingAttachmentRelease = {
+      promise: releasePromise,
+      cancel: cancelRelease,
+    };
     this.releases.set(id, release);
     try {
-      return await release;
+      return await release.promise;
     } finally {
       if (this.releases.get(id) === release) {
         this.releases.delete(id);
@@ -643,12 +700,22 @@ export class AttachmentRegistry {
 
   private async disposeExclusive(): Promise<void> {
     await this.importTail;
-    await Promise.allSettled(this.releases.values());
+    const releases = [...this.releases.values()];
+    for (const release of releases) release.cancel();
+    await Promise.allSettled(releases.map(({ promise }) => promise));
     const records = [...this.records.values()];
     this.records.clear();
     this.revokedAttachmentIds.clear();
     await Promise.all(records.map(({ path }) =>
       unlink(path).catch(() => undefined)));
+  }
+
+  private cancelPendingRelease(id: string): void {
+    const pending = this.releases.get(id);
+    if (!pending) return;
+    pending.cancel();
+    if (this.releases.get(id) === pending) this.releases.delete(id);
+    this.revokedAttachmentIds.delete(id);
   }
 
   private async releaseRecord(

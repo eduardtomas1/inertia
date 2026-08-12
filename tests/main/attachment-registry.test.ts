@@ -261,6 +261,28 @@ describe("main-owned attachment registry", () => {
     await expect(readFile(importedPath)).rejects.toThrow();
   });
 
+  it("lets a submitted attachment resolve across a racing renderer release", async () => {
+    const { registry: attachments } = await registry();
+    const [imported] = await attachments.import([{
+      name: "submitted.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    const rendererRelease = attachments.releaseFromRenderer(imported!.id);
+    await expect(attachments.resolveForRuntime(imported!.id)).resolves.toMatchObject({
+      id: imported!.id,
+      name: "submitted.png",
+    });
+    await expect(rendererRelease).resolves.toBe(false);
+    await expect(attachments.preview(imported!.id)).resolves.toMatchObject({
+      bytes: png,
+      mimeType: "image/png",
+    });
+
+    await expect(attachments.release(imported!.id)).resolves.toBe(true);
+  });
+
   it("disposes every live capability and its private file", async () => {
     const { directory, registry: attachments } = await registry();
     await attachments.import([

@@ -684,7 +684,7 @@ function registerIpcHandlers(): void {
       throw new Error("Invalid attachment.");
     }
     if (runtimeSupervisor?.deferAttachmentRelease(value)) return;
-    await attachmentRegistry().release(value);
+    await attachmentRegistry().releaseFromRenderer(value);
   });
 
   ipcMain.handle(IPC.openAttachmentExternally, async (event, ...args) => {
@@ -1029,7 +1029,7 @@ async function bootstrap(): Promise<void> {
     systemBootId: bootstrapSafety.systemBootId,
     attachmentBroker: {
       resolve: (attachmentId, signal) =>
-        attachmentRegistry().resolve(attachmentId, signal),
+        attachmentRegistry().resolveForRuntime(attachmentId, signal),
       release: (attachmentId) =>
         attachmentRegistry().release(attachmentId),
     },

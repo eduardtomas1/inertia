@@ -2,6 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import { INERTIA_VERSION } from "../../shared/version";
 import {
+  isProcessTreeTerminationUnconfirmed,
+  ProcessTreeTerminationError,
   requireProcessTreeTermination,
   terminateProcessTreeAndWait,
   type ProcessTreeTerminator,
@@ -233,6 +235,9 @@ export async function withCodexControlClient<T>(
     failConnection(new Error("Codex control process exited early."));
   });
 
+  let operationFailed = false;
+  let operationError: unknown;
+  let operationResult!: T;
   try {
     await Promise.race([
       request("initialize", {
@@ -249,12 +254,35 @@ export async function withCodexControlClient<T>(
       connectionFailure,
     ]);
     notify("initialized");
-    return await Promise.race([
+    operationResult = await Promise.race([
       runWithClient({ request }),
       connectionFailure,
     ]);
-  } finally {
-    options.signal?.removeEventListener("abort", abortConnection);
-    await close();
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
   }
+  options.signal?.removeEventListener("abort", abortConnection);
+  try {
+    await close();
+  } catch (cleanupError) {
+    if (
+      !operationFailed
+      || !isProcessTreeTerminationUnconfirmed(cleanupError)
+    ) {
+      throw cleanupError;
+    }
+    throw new ProcessTreeTerminationError(
+      options.processLabel ?? "Codex control process tree",
+      {
+        priorError: operationError,
+        cause: new AggregateError(
+          [operationError, cleanupError],
+          "Codex control operation and cleanup both failed.",
+        ),
+      },
+    );
+  }
+  if (operationFailed) throw operationError;
+  return operationResult;
 }

@@ -225,4 +225,23 @@ describe("Codex control client", () => {
     });
     expect(terminateProcessTree).toHaveBeenCalledOnce();
   });
+
+  it("preserves the control failure when cleanup is also unconfirmed", async () => {
+    const fixture = fakeChild(() => {
+      fixture.stdout.end();
+    });
+    const terminateProcessTree = vi.fn(async () => false);
+
+    await expect(withCodexControlClient({
+      ...options(fixture.child),
+      processLabel: "Codex compaction process tree",
+      terminateProcessTree,
+    }, async () => "unreachable")).rejects.toMatchObject({
+      code: "process-tree-termination-unconfirmed",
+      message: expect.stringMatching(
+        /output closed early.*Cleanup also failed: Codex compaction process tree could not be confirmed stopped\./,
+      ),
+    });
+    expect(terminateProcessTree).toHaveBeenCalledOnce();
+  });
 });

@@ -61,6 +61,7 @@ import {
 import { reconcileReviews } from "./review-support";
 import {
   mapWithinSourceControlDeadline,
+  settleSourceControlInspections,
   SourceControlDeadline,
 } from "./source-control-deadline";
 
@@ -482,17 +483,27 @@ export function createSourceControlCommandHandler(
             }
           } else {
             [diff, status] = await deadline.run(
-              async (signal) => await Promise.all([
-                getUnifiedDiff(secureRoot.root, {
-                  deadlineAt,
-                  signal,
-                  ...(command.payload.path
-                    ? { paths: [command.payload.path] }
-                    : {}),
-                  ignoreWhitespace: command.payload.ignoreWhitespace,
-                }, undefined, dependencies.secureFiles, secureRoot),
-                getRepositoryStatus(secureRoot.root, { deadlineAt }),
-              ]),
+              async (signal) => await settleSourceControlInspections(
+                signal,
+                async (inspectionSignal) => await getUnifiedDiff(
+                  secureRoot.root,
+                  {
+                    deadlineAt,
+                    signal: inspectionSignal,
+                    ...(command.payload.path
+                      ? { paths: [command.payload.path] }
+                      : {}),
+                    ignoreWhitespace: command.payload.ignoreWhitespace,
+                  },
+                  undefined,
+                  dependencies.secureFiles,
+                  secureRoot,
+                ),
+                async (inspectionSignal) => await getRepositoryStatus(
+                  secureRoot.root,
+                  { deadlineAt, signal: inspectionSignal },
+                ),
+              ),
             );
           }
           await deadline.run(
@@ -720,17 +731,27 @@ export function createSourceControlCommandHandler(
             }
           } else {
             [diff, repositoryStatus] = await deadline.run(
-              async (signal) => await Promise.all([
-                getUnifiedDiff(secureRoot.root, {
-                  deadlineAt,
-                  signal,
-                  ...(command.payload.path
-                    ? { paths: [command.payload.path] }
-                    : {}),
-                  ignoreWhitespace: command.payload.ignoreWhitespace,
-                }, undefined, dependencies.secureFiles, secureRoot),
-                getRepositoryStatus(secureRoot.root, { deadlineAt }),
-              ]),
+              async (signal) => await settleSourceControlInspections(
+                signal,
+                async (inspectionSignal) => await getUnifiedDiff(
+                  secureRoot.root,
+                  {
+                    deadlineAt,
+                    signal: inspectionSignal,
+                    ...(command.payload.path
+                      ? { paths: [command.payload.path] }
+                      : {}),
+                    ignoreWhitespace: command.payload.ignoreWhitespace,
+                  },
+                  undefined,
+                  dependencies.secureFiles,
+                  secureRoot,
+                ),
+                async (inspectionSignal) => await getRepositoryStatus(
+                  secureRoot.root,
+                  { deadlineAt, signal: inspectionSignal },
+                ),
+              ),
             );
           }
           await deadline.run(

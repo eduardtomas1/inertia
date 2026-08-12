@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   mapWithinSourceControlDeadline,
+  settleSourceControlInspections,
   SourceControlDeadline,
 } from "../../src/server/runtime/commands/source-control-deadline";
+import { GitError } from "../../src/server/git/types";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -32,22 +34,71 @@ describe("source-control aggregate deadlines", () => {
     }
   });
 
-  it("aborts sibling work when a bounded phase exits early", async () => {
-    const deadline = new SourceControlDeadline(Date.now() + 5_000, "read");
-    const observedSignals: AbortSignal[] = [];
-    try {
-      await expect(deadline.run(async (signal) => {
-        observedSignals.push(signal);
-        return await Promise.all([
-          Promise.reject(new Error("Primary Git read failed.")),
-          new Promise<string>(() => undefined),
-        ]);
-      })).rejects.toThrow("Primary Git read failed.");
-    } finally {
-      deadline.dispose();
-    }
-    expect(observedSignals).toHaveLength(1);
-    expect(observedSignals[0]?.aborted).toBe(true);
+  it("cancels and settles a sibling inspection before rejecting", async () => {
+    const controller = new AbortController();
+    const firstCancelled = deferred<void>();
+    const releaseFirst = deferred<void>();
+    const primaryFailure = new Error("Repository status failed.");
+    const cancellation = new GitError(
+      "timeout",
+      "Git inspection was cancelled.",
+    );
+    let firstAborted = false;
+    let aggregateSettled = false;
+
+    const aggregate = settleSourceControlInspections(
+      controller.signal,
+      async (signal) => {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        firstAborted = signal.aborted;
+        firstCancelled.resolve();
+        await releaseFirst.promise;
+        throw cancellation;
+      },
+      () => { throw primaryFailure; },
+    );
+    void aggregate.then(
+      () => { aggregateSettled = true; },
+      () => { aggregateSettled = true; },
+    );
+
+    await firstCancelled.promise;
+    expect(firstAborted).toBe(true);
+    expect(aggregateSettled).toBe(false);
+
+    releaseFirst.resolve();
+    await expect(aggregate).rejects.toBe(primaryFailure);
+    expect(aggregateSettled).toBe(true);
+  });
+
+  it("prioritizes failed process cleanup after sibling cancellation", async () => {
+    const controller = new AbortController();
+    const secondStarted = deferred<void>();
+    const cleanupFailure = new GitError(
+      "operation-failed",
+      "Git stopped responding, and its process tree could not be confirmed stopped.",
+    );
+
+    await expect(settleSourceControlInspections(
+      controller.signal,
+      async () => {
+        await secondStarted.promise;
+        throw new Error("Diff inspection failed.");
+      },
+      async (signal) => {
+        secondStarted.resolve();
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        throw cleanupFailure;
+      },
+    )).rejects.toBe(cleanupFailure);
   });
 
   it("aborts and rejects a filesystem operation that does not settle", async () => {

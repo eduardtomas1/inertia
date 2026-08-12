@@ -1,4 +1,5 @@
 import { GitError } from "../../git";
+import { gitInspectionSettlementValues } from "../../git/runner";
 
 export type SourceControlDeadlineKind = "read" | "workspace-discovery";
 
@@ -83,6 +84,54 @@ export class SourceControlDeadline {
   dispose(): void {
     this.controller.abort();
     clearTimeout(this.timer);
+  }
+}
+
+/**
+ * Runs two sibling Git inspections under one cancellation signal. If either
+ * inspection rejects, cancel the other and retain ownership until both have
+ * settled so no child process can outlive the aggregate operation.
+ */
+export async function settleSourceControlInspections<First, Second>(
+  signal: AbortSignal,
+  first: (signal: AbortSignal) => Promise<First>,
+  second: (signal: AbortSignal) => Promise<Second>,
+): Promise<[First, Second]> {
+  const controller = new AbortController();
+  const cancel = (): void => controller.abort();
+  let firstFailure: 0 | 1 | undefined;
+
+  if (signal.aborted) cancel();
+  else signal.addEventListener("abort", cancel, { once: true });
+
+  const runInspection = async <T>(
+    index: 0 | 1,
+    inspection: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await inspection(controller.signal);
+    } catch (error) {
+      firstFailure ??= index;
+      cancel();
+      throw error;
+    }
+  };
+
+  try {
+    const [firstResult, secondResult] = await Promise.allSettled([
+      runInspection(0, first),
+      runInspection(1, second),
+    ] as const);
+    if (firstFailure === 1) {
+      const [second, first] = gitInspectionSettlementValues([
+        secondResult,
+        firstResult,
+      ]);
+      return [first, second];
+    }
+    return gitInspectionSettlementValues([firstResult, secondResult]);
+  } finally {
+    signal.removeEventListener("abort", cancel);
   }
 }
 

@@ -50,6 +50,7 @@ describe("headless runtime status", () => {
       installState: "not-installed",
       authState: "unknown",
       canRun: false,
+      cleanupConfirmed: true,
       statusMessage: "CLI not found",
     }));
 
@@ -99,6 +100,7 @@ describe("headless runtime status", () => {
           installState: "not-installed",
           authState: "unknown",
           canRun: false,
+          cleanupConfirmed: true,
         }),
       });
 
@@ -122,6 +124,7 @@ describe("headless runtime status", () => {
         installState: "not-installed",
         authState: "unknown",
         canRun: false,
+        cleanupConfirmed: true,
       }),
     });
 
@@ -152,6 +155,7 @@ describe("headless runtime status", () => {
         installState: "installed",
         authState: "authenticated",
         canRun: true,
+        cleanupConfirmed: true,
         statusMessage: "Installed; authentication was not checked",
       }),
     });

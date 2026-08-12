@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
-import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
 import type {
   GitStatusSnapshot,
   Project,
@@ -22,16 +21,6 @@ const project: Project = {
   status: "ready",
   createdAt: "2026-07-29T10:00:00.000Z",
   updatedAt: "2026-07-29T10:00:00.000Z",
-};
-
-const summary: EnvironmentSummarySnapshot = {
-  projectName: "Inertia",
-  runtime: { status: "online", label: "Ready" },
-  changes: null,
-  branch: { label: "Branch", value: "feature/pr" },
-  checks: [],
-  subagents: [],
-  attachments: [],
 };
 
 function status(
@@ -78,14 +67,9 @@ function renderHeader(
       branches={[]}
       actions={[]}
       busy={false}
-      activityOpen={false}
-      activeRunCount={0}
-      attentionRunCount={0}
-      environmentSummary={summary}
-      environmentOpen={false}
       onOpenSidebar={vi.fn()}
       onToggleTools={vi.fn()}
-      onSetEnvironmentOpen={vi.fn()}
+      onOpenEnvironment={vi.fn()}
       onCycleTheme={vi.fn()}
       onOpenSettings={vi.fn()}
       onOpenConnectionsSettings={vi.fn()}
@@ -101,7 +85,6 @@ function renderHeader(
       onPull={vi.fn()}
       onPush={onPush}
       onRunAction={vi.fn()}
-      onToggleActivity={vi.fn()}
     />,
   );
 }
@@ -138,6 +121,22 @@ describe("WorkspaceHeader Git pull request availability", () => {
       .not.toBeInTheDocument();
   });
 
+  it("omits Runs and keeps the remaining utility actions adjacent", () => {
+    renderHeader(status(false));
+
+    expect(screen.queryByRole("button", { name: /^Open runs/u }))
+      .not.toBeInTheDocument();
+    const actions = screen.getAllByRole("button");
+    const environment = actions.findIndex((button) =>
+      button.getAttribute("aria-label") === "Open Environment");
+    expect(actions[environment + 1]).toHaveAccessibleName(
+      "Change theme (current: dark)",
+    );
+    expect(actions[environment + 2]).toHaveAccessibleName(
+      "Open workspace tools",
+    );
+  });
+
   it("uses one contextual primary action and keeps the complete Git menu", async () => {
     const onCommit = vi.fn();
     const current = status(true, {
@@ -168,14 +167,9 @@ describe("WorkspaceHeader Git pull request availability", () => {
         branches={[]}
         actions={[]}
         busy={false}
-        activityOpen={false}
-        activeRunCount={0}
-        attentionRunCount={0}
-        environmentSummary={summary}
-        environmentOpen={false}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
-        onSetEnvironmentOpen={vi.fn()}
+        onOpenEnvironment={vi.fn()}
         onCycleTheme={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenConnectionsSettings={vi.fn()}
@@ -191,7 +185,6 @@ describe("WorkspaceHeader Git pull request availability", () => {
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onToggleActivity={vi.fn()}
       />,
     );
 
@@ -228,14 +221,9 @@ describe("WorkspaceHeader Git pull request availability", () => {
         branches={[]}
         actions={[]}
         busy={false}
-        activityOpen={false}
-        activeRunCount={0}
-        attentionRunCount={0}
-        environmentSummary={summary}
-        environmentOpen={false}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
-        onSetEnvironmentOpen={vi.fn()}
+        onOpenEnvironment={vi.fn()}
         onCycleTheme={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenConnectionsSettings={vi.fn()}
@@ -251,7 +239,6 @@ describe("WorkspaceHeader Git pull request availability", () => {
         onPull={onPull}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onToggleActivity={vi.fn()}
       />,
     );
 

@@ -78,8 +78,8 @@ describe("generated turn attachment lifecycle", () => {
     let input: ProviderRunInput | null = null;
     let resolveRun: ((result: ProviderRunResult) => void) | null = null;
     let resolveStop!: () => void;
-    let stopGate = new Promise<"force-detached">((resolve) => {
-      resolveStop = () => resolve("force-detached");
+    let stopGate = new Promise<"settled">((resolve) => {
+      resolveStop = () => resolve("settled");
     });
     const providers = {
       resolveModelRoute: resolveNativeModelRoute,
@@ -118,6 +118,7 @@ describe("generated turn attachment lifecycle", () => {
         textTruncated: false,
         exitCode: 0,
         signal: null,
+        cleanupConfirmed: true,
       });
       resolveRun = null;
     };
@@ -151,7 +152,7 @@ describe("generated turn attachment lifecycle", () => {
     await expect(access(prestartPage)).rejects.toThrow();
     expect(store.agentTurn(prestart.turn.id).status).toBe("failed");
 
-    stopGate = Promise.resolve("force-detached");
+    stopGate = Promise.resolve("settled");
     const completedPage = await generated.writeJpeg(new Uint8Array([3]));
     const completed = controller.queue({
       conversationId: conversation.id,

@@ -33,7 +33,11 @@ import type {
 import {
   sanitizeProviderActivityDetail,
 } from "../provider/activity-detail";
-import type { ProviderRunFailure } from "../provider/contracts";
+import type {
+  ProviderGoalMutation,
+  ProviderGoalSnapshot,
+  ProviderRunFailure,
+} from "../provider/contracts";
 import { providerProcessInvocation } from "../provider/process";
 import {
   createOwnedProcessTreeTermination,
@@ -44,6 +48,8 @@ interface PendingClientRequest {
   resolve: (value: JsonObject) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
+  recordFailure: boolean;
+  onResponseFrame?: () => void;
 }
 
 export function startCodexAppServerRun(
@@ -80,11 +86,20 @@ export function startCodexAppServerRun(
   let lastProtocolMethod: string | undefined;
   let lastActivityId: string | undefined;
   let terminalEvent: string | undefined;
+  let ownedTerminationArmed = false;
+  let exitedBeforeOwnedTermination = false;
   let transportCloseTimer: NodeJS.Timeout | undefined;
   let decoder: JsonLineDecoder | undefined;
   let compatibilityError: CodexAppServerResult["compatibilityError"];
   let continuationError: CodexAppServerResult["continuationError"];
   let resolveResult!: (result: CodexAppServerResult) => void;
+  let startupGateReleased = false;
+  let startupFailure: Error | undefined;
+  let releaseStartupGate!: () => void;
+  const startupGate = new Promise<void>((resolve) => {
+    releaseStartupGate = resolve;
+  });
+  let goalMutationTail = Promise.resolve();
   let events: CodexAppServerEvents;
   const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
     child,
@@ -95,6 +110,32 @@ export function startCodexAppServerRun(
   const result = new Promise<CodexAppServerResult>((resolve) => {
     resolveResult = resolve;
   });
+
+  const settleStartupGate = (error?: unknown): void => {
+    if (startupGateReleased) return;
+    startupGateReleased = true;
+    if (error) {
+      startupFailure = error instanceof Error
+        ? error
+        : new Error("Codex App Server could not start the turn.");
+    }
+    releaseStartupGate();
+  };
+
+  const serializeGoalMutation = <T>(
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    const current = goalMutationTail.then(async () => {
+      await startupGate;
+      if (startupFailure) throw startupFailure;
+      return await operation();
+    });
+    goalMutationTail = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    return current;
+  };
 
   const rememberFailure = (
     reason: ProviderRunFailure["reason"],
@@ -181,21 +222,31 @@ export function startCodexAppServerRun(
     }
     settled = true;
     phase = "settled";
+    settleStartupGate(
+      new Error("The Codex App Server run ended before startup completed."),
+    );
     decoder?.stop();
     settlePendingRequests(
       "Codex App Server stopped before responding.",
     );
     events?.dispose();
     events?.settleInteractions();
+    ownedTerminationArmed = true;
     void (async () => {
       let finalStatus = status;
+      let cleanupConfirmed = true;
       try {
         // A terminal App Server turn has no further process work to preserve.
         // Use the same owned promise as cancellation, but avoid adding a
         // graceful-wait window after the provider has already settled.
         await terminateOwnedProcessTree(true);
+        if (exitedBeforeOwnedTermination) {
+          finalStatus = "failed";
+          cleanupConfirmed = false;
+        }
       } catch (error) {
         finalStatus = "failed";
+        cleanupConfirmed = false;
         rememberFailure(
           "process-exit",
           "Codex App Server process tree could not be confirmed stopped.",
@@ -221,11 +272,13 @@ export function startCodexAppServerRun(
         ...(finalFailure ? { failure: finalFailure } : {}),
         ...(compatibilityError ? { compatibilityError } : {}),
         ...(continuationError ? { continuationError } : {}),
+        cleanupConfirmed,
       });
     })();
   };
 
   const requestProcessTermination = (force: boolean): void => {
+    ownedTerminationArmed = true;
     void terminateOwnedProcessTree(force).then(
       () => {
         if (!settled) {
@@ -251,21 +304,32 @@ export function startCodexAppServerRun(
   const request = (
     method: string,
     params: JsonObject,
+    onResponseFrame?: () => void,
+    recordFailure = true,
   ): Promise<JsonObject> => {
     const id = nextRequestId;
     nextRequestId += 1;
     return new Promise<JsonObject>((resolve, reject) => {
       const timeout = setTimeout(() => {
         pendingRequests.delete(id);
-        rememberFailure(
-          "rpc-timeout",
-          "Codex App Server did not respond in time.",
-          `RPC method: ${method}`,
-        );
+        if (recordFailure) {
+          rememberFailure(
+            "rpc-timeout",
+            "Codex App Server did not respond in time.",
+            `RPC method: ${method}`,
+          );
+        }
         reject(new Error(`${method} timed out.`));
       }, options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS);
       timeout.unref();
-      pendingRequests.set(id, { method, resolve, reject, timeout });
+      pendingRequests.set(id, {
+        method,
+        resolve,
+        reject,
+        timeout,
+        recordFailure,
+        ...(onResponseFrame ? { onResponseFrame } : {}),
+      });
       if (!writeMessage({ method, id, params })) {
         clearTimeout(timeout);
         pendingRequests.delete(id);
@@ -366,15 +430,18 @@ export function startCodexAppServerRun(
       if (!pending) return;
       clearTimeout(pending.timeout);
       pendingRequests.delete(id);
+      pending.onResponseFrame?.();
       const error = objectValue(message.error);
       if (error) {
         const errorMessage =
           boundedText(error.message, 4_000) ?? `${pending.method} failed.`;
-        rememberFailure(
-          "codex-error",
-          "Codex rejected a protocol request.",
-          errorMessage,
-        );
+        if (pending.recordFailure) {
+          rememberFailure(
+            "codex-error",
+            "Codex rejected a protocol request.",
+            errorMessage,
+          );
+        }
         pending.reject(new Error(errorMessage));
       } else {
         pending.resolve(objectValue(message.result) ?? {});
@@ -464,6 +531,7 @@ export function startCodexAppServerRun(
   });
   child.once("close", (code, signal) => {
     if (settled) return;
+    exitedBeforeOwnedTermination = !ownedTerminationArmed;
     rememberFailure(
       signal ? "process-signal" : "process-exit",
       signal
@@ -487,6 +555,16 @@ export function startCodexAppServerRun(
       setActiveTurnId: (turnId) => {
         activeTurnId = turnId;
       },
+      phase: () => phase,
+      hasObservedTurn: (turnId) => events.hasObservedTurn(turnId),
+      goalProjectionSequence: () => events.goalProjectionSequence(),
+      beginGoalMutation: (activatesGoal) =>
+        events.beginGoalMutation(activatesGoal),
+      endGoalMutation: (activatesGoal) =>
+        events.endGoalMutation(activatesGoal),
+      awaitInitialGoalTurn: () => events.awaitInitialGoalTurn(),
+      projectGoalResponse: (threadId, goal, sequenceAtResponse) =>
+        events.projectGoalResponse(threadId, goal, sequenceAtResponse),
       setContinuationError: (error) => {
         continuationError = error;
       },
@@ -496,7 +574,10 @@ export function startCodexAppServerRun(
       isSettled: () => settled,
       isCancelRequested: () => cancelRequested,
       finish,
-    }).catch((error: unknown) => {
+    }).then(() => {
+      settleStartupGate();
+    }, (error: unknown) => {
+      settleStartupGate(error);
       if (
         options.access === "full"
         && isUnsupportedFullAccessError(error)
@@ -530,12 +611,71 @@ export function startCodexAppServerRun(
         threadId: providerThreadId,
         input: [{ type: "text", text, text_elements: [] }],
         expectedTurnId: activeTurnId,
-      });
+      }, undefined, false);
       return true;
     } catch {
       return false;
     }
   };
+
+  const setGoal = async (
+    input: ProviderGoalMutation,
+  ): Promise<ProviderGoalSnapshot> => serializeGoalMutation(async () => {
+    if (settled || cancelRequested || !providerThreadId) {
+      throw new Error("The Codex goal connection is not active.");
+    }
+    const ownedThreadId = providerThreadId;
+    const params: JsonObject = {
+      threadId: ownedThreadId,
+      status: input.status,
+    };
+    if (input.objective !== undefined) params.objective = input.objective;
+    if (input.tokenBudget !== undefined) {
+      params.tokenBudget = input.tokenBudget;
+    }
+    const activatesGoal = input.status === "active";
+    events.beginGoalMutation(activatesGoal);
+    try {
+      let sequenceAtResponse = events.goalProjectionSequence();
+      const response = await request("thread/goal/set", params, () => {
+        sequenceAtResponse = events.goalProjectionSequence();
+      }, false);
+      const parsed = events.projectGoalResponse(
+        ownedThreadId,
+        response.goal,
+        sequenceAtResponse,
+      );
+      if (!parsed) throw new Error("Codex returned a malformed goal response.");
+      return parsed;
+    } finally {
+      events.endGoalMutation(activatesGoal);
+    }
+  });
+
+  const clearGoal = async (): Promise<boolean> => serializeGoalMutation(async () => {
+    if (settled || cancelRequested || !providerThreadId) {
+      throw new Error("The Codex goal connection is not active.");
+    }
+    const ownedThreadId = providerThreadId;
+    events.beginGoalMutation(false);
+    try {
+      let sequenceAtResponse = events.goalProjectionSequence();
+      await request(
+        "thread/goal/clear",
+        { threadId: ownedThreadId },
+        () => {
+          sequenceAtResponse = events.goalProjectionSequence();
+        },
+        false,
+      );
+      return events.projectGoalClearResponse(
+        ownedThreadId,
+        sequenceAtResponse,
+      );
+    } finally {
+      events.endGoalMutation(false);
+    }
+  });
 
   return {
     child,
@@ -546,17 +686,35 @@ export function startCodexAppServerRun(
     respondToInput: (requestId, answers) =>
       events.respondToInput(requestId, answers),
     steer,
+    setGoal,
+    clearGoal,
   };
 }
 
 interface OpenCodexTurnOptions {
   options: CodexAppServerOptions;
   modelProvider: CodexAppServerOptions["modelProvider"];
-  request: (method: string, params: JsonObject) => Promise<JsonObject>;
+  request: (
+    method: string,
+    params: JsonObject,
+    onResponseFrame?: () => void,
+    recordFailure?: boolean,
+  ) => Promise<JsonObject>;
   notify: (method: string, params?: JsonObject) => void;
   setProviderThreadId: (threadId: string) => void;
   activeTurnId: () => string | undefined;
-  setActiveTurnId: (turnId: string) => void;
+  setActiveTurnId: (turnId: string | undefined) => void;
+  phase: () => CodexRunPhase;
+  hasObservedTurn: (turnId: string) => boolean;
+  goalProjectionSequence: () => number;
+  beginGoalMutation: (activatesGoal: boolean) => void;
+  endGoalMutation: (activatesGoal: boolean) => void;
+  awaitInitialGoalTurn: () => void;
+  projectGoalResponse: (
+    threadId: string,
+    goal: unknown,
+    sequenceAtResponse: number,
+  ) => ProviderGoalSnapshot | null;
   setContinuationError: (
     error: CodexAppServerResult["continuationError"],
   ) => void;
@@ -578,6 +736,13 @@ export async function openCodexTurn({
   setProviderThreadId,
   activeTurnId,
   setActiveTurnId,
+  phase,
+  hasObservedTurn,
+  goalProjectionSequence,
+  beginGoalMutation,
+  endGoalMutation,
+  awaitInitialGoalTurn,
+  projectGoalResponse,
   setContinuationError,
   setPhase,
   isSettled,
@@ -651,6 +816,45 @@ export async function openCodexTurn({
     return;
   }
 
+  if (options.goalStart) {
+    setPhase("starting-turn");
+    const params: JsonObject = {
+      threadId: openedThreadId,
+      status: "active",
+    };
+    if (options.goalStart.objective !== undefined) {
+      params.objective = options.goalStart.objective;
+    }
+    if (options.goalStart.tokenBudget !== undefined) {
+      params.tokenBudget = options.goalStart.tokenBudget;
+    }
+    beginGoalMutation(true);
+    let terminalGoalStart = false;
+    try {
+      let sequenceAtResponse = goalProjectionSequence();
+      const response = await request("thread/goal/set", params, () => {
+        sequenceAtResponse = goalProjectionSequence();
+      });
+      const projectedGoal = projectGoalResponse(
+        openedThreadId,
+        response.goal,
+        sequenceAtResponse,
+      );
+      if (!projectedGoal) {
+        throw new Error("Codex returned a malformed goal response.");
+      }
+      terminalGoalStart = projectedGoal.status !== "active";
+    } finally {
+      endGoalMutation(true);
+    }
+    if (terminalGoalStart && phase() === "starting-turn") {
+      finish("completed", 0, null);
+    } else if (!terminalGoalStart) {
+      awaitInitialGoalTurn();
+    }
+    return;
+  }
+
   const effectiveModel = boundedText(opened.model, 160) ?? options.model;
   if (options.planMode && !effectiveModel) {
     throw new Error(
@@ -715,6 +919,15 @@ export async function openCodexTurn({
   const startedTurnId = boundedText(turn?.id, 512);
   if (!startedTurnId) {
     throw new Error("Codex did not return a turn identifier.");
+  }
+  // Notifications can share the response's stdout chunk and complete the
+  // turn before this await resumes. Preserve the event-driven phase instead
+  // of resurrecting a completed turn as running.
+  if (phase() !== "starting-turn") {
+    if (!hasObservedTurn(startedTurnId)) {
+      throw new Error("Codex returned inconsistent turn identifiers.");
+    }
+    return;
   }
   if (activeTurnId() && activeTurnId() !== startedTurnId) {
     throw new Error("Codex returned inconsistent turn identifiers.");

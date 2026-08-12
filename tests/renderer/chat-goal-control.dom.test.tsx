@@ -72,6 +72,7 @@ function props(
 ): ChatGoalControlProps {
   return {
     workflow: state,
+    executionStatus: "running",
     loading: false,
     busy: false,
     error: null,
@@ -176,6 +177,110 @@ describe("ChatGoalControl", () => {
     expect(onDismiss).toHaveBeenCalledWith("action");
   });
 
+  it("offers Resume when an active native goal has no attached run", async () => {
+    const user = userEvent.setup();
+    const onSetGoal = vi.fn(async () => undefined);
+    render(
+      <ChatGoalControl
+        {...props(workflow(nativeCapability, [
+          goal("codex-native", "Resume after restart"),
+        ]), {
+          executionStatus: "idle",
+          onSetGoal,
+        })}
+        {...openProps()}
+      />,
+    );
+
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    expect(surface).toHaveTextContent("no Inertia run is connected");
+    expect(within(surface).queryByRole("button", { name: "Pause" }))
+      .not.toBeInTheDocument();
+    await user.click(within(surface).getByRole("button", {
+      name: "Resume goal",
+    }));
+    expect(onSetGoal).toHaveBeenCalledWith({
+      source: "codex-native",
+      status: "active",
+    });
+  });
+
+  it("disables goal mutations while a run is starting", () => {
+    render(
+      <ChatGoalControl
+        {...props(workflow(nativeCapability, [
+          goal("codex-native", "Wait for startup"),
+        ]), { executionStatus: "starting" })}
+        {...openProps()}
+      />,
+    );
+
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    expect(within(surface).getByRole("button", { name: "Pause" }))
+      .toBeDisabled();
+    expect(within(surface).getByRole("button", { name: "Clear Codex goal" }))
+      .toBeDisabled();
+  });
+
+  it("explains why a saved goal cannot resume in recovery safety mode", () => {
+    render(
+      <ChatGoalControl
+        {...props(workflow(nativeCapability, [
+          goal("codex-native", "Survive the runtime restart"),
+        ]), {
+          executionStatus: "idle",
+          busy: true,
+          error: "Changes are unavailable in recovery safety mode.",
+        })}
+        {...openProps()}
+      />,
+    );
+
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    expect(within(surface).getByRole("alert")).toHaveTextContent(
+      "recovery safety mode",
+    );
+    expect(within(surface).getByRole("button", { name: "Resume goal" }))
+      .toBeDisabled();
+  });
+
+  it("requires an explicit new or removed budget to resume a limited goal", async () => {
+    const user = userEvent.setup();
+    const onSetGoal = vi.fn(async () => undefined);
+    const limited = {
+      ...goal("codex-native", "Continue within a truthful budget", "budgetLimited"),
+      tokenBudget: 2_000,
+      tokensUsed: 1_500,
+    };
+    render(
+      <ChatGoalControl
+        {...props(workflow(nativeCapability, [limited]), { onSetGoal })}
+        {...openProps()}
+      />,
+    );
+
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    expect(within(surface).queryByRole("button", { name: "Mark active" }))
+      .not.toBeInTheDocument();
+    const budget = within(surface).getByRole("spinbutton", {
+      name: "New token budget",
+    });
+    const raised = within(surface).getByRole("button", {
+      name: "Resume with new budget",
+    });
+    expect(raised).toBeDisabled();
+    await user.type(budget, "1600");
+    expect(raised).toBeDisabled();
+    await user.clear(budget);
+    await user.type(budget, "3000");
+    await user.click(raised);
+    expect(onSetGoal).toHaveBeenCalledWith({
+      source: "codex-native",
+      status: "active",
+      tokenBudget: 3_000,
+    });
+  });
+
   it("reports an empty native goal when only a local objective is stored", () => {
     render(
       <ChatGoalControl
@@ -191,6 +296,58 @@ describe("ChatGoalControl", () => {
       .toBeInTheDocument();
     expect(surface).not.toHaveTextContent("Do not present this as provider-owned");
     expect(surface).toHaveTextContent("One separately tracked goal");
+  });
+
+  it("submits and validates an optional native token budget", async () => {
+    const user = userEvent.setup();
+    const onSetGoal = vi.fn(async () => undefined);
+    render(
+      <ChatGoalControl
+        {...props(workflow(nativeCapability), { onSetGoal })}
+        {...openProps()}
+      />,
+    );
+
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    const objective = within(surface).getByRole("textbox", {
+      name: "Objective",
+    });
+    const budget = within(surface).getByRole("spinbutton", {
+      name: "Token budget (optional)",
+    });
+    const submit = within(surface).getByRole("button", {
+      name: "Set Codex goal",
+    });
+    await user.type(objective, "Finish within the explicit budget");
+    await user.type(budget, "0");
+    expect(budget).toHaveAttribute("aria-invalid", "true");
+    expect(submit).toBeDisabled();
+    await user.clear(budget);
+    await user.type(budget, "12000");
+    expect(budget).toHaveAttribute("aria-invalid", "false");
+    await user.click(submit);
+
+    expect(onSetGoal).toHaveBeenCalledWith({
+      source: "codex-native",
+      objective: "Finish within the explicit budget",
+      status: "active",
+      tokenBudget: 12_000,
+    });
+  });
+
+  it("labels a local budget as an unenforced token target", () => {
+    render(
+      <ChatGoalControl
+        {...props(workflow(localCapability, [{
+          ...goal("inertia-local", "Track locally"),
+          tokenBudget: 5_000,
+        }]))}
+        {...openProps()}
+      />,
+    );
+
+    expect(screen.getByText(/Local token target: 5,000/u))
+      .toHaveTextContent("does not measure or enforce provider usage");
   });
 
   it("dismisses on Escape and keeps split actions with their pane owner", async () => {

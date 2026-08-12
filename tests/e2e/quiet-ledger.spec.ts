@@ -4,7 +4,6 @@ import { RuntimeStore } from "../../src/server/database";
 import {
   createAppFixture,
   type AppFixture,
-  type RuntimeTestSnapshot,
 } from "./support/app-fixture";
 import {
   capturePageWebSockets,
@@ -16,6 +15,7 @@ import {
   verifyDesktopMarkdownControls,
   verifyNarrowDesktopMarkdownControls,
 } from "./support/markdown-controls";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -207,14 +207,13 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     });
     await captureElementScenario("streaming-caret-code", activeTurn);
 
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
+    if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+      await page.getByRole("button", { name: "Open workspace tools" }).click();
+    }
     const previewTools = page.getByRole("complementary", {
       name: "Workspace tools",
     });
-    await previewTools.getByRole("tab", {
-      name: "Preview",
-      exact: true,
-    }).click();
+    await selectWorkspaceTool(previewTools, "Preview");
     const hostilePreviewUrl = `${app.previewUrl}approval-overlay`;
     await previewTools.getByRole("textbox", {
       name: "Preview address",
@@ -737,13 +736,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const beforeReconnect = await runtimeSnapshot();
     const rendererGenerationBeforeReconnect = await page.locator(".app-shell")
       .getAttribute("data-runtime-generation");
-    await electronApp.evaluate((_electron) => {
-      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-        crash: () => RuntimeTestSnapshot;
-      } | undefined;
-      if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-      runtime.crash();
-    });
+    await app.recycleRuntime();
     await expect.poll(async () => {
       const current = await runtimeSnapshot();
       return current.phase === "ready" && current.generation > beforeReconnect.generation;

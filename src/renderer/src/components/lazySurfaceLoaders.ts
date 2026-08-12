@@ -1,13 +1,11 @@
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import { createSurfaceLoader } from "../utils/surfaceLoader";
 
-export const loadActivityCenter = createSurfaceLoader(async () => ({
-  default: (await import("./ActivityCenter")).ActivityCenter,
-}));
 export const loadCommandPalette = createSurfaceLoader(async () => ({
   default: (await import("./CommandPalette")).CommandPalette,
 }));
 export const loadCommitDialog = createSurfaceLoader(() => import("./CommitDialog"));
+export const loadEnvironmentPanel = createSurfaceLoader(() => import("./EnvironmentPanel"));
 export const loadFilesPanel = createSurfaceLoader(() => import("./FilesPanel"));
 export const loadGoalPanel = createSurfaceLoader(() => import("./GoalPanel"));
 export const loadHistoricalDiffPanel = createSurfaceLoader(() => import("./HistoricalDiffPanel"));
@@ -23,7 +21,6 @@ export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPan
 export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));
 
 const frequentSurfaceLoads = [
-  loadActivityCenter,
   loadCommandPalette,
   loadSettingsView,
 ] as const;
@@ -33,7 +30,9 @@ export function prefetchFrequentSurfaces(): void {
 }
 
 export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
-  if (tab === "changes") {
+  if (tab === "environment") {
+    return;
+  } else if (tab === "changes") {
     void loadWorkspaceChangesPanel();
     void loadHistoricalDiffPanel();
   } else if (tab === "files") {
@@ -44,7 +43,7 @@ export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
     void loadGoalPanel();
   } else if (tab === "plan") {
     void loadPlanPanel();
-  } else {
+  } else if (tab === "preview") {
     void loadPreviewPanel();
   }
 }

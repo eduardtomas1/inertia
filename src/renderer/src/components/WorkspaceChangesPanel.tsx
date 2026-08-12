@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   AlertTriangle,
@@ -32,6 +32,7 @@ import {
   workspaceGitFilePath,
   workspaceGitIdentity,
   workspaceGitRepositoryLabel,
+  type WorkspaceChangesRequest,
   type WorkspaceGitFileIdentity,
 } from "../utils/workspaceGit";
 import {
@@ -79,6 +80,8 @@ export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
   busyAction?: string | null;
   run?: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   onActionError?: (message: string) => void;
+  changesRequest?: WorkspaceChangesRequest | null;
+  onChangesRequestHandled?: (revision: number) => void;
 }
 
 interface PullRequestDialogScope {
@@ -214,6 +217,8 @@ export function WorkspaceChangesPanel({
   busyAction = null,
   run,
   onActionError,
+  changesRequest = null,
+  onChangesRequestHandled,
   summary,
   selectionAnswer,
   reviewStates = [],
@@ -240,10 +245,15 @@ export function WorkspaceChangesPanel({
   const [commitDiffLoading, setCommitDiffLoading] = useState(false);
   const [commitDiffError, setCommitDiffError] = useState<string | null>(null);
   const commitDiffRequestRef = useRef(0);
+  const handledChangesRequestRef = useRef(0);
   const parsedCommitDiff = useParsedUnifiedDiff(
     commitDiff?.patch ?? "",
     commitDiff,
   );
+
+  useEffect(() => {
+    handledChangesRequestRef.current = 0;
+  }, [conversationId, projectId]);
 
   const selectedEntry = useMemo(
     () => snapshot ? workspaceGitFile(snapshot, selected) : null,
@@ -376,6 +386,21 @@ export function WorkspaceChangesPanel({
   ]);
 
   useEffect(() => {
+    if (!changesRequest || !snapshot) return;
+    const repository = snapshot.repositories.find(
+      (candidate) => candidate.repositoryPath === changesRequest.repositoryPath,
+    );
+    if (!repository) return;
+    setSelectedRepositoryPath(repository.repositoryPath);
+    setSelected(repository.files[0]
+      ? {
+          repositoryPath: repository.repositoryPath,
+          filePath: repository.files[0].path,
+        }
+      : null);
+  }, [changesRequest, snapshot]);
+
+  useEffect(() => {
     if (!activeRepositoryPath) {
       if (selectedRepositoryPath !== null) setSelectedRepositoryPath(null);
       if (selected !== null) setSelected(null);
@@ -450,6 +475,119 @@ export function WorkspaceChangesPanel({
     effectiveSelection,
     onLoadRepositoryDiff,
     selectedFileRevision,
+    snapshot,
+  ]);
+
+  const prepareActiveCommit = useCallback((): void => {
+    if (!activeRepository || !activeRepositoryAuthorityRef || commitDiffLoading) {
+      return;
+    }
+    const commitAction = nestedGitActions.find(({ id }) => id === "commit");
+    if (commitAction?.disabled || activeRepository.truncated) {
+      onActionError?.(activeRepository.truncated
+        ? "Refresh this repository before committing its complete change set."
+        : commitAction?.detail ?? "This repository cannot be committed right now.");
+      return;
+    }
+    const request = ++commitDiffRequestRef.current;
+    setCommitDiff(null);
+    setCommitDiffError(null);
+    setCommitDiffLoading(true);
+    setCommitDialogOpen(true);
+    void onLoadRepositoryDiff(
+      activeRepository.repositoryPath,
+      undefined,
+      true,
+    )
+      .then((repositoryDiff) => {
+        if (request !== commitDiffRequestRef.current) return;
+        if (repositoryDiff.repositoryPath !== activeRepository.repositoryPath) {
+          throw new Error("The repository changed while its complete diff was loading.");
+        }
+        if (repositoryDiff.truncated) {
+          throw new Error("The complete repository diff was truncated. Refresh this repository and try again before committing.");
+        }
+        if (!repositoryDiff.commitReview) {
+          throw new Error("The complete reviewed repository state is unavailable. Refresh this repository and try again before committing.");
+        }
+        setCommitDiff(repositoryDiff);
+      })
+      .catch((error: unknown) => {
+        if (request !== commitDiffRequestRef.current) return;
+        setCommitDiffError(error instanceof Error
+          ? error.message
+          : "The complete repository diff could not be loaded.");
+      })
+      .finally(() => {
+        if (request === commitDiffRequestRef.current) {
+          setCommitDiffLoading(false);
+        }
+      });
+  }, [
+    activeRepository,
+    activeRepositoryAuthorityRef,
+    commitDiffLoading,
+    nestedGitActions,
+    onActionError,
+    onLoadRepositoryDiff,
+  ]);
+
+  const pushActiveRepository = useCallback((): void => {
+    if (!activeRepository || !activeRepositoryAuthorityRef || !projectId || !run) {
+      return;
+    }
+    const pushAction = nestedGitActions.find(({ id }) => id === "push");
+    if (pushAction?.disabled) {
+      onActionError?.(pushAction.detail);
+      return;
+    }
+    void run("git.push", {
+      type: "git.push",
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath: activeRepository.repositoryPath,
+        authorityRef: activeRepositoryAuthorityRef,
+      },
+    }).then(onRefresh).catch(() => undefined);
+  }, [
+    activeRepository,
+    activeRepositoryAuthorityRef,
+    conversationId,
+    nestedGitActions,
+    onActionError,
+    onRefresh,
+    projectId,
+    run,
+  ]);
+
+  useEffect(() => {
+    if (
+      !changesRequest
+      || !snapshot
+      || handledChangesRequestRef.current === changesRequest.revision
+    ) return;
+    const repository = snapshot.repositories.find(
+      (candidate) => candidate.repositoryPath === changesRequest.repositoryPath,
+    );
+    if (!repository) {
+      handledChangesRequestRef.current = changesRequest.revision;
+      onActionError?.("The requested repository is no longer available. Refresh changes and try again.");
+      onChangesRequestHandled?.(changesRequest.revision);
+      return;
+    }
+    if (activeRepositoryPath !== repository.repositoryPath) return;
+    handledChangesRequestRef.current = changesRequest.revision;
+    if (changesRequest.action === "commit") prepareActiveCommit();
+    if (changesRequest.action === "push") pushActiveRepository();
+    onChangesRequestHandled?.(changesRequest.revision);
+  }, [
+    activeRepositoryPath,
+    changesRequest,
+    onActionError,
+    onChangesRequestHandled,
+    prepareActiveCommit,
+    pushActiveRepository,
     snapshot,
   ]);
 
@@ -544,43 +682,7 @@ export function WorkspaceChangesPanel({
                 : activeRepository.truncated
                 ? "Refresh this repository before committing its complete change set."
                 : commitAction?.detail}
-              onClick={() => {
-                if (!authorityRef || commitDiffLoading) return;
-                const request = ++commitDiffRequestRef.current;
-                setCommitDiff(null);
-                setCommitDiffError(null);
-                setCommitDiffLoading(true);
-                setCommitDialogOpen(true);
-                void onLoadRepositoryDiff(
-                  activeRepository.repositoryPath,
-                  undefined,
-                  true,
-                )
-                  .then((repositoryDiff) => {
-                    if (request !== commitDiffRequestRef.current) return;
-                    if (repositoryDiff.repositoryPath !== activeRepository.repositoryPath) {
-                      throw new Error("The repository changed while its complete diff was loading.");
-                    }
-                    if (repositoryDiff.truncated) {
-                      throw new Error("The complete repository diff was truncated. Refresh this repository and try again before committing.");
-                    }
-                    if (!repositoryDiff.commitReview) {
-                      throw new Error("The complete reviewed repository state is unavailable. Refresh this repository and try again before committing.");
-                    }
-                    setCommitDiff(repositoryDiff);
-                  })
-                  .catch((error: unknown) => {
-                    if (request !== commitDiffRequestRef.current) return;
-                    setCommitDiffError(error instanceof Error
-                      ? error.message
-                      : "The complete repository diff could not be loaded.");
-                  })
-                  .finally(() => {
-                    if (request === commitDiffRequestRef.current) {
-                      setCommitDiffLoading(false);
-                    }
-                  });
-              }}
+              onClick={prepareActiveCommit}
             >
               <GitCommitHorizontal size={12} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
             </button>
@@ -606,17 +708,7 @@ export function WorkspaceChangesPanel({
               type="button"
               disabled={!authorityRef || (pushAction?.disabled ?? true)}
               title={!authorityRef ? "Refresh this repository before changing it." : pushAction?.detail}
-              onClick={() => {
-                void run("git.push", {
-                  type: "git.push",
-                  payload: {
-                    projectId,
-                    conversationId,
-                    repositoryPath: activeRepository.repositoryPath,
-                    authorityRef,
-                  },
-                }).then(onRefresh).catch(() => undefined);
-              }}
+              onClick={pushActiveRepository}
             >
               <Upload size={12} aria-hidden="true" /><span>{pushAction?.label ?? "Push"}</span>
             </button>
@@ -648,10 +740,11 @@ export function WorkspaceChangesPanel({
     commitDiffLoading,
     conversationId,
     nestedGitActions,
-    onLoadRepositoryDiff,
     onRefresh,
+    prepareActiveCommit,
     projectId,
     projectName,
+    pushActiveRepository,
     run,
     snapshot,
   ]);

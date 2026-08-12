@@ -164,8 +164,17 @@ describe("UsageView", () => {
       '.usage-chart-partial-point[data-provider="claude"]',
     )).toBeVisible();
     expect(view.container.querySelector(
-      '.usage-provider-summary .usage-provider-mark[data-provider="claude"] svg',
+      '.usage-provider-summary .usage-provider-mark[data-provider-id="claude"] img',
     )).toBeVisible();
+    expect(view.container.querySelector(
+      '.usage-provider-summary .usage-provider-mark[data-provider-id="claude"]',
+    )).toHaveAttribute("data-provider-icon-kind", "official");
+    expect(view.container.querySelector(
+      '.usage-provider-summary .usage-provider-mark[data-provider-id="claude"]',
+    )).toHaveStyle({ "--provider-icon-size": "16px" });
+    expect(view.container.querySelector(
+      '.usage-model-identity .usage-provider-mark[data-provider-id="claude"]',
+    )).toHaveStyle({ "--provider-icon-size": "13px" });
     expect(screen.getByText(/no prompts, files, credentials, or new telemetry/iu)).toBeVisible();
     expect(screen.getByRole("region", { name: "Model usage table" })).toHaveAttribute(
       "tabindex",
@@ -183,6 +192,9 @@ describe("UsageView", () => {
     const explorer = screen.getByRole("slider", { name: "Explore daily token chart" });
     explorer.focus();
     await waitFor(() => expect(screen.getByText("* Partial coverage")).toBeVisible());
+    expect(view.container.querySelector(
+      '.usage-chart-tooltip .usage-provider-mark[data-provider-id="claude"]',
+    )).toHaveStyle({ "--provider-icon-size": "11px" });
     await user.keyboard("[ArrowLeft]");
     expect(explorer).toHaveAttribute("aria-valuenow", "29");
 
@@ -240,13 +252,11 @@ describe("UsageView", () => {
     expect(provider).not.toHaveTextContent("Token total unavailable");
   });
 
-  it("shows recent active periods in Day mode even when activity is old", async () => {
+  it("shows every active period in Day mode even when more than eight are old", async () => {
     const historical = dashboard();
-    const first = historical.daily[0]!;
     const last = historical.daily.at(-1)!;
     historical.daily = historical.daily.map((day, index) => {
-      if (index === 0) return { ...last, date: first.date };
-      if (index !== historical.daily.length - 1) return day;
+      if (index < 10) return { ...last, date: day.date };
       return {
         ...day,
         requestCount: 0,
@@ -267,7 +277,12 @@ describe("UsageView", () => {
 
     await screen.findByRole("heading", { name: "Daily processed tokens" });
     await user.click(screen.getByRole("button", { name: "Day" }));
-    expect(screen.getByRole("row", { name: /Jun 1, 2026/u })).toBeVisible();
+    const table = screen.getByRole("region", { name: "Day usage table" });
+    expect(table).toHaveClass("is-day-mode");
+    expect(table).toHaveAttribute("tabindex", "0");
+    expect(within(table).getAllByRole("row")).toHaveLength(11);
+    expect(within(table).getByRole("row", { name: /Jun 1, 2026/u })).toBeVisible();
+    expect(within(table).getByRole("row", { name: /Jun 10, 2026/u })).toBeVisible();
     expect(screen.queryByRole("row", { name: /Jun 30, 2026/u })).toBeNull();
   });
 

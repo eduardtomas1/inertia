@@ -255,7 +255,7 @@ export function DailyProviderChart({
                 const metric = dailyProviderMetric(selectedDay, provider.providerId);
                 return (
                   <span key={provider.key}>
-                    <i><ProviderMark providerId={provider.providerId} />{provider.providerLabel}</i>
+                    <i><ProviderMark providerId={provider.providerId} size={11} />{provider.providerLabel}</i>
                     <b>{metric.value === null ? "Unavailable" : `${formatTokens(metric.value)}${metric.coverage === "partial" ? "*" : ""}`}</b>
                   </span>
                 );

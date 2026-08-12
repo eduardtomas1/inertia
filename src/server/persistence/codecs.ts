@@ -20,6 +20,13 @@ import {
   type ThreadUsageSnapshot,
   type WorkspaceRun,
 } from "../../shared/contracts";
+import {
+  CHAT_ATTACHMENT_MIME_TYPES,
+  MAX_CHAT_ATTACHMENTS,
+  MAX_CHAT_ATTACHMENT_BYTES,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  chatAttachmentMimeTypeForName,
+} from "../../shared/attachments";
 import { officiallyAllowsModelSwitchWithinSession } from "../../shared/continuation-policy";
 import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
@@ -486,10 +493,65 @@ export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
   };
 }
 
-function parseAttachments(value: string): ChatAttachment[] {
+function isPersistedChatAttachment(
+  attachment: unknown,
+): attachment is ChatAttachment {
+  return typeof attachment === "object"
+    && attachment !== null
+    && !Array.isArray(attachment)
+    && "id" in attachment
+    && typeof attachment.id === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+      .test(attachment.id)
+    && "name" in attachment
+    && typeof attachment.name === "string"
+    && attachment.name.length >= 1
+    && attachment.name.length <= 255
+    && !/[\0-\x1f\x7f]/u.test(attachment.name)
+    && !/[\\/]/u.test(attachment.name)
+    && chatAttachmentMimeTypeForName(attachment.name)
+      === ("mimeType" in attachment ? attachment.mimeType : null)
+    && "path" in attachment
+    && typeof attachment.path === "string"
+    && attachment.path.length >= 1
+    && attachment.path.length <= 4_096
+    && !attachment.path.includes("\0")
+    && "mimeType" in attachment
+    && typeof attachment.mimeType === "string"
+    && (CHAT_ATTACHMENT_MIME_TYPES as readonly string[])
+      .includes(attachment.mimeType)
+    && "size" in attachment
+    && typeof attachment.size === "number"
+    && Number.isSafeInteger(attachment.size)
+    && attachment.size >= 1
+    && attachment.size <= MAX_CHAT_ATTACHMENT_BYTES;
+}
+
+export function parseAttachments(value: string): ChatAttachment[] {
   try {
     const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? (parsed as ChatAttachment[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    const attachments: ChatAttachment[] = [];
+    const ids = new Set<string>();
+    let totalBytes = 0;
+    for (const attachment of parsed) {
+      if (
+        !isPersistedChatAttachment(attachment)
+        || ids.has(attachment.id)
+        || attachments.length >= MAX_CHAT_ATTACHMENTS
+        || totalBytes + attachment.size > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
+      ) continue;
+      attachments.push({
+        id: attachment.id,
+        name: attachment.name,
+        path: attachment.path,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+      });
+      ids.add(attachment.id);
+      totalBytes += attachment.size;
+    }
+    return attachments;
   } catch {
     return [];
   }
@@ -504,6 +566,15 @@ export function parseJsonArray(value: string): unknown[] {
   }
 }
 
+export function rendererSafeAttachments(
+  attachments: readonly ChatAttachment[],
+): ChatAttachment[] {
+  return attachments.map((attachment) => ({
+    ...attachment,
+    path: attachment.id,
+  }));
+}
+
 export function messageFromRow(row: MessageRow): ChatMessage {
   return {
     id: row.id,
@@ -511,7 +582,9 @@ export function messageFromRow(row: MessageRow): ChatMessage {
     turnId: row.turn_id,
     role: row.role,
     content: row.content,
-    attachments: parseAttachments(row.attachments_json),
+    attachments: rendererSafeAttachments(
+      parseAttachments(row.attachments_json),
+    ),
     createdAt: row.created_at,
   };
 }

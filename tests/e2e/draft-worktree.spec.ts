@@ -4,14 +4,38 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 
 import { createAppFixture } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
-test("waits to expose tools until an isolated draft worktree exists", async () => {
+test("keeps Environment available while an isolated draft worktree materializes", async () => {
   const app = await createAppFixture({
     name: "isolated-draft",
     initialState: "empty",
     initialNewThreadMode: "worktree",
+    beforeLaunch: ({ testDirectory }) => {
+      const database = new Database(join(
+        testDirectory,
+        "data",
+        "inertia.sqlite",
+      ));
+      database.prepare(`
+        UPDATE app_state
+        SET workspace_startup_surface = 'tools'
+        WHERE id = 1
+      `).run();
+      database.close();
+    },
   });
   try {
+    await app.page.evaluate(() => window.localStorage.setItem(
+      "inertia:layout:last-workspace-tool:v2",
+      "terminal",
+    ));
+    await app.page.reload();
+    await app.page.locator('.app-shell[data-connection-status="online"]')
+      .waitFor();
+    await expect(app.page.getByRole("button", {
+      name: "Add your first project",
+    })).toBeVisible();
     await app.electronApp.evaluate(({ dialog }, directory) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({
         canceled: false,
@@ -27,11 +51,23 @@ test("waits to expose tools until an isolated draft worktree exists", async () =
       level: 3,
     })).toBeVisible();
 
-    const unavailableReason =
-      "Workspace tools are available after the first message creates this isolated worktree.";
-    await expect(app.page.getByRole("button", {
-      name: unavailableReason,
-    })).toBeDisabled();
+    const workspaceTools = app.page.getByRole("complementary", {
+      name: "Workspace tools",
+    });
+    await expect(workspaceTools.getByRole("tab", {
+      name: "Environment",
+    })).toHaveAttribute("aria-selected", "true");
+    await expect(workspaceTools.getByRole("tab", { name: /Changes/u }))
+      .toHaveCount(0);
+    await expect(workspaceTools.getByRole("tab", { name: /Files/u }))
+      .toHaveCount(0);
+    await expect(workspaceTools).toContainText(
+      "Files, changes, and Terminal become available after the first message creates this isolated worktree.",
+    );
+    await expect(workspaceTools.getByText("Repository not checked"))
+      .toBeVisible();
+    await expect(workspaceTools.getByText("No Git repository", { exact: true }))
+      .toHaveCount(0);
     await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
 
     const databasePath = join(
@@ -94,15 +130,13 @@ test("waits to expose tools until an isolated draft worktree exists", async () =
       stat(join(worktreePath!, ".git")).then((metadata) => metadata.isFile()),
     ).resolves.toBe(true);
 
-    const workspaceToolsButton = app.page.getByRole("button", {
-      name: "Open workspace tools",
-    });
-    await expect(workspaceToolsButton).toBeEnabled();
-    await workspaceToolsButton.click();
-    const workspaceTools = app.page.getByRole("complementary", {
-      name: "Workspace tools",
-    });
-    await workspaceTools.getByRole("tab", { name: /Files/u }).click();
+    await expect(workspaceTools.getByRole("tab", {
+      name: "Environment",
+    })).toHaveAttribute("aria-selected", "true");
+    await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
+    await expect(workspaceTools.getByLabel("Choose workspace tool"))
+      .toBeVisible();
+    await selectWorkspaceTool(workspaceTools, "Files");
     await expect(
       workspaceTools.getByRole("tree", { name: "Workspace files" }),
     ).toBeVisible();

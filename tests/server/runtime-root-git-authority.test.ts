@@ -11,9 +11,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startRuntime, type RunningRuntime } from "../../src/server";
+import type { RunningRuntime } from "../../src/server";
 import { RuntimeStore } from "../../src/server/database";
 import type { ServerEvent } from "../../src/shared/contracts";
+import { startTestRuntime as startRuntime } from "../support/test-runtime";
 import {
   connectRuntime,
 } from "../support/runtime-event-queue";
@@ -66,6 +67,8 @@ describe("runtime root Git authority", () => {
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
       secureFiles: new SecureFileTestBroker(),
     });
     runtimes.push(runtime);

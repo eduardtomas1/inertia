@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -8,6 +8,7 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 const primarySessionId = "11111111-1111-4111-8111-111111111111";
 const secondarySessionId = "22222222-2222-4222-8222-222222222222";
@@ -97,7 +98,7 @@ async function openTerminal(
   if (!await tools.isVisible().catch(() => false)) {
     await pane.getByRole("button", { name: `Open tools for ${title}` }).click();
   }
-  await tools.getByRole("tab", { name: "Terminal", exact: true }).click();
+  await selectWorkspaceTool(tools, "Terminal");
   return tools;
 }
 
@@ -175,11 +176,13 @@ test("resumes the selected provider session only in its owning split pane", asyn
   }))
     .toBeDisabled();
 
-  await writeFile(
-    join(app.secondWorkspaceDirectory!, ".terminal-resume-exit"),
-    "0",
-    "utf8",
+  const exitPath = join(
+    app.secondWorkspaceDirectory!,
+    ".terminal-resume-exit",
   );
+  const pendingExitPath = `${exitPath}.pending`;
+  await writeFile(pendingExitPath, "0", "utf8");
+  await rename(pendingExitPath, exitPath);
   await expect(secondaryPanel).not.toHaveAttribute("data-terminal-id", /.+/u);
   await expect(secondaryPanel.getByText(
     `Codex session ${secondarySessionId} ended.`,

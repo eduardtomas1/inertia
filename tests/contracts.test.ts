@@ -222,7 +222,7 @@ describe("client command contract", () => {
     }).success).toBe(false);
   });
 
-  it("accepts only scoped UUID targets for Activity Center mutations", () => {
+  it("accepts only scoped UUID targets for workspace-run mutations", () => {
     const runId = crypto.randomUUID();
     for (const type of [
       "activity.stop",
@@ -241,6 +241,23 @@ describe("client command contract", () => {
         payload: { runId: "../process", terminalId: crypto.randomUUID() },
       }).success).toBe(false);
     }
+  });
+
+  it("accepts only a scoped thread UUID for selection-question cancellation", () => {
+    const base = {
+      type: "review.selection.cancel",
+      requestId: crypto.randomUUID(),
+      payload: { conversationId: crypto.randomUUID() },
+    } as const;
+    expect(clientCommandSchema.safeParse(base).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { conversationId: "../thread" },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, runId: crypto.randomUUID() },
+    }).success).toBe(false);
   });
 
   it("accepts scoped turn-artifact reads and rejects unbounded or cross-shaped payloads", () => {

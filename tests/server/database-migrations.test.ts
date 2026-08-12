@@ -70,6 +70,14 @@ function migrateFixtureInPlace(databasePath: string): void {
   }
 }
 
+function dropUnreleasedProviderOwnership(database: Database.Database): void {
+  database.exec(`
+    DROP TABLE IF EXISTS provider_run_ownership;
+    DROP INDEX IF EXISTS agent_turns_provider_run_identity_idx;
+    DELETE FROM schema_migrations WHERE version = 55;
+  `);
+}
+
 async function createLegacyBackfillDatabase(): Promise<{
   databasePath: string;
   workspacePath: string;
@@ -172,7 +180,7 @@ afterEach(async () => {
   );
 });
 
-describe("published database fixtures", () => {
+describe("published database fixtures", { timeout: 30_000 }, () => {
   it("pins all six released schemas to sanitized, byte-reproducible databases", async () => {
     const manifest = await fixtureManifest();
     expect(manifest.format).toBe(1);
@@ -323,6 +331,7 @@ describe("published database fixtures", () => {
     const legacy = new Database(databasePath);
     legacy.exec("DROP TABLE conversation_worktree_ownership");
     legacy.prepare("DELETE FROM schema_migrations WHERE version >= 52").run();
+    dropUnreleasedProviderOwnership(legacy);
     legacy.close();
 
     migrateFixtureInPlace(databasePath);
@@ -430,6 +439,7 @@ describe("published database fixtures", () => {
     const legacy = new Database(databasePath);
     legacy.exec("ALTER TABLE turn_git_artifacts DROP COLUMN absence_reason");
     legacy.prepare("DELETE FROM schema_migrations WHERE version = 27").run();
+    dropUnreleasedProviderOwnership(legacy);
     legacy.close();
     migrateFixtureInPlace(databasePath);
 
@@ -465,6 +475,7 @@ describe("published database fixtures", () => {
     database.exec("DROP INDEX workspace_runs_attention_idx");
     database.exec("ALTER TABLE workspace_runs DROP COLUMN attention_state");
     database.prepare("DELETE FROM schema_migrations WHERE version >= 20").run();
+    dropUnreleasedProviderOwnership(database);
     database.prepare("UPDATE conversations SET last_viewed_at = ? WHERE id = ?")
       .run(afterRecent, seenConversation.id);
     database.prepare("UPDATE conversations SET last_viewed_at = ? WHERE id = ?")
@@ -592,6 +603,7 @@ describe("published database fixtures", () => {
         ON agent_plans(conversation_id, turn_id);
       DELETE FROM schema_migrations WHERE version = 21;
     `);
+    dropUnreleasedProviderOwnership(database);
     database.close();
     migrateFixtureInPlace(databasePath);
 
@@ -806,6 +818,7 @@ describe("published database fixtures", () => {
       END;
       DELETE FROM schema_migrations WHERE version = 35;
     `);
+    dropUnreleasedProviderOwnership(legacy);
     legacy.close();
     migrateFixtureInPlace(databasePath);
 
@@ -981,6 +994,7 @@ describe("published database fixtures", () => {
         );
       DELETE FROM schema_migrations WHERE version >= 36;
     `);
+    dropUnreleasedProviderOwnership(v35);
     v35.pragma("foreign_keys = ON");
     v35.close();
 
@@ -1087,6 +1101,7 @@ describe("atomic Duo schema migration", () => {
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
         ).run(38);
+        dropUnreleasedProviderOwnership(previous);
         expect((previous.prepare(
           "SELECT MAX(version) AS version FROM schema_migrations",
         ).get() as { version: number }).version).toBe(
@@ -1114,6 +1129,7 @@ describe("atomic Duo schema migration", () => {
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
         ).run(39);
+        dropUnreleasedProviderOwnership(previous);
         previous.close();
       } else if (source === "v39-upgrade") {
         const previous = new Database(databasePath);
@@ -1133,6 +1149,7 @@ describe("atomic Duo schema migration", () => {
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
         ).run(40);
+        dropUnreleasedProviderOwnership(previous);
         previous.close();
       } else if (source === "v40-upgrade") {
         const previous = new Database(databasePath);
@@ -1143,6 +1160,7 @@ describe("atomic Duo schema migration", () => {
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
         ).run(41);
+        dropUnreleasedProviderOwnership(previous);
         previous.close();
       } else if (source === "v41-upgrade") {
         const previous = new Database(databasePath);
@@ -1153,6 +1171,7 @@ describe("atomic Duo schema migration", () => {
           DROP TABLE reasoning_content_chunks;
           DELETE FROM schema_migrations WHERE version >= 42;
         `);
+        dropUnreleasedProviderOwnership(previous);
         previous.close();
       } else if (source === "v45-upgrade") {
         const previous = new Database(databasePath);
@@ -1167,6 +1186,7 @@ describe("atomic Duo schema migration", () => {
           ALTER TABLE paired_launches DROP COLUMN comparison_state;
           DELETE FROM schema_migrations WHERE version >= 46;
         `);
+        dropUnreleasedProviderOwnership(previous);
         previous.close();
       }
 
@@ -1454,9 +1474,9 @@ describe("runtime migration catalog", () => {
       .toThrow(/runtime schema catalog/iu);
   });
 
-  it("appends an indexed completed-turn range path without changing durable data", async () => {
+  it("upgrades exact schema 56 with an indexed completed-turn range path without changing durable data", async () => {
     const directory = await temporaryDirectory();
-    const databasePath = join(directory, "schema-54-usage-index.sqlite");
+    const databasePath = join(directory, "schema-56-usage-index.sqlite");
     const workspacePath = join(directory, "workspace");
     await mkdir(workspacePath);
     const store = new RuntimeStore(databasePath, workspacePath, {
@@ -1465,15 +1485,20 @@ describe("runtime migration catalog", () => {
     const project = store.createProject("Usage index", workspacePath);
     store.close();
 
-    const schema54 = new Database(databasePath);
-    schema54.exec(`
+    const schema56 = new Database(databasePath);
+    schema56.exec(`
       DROP INDEX agent_turns_usage_dashboard_completed_idx;
-      DELETE FROM schema_migrations WHERE version >= 55;
+      CREATE INDEX agent_turns_usage_dashboard_completed_idx
+      ON agent_turns(association, completed_at COLLATE NOCASE, id);
+      DELETE FROM schema_migrations WHERE version >= 57;
     `);
-    expect((schema54.prepare(
+    expect((schema56.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(54);
-    schema54.close();
+    ).get() as { version: number }).version).toBe(56);
+    expect(schema56.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_run_ownership'",
+    ).get()).toEqual({ name: "provider_run_ownership" });
+    schema56.close();
 
     migrateFixtureInPlace(databasePath);
 
@@ -1484,6 +1509,7 @@ describe("runtime migration catalog", () => {
         AND name = 'agent_turns_usage_dashboard_completed_idx'
     `).get() as { sql: string } | undefined;
     expect(index?.sql).toMatch(/association, completed_at ASC, id ASC/iu);
+    expect(index?.sql).not.toMatch(/NOCASE/iu);
     const plan = migrated.prepare(`
       EXPLAIN QUERY PLAN
       SELECT provider_id, model_selection_json, continuation_identity_json,
@@ -1510,9 +1536,9 @@ describe("runtime migration catalog", () => {
     migrated.close();
   });
 
-  it("invalidates legacy turn-start usage without changing owned completions", async () => {
+  it("upgrades exact schema 56 by invalidating legacy turn-start usage without changing completions", async () => {
     const directory = await temporaryDirectory();
-    const databasePath = join(directory, "schema-55-usage-boundary.sqlite");
+    const databasePath = join(directory, "schema-56-usage-boundary.sqlite");
     const workspacePath = join(directory, "workspace");
     await mkdir(workspacePath);
     const store = new RuntimeStore(databasePath, workspacePath, {
@@ -1576,9 +1602,15 @@ describe("runtime migration catalog", () => {
     });
     store.close();
 
-    const schema55 = new Database(databasePath);
-    schema55.prepare("DELETE FROM schema_migrations WHERE version = 56").run();
-    const before = schema55.prepare(`
+    const schema56 = new Database(databasePath);
+    schema56.exec(`
+      DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      DELETE FROM schema_migrations WHERE version >= 57;
+    `);
+    expect((schema56.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(56);
+    const before = schema56.prepare(`
       SELECT usage_start_json, usage_completion_json
       FROM agent_turns WHERE id = ?
     `).get(turn.id) as {
@@ -1591,7 +1623,7 @@ describe("runtime migration catalog", () => {
     expect(JSON.parse(before.usage_completion_json!)).toMatchObject({
       totalProcessedTokens: 1_300,
     });
-    schema55.close();
+    schema56.close();
 
     migrateFixtureInPlace(databasePath);
     migrateFixtureInPlace(databasePath);
@@ -1653,6 +1685,7 @@ describe("runtime migration catalog", () => {
       ALTER TABLE app_state DROP COLUMN auto_scroll_to_final_answer;
       DELETE FROM schema_migrations WHERE version >= 51;
     `);
+    dropUnreleasedProviderOwnership(schema50);
     schema50.close();
 
     migrateFixtureInPlace(databasePath);
@@ -1668,6 +1701,8 @@ describe("runtime migration catalog", () => {
       { version: 54 },
       { version: 55 },
       { version: 56 },
+      { version: 57 },
+      { version: 58 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

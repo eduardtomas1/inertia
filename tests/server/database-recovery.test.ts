@@ -3,12 +3,14 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,6 +54,41 @@ function backupNames(databasePath: string): string[] {
   return readdirSync(databaseRecoveryPaths(databasePath).backupsDirectory)
     .filter((name) => name.endsWith(".sqlite"))
     .sort();
+}
+
+function replaceProviderRunOwnershipTable(
+  database: Database.Database,
+  options: { checks: boolean; foreignKey: boolean },
+): void {
+  database.exec(`
+    DROP INDEX provider_run_ownership_conversation_idx;
+    ALTER TABLE provider_run_ownership
+      RENAME TO malformed_provider_run_ownership;
+    CREATE TABLE provider_run_ownership (
+      turn_id TEXT NOT NULL PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      run_id TEXT NOT NULL UNIQUE,
+      runtime_generation_id TEXT NOT NULL,
+      system_boot_id TEXT NOT NULL,
+      created_at TEXT NOT NULL
+      ${options.foreignKey ? `,
+        FOREIGN KEY (turn_id, conversation_id, run_id)
+          REFERENCES agent_turns(id, conversation_id, run_id)
+          ON DELETE RESTRICT` : ""}
+      ${options.checks ? `,
+        CHECK (length(turn_id) BETWEEN 1 AND 200),
+        CHECK (length(conversation_id) BETWEEN 1 AND 200),
+        CHECK (length(run_id) BETWEEN 1 AND 200),
+        CHECK (length(runtime_generation_id) BETWEEN 38 AND 80),
+        CHECK (length(system_boot_id) BETWEEN 8 AND 80),
+        CHECK (length(created_at) BETWEEN 20 AND 40)` : ""}
+    );
+    INSERT INTO provider_run_ownership
+    SELECT * FROM malformed_provider_run_ownership;
+    DROP TABLE malformed_provider_run_ownership;
+    CREATE INDEX provider_run_ownership_conversation_idx
+      ON provider_run_ownership(conversation_id, created_at, turn_id);
+  `);
 }
 
 afterEach(() => {
@@ -842,6 +879,31 @@ describe("database backup and startup recovery", () => {
     recovered.close();
   });
 
+  it.skipIf(process.platform === "win32")(
+    "never follows a pre-planted restore-partial symlink",
+    async () => {
+      const directory = temporaryDirectory();
+      const databasePath = join(directory, "inertia.sqlite");
+      const { store } = seed(databasePath, "safe backup");
+      await store.createBackup();
+      store.close();
+      writeFileSync(databasePath, "invalid primary");
+      const outside = join(directory, "outside-sentinel.txt");
+      writeFileSync(outside, "outside must remain unchanged");
+      symlinkSync(
+        outside,
+        databaseRecoveryPaths(databasePath).restorePartialPath,
+      );
+
+      expect(() => new RuntimeStore(databasePath, directory, {
+        recoverInterruptedRuns: false,
+      })).toThrow();
+      expect(readFileSync(outside, "utf8")).toBe(
+        "outside must remain unchanged",
+      );
+    },
+  );
+
   it("skips a newest backup with orphaned foreign keys and restores the older valid copy", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1023,6 +1085,8 @@ describe("database backup and startup recovery", () => {
       DROP TABLE recovery_import_receipts;
       DROP TABLE message_content_chunks;
       DROP TABLE reasoning_content_chunks;
+      DROP TABLE provider_run_ownership;
+      DROP INDEX agent_turns_provider_run_identity_idx;
       DELETE FROM schema_migrations WHERE version >= 42;
     `);
     released.close();
@@ -1046,6 +1110,235 @@ describe("database backup and startup recovery", () => {
       CURRENT_DATABASE_SCHEMA_VERSION,
     );
     upgraded.close();
+  });
+
+  it("restores the released V0.0.6 fixture through schema 58 without losing data", () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const paths = databaseRecoveryPaths(databasePath);
+    mkdirSync(paths.backupsDirectory, { recursive: true });
+    const backupFilename = "inertia-20260812T000000000Z.sqlite";
+    const backupPath = join(paths.backupsDirectory, backupFilename);
+    copyFileSync(join(
+      import.meta.dirname,
+      "..",
+      "fixtures",
+      "database",
+      "v0.0.6.sqlite",
+    ), backupPath);
+    const released = new Database(backupPath, { readonly: true });
+    const messagesBefore = released.prepare(
+      "SELECT id, role, content, created_at FROM messages ORDER BY id",
+    ).all();
+    released.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backupFilename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.snapshot().agentTurns).toHaveLength(2);
+    expect(recovered.snapshot().agentTurns.every(
+      ({ association }) => association === "inferred",
+    )).toBe(true);
+    recovered.close();
+
+    const upgraded = new Database(databasePath, { readonly: true });
+    expect(upgraded.prepare(
+      "SELECT id, role, content, created_at FROM messages ORDER BY id",
+    ).all()).toEqual(messagesBefore);
+    expect((upgraded.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(58);
+    expect(upgraded.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'index'
+        AND name = 'agent_turns_usage_dashboard_completed_idx'
+    `).get()).toEqual({ name: "agent_turns_usage_dashboard_completed_idx" });
+    upgraded.close();
+  });
+
+  it("restores schema 55 provider ownership before applying attachment sanitization", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "schema 55 backup");
+    const attachmentId = "33333333-3333-4333-8333-333333333333";
+    const message = store.createMessage(
+      conversationId,
+      "Keep the attachment capability opaque.",
+      "user",
+      [{
+        id: attachmentId,
+        name: "legacy-reference.png",
+        path: attachmentId,
+        mimeType: "image/png",
+        size: 8,
+      }],
+    );
+    const backup = await store.createBackup();
+    store.close();
+    const backupPath = join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      backup.filename,
+    );
+    const schema55 = new Database(backupPath);
+    schema55.prepare(`
+      UPDATE messages
+      SET attachments_json = ?
+      WHERE id = ?
+    `).run(JSON.stringify([{
+      id: attachmentId,
+      name: "legacy-reference.png",
+      path: "/Users/person/secret/legacy-reference.png",
+      mimeType: "image/png",
+      size: 8,
+    }]), message.id);
+    schema55.exec(`
+      DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      DELETE FROM schema_migrations WHERE version >= 56;
+    `);
+    schema55.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backup.filename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.providerRunOwnership.all()).toEqual([]);
+    expect(recovered.message(message.id).attachments).toEqual([{
+      id: attachmentId,
+      name: "legacy-reference.png",
+      path: attachmentId,
+      mimeType: "image/png",
+      size: 8,
+    }]);
+    recovered.close();
+
+    const upgraded = new Database(databasePath, { readonly: true });
+    expect((upgraded.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(
+      CURRENT_DATABASE_SCHEMA_VERSION,
+    );
+    expect((upgraded.prepare(
+      "SELECT attachments_json FROM messages WHERE id = ?",
+    ).get(message.id) as { attachments_json: string }).attachments_json)
+      .not.toContain("/Users/person/secret");
+    upgraded.close();
+  });
+
+  it("rejects a schema 56 backup that reintroduces an attachment path capability", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "safe current schema");
+    const attachmentId = "44444444-4444-4444-8444-444444444444";
+    const message = store.createMessage(
+      conversationId,
+      "Opaque attachment",
+      "user",
+      [{
+        id: attachmentId,
+        name: "opaque.png",
+        path: attachmentId,
+        mimeType: "image/png",
+        size: 8,
+      }],
+    );
+    const older = await store.createBackup();
+    store.createMessage(conversationId, "newer unsafe state", "assistant");
+    const newer = await store.createBackup();
+    store.close();
+    const paths = databaseRecoveryPaths(databasePath);
+    for (const backup of [older, newer]) {
+      const schema56 = new Database(join(paths.backupsDirectory, backup.filename));
+      schema56.exec(`
+        DROP INDEX agent_turns_usage_dashboard_completed_idx;
+        DELETE FROM schema_migrations WHERE version >= 57;
+      `);
+      schema56.close();
+    }
+    const tampered = new Database(join(paths.backupsDirectory, newer.filename));
+    tampered.prepare(`
+      UPDATE messages SET attachments_json = ? WHERE id = ?
+    `).run(JSON.stringify([{
+      id: "/Users/person/private/opaque.png",
+      name: "opaque.png",
+      path: "/Users/person/private/opaque.png",
+      mimeType: "image/png",
+      size: 8,
+    }]), message.id);
+    tampered.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: older.filename,
+      invalidBackupsSkipped: 1,
+    });
+    expect(recovered.message(message.id).attachments[0]?.path).toBe(attachmentId);
+    expect(recovered.conversationDetail(conversationId)?.messages
+      .some(({ content }) => content === "newer unsafe state")).toBe(false);
+    recovered.close();
+  });
+
+  it("rejects a path-shaped attachment identity during off-thread backup validation", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "unsafe capability source");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.prepare(`
+      UPDATE messages SET attachments_json = ?
+    `).run(JSON.stringify([{
+      id: "/Users/person/private/source.png",
+      name: "source.png",
+      path: "/Users/person/private/source.png",
+      mimeType: "image/png",
+      size: 8,
+    }]));
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(readdirSync(databaseRecoveryPaths(databasePath).backupsDirectory))
+      .toEqual([]);
+    primary.close();
+  });
+
+  it("validates the exact schema 58 Usage index off thread", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "usage index validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.exec(`
+      DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      CREATE INDEX agent_turns_usage_dashboard_completed_idx
+      ON agent_turns(association, completed_at COLLATE NOCASE, id);
+    `);
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    primary.exec(`
+      DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      CREATE INDEX agent_turns_usage_dashboard_completed_idx
+      ON agent_turns(association, completed_at ASC, id ASC);
+    `);
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
   });
 
   it("skips incomplete migration history and restores the next coherent backup", async () => {
@@ -1220,6 +1513,34 @@ describe("database backup and startup recovery", () => {
       },
     },
     {
+      label: "the provider ownership composite foreign key",
+      mutate: (database: Database.Database) => {
+        replaceProviderRunOwnershipTable(database, {
+          checks: true,
+          foreignKey: false,
+        });
+      },
+    },
+    {
+      label: "the provider ownership safety checks",
+      mutate: (database: Database.Database) => {
+        replaceProviderRunOwnershipTable(database, {
+          checks: false,
+          foreignKey: true,
+        });
+      },
+    },
+    {
+      label: "the unique provider ownership parent identity index",
+      mutate: (database: Database.Database) => {
+        database.exec(`
+          DROP INDEX agent_turns_provider_run_identity_idx;
+          CREATE INDEX agent_turns_provider_run_identity_idx
+            ON agent_turns(id, conversation_id, run_id);
+        `);
+      },
+    },
+    {
       label: "the Usage dashboard completed-turn range index",
       mutate: (database: Database.Database) => {
         database.exec("DROP INDEX agent_turns_usage_dashboard_completed_idx");
@@ -1262,6 +1583,63 @@ describe("database backup and startup recovery", () => {
     });
     expect(recovered.conversationDetail(conversationId)?.messages
       .map(({ content }) => content)).toEqual(["coherent schema"]);
+    recovered.close();
+  });
+
+  it("skips a current-schema backup with an unreceiptable provider ownership row", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "coherent ownership");
+    const userMessage = store.createMessage(conversationId, "Provider run");
+    const turn = store.createAgentTurn({
+      id: "provider-ownership-turn",
+      conversationId,
+      runId: "provider-ownership-run",
+      userMessageId: userMessage.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "codex-local",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    store.providerRunOwnership.record(
+      turn.id,
+      conversationId,
+      turn.runId,
+      "00000000-0000-4000-8000-000000000001:1",
+      "test:00000000-0000-4000-8000-000000000001",
+      new Date().toISOString(),
+    );
+    const older = await store.createBackup();
+    store.createMessage(conversationId, "malformed ownership", "assistant");
+    const newer = await store.createBackup();
+    store.close();
+
+    const malformed = new Database(join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      newer.filename,
+    ));
+    malformed.prepare(`
+      UPDATE provider_run_ownership SET runtime_generation_id = ?
+    `).run("x".repeat(40));
+    expect(malformed.pragma("quick_check", { simple: true })).toBe("ok");
+    malformed.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: older.filename,
+      invalidBackupsSkipped: 1,
+    });
+    expect(recovered.conversationDetail(conversationId)?.messages
+      .map(({ content }) => content)).not.toContain("malformed ownership");
     recovered.close();
   });
 

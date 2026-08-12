@@ -49,9 +49,7 @@ import {
   type DatabaseRecoveryReport,
   recoverDatabaseOnStartup,
 } from "./persistence/database-recovery";
-import {
-  reconcileRecoveryImportJournal,
-} from "./persistence/database-recovery-import";
+import { reconcileRecoveryImportJournal } from "./persistence/database-recovery-import";
 import {
   DATABASE_RECOVERY_EXPORT_MAX_BYTES,
   type DatabaseRecoveryImportResult,
@@ -65,7 +63,7 @@ import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
-import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository";
+import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
 import { ProjectRepository } from "./persistence/project-repository";
 import {
   PairedLaunchRepository,
@@ -77,6 +75,7 @@ import { RecoveryRepository } from "./persistence/recovery-repository";
 import { ReviewRepository } from "./persistence/review-repository";
 import { SettingsRepository } from "./persistence/settings-repository";
 import { SnapshotRepository } from "./persistence/snapshot-repository";
+import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "./persistence/stored-conversation-workspace";
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { TurnLedgerRepository, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
@@ -101,7 +100,6 @@ import type {
   UpsertSubagentTraceInput,
   UpsertSubagentTraceResult,
 } from "./persistence/types";
-import { ConversationWorkAuthority } from "./runtime/conversation-work-authority";
 import type { WorktreeFilesystemReceipt } from "./worktree-filesystem-identity";
 
 export { RecordNotFoundError } from "./persistence/errors";
@@ -132,7 +130,7 @@ export class RuntimeStore {
   readonly conversationWorktrees: ConversationWorktreeRepository;
   private readonly executionLedgerRepository: ExecutionLedgerRepository;
   private readonly gitArtifactRepository: GitArtifactRepository;
-  private readonly providerMetadataRepository: ProviderMetadataRepository;
+  private readonly providerMetadataRepository: ProviderMetadataRepository; readonly providerRunOwnership: ProviderRunOwnershipRepository;
   private readonly projectRepository: ProjectRepository;
   private readonly pairedLaunchRepository: PairedLaunchRepository;
   private readonly recoveryRepository: RecoveryRepository;
@@ -143,7 +141,7 @@ export class RuntimeStore {
   private readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
-  readonly conversationWork = new ConversationWorkAuthority((id) => ({ projectId: this.conversation(id).projectId, checkoutPath: this.conversationPath(id) }));
+  readonly conversationWork = new ConversationWorkAuthority(storedConversationWorkspaceResolver(this));
 
   constructor(
     databasePath: string,
@@ -185,7 +183,7 @@ export class RuntimeStore {
       requireConversation: (conversationId) =>
         this.requireConversation(conversationId),
     });
-    this.providerMetadataRepository = new ProviderMetadataRepository(this.database);
+    this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
     this.projectRepository = new ProjectRepository({
@@ -525,7 +523,7 @@ export class RuntimeStore {
       limit,
     );
   }
-
+  pairedLaunchIdsForDeletionRecovery(scope: { conversationId: string } | { projectId: string }, limit: number) { return this.pairedLaunchRepository.deletionRecoveryLaunchIds(scope, limit); }
   assertConversationDeletionAllowed(conversationId: string): void {
     this.pairedLaunchRepository.assertConversationDeletionAllowed(
       conversationId,
@@ -905,6 +903,7 @@ export class RuntimeStore {
     this.transcriptRepository.appendMessageContent(messageId, delta);
   }
 
+  attachments(conversationId?: string): ChatAttachment[] { return this.transcriptRepository.attachments(conversationId); }
   message(messageId: string): ChatMessage {
     return this.transcriptRepository.message(messageId);
   }

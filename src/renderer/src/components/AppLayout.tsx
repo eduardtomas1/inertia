@@ -25,8 +25,6 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { useStableActions } from "../hooks/useStableController";
 import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
-import type { ActivityRunSummary } from "../utils/activityCenter";
-import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
@@ -106,17 +104,12 @@ interface AppLayoutActions {
     paths: string[],
   ) => Promise<void>;
   runProjectAction: (action: ProjectAction) => void;
-  activateActivityContext: (
-    activity: WorkspaceRun,
-    tool?: WorkspacePanelTab,
+  acknowledgeActivity: (
+    activity: Pick<WorkspaceRun, "id" | "label">,
   ) => void;
-  openActivityLocation: (activity: WorkspaceRun) => void;
-  openActivityPreview: (activity: WorkspaceRun) => void;
-  stopActivity: (activity: WorkspaceRun) => void;
-  rerunActivity: (activity: WorkspaceRun) => void;
-  markActivitySeen: (activity: WorkspaceRun) => void;
-  acknowledgeActivity: (activity: WorkspaceRun) => void;
-  dismissActivity: (activity: WorkspaceRun) => void;
+  dismissActivity: (
+    activity: Pick<WorkspaceRun, "id" | "label">,
+  ) => void;
 }
 
 interface AppLayoutProps {
@@ -136,16 +129,13 @@ interface AppLayoutProps {
   setCommitDialogOpen: Dispatch<SetStateAction<boolean>>;
   paletteOpen: boolean;
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
-  activityOpen: boolean;
-  setActivityOpen: Dispatch<SetStateAction<boolean>>;
   project: Project | null;
   conversation: Conversation | null;
   splitConversationId: string | null;
   sceneActiveTool: WorkspacePanelTab | null;
   sceneToggleWorkspaceTools: () => void;
+  sceneOpenEnvironment: () => void;
   workspaceToolsUnavailableReason: string | null;
-  environmentSummary: EnvironmentSummarySnapshot;
-  runsSummary: ActivityRunSummary;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
   projectActions: ProjectAction[];
@@ -164,7 +154,6 @@ export function activateNotificationConversation(
     showWorkspace: () => void;
     closeSidebar: () => void;
     closePalette: () => void;
-    closeActivity: () => void;
     closeCommitDialog: () => void;
     closePullRequestDialog: () => void;
     closeProviderAuth: () => void;
@@ -175,7 +164,6 @@ export function activateNotificationConversation(
   actions.closeProviderAuth();
   actions.closeSidebar();
   actions.closePalette();
-  actions.closeActivity();
   actions.selectConversation(conversation);
   actions.showWorkspace();
 }
@@ -193,7 +181,6 @@ export function activeConversationIsVisible(input: {
   pullRequestDialogOpen: boolean;
   multiSpawnOpen: boolean;
   paletteOpen: boolean;
-  activityOpen: boolean;
   providerAuthOpen: boolean;
   mobileSidebarOpen: boolean;
 }): boolean {
@@ -202,7 +189,6 @@ export function activeConversationIsVisible(input: {
     && !input.pullRequestDialogOpen
     && !input.multiSpawnOpen
     && !input.paletteOpen
-    && !input.activityOpen
     && !input.providerAuthOpen
     && !input.mobileSidebarOpen;
 }
@@ -224,16 +210,13 @@ export function AppLayout({
   setCommitDialogOpen,
   paletteOpen,
   setPaletteOpen,
-  activityOpen,
-  setActivityOpen,
   project,
   conversation,
   splitConversationId,
   sceneActiveTool,
   sceneToggleWorkspaceTools,
+  sceneOpenEnvironment,
   workspaceToolsUnavailableReason,
-  environmentSummary,
-  runsSummary,
   gitStatus,
   branches,
   projectActions,
@@ -252,8 +235,6 @@ export function AppLayout({
     setSidebarOpen,
     sidebarCollapsed,
     setSidebarCollapsed,
-    environmentOpen,
-    setEnvironmentOpen,
     stackedTools,
     mobileNavigation,
     toolsVisible,
@@ -388,7 +369,6 @@ export function AppLayout({
         showWorkspace: () => setView("workspace"),
         closeSidebar: () => setSidebarOpen(false),
         closePalette: () => setPaletteOpen(false),
-        closeActivity: () => setActivityOpen(false),
         closeCommitDialog: () => setCommitDialogOpen(false),
         closePullRequestDialog: () => setPullRequestDialogOpen(false),
         closeProviderAuth: providerAuth.onClose,
@@ -405,7 +385,6 @@ export function AppLayout({
     pullRequestDialogOpen,
     multiSpawnOpen: multiSpawn.open,
     paletteOpen,
-    activityOpen,
     providerAuthOpen: Boolean(providerAuth.provider),
     mobileSidebarOpen: mobileNavigation && sidebarOpen,
   });
@@ -504,22 +483,16 @@ export function AppLayout({
             branches={branches}
             actions={projectActions}
             busy={Boolean(busyAction)}
-            activityOpen={activityOpen}
-            activeRunCount={runsSummary.activeCount}
-            attentionRunCount={runsSummary.attentionCount}
-            environmentSummary={environmentSummary}
-            environmentOpen={environmentOpen}
             onOpenSidebar={() => {
               if (mobileNavigation) setSidebarOpen(true);
               else setSidebarCollapsed((collapsed) => !collapsed);
             }}
             onToggleTools={sceneToggleWorkspaceTools}
             workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-            onSetEnvironmentOpen={setEnvironmentOpen}
+            onOpenEnvironment={sceneOpenEnvironment}
             onCycleTheme={actions.cycleTheme}
             onOpenSettings={() => setView("settings")}
             onOpenConnectionsSettings={actions.openConnectionsSettings}
-            onToggleActivity={() => setActivityOpen((open) => !open)}
             onOpenProject={() => {
               if (project) {
                 actions.openProjectPath({
@@ -679,27 +652,17 @@ export function AppLayout({
       )}
       <AppNavigationOverlays
         snapshot={connection.snapshot}
-        activityOpen={activityOpen}
         paletteOpen={paletteOpen}
         newThreadShortcut={formatAppShortcutLabel(
           platform,
           settings.keybindings["new-chat"],
         )}
-        setActivityOpen={setActivityOpen}
         setPaletteOpen={setPaletteOpen}
         setWorkspaceView={() => setView("workspace")}
         selectProject={actions.selectProject}
         selectConversation={actions.selectConversation}
         createConversation={() => actions.createConversation()}
         importProject={actions.importProject}
-        activateActivityContext={actions.activateActivityContext}
-        openActivityLocation={actions.openActivityLocation}
-        openActivityPreview={actions.openActivityPreview}
-        stopActivity={actions.stopActivity}
-        rerunActivity={actions.rerunActivity}
-        markActivitySeen={actions.markActivitySeen}
-        acknowledgeActivity={actions.acknowledgeActivity}
-        dismissActivity={actions.dismissActivity}
         openSettings={() => setView("settings")}
       />
       <AppStatusOverlays

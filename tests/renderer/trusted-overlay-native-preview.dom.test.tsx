@@ -2,10 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ActivityCenter } from "../../src/renderer/src/components/ActivityCenter";
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
 import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
-import { EnvironmentSummary } from "../../src/renderer/src/components/EnvironmentSummary";
 import { AppStatusOverlays } from "../../src/renderer/src/components/AppStatusOverlays";
 import { ProviderAuthDialog } from "../../src/renderer/src/components/ProviderAuthDialog";
 import { RouteChangeConfirmation } from "../../src/renderer/src/components/composer/RouteChangeConfirmation";
@@ -73,16 +71,6 @@ const provider: ProviderInfo = {
       refreshing: false,
     },
   },
-};
-
-const environmentSummary = {
-  projectName: "Inertia",
-  runtime: { status: "online" as const, label: "Ready" },
-  changes: null,
-  branch: null,
-  checks: [],
-  subagents: [],
-  attachments: [],
 };
 
 async function expectSuspended(): Promise<void> {
@@ -323,33 +311,6 @@ describe("trusted overlay native preview suspension", () => {
     await expectRestored();
   });
 
-  it("owns the activity center lifecycle", async () => {
-    const props = {
-      now: Date.now(),
-      runs: [],
-      projects: [],
-      conversations: [],
-      onClose: vi.fn(),
-      onOpenThread: vi.fn(),
-      onOpenLocation: vi.fn(),
-      onOpenTerminal: vi.fn(),
-      onOpenPreview: vi.fn(),
-      onStop: vi.fn(),
-      onRerun: vi.fn(),
-      onMarkSeen: vi.fn(),
-      onAcknowledge: vi.fn(),
-      onDismiss: vi.fn(),
-    };
-    const view = render(<ActivityCenter open {...props} />);
-
-    expect(screen.getByRole("dialog", { name: "Runs" }))
-      .toBeInTheDocument();
-    await expectSuspended();
-
-    view.rerender(<ActivityCenter open={false} {...props} />);
-    await expectRestored();
-  });
-
   it("owns the command palette lifecycle", async () => {
     const props = {
       projects: [],
@@ -369,17 +330,6 @@ describe("trusted overlay native preview suspension", () => {
     await expectSuspended();
 
     view.rerender(<CommandPalette open={false} {...props} />);
-    await expectRestored();
-  });
-
-  it("suspends for the mounted environment summary", async () => {
-    const view = render(<EnvironmentSummary summary={environmentSummary} />);
-
-    expect(screen.getByRole("dialog", { name: "Environment summary" }))
-      .toBeInTheDocument();
-    await expectSuspended();
-
-    view.unmount();
     await expectRestored();
   });
 

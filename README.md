@@ -64,7 +64,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - The transcript reads like one calm engineering document: a light request, an understandable workstream, a clean final answer, and a quiet supporting ledger.
 - Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
 - Provider updates and compact tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
-- The Activity Center groups work into Recent, Yesterday, and Earlier, showing the provider icon and configured alias with project, branch, status, and occurrence time while keeping manual Git work or failures independently visible.
+- The Work sidebar keeps running, blocked, completed, and failed chats visible with the persisted attention state needed to review or dismiss them.
 - Open project-file references from prose or fenced-code labels directly in Files, then edit supported text files in a focused dialog that refuses to overwrite content changed since it was opened.
 - Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
 - Codex-native goals and Inertia-local objectives keep their source visible, while next-turn skills stay route-bound and never expose provider paths or contents.
@@ -87,12 +87,12 @@ Nested module repositories keep their own review marks, notes, questions, and se
 
 ### Keep the workspace moving
 
-- The Activity Center brings agents, checks, services, and source-control work together chronologically, with provider, project, and branch identity plus the actions each run can actually support.
+- The Work sidebar and transcript keep active, blocked, completed, and failed agent work close to the conversation that owns it.
 - Native previews, terminals, files, and Git reviews stay scoped to their owning chat when two different projects share the split workspace.
 - App turns, native provider terminals, project actions, reviews, and Git operations share canonical checkout authority, so independent entry points cannot silently edit the same worktree at once.
-- Activity-first navigation surfaces work that is running, waiting for approval or input, completed in the background, unread, failed, or settled.
+- Work-first navigation surfaces chats that are running, waiting for approval or input, completed in the background, unread, failed, or settled.
 - Related checkouts and worktrees can group by their real Git identity, while repository folders remain clearly labeled and independently controllable.
-- Move between branches, use isolated worktrees for parallel threads, open detected service previews, and return to the exact terminal or folder behind a run.
+- Move between branches, use isolated worktrees for parallel threads, and open detected service previews from their owning workspace.
 
 ![Inertia in light mode](docs/screenshots/inertia-light.png)
 
@@ -167,7 +167,7 @@ Report suspected vulnerabilities privately through the [security policy](SECURIT
 
 This release turns Git into a clearer end-to-end workspace workflow. Root and nested repositories keep independent review and action state; the header surfaces contextual Commit, Pull, Push or Publish, and Pull request controls; and every commit is bound to the exact prospective content reviewed before a crash-safe, race-checked transaction changes Git state.
 
-Completed answers settle where reading starts, chronological activity carries provider icons and project or branch context, and delegated work stays compact without hiding live or failed branches. Reusable prompt presets add deliberate route-aware composition, while Duo recovery, scanned-PDF inputs, provider process ownership, attachments, and persistent workspace and worktree receipts close the deeper failure paths behind those visible improvements.
+Completed answers settle where reading starts, the Work sidebar preserves attention and ownership context, and delegated work stays compact without hiding live or failed branches. Reusable prompt presets add deliberate route-aware composition, while Duo recovery, scanned-PDF inputs, provider process ownership, attachments, and persistent workspace and worktree receipts close the deeper failure paths behind those visible improvements.
 
 Download [Inertia v0.0.30](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.30):
 

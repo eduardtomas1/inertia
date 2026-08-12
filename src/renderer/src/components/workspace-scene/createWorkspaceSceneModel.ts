@@ -32,6 +32,7 @@ import type { useDesktopTools } from "../../hooks/useDesktopTools";
 import type { useInertiaConnection } from "../../hooks/useInertiaConnection";
 import type { useProviderMaintenance } from "../../hooks/useProviderMaintenance";
 import {
+  ENVIRONMENT_TOOLS_DEFAULT_WIDTH,
   TOOLS_MIN_HEIGHT,
   TOOLS_MIN_WIDTH,
   type useWorkspaceLayout,
@@ -44,10 +45,17 @@ import {
   canStopSubagentTrace,
   isLiveSubagentTrace,
 } from "../../utils/subagentDisclosure";
+import { buildEnvironmentSummary } from "../../utils/environmentSummary";
+import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";
+import {
+  goalControlsBusy,
+  goalExecutionStatus,
+} from "../../utils/goalExecution";
+import { usageQuotaSourceForSelection } from "../../utils/usageDisplay";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 
@@ -150,6 +158,7 @@ export interface WorkspaceSceneActions {
   connectProvider: (providerId: ProviderId) => void;
   openProviderSetup: (providerId: ProviderId) => void;
   openBackendSetup: (profileId: string) => void;
+  openSettings: () => void;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => void;
@@ -189,6 +198,7 @@ export interface WorkspaceSceneModelInput {
   workflow: {
     state: AgentWorkflowState | null;
     loading: boolean;
+    mutating: boolean;
     error: string | null;
     selectedSkillIds: readonly string[];
     refresh: (providerRefresh?: boolean) => Promise<void>;
@@ -247,6 +257,19 @@ export function createWorkspaceSceneModel({
     === persistedConversation?.id
     ? workflow.state
     : null;
+  const goalMutationSafetyLocked = workflow.error
+    ?.includes("recovery safety mode") === true;
+  const currentGoalExecution = goalMutationSafetyLocked
+    ? "idle"
+    : goalExecutionStatus(projection.turns);
+  const currentGoalControlsBusy = goalControlsBusy({
+    connectionStatus: connection.status,
+    workflowLoading: workflow.loading,
+    safetyLocked: goalMutationSafetyLocked,
+    executionStatus: currentGoalExecution,
+    busyAction,
+  });
+  const goalMutationControlsBusy = currentGoalControlsBusy || workflow.mutating;
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
@@ -290,6 +313,63 @@ export function createWorkspaceSceneModel({
     workspaceBodyRef,
     tools: toolsLayout,
   } = layout;
+  const effectiveActiveTool = workspaceToolsUnavailable
+    ? "environment" as const
+    : activeTool;
+  const usageRoute = conversation && connection.snapshot
+    ? resolveComposerRouteState({
+        conversationProviderId: conversation.providerId,
+        selection: conversation.modelSelection,
+        providers: connection.snapshot.providers,
+        profiles: connection.snapshot.backendProfiles ?? [],
+      })
+    : null;
+  const usageProvider = usageRoute?.exactIdentity
+    ? usageRoute.provider ?? null
+    : null;
+  const usageQuotaSource = conversation && usageRoute?.exactIdentity
+    ? usageQuotaSourceForSelection(
+        conversation.modelSelection,
+        usageRoute.profile,
+      )
+    : "isolated";
+  const usageIdentity = conversation && usageRoute?.exactIdentity
+    ? usageQuotaSource === "selected-route"
+      ? {
+          providerId: usageProvider?.id ?? null,
+          label: usageProvider?.label
+            ?? usageRoute.profile?.displayName
+            ?? conversation.modelSelection.backendProfileDisplayName,
+        }
+      : {
+          providerId: null,
+          label: usageRoute.profile?.displayName
+            ?? conversation.modelSelection.backendProfileDisplayName,
+        }
+    : null;
+  const environmentSummary = buildEnvironmentSummary({
+    projectId: project?.id ?? null,
+    projectName: project?.name ?? null,
+    conversationId: conversation?.id ?? null,
+    connectionStatus: connection.status,
+    gitStatus: workspaceTools.gitStatus,
+    workspaceGitStatus: workspaceTools.workspaceGitStatus,
+    runs: connection.snapshot?.runs ?? [],
+    subagents: projection.subagents,
+    messages: projection.messages,
+    projectPath: project?.normalizedPath ?? null,
+    worktreePath: conversation?.worktreePath ?? null,
+    gitLoading: workspaceTools.gitLoading,
+    gitError: workspaceTools.gitError,
+    gitBusy: Boolean(busyAction?.startsWith("git.")),
+    projects: snapshotProjects,
+    conversations: snapshotConversations,
+    usage: projection.usage,
+    latestTurnId: projection.latestTurnSummary?.id ?? null,
+    usageProvider,
+    usageIdentity,
+    usageQuotaSource,
+  });
   const canUpdatePlan = Boolean(
     conversation
     && conversation.status !== "running"
@@ -431,9 +511,9 @@ export function createWorkspaceSceneModel({
       promptPresets: connection.snapshot?.promptPresets ?? [],
       goal: persistedConversation ? {
         workflow: currentWorkflow,
+        executionStatus: currentGoalExecution,
         loading: workflow.loading,
-        busy: workflow.loading
-          || busyAction?.startsWith("agent.goal") === true,
+        busy: goalMutationControlsBusy,
         error: workflow.error,
         onRetry: () => workflow.refresh(true),
         onSetGoal: setGoal,
@@ -522,7 +602,7 @@ export function createWorkspaceSceneModel({
       onStopSubagent: actions.stopSubagent,
       onStop: actions.stopAgent,
     },
-    resizeHandle: project && !workspaceToolsUnavailable && toolsVisible ? {
+    resizeHandle: project && toolsVisible ? {
       label: "Resize workspace tools",
       controls: "workspace-content",
       containerRef: workspaceBodyRef,
@@ -531,7 +611,11 @@ export function createWorkspaceSceneModel({
       value: stackedTools ? toolsLayout.height : toolsLayout.width,
       min: stackedTools ? TOOLS_MIN_HEIGHT : TOOLS_MIN_WIDTH,
       max: stackedTools ? toolsLayout.maxHeight : toolsLayout.maxWidth,
-      defaultValue: stackedTools ? 320 : 520,
+      defaultValue: stackedTools
+        ? 320
+        : effectiveActiveTool === "environment"
+          ? ENVIRONMENT_TOOLS_DEFAULT_WIDTH
+          : 520,
       onChange: stackedTools
         ? toolsLayout.onHeightChange
         : toolsLayout.onWidthChange,
@@ -541,12 +625,15 @@ export function createWorkspaceSceneModel({
       valueText: (value) => `${value} pixels for workspace tools`,
       className: "workspace-tools-resize-handle",
     } : null,
-    tools: project && !workspaceToolsUnavailable ? {
-      activeTool,
+    tools: project ? {
+      activeTool: effectiveActiveTool,
       panel: {
-        activeTab: activeTool ?? "terminal",
+        activeTab: effectiveActiveTool ?? "environment",
         visible: toolsVisible,
         onTabChange: setActiveTool,
+        ...(workspaceToolsUnavailable
+          ? { tabs: ["environment"] as const }
+          : {}),
         badges: {
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
           goal: (currentWorkflow?.goals.some(({ status }) =>
@@ -555,6 +642,45 @@ export function createWorkspaceSceneModel({
           plan: planSteps.length,
         },
         onClose: () => setActiveTool(null),
+        onOpenSettings: actions.openSettings,
+      },
+      environment: {
+        summary: environmentSummary,
+        workspaceToolsAvailable: !workspaceToolsUnavailable,
+        onOpenChanges: (repositoryPath, action = "review") => {
+          if (repositoryPath) {
+            workspaceTools.requestWorkspaceChanges(repositoryPath, action);
+          }
+          setActiveTool("changes");
+        },
+        onOpenFiles: () => setActiveTool("files"),
+        onOpenProject: () => actions.openProjectPath({
+          projectId: project.id,
+          ...runtimeConversation,
+          relativePath: ".",
+          action: "open-externally",
+        }),
+        onRevealProject: () => actions.openProjectPath({
+          projectId: project.id,
+          ...runtimeConversation,
+          relativePath: ".",
+          action: "reveal",
+        }),
+        onRetryGit: () => {
+          void workspaceTools.loadGit({ authoritative: true })
+            .catch((error) => setActionError(
+              error instanceof Error
+                ? error.message
+                : "Git changes could not be loaded.",
+            ));
+        },
+        ...(usageProvider && usageQuotaSource === "selected-route"
+          ? { onRefreshUsage: () => actions.refreshProvider(usageProvider.id) }
+          : {}),
+        onStopRun: activityActions.stopWorkspaceRun,
+        onOpenRunPreview: activityActions.openWorkspaceRunPreview,
+        onAcknowledgeRun: activityActions.acknowledgeActivity,
+        onDismissRun: activityActions.dismissActivity,
       },
       historicalDiff: workspaceTools.historicalDiff ? {
         diff: workspaceTools.historicalDiff,
@@ -571,6 +697,8 @@ export function createWorkspaceSceneModel({
         busyAction,
         run: actions.run,
         onActionError: setActionError,
+        changesRequest: workspaceTools.changesRequest,
+        onChangesRequestHandled: workspaceTools.clearWorkspaceChangesRequest,
         snapshot: workspaceTools.workspaceGitStatus,
         loading: workspaceTools.toolsLoading,
         summary: workspaceTools.reviewSummary,
@@ -579,6 +707,7 @@ export function createWorkspaceSceneModel({
         reviewStates: workspaceTools.reviewStates,
         notes: workspaceTools.reviewNotes,
         summaryLoading: busyAction === "review.summary.generate",
+        questionRunning: workspaceTools.selectionQuestionRunning,
         wrapLines: settings.wrapDiffs,
         lastReversal: workspaceTools.lastDiffReversal,
         onRefresh: () => {
@@ -598,6 +727,7 @@ export function createWorkspaceSceneModel({
         onGenerateSummary: workspaceTools.generateReviewSummary,
         onCancelSummary: workspaceTools.cancelReviewSummary,
         onAsk: workspaceTools.askAboutDiff,
+        onCancelAsk: workspaceTools.cancelDiffQuestion,
         onRequestRevision: workspaceTools.requestDiffRevision,
         onRevert: workspaceTools.revertDiffSelection,
         onUndoReversal: workspaceTools.undoDiffReversal,
@@ -640,7 +770,7 @@ export function createWorkspaceSceneModel({
       },
       filesKey: `files:${project.id}:${conversation?.id ?? "project"}`,
       terminal: {
-        visible: toolsVisible && activeTool === "terminal",
+        visible: toolsVisible && effectiveActiveTool === "terminal",
         projectId: project.id,
         ...runtimeConversation,
         projectName: project.name,
@@ -659,18 +789,16 @@ export function createWorkspaceSceneModel({
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,
       goal: {
         workflow: currentWorkflow,
+        executionStatus: currentGoalExecution,
         error: workflow.error,
         plan: latestPlan,
         subagents: projection.subagents,
         turns: projection.turns,
         selectedSkillIds: workflow.selectedSkillIds,
-        busy: workflow.loading
-          || busyAction?.startsWith("agent.goal") === true,
+        busy: goalMutationControlsBusy,
         onRetry: () => workflow.refresh(true),
         onSetGoal: setGoal,
-        onClearGoal: (goal) => {
-          void clearGoal(goal.source).catch(() => undefined);
-        },
+        onClearGoal: (goal) => clearGoal(goal.source),
         onToggleSkill: (skill) => actions.toggleSkill(skill),
         onRefreshSkills: () => {
           void actions.listSkills(true).catch((error) => setActionError(

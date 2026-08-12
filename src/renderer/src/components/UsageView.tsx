@@ -176,7 +176,7 @@ function ModelBreakdown({ dashboard }: { dashboard: UsageDashboard }): React.JSX
             <tr key={model.key}>
               <th scope="row">
                 <span className="usage-model-identity">
-                  <ProviderMark providerId={model.providerId} />
+                  <ProviderMark providerId={model.providerId} size={13} />
                   <span>
                     <strong>{model.model}</strong>
                     <small>
@@ -199,8 +199,7 @@ function ModelBreakdown({ dashboard }: { dashboard: UsageDashboard }): React.JSX
 function DayBreakdown({ dashboard }: { dashboard: UsageDashboard }): React.JSX.Element {
   const days = dashboard.daily
     .filter(({ requestCount }) => requestCount > 0)
-    .reverse()
-    .slice(0, 8);
+    .reverse();
   return (
     <table className="usage-breakdown-table is-day-table">
       <thead>
@@ -380,7 +379,12 @@ function UsageDashboardContent({
                 <button type="button" aria-pressed={breakdown === "day"} onClick={() => setBreakdown("day")}>Day</button>
               </div>
             </div>
-            <div className="usage-table-wrap" role="region" tabIndex={0} aria-label={`${breakdown === "model" ? "Model" : "Day"} usage table`}>
+            <div
+              className={`usage-table-wrap${breakdown === "day" ? " is-day-mode" : ""}`}
+              role="region"
+              tabIndex={0}
+              aria-label={`${breakdown === "model" ? "Model" : "Day"} usage table`}
+            >
               {breakdown === "model"
                 ? <ModelBreakdown dashboard={dashboard} />
                 : <DayBreakdown dashboard={dashboard} />}

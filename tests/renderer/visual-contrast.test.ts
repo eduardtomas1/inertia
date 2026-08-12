@@ -87,6 +87,7 @@ describe("visual contrast system", () => {
         "danger",
         "warning",
         "status-working",
+        "status-approval",
         "status-input",
         "status-failed",
         "status-completed",
@@ -266,12 +267,6 @@ describe("visual contrast system", () => {
     );
     expect(css).toMatch(
       /\.conversation-row\.is-active::before\s*\{[^}]*width:\s*2px;[^}]*background:\s*var\(--accent\);/su,
-    );
-  });
-
-  it("uses the theme-aware foreground for Runs badges", () => {
-    expect(css).toMatch(
-      /\.activity-count\s*\{[^}]*color:\s*var\(--accent-text\);[^}]*background:\s*var\(--accent\);/su,
     );
   });
 

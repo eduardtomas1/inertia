@@ -6,8 +6,9 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startRuntime, type RunningRuntime } from "../../src/server";
+import type { RunningRuntime } from "../../src/server";
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
+import { startTestRuntime as startRuntime } from "../support/test-runtime";
 
 class RawEventQueue {
   private readonly events: ServerEvent[] = [];
@@ -78,6 +79,8 @@ describe("runtime incremental synchronization", () => {
       dataDirectory: join(root, "data"),
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
     });
     runtimes.push(runtime);
     return runtime;

@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 
+import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
 import type { ServerEvent } from "../../../shared/contracts";
 import {
   hasNativeProviderTerminalSession,
@@ -23,6 +24,7 @@ import {
 } from "../../workspace";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { TurnController } from "../turns/turn-controller";
+import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -30,10 +32,12 @@ import {
 
 export interface ProjectWorkspaceCommandDependencies {
   store: RuntimeStore;
+  conversationAttachments: ConversationAttachmentStore;
   workspaceRuns: WorkspaceRunController<WebSocket>;
   turns: TurnController;
   providers: ProviderManager;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
+  duoLaunches?: Pick<DuoLaunchCoordinator, "reconcileProjectDeletion">;
   terminals: TerminalManager;
   secureFiles: RuntimeSecureFileBroker;
   secureFileAuthorities: SecureFileAuthorityRegistry;
@@ -84,47 +88,132 @@ export function createProjectWorkspaceCommandHandler(
       case "project.select":
         dependencies.store.selectProject(command.payload.projectId);
         return "mutation";
-      case "project.remove":
+      case "project.remove": {
+        const projectId = command.payload.projectId;
+        const conversations = dependencies.store.shellSnapshot().conversations
+          .filter((conversation) => conversation.projectId === projectId);
+        const storedWorkspaces = (items: typeof conversations) => {
+          const projectPath = dependencies.store.project(projectId).path;
+          return [
+            { projectId, checkoutPath: projectPath },
+            ...items.map((conversation) => ({
+              projectId: conversation.projectId,
+              checkoutPath: conversation.worktreePath ?? projectPath,
+            })),
+          ];
+        };
+        if (conversations.some((conversation) => (
+          dependencies.providerTerminalResumes.isActive(conversation.id)
+        ))) {
+          throw new RuntimeRequestError(
+            "End resumed provider terminals for this project before removing it.",
+          );
+        }
+        const workspaces = storedWorkspaces(conversations);
         if (
-          dependencies.store.hasActiveWorkspaceRunForProject(
-            command.payload.projectId,
+          workspaces.some(({ checkoutPath }) =>
+            dependencies.turns.hasActiveCheckout(checkoutPath))
+          || dependencies.store.hasRecordedActiveWorkspaceRunForProject(
+            projectId,
           )
         ) {
           throw new RuntimeRequestError(
             "Stop active work for this project before removing it.",
           );
         }
-        try {
-          dependencies.store.assertProjectDeletionAllowed(
-            command.payload.projectId,
+        const reservationIds = dependencies.store.conversationWork
+          .reserveProviderCheckouts(
+            `project-delete:${command.requestId}`,
+            workspaces,
           );
-        } catch (error) {
-          if (
-            error instanceof Error
-            && error.message.includes("Cancel the active Duo launch")
-          ) throw new RuntimeRequestError(error.message);
-          throw error;
-        }
-        if (dependencies.store.shellSnapshot().conversations.some((conversation) => (
-          conversation.projectId === command.payload.projectId
-          && dependencies.providerTerminalResumes.isActive(conversation.id)
-        ))) {
+        if (!reservationIds) {
           throw new RuntimeRequestError(
-            "End resumed provider terminals for this project before removing it.",
+            "Stop active work for this project before removing it.",
           );
         }
-        const removedConversationIds = dependencies.store.shellSnapshot()
-          .conversations
-          .filter((conversation) => (
-            conversation.projectId === command.payload.projectId
-          ))
-          .map(({ id }) => id);
-        dependencies.store.removeProject(command.payload.projectId);
-        for (const conversationId of removedConversationIds) {
-          dependencies.rememberDeletedConversation(conversationId);
-          dependencies.forgetRemoteTranscript(conversationId);
+        try {
+          if (
+            dependencies.duoLaunches
+            && !await dependencies.duoLaunches.reconcileProjectDeletion(
+              projectId,
+              reservationIds,
+            )
+          ) {
+            throw new RuntimeRequestError(
+              "Cancel the active Duo launch, acknowledge an interrupted dispatch, or cancel the locked comparison before removing this project.",
+            );
+          }
+          const latestConversations = dependencies.store.shellSnapshot()
+            .conversations.filter((conversation) =>
+              conversation.projectId === projectId);
+          const latestWorkspaces = storedWorkspaces(latestConversations);
+          if (
+            latestConversations.length !== conversations.length
+            || latestConversations.some((conversation) =>
+              !conversations.some(({ id }) => id === conversation.id))
+            || !dependencies.store.conversationWork
+              .providerReservationsExactlyCover(
+                reservationIds,
+                latestWorkspaces,
+              )
+          ) {
+            throw new RuntimeRequestError(
+              "The project changed while removal was being prepared. Try again.",
+            );
+          }
+          if (latestConversations.some((conversation) => (
+            dependencies.providerTerminalResumes.isActive(conversation.id)
+          ))) {
+            throw new RuntimeRequestError(
+              "End resumed provider terminals for this project before removing it.",
+            );
+          }
+          if (
+            latestWorkspaces.some(({ checkoutPath }) =>
+              dependencies.turns.hasActiveCheckout(checkoutPath))
+            || dependencies.store.hasRecordedActiveWorkspaceRunForProject(
+              projectId,
+            )
+          ) {
+            throw new RuntimeRequestError(
+              "Stop active work for this project before removing it.",
+            );
+          }
+          try {
+            dependencies.store.assertProjectDeletionAllowed(projectId);
+          } catch (error) {
+            if (
+              error instanceof Error
+              && error.message.includes("Cancel the active Duo launch")
+            ) throw new RuntimeRequestError(error.message);
+            throw error;
+          }
+          const attachmentIds = latestConversations.flatMap(({ id }) =>
+            dependencies.store.attachments(id).map(({ id: attachmentId }) =>
+              attachmentId));
+          dependencies.store.removeProject(projectId);
+          try {
+            const referencedAttachmentIds = new Set(
+              dependencies.store.attachments().map(({ id }) => id),
+            );
+            await dependencies.conversationAttachments.release(
+              attachmentIds.filter((attachmentId) =>
+                !referencedAttachmentIds.has(attachmentId)),
+            );
+          } catch {
+            // Startup reconciliation retries cleanup against authoritative SQL.
+          }
+          for (const { id } of latestConversations) {
+            dependencies.rememberDeletedConversation(id);
+            dependencies.forgetRemoteTranscript(id);
+          }
+          return "mutation";
+        } finally {
+          for (const reservationId of reservationIds) {
+            dependencies.store.conversationWork.release(reservationId);
+          }
         }
-        return "mutation";
+      }
       case "project.update": {
         const { projectId, ...update } = command.payload;
         dependencies.store.updateProject(projectId, update);

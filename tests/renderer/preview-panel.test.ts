@@ -39,6 +39,7 @@ describe("preview panel URL routing", () => {
 
   it("preserves the accessible preview and external-open controls", () => {
     const html = renderToStaticMarkup(createElement(PreviewPanel, {
+      owner: "primary",
       url: "",
       onNavigate: () => undefined,
       onOpenExternal: () => undefined,

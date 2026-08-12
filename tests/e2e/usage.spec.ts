@@ -267,8 +267,16 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     name: /^Daily measured tokens by provider/u,
   })).toBeVisible();
   expect(await page.locator(".usage-provider-summary .usage-provider-mark")
-    .evaluateAll((marks) => marks.map((mark) => mark.getAttribute("data-provider"))))
-    .toEqual(["claude", "codex", "cursor", "opencode"]);
+    .evaluateAll((marks) => marks.map((mark) => ({
+      kind: mark.getAttribute("data-provider-icon-kind"),
+      providerId: mark.getAttribute("data-provider-id"),
+    }))))
+    .toEqual([
+      { kind: "official", providerId: "claude" },
+      { kind: "official", providerId: "codex" },
+      { kind: "official", providerId: "cursor" },
+      { kind: "official", providerId: "opencode" },
+    ]);
   await expectNoViewportOverflow();
 
   const geometry = await page.locator(".usage-view").evaluate((view) => {

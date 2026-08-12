@@ -266,29 +266,8 @@
 }
 
 .usage-provider-mark {
-  display: inline-grid;
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
-  place-items: center;
-  color: var(--text);
+  --provider-icon-size: 16px;
 }
-
-.usage-provider-mark svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.usage-provider-mark svg path { fill: currentColor; }
-.usage-provider-mark[data-provider="claude"] { color: var(--usage-series-claude); }
-.usage-provider-mark[data-provider="cursor"] { color: var(--usage-series-cursor); }
-.usage-provider-mark[data-provider="opencode"] { color: var(--usage-series-opencode); }
-.usage-provider-mark .usage-opencode-inset { fill: #cfcecd; }
-.usage-provider-mark .usage-opencode-outline { fill: #211e1e; }
-:root[data-theme="dark"] .usage-provider-mark .usage-opencode-inset { fill: #4b4646; }
-:root[data-theme="dark"] .usage-provider-mark .usage-opencode-outline { fill: #f1ecec; }
 
 .usage-chart-figure { margin: 0; }
 .usage-chart-layout { display: flex; min-width: 0; gap: 8px; }
@@ -419,7 +398,6 @@
 
 .usage-chart-tooltip b { font-weight: 620; }
 .usage-chart-tooltip > small { color: var(--warning); font-size: 8px; }
-.usage-chart-tooltip .usage-provider-mark { width: 11px; height: 11px; }
 .usage-chart-tooltip-total {
   margin-top: 2px;
   padding-top: 5px;
@@ -477,6 +455,13 @@
   overscroll-behavior-inline: contain;
 }
 
+.usage-table-wrap.is-day-mode {
+  max-height: min(44vh, 430px);
+  overflow-y: auto;
+  overscroll-behavior-block: contain;
+  scrollbar-gutter: stable;
+}
+
 .usage-breakdown-table {
   width: 100%;
   min-width: 640px;
@@ -520,7 +505,6 @@
   gap: 7px;
 }
 
-.usage-model-identity .usage-provider-mark { width: 13px; height: 13px; }
 .usage-model-identity > span { min-width: 0; }
 .usage-model-identity strong,
 .usage-model-identity small {
@@ -534,6 +518,12 @@
 
 .usage-breakdown-table.is-day-table { min-width: 720px; }
 .usage-breakdown-table.is-day-table th:first-child { min-width: 130px; }
+.usage-table-wrap.is-day-mode thead {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: var(--conversation-canvas-surface);
+}
 
 .usage-notes {
   display: grid;
@@ -667,7 +657,4 @@
   .usage-chart-partial-point { fill: Canvas; }
   .usage-provider-meter > i { background: CanvasText; }
   .usage-provider-meter.is-unavailable { border: 1px dashed CanvasText; background: Canvas; }
-  .usage-provider-mark svg path,
-  .usage-provider-mark .usage-opencode-inset,
-  .usage-provider-mark .usage-opencode-outline { fill: CanvasText; }
 }

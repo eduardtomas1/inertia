@@ -102,6 +102,7 @@ describe("Settings external section targets", () => {
       onClearBackendDefault: vi.fn(async () => undefined),
     };
     const view = render(<SettingsView {...props} />);
+    expect(screen.getByRole("main", { name: "Settings" })).toHaveFocus();
     expect(screen.getByRole("button", { name: "Providers" }))
       .toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { level: 2, name: "Providers" }))

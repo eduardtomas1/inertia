@@ -135,7 +135,7 @@ afterEach(() => {
   }
 });
 
-describe("Git commit review receipts", () => {
+describe("Git commit review receipts", { timeout: 30_000 }, () => {
   it("ignores Git housekeeping while still detecting new loose objects", () => {
     const root = unbornRepository();
     const objectsRoot = join(root, ".git", "objects");
@@ -906,7 +906,29 @@ setInterval(() => {}, 1000);
     const head = git(root, "rev-parse", "HEAD");
     const foreignLock = join(root, ".git", "foreign-operation.lock");
     writeFileSync(foreignLock, "foreign lock\n");
-    const deadlineAt = Date.now() + 2_000;
+    let deadlineAt = Date.now() + 20_000;
+    let preparedMutationStarted = false;
+    const options: Parameters<typeof commitReviewedChanges>[4] = {
+      // Keep review/checkpoint setup outside the prepared-mutation deadline.
+      // Loaded Windows runners can otherwise expire before this test reaches
+      // the synchronous mutation seam it is intended to exercise.
+      get deadlineAt() {
+        return deadlineAt;
+      },
+    };
+    options.testHooks = {
+      beforeTransactionLock: () => {
+        // Measure the prepared-transaction deadline from the boundary
+        // under test, not from the unrelated review setup above.
+        deadlineAt = Date.now() + 2_000;
+      },
+      duringPreparedMutation: () => {
+        preparedMutationStarted = true;
+        while (Date.now() <= deadlineAt + 5) {
+          // Cross the aggregate deadline without yielding to its timer.
+        }
+      },
+    };
 
     let failure: unknown;
     try {
@@ -915,21 +937,13 @@ setInterval(() => {}, 1000);
         "Must reject expired prepared mutation",
         ["selected.txt"],
         review.fingerprint,
-        {
-          deadlineAt,
-          testHooks: {
-            duringPreparedMutation: () => {
-              while (Date.now() <= deadlineAt + 5) {
-                // Cross the aggregate deadline without yielding to its timer.
-              }
-            },
-          },
-        },
+        options,
       );
     } catch (error) {
       failure = error;
     }
 
+    expect(preparedMutationStarted).toBe(true);
     expect(failure).toBeInstanceOf(GitError);
     expect([
       "timeout:Git took too long to complete the operation.",

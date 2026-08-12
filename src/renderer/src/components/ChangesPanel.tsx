@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import clsx from "clsx";
 import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Sparkles, Square, StickyNote, Trash2, WandSparkles, X } from "lucide-react";
 import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
@@ -29,6 +37,7 @@ export type ChangesPanelProps = {
   notes?: DiffReviewNote[];
   loading?: boolean;
   summaryLoading?: boolean;
+  questionRunning?: boolean;
   wrapLines?: boolean;
   lastReversal?: DiffReversalOperation | null;
   fileNavigator?: ReactNode;
@@ -46,6 +55,7 @@ export type ChangesPanelProps = {
   onGenerateSummary?: () => Promise<void>;
   onCancelSummary?: () => Promise<void>;
   onAsk: (selection: DiffSelection, comment: string) => Promise<void>;
+  onCancelAsk?: () => Promise<void>;
   onRequestRevision: (selection: DiffSelection, comment: string) => Promise<void>;
   onRevert: (selection: DiffSelection, comment: string) => Promise<void>;
   onUndoReversal?: () => Promise<void>;
@@ -129,6 +139,7 @@ export function ChangesPanel({
   notes = [],
   loading = false,
   summaryLoading = false,
+  questionRunning = false,
   wrapLines = true,
   lastReversal = null,
   fileNavigator,
@@ -146,6 +157,7 @@ export function ChangesPanel({
   onGenerateSummary,
   onCancelSummary,
   onAsk,
+  onCancelAsk,
   onRequestRevision,
   onRevert,
   onUndoReversal,
@@ -162,9 +174,14 @@ export function ChangesPanel({
   const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [stoppingAsk, setStoppingAsk] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [activeHunkId, setActiveHunkId] = useState<string | null>(null);
+  const toolbarRef = useRef<HTMLElement>(null);
+  const restoreQuestionFocusRef = useRef(false);
+  const questionStopVisible = questionRunning
+    || (reviewAction === "ask" && submitting);
   const persistentReview = capabilities?.persistentReview ?? true;
   const agentRevision = capabilities?.agentRevision ?? true;
   const selectiveRevert = capabilities?.selectiveRevert ?? true;
@@ -215,9 +232,46 @@ export function ChangesPanel({
     setComment("");
     setSelectionError(null);
     setActiveHunkId(null);
+    setStoppingAsk(false);
   }, [structured.fingerprint, selectedPath]);
 
-  const clearSelection = () => { setSelection(null); setReviewAction(null); setComment(""); setSelectionError(null); };
+  useEffect(() => {
+    if (!questionRunning) setStoppingAsk(false);
+  }, [questionRunning]);
+
+  useLayoutEffect(() => {
+    if (questionStopVisible || !restoreQuestionFocusRef.current) return;
+    restoreQuestionFocusRef.current = false;
+    if (
+      document.activeElement !== document.body
+      && document.activeElement !== null
+    ) {
+      return;
+    }
+    const refresh = toolbarRef.current?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Refresh changes"]:not(:disabled)',
+    );
+    (refresh ?? toolbarRef.current)?.focus({ preventScroll: true });
+  }, [questionStopVisible]);
+
+  const clearSelection = () => { setSelection(null); setReviewAction(null); setComment(""); setSelectionError(null); setStoppingAsk(false); };
+  const stopActiveQuestion = () => {
+    if (!onCancelAsk || stoppingAsk) return;
+    setSelectionError(null);
+    setStoppingAsk(true);
+    void onCancelAsk().catch((error) => {
+      restoreQuestionFocusRef.current = false;
+      setSelectionError(error instanceof Error ? error.message : "The review question could not be stopped.");
+      setStoppingAsk(false);
+    });
+  };
+  const requestQuestionStop = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ): void => {
+    restoreQuestionFocusRef.current = document.activeElement
+      === event.currentTarget;
+    stopActiveQuestion();
+  };
   const chooseLine = (hunk: DiffHunk, index: number, extend: boolean) => {
     const start = extend && selection?.hunkId === hunk.id ? Math.min(selection.anchor, index) : index;
     const end = extend && selection?.hunkId === hunk.id ? Math.max(selection.anchor, index) : index;
@@ -331,7 +385,7 @@ export function ChangesPanel({
 
   return (
     <section className="changes-panel" aria-label="Workspace changes" aria-busy={diffBusy}>
-      <header className="panel-toolbar">
+      <header className="panel-toolbar" ref={toolbarRef} tabIndex={-1}>
         <div className="panel-heading">
           <GitCompareArrows size={17} aria-hidden="true" />
           <div className="panel-heading-copy"><h2>Changes</h2><span>{toolbarFiles} {toolbarFiles === 1 ? "file" : "files"}{headerMetrics?.repositories !== undefined ? ` in ${headerMetrics.repositories} ${headerMetrics.repositories === 1 ? "repository" : "repositories"}` : ""}</span></div>
@@ -354,6 +408,17 @@ export function ChangesPanel({
             >
               {summaryLoading ? <><LoadingMark label="Summarizing changes" /><Square size={10} /></> : <Sparkles size={15} />}
             </IconButton>
+          )}
+          {questionRunning && !(reviewAction === "ask" && submitting) && onCancelAsk && (
+            <button
+              type="button"
+              className="subtle-button"
+              disabled={stoppingAsk}
+              onClick={requestQuestionStop}
+            >
+              {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={12} />}
+              {stoppingAsk ? "Stopping…" : "Stop asking"}
+            </button>
           )}
           {onRefresh && <IconButton label="Refresh changes" onClick={onRefresh} disabled={diffBusy}>{diffBusy ? <LoadingMark label="Refreshing changes" /> : <RefreshCw size={15} />}</IconButton>}
         </div>
@@ -471,7 +536,7 @@ export function ChangesPanel({
                       {selected && line.id === lastSelectedId && (
                         <div className="diff-selection-popover">
                           <div className="diff-selection-actions">
-                            <button type="button" onClick={() => setReviewAction("ask")}><CircleHelp size={13} />Ask about</button>
+                            <button type="button" disabled={questionRunning} onClick={() => setReviewAction("ask")}><CircleHelp size={13} />Ask about</button>
                             {agentRevision && <button type="button" onClick={() => setReviewAction("revise")}><WandSparkles size={13} />Request revision</button>}
                             {selectiveRevert && <button type="button" onClick={() => setReviewAction("revert")} disabled={!changedSelection || diff?.truncated}><RotateCcw size={13} />Revert</button>}
                             {persistentReview && <button type="button" onClick={() => setReviewAction("note")}><StickyNote size={13} />Note</button>}
@@ -497,7 +562,22 @@ export function ChangesPanel({
                                   <small>A complete, current diff and both Git layers will be revalidated before an immediate reversible backup and atomic file update.</small>
                                 </div>
                               )}
-                              <div><span>{selected.lineIds.length} selected lines</span><button type="submit" className="primary-button" disabled={submitting || (reviewAction === "note" && !comment.trim())}>{submitting ? <LoadingMark label={actionLabel(reviewAction)} /> : actionLabel(reviewAction)}</button></div>
+                              <div>
+                                <span>{selected.lineIds.length} selected lines</span>
+                                {reviewAction === "ask" && submitting && onCancelAsk ? (
+                                  <button
+                                    type="button"
+                                    className="subtle-button"
+                                    disabled={stoppingAsk}
+                                    onClick={requestQuestionStop}
+                                  >
+                                    {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={12} />}
+                                    {stoppingAsk ? "Stopping…" : "Stop asking"}
+                                  </button>
+                                ) : (
+                                  <button type="submit" className="primary-button" disabled={submitting || (reviewAction === "note" && !comment.trim())}>{submitting ? <LoadingMark label={actionLabel(reviewAction)} /> : actionLabel(reviewAction)}</button>
+                                )}
+                              </div>
                             </form>
                           )}
                         </div>
@@ -505,7 +585,7 @@ export function ChangesPanel({
                     </div>)}
                   </section>;
                 })}
-                {selectionError && <p className="panel-notice diff-selection-error">{selectionError}</p>}
+                {selectionError && <p className="panel-notice diff-selection-error" role="alert">{selectionError}</p>}
               </div>
             ) : <div className="panel-empty changes-empty"><FileCode2 size={22} /><h3>{selectedPath ? "Diff unavailable" : diffEmptyState?.title ?? "Select a file"}</h3><p>{selectedPath ? "This file is outside the bounded diff preview. Refresh after reducing the change set." : diffEmptyState?.detail ?? "Choose a changed file to inspect it."}</p></div>}
             {diff?.truncated && <p className="panel-notice diff-truncated">This diff is truncated to keep the workspace responsive.</p>}

@@ -108,6 +108,7 @@ function dependencies(input: {
       hasActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),
       hasRecordedActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),
     } as unknown as RuntimeStore,
+    conversationAttachments: {} as never,
     workspaceRuns: {} as never,
     turns: {
       isActive: vi.fn(() => input.turnActive ?? false),

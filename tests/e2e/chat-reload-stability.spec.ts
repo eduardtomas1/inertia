@@ -5,8 +5,8 @@ import { RuntimeStore } from "../../src/server/database";
 import {
   createAppFixture,
   type AppFixture,
-  type RuntimeTestSnapshot,
 } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 interface ReaderAnchor {
   id: string;
@@ -164,7 +164,7 @@ test("never replaces mounted chats during a supervised runtime restart", async (
   const primaryTools = primary.getByRole("complementary", {
     name: "Workspace tools",
   });
-  await primaryTools.getByRole("tab", { name: "Files", exact: true }).click();
+  await selectWorkspaceTool(primaryTools, "Files");
   const sourceDirectory = primaryTools.getByRole("treeitem", {
     name: "src",
     exact: true,
@@ -259,13 +259,7 @@ test("never replaces mounted chats during a supervised runtime restart", async (
   const before = await app.runtimeSnapshot();
   const beforeRuntimeGeneration = await page.locator(".app-shell")
     .getAttribute("data-runtime-generation");
-  await app.electronApp.evaluate(() => {
-    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-      crash: () => RuntimeTestSnapshot;
-    } | undefined;
-    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-    runtime.crash();
-  });
+  await app.recycleRuntime();
 
   await expect.poll(async () => {
     const current = await app.runtimeSnapshot();

@@ -15,9 +15,10 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startRuntime, type RunningRuntime } from "../../src/server";
+import type { RunningRuntime } from "../../src/server";
 import { RuntimeStore } from "../../src/server/database";
 import { getUnifiedDiff } from "../../src/server/git";
+import { startTestRuntime as startRuntime } from "../support/test-runtime";
 import type { ServerEvent } from "../../src/shared/contracts";
 import { parseUnifiedDiff } from "../../src/shared/diff-review";
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
@@ -109,6 +110,8 @@ async function connectRuntime(
     dataDirectory: data,
     defaultWorkspacePath: workspace,
     enableProviders: false,
+      runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
     secureFiles: new SecureFileTestBroker(),
   });
   runtimes.push(runtime);

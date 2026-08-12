@@ -11,6 +11,8 @@ import {
   MAX_PATH_LENGTH,
 } from "./constants";
 import {
+  gitInspectionSettlementValues,
+  isGitProcessTreeTerminationFailure,
   runGit,
   runGitInspection,
 } from "./runner";
@@ -49,10 +51,10 @@ function terminalPathOutput(output: Buffer): string {
 function requirePathInspectionTime(
   options: GitPathInspectionOptions,
 ): void {
-  if (
-    options.signal?.aborted
-    || (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt)
-  ) {
+  if (options.signal?.aborted) {
+    throw new GitError("timeout", "Git inspection was cancelled.");
+  }
+  if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
     throw new GitError(
       "timeout",
       "Git took too long to complete the operation.",
@@ -97,6 +99,7 @@ export async function repositoryRoot(
     ["rev-parse", "--show-toplevel"],
     {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: MAX_PATH_LENGTH,
       failureMessage: "Unable to inspect this Git repository.",
     },
@@ -141,6 +144,7 @@ export async function repositoryMetadataMarkerIdentity(
     args,
     {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: MAX_PATH_LENGTH,
       failureMessage: "Unable to inspect this Git repository identity.",
     },
@@ -152,7 +156,16 @@ export async function repositoryMetadataMarkerIdentity(
       "rev-parse",
       "--path-format=absolute",
       argument,
-    ]).catch(async () => await inspect(["rev-parse", argument]));
+    ]).catch(async (error: unknown) => {
+      if (
+        options.signal?.aborted
+        || isGitProcessTreeTerminationFailure(error)
+      ) {
+        throw error;
+      }
+      requirePathInspectionTime(options);
+      return await inspect(["rev-parse", argument]);
+    });
     const reported = terminalPathOutput(result.stdout);
     if (!reported || reported.includes("\0")) {
       throw new GitError(
@@ -197,14 +210,10 @@ export async function repositoryMetadataMarkerIdentity(
   // Both inspections own Git children. Await both settlements even when one
   // marker probe fails so no sibling process retains a Windows cwd handle
   // after this identity inspection rejects.
-  if (gitDirectoryResult.status === "rejected") {
-    throw gitDirectoryResult.reason;
-  }
-  if (commonDirectoryResult.status === "rejected") {
-    throw commonDirectoryResult.reason;
-  }
-  const gitDirectory = gitDirectoryResult.value;
-  const commonDirectory = commonDirectoryResult.value;
+  const [gitDirectory, commonDirectory] = gitInspectionSettlementValues([
+    gitDirectoryResult,
+    commonDirectoryResult,
+  ]);
   return ["git-dir", gitDirectory, "git-common-dir", commonDirectory].join("\0");
 }
 

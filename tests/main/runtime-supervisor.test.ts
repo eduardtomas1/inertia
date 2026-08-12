@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +12,7 @@ import {
   type RuntimeCredentialBroker,
   type RuntimeSecureFileBroker,
 } from "../../src/main/runtime-supervisor";
+import { RuntimeCleanupReceiptJournal } from "../../src/main/runtime-cleanup-receipts";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 import {
   privateConnectRuntimeGrantsFromProjectIds,
@@ -18,7 +20,7 @@ import {
 
 const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;
-const dataDirectory = resolve(tmpdir(), "inertia data");
+let dataDirectory: string;
 const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
 const attachmentId = "33333333-3333-4333-8333-333333333333";
 const trustedAttachment = {
@@ -58,7 +60,29 @@ class FakeUtilityProcess extends EventEmitter {
   }
 
   spawn(): void { this.emit("spawn"); }
-  message(value: unknown): void { this.emit("message", value); }
+  message(value: unknown): void {
+    if (
+      value
+      && typeof value === "object"
+      && "type" in value
+      && value.type === "runtime.ready"
+    ) {
+      const start = this.messages.findLast((message) =>
+        message.type === "runtime.start");
+      if (start?.type === "runtime.start") {
+        for (const receiptRuntimeGenerationId of
+          start.options.confirmedTerminatedRuntimeGenerationIds ?? []) {
+          this.emit("message", {
+            type: "runtime.cleanup-receipt-consumed",
+            receiptRuntimeGenerationId,
+            currentRuntimeGenerationId: start.options.runtimeGenerationId,
+          });
+        }
+      }
+    }
+    this.emit("message", value);
+  }
+  rawMessage(value: unknown): void { this.emit("message", value); }
   exit(code: number): void {
     this.emit("exit", code);
     this.pid = undefined;
@@ -83,6 +107,7 @@ function createHarness(options: {
     _deadlineAt: number,
   ): boolean | Promise<boolean> => true);
   const supervisor = new RuntimeSupervisor({
+    systemBootId: "test:00000000-0000-4000-8000-000000000001",
     workerOptions: {
       dataDirectory,
       defaultWorkspacePath: workspaceDirectory,
@@ -109,10 +134,14 @@ function createHarness(options: {
   return { children, forceKill, supervisor };
 }
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => {
+  vi.useFakeTimers();
+  dataDirectory = mkdtempSync(join(tmpdir(), "inertia-supervisor-"));
+});
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
+  rmSync(dataDirectory, { recursive: true, force: true });
 });
 
 describe("RuntimeSupervisor", () => {
@@ -129,6 +158,8 @@ describe("RuntimeSupervisor", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        runtimeGenerationId: expect.stringMatching(/^[0-9a-f-]{36}:1$/u),
+        systemBootId: "test:00000000-0000-4000-8000-000000000001",
       },
     }]);
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
@@ -1026,7 +1057,7 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
   });
 
-  it("releases generation-owned attachments when runtime startup fails", async () => {
+  it("retains startup attachments when forced tree cleanup lacks runtime authority", async () => {
     const attachmentBroker: RuntimeAttachmentBroker = {
       resolve: vi.fn(async () => trustedAttachment),
       release: vi.fn(async () => true),
@@ -1048,8 +1079,12 @@ describe("RuntimeSupervisor", () => {
     });
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
-    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
   });
 
   it("drops generation ownership when release confirms the capability is already absent", async () => {
@@ -1122,8 +1157,8 @@ describe("RuntimeSupervisor", () => {
 
     children[0].exit(1);
     await vi.advanceTimersByTimeAsync(0);
-    expect(attachmentBroker.release).toHaveBeenCalledTimes(2);
-    expect(attachmentBroker.release).toHaveBeenLastCalledWith(attachmentId);
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
   });
 
   it("keeps runtime-owned attachments until graceful shutdown settles", async () => {
@@ -1149,11 +1184,13 @@ describe("RuntimeSupervisor", () => {
 
     children[0].message({ type: "runtime.stopped" });
     await vi.advanceTimersByTimeAsync(0);
-    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
-    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
 
     children[0].exit(0);
     await expect(stopped).resolves.toBe(true);
+    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
   });
 
   it("correlates authoritative project-path resolutions and rejects them on worker exit", async () => {
@@ -1387,21 +1424,22 @@ describe("RuntimeSupervisor", () => {
     expect(children[0].killCalls).toBe(0);
   });
 
-  it("reports startup failure and retries only after the failed child exits", () => {
+  it("reports startup failure and retries only after forced cleanup and exit", async () => {
     const { children, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
     children[0].message({ type: "runtime.startup-failed", message: "The database is locked." });
 
     expect(() => supervisor.connection()).toThrow("The database is locked");
-    vi.advanceTimersByTime(10_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(children).toHaveLength(1);
 
     children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(0);
     expect(supervisor.snapshot()).toMatchObject({ phase: "restarting", restartAttempt: 1, restartScheduled: true });
-    vi.advanceTimersByTime(499);
+    await vi.advanceTimersByTimeAsync(499);
     expect(children).toHaveLength(1);
-    vi.advanceTimersByTime(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(children).toHaveLength(2);
   });
 
@@ -1437,13 +1475,394 @@ describe("RuntimeSupervisor", () => {
     vi.advanceTimersByTime(500);
     expect(children).toHaveLength(2);
     children[1].spawn();
+    expect(children[1].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: { priorRuntimeCleanupUnconfirmed: true },
+    });
     children[1].message({ type: "runtime.ready", websocketUrl: secondUrl });
     expect(supervisor.connection()).toEqual({ websocketUrl: secondUrl });
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 2 });
   });
 
-  it("survives a sustained crash-and-reconnect loop without leaking children or timers", () => {
-    const crashCount = 64;
+  it("recycles through trusted shutdown and waits for the exact replacement readiness", async () => {
+    const secureFileBroker: RuntimeSecureFileBroker = {
+      perform: vi.fn<RuntimeSecureFileBroker["perform"]>(async () => ({
+        ok: false,
+        code: "unavailable",
+        message: "unused",
+      })),
+      shutdown: vi.fn(async () => true),
+    };
+    const { children, forceKill, supervisor } = createHarness({
+      secureFileBroker,
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    expect(supervisor.testOnlyRecycle()).toBe(recycled);
+    expect(children[0].messages.at(-1)).toEqual({ type: "runtime.shutdown" });
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "restarting",
+      generation: 1,
+      pid: 10_000,
+      websocketUrl: null,
+    });
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    expect(children).toHaveLength(2);
+    children[1].spawn();
+    expect(children[1].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        runtimeGenerationId: expect.stringMatching(/:2$/u),
+        confirmedTerminatedRuntimeGenerationIds: [
+          expect.stringMatching(/:1$/u),
+        ],
+      },
+    });
+    children[1].message({ type: "runtime.ready", websocketUrl: secondUrl });
+
+    await expect(recycled).resolves.toBe(true);
+    expect(forceKill).not.toHaveBeenCalled();
+    expect(secureFileBroker.shutdown).not.toHaveBeenCalled();
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "ready",
+      generation: 2,
+      pid: 10_001,
+      websocketUrl: secondUrl,
+      lastError: null,
+    });
+  });
+
+  it("rejects an unconfirmed recycle without admitting a replacement", async () => {
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    const rejected = expect(recycled).rejects.toThrow(/complete process cleanup/u);
+    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    await rejected;
+    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
+    children[0].exit(137);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      generation: 1,
+      pid: null,
+      restartScheduled: false,
+    });
+  });
+
+  it("rejects a source exit before trusted stopped without a replacement", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    const rejected = expect(recycled).rejects.toThrow(/clean readiness/u);
+    children[0].exit(9);
+    await rejected;
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      generation: 1,
+      restartScheduled: false,
+    });
+  });
+
+  it("rejects replacement startup failure without a second replacement", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    const rejected = expect(recycled).rejects.toThrow("Replacement failed");
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    children[1].spawn();
+    children[1].message({
+      type: "runtime.startup-failed",
+      message: "Replacement failed",
+    });
+    await rejected;
+    children[1].exit(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(children).toHaveLength(2);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      generation: 2,
+      restartScheduled: false,
+    });
+  });
+
+  it("rejects replacement exit before readiness without another replacement", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    const rejected = expect(recycled).rejects.toThrow(/clean readiness/u);
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    children[1].spawn();
+    children[1].exit(9);
+    await rejected;
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(children).toHaveLength(2);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      generation: 2,
+      restartScheduled: false,
+    });
+  });
+
+  it("retains the source when cleanup receipt publication fails", async () => {
+    const publish = vi.spyOn(
+      RuntimeCleanupReceiptJournal.prototype,
+      "publish",
+    ).mockReturnValue(false);
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    const rejected = expect(recycled).rejects.toThrow(/receipt/u);
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    await rejected;
+    publish.mockRestore();
+
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      generation: 1,
+      restartScheduled: false,
+    });
+  });
+
+  it("rejects when a trusted stopped worker cannot be terminated", async () => {
+    let resolveForceKill!: (confirmed: boolean) => void;
+    const { children, forceKill, supervisor } = createHarness();
+    forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
+      resolveForceKill = resolve;
+    }));
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    const rejected = expect(recycled).rejects.toThrow(
+      /shutdown deadline|process tree/u,
+    );
+    children[0].message({ type: "runtime.stopped" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await rejected;
+    children[0].exit(0);
+    await vi.advanceTimersByTimeAsync(0);
+    resolveForceKill(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      generation: 1,
+      restartScheduled: false,
+    });
+  });
+
+  it("fails closed when a clean recycle misses its bounded shutdown deadline", async () => {
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    const rejected = expect(recycled).rejects.toThrow(/shutdown deadline/u);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await rejected;
+    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
+    children[0].exit(137);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      pid: null,
+      restartScheduled: false,
+    });
+  });
+
+  it.each(["before", "after"] as const)(
+    "rejects trusted stopped %s a failed fallback once grace elapsed",
+    async (stoppedOrder) => {
+      let resolveForceKill!: (confirmed: boolean) => void;
+      const cleanupReceiptPublish = vi.spyOn(
+        RuntimeCleanupReceiptJournal.prototype,
+        "publish",
+      );
+      const attachmentBroker: RuntimeAttachmentBroker = {
+        resolve: vi.fn(async () => trustedAttachment),
+        release: vi.fn(async () => true),
+      };
+      const { children, forceKill, supervisor } = createHarness({
+        attachmentBroker,
+      });
+      forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
+        resolveForceKill = resolve;
+      }));
+      supervisor.start();
+      children[0].spawn();
+      children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      children[0].message({
+        type: "runtime.attachment-request",
+        requestId: crypto.randomUUID(),
+        attachmentId,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      const recycled = supervisor.testOnlyRecycle();
+      const rejected = expect(recycled).rejects.toThrow(/process tree/u);
+      if (stoppedOrder === "before") {
+        children[0].message({ type: "runtime.stopped" });
+      }
+      await vi.advanceTimersByTimeAsync(1_000);
+      resolveForceKill(false);
+      await vi.advanceTimersByTimeAsync(0);
+      if (stoppedOrder === "after") {
+        children[0].message({ type: "runtime.stopped" });
+      }
+      children[0].exit(0);
+      await rejected;
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(cleanupReceiptPublish).not.toHaveBeenCalled();
+      expect(attachmentBroker.release).not.toHaveBeenCalled();
+      expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+      expect(children).toHaveLength(1);
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "stopped",
+        generation: 1,
+        pid: null,
+      });
+      cleanupReceiptPublish.mockRestore();
+    },
+  );
+
+  it("accepts trusted stopped after grace when forced cleanup succeeds", async () => {
+    let resolveForceKill!: (confirmed: boolean) => void;
+    const cleanupReceiptPublish = vi.spyOn(
+      RuntimeCleanupReceiptJournal.prototype,
+      "publish",
+    );
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(async () => trustedAttachment),
+      release: vi.fn(async () => true),
+    };
+    const { children, forceKill, supervisor } = createHarness({
+      attachmentBroker,
+    });
+    forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
+      resolveForceKill = resolve;
+    }));
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId: crypto.randomUUID(),
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const recycled = supervisor.testOnlyRecycle();
+    await vi.advanceTimersByTimeAsync(1_000);
+    children[0].message({ type: "runtime.stopped" });
+    expect(cleanupReceiptPublish).not.toHaveBeenCalled();
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+    children[0].exit(0);
+    resolveForceKill(true);
+    await vi.advanceTimersByTimeAsync(0);
+    children[1].spawn();
+    children[1].message({ type: "runtime.ready", websocketUrl: secondUrl });
+
+    await expect(recycled).resolves.toBe(true);
+    expect(cleanupReceiptPublish).toHaveBeenCalledOnce();
+    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
+    expect(children).toHaveLength(2);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "ready",
+      generation: 2,
+      pid: 10_001,
+    });
+    cleanupReceiptPublish.mockRestore();
+  });
+
+  it("lets application stop take over an in-flight clean recycle", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    const stopped = supervisor.stop();
+    await expect(recycled).rejects.toThrow(/application shutdown/u);
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+
+    await expect(stopped).resolves.toBe(true);
+    vi.runAllTimers();
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot().phase).toBe("stopped");
+  });
+
+  it("lets application stop take over while recycle termination is pending", async () => {
+    let resolveForceKill!: (confirmed: boolean) => void;
+    const { children, forceKill, supervisor } = createHarness();
+    forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
+      resolveForceKill = resolve;
+    }));
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const recycled = supervisor.testOnlyRecycle();
+    const rejected = expect(recycled).rejects.toThrow(/application shutdown/u);
+    await vi.advanceTimersByTimeAsync(1_000);
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    const stopped = supervisor.stop();
+    await rejected;
+    resolveForceKill(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(stopped).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      generation: 1,
+      pid: null,
+      restartScheduled: false,
+    });
+  });
+
+  it("bounds crash-and-reconnect attempts and quarantines prior generations", () => {
+    const crashCount = 3;
     const { children, supervisor } = createHarness({ stableUptimeMs: 60_000 });
     supervisor.start();
 
@@ -1461,27 +1880,23 @@ describe("RuntimeSupervisor", () => {
         pid: 10_000 + cycle,
       });
       child!.exit(9);
-      expect(supervisor.snapshot()).toMatchObject({
+      expect(supervisor.snapshot()).toMatchObject(cycle < 2 ? {
         phase: "restarting",
         generation: cycle + 1,
         pid: null,
         restartScheduled: true,
+      } : {
+        phase: "stopped",
+        generation: cycle + 1,
+        pid: null,
+        restartScheduled: false,
       });
+      if (cycle === 2) break;
       vi.advanceTimersByTime(runtimeRestartDelayMs(cycle));
       expect(children).toHaveLength(cycle + 2);
     }
-
-    const recovered = children[crashCount]!;
-    recovered.spawn();
-    recovered.message({ type: "runtime.ready", websocketUrl: secondUrl });
-    expect(supervisor.connection()).toEqual({ websocketUrl: secondUrl });
-    expect(supervisor.snapshot()).toMatchObject({
-      phase: "ready",
-      generation: crashCount + 1,
-      pid: 10_000 + crashCount,
-      restartScheduled: false,
-    });
-    expect(vi.getTimerCount()).toBe(1);
+    expect(children).toHaveLength(3);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("uses bounded exponential backoff and resets it only after stable readiness", () => {
@@ -1546,7 +1961,7 @@ describe("RuntimeSupervisor", () => {
     expect(forceKill).toHaveBeenCalledOnce();
     await Promise.resolve();
     children[0].exit(137);
-    await expect(stopped).resolves.toBe(true);
+    await expect(stopped).resolves.toBe(false);
   });
 
   it("executes the supervisor tree fallback while an unconfirmed runtime close keeps the worker alive", async () => {
@@ -1566,7 +1981,7 @@ describe("RuntimeSupervisor", () => {
     expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
 
     children[0].exit(137);
-    await expect(stopped).resolves.toBe(true);
+    await expect(stopped).resolves.toBe(false);
     vi.runAllTimers();
     expect(forceKill).toHaveBeenCalledOnce();
   });
@@ -1687,7 +2102,8 @@ describe("RuntimeSupervisor", () => {
       phase: "stopped",
       pid: null,
     });
-    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
     vi.advanceTimersByTime(60_000);
     expect(children).toHaveLength(1);
   });

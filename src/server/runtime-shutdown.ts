@@ -3,6 +3,8 @@ export const RUNTIME_SHUTDOWN_DEADLINE_MS = 2_500;
 type ShutdownOperation = () => void | Promise<void>;
 
 export interface RuntimeShutdownPhases {
+  /** Stops command admission and drains work that could create new owned resources. */
+  quiesceRuntimeWork?: ShutdownOperation;
   independentDrains: readonly ShutdownOperation[];
   stopIsolatedRuns: ShutdownOperation;
   disposeTurnsAndProviders: ShutdownOperation;
@@ -90,22 +92,34 @@ export async function runRuntimeShutdownPhases(
 ): Promise<void> {
   const deadlineAt = Date.now() + Math.max(1, Math.trunc(timeoutMs));
   let shutdownError: unknown;
-  const attempt = async (operation: ShutdownOperation): Promise<void> => {
+  let ownedResourceCleanupConfirmed = true;
+  const attempt = async (
+    operation: ShutdownOperation,
+    ownsRuntimeResource = false,
+  ): Promise<void> => {
     try {
       await operation();
     } catch (error) {
+      if (ownsRuntimeResource) ownedResourceCleanupConfirmed = false;
       shutdownError ??= error;
     }
   };
   const drainAgents = async (): Promise<void> => {
-    await attempt(phases.stopIsolatedRuns);
-    await attempt(phases.disposeTurnsAndProviders);
+    await attempt(phases.stopIsolatedRuns, true);
+    await attempt(phases.disposeTurnsAndProviders, true);
   };
 
   try {
+    if (phases.quiesceRuntimeWork) {
+      await beforeDeadline(
+        Promise.resolve().then(phases.quiesceRuntimeWork),
+        deadlineAt,
+        "runtime command cleanup",
+      );
+    }
     await beforeDeadline(
       Promise.all([
-        ...phases.independentDrains.map(attempt),
+        ...phases.independentDrains.map((operation) => attempt(operation, true)),
         drainAgents(),
       ]).then(() => undefined),
       deadlineAt,
@@ -115,9 +129,11 @@ export async function runRuntimeShutdownPhases(
       ["artifact cleanup", phases.settleArtifacts],
       ["client cleanup", phases.terminateClients],
       ["server cleanup", phases.closeServer],
-      ["database cleanup", phases.closeStore],
     ] as const) {
       await beforeDeadline(attempt(operation), deadlineAt, phase);
+    }
+    if (ownedResourceCleanupConfirmed) {
+      await beforeDeadline(attempt(phases.closeStore), deadlineAt, "database cleanup");
     }
   } catch (error) {
     shutdownError ??= error;

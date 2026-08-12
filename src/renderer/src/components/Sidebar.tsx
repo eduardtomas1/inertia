@@ -1,4 +1,12 @@
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   Activity,
   BarChart3,
@@ -7,21 +15,25 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CircleAlert,
   CircleDot,
+  CircleX,
   Columns2,
   Folder,
   FolderOpen,
   FolderPlus,
+  GitBranch,
   History,
   Layers3,
   ListTree,
+  MessageCircleQuestion,
   MessageSquare,
+  Minus,
   MoreHorizontal,
   Pencil,
   Pin,
   Search,
   Settings,
+  ShieldAlert,
   SquarePen,
   Trash2,
   X,
@@ -31,6 +43,7 @@ import clsx from "clsx";
 import type { AppSnapshot, Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
 import { formatRelativeTime } from "../lib/format";
+import { agentRequestProviderName } from "../utils/agentInput";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -44,13 +57,20 @@ import {
   sidebarThreadViewMap,
   sortSidebarThreadViews,
   type SidebarThreadStatus,
+  type SidebarWorkSectionId,
 } from "../utils/sidebarModel";
+import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { IconButton, LoadingMark } from "./ui";
 import { loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
 
-const ACTIVITY_HISTORY_PAGE = 10;
+const WORK_DONE_PAGE_SIZE = 10;
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
+const COLLAPSIBLE_WORK_SECTIONS: ReadonlySet<SidebarWorkSectionId> = new Set([
+  "earlier",
+  "done",
+  "snoozed",
+]);
 
 type SidebarProps = {
   snapshot: AppSnapshot | null;
@@ -94,16 +114,46 @@ const statusLabels: Record<SidebarThreadStatus, string> = {
   idle: "Idle",
 };
 
-function StatusIcon({ status }: { status: SidebarThreadStatus }): React.JSX.Element {
-  if (status === "failed") return <CircleAlert size={12} />;
-  if (status === "completed") return <CheckCircle2 size={12} />;
-  return <CircleDot size={12} />;
+const workStatusIcons: Record<SidebarThreadStatus, typeof CircleDot> = {
+  working: CircleDot,
+  approval: ShieldAlert,
+  input: MessageCircleQuestion,
+  failed: CircleX,
+  completed: CheckCircle2,
+  idle: Minus,
+};
+
+function workProjectLabel(project: Project | undefined): string {
+  return project?.name ?? "Unknown project";
 }
 
 function groupingLabel(mode: ProjectGroupingMode): string {
   if (mode === "repository") return "Repository";
   if (mode === "repository-path") return "Repository + folder";
   return "Keep separate";
+}
+
+function workRepositoryLabel(project: Project | undefined): string | null {
+  const repositoryName = project?.repositoryRoot
+    ?.split(/[\\/]/u)
+    .filter(Boolean)
+    .at(-1);
+  if (!repositoryName || !project) return null;
+  if (project.repositoryRelativePath && project.repositoryRelativePath !== ".") {
+    return `${repositoryName}/${project.repositoryRelativePath}`;
+  }
+  return repositoryName.toLocaleLowerCase() !== project.name.toLocaleLowerCase()
+    ? repositoryName
+    : null;
+}
+
+function workFocusConversationId(identity: string): string | null {
+  if (identity.startsWith("thread-actions:")) {
+    return identity.slice("thread-actions:".length);
+  }
+  return identity.startsWith("thread:")
+    ? identity.slice("thread:".length)
+    : null;
 }
 
 function SidebarView({
@@ -146,14 +196,17 @@ function SidebarView({
   const [projectMenu, setProjectMenu] = useState<{ projectId: string; anchor: string } | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
-  const [historyVisible, setHistoryVisible] = useState(ACTIVITY_HISTORY_PAGE);
-  const [threadFilter, setThreadFilter] = useState<
-    "all" | "needs-you" | "working" | "unread" | "snoozed"
-  >("all");
+  const [doneVisible, setDoneVisible] = useState(WORK_DONE_PAGE_SIZE);
+  const [expandedWorkSections, setExpandedWorkSections] = useState<Set<SidebarWorkSectionId>>(
+    new Set(),
+  );
   const conversations = snapshot?.conversations ?? EMPTY_CONVERSATIONS;
   const snoozeNow = useSnoozeClock(conversations);
   const sidebarRef = useRef<HTMLElement>(null);
   const navigationRef = useRef<HTMLDivElement>(null);
+  const workFocusIdentityRef = useRef<string | null>(null);
+  const workFocusIndexRef = useRef<number | null>(null);
+  const workFocusConversationIdsRef = useRef<readonly string[]>([]);
   const onCloseRef = useRef(onClose);
   const mobile = useMediaQuery("(max-width: 760px)");
   useNativePreviewSuspension(Boolean(
@@ -175,11 +228,38 @@ function SidebarView({
     });
   }, [snapshot?.activeProjectId]);
 
-  useEffect(() => setHistoryVisible(ACTIVITY_HISTORY_PAGE), [query, sidebarMode]);
+  useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query, sidebarMode]);
+
+  useLayoutEffect(() => {
+    setQuery("");
+    setConversationMenu(null);
+    setRenaming(null);
+    setRenameDraft("");
+  }, [sidebarMode]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useEffect(() => {
+    if (sidebarMode !== "activity") return;
+    const clearWorkFocusIfUnowned = (event: Event): void => {
+      const target = event.target;
+      const focusOwner = target instanceof Element
+        ? target.closest("[data-work-focus-id], [data-work-focus-owner]")
+        : null;
+      if (focusOwner && sidebarRef.current?.contains(focusOwner)) return;
+      workFocusIdentityRef.current = null;
+      workFocusIndexRef.current = null;
+      workFocusConversationIdsRef.current = [];
+    };
+    document.addEventListener("focusin", clearWorkFocusIfUnowned);
+    document.addEventListener("pointerdown", clearWorkFocusIfUnowned, true);
+    return () => {
+      document.removeEventListener("focusin", clearWorkFocusIfUnowned);
+      document.removeEventListener("pointerdown", clearWorkFocusIfUnowned, true);
+    };
+  }, [sidebarMode]);
 
   useEffect(() => {
     if (!mobile || !open) return;
@@ -252,43 +332,143 @@ function SidebarView({
     const needle = query.trim().toLocaleLowerCase();
     return sortSidebarThreadViews(
       conversations
-        .filter((conversation) => (
-        !needle
-          || conversation.title.toLocaleLowerCase().includes(needle)
-          || projectById.get(conversation.projectId)?.name.toLocaleLowerCase().includes(needle)
-        ))
-        .map((conversation) => threadViewsById.get(conversation.id)!)
-        .filter((thread) => {
-          const snoozed = Boolean(
-            thread.conversation.snoozedUntil
-            && Date.parse(thread.conversation.snoozedUntil) > snoozeNow,
-          );
-          if (threadFilter === "snoozed") return snoozed;
-          if (snoozed && !thread.needsAttention && thread.status !== "working") {
-            return false;
-          }
-          if (threadFilter === "needs-you") return thread.needsAttention;
-          if (threadFilter === "working") return thread.status === "working";
-          if (threadFilter === "unread") return thread.unread;
-          return true;
-        }),
+        .filter((conversation) => {
+          if (!needle) return true;
+          const project = projectById.get(conversation.projectId);
+          const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
+            ?? agentRequestProviderName(conversation.providerId);
+          const projectLabel = workProjectLabel(project);
+          const repositoryLabel = workRepositoryLabel(project);
+          return [
+            conversation.title,
+            conversation.branch,
+            providerLabel,
+            projectLabel,
+            repositoryLabel,
+            project?.path,
+            project?.repositoryRoot,
+            project?.repositoryRelativePath,
+          ].some((value) => value?.toLocaleLowerCase().includes(needle));
+        })
+        .map((conversation) => threadViewsById.get(conversation.id)!),
     );
   }, [
     projectById,
     query,
     conversations,
-    snoozeNow,
+    snapshot?.settings.providerIdentityLabels,
     threadViewsById,
-    threadFilter,
   ]);
-  const { activeThreads, settledThreads, workSections } = useMemo(() => ({
-    activeThreads: activityThreads.filter(
-      ({ hidden, settled }) => !settled && !hidden,
-    ),
-    settledThreads: activityThreads.filter(({ settled }) => settled),
-    workSections: groupWorkThreads(activityThreads),
-  }), [activityThreads]);
-  const visibleHistory = settledThreads.slice(0, historyVisible);
+  const workSections = useMemo(
+    () => groupWorkThreads(activityThreads, snoozeNow),
+    [activityThreads, snoozeNow],
+  );
+  const workSearchActive = Boolean(query.trim());
+  const visibleWorkConversationIds = useMemo(() => {
+    const visibleIds = new Set<string>();
+    for (const section of workSections) {
+      const expanded = !COLLAPSIBLE_WORK_SECTIONS.has(section.id)
+        || workSearchActive
+        || expandedWorkSections.has(section.id);
+      if (!expanded) continue;
+      const visibleThreads = section.id === "done"
+        ? section.threads.slice(0, doneVisible)
+        : section.threads;
+      for (const { conversation } of visibleThreads) visibleIds.add(conversation.id);
+    }
+    return visibleIds;
+  }, [doneVisible, expandedWorkSections, workSearchActive, workSections]);
+  useLayoutEffect(() => {
+    if (sidebarMode !== "activity") return;
+    if (conversationMenu && !visibleWorkConversationIds.has(conversationMenu)) {
+      setConversationMenu(null);
+    }
+    if (renaming && !visibleWorkConversationIds.has(renaming)) {
+      setRenaming(null);
+      setRenameDraft("");
+    }
+  }, [conversationMenu, renaming, sidebarMode, visibleWorkConversationIds]);
+  useLayoutEffect(() => {
+    if (sidebarMode !== "activity") {
+      workFocusIdentityRef.current = null;
+      workFocusIndexRef.current = null;
+      workFocusConversationIdsRef.current = [];
+      return;
+    }
+    const identity = workFocusIdentityRef.current;
+    if (!identity) return;
+    const focusedSectionId = identity.startsWith("section:")
+      ? identity.slice("section:".length)
+      : null;
+    const focusedSection = focusedSectionId
+      ? workSections.find((section) => section.id === focusedSectionId)
+      : undefined;
+    if (focusedSection?.threads.length) {
+      workFocusConversationIdsRef.current = focusedSection.threads.map(
+        ({ conversation }) => conversation.id,
+      );
+    }
+    const focusableWorkItems = [...(
+      navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
+    )];
+    const currentIdentityIndex = focusableWorkItems.findIndex(
+      (item) => item.dataset.workFocusId === identity,
+    );
+    if (currentIdentityIndex >= 0) workFocusIndexRef.current = currentIdentityIndex;
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLElement
+      && activeElement !== document.body
+      && activeElement.isConnected
+    ) return;
+    const previousIndex = workFocusIndexRef.current;
+    const focusedConversationId = workFocusConversationId(identity);
+    const focusedConversationIds = focusedConversationId
+      ? [focusedConversationId]
+      : workFocusConversationIdsRef.current;
+    const destinationThread = focusedConversationIds
+      .map((conversationId) => focusableWorkItems.find(
+        (item) => item.dataset.workFocusId === `thread:${conversationId}`,
+      ))
+      .find((item) => item !== undefined);
+    const destinationSection = focusedConversationIds
+      .map((conversationId) => workSections.find((section) => (
+        section.threads.some(({ conversation }) => conversation.id === conversationId)
+      )))
+      .find((section) => section !== undefined);
+    const collapsedDestinationSection = destinationSection
+      && COLLAPSIBLE_WORK_SECTIONS.has(destinationSection.id)
+      && !workSearchActive
+      && !expandedWorkSections.has(destinationSection.id)
+      ? destinationSection
+      : undefined;
+    const target = focusableWorkItems.find((item) => item.dataset.workFocusId === identity)
+      ?? destinationThread
+      ?? (collapsedDestinationSection
+        ? focusableWorkItems.find(
+          (item) => item.dataset.workFocusId === `section:${collapsedDestinationSection.id}`,
+        )
+        : undefined)
+      ?? (previousIndex === null
+        ? undefined
+        : focusableWorkItems[Math.min(previousIndex, focusableWorkItems.length - 1)])
+      ?? sidebarRef.current?.querySelector<HTMLInputElement>('input[type="search"]');
+    target?.focus({ preventScroll: true });
+    workFocusIdentityRef.current = target?.dataset.workFocusId ?? null;
+    const targetIndex = target ? focusableWorkItems.indexOf(target) : -1;
+    workFocusIndexRef.current = targetIndex >= 0 ? targetIndex : null;
+  }, [
+    doneVisible,
+    expandedWorkSections,
+    sidebarMode,
+    snoozeNow,
+    workSearchActive,
+    workSections,
+  ]);
+  const visibleWorkCount = workSections.reduce(
+    (count, section) => count + section.threads.length,
+    0,
+  );
   const activeRenameProject = renamingProject ? projectById.get(renamingProject) : undefined;
 
   const toggleExpanded = (projectId: string) => {
@@ -405,7 +585,13 @@ function SidebarView({
       && snapshot.activeConversationId !== conversation.id
     );
     return (
-      <div className="conversation-menu" role="menu">
+      <div
+        className="conversation-menu"
+        role="menu"
+        data-work-focus-owner={sidebarMode === "activity"
+          ? `thread-actions:${conversation.id}`
+          : undefined}
+      >
         <button type="button" role="menuitem" onClick={() => { setRenameDraft(conversation.title); setRenaming(conversation.id); setConversationMenu(null); }}><Pencil size={13} />Rename</button>
         <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onPinConversation(conversation, !conversation.pinnedAt); }}>
           <MessageSquare size={13} />{conversation.pinnedAt ? "Unpin" : "Pin"}
@@ -476,6 +662,9 @@ function SidebarView({
         value={renameDraft}
         maxLength={120}
         autoFocus
+        data-work-focus-id={sidebarMode === "activity"
+          ? `thread:${conversation.id}`
+          : undefined}
         aria-label={`Rename ${conversation.title}`}
         onChange={(event) => setRenameDraft(event.target.value)}
         onBlur={() => setRenaming(null)}
@@ -484,16 +673,33 @@ function SidebarView({
     </form>
   );
 
-  const activityRow = (conversation: Conversation, variant: "card" | "history") => {
+  const activityRow = (conversation: Conversation) => {
     const model = threadViewsById.get(conversation.id)
       ?? sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
     const project = projectById.get(conversation.projectId);
     const isActive = snapshot?.activeConversationId === conversation.id && view === "workspace";
+    const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
+      ?? agentRequestProviderName(conversation.providerId);
+    const projectLabel = workProjectLabel(project);
+    const repositoryLabel = workRepositoryLabel(project);
+    const WorkStatusIcon = workStatusIcons[model.status];
+    const accessibleContext = [
+      conversation.title,
+      providerLabel,
+      projectLabel,
+      repositoryLabel ? `Repository ${repositoryLabel}` : null,
+      conversation.branch ? `Branch ${conversation.branch}` : null,
+      statusLabels[model.status],
+      conversation.snoozedUntil && Date.parse(conversation.snoozedUntil) > snoozeNow
+        ? "Snoozed"
+        : null,
+      conversation.pinnedAt ? "Pinned" : null,
+      model.unread ? "New completion" : null,
+    ].filter((value): value is string => Boolean(value)).join(", ");
     return (
       <div
         className={clsx(
           "activity-thread",
-          `is-${variant}`,
           `status-${model.status}`,
           isActive && "is-active",
           splitConversationId === conversation.id && "is-split",
@@ -506,34 +712,61 @@ function SidebarView({
             type="button"
             className="activity-thread-select"
             data-sidebar-nav
-            aria-label={`${conversation.title}, ${statusLabels[model.status]}`}
+            data-work-focus-id={`thread:${conversation.id}`}
+            aria-current={isActive ? "page" : undefined}
+            aria-label={accessibleContext}
             onClick={() => activateConversation(conversation)}
           >
-            <span className="activity-thread-topline">
-              <span className="activity-thread-title">{conversation.title}</span>
-              {conversation.pinnedAt && <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />}
-              <time dateTime={conversation.updatedAt}>{formatRelativeTime(conversation.updatedAt)}</time>
-            </span>
-            {variant === "card" && (
-              <span className="work-thread-meta">
-                <span className={clsx("thread-status-label", `is-${model.status}`)}>
-                  <StatusIcon status={model.status} />
-                  {statusLabels[model.status]}
-                  {model.unread && <span className="thread-unread-mark">Unread</span>}
-                </span>
-                <span className="activity-thread-context">
-                  <span><Folder size={12} />{project?.name ?? "Unknown project"}</span>
-                </span>
+            <span
+              className="activity-thread-provider"
+              title={`${providerLabel} provider`}
+              aria-hidden="true"
+            >
+              <ProviderBrandIcon
+                providerId={conversation.providerId}
+                size={15}
+                decorative
+              />
+              <span
+                className="activity-thread-state-mark"
+                data-work-status={model.status}
+                aria-hidden="true"
+              >
+                <WorkStatusIcon size={8} />
               </span>
-            )}
-            {variant === "history" && (
-              <span className="activity-history-context">{project?.name ?? "Unknown project"} · {statusLabels[model.status]}</span>
-            )}
+            </span>
+            <span className="activity-thread-copy">
+              <span className="activity-thread-topline">
+                <span className="activity-thread-title">{conversation.title}</span>
+                {conversation.pinnedAt && <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />}
+                {model.unread && <span className="thread-unread-mark">New</span>}
+                <time dateTime={conversation.updatedAt}>{formatRelativeTime(conversation.updatedAt)}</time>
+              </span>
+              <span className="work-thread-meta">
+                <span className="activity-thread-provider-label">{providerLabel}</span>
+                <span className="activity-thread-project-meta" title={project?.path}>
+                  <Folder size={10} aria-hidden="true" />
+                  {projectLabel}
+                </span>
+                {repositoryLabel && (
+                  <span className="activity-thread-repository-meta" title={project?.repositoryRoot ?? undefined}>
+                    {repositoryLabel}
+                  </span>
+                )}
+                {conversation.branch && (
+                  <span className="activity-thread-branch-meta" title={`Branch ${conversation.branch}`}>
+                    <GitBranch size={10} aria-hidden="true" />
+                    {conversation.branch}
+                  </span>
+                )}
+              </span>
+            </span>
           </button>
         )}
         <IconButton
           label={`Thread actions for ${conversation.title}`}
           className="activity-thread-menu-button"
+          data-work-focus-id={`thread-actions:${conversation.id}`}
           onClick={() => {
             setProjectMenu(null);
             setConversationMenu(conversationMenu === conversation.id ? null : conversation.id);
@@ -562,6 +795,36 @@ function SidebarView({
         aria-label="Project navigation"
         aria-hidden={mobile && !open ? true : undefined}
         inert={mobile && !open ? true : undefined}
+        onFocusCapture={(event) => {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          const focusOwner = target?.closest<HTMLElement>(
+            "[data-work-focus-id], [data-work-focus-owner]",
+          );
+          const identity = focusOwner?.dataset.workFocusId
+            ?? focusOwner?.dataset.workFocusOwner
+            ?? null;
+          workFocusIdentityRef.current = identity;
+          if (!identity) {
+            workFocusIndexRef.current = null;
+            workFocusConversationIdsRef.current = [];
+            return;
+          }
+          const focusedConversationId = workFocusConversationId(identity);
+          const focusedSectionId = identity.startsWith("section:")
+            ? identity.slice("section:".length)
+            : null;
+          workFocusConversationIdsRef.current = focusedConversationId
+            ? [focusedConversationId]
+            : workSections.find((section) => section.id === focusedSectionId)
+              ?.threads.map(({ conversation }) => conversation.id) ?? [];
+          const focusableWorkItems = [...(
+            navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
+          )];
+          const identityIndex = focusableWorkItems.findIndex(
+            (item) => item.dataset.workFocusId === identity,
+          );
+          workFocusIndexRef.current = identityIndex >= 0 ? identityIndex : null;
+        }}
       >
         <div className="sidebar-brand drag-region">
           <button type="button" className="brand-lockup no-drag" aria-label="Go to workspace" onClick={() => navigate("workspace")}>
@@ -614,27 +877,6 @@ function SidebarView({
           {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
         </div>
 
-        {sidebarMode === "activity" && (
-          <div className="thread-filter-bar" role="group" aria-label="Filter conversations">
-            {([
-              ["all", "All"],
-              ["needs-you", "Needs you"],
-              ["working", "Running"],
-              ["unread", "Unread"],
-              ["snoozed", "Snoozed"],
-            ] as const).map(([id, label]) => (
-              <button
-                type="button"
-                aria-pressed={threadFilter === id}
-                onClick={() => setThreadFilter(id)}
-                key={id}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-
         {activeRenameProject && (
           <form
             className="sidebar-project-rename"
@@ -652,12 +894,14 @@ function SidebarView({
           </form>
         )}
 
-        <div className="sidebar-section-title">
-          <span>{sidebarMode === "activity" ? "Conversations" : "Projects"}</span>
-          <IconButton label="Add project" disabled={busy || connectionStatus !== "online"} onClick={onImportProject}>
-            {busy ? <LoadingMark label="Adding project" /> : <FolderPlus size={15} />}
-          </IconButton>
-        </div>
+        {sidebarMode === "classic" && (
+          <div className="sidebar-section-title">
+            <span>Projects</span>
+            <IconButton label="Add project" disabled={busy || connectionStatus !== "online"} onClick={onImportProject}>
+              {busy ? <LoadingMark label="Adding project" /> : <FolderPlus size={15} />}
+            </IconButton>
+          </div>
+        )}
 
         <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} role="list" aria-label={sidebarMode === "activity" ? "Work" : "Projects"}>
           {!snapshot && <div className="sidebar-loading"><LoadingMark label="Loading projects" /><span>Opening your workspace…</span></div>}
@@ -789,29 +1033,63 @@ function SidebarView({
 
           {sidebarMode === "activity" && snapshot && (
             <div className="activity-thread-stream">
-              {activeThreads.length === 0 && settledThreads.length === 0 && (
+              {visibleWorkCount === 0 && (
                 <div className="sidebar-empty">
                   <Activity size={19} />
                   <span>{query ? "No matching work" : snapshot.projects.length === 0 ? "No projects yet" : "No work yet"}</span>
                 </div>
               )}
-              {workSections.map((section) => section.threads.length > 0 && (
-                <section className={`work-thread-section is-${section.id}`} aria-labelledby={`work-section-${section.id}`} key={section.id}>
-                  <h2 id={`work-section-${section.id}`}><span>{section.label}</span><span>{section.threads.length}</span></h2>
-                  {section.threads.map(({ conversation }) => activityRow(conversation, "card"))}
-                </section>
-              ))}
-              {settledThreads.length > 0 && (
-                <>
-                  <div className="activity-history-heading"><History size={12} /><span>History</span><span>{settledThreads.length}</span></div>
-                  {visibleHistory.map(({ conversation }) => activityRow(conversation, "history"))}
-                  {visibleHistory.length < settledThreads.length && (
-                    <button type="button" className="activity-show-more" onClick={() => setHistoryVisible((count) => count + ACTIVITY_HISTORY_PAGE)}>
-                      Show more <span>{settledThreads.length - visibleHistory.length} older</span>
-                    </button>
-                  )}
-                </>
-              )}
+              {workSections.map((section) => {
+                if (section.threads.length === 0) return null;
+                const collapsible = COLLAPSIBLE_WORK_SECTIONS.has(section.id);
+                const disclosure = collapsible && !workSearchActive;
+                const expanded = !collapsible || workSearchActive || expandedWorkSections.has(section.id);
+                const visibleThreads = section.id === "done"
+                  ? section.threads.slice(0, doneVisible)
+                  : section.threads;
+                return (
+                  <section className={`work-thread-section is-${section.id}`} aria-labelledby={`work-section-${section.id}`} key={section.id}>
+                    {disclosure ? (
+                      <h2 id={`work-section-${section.id}`}>
+                        <button
+                          type="button"
+                          className="work-thread-section-toggle"
+                          data-sidebar-nav
+                          data-work-focus-id={`section:${section.id}`}
+                          aria-expanded={expanded}
+                          onClick={() => {
+                            setConversationMenu(null);
+                            setExpandedWorkSections((current) => {
+                              const next = new Set(current);
+                              if (next.has(section.id)) next.delete(section.id);
+                              else next.add(section.id);
+                              return next;
+                            });
+                          }}
+                        >
+                          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          <span>{section.label}</span>
+                          <span>{section.threads.length}</span>
+                        </button>
+                      </h2>
+                    ) : (
+                      <h2 id={`work-section-${section.id}`}><span>{section.label}</span><span>{section.threads.length}</span></h2>
+                    )}
+                    {expanded && visibleThreads.map(({ conversation }) => activityRow(conversation))}
+                    {expanded && section.id === "done" && visibleThreads.length < section.threads.length && (
+                      <button
+                        type="button"
+                        className="activity-show-more"
+                        data-sidebar-nav
+                        data-work-focus-id="show-more:done"
+                        onClick={() => setDoneVisible((count) => count + WORK_DONE_PAGE_SIZE)}
+                      >
+                        Show more <span>{section.threads.length - visibleThreads.length} older</span>
+                      </button>
+                    )}
+                  </section>
+                );
+              })}
             </div>
           )}
         </div>

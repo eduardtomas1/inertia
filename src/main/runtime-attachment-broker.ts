@@ -156,6 +156,20 @@ export class RuntimeAttachmentBrokerCoordinator<
     return true;
   }
 
+  owns(peers: Iterable<Peer | null>, attachmentId: string): boolean {
+    return [...peers].some((peer) =>
+      (peer?.attachmentClaimCounts.get(attachmentId) ?? 0) > 0);
+  }
+
+  deferRendererReleaseForAny(
+    peers: Iterable<Peer | null>,
+    attachmentId: string,
+  ): boolean {
+    return [...peers].reduce((deferred, peer) =>
+      (peer ? this.deferRendererRelease(peer, attachmentId) : false)
+        || deferred, false);
+  }
+
   clear(peer: Peer): void {
     for (const [requestId, pending] of this.pending) {
       if (pending.peer !== peer) continue;

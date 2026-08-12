@@ -6,6 +6,7 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -69,12 +70,7 @@ async function openPaneTool(
       name: `Open tools for ${chatTitle}`,
     }).click();
   }
-  await tools.getByRole("tab", {
-    name: tab === "Changes"
-      ? /Changes/u
-      : tab === "Goal" ? /^Goal/u : tab,
-    exact: tab !== "Changes" && tab !== "Goal",
-  }).click();
+  await selectWorkspaceTool(tools, tab);
   return tools;
 }
 
@@ -154,14 +150,14 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await primaryMessage.fill("/goal");
   await primary.getByRole("option", { name: /^\/goal/u }).click();
   const primaryGoalSurface = primary.getByRole("region", {
-    name: "Local objective",
+    name: "Codex goal",
   });
-  await expect(primaryGoalSurface).toContainText("Primary chat objective");
   await expect(primaryGoalSurface).toContainText(
-    "Saved in Inertia only; it is not shared with the provider.",
+    "One separately tracked goal",
   );
+  await expect(primaryGoalSurface).not.toContainText("Primary chat objective");
   await expect(secondary.getByRole("region", {
-    name: "Local objective",
+    name: "Codex goal",
   })).toHaveCount(0);
   await expect(primary.getByRole("complementary", {
     name: "Workspace tools",
@@ -177,11 +173,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     path: chatGoalScreenshot,
     contentType: "image/png",
   });
-  await primaryGoalSurface.getByRole("button", { name: "Complete" }).click();
-  await expect(primaryGoalSurface.getByText("Complete", { exact: true }))
-    .toBeVisible();
   await expect(secondary.getByRole("region", {
-    name: "Local objective",
+    name: "Codex goal",
   })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(primaryGoalSurface).toHaveCount(0);
@@ -234,9 +227,9 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(secondaryGoal.getByRole("region", {
     name: "Goals and agent workflows",
   })).toBeVisible();
-  await expect(primaryGoal.getByText("Inertia local goal", { exact: true }))
+  await expect(primaryGoal.getByText("Inertia local", { exact: true }))
     .toBeVisible();
-  await expect(secondaryGoal.getByText("Inertia local goal", { exact: true }))
+  await expect(secondaryGoal.getByText("Inertia local", { exact: true }))
     .toBeVisible();
   const goalDuplicateIds = await page.locator("[id]").evaluateAll(
     (elements) => {

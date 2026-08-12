@@ -32,7 +32,7 @@ describe("legacy workspace startup migration", () => {
     };
     expect(readLegacyWorkspaceStartup(storage)).toEqual({
       surface: "summary",
-      tool: "terminal",
+      tool: "environment",
     });
   });
 });

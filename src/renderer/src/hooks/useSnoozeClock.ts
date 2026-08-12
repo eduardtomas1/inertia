@@ -19,7 +19,16 @@ export function nextSnoozeExpiry(
   return next;
 }
 
-/** Re-renders the sidebar when the earliest live snooze expires. */
+export function nextLocalDayBoundary(now: number): number {
+  const current = new Date(now);
+  return new Date(
+    current.getFullYear(),
+    current.getMonth(),
+    current.getDate() + 1,
+  ).getTime();
+}
+
+/** Re-renders the sidebar at the next snooze expiry or local day boundary. */
 export function useSnoozeClock(
   conversations: readonly Conversation[],
 ): number {
@@ -28,16 +37,19 @@ export function useSnoozeClock(
     () => nextSnoozeExpiry(conversations, now),
     [conversations, now],
   );
+  const nextRefresh = Math.min(
+    nextExpiry ?? Number.POSITIVE_INFINITY,
+    nextLocalDayBoundary(now),
+  );
 
   useEffect(() => {
-    if (nextExpiry === null) return;
     const delay = Math.min(
       MAX_TIMER_DELAY_MS,
-      Math.max(0, nextExpiry - Date.now()) + 1,
+      Math.max(0, nextRefresh - Date.now()) + 1,
     );
     const timer = window.setTimeout(() => setNow(Date.now()), delay);
     return () => window.clearTimeout(timer);
-  }, [nextExpiry]);
+  }, [nextRefresh]);
 
   return now;
 }

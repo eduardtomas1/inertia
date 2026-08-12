@@ -10,12 +10,11 @@ import {
   type ProviderId,
   type ProviderMaintenanceProviderId,
   type SubagentTrace,
-  type WorkspaceRun,
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { AppLayout } from "./components/AppLayout";
-import type { WorkspacePanelTab, WorkspaceSceneProps } from "./components/WorkspaceScene";
+import type { WorkspaceSceneProps } from "./components/WorkspaceScene";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
@@ -30,8 +29,10 @@ import {
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useDraftConversation } from "./hooks/useDraftConversation";
-import { useActivityActions } from "./hooks/useActivityActions";
-import { useActivityActionRouter } from "./hooks/useActivityActionRouter";
+import {
+  useActivityActions,
+  type PreviewWorkspaceRun,
+} from "./hooks/useActivityActions";
 import { useStableActions, useStableController } from "./hooks/useStableController";
 import { useAppUpdate } from "./app-update";
 import { useWorkspaceTools } from "./hooks/useWorkspaceTools";
@@ -41,15 +42,17 @@ import { useMultiSpawn } from "./hooks/useMultiSpawn";
 import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
 import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
-import { activityRunSummary } from "./utils/activityCenter";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
+import {
+  focusWorkspacePreviewAddress,
+  routeWorkspaceRunPreview,
+} from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { planFromText } from "./utils/planFromText";
-import { buildEnvironmentSummary } from "./utils/environmentSummary";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
 import { finishLegacyWorkspaceStartupMigration, readLegacyWorkspaceStartup } from "./utils/workspaceStartup";
 import {
@@ -63,6 +66,10 @@ import { createWorkspaceTurnActions } from "./components/workspace-scene/createW
 import { requestComposerPrefill } from "./utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "./utils/subagentDisclosure";
 import type { AppView } from "./appView";
+
+const focusPrimaryPreview = (): void => {
+  focusWorkspacePreviewAddress("primary");
+};
 
 function useDocumentActive(): boolean {
   const [active, setActive] = useState(
@@ -127,7 +134,6 @@ export default function App(): React.JSX.Element {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
-  const [activityOpen, setActivityOpen] = useState(false);
   const [latestContentVisible, setLatestContentVisible] = useState(false);
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
@@ -218,6 +224,9 @@ export default function App(): React.JSX.Element {
   const workspaceLayout = useWorkspaceLayout(view, Boolean(project), {
     startupSurface: effectiveWorkspaceStartupSurface,
     startupReady: Boolean(connection.snapshot),
+    workspaceId: project
+      ? `${project.id}:${connection.snapshot?.activeConversationId ?? "draft"}`
+      : null,
     initialTool: legacyWorkspaceStartup?.tool,
   });
   const {
@@ -242,6 +251,7 @@ export default function App(): React.JSX.Element {
   const sceneToggleWorkspaceTools = splitConversation
     ? primaryPaneLayout.toggleWorkspaceTools
     : toggleWorkspaceTools;
+  const sceneOpenEnvironment = () => sceneSetActiveTool("environment");
   const conversationProjection = useStableController(
     useConversationProjection({
       snapshot: connection.snapshot,
@@ -264,7 +274,6 @@ export default function App(): React.JSX.Element {
     refreshDetail,
     messages,
     plans,
-    subagents,
     streamingText,
   } = conversationProjection;
   const authProvider = useMemo(
@@ -280,10 +289,6 @@ export default function App(): React.JSX.Element {
   const selectedMaintenanceOperation = selectedMaintenanceProviderId
     ? providerMaintenance.operations.get(selectedMaintenanceProviderId) ?? null
     : null;
-  const runsSummary = useMemo(
-    () => activityRunSummary(connection.snapshot?.runs ?? []),
-    [connection.snapshot?.runs],
-  );
   const visibleConversationRun = useMemo(
     () => conversation
       ? selectConversationWorkspaceRun(conversation.id, connection.snapshot?.runs ?? [])
@@ -410,6 +415,18 @@ export default function App(): React.JSX.Element {
   });
   const workspaceToolsUnavailableReason = draftWorkspaceToolsUnavailableReason(draftConversation.requiresWorkspaceMaterialization);
   const workspaceToolsUnavailable = Boolean(workspaceToolsUnavailableReason);
+  const sceneHeaderActiveTool = workspaceToolsUnavailable && sceneActiveTool
+    ? "environment"
+    : sceneActiveTool;
+  useEffect(() => {
+    if (
+      workspaceToolsUnavailable
+      && sceneActiveTool
+      && sceneActiveTool !== "environment"
+    ) {
+      sceneSetActiveTool("environment");
+    }
+  }, [sceneActiveTool, sceneSetActiveTool, workspaceToolsUnavailable]);
   const workspaceTools = useStableController(
     useWorkspaceTools({
       enabled: !workspaceToolsUnavailable,
@@ -430,7 +447,7 @@ export default function App(): React.JSX.Element {
         !workspaceToolsUnavailable
         && (
           sceneActiveTool === "changes"
-          || workspaceLayout.environmentOpen
+          || sceneActiveTool === "environment"
         ),
       loadFilesOnMount:
         !workspaceToolsUnavailable && sceneActiveTool === "files",
@@ -446,7 +463,6 @@ export default function App(): React.JSX.Element {
       previewContextId: conversation?.id ?? null,
     }),
   );
-  const { navigatePreview } = desktopTools;
   const {
     gitStatus,
     branches,
@@ -456,30 +472,7 @@ export default function App(): React.JSX.Element {
     mutateBranch,
     commit,
     projectActions,
-    workspaceGitStatus,
   } = workspaceTools;
-  const environmentSummary = useMemo(() => buildEnvironmentSummary({
-    projectId: project?.id ?? null,
-    projectName: project?.name ?? null,
-    conversationId: conversation?.id ?? null,
-    connectionStatus: connection.status,
-    gitStatus,
-    workspaceGitStatus,
-    runs: connection.snapshot?.runs ?? [],
-    subagents,
-    messages,
-  }), [
-    connection.snapshot?.runs,
-    connection.status,
-    conversation?.id,
-    gitStatus,
-    messages,
-    project?.id,
-    project?.name,
-    subagents,
-    workspaceGitStatus,
-  ]);
-
   useEffect(() => {
     const run = visibleConversationRun;
     if (!run || pendingSeenRunsRef.current.has(run.id)) return;
@@ -492,7 +485,7 @@ export default function App(): React.JSX.Element {
         workspaceVisible: view === "workspace",
         latestContentVisible,
         obstructed: workspaceAttentionObstructed({
-          activityOpen, paletteOpen, commitDialogOpen,
+          paletteOpen, commitDialogOpen,
           authProviderOpen: authProviderId !== null,
           multiSpawnOpen: multiSpawn.open,
           mobileSidebarOpen: mobileNavigation && sidebarOpen,
@@ -508,7 +501,6 @@ export default function App(): React.JSX.Element {
       pendingSeenRunsRef.current.delete(run.id);
     });
   }, [
-    activityOpen,
     attentionVisibilityVersion,
     authProviderId,
     commitDialogOpen,
@@ -596,40 +588,45 @@ export default function App(): React.JSX.Element {
     setView("workspace");
     setSidebarOpen(false);
   };
-  const activatePrimaryActivityContext = (
-    activity: WorkspaceRun,
-    tool?: WorkspacePanelTab,
-  ) => {
-    const targetConversation = connection.snapshot?.conversations.find(({ id }) => id === activity.conversationId);
-    const targetProject = connection.snapshot?.projects.find(({ id }) => id === activity.projectId);
+  const activatePrimaryRunContext = (
+    activity: PreviewWorkspaceRun,
+    tool: "preview",
+  ): boolean => {
+    const targetProject = connection.snapshot?.projects.find(
+      ({ id }) => id === activity.projectId,
+    );
+    const targetConversation = activity.conversationId === null
+      ? null
+      : connection.snapshot?.conversations.find(
+          ({ id, projectId: ownerProjectId }) =>
+            id === activity.conversationId
+            && ownerProjectId === activity.projectId,
+        ) ?? null;
+    if (!targetProject || (activity.conversationId && !targetConversation)) {
+      return false;
+    }
     if (targetConversation) selectConversation(targetConversation);
-    else if (targetProject) selectProject(targetProject);
+    else selectProject(targetProject);
     setView("workspace");
     setSidebarOpen(false);
-    if (tool) sceneSetActiveTool(tool);
+    sceneSetActiveTool(tool);
+    return true;
   };
   const activityActions = useStableController(
     useActivityActions({
-      snapshot: connection.snapshot,
       project,
       conversationId: conversation?.id ?? null,
-      request,
       run,
       setActiveTool: sceneSetActiveTool,
-      setActivityOpen,
       setActionError,
-      activateContext: activatePrimaryActivityContext,
-      openProjectPath,
-      navigatePreview,
+      activateContext: activatePrimaryRunContext,
+      navigatePreview: desktopTools.navigatePreview,
+      focusPreview: focusPrimaryPreview,
     }),
   );
   const {
     runProjectAction,
-    openActivityLocation,
-    openActivityPreview: openPrimaryActivityPreview,
-    stopActivity,
-    rerunActivity: rerunPrimaryActivity,
-    markActivitySeen,
+    openWorkspaceRunPreview: openPrimaryWorkspaceRunPreview,
     acknowledgeActivity,
     dismissActivity,
   } = activityActions;
@@ -827,6 +824,7 @@ export default function App(): React.JSX.Element {
       connectProvider,
       openProviderSetup,
       openBackendSetup,
+      openSettings: () => navigateToView("settings"),
       openProjectPath,
       followUpSubagent: (trace: SubagentTrace) => {
         if (!conversation || !canFollowUpSubagentTrace(
@@ -915,7 +913,6 @@ export default function App(): React.JSX.Element {
     busyAction,
     setBusyAction,
     setActionError,
-    setActivityOpen,
     gitRefreshVersion,
     request,
     actions: {
@@ -929,6 +926,7 @@ export default function App(): React.JSX.Element {
       connectProvider,
       openProviderSetup,
       openBackendSetup,
+      openSettings: () => navigateToView("settings"),
       openProjectPath,
       sendMessageToConversation,
       updateConversationById,
@@ -942,29 +940,36 @@ export default function App(): React.JSX.Element {
     onSecondaryConversationCreated: updateSplitConversationId,
     onTerminal: () => setGitRefreshVersion((version) => version + 1),
   });
-  const routedActivityActions = useActivityActionRouter({
-    secondaryConversationId: splitConversation?.id ?? null,
-    primary: {
-      activateContext: activatePrimaryActivityContext,
-      openActivityPreview: openPrimaryActivityPreview,
-      rerunActivity: rerunPrimaryActivity,
-    },
-    secondary: {
-      activateContext: (_activity, tool) => {
-        setView("workspace");
-        setSidebarOpen(false);
-        if (tool) secondaryPaneLayout.setActiveTool(tool);
+  const openWorkspaceRunPreview = useCallback((run: PreviewWorkspaceRun) => {
+    routeWorkspaceRunPreview(
+      run,
+      splitConversation?.id ?? null,
+      openPrimaryWorkspaceRunPreview,
+      splitWorkspace.openWorkspaceRunPreview,
+    );
+  }, [
+    openPrimaryWorkspaceRunPreview,
+    splitConversation?.id,
+    splitWorkspace,
+  ]);
+  const visibleSplitScene = useMemo(() => {
+    const splitScene = splitWorkspace.scene;
+    const secondaryTools = splitScene?.secondary.tools;
+    if (!splitScene || !secondaryTools) return splitScene;
+    return {
+      ...splitScene,
+      secondary: {
+        ...splitScene.secondary,
+        tools: {
+          ...secondaryTools,
+          environment: {
+            ...secondaryTools.environment,
+            onOpenRunPreview: openWorkspaceRunPreview,
+          },
+        },
       },
-      openActivityPreview:
-        splitWorkspace.activityActions.openActivityPreview,
-      rerunActivity: splitWorkspace.activityActions.rerunActivity,
-    },
-  });
-  const {
-    activateContext: activateActivityContext,
-    openActivityPreview,
-    rerunActivity,
-  } = routedActivityActions;
+    };
+  }, [openWorkspaceRunPreview, splitWorkspace.scene]);
   const visibleWorkspaceScene = useMemo<WorkspaceSceneProps>(() => ({
     ...workspaceScene,
     chat: {
@@ -973,11 +978,19 @@ export default function App(): React.JSX.Element {
         ? sendingConversationIds.has(conversation.id)
         : false,
     },
-    splitScene: splitWorkspace.scene,
+    tools: workspaceScene.tools ? {
+      ...workspaceScene.tools,
+      environment: {
+        ...workspaceScene.tools.environment,
+        onOpenRunPreview: openWorkspaceRunPreview,
+      },
+    } : null,
+    splitScene: visibleSplitScene,
   }), [
     conversation,
+    openWorkspaceRunPreview,
     sendingConversationIds,
-    splitWorkspace.scene,
+    visibleSplitScene,
     workspaceScene,
   ]);
 
@@ -999,16 +1012,13 @@ export default function App(): React.JSX.Element {
       setCommitDialogOpen={setCommitDialogOpen}
       paletteOpen={paletteOpen}
       setPaletteOpen={setPaletteOpen}
-      activityOpen={activityOpen}
-      setActivityOpen={setActivityOpen}
       project={project}
       conversation={conversation}
       splitConversationId={splitConversation?.id ?? null}
-      sceneActiveTool={workspaceToolsUnavailable ? null : sceneActiveTool}
+      sceneActiveTool={sceneHeaderActiveTool}
       sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
+      sceneOpenEnvironment={sceneOpenEnvironment}
       workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-      environmentSummary={environmentSummary}
-      runsSummary={runsSummary}
       gitStatus={gitStatus}
       branches={branches}
       projectActions={projectActions}
@@ -1047,12 +1057,6 @@ export default function App(): React.JSX.Element {
         commitReviewRevision: workspaceTools.commitReviewRevision,
         commit,
         runProjectAction,
-        activateActivityContext,
-        openActivityLocation,
-        openActivityPreview,
-        stopActivity,
-        rerunActivity,
-        markActivitySeen,
         acknowledgeActivity,
         dismissActivity,
       }}

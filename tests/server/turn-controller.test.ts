@@ -1631,11 +1631,17 @@ describe("TurnController authoritative lifecycle", () => {
       insertions: 2,
       deletions: 0,
     });
+    const onPersisted = vi.fn(() => {
+      expect(runtime.store.snapshot().messages.some((message) =>
+        message.role === "user"
+        && message.content === "Implement the lifecycle.")).toBe(true);
+    });
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Implement the lifecycle.",
       checkpointId: checkpoint.id,
-    });
+    }, onPersisted);
+    expect(onPersisted).toHaveBeenCalledOnce();
     expect(queued.turn).toMatchObject({
       status: "queued",
       userMessageId: queued.message.id,

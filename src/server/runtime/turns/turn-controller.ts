@@ -449,7 +449,8 @@ export class TurnController {
     }
   }
 
-  queue(request: QueueTurnRequest): QueuedTurn {
+  /** Synchronous ownership handoff runs after commit and before live adoption. */
+  queue(request: QueueTurnRequest, onPersisted?: () => void): QueuedTurn {
     if (this.closing) throw new Error("The local runtime is shutting down.");
     if (
       !request.goalStart
@@ -472,7 +473,7 @@ export class TurnController {
       id: this.id,
       now: () => this.now(),
       clock: this.clock,
-    }, request);
+    }, request, onPersisted);
     return this.adoptPreparedTurn(prepared);
   }
 

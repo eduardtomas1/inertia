@@ -10406,25 +10406,109 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   list-style: none;
 }
 
-.turn-user-request-context-chip {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 5px;
-  max-width: 100%;
-  padding: 4px 6px;
-  border: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
-  border-radius: var(--radius-small);
-  color: var(--quiet-secondary);
-  background: color-mix(in srgb, var(--surface) 58%, transparent);
-  font-size: var(--metadata-font-size);
-  line-height: 1.25;
+.sent-attachments {
+  display: grid;
+  width: min(100%, 480px);
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  gap: 7px;
 }
 
-.turn-user-request-context-chip > span {
+.sent-attachment {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: var(--radius-medium);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.sent-attachment-open {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 6px;
+  border: 0;
+  border-radius: inherit;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+button.sent-attachment-open {
+  cursor: zoom-in;
+}
+
+button.sent-attachment-open:hover {
+  background: color-mix(in srgb, var(--surface-hover) 72%, transparent);
+}
+
+button.sent-attachment-open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.sent-attachment-thumbnail {
+  position: relative;
+  display: grid;
+  width: 64px;
+  height: 54px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-small);
+  color: var(--quiet-muted);
+  background: color-mix(in srgb, var(--surface-muted) 84%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.sent-attachment-thumbnail img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sent-attachment-thumbnail[data-thumbnail-state="loading"] img,
+.sent-attachment-thumbnail[data-thumbnail-state="unavailable"] img {
+  opacity: 0;
+}
+
+.sent-attachment-thumbnail.is-document {
+  color: var(--accent-strong);
+}
+
+.sent-attachment-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sent-attachment-copy strong,
+.sent-attachment-copy small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sent-attachment-copy strong {
+  color: var(--text-soft);
+  font-size: var(--ui-font-secondary);
+  font-weight: 640;
+}
+
+.sent-attachment-copy small {
+  color: var(--quiet-secondary);
+  font-size: var(--metadata-font-size);
+}
+
+@container (max-width: 420px) {
+  .sent-attachments {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .response-turn > .message.is-assistant:last-child,

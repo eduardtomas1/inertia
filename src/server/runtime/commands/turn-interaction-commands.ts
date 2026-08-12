@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import type WebSocket from "ws";
+
+import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
 
 import {
   type AgentApprovalRequest,
@@ -42,6 +45,7 @@ import {
 
 export interface TurnInteractionCommandDependencies {
   store: RuntimeStore;
+  conversationAttachments: ConversationAttachmentStore;
   backendProfileController: BackendProfileController;
   turns: TurnController;
   isolatedRuns: IsolatedRunController<WebSocket>;
@@ -147,17 +151,35 @@ export function createTurnInteractionCommandHandler(
             () => resolutionAbort.abort(),
           );
         }
-        const attachments = resolvedAttachments.map(
+        const sourceAttachments = resolvedAttachments.map(
           ({ attachment }) => attachment,
         );
+        let attachments = sourceAttachments;
+        const attachmentRetentionId = randomUUID();
+        let attachmentRetentionStarted = false;
+        let retainedAttachmentsAccepted = false;
         let generatedAttachmentPaths: string[] = [];
+        const acceptRetainedAttachments = () => {
+          if (retainedAttachmentsAccepted) return;
+          dependencies.conversationAttachments.acceptRetention(
+            attachmentRetentionId,
+          );
+          retainedAttachmentsAccepted = true;
+        };
         const relinquishAttachments = async () => {
           const generated = generatedAttachmentPaths;
           generatedAttachmentPaths = [];
           await Promise.all([
             dependencies.attachmentResolver?.relinquishAll(
-              attachments.map(({ id }) => id),
+              sourceAttachments.map(({ id }) => id),
             ),
+            attachmentRetentionStarted
+              && !retainedAttachmentsAccepted
+              && sourceAttachments.length > 0
+              ? dependencies.conversationAttachments.releaseRetention(
+                  attachmentRetentionId,
+                )
+              : undefined,
             generated.length > 0
               ? dependencies.generatedAttachments.release(generated)
               : undefined,
@@ -360,6 +382,55 @@ export function createTurnInteractionCommandHandler(
             }
           }
         }
+        const retentionAbort = new AbortController();
+        attachmentRetentionStarted = true;
+        const retention = dependencies.conversationAttachments.retain(
+          resolvedAttachments,
+          retentionAbort.signal,
+          attachmentRetentionId,
+        );
+        let retentionCompleted = false;
+        try {
+          attachments = await awaitMessageSendPreparation(
+            retention,
+            preparationDeadlineAt,
+            () => retentionAbort.abort(),
+          );
+          retentionCompleted = true;
+          const durablePathBySourcePath = new Map(
+            sourceAttachments.map((source, index) => [
+              source.path,
+              attachments[index]?.path ?? source.path,
+            ]),
+          );
+          documentPreparation = {
+            ...documentPreparation,
+            imagePaths: documentPreparation.imagePaths.map((path) =>
+              durablePathBySourcePath.get(path) ?? path),
+          };
+          assertMessageSendPreparationPending(preparationDeadlineAt);
+        } catch (error) {
+          if (!retentionCompleted) {
+            void retention.then(
+              () => dependencies.conversationAttachments
+                .releaseRetention(attachmentRetentionId),
+              () => undefined,
+            ).catch(() => undefined);
+          }
+          if (providerTransitionReserved) {
+            dependencies.providerTerminalResumes.release(conversation.id);
+            providerTransitionReserved = false;
+          }
+          if (pendingCheckpoint) {
+            await deleteCheckpoint(
+              pendingCheckpoint.repositoryPath,
+              pendingCheckpoint.ref,
+              conversation.id,
+            ).catch(() => undefined);
+          }
+          await relinquishAttachments();
+          throw error;
+        }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         try {
           if (pendingCheckpoint) {
@@ -385,8 +456,11 @@ export function createTurnInteractionCommandHandler(
                 context: command.payload.context,
                 checkpointId,
                 skills: resolvedSkills.inputs,
-              })
+              }, () => acceptRetainedAttachments())
             : null;
+          if (queued !== null) {
+            acceptRetainedAttachments();
+          }
         } catch (error) {
           if (providerTransitionReserved) {
             dependencies.providerTerminalResumes.release(conversation.id);
@@ -417,7 +491,11 @@ export function createTurnInteractionCommandHandler(
               undefined,
               { activateConversation: command.payload.activate },
             );
+            acceptRetainedAttachments();
             attachmentOwnershipAccepted = true;
+            await dependencies.attachmentResolver?.releaseAll(
+              sourceAttachments.map(({ id }) => id),
+            );
           }
           if (
             conversation.title === "New chat"

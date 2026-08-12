@@ -7,6 +7,8 @@ import type {
 import {
   agentTurnFromRow,
   messageFromRow,
+  parseAttachments,
+  rendererSafeAttachments,
   requireTimestamp,
 } from "./codecs";
 import type { PersistenceContext } from "./context";
@@ -93,8 +95,9 @@ export class TranscriptRepository {
       ? new Date().toISOString()
       : requireTimestamp(createdAt, "Message creation time");
     const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now };
+    const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt)`).run({ ...message, attachmentsJson: JSON.stringify(attachments) });
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments) });
       this.context.database.prepare(`
         UPDATE conversations
         SET updated_at = ?, settled_at = NULL,
@@ -107,7 +110,10 @@ export class TranscriptRepository {
           .run(conversation.project_id, conversationId);
       }
     })();
-    return message;
+    return {
+      ...message,
+      attachments: persistedAttachments,
+    };
   }
 
   /**
@@ -198,6 +204,25 @@ export class TranscriptRepository {
     if (!appendMessageContentChunks(this.context.database, messageId, delta)) {
       throw new RecordNotFoundError("Message not found.");
     }
+  }
+
+  attachments(conversationId?: string): ChatAttachment[] {
+    const rows = (conversationId === undefined
+      ? this.context.database.prepare(`
+          SELECT messages.attachments_json
+          FROM messages
+          ORDER BY messages.created_at ASC, messages.id ASC
+        `).all()
+      : this.context.database.prepare(`
+          SELECT messages.attachments_json
+          FROM messages
+          WHERE messages.conversation_id = ?
+          ORDER BY messages.created_at ASC, messages.id ASC
+        `).all(conversationId)) as Array<Pick<MessageRow, "attachments_json">>;
+    return rows
+      .flatMap((row) => rendererSafeAttachments(
+        parseAttachments(row.attachments_json),
+      ));
   }
 
   message(messageId: string): ChatMessage {

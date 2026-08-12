@@ -53,9 +53,12 @@ export interface ResolvedTurnRequest {
 export function prepareTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
+  onPersisted?: () => void,
 ): PreparedTurnRequest {
   const resolved = resolveTurnRequest(dependencies, request);
-  return resolved.adopt(dependencies.store.beginAgentTurn(resolved.input));
+  const queued = dependencies.store.beginAgentTurn(resolved.input);
+  onPersisted?.();
+  return resolved.adopt(queued);
 }
 
 /**

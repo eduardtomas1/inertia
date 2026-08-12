@@ -49,9 +49,7 @@ import {
   type DatabaseRecoveryReport,
   recoverDatabaseOnStartup,
 } from "./persistence/database-recovery";
-import {
-  reconcileRecoveryImportJournal,
-} from "./persistence/database-recovery-import";
+import { reconcileRecoveryImportJournal } from "./persistence/database-recovery-import";
 import {
   DATABASE_RECOVERY_EXPORT_MAX_BYTES,
   type DatabaseRecoveryImportResult,
@@ -905,6 +903,7 @@ export class RuntimeStore {
     this.transcriptRepository.appendMessageContent(messageId, delta);
   }
 
+  attachments(conversationId?: string): ChatAttachment[] { return this.transcriptRepository.attachments(conversationId); }
   message(messageId: string): ChatMessage {
     return this.transcriptRepository.message(messageId);
   }

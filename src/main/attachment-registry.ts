@@ -283,8 +283,11 @@ async function cleanupOrphanedSessions(
   root: string,
   options: AttachmentStorageSessionOptions = {},
 ): Promise<AttachmentStorageReservation> {
+  // An unconfirmed prior runtime can still add or grow files after any
+  // inventory. Preserve its bytes and reserve the entire shared ceiling.
+  if (options.preserveExisting) return fullReservation();
   let reservation = await cleanupOrphanedAttachments(root, {
-    preserveExisting: options.preserveExisting,
+    preserveExisting: false,
   });
   let names: string[];
   try {
@@ -301,10 +304,10 @@ async function cleanupOrphanedSessions(
       return fullReservation();
     }
     const orphaned = await cleanupOrphanedAttachments(directory, {
-      preserveExisting: options.preserveExisting,
+      preserveExisting: false,
     });
     reservation = addReservation(reservation, orphaned);
-    if (orphaned.records > 0 || orphaned.bytes > 0 || options.preserveExisting) continue;
+    if (orphaned.records > 0 || orphaned.bytes > 0) continue;
     try {
       await rmdir(directory);
     } catch (error) {
@@ -496,8 +499,15 @@ export class AttachmentRegistry {
       for (const attachment of deduplicated) {
         registered.push(await this.persist(attachment));
       }
-      return registered.map(({ digest: _digest, extension: _extension, ...attachment }) =>
-        attachment);
+      return registered.map(({
+        digest: _digest,
+        extension: _extension,
+        path: _path,
+        ...attachment
+      }) => ({
+        ...attachment,
+        path: attachment.id,
+      }));
     } catch (error) {
       await Promise.all(registered.map(async (attachment) => {
         this.records.delete(attachment.id);

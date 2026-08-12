@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  constants,
   copyFileSync,
   existsSync,
   lstatSync,
@@ -15,6 +16,7 @@ import { Worker } from "node:worker_threads";
 
 import Database from "better-sqlite3";
 
+import { validAttachmentCapabilities } from "./attachment-capability-schema";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "./migrations/catalog";
 import {
   indexColumns,
@@ -178,6 +180,12 @@ function removeIfRegularFile(path: string): void {
   if (regularOwnedFile(path)) unlinkSync(path);
 }
 
+function removeDatabaseFileFamily(path: string): void {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    removeIfRegularFile(`${path}${suffix}`);
+  }
+}
+
 function validateOpenDatabase(
   database: Database.Database,
   check: "quick_check" | "integrity_check",
@@ -186,6 +194,9 @@ function validateOpenDatabase(
     readonly [number, readonly string[]]
   )[],
   providerRunOwnershipSchemaIsValid: (
+    database: Database.Database,
+  ) => boolean,
+  attachmentCapabilitiesAreValid: (
     database: Database.Database,
   ) => boolean,
 ): DatabaseValidation {
@@ -451,6 +462,9 @@ function validateOpenDatabase(
   if (version >= 55 && !providerRunOwnershipSchemaIsValid(database)) {
     return "corrupt";
   }
+  if (version >= 56 && !attachmentCapabilitiesAreValid(database)) {
+    return "corrupt";
+  }
   return "valid-current";
 }
 
@@ -468,6 +482,7 @@ function validateDatabase(
       CURRENT_DATABASE_SCHEMA_VERSION,
       REQUIRED_TABLES_BY_SCHEMA_VERSION,
       validProviderRunOwnershipSchema,
+      validAttachmentCapabilities,
     );
   } catch {
     return "corrupt";
@@ -487,6 +502,7 @@ function validateDatabaseOffThread(
     const { DatabaseSync } = require("node:sqlite");
     const indexColumns = ${indexColumns.toString()};
     const validProviderRunOwnershipSchema = ${validProviderRunOwnershipSchema.toString()};
+    const validAttachmentCapabilities = ${validAttachmentCapabilities.toString()};
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
     let result = "corrupt";
@@ -498,6 +514,7 @@ function validateDatabaseOffThread(
         workerData.currentSchemaVersion,
         workerData.requiredTablesBySchemaVersion,
         validProviderRunOwnershipSchema,
+        validAttachmentCapabilities,
       );
     } catch {
       result = "corrupt";
@@ -680,12 +697,12 @@ function availableName(directory: string, stem: string, suffix: string): string 
 
 function cleanInterruptedFiles(databasePath: string): void {
   const paths = databaseRecoveryPaths(databasePath);
-  removeIfRegularFile(paths.restorePartialPath);
+  removeDatabaseFileFamily(paths.restorePartialPath);
   if (!existsSync(paths.backupsDirectory)) return;
   const partialPattern = partialBackupPattern(databasePath);
   for (const filename of readdirSync(paths.backupsDirectory)) {
     if (partialPattern.test(filename)) {
-      removeIfRegularFile(join(paths.backupsDirectory, filename));
+      removeDatabaseFileFamily(join(paths.backupsDirectory, filename));
     }
   }
 }
@@ -719,7 +736,7 @@ function quarantinePrimary(
 function restoreBackup(databasePath: string, backup: ValidatedBackup): void {
   const { restorePartialPath } = databaseRecoveryPaths(databasePath);
   removeIfRegularFile(restorePartialPath);
-  copyFileSync(backup.path, restorePartialPath);
+  copyFileSync(backup.path, restorePartialPath, constants.COPYFILE_EXCL);
   chmodSync(restorePartialPath, FILE_MODE);
   if (validateDatabase(restorePartialPath, "integrity_check") !== "valid-current") {
     removeIfRegularFile(restorePartialPath);
@@ -1002,7 +1019,7 @@ export class DatabaseBackupManager {
       }
       return result;
     } catch (error) {
-      removeIfRegularFile(partialPath);
+      removeDatabaseFileFamily(partialPath);
       throw error;
     }
   }

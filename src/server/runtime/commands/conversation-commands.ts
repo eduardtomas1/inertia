@@ -3,6 +3,8 @@ import { join, resolve } from "node:path";
 
 import type WebSocket from "ws";
 
+import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
+
 import {
   type Conversation,
   type ServerEvent,
@@ -77,6 +79,7 @@ function requestedConversationModelSelection(
 
 export interface ConversationCommandDependencies {
   store: RuntimeStore;
+  conversationAttachments: ConversationAttachmentStore;
   providers: ProviderManager;
   backendProfileController: BackendProfileController;
   workspaceRuns: WorkspaceRunController<WebSocket>;
@@ -730,13 +733,30 @@ export function createConversationCommandHandler(
             dependencies.store.projectPath(conversation.projectId),
             conversation.id,
           ).catch(() => undefined);
+          const finalConversation = dependencies.store.conversation(
+            command.payload.conversationId,
+          );
+          const attachmentIds = dependencies.store
+            .attachments(finalConversation.id)
+            .map(({ id }) => id);
           dependencies.store.deleteConversation(
-            command.payload.conversationId,
+            finalConversation.id,
           );
+          try {
+            const referencedAttachmentIds = new Set(
+              dependencies.store.attachments().map(({ id }) => id),
+            );
+            await dependencies.conversationAttachments.release(
+              attachmentIds.filter((attachmentId) =>
+                !referencedAttachmentIds.has(attachmentId)),
+            );
+          } catch {
+            // Startup reconciliation retries cleanup against authoritative SQL.
+          }
           dependencies.rememberDeletedConversation(
-            command.payload.conversationId,
+            finalConversation.id,
           );
-          dependencies.forgetRemoteTranscript(command.payload.conversationId);
+          dependencies.forgetRemoteTranscript(finalConversation.id);
           return "mutation";
         } finally {
           dependencies.providerTerminalResumes.release(conversation.id);

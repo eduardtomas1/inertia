@@ -336,6 +336,9 @@ function conversationHandler(
 ) {
   const dependencies: ConversationCommandDependencies = {
     store,
+    conversationAttachments: {
+      release: vi.fn(async () => undefined),
+    } as never,
     providers: {} as never,
     backendProfileController: {} as never,
     workspaceRuns: {} as never,
@@ -363,6 +366,9 @@ function projectHandler(
 ) {
   const dependencies: ProjectWorkspaceCommandDependencies = {
     store: runtime.store,
+    conversationAttachments: {
+      release: vi.fn(async () => undefined),
+    } as never,
     workspaceRuns: {} as never,
     turns: runtime.controller,
     providers: runtime.provider as never,

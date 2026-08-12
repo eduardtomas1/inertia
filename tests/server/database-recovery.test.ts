@@ -9,6 +9,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -877,6 +878,31 @@ describe("database backup and startup recovery", () => {
     recovered.close();
   });
 
+  it.skipIf(process.platform === "win32")(
+    "never follows a pre-planted restore-partial symlink",
+    async () => {
+      const directory = temporaryDirectory();
+      const databasePath = join(directory, "inertia.sqlite");
+      const { store } = seed(databasePath, "safe backup");
+      await store.createBackup();
+      store.close();
+      writeFileSync(databasePath, "invalid primary");
+      const outside = join(directory, "outside-sentinel.txt");
+      writeFileSync(outside, "outside must remain unchanged");
+      symlinkSync(
+        outside,
+        databaseRecoveryPaths(databasePath).restorePartialPath,
+      );
+
+      expect(() => new RuntimeStore(databasePath, directory, {
+        recoverInterruptedRuns: false,
+      })).toThrow();
+      expect(readFileSync(outside, "utf8")).toBe(
+        "outside must remain unchanged",
+      );
+    },
+  );
+
   it("skips a newest backup with orphaned foreign keys and restores the older valid copy", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1083,6 +1109,148 @@ describe("database backup and startup recovery", () => {
       CURRENT_DATABASE_SCHEMA_VERSION,
     );
     upgraded.close();
+  });
+
+  it("restores schema 55 provider ownership before applying attachment sanitization", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "schema 55 backup");
+    const attachmentId = "33333333-3333-4333-8333-333333333333";
+    const message = store.createMessage(
+      conversationId,
+      "Keep the attachment capability opaque.",
+      "user",
+      [{
+        id: attachmentId,
+        name: "legacy-reference.png",
+        path: attachmentId,
+        mimeType: "image/png",
+        size: 8,
+      }],
+    );
+    const backup = await store.createBackup();
+    store.close();
+    const backupPath = join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      backup.filename,
+    );
+    const schema55 = new Database(backupPath);
+    schema55.prepare(`
+      UPDATE messages
+      SET attachments_json = ?
+      WHERE id = ?
+    `).run(JSON.stringify([{
+      id: attachmentId,
+      name: "legacy-reference.png",
+      path: "/Users/person/secret/legacy-reference.png",
+      mimeType: "image/png",
+      size: 8,
+    }]), message.id);
+    schema55.prepare(
+      "DELETE FROM schema_migrations WHERE version = 56",
+    ).run();
+    schema55.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backup.filename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.providerRunOwnership.all()).toEqual([]);
+    expect(recovered.message(message.id).attachments).toEqual([{
+      id: attachmentId,
+      name: "legacy-reference.png",
+      path: attachmentId,
+      mimeType: "image/png",
+      size: 8,
+    }]);
+    recovered.close();
+
+    const upgraded = new Database(databasePath, { readonly: true });
+    expect((upgraded.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(56);
+    expect((upgraded.prepare(
+      "SELECT attachments_json FROM messages WHERE id = ?",
+    ).get(message.id) as { attachments_json: string }).attachments_json)
+      .not.toContain("/Users/person/secret");
+    upgraded.close();
+  });
+
+  it("rejects a schema 56 backup that reintroduces an attachment path capability", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "safe current schema");
+    const attachmentId = "44444444-4444-4444-8444-444444444444";
+    const message = store.createMessage(
+      conversationId,
+      "Opaque attachment",
+      "user",
+      [{
+        id: attachmentId,
+        name: "opaque.png",
+        path: attachmentId,
+        mimeType: "image/png",
+        size: 8,
+      }],
+    );
+    const older = await store.createBackup();
+    store.createMessage(conversationId, "newer unsafe state", "assistant");
+    const newer = await store.createBackup();
+    store.close();
+    const paths = databaseRecoveryPaths(databasePath);
+    const tampered = new Database(join(paths.backupsDirectory, newer.filename));
+    tampered.prepare(`
+      UPDATE messages SET attachments_json = ? WHERE id = ?
+    `).run(JSON.stringify([{
+      id: "/Users/person/private/opaque.png",
+      name: "opaque.png",
+      path: "/Users/person/private/opaque.png",
+      mimeType: "image/png",
+      size: 8,
+    }]), message.id);
+    tampered.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: older.filename,
+      invalidBackupsSkipped: 1,
+    });
+    expect(recovered.message(message.id).attachments[0]?.path).toBe(attachmentId);
+    expect(recovered.conversationDetail(conversationId)?.messages
+      .some(({ content }) => content === "newer unsafe state")).toBe(false);
+    recovered.close();
+  });
+
+  it("rejects a path-shaped attachment identity during off-thread backup validation", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "unsafe capability source");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.prepare(`
+      UPDATE messages SET attachments_json = ?
+    `).run(JSON.stringify([{
+      id: "/Users/person/private/source.png",
+      name: "source.png",
+      path: "/Users/person/private/source.png",
+      mimeType: "image/png",
+      size: 8,
+    }]));
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(readdirSync(databaseRecoveryPaths(databasePath).backupsDirectory))
+      .toEqual([]);
+    primary.close();
   });
 
   it("skips incomplete migration history and restores the next coherent backup", async () => {

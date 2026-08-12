@@ -1,7 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import {
-  FileText,
-  Image as ImageIcon,
   RotateCcw,
 } from "lucide-react";
 import clsx from "clsx";
@@ -9,10 +7,6 @@ import type {
   ChatMessage,
   SubagentTrace,
 } from "@shared/contracts";
-import {
-  chatAttachmentKind,
-  chatAttachmentTypeLabel,
-} from "@shared/attachments";
 import { formatClockTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
@@ -28,6 +22,7 @@ import {
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { SubagentDisclosure } from "../SubagentDisclosure";
+import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
   LiveElapsed,
   SettledWorkDetails,
@@ -93,27 +88,10 @@ export function UserRequestLayer({
           {expanded ? "Show less" : "Show full message"}
         </button>
       )}
-      {turn.userMessage.attachments.length > 0 && (
-        <ul className="message-attachments turn-user-request-context" aria-label="Request context">
-          {turn.userMessage.attachments.map((attachment) => {
-            const kind = chatAttachmentKind(attachment.mimeType);
-            const typeLabel = chatAttachmentTypeLabel(attachment.mimeType);
-            return (
-              <li
-                className="turn-user-request-context-chip"
-                data-request-context-kind={kind}
-                key={attachment.id}
-                title={`${typeLabel} · ${attachment.name}`}
-              >
-                {kind === "image"
-                  ? <ImageIcon size={12} aria-hidden="true" />
-                  : <FileText size={12} aria-hidden="true" />}
-                <span>{typeLabel} · {attachment.name}</span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <SentMessageAttachmentList
+        attachments={turn.userMessage.attachments}
+        label="Request attachments"
+      />
     </article>
   );
 }

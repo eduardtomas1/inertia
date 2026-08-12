@@ -14,6 +14,7 @@ import {
   type ResponseTimelineCompatibility,
 } from "../../utils/responseTimeline";
 import { ResponseMarkdown } from "../ResponseMarkdown";
+import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
   ActivityRow,
   PlanDetail,
@@ -94,6 +95,7 @@ function CompatibilityDisclosure({
                 {message.role === "assistant"
                   ? <ResponseMarkdown content={message.content} projectRoot={props.projectRoot} projectId={props.projectId} conversationId={props.conversationId} defaultCodeWrap={props.defaultCodeWrap} onOpenProjectFile={props.onOpenTurnFile} />
                   : <div className="message-body">{message.content}</div>}
+                <SentMessageAttachmentList attachments={message.attachments} />
               </article>
             ))}
             {compatibility.activities.map((activity) => <ActivityRow key={activity.id} activity={activity} />)}

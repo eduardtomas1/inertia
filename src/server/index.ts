@@ -29,6 +29,7 @@ import {
   type RuntimePrivateConnectForgetScope,
   type RuntimePrivateConnectPromptPreparation,
 } from "../node/runtime-process-protocol";
+import { ConversationAttachmentStore } from "../node/conversation-attachment-store";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases";
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
@@ -52,17 +53,13 @@ import {
   projectIdentityIsUsable,
 } from "./project-identity-refresh";
 import { TurnGitArtifactManager } from "./turn-git-artifacts";
-import {
-  sendRuntimeEvent,
-} from "./runtime-protocol";
+import { sendRuntimeEvent } from "./runtime-protocol";
 import { createTestStreamingTrace } from "./runtime/test-streaming-trace";
 import {
   initialProviderSnapshots,
   providerSnapshot,
 } from "./runtime-snapshots";
-import {
-  DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS,
-} from "./review-summary";
+import { DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS } from "./review-summary";
 import {
   IsolatedRunController,
 } from "./runtime/reviews/isolated-run-controller";
@@ -320,6 +317,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   if (priorBootLeasesCleared) {
     store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
   }
+  const conversationAttachments = await ConversationAttachmentStore.open(dataDirectory);
+  if (!runtimeSafetyLock) await conversationAttachments.reconcile(store.attachments());
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;
@@ -793,7 +792,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
       }),
       createConversationCommandHandler({
-        store,
+        store, conversationAttachments,
         providers,
         backendProfileController,
         workspaceRuns,
@@ -810,7 +809,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
       }),
       createTurnInteractionCommandHandler({
-        store,
+        store, conversationAttachments,
         backendProfileController,
         turns,
         isolatedRuns,
@@ -870,7 +869,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
       }),
       createProjectWorkspaceCommandHandler({
-        store,
+        store, conversationAttachments,
         workspaceRuns,
         turns,
         providers,
@@ -1219,6 +1218,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           await projectIdentities.drain();
         },
         independentDrains: [
+          () => conversationAttachments.close(),
           () => terminals.disposeAll(),
           () => providerMaintenance.dispose(),
         ],

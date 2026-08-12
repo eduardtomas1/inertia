@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
+import { parseAttachments } from "../../src/server/persistence/codecs";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 
@@ -82,6 +83,95 @@ afterAll(async () => {
 });
 
 describe("RuntimeStore conversation lifecycle", () => {
+  it("drops malformed and unsupported persisted attachment projections", () => {
+    const valid = {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "reference.png",
+      path: "/private/reference.png",
+      mimeType: "image/png",
+      size: 8,
+    };
+
+    expect(parseAttachments("not-json")).toEqual([]);
+    expect(parseAttachments(JSON.stringify([
+      null,
+      { ...valid, mimeType: "application/zip" },
+      { ...valid, size: 0 },
+      { ...valid, name: "../reference.png" },
+      { ...valid, unexpected: "/private/extra-path" },
+    ]))).toEqual([valid]);
+
+    const bounded = Array.from({ length: 9 }, (_, index) => ({
+      ...valid,
+      id: `0000000${index}-0000-4000-8000-00000000000${index}`,
+      size: 3 * 1024 * 1024,
+    }));
+    expect(parseAttachments(JSON.stringify([
+      bounded[0],
+      bounded[0],
+      ...bounded.slice(1),
+    ]))).toEqual(bounded.slice(0, 6));
+    const countBounded = bounded.map((attachment) => ({
+      ...attachment,
+      size: 1,
+    }));
+    expect(parseAttachments(JSON.stringify(countBounded)))
+      .toEqual(countBounded.slice(0, 8));
+  });
+
+  it("appends schema 56 attachment sanitization after provider ownership", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const attachment = {
+      id: "33333333-3333-4333-8333-333333333333",
+      name: "legacy-reference.png",
+      path: "/Users/person/secret/legacy-reference.png",
+      mimeType: "image/png" as const,
+      size: 1_024,
+    };
+    const message = store.createMessage(
+      conversation.id,
+      "Inspect the legacy attachment.",
+      "user",
+      [attachment],
+    );
+    store.close();
+
+    const previousSchema = new Database(databasePath);
+    previousSchema.prepare(`
+      UPDATE messages
+      SET attachments_json = ?
+      WHERE id = ?
+    `).run(JSON.stringify([attachment]), message.id);
+    previousSchema.prepare(`
+      DELETE FROM schema_migrations
+      WHERE version = ?
+    `).run(CURRENT_DATABASE_SCHEMA_VERSION);
+    previousSchema.close();
+
+    const upgraded = new RuntimeStore(databasePath, workspacePath);
+    expect(upgraded.conversationDetail(conversation.id)?.messages)
+      .toContainEqual(expect.objectContaining({
+        id: message.id,
+        attachments: [{ ...attachment, path: attachment.id }],
+      }));
+    upgraded.close();
+
+    const verified = new Database(databasePath, { readonly: true });
+    const row = verified.prepare(`
+      SELECT attachments_json
+      FROM messages
+      WHERE id = ?
+    `).get(message.id) as { attachments_json: string };
+    const version = verified.prepare(`
+      SELECT MAX(version) AS version
+      FROM schema_migrations
+    `).get() as { version: number };
+    verified.close();
+    expect(row.attachments_json).not.toContain("/Users/person/secret");
+    expect(version.version).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+  });
+
   it("keeps a new workspace empty until the user adds a project", async () => {
     const { databasePath, workspacePath, store } = await createStore({ withProject: false });
     expect(store.snapshot()).toMatchObject({
@@ -96,6 +186,67 @@ describe("RuntimeStore conversation lifecycle", () => {
     const reopened = new RuntimeStore(databasePath, workspacePath);
     expect(reopened.snapshot().projects).toEqual([]);
     expect(reopened.snapshot().activeProjectId).toBeNull();
+    reopened.close();
+  });
+
+  it("keeps sent attachment metadata in authoritative detail after restart", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const attachments = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "reference.png",
+        path: "/private/conversation-attachments/reference.png",
+        mimeType: "image/png" as const,
+        size: 1_024,
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "evidence.json",
+        path: "/private/conversation-attachments/evidence.json",
+        mimeType: "application/json" as const,
+        size: 2_048,
+      },
+    ];
+    const message = store.createMessage(
+      conversation.id,
+      "Inspect both retained files.",
+      "user",
+      attachments,
+    );
+    const projectedAttachments = attachments.map((attachment) => ({
+      ...attachment,
+      path: attachment.id,
+    }));
+
+    expect(message.attachments).toEqual(projectedAttachments);
+    expect(store.conversationDetail(conversation.id)?.messages)
+      .toContainEqual(expect.objectContaining({
+        id: message.id,
+        attachments: projectedAttachments,
+      }));
+    expect(store.attachments(conversation.id)).toEqual(projectedAttachments);
+    store.close();
+
+    const database = new Database(databasePath, { readonly: true });
+    const persisted = database.prepare(`
+      SELECT attachments_json
+      FROM messages
+      WHERE id = ?
+    `).get(message.id) as { attachments_json: string };
+    database.close();
+    expect(persisted.attachments_json).not.toContain("/private/");
+    expect(JSON.parse(persisted.attachments_json)).toEqual(
+      projectedAttachments,
+    );
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.conversationDetail(conversation.id)?.messages)
+      .toContainEqual(expect.objectContaining({
+        id: message.id,
+        attachments: projectedAttachments,
+      }));
+    expect(reopened.attachments()).toEqual(projectedAttachments);
     reopened.close();
   });
 

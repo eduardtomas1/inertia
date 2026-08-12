@@ -13,6 +13,7 @@ import {
 } from "../../provider/metadata";
 import { legacyModelSelection } from "../codecs";
 import type { AgentTurnRow, ConversationRow } from "../rows";
+import { sanitizePersistedAttachmentCapabilities } from "./attachment-capabilities";
 import {
   createRuntimeMigrationCatalog,
   type DatabaseMigrationDefinition,
@@ -1208,6 +1209,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
       promptPresetMigrationDefinition,
     );
     migrationExtensions.push(providerRunOwnershipMigration);
+    migrationExtensions.push(sanitizePersistedAttachmentCapabilities);
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

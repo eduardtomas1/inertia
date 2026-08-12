@@ -10,10 +10,7 @@ import {
 } from "react";
 
 import type { WorkspacePanelTab } from "../components/WorkspacePanel";
-import {
-  LAST_WORKSPACE_TOOL_KEY,
-  workspacePanelTab,
-} from "../utils/workspaceStartup";
+import { workspacePanelTab } from "../utils/workspaceStartup";
 import { usePersistedSize } from "./usePersistedSize";
 
 const PANE_TOOL_MIN_HEIGHT = 150;
@@ -40,8 +37,7 @@ export interface ConversationPaneLayout {
 
 function initialTool(storageKey: string): WorkspacePanelTab {
   return workspacePanelTab(window.localStorage.getItem(storageKey))
-    ?? workspacePanelTab(window.localStorage.getItem(LAST_WORKSPACE_TOOL_KEY))
-    ?? "terminal";
+    ?? "environment";
 }
 
 interface PersistedPaneToolState {

@@ -8,6 +8,7 @@ const LEGACY_MIGRATED_KEY = "inertia:layout:startup-surface-migrated:v1";
 export const LAST_WORKSPACE_TOOL_KEY = "inertia:layout:last-workspace-tool:v2";
 
 const WORKSPACE_TOOLS = new Set<WorkspacePanelTab>([
+  "environment",
   "changes",
   "files",
   "terminal",
@@ -36,7 +37,7 @@ export function readLegacyWorkspaceStartup(
   const tool = workspacePanelTab(legacy);
   return {
     surface: tool ? "tools" : "summary",
-    tool: tool ?? "terminal",
+    tool: tool ?? "environment",
   };
 }
 

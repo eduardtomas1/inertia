@@ -25,7 +25,6 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { useStableActions } from "../hooks/useStableController";
 import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
-import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
@@ -98,10 +97,6 @@ interface AppLayoutActions {
     paths: string[],
   ) => Promise<void>;
   runProjectAction: (action: ProjectAction) => void;
-  stopWorkspaceRun: (run: Pick<WorkspaceRun, "id" | "label">) => void;
-  openWorkspaceRunPreview: (
-    run: EnvironmentSummarySnapshot["checks"][number],
-  ) => void;
   acknowledgeActivity: (
     activity: Pick<WorkspaceRun, "id" | "label">,
   ) => void;
@@ -132,8 +127,8 @@ interface AppLayoutProps {
   splitConversationId: string | null;
   sceneActiveTool: WorkspacePanelTab | null;
   sceneToggleWorkspaceTools: () => void;
+  sceneOpenEnvironment: () => void;
   workspaceToolsUnavailableReason: string | null;
-  environmentSummary: EnvironmentSummarySnapshot;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
   projectActions: ProjectAction[];
@@ -151,7 +146,6 @@ export function activateNotificationConversation(
     showWorkspace: () => void;
     closeSidebar: () => void;
     closePalette: () => void;
-    closeEnvironment: () => void;
     closeCommitDialog: () => void;
     closePullRequestDialog: () => void;
     closeProviderAuth: () => void;
@@ -162,7 +156,6 @@ export function activateNotificationConversation(
   actions.closeProviderAuth();
   actions.closeSidebar();
   actions.closePalette();
-  actions.closeEnvironment();
   actions.selectConversation(conversation);
   actions.showWorkspace();
 }
@@ -176,7 +169,6 @@ export function formatAppShortcutLabel(
 
 export function activeConversationIsVisible(input: {
   view: "workspace" | "settings";
-  environmentOpen: boolean;
   commitDialogOpen: boolean;
   pullRequestDialogOpen: boolean;
   multiSpawnOpen: boolean;
@@ -185,7 +177,6 @@ export function activeConversationIsVisible(input: {
   mobileSidebarOpen: boolean;
 }): boolean {
   return input.view === "workspace"
-    && !input.environmentOpen
     && !input.commitDialogOpen
     && !input.pullRequestDialogOpen
     && !input.multiSpawnOpen
@@ -216,8 +207,8 @@ export function AppLayout({
   splitConversationId,
   sceneActiveTool,
   sceneToggleWorkspaceTools,
+  sceneOpenEnvironment,
   workspaceToolsUnavailableReason,
-  environmentSummary,
   gitStatus,
   branches,
   projectActions,
@@ -235,8 +226,6 @@ export function AppLayout({
     setSidebarOpen,
     sidebarCollapsed,
     setSidebarCollapsed,
-    environmentOpen,
-    setEnvironmentOpen,
     stackedTools,
     mobileNavigation,
     toolsVisible,
@@ -371,7 +360,6 @@ export function AppLayout({
         showWorkspace: () => setView("workspace"),
         closeSidebar: () => setSidebarOpen(false),
         closePalette: () => setPaletteOpen(false),
-        closeEnvironment: () => setEnvironmentOpen(false),
         closeCommitDialog: () => setCommitDialogOpen(false),
         closePullRequestDialog: () => setPullRequestDialogOpen(false),
         closeProviderAuth: providerAuth.onClose,
@@ -384,7 +372,6 @@ export function AppLayout({
   }, [connection.status]);
   const activeConversationVisible = activeConversationIsVisible({
     view,
-    environmentOpen,
     commitDialogOpen,
     pullRequestDialogOpen,
     multiSpawnOpen: multiSpawn.open,
@@ -487,15 +474,13 @@ export function AppLayout({
             branches={branches}
             actions={projectActions}
             busy={Boolean(busyAction)}
-            environmentSummary={environmentSummary}
-            environmentOpen={environmentOpen}
             onOpenSidebar={() => {
               if (mobileNavigation) setSidebarOpen(true);
               else setSidebarCollapsed((collapsed) => !collapsed);
             }}
             onToggleTools={sceneToggleWorkspaceTools}
             workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-            onSetEnvironmentOpen={setEnvironmentOpen}
+            onOpenEnvironment={sceneOpenEnvironment}
             onCycleTheme={actions.cycleTheme}
             onOpenSettings={() => setView("settings")}
             onOpenConnectionsSettings={actions.openConnectionsSettings}
@@ -515,10 +500,6 @@ export function AppLayout({
               actions.mutateBranch("git.branch.create", name)}
             onCommit={() => setCommitDialogOpen(true)}
             onRunAction={actions.runProjectAction}
-            onStopRun={actions.stopWorkspaceRun}
-            onOpenRunPreview={actions.openWorkspaceRunPreview}
-            onAcknowledgeRun={actions.acknowledgeActivity}
-            onDismissRun={actions.dismissActivity}
             onCreateConversationOnBranch={(branch) =>
               actions.createConversation(project, { kind: "branch", branch })}
             onCreateConversationInWorktree={() => {

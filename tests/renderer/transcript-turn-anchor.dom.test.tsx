@@ -92,9 +92,18 @@ function rect(top: number, height: number): DOMRect {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+async function drainVirtualizerTimers(): Promise<void> {
+  await act(async () => {
+    vi.runOnlyPendingTimers();
+    await Promise.resolve();
+  });
+  vi.useRealTimers();
+}
 
 describe("accepted turn viewport anchoring", () => {
   function renderTimeline(
@@ -258,6 +267,7 @@ describe("accepted turn viewport anchoring", () => {
   });
 
   it("settles an exact turn while the transcript remains virtualized", async () => {
+    vi.useFakeTimers();
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       frames.push(callback);
@@ -315,6 +325,7 @@ describe("accepted turn viewport anchoring", () => {
     expect(settled).toHaveBeenCalledOnce();
     expect(settled).toHaveBeenCalledWith("turn-1");
     expect(cancelled).not.toHaveBeenCalled();
+    await drainVirtualizerTimers();
   });
 });
 
@@ -634,6 +645,7 @@ describe("completed answer positioning", () => {
   });
 
   it("waits for a delayed final answer while the transcript stays virtualized", async () => {
+    vi.useFakeTimers();
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       frames.push(callback);
@@ -710,6 +722,7 @@ describe("completed answer positioning", () => {
     expect(harness.scrollElementRef.current!.scrollTop).toBe(400);
     expect(positioned.mock.calls.map(([event]) => event.status))
       .toEqual(["started", "positioned"]);
+    await drainVirtualizerTimers();
   });
 
   it("does not reposition disabled or already-loaded answers", async () => {

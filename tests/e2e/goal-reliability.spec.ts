@@ -10,6 +10,10 @@ import {
   createAppFixture,
   type RuntimeTestSnapshot,
 } from "./support/app-fixture";
+import {
+  ensureWorkspaceTools,
+  selectWorkspaceTool,
+} from "./support/workspace-tools";
 
 const providerSessionId = "33333333-3333-4333-8333-333333333333";
 
@@ -147,9 +151,8 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
       exact: true,
     })).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
-    const tools = page.getByRole("complementary", { name: "Workspace tools" });
-    await tools.getByRole("tab", { name: /^Goal/u }).click();
+    const tools = await ensureWorkspaceTools(page);
+    await selectWorkspaceTool(tools, "Goal");
     await expect(tools.getByRole("button", { name: "Pause" })).toBeVisible();
 
     await page.getByRole("button", { name: "Stop agent", exact: true }).click();
@@ -193,11 +196,8 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
       "data-connection-status",
       "online",
     );
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
-    const reloadedTools = page.getByRole("complementary", {
-      name: "Workspace tools",
-    });
-    await reloadedTools.getByRole("tab", { name: /^Goal/u }).click();
+    const reloadedTools = await ensureWorkspaceTools(page);
+    await selectWorkspaceTool(reloadedTools, "Goal");
     await expect(reloadedTools.getByText("Ship the reliable goal flow", {
       exact: true,
     })).toBeVisible({ timeout: 10_000 });

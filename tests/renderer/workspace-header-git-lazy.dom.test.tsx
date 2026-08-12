@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
 import type { GitStatusSnapshot, Project } from "../../src/shared/contracts";
 
 const deferredMenu = vi.hoisted(() => {
@@ -60,16 +59,6 @@ const gitStatus: GitStatusSnapshot = {
   deletions: 0,
 };
 
-const summary: EnvironmentSummarySnapshot = {
-  projectName: "Inertia",
-  runtime: { status: "online", label: "Ready" },
-  changes: null,
-  branch: { label: "Branch", value: "feature/pr" },
-  checks: [],
-  subagents: [],
-  attachments: [],
-};
-
 describe("WorkspaceHeader deferred Git menu", () => {
   beforeEach(() => {
     vi.stubGlobal("matchMedia", () => ({
@@ -97,11 +86,9 @@ describe("WorkspaceHeader deferred Git menu", () => {
         branches={[]}
         actions={[]}
         busy={false}
-        environmentSummary={summary}
-        environmentOpen={false}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
-        onSetEnvironmentOpen={vi.fn()}
+        onOpenEnvironment={vi.fn()}
         onCycleTheme={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenConnectionsSettings={vi.fn()}
@@ -117,10 +104,6 @@ describe("WorkspaceHeader deferred Git menu", () => {
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onStopRun={vi.fn()}
-        onOpenRunPreview={vi.fn()}
-        onAcknowledgeRun={vi.fn()}
-        onDismissRun={vi.fn()}
       />,
     );
 

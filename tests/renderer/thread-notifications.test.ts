@@ -46,7 +46,6 @@ describe("thread notifications", () => {
   it("treats settings and modal overlays as obscuring the active chat", () => {
     const visible = {
       view: "workspace" as const,
-      environmentOpen: false,
       commitDialogOpen: false,
       pullRequestDialogOpen: false,
       multiSpawnOpen: false,
@@ -60,8 +59,6 @@ describe("thread notifications", () => {
     expect(activeConversationIsVisible({ ...visible, commitDialogOpen: true }))
       .toBe(false);
     expect(activeConversationIsVisible({ ...visible, paletteOpen: true }))
-      .toBe(false);
-    expect(activeConversationIsVisible({ ...visible, environmentOpen: true }))
       .toBe(false);
   });
 
@@ -78,7 +75,6 @@ describe("thread notifications", () => {
     const showWorkspace = vi.fn();
     const closeSidebar = vi.fn();
     const closePalette = vi.fn();
-    const closeEnvironment = vi.fn();
     const closeCommitDialog = vi.fn(() => calls.push("commit"));
     const closePullRequestDialog = vi.fn(() => calls.push("pull-request"));
     const closeProviderAuth = vi.fn(() => calls.push("provider-auth"));
@@ -89,7 +85,6 @@ describe("thread notifications", () => {
       showWorkspace,
       closeSidebar,
       closePalette,
-      closeEnvironment,
       closeCommitDialog,
       closePullRequestDialog,
       closeProviderAuth,
@@ -105,7 +100,6 @@ describe("thread notifications", () => {
     expect(showWorkspace).toHaveBeenCalledOnce();
     expect(closeSidebar).toHaveBeenCalledOnce();
     expect(closePalette).toHaveBeenCalledOnce();
-    expect(closeEnvironment).toHaveBeenCalledOnce();
     expect(closeCommitDialog).toHaveBeenCalledOnce();
     expect(closePullRequestDialog).toHaveBeenCalledOnce();
     expect(closeProviderAuth).toHaveBeenCalledOnce();

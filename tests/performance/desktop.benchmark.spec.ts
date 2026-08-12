@@ -18,6 +18,7 @@ import {
   TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
 } from "../../src/shared/runtime-command-timeouts";
 import { processExists } from "../e2e/support/app-fixture";
+import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
 const reportPath = resolve(
@@ -1216,9 +1217,9 @@ async function closeSplitChat(page: Page): Promise<void> {
 async function openAndCloseToolCycle(page: Page): Promise<void> {
   await openWorkspaceTools(page);
   const tools = page.getByRole("complementary", { name: "Workspace tools" });
-  await tools.getByRole("tab", { name: /Files/u }).click();
+  await selectWorkspaceTool(tools, "Files");
   await tools.getByRole("tree", { name: "Workspace files" }).waitFor();
-  await tools.getByRole("tab", { name: "Terminal", exact: true }).click();
+  await selectWorkspaceTool(tools, "Terminal");
   await tools.locator(".terminal-panel[data-terminal-id]").waitFor();
   await tools.getByRole("button", { name: "Close terminal" }).first().click();
   await expect(tools.locator(".terminal-panel[data-terminal-id]")).toHaveCount(0);
@@ -1409,12 +1410,12 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     }
     const tools = cold.page.getByRole("complementary", { name: "Workspace tools" });
     const fileTreeStartedAt = performance.now();
-    await tools.getByRole("tab", { name: /Files/u }).click();
+    await selectWorkspaceTool(tools, "Files");
     await tools.getByRole("tree", { name: "Workspace files" }).waitFor();
     const fileTreeMs = performance.now() - fileTreeStartedAt;
 
     const terminalStartedAt = performance.now();
-    await tools.getByRole("tab", { name: "Terminal", exact: true }).click();
+    await selectWorkspaceTool(tools, "Terminal");
     await tools.locator(".terminal-panel[data-terminal-id]").waitFor();
     const terminalStartupMs = performance.now() - terminalStartedAt;
 

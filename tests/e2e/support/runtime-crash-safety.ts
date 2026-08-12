@@ -8,6 +8,10 @@ import {
   type AppFixture,
   type RuntimeTestSnapshot,
 } from "./app-fixture";
+import {
+  ensureWorkspaceTools,
+  selectWorkspaceTool,
+} from "./workspace-tools";
 
 export async function expectRuntimeCrashSafety(app: AppFixture): Promise<void> {
   const { electronApp, page, runtimeSnapshot, testDirectory } = app;
@@ -25,10 +29,8 @@ export async function expectRuntimeCrashSafety(app: AppFixture): Promise<void> {
   const beforeRuntimeGeneration = await page.locator(".app-shell")
     .getAttribute("data-runtime-generation");
   expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await page.getByRole("complementary", { name: "Workspace tools" })
-    .getByRole("tab", { name: "Terminal", exact: true })
-    .click();
+  const tools = await ensureWorkspaceTools(page);
+  await selectWorkspaceTool(tools, "Terminal");
   const terminal = page.locator("aside.terminal-panel").first();
   await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
   const database = new Database(join(testDirectory, "data", "inertia.sqlite"));

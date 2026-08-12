@@ -5,6 +5,7 @@ export const loadCommandPalette = createSurfaceLoader(async () => ({
   default: (await import("./CommandPalette")).CommandPalette,
 }));
 export const loadCommitDialog = createSurfaceLoader(() => import("./CommitDialog"));
+export const loadEnvironmentPanel = createSurfaceLoader(() => import("./EnvironmentPanel"));
 export const loadFilesPanel = createSurfaceLoader(() => import("./FilesPanel"));
 export const loadGoalPanel = createSurfaceLoader(() => import("./GoalPanel"));
 export const loadHistoricalDiffPanel = createSurfaceLoader(() => import("./HistoricalDiffPanel"));
@@ -28,7 +29,9 @@ export function prefetchFrequentSurfaces(): void {
 }
 
 export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
-  if (tab === "changes") {
+  if (tab === "environment") {
+    return;
+  } else if (tab === "changes") {
     void loadWorkspaceChangesPanel();
     void loadHistoricalDiffPanel();
   } else if (tab === "files") {
@@ -39,7 +42,7 @@ export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
     void loadGoalPanel();
   } else if (tab === "plan") {
     void loadPlanPanel();
-  } else {
+  } else if (tab === "preview") {
     void loadPreviewPanel();
   }
 }

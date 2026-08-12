@@ -16,6 +16,8 @@ import {
 import {
   rootGitMutationScope,
   type RootGitMutationScope,
+  type WorkspaceChangesRequest,
+  type WorkspaceChangesRequestedAction,
   workspaceGitRefreshIdentity,
 } from "../../utils/workspaceGit";
 
@@ -63,6 +65,10 @@ export function useWorkspaceGit({
     useState<WorkspaceGitSnapshot | null>(null);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [changesRequest, setChangesRequest] =
+    useState<WorkspaceChangesRequest | null>(null);
+  const changesRequestRevisionRef = useRef(0);
   const [commitReviewRevision, setCommitReviewRevision] = useState(0);
   const projectRefreshIdentity = workspaceGitRefreshIdentity(project);
   const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
@@ -91,7 +97,11 @@ export function useWorkspaceGit({
   ): Promise<void> => {
     if (!project?.id) return Promise.resolve();
     const scope = options?.scope ?? "workspace";
-    if (options?.authoritative) requestGenerationRef.current += 1;
+    if (options?.authoritative) {
+      requestGenerationRef.current += 1;
+      setLoading(true);
+      setLoadError(null);
+    }
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     const identity = `${owner}:${ignoreWhitespace ? "ignore" : "exact"}`;
     const generation = requestGenerationRef.current;
@@ -139,12 +149,12 @@ export function useWorkspaceGit({
       }
     }
 
+    const ownsResponse = (): boolean => (
+      authorityRef.current === owner
+      && requestGenerationRef.current === generation
+    );
     let promise: Promise<void>;
     promise = (async () => {
-      const ownsResponse = (): boolean => (
-        authorityRef.current === owner
-        && requestGenerationRef.current === generation
-      );
       const statusRequest = request({
         type: "git.refresh",
         payload: {
@@ -200,9 +210,29 @@ export function useWorkspaceGit({
       if (ownsResponse() && diffEvent.result.kind === "git.diff") {
         setGitDiff(diffEvent.result.diff);
       }
-    })().finally(() => {
+    })().catch((error: unknown) => {
+      if (ownsResponse()) {
+        setLoadError(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Git changes could not be loaded.",
+        );
+      }
+      throw error;
+    }).finally(() => {
       if (loadGitInFlightRef.current?.promise === promise) {
         loadGitInFlightRef.current = null;
+      }
+      const trailing = trailingGitLoadRef.current;
+      if (
+        authorityRef.current === owner
+        && requestGenerationRef.current === generation
+        && !(
+          trailing?.identity === identity
+          && trailing.generation === generation
+        )
+      ) {
+        setLoading(false);
       }
     });
     loadGitInFlightRef.current = { identity, generation, scope, promise };
@@ -222,7 +252,25 @@ export function useWorkspaceGit({
     setWorkspaceGitStatus(null);
     setBranches([]);
     setLoading(false);
+    setLoadError(null);
+    setChangesRequest(null);
   }, [authority, enabled, projectRefreshIdentity]);
+
+  const requestWorkspaceChanges = useCallback((
+    repositoryPath: string,
+    action: WorkspaceChangesRequestedAction = "review",
+  ): void => {
+    changesRequestRevisionRef.current += 1;
+    setChangesRequest({
+      repositoryPath,
+      action,
+      revision: changesRequestRevisionRef.current,
+    });
+  }, []);
+
+  const clearWorkspaceChangesRequest = useCallback((revision: number): void => {
+    setChangesRequest((current) => current?.revision === revision ? null : current);
+  }, []);
 
   useEffect(() => {
     requestGenerationRef.current += 1;
@@ -237,24 +285,30 @@ export function useWorkspaceGit({
       return;
     }
     let cancelled = false;
+    const owner = authority;
+    const generation = requestGenerationRef.current;
     setLoading(true);
+    setLoadError(null);
     void loadGit({
       scope: loadWorkspaceOnMount ? "workspace" : "status",
     }).catch((error) => {
       if (!cancelled) {
-        setActionError(
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : "Git changes could not be loaded.",
-        );
+        if (
+          authorityRef.current !== owner
+          || requestGenerationRef.current !== generation
+        ) return;
+        const message = error instanceof Error && error.message.trim()
+          ? error.message
+          : "Git changes could not be loaded.";
+        setLoadError(message);
+        setActionError(message);
       }
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
     });
     return () => {
       cancelled = true;
     };
   }, [
+    authority,
     enabled,
     loadGit,
     online,
@@ -377,18 +431,35 @@ export function useWorkspaceGit({
     commitReviewRef.current = null;
     setCommitReviewRevision((current) => current + 1);
     setLoading(true);
-    void loadGit({
+    setLoadError(null);
+    const owner = `${project.id}:${conversation?.id ?? ""}`;
+    const refresh = loadGit({
       authoritative: true,
       scope: loadWorkspaceOnMount ? "workspace" : "status",
-    }).then(() => {
+    });
+    const generation = requestGenerationRef.current;
+    void refresh.then(() => {
+      if (
+        authorityRef.current !== owner
+        || requestGenerationRef.current !== generation
+      ) return;
       loadBranches();
     }).catch((error) => {
-      setActionError(
-        error instanceof Error && error.message.trim()
-          ? error.message
-          : "Git changes could not be reconciled.",
-      );
-    }).finally(() => setLoading(false));
+      if (
+        authorityRef.current !== owner
+        || requestGenerationRef.current !== generation
+      ) return;
+      const message = error instanceof Error && error.message.trim()
+        ? error.message
+        : "Git changes could not be reconciled.";
+      setLoadError(message);
+      setActionError(message);
+    }).finally(() => {
+      if (
+        authorityRef.current === owner
+        && requestGenerationRef.current === generation
+      ) setLoading(false);
+    });
   }), [
     conversation?.id,
     enabled,
@@ -495,6 +566,7 @@ export function useWorkspaceGit({
     workspaceGitStatus,
     branches,
     loading,
+    loadError,
     loadGit,
     loadWorkspaceRepositoryDiff,
     loadCommitReview,
@@ -503,5 +575,8 @@ export function useWorkspaceGit({
     loadBranches,
     mutateBranch,
     commit,
+    changesRequest,
+    requestWorkspaceChanges,
+    clearWorkspaceChangesRequest,
   };
 }

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -49,7 +50,7 @@ test("opens the command palette and manages a thread", async () => {
   if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
     await page.getByRole("button", { name: "Open workspace tools" }).click();
   }
-  await page.getByRole("tab", { name: "Terminal", exact: true }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
   const terminalInput = page.locator(".xterm-helper-textarea").first();
   await terminalInput.focus();
   await page.keyboard.press("Control+K");

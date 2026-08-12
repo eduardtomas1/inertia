@@ -41,6 +41,8 @@ export interface ProviderDetection {
   installState: ProviderInstallState;
   authState: ProviderAuthState;
   canRun: boolean;
+  /** Fixed probe owner completion; false poisons clean runtime shutdown. */
+  cleanupConfirmed: boolean;
   statusMessage?: string;
 }
 
@@ -75,6 +77,18 @@ interface ProviderRunRequest {
   sessionId?: string;
   imagePaths?: readonly string[];
   skills?: readonly ProviderSkillInput[];
+  /**
+   * Privileged Codex-only launch mode for a user-authored native goal. The
+   * App Server owns the automatic turns started by this mutation; `prompt`
+   * remains the durable visible request label and is not sent as a turn.
+   */
+  goalStart?: {
+    objective?: string;
+    tokenBudget?: number | null;
+  };
+  /** Saved evidence used only to keep a resumed Codex run alive long enough
+   * for an active goal's provider-authored continuation to start. */
+  goalContinuationExpected?: boolean;
 }
 
 export type ProviderRunInput = ProviderRunRequest &
@@ -97,6 +111,7 @@ export const PROVIDER_FAILURE_REASONS = [
   "process-exit",
   "process-signal",
   "rpc-timeout",
+  "goal-continuation-timeout",
   "codex-error",
   "transport-closed",
 ] as const;
@@ -189,6 +204,12 @@ export interface ProviderGoalSnapshot {
   timeUsedSeconds: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProviderGoalMutation {
+  objective?: string;
+  status: AgentGoalStatus;
+  tokenBudget?: number | null;
 }
 
 /** A provider-authored update to the current goal for one native session. */
@@ -299,6 +320,8 @@ export interface ProviderRunResult {
   signal: NodeJS.Signals | null;
   error?: string;
   failure?: ProviderRunFailure;
+  /** True only after authoritative complete process-tree cleanup. */
+  cleanupConfirmed: boolean;
 }
 
 export type ProviderRuntimeErrorCode = "invalid_input" | "already_running";

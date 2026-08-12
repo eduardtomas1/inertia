@@ -21,6 +21,28 @@ const summary: EnvironmentSummarySnapshot = {
   attachments: [],
 };
 
+type EnvironmentCheck = EnvironmentSummarySnapshot["checks"][number];
+
+function environmentCheck(
+  overrides: Partial<EnvironmentCheck>,
+): EnvironmentCheck {
+  return {
+    id: "check",
+    kind: "check",
+    projectId: "project-1",
+    conversationId: null,
+    label: "Check",
+    status: "running",
+    canStop: false,
+    port: null,
+    contextLabel: null,
+    canOpenPreview: false,
+    canAcknowledge: false,
+    canDismiss: false,
+    ...overrides,
+  };
+}
+
 const project: Project = {
   id: "11111111-1111-4111-8111-111111111111",
   name: "Inertia",
@@ -39,14 +61,32 @@ const project: Project = {
 
 function HeaderHarness({
   activeProject = null,
+  environmentSummary = summary,
   workspaceToolsUnavailableReason = null,
   onOpenSettings = vi.fn(),
   onOpenConnectionsSettings = vi.fn(),
+  onStopRun = vi.fn(),
+  onOpenRunPreview = vi.fn(),
+  onAcknowledgeRun = vi.fn(),
+  onDismissRun = vi.fn(),
 }: {
   activeProject?: Project | null;
+  environmentSummary?: EnvironmentSummarySnapshot;
   workspaceToolsUnavailableReason?: string | null;
   onOpenSettings?: () => void;
   onOpenConnectionsSettings?: () => void;
+  onStopRun?: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onOpenRunPreview?: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onAcknowledgeRun?: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
+  onDismissRun?: (
+    run: EnvironmentSummarySnapshot["checks"][number],
+  ) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(true);
   return (
@@ -62,10 +102,7 @@ function HeaderHarness({
         branches={[]}
         actions={[]}
         busy={false}
-        activityOpen={false}
-        activeRunCount={0}
-        attentionRunCount={0}
-        environmentSummary={summary}
+        environmentSummary={environmentSummary}
         environmentOpen={open}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
@@ -86,7 +123,10 @@ function HeaderHarness({
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onToggleActivity={vi.fn()}
+        onStopRun={onStopRun}
+        onOpenRunPreview={onOpenRunPreview}
+        onAcknowledgeRun={onAcknowledgeRun}
+        onDismissRun={onDismissRun}
       />
       <button type="button">Outside</button>
     </>
@@ -126,6 +166,250 @@ describe("environment summary header popover", () => {
     expect(screen.getByRole("button", {
       name: "Open environment summary",
     })).toHaveFocus();
+  });
+
+  it("offers an accessible exact-run stop for every stoppable active item", () => {
+    const onStopRun = vi.fn();
+    const onOpenRunPreview = vi.fn();
+    const onAcknowledgeRun = vi.fn();
+    const onDismissRun = vi.fn();
+    const preview = {
+      id: "preview-service",
+      kind: "service" as const,
+      projectId: "project-2",
+      conversationId: "conversation-2",
+      label: "Preview service",
+      status: "running" as const,
+      canStop: true,
+      port: 4173,
+      contextLabel: "Docs · Docs chat (docs/preview) · npm run preview",
+      canOpenPreview: true,
+      canAcknowledge: false,
+      canDismiss: false,
+    };
+    const failed = {
+      id: "failed-check",
+      kind: "check" as const,
+      projectId: "project-1",
+      conversationId: null,
+      label: "Typecheck",
+      status: "failed" as const,
+      canStop: false,
+      port: null,
+      contextLabel: null,
+      canOpenPreview: false,
+      canAcknowledge: true,
+      canDismiss: true,
+    };
+    render(
+      <HeaderHarness
+        environmentSummary={{
+          ...summary,
+          checks: [preview, failed],
+        }}
+        onStopRun={onStopRun}
+        onOpenRunPreview={onOpenRunPreview}
+        onAcknowledgeRun={onAcknowledgeRun}
+        onDismissRun={onDismissRun}
+      />,
+    );
+
+    const stop = screen.getByRole("button", {
+      name: "Stop Preview service · Docs · Docs chat (docs/preview) · npm run preview",
+    });
+    stop.focus();
+    expect(stop).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Stop Typecheck" }))
+      .not.toBeInTheDocument();
+
+    fireEvent.click(stop);
+    expect(onStopRun).toHaveBeenCalledWith(preview);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Open preview for Preview service · Docs · Docs chat (docs/preview) · npm run preview",
+    }));
+    expect(onOpenRunPreview).toHaveBeenCalledWith(preview);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Acknowledge Typecheck",
+    }));
+    expect(onAcknowledgeRun).toHaveBeenCalledWith(failed);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Dismiss Typecheck",
+    }));
+    expect(onDismissRun).toHaveBeenCalledWith(failed);
+  });
+
+  it("disambiguates actions for identical failures owned by sibling chats", () => {
+    const currentFailure = environmentCheck({
+      id: "current-failure",
+      conversationId: "conversation-1",
+      label: "Typecheck",
+      status: "failed",
+      canAcknowledge: true,
+      canDismiss: true,
+    });
+    const siblingFailure = environmentCheck({
+      id: "sibling-failure",
+      conversationId: "conversation-2",
+      label: "Typecheck",
+      status: "failed",
+      contextLabel: "Release chat (codex/release)",
+      canAcknowledge: true,
+      canDismiss: true,
+    });
+
+    render(<HeaderHarness environmentSummary={{
+      ...summary,
+      checks: [currentFailure, siblingFailure],
+    }} />);
+
+    expect(screen.getByRole("button", { name: "Acknowledge Typecheck" }))
+      .toBeVisible();
+    expect(screen.getByRole("button", {
+      name: "Acknowledge Typecheck · Release chat (codex/release)",
+    })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Dismiss Typecheck" }))
+      .toBeVisible();
+    expect(screen.getByRole("button", {
+      name: "Dismiss Typecheck · Release chat (codex/release)",
+    })).toBeVisible();
+  });
+
+  it("moves focus to the next run control when an action removes its row", () => {
+    const running = environmentCheck({
+      id: "running-check",
+      label: "Build",
+      canStop: true,
+    });
+    const failed = environmentCheck({
+      id: "failed-check",
+      label: "Typecheck",
+      status: "failed",
+      canAcknowledge: true,
+      canDismiss: true,
+    });
+    const view = render(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [running, failed],
+      }} />,
+    );
+    const stop = screen.getByRole("button", { name: "Stop Build" });
+    stop.focus();
+
+    fireEvent.click(stop);
+    view.rerender(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [failed],
+      }} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Acknowledge Typecheck" }))
+      .toHaveFocus();
+  });
+
+  it("keeps focus in a run row when its activated action disappears", () => {
+    const running = environmentCheck({
+      id: "running-check",
+      label: "Preview",
+      canStop: true,
+      canOpenPreview: true,
+    });
+    const view = render(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [running],
+      }} />,
+    );
+    const stop = screen.getByRole("button", { name: "Stop Preview" });
+    stop.focus();
+
+    fireEvent.click(stop);
+    view.rerender(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [{ ...running, canStop: false }],
+      }} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Open preview for Preview" }))
+      .toHaveFocus();
+  });
+
+  it.each([
+    {
+      actionName: "Stop Build",
+      check: environmentCheck({
+        id: "running-check",
+        label: "Build",
+        canStop: true,
+      }),
+    },
+    {
+      actionName: "Acknowledge Typecheck",
+      check: environmentCheck({
+        id: "failed-check",
+        label: "Typecheck",
+        status: "failed",
+        canAcknowledge: true,
+      }),
+    },
+    {
+      actionName: "Dismiss Typecheck",
+      check: environmentCheck({
+        id: "failed-check",
+        label: "Typecheck",
+        status: "failed",
+        canDismiss: true,
+      }),
+    },
+  ])("returns focus to Environment after $actionName removes the final row", ({
+    actionName,
+    check,
+  }) => {
+    const view = render(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [check],
+      }} />,
+    );
+    const action = screen.getByRole("button", { name: actionName });
+    action.focus();
+
+    fireEvent.click(action);
+    view.rerender(
+      <HeaderHarness environmentSummary={{ ...summary, checks: [] }} />,
+    );
+
+    expect(screen.getByRole("button", {
+      name: "Close environment summary",
+    })).toHaveFocus();
+  });
+
+  it("does not steal focus when the user leaves a run action before its row disappears", () => {
+    const running = environmentCheck({
+      id: "running-check",
+      label: "Build",
+      canStop: true,
+    });
+    const view = render(
+      <HeaderHarness environmentSummary={{
+        ...summary,
+        checks: [running],
+      }} />,
+    );
+    const stop = screen.getByRole("button", { name: "Stop Build" });
+    const outside = screen.getByRole("button", { name: "Outside" });
+    stop.focus();
+    fireEvent.click(stop);
+    outside.focus();
+
+    view.rerender(
+      <HeaderHarness environmentSummary={{ ...summary, checks: [] }} />,
+    );
+
+    expect(outside).toHaveFocus();
   });
 
   it("routes the Private Connect indicator directly to Connections & devices settings", async () => {

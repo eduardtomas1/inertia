@@ -136,7 +136,7 @@ function buildRuntimeWorkers(): string {
 }
 
 describe("runtime recovery supervisor integration", () => {
-  it("force-terminates a post-rename import, reconciles on restart, and retries once", async () => {
+  it("force-terminates a post-rename import and keeps replacement mutations locked", async () => {
     const testRoot = mkdtempSync(join(tmpdir(), "inertia-recovery-supervisor-"));
     temporaryDirectories.push(testRoot);
     const dataDirectory = join(testRoot, "data");
@@ -253,36 +253,13 @@ describe("runtime recovery supervisor integration", () => {
     expect(existsSync(targetDirectory)).toBe(true);
     await expect(readdir(targetDirectory)).resolves.toEqual([]);
 
-    const retry = await supervisor.databaseRecovery(
+    await expect(supervisor.databaseRecovery(
       "import",
       recoveryPath,
       targetDirectory,
-    );
-    const duplicate = await supervisor.databaseRecovery(
-      "import",
-      recoveryPath,
-      targetDirectory,
-    );
-    expect(retry).toMatchObject({ projects: 2, alreadyImported: false });
-    expect(duplicate).toMatchObject({ projects: 2, alreadyImported: true });
+    )).rejects.toThrow(/recovery safety mode.*prior runtime-owned process/iu);
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 2 });
-    const database = new Database(join(dataDirectory, "inertia.sqlite"), {
-      readonly: true,
-    });
-    const counts = database.prepare(`
-      SELECT
-        (SELECT COUNT(*) FROM recovery_import_journals) AS journals,
-        (SELECT COUNT(*) FROM recovery_import_receipts) AS receipts,
-        (SELECT COUNT(*) FROM projects) AS projects
-    `).get();
-    const projectPaths = (database.prepare(
-      "SELECT path FROM projects ORDER BY path",
-    ).all() as Array<{ path: string }>).map(({ path }) => path);
-    database.close();
-    expect(counts).toEqual({ journals: 0, receipts: 1, projects: 2 });
-    expect(projectPaths).toHaveLength(2);
-    expect(projectPaths.every((path) => existsSync(path))).toBe(true);
-    await expect(supervisor.stop()).resolves.toBe(true);
+    await expect(supervisor.stop()).resolves.toBe(false);
   }, 30_000);
 
   it("cancels a near-limit import while its isolated transaction is busy", async () => {

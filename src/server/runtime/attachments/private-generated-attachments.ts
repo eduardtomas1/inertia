@@ -21,6 +21,8 @@ const TRANSIENT_UNLINK_CODES = new Set(["EACCES", "EBUSY", "EPERM", "ETXTBSY"]);
 export interface PrivateGeneratedAttachmentStoreLimits {
   readonly maxBytes?: number;
   readonly maxRecords?: number;
+  /** Retain and inventory prior files while provider cleanup is unconfirmed. */
+  readonly preserveExisting?: boolean;
 }
 
 function errorCode(error: unknown): string | null {
@@ -87,7 +89,7 @@ async function secureGeneratedDirectory(dataDirectory: string): Promise<string> 
 }
 
 export class PrivateGeneratedAttachmentStore {
-  private readonly records = new Map<string, number>();
+  private readonly records: Map<string, number>;
   private readonly maxBytes: number;
   private readonly maxRecords: number;
   private mutationTail: Promise<void> = Promise.resolve();
@@ -95,7 +97,9 @@ export class PrivateGeneratedAttachmentStore {
   private constructor(
     readonly directory: string,
     limits: PrivateGeneratedAttachmentStoreLimits,
+    records: Map<string, number>,
   ) {
+    this.records = records;
     this.maxBytes = Math.max(1, Math.min(
       MAX_GENERATED_BYTES,
       Math.trunc(limits.maxBytes ?? MAX_GENERATED_BYTES),
@@ -111,18 +115,29 @@ export class PrivateGeneratedAttachmentStore {
     limits: PrivateGeneratedAttachmentStoreLimits = {},
   ): Promise<PrivateGeneratedAttachmentStore> {
     const directory = await secureGeneratedDirectory(resolve(dataDirectory));
+    const records = new Map<string, number>();
     for (const name of await readdir(directory)) {
       if (!GENERATED_JPEG_NAME.test(name)) {
         throw new Error("Generated attachment storage contains an unexpected entry.");
       }
       const path = join(directory, name);
       const info = await lstat(path);
-      if (!info.isFile() && !info.isSymbolicLink()) {
-        throw new Error("Generated attachment storage contains an unsafe entry.");
+      if (!info.isFile() || info.isSymbolicLink()) {
+        if (limits.preserveExisting) {
+          throw new Error("Generated attachment storage contains an unsafe entry.");
+        }
+        await unlinkGenerated(path);
+        continue;
       }
-      await unlinkGenerated(path);
+      if (limits.preserveExisting) records.set(path, info.size);
+      else await unlinkGenerated(path);
     }
-    return new PrivateGeneratedAttachmentStore(directory, limits);
+    const store = new PrivateGeneratedAttachmentStore(directory, limits, records);
+    const usage = store.usage();
+    if (usage.records > store.maxRecords || usage.bytes > store.maxBytes) {
+      throw new Error("Generated attachment storage exceeds its safe capacity.");
+    }
+    return store;
   }
 
   usage(): { bytes: number; records: number } {

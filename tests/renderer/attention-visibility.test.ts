@@ -77,7 +77,7 @@ describe("active transcript attention visibility", () => {
 
   it("treats the multi-spawn dialog as a completion obstruction", () => {
     const unobstructed = {
-      activityOpen: false,
+      environmentOpen: false,
       paletteOpen: false,
       commitDialogOpen: false,
       authProviderOpen: false,
@@ -88,6 +88,10 @@ describe("active transcript attention visibility", () => {
     expect(workspaceAttentionObstructed({
       ...unobstructed,
       multiSpawnOpen: true,
+    })).toBe(true);
+    expect(workspaceAttentionObstructed({
+      ...unobstructed,
+      environmentOpen: true,
     })).toBe(true);
     expect(shouldMarkWorkspaceRunSeen(
       run(),

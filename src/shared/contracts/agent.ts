@@ -86,6 +86,7 @@ export interface TurnRequestContext {
 export interface ChatAttachment {
   id: string;
   name: string;
+  /** Renderer projections use the opaque attachment id; only privileged code may carry a local path. */
   path: string;
   mimeType: ChatAttachmentMimeType;
   size: number;

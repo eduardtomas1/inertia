@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ActivityCenter } from "../../src/renderer/src/components/ActivityCenter";
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
 import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
 import { EnvironmentSummary } from "../../src/renderer/src/components/EnvironmentSummary";
@@ -323,33 +322,6 @@ describe("trusted overlay native preview suspension", () => {
     await expectRestored();
   });
 
-  it("owns the activity center lifecycle", async () => {
-    const props = {
-      now: Date.now(),
-      runs: [],
-      projects: [],
-      conversations: [],
-      onClose: vi.fn(),
-      onOpenThread: vi.fn(),
-      onOpenLocation: vi.fn(),
-      onOpenTerminal: vi.fn(),
-      onOpenPreview: vi.fn(),
-      onStop: vi.fn(),
-      onRerun: vi.fn(),
-      onMarkSeen: vi.fn(),
-      onAcknowledge: vi.fn(),
-      onDismiss: vi.fn(),
-    };
-    const view = render(<ActivityCenter open {...props} />);
-
-    expect(screen.getByRole("dialog", { name: "Runs" }))
-      .toBeInTheDocument();
-    await expectSuspended();
-
-    view.rerender(<ActivityCenter open={false} {...props} />);
-    await expectRestored();
-  });
-
   it("owns the command palette lifecycle", async () => {
     const props = {
       projects: [],
@@ -373,7 +345,16 @@ describe("trusted overlay native preview suspension", () => {
   });
 
   it("suspends for the mounted environment summary", async () => {
-    const view = render(<EnvironmentSummary summary={environmentSummary} />);
+    const view = render(
+      <EnvironmentSummary
+        summary={environmentSummary}
+        onStopRun={vi.fn()}
+        onOpenRunPreview={vi.fn()}
+        onAcknowledgeRun={vi.fn()}
+        onDismissRun={vi.fn()}
+        onRestoreActionFocus={vi.fn()}
+      />,
+    );
 
     expect(screen.getByRole("dialog", { name: "Environment summary" }))
       .toBeInTheDocument();

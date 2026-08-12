@@ -135,6 +135,7 @@ class ControlledProvider implements TurnProviderRuntime {
       textTruncated: false,
       exitCode: 0,
       signal: null,
+      cleanupConfirmed: true,
       ...result,
     });
   }

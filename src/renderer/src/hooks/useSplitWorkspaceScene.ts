@@ -37,7 +37,11 @@ import {
 import { planFromText } from "../utils/planFromText";
 import { requestComposerPrefill } from "../utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "../utils/subagentDisclosure";
-import { useActivityActions } from "./useActivityActions";
+import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
+import {
+  useActivityActions,
+  type PreviewWorkspaceRun,
+} from "./useActivityActions";
 import {
   agentWorkflowRouteIdentity,
   useAgentWorkflows,
@@ -60,13 +64,15 @@ type Connection = ReturnType<typeof useInertiaConnection>;
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
-type ActivityActions = ReturnType<typeof useActivityActions>;
 
 const ignoreLatestContentVisibility = (): void => undefined;
+const focusSecondaryPreview = (): void => {
+  focusWorkspacePreviewAddress("secondary");
+};
 
 export interface SplitWorkspaceSceneController {
   scene: WorkspaceSceneProps["splitScene"];
-  activityActions: ActivityActions;
+  openWorkspaceRunPreview: (run: PreviewWorkspaceRun) => void;
 }
 
 interface SplitWorkspaceActions
@@ -112,7 +118,6 @@ interface UseSplitWorkspaceSceneOptions {
   busyAction: string | null;
   setBusyAction: Dispatch<SetStateAction<string | null>>;
   setActionError: Dispatch<SetStateAction<string | null>>;
-  setActivityOpen: (open: boolean) => void;
   gitRefreshVersion: number;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   actions: SplitWorkspaceActions;
@@ -145,7 +150,6 @@ export function useSplitWorkspaceScene({
   busyAction,
   setBusyAction,
   setActionError,
-  setActivityOpen,
   gitRefreshVersion,
   request,
   actions,
@@ -240,20 +244,27 @@ export function useSplitWorkspaceScene({
     previewOwnerId: "secondary",
     previewContextId: splitConversation?.id ?? null,
   }));
+  const activatePreviewContext = useCallback((run: PreviewWorkspaceRun) => {
+    if (
+      !splitProject
+      || !splitConversation
+      || run.projectId !== splitProject.id
+      || run.conversationId !== splitConversation.id
+    ) {
+      return false;
+    }
+    layout.setActiveTool("preview");
+    return true;
+  }, [layout, splitConversation, splitProject]);
   const activityActions = useStableController(useActivityActions({
-    snapshot: connection.snapshot,
     project: splitProject,
     conversationId: splitConversation?.id ?? null,
-    request,
     run,
     setActiveTool: layout.setActiveTool,
-    setActivityOpen,
     setActionError,
-    activateContext: (_activity, tool) => {
-      if (tool) layout.setActiveTool(tool);
-    },
-    openProjectPath: actions.openProjectPath,
+    activateContext: activatePreviewContext,
     navigatePreview: desktopTools.navigatePreview,
+    focusPreview: focusSecondaryPreview,
   }));
   const planSteps = useMemo(() => {
     if (!splitConversation) return [];
@@ -476,6 +487,6 @@ export function useSplitWorkspaceScene({
   ]);
   return useMemo(() => ({
     scene,
-    activityActions,
-  }), [activityActions, scene]);
+    openWorkspaceRunPreview: activityActions.openWorkspaceRunPreview,
+  }), [activityActions.openWorkspaceRunPreview, scene]);
 }

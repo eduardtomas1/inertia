@@ -468,6 +468,12 @@ export class IsolatedRunController<Owner extends object> {
       if (first.kind === "provider-error") throw new IsolatedRunError("provider-failed");
       if (first.result.status === "cancelled") throw new IsolatedRunError("provider-cancelled");
       if (first.result.status !== "completed") throw new IsolatedRunError("provider-failed");
+      if (first.result.cleanupConfirmed !== true) {
+        throw new IsolatedRunError(
+          "provider-failed",
+          "Provider process cleanup could not be confirmed.",
+        );
+      }
       if (first.result.textTruncated || outputExceeded) throw new IsolatedRunError("output-limit");
 
       const text = (first.result.text || streamed).slice(0, outputLimit);
@@ -566,15 +572,22 @@ export class IsolatedRunController<Owner extends object> {
 
   async dispose(cause: "runtime-shutdown" | "runtime-crash" = "runtime-shutdown"): Promise<void> {
     if (this.closing) {
-      await Promise.allSettled(
-        [...this.activeByConversation.values()].map(({ finished }) => finished.promise),
-      );
+      if (this.activeByConversation.size > 0) {
+        throw new Error("Isolated provider cleanup remains unconfirmed.");
+      }
       return;
     }
     this.closing = true;
     const active = [...this.activeByConversation.values()];
     for (const task of active) this.requestStop(task, cause);
-    await Promise.allSettled(active.map(({ finished }) => finished.promise));
+    await Promise.allSettled(active.map((task) => this.settleAndCleanup(
+      task,
+      task.stopOutcome?.reason ?? cause,
+      task.stopOutcome?.message ?? stopMessage(cause),
+    )));
+    if (this.activeByConversation.size > 0) {
+      throw new Error("Isolated provider cleanup remains unconfirmed.");
+    }
   }
 
   private requestStop(
@@ -632,10 +645,22 @@ export class IsolatedRunController<Owner extends object> {
     reason: IsolatedRunStopReason,
     detail: string,
   ): Promise<void> {
-    active.cleanupPromise ??= (async () => {
+    if (active.cleanupPromise) return active.cleanupPromise;
+    let released = false;
+    const cleanup = (async () => {
       if (active.timeout) clearTimeout(active.timeout);
       if (reason !== "completed" && active.providerStarted) {
-        await this.stopProvider(active).catch(() => "force-detached");
+        const providerStop = await this.stopProvider(active)
+          .catch(() => "force-detached" as const);
+        if (
+          providerStop !== "settled"
+          && !(providerStop === "missing" && !this.providers.isRunning(
+            active.providerConversationId,
+          ))
+        ) {
+          active.providerStopPromise = null;
+          return;
+        }
       }
       if (!active.workspaceSettled) {
         active.workspaceSettled = true;
@@ -660,8 +685,15 @@ export class IsolatedRunController<Owner extends object> {
         this.activeByWorkspaceRun.delete(active.workspaceRunId);
       }
       active.finished.resolve();
+      released = true;
     })();
-    return active.cleanupPromise;
+    active.cleanupPromise = cleanup;
+    void cleanup.finally(() => {
+      if (!released && active.cleanupPromise === cleanup) {
+        active.cleanupPromise = null;
+      }
+    }).catch(() => undefined);
+    return cleanup;
   }
 
   private safeBroadcast(): void {

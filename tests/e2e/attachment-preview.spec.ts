@@ -288,7 +288,9 @@ test("opens secure image and Linux-style clipboard PDF previews", async ({
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("sends a Linux-style pasted PDF as verified agent context", async () => {
+test("sends a Linux-style pasted PDF as verified agent context", async ({
+  browserName: _browserName,
+}, testInfo) => {
   const pdfBytes = readablePdf();
   await app.resizeWindow(1_280, 820);
   const composer = page.locator(".composer");
@@ -310,6 +312,11 @@ test("sends a Linux-style pasted PDF as verified agent context", async () => {
   const attachments = composer.getByRole("list", { name: "Attachments" });
   await expect(attachments.getByText("linux-send.pdf", { exact: true }))
     .toBeVisible();
+  const selectedPdfSource = await attachments.getByRole("button", {
+    name: "Preview attachment linux-send.pdf",
+  }).getAttribute("data-preview-source");
+  const selectedPdfId = selectedPdfSource?.split("/").at(-1);
+  expect(selectedPdfId).toMatch(/^[0-9a-f-]{36}$/u);
   await textarea.fill("Summarize the attached PDF.");
   await expect(composer.getByRole("button", { name: "Send message" }))
     .toBeEnabled();
@@ -325,6 +332,78 @@ test("sends a Linux-style pasted PDF as verified agent context", async () => {
   // seconds cold-loading the bounded PDF stack. Keep this assertion inside
   // the production initialization deadline instead of racing valid work.
   await expect(acceptedRequest).toBeVisible({ timeout: 30_000 });
+  const retainedDocument = page.getByRole("button", {
+    name: "Preview attachment linux-send.pdf",
+  });
+  await expect(retainedDocument).toBeVisible();
+  await expect(page.getByText(
+    `PDF document · ${pdfBytes.length} B`,
+    { exact: true },
+  ))
+    .toBeVisible();
+  const sentPdfScreenshot = testInfo.outputPath(
+    "sent-pdf-attachment-1280x820.png",
+  );
+  await page.screenshot({ animations: "disabled", path: sentPdfScreenshot });
+  await testInfo.attach("sent-pdf-attachment-1280x820", {
+    path: sentPdfScreenshot,
+    contentType: "image/png",
+  });
+  await retainedDocument.click();
+  const retainedDialog = page.getByRole("dialog", { name: "linux-send.pdf" });
+  await expect(retainedDialog.getByRole("img", {
+    name: "linux-send.pdf, page 1",
+  })).toBeVisible();
+  const durablePdfPath = join(
+    app.testDirectory,
+    "data",
+    "conversation-attachments",
+    selectedPdfId!,
+    `${selectedPdfId}.pdf`,
+  );
+  const replacementPdf = Buffer.from(pdfBytes);
+  replacementPdf[replacementPdf.length - 1] =
+    replacementPdf[replacementPdf.length - 1]! ^ 0x01;
+  await electronApp.evaluate(({ shell }) => {
+    Reflect.set(globalThis, "__openedAttachmentPath", null);
+    Reflect.set(globalThis, "__pendingAttachmentPath", null);
+    Reflect.set(globalThis, "__finishOpeningAttachment", null);
+    Reflect.set(shell, "openPath", (path: string) => {
+      Reflect.set(globalThis, "__pendingAttachmentPath", path);
+      return new Promise<string>((resolve) => {
+        Reflect.set(globalThis, "__finishOpeningAttachment", () => {
+          Reflect.set(globalThis, "__openedAttachmentPath", path);
+          resolve("");
+        });
+      });
+    });
+  });
+  await retainedDialog.getByRole("button", { name: "Open in PDF app" })
+    .click();
+  await expect.poll(() => electronApp.evaluate(() =>
+    Reflect.get(globalThis, "__pendingAttachmentPath") as string | null))
+    .not.toBeNull();
+  const retainedPath = await electronApp.evaluate(() =>
+    Reflect.get(globalThis, "__pendingAttachmentPath") as string);
+  await writeFile(durablePdfPath, replacementPdf);
+  expect(basename(retainedPath)).toMatch(/^[0-9a-f-]{36}\.pdf$/u);
+  expect(retainedPath).toContain(join("inertia-attachments", ""));
+  expect(retainedPath).not.toBe(durablePdfPath);
+  await expect(readFile(retainedPath)).resolves.toEqual(pdfBytes);
+  await expect(readFile(durablePdfPath)).resolves.toEqual(replacementPdf);
+  await electronApp.evaluate(() => {
+    const finish = Reflect.get(
+      globalThis,
+      "__finishOpeningAttachment",
+    ) as (() => void) | null;
+    finish?.();
+  });
+  await expect.poll(() => electronApp.evaluate(() =>
+    Reflect.get(globalThis, "__openedAttachmentPath") as string | null))
+    .toBe(retainedPath);
+  expect(await retainedDialog.textContent()).not.toContain(retainedPath);
+  await writeFile(durablePdfPath, pdfBytes);
+  await page.keyboard.press("Escape");
   await expect(attachments).toHaveCount(0);
   await expect(textarea).toHaveValue("");
   await expect(page.getByRole("alert")).toHaveCount(0);

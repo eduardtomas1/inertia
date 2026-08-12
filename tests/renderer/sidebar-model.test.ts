@@ -465,7 +465,7 @@ describe("work-first chat model", () => {
     expect(hasUnreadCompletion({ ...completed, completedAt: null }, null)).toBe(false);
   });
 
-  it("joins Work to the same persisted run attention state used by Runs", () => {
+  it("joins Work to the persisted workspace-run attention state", () => {
     const entries = ["failed", "acknowledged", "completed", "dismissed", "working"]
       .map((id) => conversation({ id, projectId: "p" }));
     const runs = [

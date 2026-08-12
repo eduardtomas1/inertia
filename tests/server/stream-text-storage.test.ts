@@ -435,6 +435,8 @@ describe("append-oriented stream text persistence", () => {
 
     const old = new Database(current.databasePath);
     old.exec(`
+      DROP TABLE provider_run_ownership;
+      DROP INDEX agent_turns_provider_run_identity_idx;
       DROP TABLE recovery_import_journals;
       DROP TABLE recovery_import_receipts;
       DROP TABLE message_content_chunks;
@@ -483,6 +485,8 @@ describe("append-oriented stream text persistence", () => {
 
     const old = new Database(current.databasePath);
     old.exec(`
+      DROP TABLE provider_run_ownership;
+      DROP INDEX agent_turns_provider_run_identity_idx;
       DROP INDEX message_content_chunks_message_sequence_idx;
       ALTER TABLE message_content_chunks RENAME TO message_content_chunks_v44_source;
       CREATE TABLE message_content_chunks (

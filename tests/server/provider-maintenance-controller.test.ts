@@ -66,6 +66,7 @@ function success(
     exitCode: 0,
     signal: null,
     message: "Provider update command completed.",
+    cleanupConfirmed: true,
     output,
     outputTruncated: false,
   };
@@ -345,5 +346,28 @@ describe("ProviderMaintenanceController", () => {
     expect(await waitForTerminal(operations, started.id)).toMatchObject({
       status: "cancelled",
     });
+  });
+
+  it("keeps an unconfirmed updater cleanup latched through disposal", async () => {
+    const operations: ProviderMaintenanceOperation[] = [];
+    const controller = new ProviderMaintenanceController({
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      resolveCapabilities: async ({ providerId }) => capabilities(providerId),
+      runAction: async () => ({
+        ...success(null),
+        status: "failed",
+        message: "Provider update cleanup could not be confirmed.",
+        cleanupConfirmed: false,
+      }),
+      operationId: operationIds(),
+      onOperation: (operation) => operations.push(operation),
+    });
+    const started = await controller.startUpdate("claude");
+
+    await waitForTerminal(operations, started.id);
+    await expect(controller.dispose()).rejects.toThrow(
+      "Provider maintenance process cleanup could not be confirmed.",
+    );
   });
 });

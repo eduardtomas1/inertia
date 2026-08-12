@@ -1,7 +1,11 @@
 import { DEFAULT_OUTPUT_BYTES } from "./constants";
 import { repositoryRoot } from "./paths";
 import { inspectGitRemoteRouting } from "./remote-routing";
-import { runGitInspection } from "./runner";
+import {
+  gitInspectionSettlementValues,
+  isGitProcessTreeTerminationFailure,
+  runGitInspection,
+} from "./runner";
 import {
   GitError,
   type GitChangedFile,
@@ -149,6 +153,7 @@ export function parseNumstat(
 
 export interface GitStatusOptions {
   deadlineAt?: number;
+  signal?: AbortSignal;
 }
 
 export async function hasHead(
@@ -158,12 +163,18 @@ export async function hasHead(
   try {
     await runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: 256,
       failureMessage: "Unable to inspect the current commit.",
     });
     return true;
   } catch (error) {
-    if (error instanceof GitError && error.code === "operation-failed") {
+    if (
+      error instanceof GitError
+      && error.code === "operation-failed"
+      && !options.signal?.aborted
+      && !isGitProcessTreeTerminationFailure(error)
+    ) {
       return false;
     }
     throw error;
@@ -180,6 +191,7 @@ export async function getRepositoryStatus(
     ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
     {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
       maxOutputBytes: DEFAULT_OUTPUT_BYTES,
       truncateOutput: true,
       failureMessage: "Unable to read the repository status.",
@@ -187,7 +199,7 @@ export async function getRepositoryStatus(
   );
   const parsed = parsePorcelain(statusResult.stdout);
   const hasCurrentHead = await hasHead(root, options);
-  const [statsResult, remoteRouting] = await Promise.all([
+  const [statsInspection, routingInspection] = await Promise.allSettled([
     runGitInspection(
       root,
       hasCurrentHead
@@ -211,12 +223,19 @@ export async function getRepositoryStatus(
           ],
       {
         deadlineAt: options.deadlineAt,
+        signal: options.signal,
         maxOutputBytes: DEFAULT_OUTPUT_BYTES,
         truncateOutput: true,
         failureMessage: "Unable to calculate repository change totals.",
       },
     ),
     inspectGitRemoteRouting(root, parsed.branch, options),
+  ]);
+  // Both branches own Git children. Wait for both to settle on cancellation
+  // so this promise remains the process-tree ownership boundary.
+  const [statsResult, remoteRouting] = gitInspectionSettlementValues([
+    statsInspection,
+    routingInspection,
   ]);
   const stats = parseNumstat(statsResult.stdout);
   for (const file of parsed.files) {

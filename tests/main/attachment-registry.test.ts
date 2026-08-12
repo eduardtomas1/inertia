@@ -173,17 +173,18 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: png,
     }]);
+    const attachmentPath = (await attachments.resolve(attachment!.id))!.path;
 
     const current = await createAttachmentStorageSession(root);
 
-    await expect(lstat(attachment!.path)).rejects.toThrow();
+    await expect(lstat(attachmentPath)).rejects.toThrow();
     await expect(lstat(previous.directory)).rejects.toThrow();
     expect(current.reservation).toEqual({ records: 0, bytes: 0 });
     await removeAttachmentStorageSession(current.directory);
   });
 
   it("materializes an opaque capability and revalidates its exact bytes", async () => {
-    const { registry: attachments } = await registry();
+    const { directory, registry: attachments } = await registry();
     const [imported] = await attachments.import([{
       name: "preview.png",
       mimeType: "image/png",
@@ -196,6 +197,8 @@ describe("main-owned attachment registry", () => {
       size: png.length,
     });
     expect(imported?.id).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(imported?.path).toBe(imported?.id);
+    expect(imported?.path).not.toContain(directory);
     const resolved = await attachments.resolve(imported!.id);
     expect(resolved).toMatchObject({
       id: imported!.id,
@@ -219,7 +222,8 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: png,
     }]);
-    await writeFile(imported!.path, Buffer.from("tampered", "utf8"));
+    const importedPath = (await attachments.resolve(imported!.id))!.path;
+    await writeFile(importedPath, Buffer.from("tampered", "utf8"));
 
     await expect(attachments.resolve(imported!.id)).rejects.toThrow(
       /changed|metadata|content/u,
@@ -233,8 +237,9 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: alternatePng,
     }]);
+    const importedPath = (await attachments.resolve(imported!.id))!.path;
 
-    await writeFile(imported!.path, sameSizeReplacementPng);
+    await writeFile(importedPath, sameSizeReplacementPng);
 
     await expect(attachments.preview(imported!.id)).rejects.toThrow(
       /metadata|content/u,
@@ -248,11 +253,12 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: png,
     }]);
+    const importedPath = (await attachments.resolve(imported!.id))!.path;
 
     await expect(attachments.release(imported!.id)).resolves.toBe(true);
     await expect(attachments.release(imported!.id)).resolves.toBe(false);
     await expect(attachments.resolve(imported!.id)).resolves.toBeNull();
-    await expect(readFile(imported!.path)).rejects.toThrow();
+    await expect(readFile(importedPath)).rejects.toThrow();
   });
 
   it("disposes every live capability and its private file", async () => {
@@ -293,11 +299,12 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: png,
     }]);
+    const orphanPath = (await previousProcess.resolve(orphan!.id))!.path;
     await writeFile(join(directory, "keep-me.txt"), "unrelated");
 
     await cleanupOrphanedAttachments(directory);
 
-    await expect(readFile(orphan!.path)).rejects.toThrow();
+    await expect(readFile(orphanPath)).rejects.toThrow();
     await expect(readFile(join(directory, "keep-me.txt"), "utf8"))
       .resolves.toBe("unrelated");
     const restarted = new AttachmentRegistry(directory, {
@@ -311,6 +318,98 @@ describe("main-owned attachment registry", () => {
     }])).resolves.toHaveLength(1);
   });
 
+  it.skipIf(process.platform === "win32")(
+    "removes an orphan symlink session without touching its target",
+    async () => {
+      const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
+      directories.push(parent);
+      const root = join(parent, "attachments");
+      const previous = join(root, "session-Abc123");
+      const outside = join(parent, "outside-attachment.txt");
+      const link = join(
+        previous,
+        "00000000-0000-4000-8000-000000000000.txt",
+      );
+      await mkdir(previous, { recursive: true });
+      await writeFile(outside, "outside");
+      await symlink(outside, link);
+
+      const storage = await createAttachmentStorageSession(root);
+
+      expect(storage.reservation).toEqual({ records: 0, bytes: 0 });
+      await expect(lstat(link)).rejects.toThrow();
+      await expect(lstat(previous)).rejects.toThrow();
+      await expect(readFile(outside, "utf8")).resolves.toBe("outside");
+      await removeAttachmentStorageSession(storage.directory);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "preserves an orphan symlink session and reserves full capacity",
+    async () => {
+      const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
+      directories.push(parent);
+      const root = join(parent, "attachments");
+      const previous = join(root, "session-Abc123");
+      const outside = join(parent, "retained-attachment.txt");
+      const link = join(
+        previous,
+        "00000000-0000-4000-8000-000000000000.txt",
+      );
+      await mkdir(previous, { recursive: true });
+      await writeFile(outside, "retained");
+      await symlink(outside, link);
+
+      const storage = await createAttachmentStorageSession(root, {
+        preserveExisting: true,
+      });
+
+      expect(storage.reservation).toEqual({
+        records: 256,
+        bytes: 512 * 1024 * 1024,
+      });
+      expect((await lstat(link)).isSymbolicLink()).toBe(true);
+      expect((await lstat(previous)).isDirectory()).toBe(true);
+      await expect(readFile(outside, "utf8")).resolves.toBe("retained");
+      await removeAttachmentStorageSession(storage.directory);
+    },
+  );
+
+  it("reserves full capacity while an unconfirmed prior session can still grow", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
+    directories.push(parent);
+    const root = join(parent, "attachments");
+    const previous = join(root, "session-Abc123");
+    const owned = join(
+      previous,
+      "00000000-0000-4000-8000-000000000000.png",
+    );
+    const foreign = join(previous, "foreign-entry.bin");
+    await mkdir(previous, { recursive: true });
+    await writeFile(owned, png);
+    await writeFile(foreign, "prior-runtime-owned");
+
+    const storage = await createAttachmentStorageSession(root, {
+      preserveExisting: true,
+    });
+    await writeFile(owned, Buffer.alloc(1_024 * 1_024));
+
+    expect(storage.reservation).toEqual({
+      records: 256,
+      bytes: 512 * 1024 * 1024,
+    });
+    const registry = new AttachmentRegistry(storage.directory, {
+      reservedRecords: storage.reservation.records,
+      reservedBytes: storage.reservation.bytes,
+    });
+    await expect(registry.import([{
+      name: "must-wait-for-confirmed-cleanup.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+    await expect(readFile(foreign, "utf8")).resolves.toBe("prior-runtime-owned");
+  });
+
   it("retries transient startup orphan deletion before reserving capacity", async () => {
     const { directory, registry: previousProcess } = await registry();
     const [orphan] = await previousProcess.import([{
@@ -318,6 +417,7 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: png,
     }]);
+    const orphanPath = (await previousProcess.resolve(orphan!.id))!.path;
     const waits: number[] = [];
     const unlinkFile = vi.fn<(path: string) => Promise<void>>()
       .mockRejectedValueOnce(Object.assign(new Error("locked"), {
@@ -338,7 +438,7 @@ describe("main-owned attachment registry", () => {
     })).resolves.toEqual({ records: 0, bytes: 0 });
     expect(unlinkFile).toHaveBeenCalledTimes(3);
     expect(waits).toEqual([25, 50]);
-    await expect(readFile(orphan!.path)).rejects.toThrow();
+    await expect(readFile(orphanPath)).rejects.toThrow();
   });
 
   it("reserves capacity for persistently locked startup orphans", async () => {

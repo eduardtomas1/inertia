@@ -170,6 +170,35 @@ function discoveryTimeoutError(): GitError {
   );
 }
 
+function repositoryResolutionCancelledError(): GitError {
+  return new GitError("timeout", "Git inspection was cancelled.");
+}
+
+function requireRepositoryResolutionActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw repositoryResolutionCancelledError();
+}
+
+async function beforeRepositoryResolutionAbort<T>(
+  operation: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return await operation();
+  let rejectCancellation!: (error: GitError) => void;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const onAbort = (): void => {
+    rejectCancellation(repositoryResolutionCancelledError());
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    requireRepositoryResolutionActive(signal);
+    return await Promise.race([operation(), cancellation]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 async function beforeDiscoveryDeadline<T>(
   operation: (signal?: AbortSignal) => Promise<T>,
   deadlineAt: number | undefined,
@@ -210,6 +239,7 @@ function normalizedLimits(input: Partial<WorkspaceGitDiscoveryLimits>): Workspac
 async function requireWorkspaceDirectory(
   workspacePath: string,
   deadlineAt?: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   if (
     typeof workspacePath !== "string"
@@ -220,13 +250,19 @@ async function requireWorkspaceDirectory(
     throw new GitError("invalid-input", "The workspace path is invalid.");
   }
   try {
-    const root = await beforeDiscoveryDeadline(
-      () => realpath(resolve(workspacePath)),
-      deadlineAt,
+    const root = await beforeRepositoryResolutionAbort(
+      async () => await beforeDiscoveryDeadline(
+        () => realpath(resolve(workspacePath)),
+        deadlineAt,
+      ),
+      signal,
     );
-    if (!(await beforeDiscoveryDeadline(
-      () => stat(root),
-      deadlineAt,
+    if (!(await beforeRepositoryResolutionAbort(
+      async () => await beforeDiscoveryDeadline(
+        () => stat(root),
+        deadlineAt,
+      ),
+      signal,
     )).isDirectory()) {
       throw new Error();
     }
@@ -237,20 +273,31 @@ async function requireWorkspaceDirectory(
   }
 }
 
-async function markerState(directory: string): Promise<"present" | "absent" | "unsafe"> {
+async function markerState(
+  directory: string,
+  signal?: AbortSignal,
+): Promise<"present" | "absent" | "unsafe"> {
   let entries;
   try {
-    entries = await readdir(directory, { withFileTypes: true });
-  } catch {
+    entries = await beforeRepositoryResolutionAbort(
+      () => readdir(directory, { withFileTypes: true }),
+      signal,
+    );
+  } catch (error) {
+    if (error instanceof GitError) throw error;
     return "absent";
   }
   const marker = entries.find((entry) => entry.name.toLocaleLowerCase("en-US") === ".git");
   if (!marker) return "absent";
   try {
-    const info = await lstat(resolve(directory, marker.name));
+    const info = await beforeRepositoryResolutionAbort(
+      () => lstat(resolve(directory, marker.name)),
+      signal,
+    );
     if (info.isSymbolicLink()) return "unsafe";
     return info.isDirectory() || info.isFile() ? "present" : "absent";
-  } catch {
+  } catch (error) {
+    if (error instanceof GitError) throw error;
     return "absent";
   }
 }
@@ -567,8 +614,15 @@ export async function resolveWorkspaceGitRepositoryIdentity(
   workspacePath: string,
   repositoryPath: string,
   secureFiles?: RuntimeSecureFileBroker,
+  signal?: AbortSignal,
 ): Promise<ResolvedWorkspaceRepositoryIdentity> {
-  const workspaceRoot = await requireWorkspaceDirectory(workspacePath);
+  requireRepositoryResolutionActive(signal);
+  const workspaceRoot = await requireWorkspaceDirectory(
+    workspacePath,
+    undefined,
+    signal,
+  );
+  requireRepositoryResolutionActive(signal);
   const normalized = normalizedRepositoryPath(repositoryPath);
   const segments = normalized === "." ? [] : normalized.split("/");
   let candidate = workspaceRoot;
@@ -576,22 +630,40 @@ export async function resolveWorkspaceGitRepositoryIdentity(
     candidate = resolve(candidate, segment);
     let info;
     try {
-      info = await lstat(candidate);
-    } catch {
+      info = await beforeRepositoryResolutionAbort(
+        () => lstat(candidate),
+        signal,
+      );
+      requireRepositoryResolutionActive(signal);
+    } catch (error) {
+      if (error instanceof GitError) throw error;
       throw new GitError("not-found", "The repository folder could not be found.");
     }
     if (info.isSymbolicLink() || !info.isDirectory()) {
       throw new GitError("invalid-input", "The repository path uses an unsafe symbolic link.");
     }
   }
-  const canonical = await realpath(candidate).catch(() => {
+  let canonical: string;
+  try {
+    canonical = await beforeRepositoryResolutionAbort(
+      () => realpath(candidate),
+      signal,
+    );
+  } catch (error) {
+    if (error instanceof GitError) throw error;
     throw new GitError("not-found", "The repository folder could not be found.");
-  });
+  }
+  requireRepositoryResolutionActive(signal);
   if (!isContained(workspaceRoot, canonical)) {
     throw new GitError("invalid-input", "The repository is outside the workspace.");
   }
-  const canonicalInfo = await lstat(canonical, { bigint: true });
-  const marker = await markerState(canonical);
+  const canonicalInfo = await beforeRepositoryResolutionAbort(
+    () => lstat(canonical, { bigint: true }),
+    signal,
+  );
+  requireRepositoryResolutionActive(signal);
+  const marker = await markerState(canonical, signal);
+  requireRepositoryResolutionActive(signal);
   if (marker !== "present") {
     throw new GitError(
       marker === "unsafe" ? "invalid-input" : "not-repository",
@@ -601,8 +673,11 @@ export async function resolveWorkspaceGitRepositoryIdentity(
     );
   }
   const secureRoot = secureFiles
-    ? await secureFiles.authorizeRoot(canonical)
+    ? signal
+      ? await secureFiles.authorizeRoot(canonical, signal)
+      : await secureFiles.authorizeRoot(canonical)
     : undefined;
+  requireRepositoryResolutionActive(signal);
   if (
     secureRoot
     && (
@@ -616,7 +691,7 @@ export async function resolveWorkspaceGitRepositoryIdentity(
       "The repository folder changed while it was being inspected.",
     );
   }
-  const resolvedRepositoryRoot = await repositoryRoot(canonical);
+  const resolvedRepositoryRoot = await repositoryRoot(canonical, { signal });
   if (
     canonicalIdentity(resolvedRepositoryRoot)
     !== canonicalIdentity(canonical)
@@ -628,8 +703,13 @@ export async function resolveWorkspaceGitRepositoryIdentity(
   }
   const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
     secureRoot?.root ?? canonical,
+    { signal },
   );
-  if (secureRoot) await secureFiles!.verifyRoot(secureRoot);
+  if (secureRoot) {
+    if (signal) await secureFiles!.verifyRoot(secureRoot, signal);
+    else await secureFiles!.verifyRoot(secureRoot);
+  }
+  requireRepositoryResolutionActive(signal);
   return { root: secureRoot?.root ?? canonical, secureRoot, metadataMarkerIdentity };
 }
 
@@ -637,15 +717,18 @@ export async function resolveWorkspaceGitRepository(
   workspacePath: string,
   repositoryPath: string,
   secureFiles?: RuntimeSecureFileBroker,
+  signal?: AbortSignal,
 ): Promise<ResolvedWorkspaceRepository> {
   const repository = await resolveWorkspaceGitRepositoryIdentity(
     workspacePath,
     repositoryPath,
     secureFiles,
+    signal,
   );
-  const status = await getRepositoryStatus(repository.root);
+  const status = await getRepositoryStatus(repository.root, { signal });
   const verifiedMetadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
     repository.root,
+    { signal },
   );
   if (repository.metadataMarkerIdentity !== verifiedMetadataMarkerIdentity) {
     throw new GitError(
@@ -654,8 +737,13 @@ export async function resolveWorkspaceGitRepository(
     );
   }
   if (repository.secureRoot) {
-    await secureFiles!.verifyRoot(repository.secureRoot);
+    if (signal) {
+      await secureFiles!.verifyRoot(repository.secureRoot, signal);
+    } else {
+      await secureFiles!.verifyRoot(repository.secureRoot);
+    }
   }
+  requireRepositoryResolutionActive(signal);
   if (canonicalIdentity(status.root) !== canonicalIdentity(repository.root)) {
     throw new GitError("not-repository", "The selected folder is not a distinct Git repository.");
   }

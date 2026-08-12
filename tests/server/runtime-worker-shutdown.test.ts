@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { RunningRuntime } from "../../src/server";
+import { runRuntimeShutdownPhases } from "../../src/server/runtime-shutdown";
 import { completeRuntimeWorkerShutdown } from "../../src/server/runtime-worker-shutdown";
 
 function runtimeWithClose(
@@ -81,5 +82,40 @@ describe("runtime worker shutdown", () => {
     });
     expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
     expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("never reports stopped when an owned child misses the shutdown deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const post = vi.fn();
+      const exit = vi.fn();
+      const closeBrokers = vi.fn();
+      const shutdown = completeRuntimeWorkerShutdown({
+        runtime: runtimeWithClose(() => runRuntimeShutdownPhases({
+          independentDrains: [() => new Promise<void>(() => undefined)],
+          stopIsolatedRuns: () => undefined,
+          disposeTurnsAndProviders: () => undefined,
+          settleArtifacts: () => undefined,
+          terminateClients: () => undefined,
+          closeServer: () => undefined,
+          closeStore: () => undefined,
+        }, 100)),
+        cause: "runtime-shutdown",
+        exitCode: 0,
+        closeBrokers,
+        post,
+        exit,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await shutdown;
+      expect(post).toHaveBeenCalledWith({
+        type: "runtime.shutdown-unconfirmed",
+      });
+      expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

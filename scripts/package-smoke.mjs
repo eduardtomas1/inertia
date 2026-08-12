@@ -375,14 +375,25 @@ let launchedAt = 0;
 
 try {
   await Promise.all([
-    mkdir(dataDirectory, { recursive: true }),
+    mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(workspaceDirectory, { recursive: true }),
     mkdir(profileDirectory, { recursive: true }),
   ]);
+  if (process.platform !== "win32") {
+    const dataRoot = await stat(dataDirectory);
+    if (
+      !dataRoot.isDirectory()
+      || dataRoot.uid !== process.geteuid()
+      || (dataRoot.mode & 0o077) !== 0
+    ) throw new Error("The package-smoke runtime data root is not owner-private.");
+  }
   const packagedCodex = await createWindowsCodexFixture(temporaryRoot, workspaceDirectory);
   const packagedPdf = await createPdfFixture(temporaryRoot);
+  // This smoke does not exercise credential persistence. Keep macOS package
+  // and shutdown checks independent from the automation host's Keychain.
   const launchArguments = [
     `--user-data-dir=${profileDirectory}`,
+    ...(process.platform === "darwin" ? ["--use-mock-keychain"] : []),
     ...(process.platform === "linux" && process.env.INERTIA_PACKAGE_SMOKE_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
   ];
   launchedAt = Date.now();

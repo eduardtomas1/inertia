@@ -195,6 +195,7 @@ class PairProvider implements TurnProviderRuntime {
         textTruncated: false,
         exitCode: 0,
         signal: null,
+      cleanupConfirmed: true,
       });
     }
   }
@@ -815,6 +816,12 @@ describe("atomic Duo launch persistence", () => {
         runtime.workspace,
         { recoverInterruptedRuns: false },
       );
+      // This direct-store restart fixture has no RuntimeSupervisor handshake.
+      // Model the supervisor's confirmed generation receipt before ordinary
+      // interrupted-turn recovery; unconfirmed ownership is covered separately.
+      for (const { turn } of prepared.queued) {
+        reopened.providerRunOwnership.clear(turn.id, turn.runId);
+      }
       recoverInterruptedTurns(reopened);
       await reconcileInterruptedDuoLaunches(reopened);
       expect(prepared.queued.map(({ turn }) =>

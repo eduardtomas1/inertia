@@ -30,6 +30,7 @@ export interface ProviderParserState {
   sawText: boolean;
   sawStreamingDelta: boolean;
   hadErrorEvent: boolean;
+  sawTerminalEvent?: boolean;
   failureText?: string;
   toolActivities?: Map<
     string,
@@ -153,6 +154,7 @@ export function normalizeProviderLine(
   };
 
   if (type === "error" || type === "turn.failed" || event.is_error === true) {
+    if (type === "turn.failed") state.sawTerminalEvent = true;
     state.hadErrorEvent = true;
     const error = objectValue(event.error);
     state.failureText ??= stringValue(event.message) ?? stringValue(error?.message) ?? stringValue(event.result);
@@ -168,7 +170,10 @@ export function normalizeProviderLine(
   switch (providerId) {
     case "codex": {
       if (type === "turn.started") emitActivity("turn", "started", "Turn started");
-      if (type === "turn.completed") emitActivity("turn", "completed", "Turn completed");
+      if (type === "turn.completed") {
+        state.sawTerminalEvent = true;
+        emitActivity("turn", "completed", "Turn completed");
+      }
 
       const item = objectValue(event.item);
       if (!item) return;
@@ -294,6 +299,7 @@ export function normalizeProviderLine(
         return;
       }
       if (type === "result") {
+        state.sawTerminalEvent = true;
         if (event.is_error !== true && !state.sawText) emitNonEmptyText(event.result);
         emitActivity("turn", event.is_error === true ? "failed" : "completed", "Turn completed");
       }
@@ -330,6 +336,7 @@ export function normalizeProviderLine(
         return;
       }
       if (type === "result") {
+        state.sawTerminalEvent = true;
         if (event.is_error !== true && !state.sawText) emitNonEmptyText(event.result);
         emitActivity("turn", event.is_error === true ? "failed" : "completed", "Turn completed");
       }
@@ -376,6 +383,7 @@ export function normalizeProviderLine(
       }
       if (type === "step_finish") {
         const reason = stringValue(part?.reason);
+        if (reason === "stop") state.sawTerminalEvent = true;
         emitActivity("turn", "completed", reason === "stop" ? "Run completed" : "Step completed");
       }
     }
@@ -465,6 +473,55 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
   if (!input.prompt.trim()) throw new ProviderRuntimeError("invalid_input", "A prompt is required.");
   if (input.prompt.length > MAX_PROMPT_CHARS || input.prompt.includes("\0")) {
     throw new ProviderRuntimeError("invalid_input", "The prompt is too large.");
+  }
+  if (
+    input.goalContinuationExpected !== undefined
+    && typeof input.goalContinuationExpected !== "boolean"
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The goal continuation hint is invalid.",
+    );
+  }
+  if (
+    input.goalContinuationExpected === true
+    && (
+      input.providerId !== "codex"
+      || input.harnessId !== "codex-app-server"
+      || (!input.sessionId && !input.goalStart)
+    )
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The goal continuation hint is invalid.",
+    );
+  }
+  if (input.goalStart) {
+    const objective = input.goalStart.objective?.trim();
+    const budget = input.goalStart.tokenBudget;
+    if (
+      input.providerId !== "codex"
+      || input.harnessId !== "codex-app-server"
+      || (input.goalStart.objective !== undefined && (
+        !objective
+        || objective.length > 4_000
+        || objective.includes("\0")
+      ))
+      || (
+        budget !== undefined
+        && budget !== null
+        && (
+          !Number.isSafeInteger(budget)
+          || budget < 1
+          || budget > 1_000_000_000
+        )
+      )
+    ) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        "The native goal start request is invalid.",
+      );
+    }
   }
   for (const value of [input.runId, input.turnId, input.model, input.sessionId]) {
     if (value !== undefined && (!value.trim() || value.length > 512 || value.includes("\0"))) {

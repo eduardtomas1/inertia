@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   mapWithinSourceControlDeadline,
@@ -29,6 +29,94 @@ describe("source-control aggregate deadlines", () => {
         }
         return "late";
       })).rejects.toThrow("Git inspection took too long.");
+    } finally {
+      deadline.dispose();
+    }
+  });
+
+  it("removes its abort listener after a synchronous rejection", async () => {
+    const deadline = new SourceControlDeadline(Date.now() + 5_000, "read");
+    const removeEventListener = vi.spyOn(
+      deadline.signal,
+      "removeEventListener",
+    );
+    const failure = new Error("Synchronous inspection failure.");
+    try {
+      await expect(deadline.run(() => { throw failure; })).rejects.toBe(failure);
+      expect(removeEventListener).toHaveBeenCalledWith(
+        "abort",
+        expect.any(Function),
+      );
+    } finally {
+      deadline.dispose();
+    }
+  });
+
+  it("retains deadline ownership until cancelled Git cleanup settles", async () => {
+    const deadline = new SourceControlDeadline(Date.now() + 20, "read");
+    const cleanupStarted = deferred<void>();
+    const releaseCleanup = deferred<void>();
+    let aggregateSettled = false;
+    try {
+      const aggregate = deadline.runToSettlement(
+        async (signal) => await settleSourceControlInspections(
+          signal,
+          async (inspectionSignal) => {
+            if (!inspectionSignal.aborted) {
+              await new Promise<void>((resolve) => {
+                inspectionSignal.addEventListener("abort", () => resolve(), {
+                  once: true,
+                });
+              });
+            }
+            cleanupStarted.resolve();
+            await releaseCleanup.promise;
+            throw new GitError("timeout", "Git inspection was cancelled.");
+          },
+          async (inspectionSignal) => {
+            if (!inspectionSignal.aborted) {
+              await new Promise<void>((resolve) => {
+                inspectionSignal.addEventListener("abort", () => resolve(), {
+                  once: true,
+                });
+              });
+            }
+            throw new GitError("timeout", "Git inspection was cancelled.");
+          },
+        ),
+      );
+      void aggregate.then(
+        () => { aggregateSettled = true; },
+        () => { aggregateSettled = true; },
+      );
+
+      await cleanupStarted.promise;
+      expect(aggregateSettled).toBe(false);
+
+      releaseCleanup.resolve();
+      await expect(aggregate).rejects.toThrow("Git inspection took too long.");
+      expect(aggregateSettled).toBe(true);
+    } finally {
+      releaseCleanup.resolve();
+      deadline.dispose();
+    }
+  });
+
+  it("preserves failed process cleanup beyond the outer deadline", async () => {
+    const deadline = new SourceControlDeadline(Date.now() + 20, "read");
+    const cleanupFailure = new GitError(
+      "operation-failed",
+      "Git stopped responding, and its process tree could not be confirmed stopped.",
+    );
+    try {
+      await expect(deadline.runToSettlement(async (signal) => {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        throw cleanupFailure;
+      })).rejects.toBe(cleanupFailure);
     } finally {
       deadline.dispose();
     }

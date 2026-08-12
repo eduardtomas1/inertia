@@ -482,7 +482,7 @@ export function createSourceControlCommandHandler(
               await before.selection.dispose().catch(() => undefined);
             }
           } else {
-            [diff, status] = await deadline.run(
+            [diff, status] = await deadline.runToSettlement(
               async (signal) => await settleSourceControlInspections(
                 signal,
                 async (inspectionSignal) => await getUnifiedDiff(
@@ -730,7 +730,7 @@ export function createSourceControlCommandHandler(
               await before.selection.dispose().catch(() => undefined);
             }
           } else {
-            [diff, repositoryStatus] = await deadline.run(
+            [diff, repositoryStatus] = await deadline.runToSettlement(
               async (signal) => await settleSourceControlInspections(
                 signal,
                 async (inspectionSignal) => await getUnifiedDiff(

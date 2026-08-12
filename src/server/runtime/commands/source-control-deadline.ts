@@ -1,5 +1,8 @@
 import { GitError } from "../../git";
-import { gitInspectionSettlementValues } from "../../git/runner";
+import {
+  gitInspectionSettlementValues,
+  isGitProcessTreeTerminationFailure,
+} from "../../git/runner";
 
 export type SourceControlDeadlineKind = "read" | "workspace-discovery";
 
@@ -36,9 +39,28 @@ export class SourceControlDeadline {
   }
 
   async run<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    return await this.runOperation(operation, false);
+  }
+
+  /**
+   * Like run(), but retains ownership after the deadline aborts until the
+   * operation settles. Use this only for operations whose cancellation path
+   * is independently bounded, such as owned Git process-tree cleanup.
+   */
+  async runToSettlement<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    return await this.runOperation(operation, true);
+  }
+
+  private async runOperation<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+    retainOwnershipOnAbort: boolean,
+  ): Promise<T> {
     this.requireTime();
     return await new Promise<T>((resolve, reject) => {
       let settled = false;
+      let deadlineReached = false;
       const finish = (callback: () => void): void => {
         if (settled) return;
         settled = true;
@@ -46,26 +68,45 @@ export class SourceControlDeadline {
         callback();
       };
       const onAbort = (): void => {
+        deadlineReached = true;
+        if (retainOwnershipOnAbort) return;
         finish(() => reject(deadlineError(this.kind)));
       };
       this.signal.addEventListener("abort", onAbort, { once: true });
-      void operation(this.signal).then(
-        (value) => finish(() => {
-          if (this.signal.aborted || Date.now() >= this.deadlineAt) {
+      const settleOperation = (result: PromiseSettledResult<T>): void => {
+        finish(() => {
+          if (
+            deadlineReached
+            || this.signal.aborted
+            || Date.now() >= this.deadlineAt
+          ) {
             this.controller.abort();
-            reject(deadlineError(this.kind));
+            if (
+              retainOwnershipOnAbort
+              && result.status === "rejected"
+              && isGitProcessTreeTerminationFailure(result.reason)
+            ) {
+              reject(result.reason);
+            } else {
+              reject(deadlineError(this.kind));
+            }
+          } else if (result.status === "rejected") {
+            reject(result.reason);
           } else {
-            resolve(value);
+            resolve(result.value);
           }
-        }),
-        (error: unknown) => finish(() => {
-          if (this.signal.aborted || Date.now() >= this.deadlineAt) {
-            this.controller.abort();
-            reject(deadlineError(this.kind));
-          } else {
-            reject(error);
-          }
-        }),
+        });
+      };
+      let pending: Promise<T>;
+      try {
+        pending = operation(this.signal);
+      } catch (error) {
+        settleOperation({ status: "rejected", reason: error });
+        return;
+      }
+      void pending.then(
+        (value) => settleOperation({ status: "fulfilled", value }),
+        (reason: unknown) => settleOperation({ status: "rejected", reason }),
       );
     });
   }

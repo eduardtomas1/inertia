@@ -98,23 +98,13 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await expect(page.getByRole("button", {
     name: localServer.origin,
     exact: true,
-  }))
+  })).toHaveCount(0);
+  await expect(page.getByText("No validated local service ports are active."))
     .toBeVisible();
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Preview");
-  await expect.poll(
-    () => app.nativePreviewIsVisible(hostilePreviewUrl),
-  ).toBe(true);
-
-  await page.getByRole("button", { name: /^Open runs/u }).click();
-  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
-  await expect(page.getByRole("dialog", { name: "Runs" })).toBeVisible();
-  await expect.poll(
-    () => app.nativePreviewIsVisible(hostilePreviewUrl),
-  ).toBe(false);
-  await page.getByRole("button", { name: "Close runs" }).click();
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(true);

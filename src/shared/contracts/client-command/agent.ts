@@ -37,6 +37,15 @@ export const agentCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("agent.workflow.saved.load"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("agent.goal.set"),
       payload: z.object({
         conversationId: z.string().uuid(),

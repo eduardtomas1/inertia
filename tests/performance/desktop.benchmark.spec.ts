@@ -1291,23 +1291,9 @@ async function coldIntentDialogMeasurement(page: Page): Promise<number> {
 }
 
 async function prefetchedOverlayMeasurements(page: Page): Promise<{
-  activityFirstOpenMs: number;
-  activityWarmReopenMs: number;
   commandPaletteFirstOpenMs: number;
   settingsFirstOpenMs: number;
 }> {
-  const activityFirstOpenMs = await rendererInteractionMeasurement(page, {
-    triggerSelector: 'button[aria-label^="Open runs"]',
-    targetSelector: '.activity-center[role="dialog"]',
-  });
-  await page.getByRole("button", { name: "Close runs" }).click();
-
-  const activityWarmReopenMs = await rendererInteractionMeasurement(page, {
-    triggerSelector: 'button[aria-label^="Open runs"]',
-    targetSelector: '.activity-center[role="dialog"]',
-  });
-  await page.getByRole("button", { name: "Close runs" }).click();
-
   const settingsFirstOpenMs = await rendererInteractionMeasurement(page, {
     triggerSelector: ".sidebar-footer .sidebar-destination",
     targetSelector: ".settings-view",
@@ -1323,8 +1309,6 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<{
   });
   await page.getByRole("button", { name: "Close search" }).click();
   return {
-    activityFirstOpenMs,
-    activityWarmReopenMs,
     commandPaletteFirstOpenMs,
     settingsFirstOpenMs,
   };
@@ -1710,10 +1694,6 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       );
     expect(report.scenarios.firstOpenLatency.coldIntentDialogMs)
       .toBeLessThan(5_000);
-    expect(report.scenarios.firstOpenLatency.activityFirstOpenMs)
-      .toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
-    expect(report.scenarios.firstOpenLatency.activityWarmReopenMs)
-      .toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
     expect(report.scenarios.firstOpenLatency.commandPaletteFirstOpenMs)
       .toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
     expect(report.scenarios.firstOpenLatency.settingsFirstOpenMs)

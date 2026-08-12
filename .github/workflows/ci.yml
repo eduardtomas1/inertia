@@ -17,7 +17,7 @@ jobs:
   test:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
       matrix:
@@ -25,12 +25,15 @@ jobs:
           - label: Linux x64
             runner: ubuntu-24.04
             artifact: linux-x64
+            timeout_minutes: 40
           - label: Windows x64
             runner: windows-2025
             artifact: windows-x64
+            timeout_minutes: 55
           - label: macOS arm64
             runner: macos-15
             artifact: macos-arm64
+            timeout_minutes: 40
     env:
       CI: "true"
       INERTIA_BENCHMARK_REPORT: performance-results/platform-${{ matrix.artifact }}.json

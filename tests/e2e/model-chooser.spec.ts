@@ -16,7 +16,6 @@ import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelF
 import {
   createAppFixture,
   type AppFixture,
-  type RuntimeTestSnapshot,
 } from "./support/app-fixture";
 
 let app!: AppFixture;
@@ -371,13 +370,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     "data-runtime-generation",
   );
   expect(rendererGenerationBeforeRestart).not.toBeNull();
-  await electronApp.evaluate(() => {
-    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-      crash: () => RuntimeTestSnapshot;
-    } | undefined;
-    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-    runtime.crash();
-  });
+  await app.recycleRuntime();
   await expect.poll(async () => {
     const current = await runtimeSnapshot();
     return current.phase === "ready" && current.generation > beforeRestart.generation;
@@ -653,13 +646,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   catalogStore.close();
 
   const beforeCatalogRestart = await runtimeSnapshot();
-  await electronApp.evaluate(() => {
-    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-      crash: () => RuntimeTestSnapshot;
-    } | undefined;
-    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-    runtime.crash();
-  });
+  await app.recycleRuntime();
   await expect.poll(async () => {
     const current = await runtimeSnapshot();
     return current.phase === "ready"

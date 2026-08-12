@@ -1,0 +1,108 @@
+import type {
+  RuntimeSecureFileResult,
+  RuntimeWorkerCommand,
+  RuntimeWorkerEvent,
+} from "../node/runtime-process-protocol.js";
+import type {
+  RuntimeProcessRecord,
+  RuntimeSecureFileBroker,
+} from "./runtime-supervisor-types.js";
+
+type SecureFileRequestEvent = Extract<
+  RuntimeWorkerEvent,
+  { type: "runtime.secure-file-request" }
+>;
+
+interface PendingSecureFileRequest {
+  readonly record: RuntimeProcessRecord;
+  readonly controller: AbortController;
+}
+
+interface RuntimeSecureFileCoordinatorOptions {
+  readonly broker?: RuntimeSecureFileBroker;
+  readonly accepts: (record: RuntimeProcessRecord) => boolean;
+  readonly post: (
+    record: RuntimeProcessRecord,
+    result: RuntimeWorkerCommand,
+  ) => void;
+}
+
+export class RuntimeSecureFileCoordinator {
+  private readonly broker?: RuntimeSecureFileBroker;
+  private readonly accepts: RuntimeSecureFileCoordinatorOptions["accepts"];
+  private readonly post: RuntimeSecureFileCoordinatorOptions["post"];
+  private readonly pending = new Map<string, PendingSecureFileRequest>();
+
+  constructor(options: RuntimeSecureFileCoordinatorOptions) {
+    this.broker = options.broker;
+    this.accepts = options.accepts;
+    this.post = options.post;
+  }
+
+  handle(record: RuntimeProcessRecord, event: SecureFileRequestEvent): void {
+    if (!this.accepts(record) || !this.broker) {
+      this.reply(record, event.requestId, {
+        ok: false,
+        code: "unavailable",
+        message: "The secure file service is unavailable.",
+      });
+      return;
+    }
+    if (record.secureFileRequestIds.has(event.requestId)) {
+      this.reply(record, event.requestId, {
+        ok: false,
+        code: "invalid",
+        message: "The secure file request identifier was already used.",
+      });
+      return;
+    }
+    record.secureFileRequestIds.add(event.requestId);
+    if (record.secureFileRequestIds.size > 512) {
+      const oldest = record.secureFileRequestIds.values().next().value;
+      if (typeof oldest === "string") record.secureFileRequestIds.delete(oldest);
+    }
+    const controller = new AbortController();
+    const pending = { record, controller };
+    this.pending.set(event.requestId, pending);
+    const { type: _type, requestId: _requestId, ...request } = event;
+    void this.broker.perform(request, controller.signal).then(
+      (result) => {
+        if (this.pending.get(event.requestId) !== pending) return;
+        this.pending.delete(event.requestId);
+        if (this.accepts(record)) this.reply(record, event.requestId, result);
+      },
+      () => {
+        if (this.pending.get(event.requestId) !== pending) return;
+        this.pending.delete(event.requestId);
+        if (this.accepts(record)) {
+          this.reply(record, event.requestId, {
+            ok: false,
+            code: "unavailable",
+            message: "The secure file operation could not be completed.",
+          });
+        }
+      },
+    );
+  }
+
+  clear(record: RuntimeProcessRecord | null): void {
+    if (!record) return;
+    for (const [requestId, pending] of this.pending) {
+      if (pending.record !== record) continue;
+      this.pending.delete(requestId);
+      pending.controller.abort();
+    }
+  }
+
+  shutdown(): Promise<boolean> {
+    return this.broker?.shutdown?.() ?? Promise.resolve(true);
+  }
+
+  private reply(
+    record: RuntimeProcessRecord,
+    requestId: string,
+    result: RuntimeSecureFileResult["result"],
+  ): void {
+    this.post(record, { type: "runtime.secure-file-result", requestId, result });
+  }
+}

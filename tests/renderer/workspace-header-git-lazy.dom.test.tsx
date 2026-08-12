@@ -86,9 +86,6 @@ describe("WorkspaceHeader deferred Git menu", () => {
         branches={[]}
         actions={[]}
         busy={false}
-        activityOpen={false}
-        activeRunCount={0}
-        attentionRunCount={0}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
         onOpenEnvironment={vi.fn()}
@@ -107,7 +104,6 @@ describe("WorkspaceHeader deferred Git menu", () => {
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onToggleActivity={vi.fn()}
       />,
     );
 

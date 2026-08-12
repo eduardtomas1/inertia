@@ -54,6 +54,20 @@ const attachmentTypeLabels: Readonly<Record<ChatAttachmentMimeType, string>> = {
   "application/json": "JSON document",
 };
 
+const attachmentStorageExtension: Readonly<
+  Record<ChatAttachmentMimeType, string>
+> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "application/pdf": "pdf",
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "text/csv": "csv",
+  "application/json": "json",
+};
+
 export function chatAttachmentKind(
   mimeType: ChatAttachmentMimeType,
 ): ChatAttachmentKind {
@@ -83,4 +97,10 @@ export function chatAttachmentTypeLabel(
   mimeType: ChatAttachmentMimeType,
 ): string {
   return attachmentTypeLabels[mimeType];
+}
+
+export function chatAttachmentStorageExtension(
+  mimeType: ChatAttachmentMimeType,
+): string {
+  return attachmentStorageExtension[mimeType];
 }

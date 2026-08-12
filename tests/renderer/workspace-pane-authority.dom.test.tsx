@@ -157,6 +157,71 @@ function deferredWorkspaceGitRequests() {
 }
 
 describe("workspace pane authority", () => {
+  it("consumes Environment repository action requests only at the handled revision", () => {
+    const request = vi.fn(async (_command: CommandWithoutId): Promise<ServerEvent> => result({
+      kind: "git.status",
+      status: {
+        isRepository: false,
+        root: null,
+        branch: null,
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        hasRemote: false,
+        files: [],
+        insertions: 0,
+        deletions: 0,
+      },
+    }));
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: false,
+      loadStatusOnMount: false,
+      loadWorkspaceOnMount: false,
+      project: alpha,
+      conversation: alphaChat,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request,
+      run: async (_key, command) => await request(command),
+      subscribe: noopSubscribe,
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.requestWorkspaceChanges(
+      "modules/alpha",
+      "commit",
+    ));
+    expect(hook.result.current.changesRequest).toMatchObject({
+      repositoryPath: "modules/alpha",
+      action: "commit",
+      revision: 1,
+    });
+
+    act(() => hook.result.current.requestWorkspaceChanges(
+      "modules/alpha",
+      "push",
+    ));
+    act(() => hook.result.current.clearWorkspaceChangesRequest(1));
+    expect(hook.result.current.changesRequest).toMatchObject({
+      action: "push",
+      revision: 2,
+    });
+
+    act(() => hook.result.current.clearWorkspaceChangesRequest(2));
+    expect(hook.result.current.changesRequest).toBeNull();
+
+    act(() => hook.result.current.requestWorkspaceChanges(
+      "modules/alpha",
+      "commit",
+    ));
+    expect(hook.result.current.changesRequest).toMatchObject({
+      action: "commit",
+      revision: 3,
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("keeps ordinary complete Changes diffs reviewable without a commit receipt", () => {
     const review = renderHook(() => useWorkspaceReview({
       project: alpha,
@@ -184,6 +249,107 @@ describe("workspace pane authority", () => {
 
     expect(review.result.current.structuredDiffError).toBeNull();
     expect(review.result.current.structuredDiff.files).toHaveLength(1);
+  });
+
+  it("cancels only the active selection question for the viewed thread", async () => {
+    const request = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.ok",
+      requestId: crypto.randomUUID(),
+    }));
+    const review = renderHook(() => useWorkspaceReview({
+      project: alpha,
+      conversation: alphaChat,
+      detail: null,
+      gitDiff: null,
+      ignoreWhitespace: false,
+      confirmDestructiveActions: false,
+      request,
+      run: vi.fn(),
+      setGitDiff: vi.fn(),
+    }));
+
+    await act(async () => review.result.current.cancelDiffQuestion());
+
+    expect(request).toHaveBeenCalledWith({
+      type: "review.selection.cancel",
+      payload: { conversationId: alphaChat.id },
+    });
+  });
+
+  it("tracks concurrent selection questions under their initiating pane authority", async () => {
+    const patch = [
+      "diff --git a/src/value.ts b/src/value.ts",
+      "--- a/src/value.ts",
+      "+++ b/src/value.ts",
+      "@@ -1 +1 @@",
+      "-export const value = 1;",
+      "+export const value = 2;",
+    ].join("\n");
+    const structured = parseUnifiedDiff(patch);
+    const file = structured.files[0]!;
+    const hunk = file.hunks[0]!;
+    const selectedLine = hunk.lines.find(({ kind }) => kind === "addition")!;
+    const selection = {
+      fingerprint: structured.fingerprint,
+      file,
+      hunk,
+      lineIds: [selectedLine.id],
+      reference: file.path,
+      repositoryPath: ".",
+    };
+    const pending: Array<{
+      resolve: (event: ServerEvent) => void;
+      reject: (error: Error) => void;
+    }> = [];
+    const run = vi.fn(() => new Promise<ServerEvent>((resolve, reject) => {
+      pending.push({ resolve, reject });
+    }));
+    const review = renderHook((owner: {
+      project: Project;
+      conversation: Conversation;
+    }) => useWorkspaceReview({
+      ...owner,
+      detail: null,
+      gitDiff: { patch, truncated: false, files: [] },
+      ignoreWhitespace: false,
+      confirmDestructiveActions: false,
+      request: vi.fn(),
+      run,
+      setGitDiff: vi.fn(),
+    }), {
+      initialProps: { project: alpha, conversation: alphaChat },
+    });
+
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = review.result.current.askAboutDiff(selection, "first");
+      second = review.result.current.askAboutDiff(selection, "second");
+    });
+    await waitFor(() => {
+      expect(review.result.current.selectionQuestionRunning).toBe(true);
+      expect(pending).toHaveLength(2);
+    });
+
+    review.rerender({ project: beta, conversation: betaChat });
+    expect(review.result.current.selectionQuestionRunning).toBe(false);
+    review.rerender({ project: alpha, conversation: alphaChat });
+    expect(review.result.current.selectionQuestionRunning).toBe(true);
+
+    await act(async () => {
+      pending[0]!.resolve({
+        type: "request.ok",
+        requestId: crypto.randomUUID(),
+      });
+      await first;
+    });
+    expect(review.result.current.selectionQuestionRunning).toBe(true);
+
+    await act(async () => {
+      pending[1]!.reject(new Error("Provider disconnected"));
+      await expect(second).rejects.toThrow("Provider disconnected");
+    });
+    expect(review.result.current.selectionQuestionRunning).toBe(false);
   });
 
   it("blocks root commit clicks and Enter when the complete diff is truncated", () => {
@@ -1602,15 +1768,9 @@ describe("workspace pane authority", () => {
       conversationId: string;
     }) => useActivityActions({
       ...owner,
-      snapshot: null,
-      request: vi.fn(),
       run: vi.fn(),
       setActiveTool: vi.fn(),
-      setActivityOpen: vi.fn(),
       setActionError: vi.fn(),
-      activateContext: vi.fn(),
-      openProjectPath: vi.fn(),
-      navigatePreview: vi.fn(),
     }), {
       initialProps: {
         project: alpha,
@@ -1631,15 +1791,9 @@ describe("workspace pane authority", () => {
     const hook = renderHook((project: Project) => useActivityActions({
       project,
       conversationId: project.id === alpha.id ? alphaChat.id : betaChat.id,
-      snapshot: null,
-      request: vi.fn(),
       run: vi.fn(),
       setActiveTool: vi.fn(),
-      setActivityOpen: vi.fn(),
       setActionError: vi.fn(),
-      activateContext: vi.fn(),
-      openProjectPath: vi.fn(),
-      navigatePreview: vi.fn(),
     }), { initialProps: alpha });
 
     act(() => hook.result.current.requestProviderResume(alphaChat.id));
@@ -1650,17 +1804,116 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.pendingResumeConversationId).toBeNull();
   });
 
-  it("waits for the target pane owner before navigating an activity preview", async () => {
-    const activateContext = vi.fn();
-    const navigateAlphaPreview = vi.fn();
-    const navigateBetaPreview = vi.fn();
+  it("stops the exact workspace run surfaced by the owning UI", async () => {
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.ok",
+      requestId: crypto.randomUUID(),
+    }));
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run,
+      setActiveTool: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.stopWorkspaceRun({
+      id: "55555555-5555-4555-8555-555555555555",
+      label: "Preview service",
+    }));
+
+    await waitFor(() => expect(run).toHaveBeenCalledWith(
+      "activity.stop:55555555-5555-4555-8555-555555555555",
+      {
+        type: "activity.stop",
+        payload: { runId: "55555555-5555-4555-8555-555555555555" },
+      },
+    ));
+  });
+
+  it.each([
+    ["acknowledgeActivity", "activity.acknowledge"],
+    ["dismissActivity", "activity.dismiss"],
+  ] as const)("routes %s to the exact failed run", async (
+    action,
+    commandType,
+  ) => {
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.ok",
+      requestId: crypto.randomUUID(),
+    }));
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run,
+      setActiveTool: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+    const failedRun = {
+      id: "77777777-7777-4777-8777-777777777777",
+      label: "Typecheck",
+    };
+
+    act(() => hook.result.current[action](failedRun));
+
+    await waitFor(() => expect(run).toHaveBeenCalledWith(
+      `${commandType}:${failedRun.id}`,
+      {
+        type: commandType,
+        payload: { runId: failedRun.id },
+      },
+    ));
+  });
+
+  it.each([
+    [
+      "acknowledgeActivity",
+      new Error("The run was removed."),
+      "Could not acknowledge Typecheck: The run was removed.",
+    ],
+    [
+      "dismissActivity",
+      "unknown failure",
+      "Could not dismiss Typecheck: The run could not be dismissed.",
+    ],
+  ] as const)("reports %s failures without clearing the row", async (
+    action,
+    failure,
+    message,
+  ) => {
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run: vi.fn(async () => {
+        throw failure;
+      }),
+      setActiveTool: vi.fn(),
+      setActionError,
+    }));
+
+    act(() => hook.result.current[action]({
+      id: "88888888-8888-4888-8888-888888888888",
+      label: "Typecheck",
+    }));
+
+    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(message));
+  });
+
+  it("opens a service preview only after its exact pane context is active", async () => {
+    const navigatePreview = vi.fn((
+      _url: string,
+      onSettled?: () => void,
+    ) => onSettled?.());
+    const focusPreview = vi.fn();
+    const activateContext = vi.fn(() => true);
     const previewRun: WorkspaceRun = {
       id: "55555555-5555-4555-8555-555555555555",
       kind: "service",
       projectId: beta.id,
       conversationId: betaChat.id,
       actionId: "preview",
-      label: "preview",
+      label: "Docs preview",
       detail: "npm run preview",
       status: "running",
       attentionState: "acknowledged",
@@ -1672,42 +1925,126 @@ describe("workspace pane authority", () => {
     const hook = renderHook((owner: {
       project: Project;
       conversationId: string;
-      navigatePreview: (url: string) => void;
     }) => useActivityActions({
-      project: owner.project,
-      conversationId: owner.conversationId,
-      snapshot: null,
-      request: vi.fn(),
+      ...owner,
       run: vi.fn(),
       setActiveTool: vi.fn(),
-      setActivityOpen: vi.fn(),
       setActionError: vi.fn(),
       activateContext,
-      openProjectPath: vi.fn(),
-      navigatePreview: owner.navigatePreview,
+      navigatePreview,
+      focusPreview,
     }), {
       initialProps: {
         project: alpha,
         conversationId: alphaChat.id,
-        navigatePreview: navigateAlphaPreview,
       },
     });
 
-    act(() => hook.result.current.openActivityPreview(previewRun));
+    act(() => hook.result.current.openWorkspaceRunPreview(previewRun));
     expect(activateContext).toHaveBeenCalledWith(previewRun, "preview");
-    expect(navigateAlphaPreview).not.toHaveBeenCalled();
+    expect(navigatePreview).not.toHaveBeenCalled();
 
-    hook.rerender({
-      project: beta,
+    hook.rerender({ project: beta, conversationId: betaChat.id });
+    await waitFor(() => expect(navigatePreview).toHaveBeenCalledWith(
+      "http://127.0.0.1:4173",
+      focusPreview,
+    ));
+    expect(focusPreview).toHaveBeenCalledOnce();
+  });
+
+  it("rejects stale or invalid service previews without changing context", () => {
+    const activateContext = vi.fn(() => true);
+    const navigatePreview = vi.fn();
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run: vi.fn(),
+      setActiveTool: vi.fn(),
+      setActionError,
+      activateContext,
+      navigatePreview,
+    }));
+
+    act(() => hook.result.current.openWorkspaceRunPreview({
+      id: "66666666-6666-4666-8666-666666666666",
+      kind: "service",
+      projectId: alpha.id,
+      conversationId: alphaChat.id,
+      label: "Expired preview",
+      status: "succeeded",
+      port: 4173,
+    }));
+
+    expect(activateContext).not.toHaveBeenCalled();
+    expect(navigatePreview).not.toHaveBeenCalled();
+    expect(setActionError).toHaveBeenCalledWith(
+      "Could not open Expired preview: its preview is no longer available.",
+    );
+  });
+
+  it("rejects a live preview when its exact workspace context is unavailable", () => {
+    const activateContext = vi.fn(() => false);
+    const navigatePreview = vi.fn();
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run: vi.fn(),
+      setActiveTool: vi.fn(),
+      setActionError,
+      activateContext,
+      navigatePreview,
+    }));
+    const preview = {
+      id: "99999999-9999-4999-8999-999999999999",
+      kind: "service" as const,
+      projectId: beta.id,
       conversationId: betaChat.id,
-      navigatePreview: navigateBetaPreview,
-    });
-    await waitFor(() => {
-      expect(navigateBetaPreview).toHaveBeenCalledWith(
-        "http://127.0.0.1:4173",
-      );
-    });
-    expect(navigateAlphaPreview).not.toHaveBeenCalled();
+      label: "Unavailable preview",
+      status: "running" as const,
+      port: 4173,
+    };
+
+    act(() => hook.result.current.openWorkspaceRunPreview(preview));
+
+    expect(activateContext).toHaveBeenCalledWith(preview, "preview");
+    expect(navigatePreview).not.toHaveBeenCalled();
+    expect(setActionError).toHaveBeenCalledWith(
+      "Could not open Unavailable preview: its preview is no longer available.",
+    );
+  });
+
+  it.each([
+    {
+      failure: new Error("The run already finished."),
+      message: "Could not stop Review question: The run already finished.",
+    },
+    {
+      failure: "unknown failure",
+      message: "Could not stop Review question: The work could not be stopped.",
+    },
+  ])("surfaces an exact-run stop failure without hiding its owner", async ({
+    failure,
+    message,
+  }) => {
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useActivityActions({
+      project: alpha,
+      conversationId: alphaChat.id,
+      run: vi.fn(async () => {
+        throw failure;
+      }),
+      setActiveTool: vi.fn(),
+      setActionError,
+    }));
+
+    act(() => hook.result.current.stopWorkspaceRun({
+      id: "66666666-6666-4666-8666-666666666666",
+      label: "Review question",
+    }));
+
+    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(message));
   });
 
   it("closes and resets a native preview when its conversation changes", async () => {
@@ -1744,7 +2081,6 @@ describe("workspace pane authority", () => {
     );
     act(() => hook.result.current.navigatePreview("http://localhost:3000"));
     expect(hook.result.current.previewUrl).toBe("http://localhost:3000");
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
 
     hook.rerender({ contextId: betaChat.id });
     act(() => {
@@ -1758,7 +2094,6 @@ describe("workspace pane authority", () => {
 
     await waitFor(() => {
       expect(hook.result.current.previewUrl).toBe("");
-      expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
       expect(previewClose).toHaveBeenCalledWith({
         ownerId: "primary",
         contextId: alphaChat.id,
@@ -1766,149 +2101,4 @@ describe("workspace pane authority", () => {
     });
   });
 
-  it("exposes a preview as ready only after navigation succeeds", async () => {
-    const setActionError = vi.fn();
-    let publishPreviewState:
-      | Parameters<typeof window.inertia.onPreviewState>[0]
-      | null = null;
-    const previewNavigate = vi.fn()
-      .mockRejectedValueOnce(new Error("Connection refused."))
-      .mockResolvedValueOnce({
-        url: "http://localhost:4173",
-        loading: false,
-        canGoBack: false,
-        canGoForward: false,
-      })
-      .mockResolvedValueOnce({
-        url: "http://localhost:4173",
-        loading: false,
-        canGoBack: false,
-        canGoForward: false,
-      })
-      .mockResolvedValueOnce({
-        url: "http://localhost:4173",
-        loading: false,
-        canGoBack: false,
-        canGoForward: false,
-      })
-      .mockRejectedValueOnce(new Error("Connection refused again."));
-    const previewCommand = vi.fn()
-      .mockRejectedValueOnce(new Error("Reload failed."))
-      .mockResolvedValueOnce({
-        url: "http://localhost:4173/docs",
-        loading: true,
-        canGoBack: true,
-        canGoForward: false,
-      });
-    Object.defineProperty(window, "inertia", {
-      configurable: true,
-      value: {
-        previewClose: vi.fn(async () => undefined),
-        onPreviewState: vi.fn((listener) => {
-          publishPreviewState = listener;
-          return () => undefined;
-        }),
-        previewNavigate,
-        previewCommand,
-      },
-    });
-    const hook = renderHook(() => useDesktopTools({
-      setActionError,
-      previewOwnerId: "primary",
-      previewContextId: alphaChat.id,
-    }));
-
-    act(() => hook.result.current.navigatePreview("http://localhost:3000"));
-    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
-      "Connection refused.",
-    ));
-    expect(hook.result.current.previewUrl).toBe("http://localhost:3000");
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-
-    act(() => hook.result.current.navigatePreview("http://localhost:4173"));
-    await waitFor(() => expect(hook.result.current.lastLoadedPreviewUrl)
-      .toBe("http://localhost:4173"));
-
-    act(() => hook.result.current.previewCommand("reload"));
-    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
-      "Reload failed.",
-    ));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-
-    act(() => hook.result.current.navigatePreview("http://localhost:4173"));
-    await waitFor(() => expect(hook.result.current.lastLoadedPreviewUrl)
-      .toBe("http://localhost:4173"));
-
-    act(() => publishPreviewState?.({
-      ownerId: "primary",
-      contextId: alphaChat.id,
-      url: "http://localhost:4173/docs",
-      ready: false,
-      loading: true,
-      canGoBack: true,
-      canGoForward: false,
-    }));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-
-    act(() => publishPreviewState?.({
-      ownerId: "primary",
-      contextId: alphaChat.id,
-      url: "http://localhost:4173/docs",
-      ready: false,
-      loading: false,
-      canGoBack: true,
-      canGoForward: false,
-    }));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-
-    act(() => publishPreviewState?.({
-      ownerId: "primary",
-      contextId: alphaChat.id,
-      url: "http://localhost:4173/docs",
-      ready: true,
-      loading: false,
-      canGoBack: true,
-      canGoForward: false,
-    }));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("http://localhost:4173/docs");
-
-    act(() => hook.result.current.previewCommand("reload"));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-    await waitFor(() => expect(previewCommand).toHaveBeenCalledTimes(2));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-
-    act(() => publishPreviewState?.({
-      ownerId: "primary",
-      contextId: alphaChat.id,
-      url: "http://localhost:5173/docs",
-      ready: false,
-      loading: true,
-      canGoBack: true,
-      canGoForward: false,
-    }));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-
-    act(() => publishPreviewState?.({
-      ownerId: "primary",
-      contextId: alphaChat.id,
-      url: "http://localhost:5173/docs",
-      ready: true,
-      loading: false,
-      canGoBack: true,
-      canGoForward: false,
-    }));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("http://localhost:5173/docs");
-
-    act(() => hook.result.current.navigatePreview("https://example.com"));
-    await waitFor(() => expect(hook.result.current.previewUrl)
-      .toBe("http://localhost:4173"));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-
-    act(() => hook.result.current.navigatePreview("http://localhost:5173"));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
-      "Connection refused again.",
-    ));
-    expect(hook.result.current.lastLoadedPreviewUrl).toBe("");
-  });
 });

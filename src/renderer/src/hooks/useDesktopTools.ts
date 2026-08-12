@@ -12,17 +12,6 @@ interface DesktopToolsOptions {
   previewContextId?: string | null;
 }
 
-function loadedPreviewUrl(requestedUrl: string, loadedUrl: string): string {
-  if (!loadedUrl) return "";
-  try {
-    return new URL(requestedUrl).origin === new URL(loadedUrl).origin
-      ? loadedUrl
-      : "";
-  } catch {
-    return "";
-  }
-}
-
 export async function prepareComposerAttachmentImports(
   files: readonly File[],
 ): Promise<Array<{ name: string; mimeType: string; data: ArrayBuffer }>> {
@@ -59,12 +48,10 @@ export function useDesktopTools({
   const [ownedPreview, setOwnedPreview] = useState<{
     contextId: string | null;
     url: string;
-    lastLoadedUrl: string;
     navigation: PreviewState;
   }>({
     contextId: previewContextId,
     url: "",
-    lastLoadedUrl: "",
     navigation: emptyPreviewState(),
   });
 
@@ -72,7 +59,6 @@ export function useDesktopTools({
     setOwnedPreview({
       contextId: previewContextId,
       url: "",
-      lastLoadedUrl: "",
       navigation: emptyPreviewState(),
     });
     if (!previewContextId) return;
@@ -85,9 +71,6 @@ export function useDesktopTools({
       setOwnedPreview({
         contextId: state.contextId,
         url: state.url,
-        lastLoadedUrl: state.ready
-          ? loadedPreviewUrl(state.url, state.url)
-          : "",
         navigation: state,
       });
     });
@@ -145,13 +128,15 @@ export function useDesktopTools({
     [],
   );
 
-  const navigatePreview = useCallback((url: string) => {
+  const navigatePreview = useCallback((
+    url: string,
+    onSettled?: () => void,
+  ) => {
     const contextId = previewContextId;
     if (!contextId) return;
     setOwnedPreview((current) => ({
       contextId,
       url,
-      lastLoadedUrl: "",
       navigation: { ...current.navigation, url, loading: true },
     }));
     void window.inertia.previewNavigate({
@@ -168,9 +153,9 @@ export function useDesktopTools({
         setOwnedPreview({
           contextId,
           url: state.url,
-          lastLoadedUrl: loadedPreviewUrl(url, state.url),
           navigation: state,
         });
+        onSettled?.();
       })
       .catch((error) => {
         const authority = authorityRef.current;
@@ -190,6 +175,7 @@ export function useDesktopTools({
             loading: false,
           },
         }));
+        onSettled?.();
       });
   }, [previewContextId, previewOwnerId, setActionError]);
 
@@ -198,13 +184,6 @@ export function useDesktopTools({
   ) => {
     const contextId = previewContextId;
     if (!contextId) return;
-    setOwnedPreview((current) => current.contextId === contextId
-      ? {
-          ...current,
-          lastLoadedUrl: "",
-          navigation: { ...current.navigation, loading: true },
-        }
-      : current);
     void window.inertia.previewCommand({
       ownerId: previewOwnerId,
       contextId,
@@ -216,14 +195,11 @@ export function useDesktopTools({
           authority.previewOwnerId !== previewOwnerId
           || authority.previewContextId !== contextId
         ) return;
-        setOwnedPreview((current) => ({
+        setOwnedPreview({
           contextId,
           url: state.url,
-          lastLoadedUrl: current.contextId === contextId
-            ? current.lastLoadedUrl
-            : "",
           navigation: state,
-        }));
+        });
       })
       .catch((error) => {
         const authority = authorityRef.current;
@@ -231,9 +207,6 @@ export function useDesktopTools({
           authority.previewOwnerId !== previewOwnerId
           || authority.previewContextId !== contextId
         ) return;
-        setOwnedPreview((current) => current.contextId === contextId
-          ? { ...current, lastLoadedUrl: "" }
-          : current);
         setActionError(
           error instanceof Error
             ? error.message
@@ -256,13 +229,11 @@ export function useDesktopTools({
     : {
         contextId: previewContextId,
         url: "",
-        lastLoadedUrl: "",
         navigation: emptyPreviewState(),
       };
 
   return {
     previewUrl: visiblePreview.url,
-    lastLoadedPreviewUrl: visiblePreview.lastLoadedUrl,
     previewNavigation: visiblePreview.navigation,
     chooseComposerAttachments,
     importComposerAttachments,

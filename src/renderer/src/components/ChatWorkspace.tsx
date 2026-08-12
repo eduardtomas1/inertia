@@ -296,11 +296,13 @@ export function ChatWorkspace({
   );
   const hasGoalControl = Boolean(goal);
   const goalWorkflow = goal?.workflow ?? null;
+  const goalExecutionStatus = goal?.executionStatus ?? "idle";
   const goalLoading = goal?.loading ?? false;
   const goalBusy = goal?.busy ?? false;
   const goalError = goal?.error ?? null;
   const goalControl = useMemo<ChatGoalControlProps | null>(() => hasGoalControl ? ({
     workflow: goalWorkflow,
+    executionStatus: goalExecutionStatus,
     loading: goalLoading,
     busy: goalBusy,
     error: goalError,
@@ -311,6 +313,7 @@ export function ChatWorkspace({
     clearChatGoal,
     goalBusy,
     goalError,
+    goalExecutionStatus,
     goalLoading,
     goalWorkflow,
     hasGoalControl,

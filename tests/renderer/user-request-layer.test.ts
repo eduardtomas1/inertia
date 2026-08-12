@@ -153,7 +153,7 @@ describe("Quiet Ledger user request layer", () => {
       checkpoint,
       checkpointRestoreDisabled: true,
       attachment: {
-        id: "attachment-1",
+        id: "11111111-1111-4111-8111-111111111111",
         name: "reference.png",
         path: "/workspace/reference.png",
         mimeType: "image/png",
@@ -167,18 +167,23 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain(`<time dateTime="${requestedAt}">`);
     expect(html).toContain('class="message-revert"');
     expect(html).toContain('disabled=""');
-    expect(html).toContain('aria-label="Request context"');
+    expect(html).toContain('aria-label="Request attachments"');
     expect(html).toContain('data-request-context-kind="image"');
-    expect(html).toContain("PNG image · reference.png");
+    expect(html).toContain("PNG image · 1.0 KB");
+    expect(html).toContain('aria-label="Preview attachment reference.png"');
+    expect(html).toContain(
+      'src="inertia://bundle/attachment-preview/11111111-1111-4111-8111-111111111111"',
+    );
+    expect(html).toContain("1.0 KB");
     expect(html).not.toContain("/workspace/reference.png");
-    expect(html.indexOf("PNG image · reference.png"))
+    expect(html.indexOf("reference.png"))
       .toBeGreaterThan(html.indexOf("Please inspect this reference."));
   });
 
   it("labels historical documents truthfully without exposing their private path", () => {
     const html = renderRequest("Review the attached brief.", {
       attachment: {
-        id: "attachment-pdf",
+        id: "22222222-2222-4222-8222-222222222222",
         name: "brief.pdf",
         path: "/private/runtime/brief.pdf",
         mimeType: "application/pdf",
@@ -187,7 +192,8 @@ describe("Quiet Ledger user request layer", () => {
     });
 
     expect(html).toContain('data-request-context-kind="document"');
-    expect(html).toContain("PDF document · brief.pdf");
+    expect(html).toContain('aria-label="Preview attachment brief.pdf"');
+    expect(html).toContain("PDF document · 4.0 KB");
     expect(html).not.toContain("/private/runtime/brief.pdf");
     expect(html).not.toContain("Image · brief.pdf");
   });

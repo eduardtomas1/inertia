@@ -16,6 +16,8 @@ import {
 import {
   rootGitMutationScope,
   type RootGitMutationScope,
+  type WorkspaceChangesRequest,
+  type WorkspaceChangesRequestedAction,
   workspaceGitRefreshIdentity,
 } from "../../utils/workspaceGit";
 
@@ -64,6 +66,9 @@ export function useWorkspaceGit({
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [changesRequest, setChangesRequest] =
+    useState<WorkspaceChangesRequest | null>(null);
+  const changesRequestRevisionRef = useRef(0);
   const [commitReviewRevision, setCommitReviewRevision] = useState(0);
   const projectRefreshIdentity = workspaceGitRefreshIdentity(project);
   const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
@@ -248,7 +253,24 @@ export function useWorkspaceGit({
     setBranches([]);
     setLoading(false);
     setLoadError(null);
+    setChangesRequest(null);
   }, [authority, enabled, projectRefreshIdentity]);
+
+  const requestWorkspaceChanges = useCallback((
+    repositoryPath: string,
+    action: WorkspaceChangesRequestedAction = "review",
+  ): void => {
+    changesRequestRevisionRef.current += 1;
+    setChangesRequest({
+      repositoryPath,
+      action,
+      revision: changesRequestRevisionRef.current,
+    });
+  }, []);
+
+  const clearWorkspaceChangesRequest = useCallback((revision: number): void => {
+    setChangesRequest((current) => current?.revision === revision ? null : current);
+  }, []);
 
   useEffect(() => {
     requestGenerationRef.current += 1;
@@ -553,5 +575,8 @@ export function useWorkspaceGit({
     loadBranches,
     mutateBranch,
     commit,
+    changesRequest,
+    requestWorkspaceChanges,
+    clearWorkspaceChangesRequest,
   };
 }

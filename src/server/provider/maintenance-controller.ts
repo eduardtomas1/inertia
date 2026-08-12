@@ -155,6 +155,7 @@ export class ProviderMaintenanceController {
   private readonly latestVersions: ProviderLatestVersionCache;
   private readonly now: () => number;
   private readonly operationId: () => string;
+  private cleanupUnconfirmed = false;
 
   constructor(private readonly options: ProviderMaintenanceControllerOptions) {
     this.latestVersions = options.latestVersions ?? new ProviderLatestVersionCache();
@@ -272,6 +273,9 @@ export class ProviderMaintenanceController {
         .map((operation) => operation.completion)
         .filter((completion): completion is Promise<void> => completion !== null),
     );
+    if (this.cleanupUnconfirmed) {
+      throw new Error("Provider maintenance process cleanup could not be confirmed.");
+    }
   }
 
   private async refreshOne(
@@ -336,6 +340,7 @@ export class ProviderMaintenanceController {
           return await this.runAction(action, active);
         },
       );
+      this.cleanupUnconfirmed ||= !result.cleanupConfirmed;
       if (result.status === "cancelled") {
         this.finishOperation(active, {
           status: "cancelled",

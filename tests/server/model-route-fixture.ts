@@ -33,6 +33,8 @@ interface NativeProviderRunInput {
   sessionId?: string;
   imagePaths?: readonly string[];
   skills?: readonly ProviderSkillInput[];
+  goalStart?: ProviderRunInput["goalStart"];
+  goalContinuationExpected?: boolean;
 }
 
 export function nativeProviderRunFields(

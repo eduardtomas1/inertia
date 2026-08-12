@@ -50,7 +50,6 @@ describe("thread notifications", () => {
       pullRequestDialogOpen: false,
       multiSpawnOpen: false,
       paletteOpen: false,
-      activityOpen: false,
       providerAuthOpen: false,
       mobileSidebarOpen: false,
     };
@@ -76,7 +75,6 @@ describe("thread notifications", () => {
     const showWorkspace = vi.fn();
     const closeSidebar = vi.fn();
     const closePalette = vi.fn();
-    const closeActivity = vi.fn();
     const closeCommitDialog = vi.fn(() => calls.push("commit"));
     const closePullRequestDialog = vi.fn(() => calls.push("pull-request"));
     const closeProviderAuth = vi.fn(() => calls.push("provider-auth"));
@@ -87,7 +85,6 @@ describe("thread notifications", () => {
       showWorkspace,
       closeSidebar,
       closePalette,
-      closeActivity,
       closeCommitDialog,
       closePullRequestDialog,
       closeProviderAuth,
@@ -103,7 +100,6 @@ describe("thread notifications", () => {
     expect(showWorkspace).toHaveBeenCalledOnce();
     expect(closeSidebar).toHaveBeenCalledOnce();
     expect(closePalette).toHaveBeenCalledOnce();
-    expect(closeActivity).toHaveBeenCalledOnce();
     expect(closeCommitDialog).toHaveBeenCalledOnce();
     expect(closePullRequestDialog).toHaveBeenCalledOnce();
     expect(closeProviderAuth).toHaveBeenCalledOnce();

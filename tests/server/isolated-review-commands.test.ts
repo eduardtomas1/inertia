@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Conversation } from "../../src/shared/contracts";
 import type { RuntimeStore } from "../../src/server/database";
+import { GitError } from "../../src/server/git";
 import { ConversationWorkAuthority } from "../../src/server/runtime/conversation-work-authority";
 import {
   createIsolatedReviewCommandHandler,
@@ -63,6 +64,8 @@ function deferred<Value>(): {
 function fixture(authority: ConversationWorkAuthority) {
   const start = vi.fn(() => true);
   const queue = vi.fn(() => ({ turn: { id: turnId } }));
+  const stopConversation = vi.fn(() => false);
+  const runIsolated = vi.fn();
   const dependencies = {
     store: {
       conversation: vi.fn(() => conversation),
@@ -73,7 +76,11 @@ function fixture(authority: ConversationWorkAuthority) {
       queue,
       start,
     },
-    isolatedRuns: { has: vi.fn(() => false) },
+    isolatedRuns: {
+      has: vi.fn(() => false),
+      run: runIsolated,
+      stopConversation,
+    },
     secureFiles: {},
     dataDirectory: "/private/inertia-data",
     enableProviders: true,
@@ -82,7 +89,7 @@ function fixture(authority: ConversationWorkAuthority) {
     broadcastSnapshot: vi.fn(),
     send: vi.fn(),
   } as unknown as IsolatedReviewCommandDependencies;
-  return { dependencies, queue, start };
+  return { dependencies, queue, runIsolated, start, stopConversation };
 }
 
 describe("isolated review revision authority", () => {
@@ -123,6 +130,161 @@ describe("isolated review revision authority", () => {
     )).rejects.toThrow("Wait for the current agent");
 
     expect(reviewSupport.selectedReviewContext).not.toHaveBeenCalled();
+  });
+
+  it("cancels only an active selection question", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    const { dependencies, stopConversation } = fixture(authority);
+    stopConversation.mockReturnValue(true);
+
+    await expect(createIsolatedReviewCommandHandler(dependencies)(
+      {} as WebSocket,
+      {
+        type: "review.selection.cancel",
+        requestId,
+        payload: { conversationId },
+      },
+    )).resolves.toBe("handled");
+
+    expect(stopConversation).toHaveBeenCalledWith(
+      conversationId,
+      "selection-ask",
+    );
+    expect(dependencies.send).toHaveBeenCalledWith(
+      expect.anything(),
+      { type: "request.ok", requestId },
+    );
+  });
+
+  it("rejects cancellation when no selection question owns the thread", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    const { dependencies, stopConversation } = fixture(authority);
+
+    await expect(createIsolatedReviewCommandHandler(dependencies)(
+      {} as WebSocket,
+      {
+        type: "review.selection.cancel",
+        requestId,
+        payload: { conversationId },
+      },
+    )).rejects.toThrow(
+      "This thread does not have an active review question.",
+    );
+
+    expect(stopConversation).toHaveBeenCalledWith(
+      conversationId,
+      "selection-ask",
+    );
+    expect(dependencies.send).not.toHaveBeenCalled();
+  });
+
+  it("aborts cancellation while selection context is still being assembled", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    let setupSignal: AbortSignal | undefined;
+    reviewSupport.selectedReviewContext.mockImplementation((
+      _store,
+      _selection,
+      _purpose,
+      _secureFiles,
+      signal?: AbortSignal,
+    ) => {
+      setupSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => reject(new Error("selection setup cancelled")),
+          { once: true },
+        );
+      });
+    });
+    const { dependencies, runIsolated, stopConversation } = fixture(authority);
+    const handler = createIsolatedReviewCommandHandler(dependencies);
+    const socket = {} as WebSocket;
+
+    const question = handler(socket, askCommand);
+    await vi.waitFor(() => {
+      expect(reviewSupport.selectedReviewContext).toHaveBeenCalledOnce();
+    });
+    await expect(handler(socket, {
+      ...askCommand,
+      requestId: projectId,
+    })).rejects.toThrow(
+      "Wait for the current agent or review turn to finish first.",
+    );
+    await expect(handler(socket, {
+      type: "review.selection.cancel",
+      requestId: turnId,
+      payload: { conversationId },
+    })).resolves.toBe("handled");
+    expect(setupSignal).toBeInstanceOf(AbortSignal);
+    expect(setupSignal?.aborted).toBe(true);
+    await expect(question).resolves.toBe("handled");
+
+    expect(stopConversation).toHaveBeenCalledWith(
+      conversationId,
+      "selection-ask",
+    );
+    expect(runIsolated).not.toHaveBeenCalled();
+    expect(dependencies.send).toHaveBeenCalledWith(socket, {
+      type: "request.ok",
+      requestId: turnId,
+    });
+    expect(dependencies.send).toHaveBeenCalledWith(socket, {
+      type: "request.ok",
+      requestId,
+    });
+  });
+
+  it("reports a failed Git process-tree cleanup after setup cancellation", async () => {
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath: "/private/inertia-worktree",
+    }));
+    reviewSupport.selectedReviewContext.mockImplementation((
+      _store,
+      _selection,
+      _purpose,
+      _secureFiles,
+      signal?: AbortSignal,
+    ) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new GitError(
+        "operation-failed",
+        "Git stopped responding, and its process tree could not be confirmed stopped.",
+      )), { once: true });
+    }));
+    const { dependencies, runIsolated } = fixture(authority);
+    const handler = createIsolatedReviewCommandHandler(dependencies);
+    const socket = {} as WebSocket;
+
+    const question = handler(socket, askCommand);
+    await vi.waitFor(() => {
+      expect(reviewSupport.selectedReviewContext).toHaveBeenCalledOnce();
+    });
+    await expect(handler(socket, {
+      type: "review.selection.cancel",
+      requestId: turnId,
+      payload: { conversationId },
+    })).resolves.toBe("handled");
+
+    await expect(question).rejects.toMatchObject({
+      code: "operation-failed",
+      message:
+        "Git stopped responding, and its process tree could not be confirmed stopped.",
+    });
+    expect(runIsolated).not.toHaveBeenCalled();
+    expect(dependencies.send).not.toHaveBeenCalledWith(socket, {
+      type: "request.ok",
+      requestId,
+    });
   });
 
   it("holds conversation ownership from diff read through turn start", async () => {

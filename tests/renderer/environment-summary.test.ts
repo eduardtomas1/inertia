@@ -1,22 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildEnvironmentSummary,
-} from "../../src/renderer/src/utils/environmentSummary";
+import { buildEnvironmentSummary } from "../../src/renderer/src/utils/environmentSummary";
 import type {
   ChatMessage,
+  ProviderInfo,
   SubagentTrace,
+  ThreadUsageSnapshot,
   WorkspaceGitSnapshot,
   WorkspaceRun,
 } from "../../src/shared/contracts";
 
-const now = "2026-07-28T12:00:00.000Z";
+const now = "2026-08-12T12:00:00.000Z";
 
-function run(
-  update: Partial<WorkspaceRun> = {},
-): WorkspaceRun {
+function run(update: Partial<WorkspaceRun> = {}): WorkspaceRun {
   return {
-    id: crypto.randomUUID(),
+    id: "check-1",
     kind: "check",
     projectId: "project-1",
     conversationId: "conversation-1",
@@ -33,12 +31,10 @@ function run(
   };
 }
 
-function subagent(
-  update: Partial<SubagentTrace> = {},
-): SubagentTrace {
+function subagent(update: Partial<SubagentTrace> = {}): SubagentTrace {
   const status = update.status ?? "running";
   return {
-    id: crypto.randomUUID(),
+    id: "trace-1",
     conversationId: "conversation-1",
     runId: "run-1",
     turnId: "turn-1",
@@ -53,9 +49,7 @@ function subagent(
     providerName: "Review",
     providerStatus: null,
     status,
-    isLive: update.isLive ?? [
-      "queued", "spawned", "running", "waiting",
-    ].includes(status),
+    isLive: update.isLive ?? ["queued", "spawned", "running", "waiting"].includes(status),
     description: null,
     progress: null,
     result: null,
@@ -66,11 +60,7 @@ function subagent(
   };
 }
 
-function message(
-  id: string,
-  name: string,
-  createdAt: string,
-): ChatMessage {
+function message(id: string, name: string): ChatMessage {
   return {
     id,
     conversationId: "conversation-1",
@@ -84,105 +74,546 @@ function message(
       mimeType: name.endsWith(".pdf") ? "application/pdf" : "image/png",
       size: 128,
     }],
-    createdAt,
+    createdAt: now,
   };
 }
 
-describe("environment summary projection", () => {
-  it("uses truthful workspace-wide changes and only current active work", () => {
-    const workspaceGitStatus: WorkspaceGitSnapshot = {
-      repositories: [{
-        repositoryPath: ".",
-        state: "ready",
-        error: null,
-        branch: "codex/summary",
-        upstream: null,
-        ahead: 0,
-        behind: 0,
-        hasRemote: true,
-        files: [],
+function provider(
+  update: Partial<ProviderInfo> = {},
+): ProviderInfo {
+  return {
+    id: "codex",
+    label: "Codex",
+    command: "codex",
+    available: true,
+    version: "1.0.0",
+    installState: "installed",
+    authState: "authenticated",
+    canRun: true,
+    statusMessage: null,
+    models: [],
+    rateLimits: [{
+      id: "five-hour",
+      label: "Five-hour limit",
+      usedPercent: 36,
+      remainingPercent: 64,
+      windowMinutes: 300,
+      resetsAt: "2026-08-12T15:00:00.000Z",
+    }],
+    metadataState: {
+      models: {
+        freshness: "fresh",
+        provenance: "provider",
+        updatedAt: now,
+        lastAttemptedAt: now,
+        refreshing: false,
+      },
+      rateLimits: {
+        freshness: "fresh",
+        provenance: "provider",
+        updatedAt: now,
+        lastAttemptedAt: now,
+        refreshing: false,
+      },
+    },
+    ...update,
+  };
+}
+
+function usage(update: Partial<ThreadUsageSnapshot> = {}): ThreadUsageSnapshot {
+  return {
+    conversationId: "conversation-1",
+    turnId: "turn-1",
+    usedTokens: 28_000,
+    totalProcessedTokens: 42_000,
+    totalProcessedScope: "thread",
+    maxTokens: 100_000,
+    inputTokens: 20_000,
+    cachedInputTokens: 4_000,
+    cacheWriteInputTokens: null,
+    outputTokens: 4_000,
+    reasoningOutputTokens: null,
+    compactsAutomatically: true,
+    updatedAt: now,
+    ...update,
+  };
+}
+
+function workspaceGit(
+  update: Partial<WorkspaceGitSnapshot> = {},
+): WorkspaceGitSnapshot {
+  return {
+    repositories: [{
+      repositoryPath: ".",
+      authorityRef: "root-authority",
+      state: "ready",
+      error: null,
+      branch: "codex/environment",
+      upstream: "origin/codex/environment",
+      ahead: 1,
+      behind: 0,
+      hasRemote: true,
+      pullRequest: {
+        available: true,
+        remoteName: "origin",
+        forge: "github",
+        unavailableReason: null,
+      },
+      files: [{
+        path: "src/App.tsx",
+        status: "modified",
         insertions: 9,
         deletions: 4,
-        clean: false,
-        truncated: false,
+        untracked: false,
+        staged: false,
+        unstaged: true,
+        indexStatus: " ",
+        worktreeStatus: "M",
       }],
-      files: 2,
       insertions: 9,
       deletions: 4,
-      scannedDirectories: 1,
-      skippedDirectories: 0,
-      discoveredRepositories: 1,
-      repositoryLimit: 128,
-      partial: false,
+      clean: false,
       truncated: false,
-      issues: [],
-    };
+    }],
+    files: 1,
+    insertions: 9,
+    deletions: 4,
+    scannedDirectories: 1,
+    skippedDirectories: 0,
+    discoveredRepositories: 1,
+    repositoryLimit: 128,
+    partial: false,
+    truncated: false,
+    issues: [],
+    ...update,
+  };
+}
 
+const owners = {
+  projects: [
+    { id: "project-1", name: "Inertia", path: "/workspace/inertia" },
+    { id: "project-2", name: "Docs", path: "/workspace/docs" },
+  ],
+  conversations: [
+    {
+      id: "conversation-1",
+      projectId: "project-1",
+      title: "Primary chat",
+      branch: "main",
+      worktreePath: null,
+    },
+    {
+      id: "conversation-2",
+      projectId: "project-2",
+      title: "Docs chat",
+      branch: "docs/preview",
+      worktreePath: "/workspace/.inertia/worktrees/docs-preview",
+    },
+  ],
+};
+
+describe("environment summary projection", () => {
+  it("projects real workspace, Git, attachments, active work, and validated services", () => {
     const summary = buildEnvironmentSummary({
       projectId: "project-1",
       projectName: "Inertia",
       conversationId: "conversation-1",
       connectionStatus: "online",
       gitStatus: null,
-      workspaceGitStatus,
+      workspaceGitStatus: workspaceGit(),
       runs: [
         run(),
-        run({ id: "old", status: "succeeded", finishedAt: now }),
-        run({ id: "other", projectId: "project-2" }),
         run({
-          id: "failed",
-          status: "failed",
-          attentionState: "unseen",
+          id: "preview",
+          kind: "service",
+          label: "Preview",
+          port: 4173,
+        }),
+        run({
+          id: "settled",
+          status: "succeeded",
+          canStop: false,
           finishedAt: now,
         }),
       ],
-      subagents: [
-        subagent(),
-        subagent({ id: "done", status: "completed" }),
-        subagent({ id: "other-agent", conversationId: "conversation-2" }),
-      ],
-      messages: [
-        message("old", "old.png", "2026-07-28T10:00:00.000Z"),
-        message("new", "notes.pdf", "2026-07-28T11:00:00.000Z"),
-      ],
+      subagents: [subagent(), subagent({ id: "done", status: "completed" })],
+      messages: [message("old", "old.png"), message("new", "notes.pdf")],
       projectPath: "/workspace/inertia",
       worktreePath: "/workspace/worktrees/environment-panel",
-      lastLoadedPreviewUrl: "http://localhost:4173/app",
+      ...owners,
     });
 
     expect(summary.runtime).toEqual({ status: "online" });
     expect(summary.changes).toEqual({
-      files: 2,
+      files: 1,
       insertions: 9,
       deletions: 4,
       repositories: 1,
     });
     expect(summary.branch).toEqual({
       label: "Branch",
-      value: "codex/summary",
+      value: "codex/environment",
     });
     expect(summary.workspace).toEqual({
       label: "Worktree",
       value: "environment-panel",
       path: "/workspace/worktrees/environment-panel",
     });
-    expect(summary.openTarget).toEqual({
-      name: "Inertia",
-      path: "/workspace/worktrees/environment-panel",
-    });
-    expect(summary.localPreviewTargets).toEqual([{
-      url: "http://localhost:4173",
+    expect(summary.checks.map(({ id }) => id)).toEqual(["check-1"]);
+    expect(summary.localServers).toMatchObject([{
+      id: "preview",
+      url: "http://127.0.0.1:4173",
+      canOpenPreview: true,
     }]);
-    expect(summary.checks).toHaveLength(2);
-    expect(summary.checks.map(({ id }) => id)).toContain("failed");
     expect(summary.subagents).toHaveLength(1);
     expect(summary.attachments.map(({ name }) => name))
       .toEqual(["notes.pdf", "old.png"]);
     expect(JSON.stringify(summary)).not.toContain("/private/");
   });
 
-  it("does not invent workspace details before they are available", () => {
+  it("never derives Local Servers from remembered URLs or invalid service ports", () => {
     const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [
+        run({ id: "valid", kind: "service", port: 4173 }),
+        run({ id: "invalid", kind: "service", port: 70_000 }),
+        run({
+          id: "finished",
+          kind: "service",
+          port: 3000,
+          status: "succeeded",
+          canStop: false,
+          finishedAt: now,
+        }),
+        run({
+          id: "missing-owner",
+          kind: "service",
+          conversationId: "missing",
+          port: 8080,
+        }),
+      ],
+      subagents: [],
+      messages: [],
+      ...owners,
+    });
+
+    expect(summary.localServers.map(({ id }) => id))
+      .toEqual(["valid", "missing-owner"]);
+    expect(summary.localServers.find(({ id }) => id === "valid")?.canOpenPreview)
+      .toBe(true);
+    expect(summary.localServers.find(({ id }) => id === "missing-owner")?.canOpenPreview)
+      .toBe(false);
+    expect(summary.checks.find(({ id }) => id === "invalid")?.canOpenPreview)
+      .toBe(false);
+  });
+
+  it("suppresses cached run and service state while the runtime is reconnecting or offline", () => {
+    for (const connectionStatus of ["connecting", "offline"] as const) {
+      const summary = buildEnvironmentSummary({
+        projectId: "project-1",
+        projectName: "Inertia",
+        conversationId: "conversation-1",
+        connectionStatus,
+        gitStatus: null,
+        workspaceGitStatus: null,
+        runs: [
+          run({ id: "cached-check" }),
+          run({ id: "cached-service", kind: "service", port: 4173 }),
+        ],
+        subagents: [],
+        messages: [],
+        ...owners,
+      });
+
+      expect(summary.runtime.status).toBe(connectionStatus);
+      expect(summary.checks).toEqual([]);
+      expect(summary.localServers).toEqual([]);
+    }
+  });
+
+  it("keeps every stoppable owner visible while bounding passive work", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [
+        ...[1, 2, 3, 4].map((value) => run({
+          id: `passive-${value}`,
+          canStop: false,
+          startedAt: `2026-08-12T12:0${7 - value}:00.000Z`,
+        })),
+        run({
+          id: "split-service",
+          kind: "service",
+          projectId: "project-2",
+          conversationId: "conversation-2",
+          label: "Docs preview",
+          detail: "npm run preview",
+          port: 4173,
+          canStop: true,
+          startedAt: "2026-08-12T12:01:00.000Z",
+        }),
+        run({
+          id: "unknown",
+          projectId: "removed-project",
+          conversationId: null,
+          canStop: true,
+          startedAt: "2026-08-12T12:00:00.000Z",
+        }),
+      ],
+      subagents: [],
+      messages: [],
+      ...owners,
+      visibleProjectIds: ["project-2"],
+    });
+
+    expect(summary.checks.map(({ id }) => id)).toEqual([
+      "passive-1",
+      "passive-2",
+      "passive-3",
+      "unknown",
+    ]);
+    expect(summary.checks.find(({ id }) => id === "unknown"))
+      .toMatchObject({ contextLabel: "Unavailable project", canStop: true });
+    expect(summary.localServers[0]).toMatchObject({
+      id: "split-service",
+      contextLabel: "Docs · Docs chat (docs/preview) · npm run preview",
+      canOpenPreview: true,
+    });
+  });
+
+  it("disambiguates duplicate project names and sibling chat attention", () => {
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [
+        run({
+          id: "docs-alpha",
+          projectId: "docs-alpha",
+          conversationId: "docs-alpha-chat",
+          detail: "npm run check",
+        }),
+        run({
+          id: "sibling-failure",
+          conversationId: "conversation-2",
+          status: "failed",
+          attentionState: "unseen",
+          canStop: false,
+          finishedAt: now,
+        }),
+      ],
+      subagents: [],
+      messages: [],
+      projects: [
+        { id: "project-1", name: "Inertia", path: "/workspace/inertia" },
+        { id: "docs-alpha", name: "Docs", path: "/workspace/docs-alpha" },
+        { id: "docs-beta", name: "Docs", path: "/workspace/docs-beta" },
+      ],
+      conversations: [
+        ...owners.conversations,
+        {
+          id: "docs-alpha-chat",
+          projectId: "docs-alpha",
+          title: "Checks",
+          branch: "codex/checks",
+          worktreePath: "/workspace/docs-alpha/.inertia/checks",
+        },
+      ],
+    });
+
+    expect(summary.checks.find(({ id }) => id === "docs-alpha")?.contextLabel)
+      .toBe("Docs (/workspace/docs-alpha) · Checks (codex/checks) · npm run check");
+    expect(summary.checks.find(({ id }) => id === "sibling-failure"))
+      .toMatchObject({
+        contextLabel: "Docs chat (docs/preview)",
+        canAcknowledge: true,
+        canDismiss: true,
+      });
+  });
+
+  it("projects root and nested repository identities with scoped action state", () => {
+    const root = workspaceGit().repositories[0]!;
+    const nested = {
+      ...root,
+      repositoryPath: "packages/docs",
+      authorityRef: "docs-authority",
+      branch: null,
+      upstream: null,
+      ahead: 0,
+      hasRemote: false,
+      files: [],
+      insertions: 0,
+      deletions: 0,
+      clean: true,
+      pullRequest: undefined,
+    };
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: workspaceGit({
+        repositories: [root, nested],
+        files: 1,
+        discoveredRepositories: 2,
+      }),
+      runs: [],
+      subagents: [],
+      messages: [],
+    });
+
+    expect(summary.branch).toEqual({ label: "Branches", value: "2 repositories" });
+    expect(summary.repositories).toMatchObject([{
+      repositoryPath: ".",
+      authorityRef: "root-authority",
+      branch: "codex/environment",
+      commitAction: { label: "Commit", disabled: false },
+      pushAction: { label: "Push 1", disabled: true },
+    }, {
+      repositoryPath: "packages/docs",
+      authorityRef: "docs-authority",
+      branch: null,
+      commitAction: { disabled: true },
+      pushAction: { disabled: true },
+    }]);
+  });
+
+  it("disables repository mutations when scoped Git authority is unavailable", () => {
+    const repository = {
+      ...workspaceGit().repositories[0]!,
+      authorityRef: null,
+    };
+    const summary = buildEnvironmentSummary({
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: workspaceGit({ repositories: [repository] }),
+      runs: [],
+      subagents: [],
+      messages: [],
+    });
+
+    expect(summary.repositories[0]).toMatchObject({
+      authorityRef: null,
+      commitAction: {
+        disabled: true,
+        detail: expect.stringContaining("Scoped Git access is unavailable"),
+      },
+      pushAction: {
+        disabled: true,
+        detail: expect.stringContaining("Scoped Git access is unavailable"),
+      },
+    });
+  });
+
+  it("projects current, stale, refreshing, unavailable, and isolated Usage truthfully", () => {
+    const input = {
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online" as const,
+      gitStatus: null,
+      workspaceGitStatus: null,
+      runs: [],
+      subagents: [],
+      messages: [],
+      latestTurnId: "turn-1",
+      usage: usage(),
+      usageProvider: provider(),
+      usageIdentity: { providerId: "codex", label: "Codex" },
+      usageQuotaSource: "selected-route" as const,
+    };
+    const current = buildEnvironmentSummary(input);
+    expect(current.usage).toMatchObject({
+      providerId: "codex",
+      context: {
+        quality: "current",
+        remainingPercent: 72,
+        valueLabel: "72%",
+      },
+      quota: {
+        freshness: "current",
+        source: "selected-route",
+        limits: [{ remainingPercent: 64 }],
+      },
+    });
+
+    const stale = buildEnvironmentSummary({
+      ...input,
+      latestTurnId: "turn-2",
+      usageProvider: provider({
+        metadataState: {
+          ...provider().metadataState,
+          rateLimits: {
+            ...provider().metadataState.rateLimits,
+            freshness: "stale",
+          },
+        },
+      }),
+    });
+    expect(stale.usage).toMatchObject({
+      context: { quality: "stale", valueLabel: "72% · stale" },
+      quota: { freshness: "stale" },
+    });
+
+    const refreshing = buildEnvironmentSummary({
+      ...input,
+      usageProvider: provider({
+        metadataState: {
+          ...provider().metadataState,
+          rateLimits: {
+            ...provider().metadataState.rateLimits,
+            freshness: "stale",
+            refreshing: true,
+          },
+        },
+      }),
+    });
+    expect(refreshing.usage?.quota.freshness).toBe("refreshing");
+
+    const unavailable = buildEnvironmentSummary({
+      ...input,
+      usage: usage({ usedTokens: null, maxTokens: null }),
+      usageProvider: null,
+    });
+    expect(unavailable.usage).toMatchObject({
+      context: { quality: "unavailable", remainingPercent: null },
+      quota: { freshness: "unavailable", limits: [] },
+    });
+
+    const isolated = buildEnvironmentSummary({
+      ...input,
+      usageIdentity: { providerId: null, label: "Kimi gateway" },
+      usageQuotaSource: "isolated",
+    });
+    expect(isolated.usage).toMatchObject({
+      providerId: null,
+      providerLabel: "Kimi gateway",
+    });
+    expect(isolated.usage?.quota).toMatchObject({
+      freshness: "unavailable",
+      source: "isolated",
+      limits: [],
+    });
+  });
+
+  it("keeps empty, detached, loading, and failed states explicit", () => {
+    const empty = buildEnvironmentSummary({
       projectId: null,
       projectName: null,
       conversationId: null,
@@ -193,55 +624,26 @@ describe("environment summary projection", () => {
       subagents: [],
       messages: [],
     });
-
-    expect(summary).toMatchObject({
-      projectName: null,
-      runtime: { status: "connecting" },
+    expect(empty).toMatchObject({
+      workspace: null,
       changes: null,
       branch: null,
+      repositories: [],
       checks: [],
-      subagents: [],
-      attachments: [],
-      workspace: null,
-      openTarget: null,
-      localPreviewTargets: [],
+      localServers: [],
+      usage: null,
       gitState: "unknown",
     });
-  });
 
-  it("names a non-repository workspace as a project directory", () => {
-    const summary = buildEnvironmentSummary({
+    const detached = buildEnvironmentSummary({
       projectId: "project-1",
       projectName: "Notes",
       conversationId: null,
       connectionStatus: "online",
-      gitStatus: null,
-      workspaceGitStatus: null,
-      runs: [],
-      subagents: [],
-      messages: [],
-      projectPath: "/workspace/notes",
-    });
-
-    expect(summary.workspace).toMatchObject({
-      label: "Project directory",
-      value: "notes",
-    });
-    expect(summary.openTarget).toEqual({
-      name: "Notes",
-      path: "/workspace/notes",
-    });
-  });
-
-  it("identifies a detached repository without inventing a branch name", () => {
-    const summary = buildEnvironmentSummary({
-      projectId: "project-1",
-      projectName: "Inertia",
-      conversationId: "conversation-1",
-      connectionStatus: "online",
       gitStatus: {
         isRepository: true,
-        root: "/workspace/inertia",
+        authorityRef: "root-authority",
+        root: "/workspace/notes",
         branch: null,
         upstream: null,
         ahead: 0,
@@ -255,174 +657,94 @@ describe("environment summary projection", () => {
       runs: [],
       subagents: [],
       messages: [],
-      projectPath: "/workspace/inertia",
+      projectPath: "/workspace/notes",
     });
+    expect(detached.workspace).toMatchObject({
+      label: "Project directory",
+      value: "notes",
+    });
+    expect(detached.branch).toEqual({ label: "Branch", value: "Detached HEAD" });
 
-    expect(summary.branch).toEqual({ label: "Branch", value: "Detached HEAD" });
-    expect(summary.workspace?.label).toBe("Worktree");
-  });
-
-  it("keeps mixed multi-repository branch state explicit", () => {
-    const summary = buildEnvironmentSummary({
+    const loading = buildEnvironmentSummary({
+      ...owners,
       projectId: "project-1",
       projectName: "Inertia",
       conversationId: "conversation-1",
       connectionStatus: "online",
-      gitStatus: {
-        isRepository: true,
-        root: "/workspace/inertia",
-        branch: "main",
-        upstream: null,
-        ahead: 0,
-        behind: 0,
-        hasRemote: false,
-        files: [],
-        insertions: 0,
-        deletions: 0,
-      },
-      workspaceGitStatus: {
-        repositories: [{
-          repositoryPath: ".",
-          state: "ready",
-          error: null,
-          branch: "main",
-          upstream: null,
-          ahead: 0,
-          behind: 0,
-          hasRemote: false,
-          files: [],
-          insertions: 0,
-          deletions: 0,
-          clean: true,
-          truncated: false,
-        }, {
-          repositoryPath: "packages/feature",
-          state: "ready",
-          error: null,
-          branch: null,
-          upstream: null,
-          ahead: 0,
-          behind: 0,
-          hasRemote: false,
-          files: [],
-          insertions: 0,
-          deletions: 0,
-          clean: true,
-          truncated: false,
-        }],
-        files: 0,
-        insertions: 0,
-        deletions: 0,
-        scannedDirectories: 2,
-        skippedDirectories: 0,
-        discoveredRepositories: 2,
-        repositoryLimit: 128,
-        partial: false,
-        truncated: false,
-        issues: [],
-      },
+      gitStatus: null,
+      workspaceGitStatus: workspaceGit(),
       runs: [],
       subagents: [],
       messages: [],
+      gitLoading: true,
     });
-
-    expect(summary.branch).toEqual({
-      label: "Branches",
-      value: "2 repositories",
-    });
-  });
-
-  it("keeps provisional root changes loading and preserves refresh failures", () => {
-    const input = {
-      projectId: "project-1",
-      projectName: "Inertia",
-      conversationId: "conversation-1",
-      connectionStatus: "online" as const,
-      gitStatus: {
-        isRepository: true,
-        root: "/workspace/inertia",
-        branch: "main",
-        upstream: null,
-        ahead: 0,
-        behind: 0,
-        hasRemote: false,
-        files: [],
-        insertions: 0,
-        deletions: 0,
-      },
-      workspaceGitStatus: null,
-      runs: [],
-      subagents: [],
-      messages: [],
-    };
-
-    const loading = buildEnvironmentSummary({ ...input, gitLoading: true });
-    expect(loading.changes).toMatchObject({ files: 0, repositories: 1 });
     expect(loading.gitState).toBe("loading");
+    expect(loading.repositories[0]).toMatchObject({
+      commitAction: {
+        disabled: true,
+        detail: expect.stringContaining("Git data is refreshing"),
+      },
+      pushAction: {
+        disabled: true,
+        detail: expect.stringContaining("Git data is refreshing"),
+      },
+    });
 
     const failed = buildEnvironmentSummary({
-      ...input,
+      ...owners,
+      projectId: "project-1",
+      projectName: "Inertia",
+      conversationId: "conversation-1",
+      connectionStatus: "online",
+      gitStatus: null,
+      workspaceGitStatus: workspaceGit(),
+      runs: [],
+      subagents: [],
+      messages: [],
       gitError: "Workspace scan timed out.",
     });
-    expect(failed.changes).toMatchObject({ files: 0, repositories: 1 });
     expect(failed.gitState).toBe("error");
     expect(failed.gitNotice).toBe("Workspace scan timed out.");
-  });
-
-  it("does not present remote preview URLs as local servers", () => {
-    const summary = buildEnvironmentSummary({
-      projectId: "project-1",
-      projectName: "Inertia",
-      conversationId: "conversation-1",
-      connectionStatus: "online",
-      gitStatus: null,
-      workspaceGitStatus: null,
-      runs: [],
-      subagents: [],
-      messages: [],
-      lastLoadedPreviewUrl: "https://preview.example.com/app",
+    expect(failed.repositories[0]).toMatchObject({
+      commitAction: {
+        disabled: true,
+        detail: expect.stringContaining("Git data is unavailable"),
+      },
+      pushAction: {
+        disabled: true,
+        detail: expect.stringContaining("Git data is unavailable"),
+      },
     });
-
-    expect(summary.localPreviewTargets).toEqual([]);
   });
 
-  it("does not report a clean tree when no repository was discovered", () => {
-    const summary = buildEnvironmentSummary({
+  it("does not call an empty or failed repository scan clean", () => {
+    const noRepository = buildEnvironmentSummary({
       projectId: "project-1",
       projectName: "Inertia",
       conversationId: "conversation-1",
       connectionStatus: "online",
       gitStatus: null,
-      workspaceGitStatus: {
+      workspaceGitStatus: workspaceGit({
         repositories: [],
         files: 0,
         insertions: 0,
         deletions: 0,
-        scannedDirectories: 1,
-        skippedDirectories: 0,
         discoveredRepositories: 0,
-        repositoryLimit: 128,
-        partial: false,
-        truncated: false,
-        issues: [],
-      },
+      }),
       runs: [],
       subagents: [],
       messages: [],
     });
+    expect(noRepository.changes).toBeNull();
+    expect(noRepository.gitState).toBe("unavailable");
 
-    expect(summary.changes).toBeNull();
-    expect(summary.gitState).toBe("unavailable");
-  });
-
-  it("reports an unavailable repository scan as an error instead of a clean tree", () => {
-    const summary = buildEnvironmentSummary({
+    const failedRepository = buildEnvironmentSummary({
       projectId: "project-1",
       projectName: "Inertia",
       conversationId: "conversation-1",
       connectionStatus: "online",
       gitStatus: null,
-      workspaceGitStatus: {
+      workspaceGitStatus: workspaceGit({
         repositories: [{
           repositoryPath: ".",
           state: "error",
@@ -441,275 +763,14 @@ describe("environment summary projection", () => {
         files: 0,
         insertions: 0,
         deletions: 0,
-        scannedDirectories: 1,
-        skippedDirectories: 0,
-        discoveredRepositories: 1,
-        repositoryLimit: 128,
         partial: true,
-        truncated: false,
-        issues: [],
-      },
+      }),
       runs: [],
       subagents: [],
       messages: [],
     });
-
-    expect(summary.changes).toBeNull();
-    expect(summary.gitState).toBe("error");
-    expect(summary.gitNotice).toBe("Permission denied.");
-  });
-
-  it("counts only successfully inspected repositories in a partial scan", () => {
-    const summary = buildEnvironmentSummary({
-      projectId: "project-1",
-      projectName: "Inertia",
-      conversationId: "conversation-1",
-      connectionStatus: "online",
-      gitStatus: null,
-      workspaceGitStatus: {
-        repositories: [{
-          repositoryPath: ".",
-          state: "ready",
-          error: null,
-          branch: "main",
-          upstream: null,
-          ahead: 0,
-          behind: 0,
-          hasRemote: false,
-          files: [],
-          insertions: 0,
-          deletions: 0,
-          clean: true,
-          truncated: false,
-        }, {
-          repositoryPath: "modules/private",
-          state: "error",
-          error: "Permission denied.",
-          branch: null,
-          upstream: null,
-          ahead: 0,
-          behind: 0,
-          hasRemote: false,
-          files: [],
-          insertions: 0,
-          deletions: 0,
-          clean: false,
-          truncated: false,
-        }],
-        files: 0,
-        insertions: 0,
-        deletions: 0,
-        scannedDirectories: 2,
-        skippedDirectories: 0,
-        discoveredRepositories: 2,
-        repositoryLimit: 128,
-        partial: true,
-        truncated: false,
-        issues: [],
-      },
-      runs: [],
-      subagents: [],
-      messages: [],
-    });
-
-    expect(summary.changes).toMatchObject({ repositories: 1, files: 0 });
-    expect(summary.gitState).toBe("ready");
-    expect(summary.gitNotice).toBe("Permission denied.");
-  });
-
-  it("marks bounded scans incomplete even when an inspected repository is ready", () => {
-    for (const completeness of [
-      { partial: true, truncated: false },
-      { partial: false, truncated: true },
-    ]) {
-      const summary = buildEnvironmentSummary({
-        projectId: "project-1",
-        projectName: "Inertia",
-        conversationId: "conversation-1",
-        connectionStatus: "online",
-        gitStatus: null,
-        workspaceGitStatus: {
-          repositories: [{
-            repositoryPath: ".",
-            state: "ready",
-            error: null,
-            branch: "main",
-            upstream: null,
-            ahead: 0,
-            behind: 0,
-            hasRemote: false,
-            files: [],
-            insertions: 0,
-            deletions: 0,
-            clean: true,
-            truncated: false,
-          }],
-          files: 0,
-          insertions: 0,
-          deletions: 0,
-          scannedDirectories: 128,
-          skippedDirectories: 1,
-          discoveredRepositories: 1,
-          repositoryLimit: 128,
-          ...completeness,
-          issues: [],
-        },
-        runs: [],
-        subagents: [],
-        messages: [],
-      });
-
-      expect(summary.changes).toMatchObject({ repositories: 1, files: 0 });
-      expect(summary.gitState).toBe("ready");
-      expect(summary.gitNotice).toBe(
-        "The repository scan did not inspect every directory.",
-      );
-    }
-  });
-
-  it("keeps a message-less repository failure distinct from no repository", () => {
-    const summary = buildEnvironmentSummary({
-      projectId: "project-1",
-      projectName: "Inertia",
-      conversationId: "conversation-1",
-      connectionStatus: "online",
-      gitStatus: null,
-      workspaceGitStatus: {
-        repositories: [{
-          repositoryPath: ".",
-          state: "error",
-          error: null,
-          branch: null,
-          upstream: null,
-          ahead: 0,
-          behind: 0,
-          hasRemote: false,
-          files: [],
-          insertions: 0,
-          deletions: 0,
-          clean: false,
-          truncated: false,
-        }],
-        files: 0,
-        insertions: 0,
-        deletions: 0,
-        scannedDirectories: 1,
-        skippedDirectories: 0,
-        discoveredRepositories: 1,
-        repositoryLimit: 128,
-        partial: true,
-        truncated: false,
-        issues: [],
-      },
-      runs: [],
-      subagents: [],
-      messages: [],
-    });
-
-    expect(summary.changes).toBeNull();
-    expect(summary.gitState).toBe("error");
-    expect(summary.gitNotice).toBe(
-      "The repository scan did not inspect every directory.",
-    );
-  });
-
-  it("treats a workspace scan issue without a repository result as an error", () => {
-    const summary = buildEnvironmentSummary({
-      projectId: "project-1",
-      projectName: "Inertia",
-      conversationId: "conversation-1",
-      connectionStatus: "online",
-      gitStatus: null,
-      workspaceGitStatus: {
-        repositories: [],
-        files: 0,
-        insertions: 0,
-        deletions: 0,
-        scannedDirectories: 0,
-        skippedDirectories: 1,
-        discoveredRepositories: 0,
-        repositoryLimit: 128,
-        partial: true,
-        truncated: false,
-        issues: [{
-          repositoryPath: ".",
-          message: "Directory could not be read.",
-        }],
-      },
-      runs: [],
-      subagents: [],
-      messages: [],
-    });
-
-    expect(summary.changes).toBeNull();
-    expect(summary.gitState).toBe("error");
-    expect(summary.gitNotice).toBe("Directory could not be read.");
-  });
-
-  it("recognizes an IPv6 loopback preview without exposing its path", () => {
-    const summary = buildEnvironmentSummary({
-      projectId: "project-1",
-      projectName: "Inertia",
-      conversationId: "conversation-1",
-      connectionStatus: "online",
-      gitStatus: null,
-      workspaceGitStatus: null,
-      runs: [],
-      subagents: [],
-      messages: [],
-      lastLoadedPreviewUrl: "http://[::1]:3000/private?token=hidden",
-    });
-
-    expect(summary.localPreviewTargets).toEqual([{
-      url: "http://[::1]:3000",
-    }]);
-  });
-
-  it("derives compact workspace labels from Windows paths", () => {
-    const summary = buildEnvironmentSummary({
-      projectId: "project-1",
-      projectName: "Inertia",
-      conversationId: "conversation-1",
-      connectionStatus: "online",
-      gitStatus: null,
-      workspaceGitStatus: null,
-      runs: [],
-      subagents: [],
-      messages: [],
-      projectPath: "C:\\Users\\Ada\\Inertia\\",
-      worktreePath: "C:\\Users\\Ada\\worktrees\\environment-panel\\",
-    });
-
-    expect(summary.workspace).toMatchObject({
-      label: "Worktree",
-      value: "environment-panel",
-    });
-    expect(summary.openTarget).toEqual({
-      name: "Inertia",
-      path: "C:\\Users\\Ada\\worktrees\\environment-panel\\",
-    });
-  });
-
-  it("uses the authoritative live bit for queued and future provider states", () => {
-    const summary = buildEnvironmentSummary({
-      projectId: "project-1",
-      projectName: "Inertia",
-      conversationId: "conversation-1",
-      connectionStatus: "online",
-      gitStatus: null,
-      workspaceGitStatus: null,
-      runs: [],
-      subagents: [
-        subagent({ id: "queued", status: "queued", isLive: true }),
-        subagent({ id: "future", status: "unknown", isLive: true }),
-        subagent({ id: "stale-running", status: "running", isLive: false }),
-      ],
-      messages: [],
-    });
-
-    expect(summary.subagents.map(({ id }) => id)).toEqual([
-      "queued",
-      "future",
-    ]);
+    expect(failedRepository.changes).toBeNull();
+    expect(failedRepository.gitState).toBe("error");
+    expect(failedRepository.gitNotice).toBe("Permission denied.");
   });
 });

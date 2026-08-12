@@ -144,6 +144,8 @@ function workspaceResolver(store: RuntimeStore) {
 
 function resetWorkspaceAuthorityMigration(database: Database.Database): void {
   database.exec(`
+    DROP TABLE provider_run_ownership;
+    DROP INDEX agent_turns_provider_run_identity_idx;
     DROP TABLE conversation_path_authorities;
     DROP TABLE project_path_authorities;
     DROP TABLE workspace_path_authority_enrollment;
@@ -169,6 +171,7 @@ function operationHarness(
     resolveModelRoute: resolveNativeModelRoute,
     harnessIdFor: providerBoundary,
     cancel: () => true,
+    isRunning: () => false,
   } as unknown as TurnProviderRuntime;
   const turns = new TurnController(
     fixture.store,

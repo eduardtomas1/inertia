@@ -49,6 +49,25 @@ export class ProcessTreeTerminationError extends Error {
   }
 }
 
+export function isProcessTreeTerminationUnconfirmed(error: unknown): boolean {
+  const visited = new Set<unknown>();
+  let current = error;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (typeof current !== "object" || current === null || visited.has(current)) {
+      return false;
+    }
+    visited.add(current);
+    if (
+      "code" in current
+      && current.code === "process-tree-termination-unconfirmed"
+    ) {
+      return true;
+    }
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return false;
+}
+
 export async function requireProcessTreeTermination(
   terminate: ProcessTreeTerminator,
   child: ChildProcess,

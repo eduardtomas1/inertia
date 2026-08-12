@@ -5,7 +5,6 @@ import { cursorAcpProcessInvocation } from "../../src/server/provider/cursor-acp
 import { openCodeServerProcessInvocation } from "../../src/server/provider/opencode-owned-server";
 import { providerProcessInvocation, providerPtyArguments } from "../../src/server/provider/process";
 import {
-  parseWhereExecutableOutput,
   windowsCodexKnownPaths,
 } from "../../src/server/provider/windows-codex";
 
@@ -33,19 +32,6 @@ describe("Windows Codex discovery primitives", () => {
     expect(paths).toContain("D:\\pnpm home\\codex.cmd");
     expect(paths).toContain("D:\\Bun\\bin\\codex.exe");
     expect(paths).toContain("D:\\Volta\\bin\\codex.exe");
-  });
-
-  it("accepts bounded absolute where.exe results and deduplicates Windows paths case-insensitively", () => {
-    expect(parseWhereExecutableOutput([
-      "\"C:\\Program Files\\Codex\\codex.EXE\"",
-      "c:\\program files\\codex\\CODEX.exe",
-      "relative\\codex.cmd",
-      "",
-      "D:\\Unicode 路径\\codex.cmd",
-    ].join("\r\n"))).toEqual([
-      "C:\\Program Files\\Codex\\codex.EXE",
-      "D:\\Unicode 路径\\codex.cmd",
-    ]);
   });
 
   it("launches native executables directly and batch shims only through a hardened cmd.exe invocation", () => {

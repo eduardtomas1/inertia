@@ -77,7 +77,6 @@ describe("active transcript attention visibility", () => {
 
   it("treats the multi-spawn dialog as a completion obstruction", () => {
     const unobstructed = {
-      activityOpen: false,
       paletteOpen: false,
       commitDialogOpen: false,
       authProviderOpen: false,

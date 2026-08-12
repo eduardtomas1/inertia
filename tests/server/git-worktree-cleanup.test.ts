@@ -1138,9 +1138,9 @@ describe("launch-owned Git cleanup", () => {
       linuxBirthtimeProbe("valid"),
     );
     const worktreesDirectory = dirname(adminDirectory(path));
-    mkdirSync(join(worktreesDirectory, "scan-keeper"));
+    mkdirSync(join(worktreesDirectory, "slow-admin-keeper"));
     await removeWorktree(root, path, true);
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
       mkdirSync(join(worktreesDirectory, `slow-admin-${index}`));
     }
     let slowProbeCount = 0;

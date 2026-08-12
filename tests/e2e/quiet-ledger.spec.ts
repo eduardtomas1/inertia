@@ -4,7 +4,6 @@ import { RuntimeStore } from "../../src/server/database";
 import {
   createAppFixture,
   type AppFixture,
-  type RuntimeTestSnapshot,
 } from "./support/app-fixture";
 import {
   capturePageWebSockets,
@@ -737,13 +736,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const beforeReconnect = await runtimeSnapshot();
     const rendererGenerationBeforeReconnect = await page.locator(".app-shell")
       .getAttribute("data-runtime-generation");
-    await electronApp.evaluate((_electron) => {
-      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-        crash: () => RuntimeTestSnapshot;
-      } | undefined;
-      if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-      runtime.crash();
-    });
+    await app.recycleRuntime();
     await expect.poll(async () => {
       const current = await runtimeSnapshot();
       return current.phase === "ready" && current.generation > beforeReconnect.generation;

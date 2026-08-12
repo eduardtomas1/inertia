@@ -7,6 +7,7 @@ import {
   type ProviderAccessMode,
   type ProviderApprovalEvent,
   type ProviderGoalClearedEvent,
+  type ProviderGoalSnapshot,
   type ProviderGoalUpdatedEvent,
   type ProviderSubagentEvent,
 } from "../../src/server/providers";
@@ -92,6 +93,7 @@ const path = require("node:path");
 const readline = require("node:readline");
 const capture = (value) => fs.appendFileSync(process.env.INERTIA_APP_SERVER_CAPTURE, JSON.stringify(value) + "\\n");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sendBatch = (values) => process.stdout.write(values.map((value) => JSON.stringify(value)).join("\\n") + "\\n");
 if (process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed") {
   process.stdout.on("error", () => {});
 }
@@ -188,6 +190,128 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     return;
   }
+  if (message.method === "thread/goal/set") {
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-live-mutation-error") {
+      sendBatch([
+        { id: message.id, error: { code: -32000, message: "goal mutation rejected" } },
+        { method: "error", params: { threadId, turnId, error: { message: "parent turn failed after goal mutation" }, willRetry: false } },
+        { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "failed", items: [], error: { message: "parent turn failed after goal mutation" } } } },
+      ]);
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-error") {
+      send({ id: message.id, error: { code: -32000, message: "an unfinished goal already exists" } });
+      return;
+    }
+    const goal = {
+      threadId,
+      objective: message.params.objective || "Existing goal",
+      status: message.params.status,
+      tokenBudget: message.params.tokenBudget ?? null,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: 1800000000,
+      updatedAt: 1800000000,
+    };
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering") {
+      const activeGoal = { ...goal, status: "active" };
+      const completedGoal = { ...goal, status: "complete" };
+      sendBatch([
+        { method: "thread/goal/updated", params: { threadId, turnId, goal: activeGoal } },
+        { id: message.id, result: { goal } },
+        { method: "thread/goal/updated", params: { threadId, turnId, goal: completedGoal } },
+        { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+      ]);
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-after-start") {
+      turnId = "goal-terminal-after-start-turn";
+      sendBatch([
+        { id: message.id, result: { goal } },
+        { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+        { method: "thread/goal/updated", params: { threadId, turnId, goal: { ...goal, status: "budgetLimited", tokenBudget: 12_000, tokensUsed: 12_000, updatedAt: 1800000001 } } },
+      ]);
+      setTimeout(() => {
+        send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-terminal-message", delta: "Final goal turn output." } });
+        send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      }, 10);
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-clear-response-ordering") {
+      sendBatch([
+        { id: message.id, result: { goal } },
+        { method: "thread/goal/cleared", params: { threadId } },
+      ]);
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-response-ordering") {
+      const terminalGoal = { ...goal, updatedAt: 1800000011 };
+      sendBatch([
+        { method: "thread/goal/updated", params: { threadId, turnId, goal: terminalGoal } },
+        { id: message.id, result: { goal: terminalGoal } },
+      ]);
+      return;
+    }
+    send({ id: message.id, result: { goal } });
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only") {
+      setTimeout(() => send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } }), 10);
+      return;
+    }
+    send({ method: "thread/goal/updated", params: { threadId, goal } });
+    if (
+      process.env.INERTIA_APP_SERVER_SCENARIO !== "goal-continuation"
+      && process.env.INERTIA_APP_SERVER_SCENARIO !== "goal-wait-for-interrupt"
+    ) return;
+    turnId = "goal-turn-1";
+    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-wait-for-interrupt") return;
+    send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-message-1", delta: "First goal turn. " } });
+    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    setTimeout(() => {
+      turnId = "goal-turn-2";
+      send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-message-2", delta: "Second goal turn." } });
+      const completedGoal = {
+        ...goal,
+        status: "complete",
+        tokensUsed: 9000,
+        timeUsedSeconds: 8,
+        updatedAt: 1800000008,
+      };
+      send({ method: "thread/goal/updated", params: { threadId, turnId, goal: completedGoal } });
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    }, 10);
+    return;
+  }
+  if (message.method === "thread/goal/clear") {
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-terminal-response-ordering") {
+      sendBatch([
+        { method: "thread/goal/cleared", params: { threadId } },
+        { id: message.id, result: {} },
+      ]);
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering") {
+      const activeGoal = {
+        threadId,
+        objective: "Goal created after clear response",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 200,
+        timeUsedSeconds: 2,
+        createdAt: 1800000000,
+        updatedAt: 1800000011,
+      };
+      sendBatch([
+        { id: message.id, result: {} },
+        { method: "thread/goal/updated", params: { threadId, turnId, goal: activeGoal } },
+      ]);
+      return;
+    }
+    send({ id: message.id, result: {} });
+    send({ method: "thread/goal/cleared", params: { threadId } });
+    return;
+  }
   if (message.method === "turn/start") {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
@@ -198,6 +322,25 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       );
     }
     send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    if (
+      process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-clear-response-ordering"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-response-ordering"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-terminal-response-ordering"
+    ) {
+      if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering") {
+        send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { threadId, objective: "Goal before clear response", status: "active", tokenBudget: null, tokensUsed: 100, timeUsedSeconds: 1, createdAt: 1800000000, updatedAt: 1800000010 } } });
+      }
+      if (
+        process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-response-ordering"
+        || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-terminal-response-ordering"
+      ) {
+        send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { threadId, objective: "Goal awaiting mutation", status: "active", tokenBudget: null, tokensUsed: 100, timeUsedSeconds: 1, createdAt: 1800000000, updatedAt: 1800000010 } } });
+        send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      }
+      return;
+    }
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "legacy-large-frame") {
       send({ method: "account/rateLimits/updated", params: { padding: "x".repeat(1024 * 1024 + 32) } });
       send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
@@ -239,6 +382,40 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           })),
         },
       });
+    }
+    if (
+      process.env.INERTIA_APP_SERVER_SCENARIO === "goal-resume-continuation"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-no-continuation"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-budget-limited"
+    ) {
+      const activeGoal = {
+        threadId,
+        objective: "Resume the existing goal",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 100,
+        timeUsedSeconds: 1,
+        createdAt: 1800000000,
+        updatedAt: 1800000001,
+      };
+      send({ method: "thread/goal/updated", params: { threadId, turnId, goal: activeGoal } });
+      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "resume-message-1", delta: "Resumed goal turn. " } });
+      if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-budget-limited") {
+        send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { ...activeGoal, status: "budgetLimited", tokenBudget: 12000, tokensUsed: 12000, timeUsedSeconds: 4, updatedAt: 1800000004 } } });
+      }
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      if (
+        process.env.INERTIA_APP_SERVER_SCENARIO === "goal-no-continuation"
+        || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-budget-limited"
+      ) return;
+      setTimeout(() => {
+        turnId = "goal-resume-turn-2";
+        send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+        send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "resume-message-2", delta: "Automatic continuation." } });
+        send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { ...activeGoal, status: "complete", tokensUsed: 500, timeUsedSeconds: 3, updatedAt: 1800000003 } } });
+        send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      }, 10);
+      return;
     }
     send({ method: "turn/completed", params: { threadId, turn: { id: "orphan-turn", status: "completed", items: [], error: null } } });
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "steer-and-collab") {
@@ -293,6 +470,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     if (
       process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only"
     ) return;
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-events") {
       return complete();
@@ -828,6 +1006,499 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-goals",
       type: "goal-cleared",
     })]);
+  });
+
+  it("keeps the owned App Server connection across automatic goal turns", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-continuation";
+    const manager = trackedManager(fake.command);
+    const text: string[] = [];
+    const statuses: string[] = [];
+    const updates: ProviderGoalUpdatedEvent[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-continuation",
+      runId: "run-goal-continuation",
+      turnId: "turn-goal-continuation",
+      cwd: fake.root,
+      prompt: "/goal Ship the reliable flow",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-goal-continuation",
+      goalStart: {
+        objective: "Ship the reliable flow",
+        tokenBudget: 12_000,
+      },
+      goalContinuationExpected: true,
+    }), {
+      onText: (event) => text.push(event.text),
+      onStatus: (event) => statuses.push(event.status),
+      onGoalUpdated: (event) => updates.push(event),
+    });
+
+    expect(result).toMatchObject({
+      status: "completed",
+      sessionId: "thread-goal-continuation",
+      text: "First goal turn. Second goal turn.",
+    });
+    expect(text).toEqual(["First goal turn. ", "Second goal turn."]);
+    expect(statuses).toEqual([
+      "starting",
+      "running",
+      "completed",
+    ]);
+    expect(updates.some(({ goal }) =>
+      goal.objective === "Ship the reliable flow"
+      && goal.status === "active"
+      && goal.tokenBudget === 12_000
+      && goal.tokensUsed === 0)).toBe(true);
+    expect(updates.at(-1)?.goal).toMatchObject({
+      objective: "Ship the reliable flow",
+      status: "complete",
+      tokenBudget: 12_000,
+      tokensUsed: 9_000,
+    });
+
+    const messages = captured(fake.capturePath);
+    expect(messages.filter(({ method }) => method === "thread/goal/set"))
+      .toEqual([expect.objectContaining({
+        params: {
+          threadId: "thread-goal-continuation",
+          objective: "Ship the reliable flow",
+          status: "active",
+          tokenBudget: 12_000,
+        },
+      })]);
+    expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
+  });
+
+  it("fails a rejected goal start without converting it into an ordinary turn", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-set-error";
+    const manager = trackedManager(fake.command);
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-rejected",
+      cwd: fake.root,
+      prompt: "/goal Duplicate goal",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-goal-rejected",
+      goalStart: { objective: "Duplicate goal" },
+      goalContinuationExpected: true,
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "codex-error" },
+    });
+
+    const messages = captured(fake.capturePath);
+    expect(messages.filter(({ method }) => method === "thread/goal/set"))
+      .toHaveLength(1);
+    expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
+    expect(manager.isRunning("conversation-goal-rejected")).toBe(false);
+  });
+
+  it("settles a goal start superseded by a terminal notification", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-set-response-ordering";
+    const manager = trackedManager(fake.command);
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-terminal-start",
+      cwd: fake.root,
+      prompt: "/goal Finish before the first continuation",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-terminal-start",
+      goalStart: { objective: "Finish before the first continuation" },
+      goalContinuationExpected: true,
+    }))).resolves.toMatchObject({
+      status: "completed",
+      sessionId: "thread-goal-terminal-start",
+    });
+
+    expect(manager.isRunning("conversation-goal-terminal-start")).toBe(false);
+  });
+
+  it("lets an already-started goal turn drain after a terminal update", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-terminal-after-start";
+    const manager = trackedManager(fake.command);
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-terminal-running",
+      cwd: fake.root,
+      prompt: "/goal Finish the running turn",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-terminal-running",
+      goalStart: {
+        objective: "Finish the running turn",
+        tokenBudget: 12_000,
+      },
+      goalContinuationExpected: true,
+    }))).resolves.toMatchObject({
+      status: "completed",
+      text: "Final goal turn output.",
+    });
+
+    expect(manager.isRunning("conversation-goal-terminal-running")).toBe(false);
+  });
+
+  it("interrupts an automatic goal turn while preserving its active snapshot", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-wait-for-interrupt";
+    const manager = trackedManager(fake.command, 500);
+    const updates: ProviderGoalUpdatedEvent[] = [];
+    let cancelled = false;
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-cancel",
+      cwd: fake.root,
+      prompt: "/goal Pause safely",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-cancel",
+      goalStart: { objective: "Pause safely" },
+      goalContinuationExpected: true,
+    }), {
+      onGoalUpdated: (event) => updates.push(event),
+      onStatus: (event) => {
+        if (event.status !== "running" || cancelled) return;
+        cancelled = manager.cancel(event.conversationId);
+      },
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    expect(cancelled).toBe(true);
+    expect(updates.at(-1)?.goal).toMatchObject({
+      objective: "Pause safely",
+      status: "active",
+    });
+    expect(captured(fake.capturePath).find(({ method }) =>
+      method === "turn/interrupt")).toMatchObject({
+      params: {
+        threadId: "thread-goal-cancel",
+        turnId: "goal-turn-1",
+      },
+    });
+  });
+
+  it("projects a live goal mutation response even without a duplicate notification", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-response-only";
+    const updates: ProviderGoalSnapshot[] = [];
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the ordinary turn open",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-live-update",
+      onStatus: () => markRunning(),
+      onGoalUpdated: (_threadId, goal) => updates.push(goal),
+    });
+    await running;
+
+    await expect(run.setGoal({
+      objective: "Finish from the live connection",
+      status: "complete",
+      tokenBudget: null,
+    })).resolves.toMatchObject({
+      objective: "Finish from the live connection",
+      status: "complete",
+    });
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    expect(updates).toEqual([expect.objectContaining({
+      objective: "Finish from the live connection",
+      status: "complete",
+    })]);
+  });
+
+  it("does not promote a recoverable goal RPC error to the run failure", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-live-mutation-error";
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the parent turn running",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-live-mutation-error",
+      onStatus: (status) => {
+        if (status === "running") markRunning();
+      },
+    });
+    await running;
+
+    await expect(run.setGoal({
+      status: "paused",
+    })).rejects.toThrow("goal mutation rejected");
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "codex-error",
+        message: "Codex reported an error.",
+        technicalDetail: expect.stringContaining(
+          "parent turn failed after goal mutation",
+        ),
+      },
+    });
+  });
+
+  it("orders goal mutations at the decoded response frame", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-set-response-ordering";
+    const updates: ProviderGoalSnapshot[] = [];
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the ordered mutation connection open",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-set-response-ordering",
+      onStatus: () => markRunning(),
+      onGoalUpdated: (_threadId, goal) => updates.push(goal),
+    });
+    await running;
+
+    await expect(run.setGoal({
+      objective: "Pause after current progress",
+      status: "paused",
+      tokenBudget: null,
+    })).resolves.toMatchObject({ status: "complete" });
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    expect(updates.map(({ status }) => status)).toEqual([
+      "active",
+      "complete",
+    ]);
+  });
+
+  it("preserves a clear decoded after a goal mutation response", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO =
+      "goal-set-clear-response-ordering";
+    const updates: ProviderGoalSnapshot[] = [];
+    const clears: string[] = [];
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the clear-ordering connection open",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-set-clear-response-ordering",
+      onStatus: () => markRunning(),
+      onGoalUpdated: (_threadId, goal) => updates.push(goal),
+      onGoalCleared: (threadId) => clears.push(threadId),
+    });
+    await running;
+
+    await expect(run.setGoal({
+      objective: "Do not revive this goal",
+      status: "active",
+      tokenBudget: null,
+    })).rejects.toThrow(
+      "Codex cleared the goal before the update completed.",
+    );
+    expect(clears).toEqual(["thread-goal-set-clear-response-ordering"]);
+    expect(updates).toEqual([]);
+
+    run.cancel(true);
+    await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("keeps an awaited continuation alive through a terminal goal response", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-terminal-response-ordering";
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Wait for a terminal goal mutation",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-terminal-response-ordering",
+      goalContinuationGraceMs: 1_000,
+      onStatus: (status) => {
+        if (status === "running") markRunning();
+      },
+    });
+    await running;
+
+    await expect(run.setGoal({
+      objective: "Finish the awaited goal",
+      status: "complete",
+      tokenBudget: null,
+    })).resolves.toMatchObject({
+      objective: "Finish the awaited goal",
+      status: "complete",
+    });
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("preserves a goal notification decoded after a clear response", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-clear-response-ordering";
+    const updates: ProviderGoalSnapshot[] = [];
+    const clears: string[] = [];
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Keep the ordered clear connection open",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-clear-response-ordering",
+      onStatus: () => markRunning(),
+      onGoalUpdated: (_threadId, goal) => updates.push(goal),
+      onGoalCleared: (threadId) => clears.push(threadId),
+    });
+    await running;
+
+    await expect(run.clearGoal()).resolves.toBe(false);
+    expect(clears).toEqual([]);
+    expect(updates.map(({ objective }) => objective)).toEqual([
+      "Goal before clear response",
+      "Goal created after clear response",
+    ]);
+    run.cancel(true);
+    await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("keeps an awaited continuation alive through a goal clear response", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-clear-terminal-response-ordering";
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Wait for a goal clear mutation",
+      planMode: false,
+      access: "full",
+      sessionId: "thread-goal-clear-terminal-response-ordering",
+      goalContinuationGraceMs: 1_000,
+      onStatus: (status) => {
+        if (status === "running") markRunning();
+      },
+    });
+    await running;
+
+    await expect(run.clearGoal()).resolves.toBe(true);
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("keeps a resumed active goal connected across provider continuations", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-resume-continuation";
+    const manager = trackedManager(fake.command);
+    const updates: ProviderGoalUpdatedEvent[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-resume",
+      cwd: fake.root,
+      prompt: "Continue the saved goal",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-resume",
+      goalContinuationExpected: true,
+    }), {
+      onGoalUpdated: (event) => updates.push(event),
+    });
+
+    expect(result).toMatchObject({
+      status: "completed",
+      text: "Resumed goal turn. Automatic continuation.",
+    });
+    expect(updates.map(({ goal }) => goal.status)).toEqual([
+      "active",
+      "complete",
+    ]);
+    const messages = captured(fake.capturePath);
+    expect(messages.filter(({ method }) => method === "turn/start"))
+      .toHaveLength(1);
+    expect(messages.some(({ method }) => method === "thread/goal/set"))
+      .toBe(false);
+  });
+
+  it("settles without another turn when the provider exhausts the goal budget", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-budget-limited";
+    const manager = trackedManager(fake.command);
+    const updates: ProviderGoalUpdatedEvent[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goal-budget",
+      cwd: fake.root,
+      prompt: "Continue until the budget boundary",
+      interactionMode: "build",
+      access: "full",
+      sessionId: "thread-goal-budget",
+      goalContinuationExpected: true,
+    }), {
+      onGoalUpdated: (event) => updates.push(event),
+    });
+
+    expect(result).toMatchObject({ status: "completed" });
+    expect(updates.at(-1)?.goal).toMatchObject({
+      status: "budgetLimited",
+      tokenBudget: 12_000,
+      tokensUsed: 12_000,
+    });
+    expect(captured(fake.capturePath).filter(({ method }) =>
+      method === "turn/start")).toHaveLength(1);
   });
 
   it("keeps full access on App Server while streaming rich plan-turn state", async () => {
@@ -1461,6 +2132,29 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(terminateProcessTree.mock.calls[0]?.[1]).toBe(true);
   });
 
+  it("does not trust post-close cleanup after an unexpected direct-child exit", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "premature-exit";
+    const terminateProcessTree = vi.fn(async () => true);
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Exit before cleanup is armed",
+      planMode: false,
+      access: "full",
+      terminateProcessTree,
+    });
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: false,
+      failure: { reason: "process-exit" },
+    });
+    expect(terminateProcessTree).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["malformed-frame", "malformed-protocol"],
     ["premature-exit", "process-exit"],
@@ -1497,7 +2191,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         },
       });
     }
-    expect(manager.activeConversationIds()).toEqual([]);
+    if (scenario === "premature-exit") {
+      expect(manager.activeConversationIds()).toEqual([
+        "conversation-premature-exit",
+      ]);
+      managers.splice(managers.indexOf(manager), 1);
+      await expect(manager.disposeAll()).rejects.toThrow(
+        "Provider process cleanup could not be confirmed.",
+      );
+    } else {
+      expect(manager.activeConversationIds()).toEqual([]);
+    }
   });
 
   it("classifies a parent-observed transport close and cleans up the live process", async () => {
@@ -1557,6 +2261,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         signal: "SIGTERM",
         failure: { reason: "process-signal" },
       });
+    }
+    if (signalManager.activeConversationIds().length > 0) {
+      expect(signalManager.activeConversationIds()).toEqual([
+        "conversation-signal",
+      ]);
+      managers.splice(managers.indexOf(signalManager), 1);
+      await expect(signalManager.disposeAll()).rejects.toThrow(
+        "Provider process cleanup could not be confirmed.",
+      );
     }
 
     const terminalFake = fakeAppServer();

@@ -58,6 +58,16 @@ function generate(packages: FixturePackage[]): string {
 }
 
 describe("third-party notice generation", () => {
+  it("includes reviewed vendored provider icon terms in packaged notices", () => {
+    const output = generate([]);
+
+    expect(output).toContain("VENDORED PROVIDER ICONS");
+    expect(output).toContain("Copyright (c) 2024 OpenAI");
+    expect(output).toContain("Copyright 2023 Anthropic, PBC.");
+    expect(output).toContain("Copyright Anysphere, Inc.");
+    expect(output).toContain("Copyright (c) 2025 opencode");
+  });
+
   it("sorts packages and de-duplicates identical license text deterministically", () => {
     const packages = [
       { name: "zeta", version: "1.0.0", license: "MIT", files: { LICENSE: "Shared license\r\n" } },

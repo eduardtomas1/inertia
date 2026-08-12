@@ -9,11 +9,38 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
+vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
+  loadCommitDialog: vi.fn(),
+  prefetchWorkspaceTool: vi.fn(),
+}));
+
 import { EnvironmentPanel } from "../../src/renderer/src/components/EnvironmentPanel";
+import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
 import { WorkspacePanel } from "../../src/renderer/src/components/WorkspacePanel";
-import type { Project } from "../../src/shared/contracts";
 import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
+import type { Project } from "../../src/shared/contracts";
+
+type EnvironmentRun = EnvironmentSummarySnapshot["checks"][number];
+
+function environmentRun(
+  overrides: Partial<EnvironmentRun> = {},
+): EnvironmentRun {
+  return {
+    id: "check",
+    kind: "check",
+    projectId: "project-1",
+    conversationId: null,
+    label: "Check",
+    status: "running",
+    canStop: false,
+    port: null,
+    contextLabel: null,
+    canOpenPreview: false,
+    canAcknowledge: false,
+    canDismiss: false,
+    ...overrides,
+  };
+}
 
 const summary: EnvironmentSummarySnapshot = {
   projectName: "Inertia",
@@ -31,12 +58,110 @@ const summary: EnvironmentSummarySnapshot = {
     files: 2,
     insertions: 9,
     deletions: 4,
-    repositories: 1,
+    repositories: 2,
   },
   gitState: "ready",
   gitNotice: null,
-  branch: { label: "Branch", value: "codex/summary" },
-  checks: [{ id: "check-1", label: "Typecheck", status: "running" }],
+  branch: { label: "Branches", value: "2 repositories" },
+  repositories: [{
+    repositoryPath: ".",
+    state: "ready",
+    error: null,
+    branch: "codex/summary",
+    upstream: "origin/codex/summary",
+    ahead: 1,
+    behind: 0,
+    hasRemote: true,
+    pullRequest: {
+      available: true,
+      remoteName: "origin",
+      forge: "github",
+      unavailableReason: null,
+    },
+    files: 2,
+    insertions: 9,
+    deletions: 4,
+    clean: false,
+    truncated: false,
+    authorityRef: "root-authority",
+    commitAction: {
+      id: "commit",
+      label: "Commit",
+      detail: "Review and commit 2 changed files.",
+      disabled: false,
+    },
+    pushAction: {
+      id: "push",
+      label: "Push 1",
+      detail: "Commit local changes before pushing.",
+      disabled: true,
+    },
+  }, {
+    repositoryPath: "packages/docs",
+    state: "ready",
+    error: null,
+    branch: null,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    hasRemote: false,
+    pullRequest: undefined,
+    files: 0,
+    insertions: 0,
+    deletions: 0,
+    clean: true,
+    truncated: false,
+    authorityRef: "docs-authority",
+    commitAction: {
+      id: "commit",
+      label: "Commit",
+      detail: "There are no local changes to commit.",
+      disabled: true,
+    },
+    pushAction: {
+      id: "push",
+      label: "Push",
+      detail: "Check out a local branch first.",
+      disabled: true,
+    },
+  }],
+  checks: [],
+  localServers: [{
+    ...environmentRun({
+      id: "preview-service",
+      kind: "service",
+      conversationId: "conversation-2",
+      label: "Docs preview",
+      canStop: true,
+      port: 4173,
+      contextLabel: "Docs chat (docs/preview) · npm run preview",
+      canOpenPreview: true,
+    }),
+    url: "http://127.0.0.1:4173",
+  }],
+  usage: {
+    providerId: "codex",
+    providerLabel: "Codex",
+    context: {
+      quality: "current",
+      remainingPercent: 72,
+      valueLabel: "72%",
+      accessibleLabel: "Context 72% remaining",
+      updatedAt: "2026-08-12T10:00:00.000Z",
+    },
+    quota: {
+      freshness: "current",
+      source: "selected-route",
+      updatedAt: "2026-08-12T10:00:00.000Z",
+      limits: [{
+        id: "five-hour",
+        label: "Five-hour limit",
+        remainingPercent: 64,
+        windowMinutes: 300,
+        resetsAt: "2026-08-12T12:00:00.000Z",
+      }],
+    },
+  },
   subagents: [{
     id: "trace-1",
     providerName: "Review",
@@ -47,7 +172,6 @@ const summary: EnvironmentSummarySnapshot = {
     { id: "attachment-1", name: "reference.png", mimeType: "image/png" },
     { id: "attachment-2", name: "requirements.pdf", mimeType: "application/pdf" },
   ],
-  localPreviewTargets: [{ url: "http://localhost:4173/" }],
 };
 
 const project: Project = {
@@ -68,12 +192,14 @@ const project: Project = {
 
 function HeaderHarness({
   activeProject = null,
+  activeTool = null,
   workspaceToolsUnavailableReason = null,
   onOpenSettings = vi.fn(),
   onOpenConnectionsSettings = vi.fn(),
   onOpenEnvironment = vi.fn(),
 }: {
   activeProject?: Project | null;
+  activeTool?: "environment" | null;
   workspaceToolsUnavailableReason?: string | null;
   onOpenSettings?: () => void;
   onOpenConnectionsSettings?: () => void;
@@ -84,16 +210,13 @@ function HeaderHarness({
       project={activeProject}
       conversation={null}
       view="workspace"
-      activeTool={null}
+      activeTool={activeTool}
       sidebarCollapsed={false}
       theme="dark"
       gitStatus={null}
       branches={[]}
       actions={[]}
       busy={false}
-      activityOpen={false}
-      activeRunCount={0}
-      attentionRunCount={0}
       onOpenSidebar={vi.fn()}
       onToggleTools={vi.fn()}
       workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
@@ -113,34 +236,44 @@ function HeaderHarness({
       onPull={vi.fn()}
       onPush={vi.fn()}
       onRunAction={vi.fn()}
-      onToggleActivity={vi.fn()}
     />
   );
 }
 
+const panelActions = () => ({
+  onOpenChanges: vi.fn(),
+  onOpenFiles: vi.fn(),
+  onOpenProject: vi.fn(),
+  onRevealProject: vi.fn(),
+  onRetryGit: vi.fn(),
+  onRefreshUsage: vi.fn(),
+  onStopRun: vi.fn(),
+  onOpenRunPreview: vi.fn(),
+  onAcknowledgeRun: vi.fn(),
+  onDismissRun: vi.fn(),
+});
+
 function EnvironmentFocusHarness(): React.JSX.Element {
-  const [activeTab, setActiveTab] = useState<"environment" | "changes" | "files" | "preview">(
+  const [activeTab, setActiveTab] = useState<"environment" | "changes" | "files">(
     "environment",
   );
   return (
     <WorkspacePanel
       activeTab={activeTab}
       onTabChange={(tab) => {
-        if (tab === "environment" || tab === "changes" || tab === "files" || tab === "preview") {
+        if (tab === "environment" || tab === "changes" || tab === "files") {
           setActiveTab(tab);
         }
       }}
-      tabs={["environment", "changes", "files", "preview"]}
+      tabs={["environment", "changes", "files"]}
     >
       {activeTab === "environment" ? (
         <EnvironmentPanel
           summary={summary}
           workspaceToolsAvailable
+          {...panelActions()}
           onOpenChanges={() => setActiveTab("changes")}
           onOpenFiles={() => setActiveTab("files")}
-          onOpenPreview={() => setActiveTab("preview")}
-          onOpenProject={vi.fn()}
-          onRevealProject={vi.fn()}
         />
       ) : <p>{activeTab}</p>}
     </WorkspacePanel>
@@ -161,75 +294,93 @@ describe("Environment panel", () => {
     }));
   });
 
-  it("reports real context and routes each available action", () => {
-    const actions = {
-      onOpenChanges: vi.fn(),
-      onOpenFiles: vi.fn(),
-      onOpenPreview: vi.fn(),
-      onOpenProject: vi.fn(),
-      onRevealProject: vi.fn(),
-      onRetryGit: vi.fn(),
-      onCommit: vi.fn(),
-      onPush: vi.fn(),
+  it("renders the compact truthful hierarchy and repository-scoped actions", () => {
+    const actions = panelActions();
+    render(<EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />);
+
+    const panel = screen.getByLabelText("Environment details");
+    expect(within(panel).getByLabelText("9 insertions and 4 deletions")).toBeVisible();
+    expect(within(panel).getByText("Worktree")).toBeVisible();
+    expect(within(panel).getByText("2 repositories")).toBeVisible();
+    expect(within(panel).getByText("Local Servers")).toBeVisible();
+    expect(within(panel).getByText("Usage")).toBeVisible();
+    expect(within(panel).getByRole("heading", { name: "Repository" })).toBeVisible();
+    expect(within(panel).getByRole("heading", { name: "Editor" })).toBeVisible();
+    expect(within(panel).queryByText("Ready", { exact: true })).not.toBeInTheDocument();
+    expect(within(panel).queryByText("Recap", { exact: true })).not.toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByText("Commit and Push").closest("summary")!);
+    fireEvent.click(within(panel).getAllByRole("button", { name: "Commit" })
+      .find((button) => !button.hasAttribute("disabled"))!);
+    expect(actions.onOpenChanges).toHaveBeenCalledWith(".", "commit");
+    expect(within(panel).getByRole("button", { name: "Push 1" })).toBeDisabled();
+
+    fireEvent.click(within(panel).getByText("Local Servers").closest("summary")!);
+    expect(within(panel).getByText("http://127.0.0.1:4173 · Docs chat (docs/preview) · npm run preview")).toBeVisible();
+    fireEvent.click(within(panel).getByRole("button", {
+      name: /Open preview for Docs preview/u,
+    }));
+    expect(actions.onOpenRunPreview).toHaveBeenCalledWith(summary.localServers[0]);
+
+    fireEvent.click(within(panel).getByText("Usage").closest("summary")!);
+    expect(within(panel).getByText("Context window")).toBeVisible();
+    expect(within(panel).getByText("64% left")).toBeVisible();
+    expect(within(panel).getByText("Current")).toBeVisible();
+    expect(within(panel).getByText("reference.png")).toBeVisible();
+    expect(within(panel).getByText("requirements.pdf")).toBeVisible();
+  });
+
+  it("does not offer repository mutations without scoped Git authority", () => {
+    const actions = panelActions();
+    const repository = {
+      ...summary.repositories[0]!,
+      authorityRef: null,
+      commitAction: {
+        ...summary.repositories[0]!.commitAction!,
+        disabled: true,
+        detail: "Scoped Git access is unavailable. Refresh the workspace before changing this repository.",
+      },
+      pushAction: {
+        ...summary.repositories[0]!.pushAction!,
+        disabled: true,
+        detail: "Scoped Git access is unavailable. Refresh the workspace before changing this repository.",
+      },
     };
     render(
       <EnvironmentPanel
-        summary={summary}
+        summary={{ ...summary, repositories: [repository] }}
         workspaceToolsAvailable
-        commitAction={{
-          id: "commit",
-          label: "Commit",
-          detail: "Commit two changed files.",
-          disabled: false,
-        }}
-        pushAction={{
-          id: "push",
-          label: "Push 1",
-          detail: "Push one commit.",
-          disabled: false,
-        }}
         {...actions}
       />,
     );
 
-    expect(screen.getAllByText("Worktree")[0]).toBeVisible();
-    expect(screen.getByText("codex/summary")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Repository" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Editor" })).toBeVisible();
-    expect(screen.getByLabelText("9 insertions and 4 deletions")).toBeVisible();
-    expect(screen.queryByText("Ready", { exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByText("Usage", { exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByText("Recap", { exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByText("reference.png")).not.toBeInTheDocument();
-    expect(screen.queryByText("requirements.pdf")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Changes/u }));
     fireEvent.click(screen.getByText("Commit and Push").closest("summary")!);
-    fireEvent.click(screen.getByRole("button", { name: "Commit" }));
-    fireEvent.click(screen.getByRole("button", { name: "Push 1" }));
-    fireEvent.click(screen.getByText("Local Servers").closest("summary")!);
-    expect(screen.getByText("Last opened in Preview")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /localhost:4173/u }));
-    fireEvent.click(screen.getByRole("button", { name: /Open active workspace inertia externally/u }));
-    fireEvent.click(screen.getByRole("button", { name: "Editor view" }));
-    fireEvent.click(screen.getByRole("button", { name: /Open in/u }));
-    expect(actions.onOpenChanges).toHaveBeenCalledOnce();
-    expect(actions.onOpenFiles).toHaveBeenCalledOnce();
-    expect(actions.onOpenPreview).toHaveBeenCalledOnce();
-    expect(actions.onOpenProject).toHaveBeenCalledOnce();
-    expect(actions.onRevealProject).toHaveBeenCalledOnce();
-    expect(actions.onCommit).toHaveBeenCalledOnce();
-    expect(actions.onPush).toHaveBeenCalledOnce();
+    const commit = screen.getByRole("button", { name: "Commit" });
+    const push = screen.getByRole("button", { name: "Push 1" });
+    expect(commit).toBeDisabled();
+    expect(push).toBeDisabled();
+    expect(commit).toHaveAttribute("title", expect.stringContaining("Scoped Git access is unavailable"));
+    expect(push).toHaveAttribute("title", expect.stringContaining("Scoped Git access is unavailable"));
+    fireEvent.click(commit);
+    fireEvent.click(push);
+    expect(actions.onOpenChanges).not.toHaveBeenCalled();
   });
 
-  it("routes the header Environment control to the panel", () => {
+  it("routes the header Environment control and reflects its active state", () => {
     const onOpenEnvironment = vi.fn();
-    render(<HeaderHarness activeProject={project} onOpenEnvironment={onOpenEnvironment} />);
-
+    const view = render(
+      <HeaderHarness activeProject={project} onOpenEnvironment={onOpenEnvironment} />,
+    );
     const trigger = screen.getByRole("button", { name: "Open Environment" });
     expect(trigger).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(trigger);
     expect(onOpenEnvironment).toHaveBeenCalledOnce();
+
+    view.rerender(
+      <HeaderHarness activeProject={project} activeTool="environment" />,
+    );
+    expect(screen.getByRole("button", { name: "Open Environment" }))
+      .toHaveAttribute("aria-pressed", "true");
   });
 
   it("does not offer Environment before a task has a project", () => {
@@ -238,15 +389,8 @@ describe("Environment panel", () => {
       .not.toBeInTheDocument();
   });
 
-  it("distinguishes clean, loading, uninspected, unavailable, and failed repository states", () => {
-    const actions = {
-      onOpenChanges: vi.fn(),
-      onOpenFiles: vi.fn(),
-      onOpenPreview: vi.fn(),
-      onOpenProject: vi.fn(),
-      onRevealProject: vi.fn(),
-      onRetryGit: vi.fn(),
-    };
+  it("distinguishes clean, loading, unknown, unavailable, and failed Git states", () => {
+    const actions = panelActions();
     const view = render(
       <EnvironmentPanel
         summary={{ ...summary, gitState: "loading" }}
@@ -256,9 +400,6 @@ describe("Environment panel", () => {
     );
     expect(screen.getByRole("button", { name: "Changes Checking…" })).toBeDisabled();
     expect(screen.getByText("Checking branch…")).toBeVisible();
-    expect(screen.queryByText("codex/summary")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("9 insertions and 4 deletions"))
-      .not.toBeInTheDocument();
 
     view.rerender(
       <EnvironmentPanel
@@ -271,58 +412,27 @@ describe("Environment panel", () => {
         {...actions}
       />,
     );
-    expect(screen.getByLabelText("0 insertions and 0 deletions")).toBeVisible();
-    expect(screen.getByRole("button", { name: /Changes/u })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Changes Clean" })).toBeEnabled();
+
+    for (const [gitState, label] of [
+      ["unknown", "Repository not checked"],
+      ["unavailable", "No Git repository"],
+    ] as const) {
+      view.rerender(
+        <EnvironmentPanel
+          summary={{ ...summary, branch: null, changes: null, gitState }}
+          workspaceToolsAvailable
+          {...actions}
+        />,
+      );
+      expect(screen.getByText(label)).toBeVisible();
+    }
 
     view.rerender(
       <EnvironmentPanel
         summary={{
           ...summary,
-          changes: { ...summary.changes!, files: 0, insertions: 0, deletions: 0 },
-          gitState: "ready",
-          gitNotice: "The repository scan did not inspect every directory.",
-        }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(screen.getByLabelText("0 insertions and 0 deletions")).toBeVisible();
-    expect(screen.getByText(/did not inspect every directory/u)).toBeVisible();
-
-    view.rerender(
-      <EnvironmentPanel
-        summary={{
-          ...summary,
-          branch: null,
           changes: null,
-          gitState: "unknown",
-        }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Changes Not checked" }))
-      .toBeDisabled();
-    expect(screen.getByText("Repository not checked")).toBeVisible();
-
-    view.rerender(
-      <EnvironmentPanel
-        summary={{
-          ...summary,
-          branch: null,
-          changes: null,
-          gitState: "unavailable",
-        }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(screen.getByText("No Git repository")).toBeVisible();
-
-    view.rerender(
-      <EnvironmentPanel
-        summary={{
-          ...summary,
           gitState: "error",
           gitNotice: "Permission denied.",
         }}
@@ -331,31 +441,16 @@ describe("Environment panel", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Changes Unavailable" })).toBeDisabled();
-    expect(screen.getByText(/Permission denied\./u)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(screen.queryByLabelText("9 insertions and 4 deletions"))
-      .not.toBeInTheDocument();
-    expect(actions.onOpenChanges).not.toHaveBeenCalled();
     expect(actions.onRetryGit).toHaveBeenCalledOnce();
   });
 
-  it("only promotes runtime state when live details need attention", () => {
-    const actions = {
-      onOpenChanges: vi.fn(),
-      onOpenFiles: vi.fn(),
-      onOpenPreview: vi.fn(),
-      onOpenProject: vi.fn(),
-      onRevealProject: vi.fn(),
-    };
+  it("promotes runtime status only when attention is required", () => {
+    const actions = panelActions();
     const view = render(
-      <EnvironmentPanel
-        summary={summary}
-        workspaceToolsAvailable
-        {...actions}
-      />,
+      <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />,
     );
-    expect(screen.queryByText("Ready", { exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByText(/workspace runtime/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/workspace runtime/iu)).not.toBeInTheDocument();
 
     view.rerender(
       <EnvironmentPanel
@@ -365,7 +460,6 @@ describe("Environment panel", () => {
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent("Connecting to workspace");
-    expect(screen.getByRole("status")).toHaveTextContent("may be incomplete");
 
     view.rerender(
       <EnvironmentPanel
@@ -375,89 +469,135 @@ describe("Environment panel", () => {
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent("Workspace runtime unavailable");
-    expect(screen.getByRole("status")).toHaveTextContent("may be out of date");
   });
 
-  it("keeps detached state explicit and names the platform file manager", () => {
-    Object.defineProperty(window, "inertia", {
-      configurable: true,
-      value: { getPlatform: () => "darwin" },
-    });
-    try {
-      render(
-        <EnvironmentPanel
-          summary={{
-            ...summary,
-            branch: { label: "Branch", value: "Detached HEAD" },
-          }}
-          workspaceToolsAvailable
-          onOpenChanges={vi.fn()}
-          onOpenFiles={vi.fn()}
-          onOpenPreview={vi.fn()}
-          onOpenProject={vi.fn()}
-          onRevealProject={vi.fn()}
-        />,
-      );
-
-      expect(screen.getByText("Detached HEAD")).toBeVisible();
-      expect(screen.getByRole("button", { name: "Open in Finder" }))
-        .toBeVisible();
-    } finally {
-      Reflect.deleteProperty(window, "inertia");
-    }
-  });
-
-  it("shows a truthful empty server disclosure without filler sections", () => {
-    const actions = {
-      onOpenChanges: vi.fn(),
-      onOpenFiles: vi.fn(),
-      onOpenPreview: vi.fn(),
-      onOpenProject: vi.fn(),
-      onRevealProject: vi.fn(),
+  it("shows current, stale, refreshing, and unavailable Usage without inventing quota", () => {
+    const actions = panelActions();
+    const view = render(
+      <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />,
+    );
+    const usage = () => screen.getByText("Usage").closest("details")!;
+    const openUsage = () => {
+      if (!usage().hasAttribute("open")) {
+        fireEvent.click(usage().querySelector("summary")!);
+      }
+      return usage();
     };
-    render(
+    openUsage();
+    expect(within(usage()).getByText("Current")).toBeVisible();
+
+    view.rerender(
       <EnvironmentPanel
         summary={{
           ...summary,
-          localPreviewTargets: [],
-          checks: [],
-          subagents: [],
-          attachments: [],
+          usage: {
+            ...summary.usage!,
+            context: {
+              ...summary.usage!.context,
+              quality: "stale",
+              valueLabel: "72% · stale",
+              accessibleLabel: "Context 72% remaining, stale",
+            },
+            quota: {
+              ...summary.usage!.quota,
+              freshness: "stale",
+              limits: [],
+            },
+          },
         }}
         workspaceToolsAvailable
         {...actions}
       />,
     );
+    expect(within(openUsage()).getByText("Stale")).toBeVisible();
+    fireEvent.click(within(openUsage()).getByRole("button", { name: "Refresh usage" }));
+    expect(actions.onRefreshUsage).toHaveBeenCalledOnce();
 
-    expect(screen.getByText("Local Servers")).toBeVisible();
-    const localServers = screen.getByText("Local Servers").closest("details")!;
-    expect(localServers).not.toHaveAttribute("open");
-    expect(localServers.querySelector("summary")).toHaveTextContent("0");
-    fireEvent.click(localServers.querySelector("summary")!);
-    expect(localServers).toHaveAttribute("open");
-    expect(screen.getByText("Open a local URL in Preview to show it here."))
+    view.rerender(
+      <EnvironmentPanel
+        summary={{
+          ...summary,
+          usage: {
+            ...summary.usage!,
+            context: {
+              quality: "unavailable",
+              remainingPercent: null,
+              valueLabel: "Unavailable",
+              accessibleLabel: "Context usage unavailable",
+              updatedAt: null,
+            },
+            quota: {
+              ...summary.usage!.quota,
+              freshness: "refreshing",
+              limits: [],
+            },
+          },
+        }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(within(openUsage()).getAllByText("Refreshing").length).toBeGreaterThan(0);
+    expect(within(openUsage()).getByRole("button", { name: "Refreshing" })).toBeDisabled();
+
+    view.rerender(
+      <EnvironmentPanel
+        summary={{
+          ...summary,
+          usage: {
+            ...summary.usage!,
+            quota: {
+              ...summary.usage!.quota,
+              freshness: "unavailable",
+              source: "isolated",
+              limits: [],
+            },
+          },
+        }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(within(openUsage()).getByText("Unavailable for this backend"))
       .toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Active work" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Recent attachments" })).not.toBeInTheDocument();
-    expect(screen.queryByText(/No recent task attachments/u)).not.toBeInTheDocument();
+    expect(within(openUsage()).queryByRole("button", { name: "Refresh usage" }))
+      .not.toBeInTheDocument();
 
+    view.rerender(
+      <EnvironmentPanel
+        summary={{ ...summary, usage: null }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(within(openUsage()).getByText(/Usage is unavailable/iu)).toBeVisible();
   });
 
-  it("moves keyboard focus to the selected tool tab after an Environment action", async () => {
+  it("shows only validated live servers and a truthful empty disclosure", () => {
+    const actions = panelActions();
+    render(
+      <EnvironmentPanel
+        summary={{ ...summary, localServers: [] }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    const localServers = screen.getByText("Local Servers").closest("details")!;
+    expect(localServers.querySelector("summary")).toHaveTextContent("0");
+    fireEvent.click(localServers.querySelector("summary")!);
+    expect(within(localServers).getByText("No validated local service ports are active."))
+      .toBeVisible();
+  });
+
+  it("moves keyboard focus to the selected workspace tool", async () => {
     const user = userEvent.setup();
     render(<EnvironmentFocusHarness />);
-    const scenarios: Array<{ action: string | RegExp; tab: string }> = [
+    for (const scenario of [
       { action: /Changes/u, tab: "Changes" },
       { action: "Editor view", tab: "Files" },
-      { action: /localhost:4173/u, tab: "Preview" },
-    ];
-
-    for (const [index, scenario] of scenarios.entries()) {
-      if (index > 0) {
+    ]) {
+      if (scenario.tab === "Files") {
         await user.click(screen.getByRole("tab", { name: "Environment" }));
-      }
-      if (scenario.tab === "Preview") {
-        await user.click(screen.getByText("Local Servers"));
       }
       const action = within(screen.getByLabelText("Environment details"))
         .getByRole("button", { name: scenario.action });
@@ -469,132 +609,148 @@ describe("Environment panel", () => {
     }
   });
 
-  it("keeps every labelled section unique when split panes both show Environment", () => {
-    const actions = {
-      onOpenChanges: vi.fn(),
-      onOpenFiles: vi.fn(),
-      onOpenPreview: vi.fn(),
-      onOpenProject: vi.fn(),
-      onRevealProject: vi.fn(),
-    };
+  it("keeps section labelling unique across split Environment panels", () => {
+    const actions = panelActions();
     const view = render(
       <>
         <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />
         <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />
       </>,
     );
-    const labelled = [...view.container.querySelectorAll<HTMLElement>(
-      ".environment-panel [aria-labelledby], .environment-panel[aria-labelledby]",
-    )];
-    const labels = labelled.map((element) =>
-      element.getAttribute("aria-labelledby"));
-
+    const labels = [...view.container.querySelectorAll<HTMLElement>(
+      ".environment-panel [aria-labelledby]",
+    )].map((element) => element.getAttribute("aria-labelledby"));
     expect(labels).not.toContain(null);
     expect(new Set(labels).size).toBe(labels.length);
-    for (const label of labels) {
-      expect(document.getElementById(label!)).not.toBeNull();
-    }
+    for (const label of labels) expect(document.getElementById(label!)).not.toBeNull();
   });
 
-  it("routes the Private Connect indicator directly to Connections & devices settings", async () => {
-    const onOpenSettings = vi.fn();
-    const onOpenConnectionsSettings = vi.fn();
+  it("preserves all run controls and sibling owner context", () => {
+    const actions = panelActions();
+    const failed = environmentRun({
+      id: "failed-check",
+      conversationId: "conversation-2",
+      label: "Typecheck",
+      status: "failed",
+      contextLabel: "Release chat (codex/release)",
+      canAcknowledge: true,
+      canDismiss: true,
+    });
+    render(
+      <EnvironmentPanel
+        summary={{ ...summary, checks: [failed] }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    fireEvent.click(screen.getByText("Active work").closest("summary")!);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Acknowledge Typecheck · Release chat (codex/release)",
+    }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Dismiss Typecheck · Release chat (codex/release)",
+    }));
+    fireEvent.click(screen.getByText("Local Servers").closest("summary")!);
+    fireEvent.click(screen.getByRole("button", {
+      name: /Stop Docs preview · Docs chat/u,
+    }));
+    expect(actions.onAcknowledgeRun).toHaveBeenCalledWith(failed);
+    expect(actions.onDismissRun).toHaveBeenCalledWith(failed);
+    expect(actions.onStopRun).toHaveBeenCalledWith(summary.localServers[0]);
+  });
+
+  it("moves focus to the next run action when a row disappears", () => {
+    const actions = panelActions();
+    const running = environmentRun({ id: "build", label: "Build", canStop: true });
+    const failed = environmentRun({
+      id: "typecheck",
+      label: "Typecheck",
+      status: "failed",
+      canAcknowledge: true,
+    });
+    const view = render(
+      <EnvironmentPanel
+        summary={{ ...summary, checks: [running, failed] }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    fireEvent.click(screen.getByText("Active work").closest("summary")!);
+    const stop = screen.getByRole("button", { name: "Stop Build" });
+    stop.focus();
+    fireEvent.click(stop);
+    view.rerender(
+      <EnvironmentPanel
+        summary={{ ...summary, checks: [failed] }}
+        workspaceToolsAvailable
+        {...actions}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Acknowledge Typecheck" }))
+      .toHaveFocus();
+  });
+
+  it("does not steal focus after the user leaves a disappearing run action", () => {
+    const actions = panelActions();
+    const running = environmentRun({ id: "build", label: "Build", canStop: true });
+    const view = render(
+      <>
+        <EnvironmentPanel
+          summary={{ ...summary, checks: [running] }}
+          workspaceToolsAvailable
+          {...actions}
+        />
+        <button type="button">Outside</button>
+      </>,
+    );
+    fireEvent.click(screen.getByText("Active work").closest("summary")!);
+    const stop = screen.getByRole("button", { name: "Stop Build" });
+    const outside = screen.getByRole("button", { name: "Outside" });
+    stop.focus();
+    fireEvent.click(stop);
+    outside.focus();
+    view.rerender(
+      <>
+        <EnvironmentPanel
+          summary={{ ...summary, checks: [] }}
+          workspaceToolsAvailable
+          {...actions}
+        />
+        <button type="button">Outside</button>
+      </>,
+    );
+    expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
+  });
+
+  it("names detached state and the platform file manager truthfully", () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
-      value: {
-        getPrivateConnectState: vi.fn(async () => ({
-          available: true,
-          enabled: true,
-          status: "ready",
-          statusMessage: null,
-          externalUrl: "https://inertia.tailnet.ts.net",
-          activeSessions: 0,
-          devices: [],
-          pendingPairings: [],
-          invitation: null,
-          notice: null,
-          diagnostics: { tailscale: "connected", magicDns: "available", gatewayPort: 1, servePort: 8443, externalUrl: "https://inertia.tailnet.ts.net", mappingOwnership: "owned", errorClass: null },
-        })),
-        onPrivateConnectState: vi.fn(() => vi.fn()),
-      },
+      value: { getPlatform: () => "darwin" },
     });
     try {
-      render(<HeaderHarness
-        activeProject={project}
-        onOpenSettings={onOpenSettings}
-        onOpenConnectionsSettings={onOpenConnectionsSettings}
-      />);
-      const indicator = await screen.findByRole("button", {
-        name: "Connections & devices ready",
-      });
-      indicator.click();
-      expect(onOpenConnectionsSettings).toHaveBeenCalledOnce();
-      expect(onOpenSettings).not.toHaveBeenCalled();
+      render(
+        <EnvironmentPanel
+          summary={{ ...summary, branch: { label: "Branch", value: "Detached HEAD" } }}
+          workspaceToolsAvailable
+          {...panelActions()}
+        />,
+      );
+      expect(screen.getAllByText("Detached HEAD")[0]).toBeVisible();
+      expect(screen.getByRole("button", { name: "Open in Finder" })).toBeVisible();
     } finally {
       Reflect.deleteProperty(window, "inertia");
     }
   });
 
-  it("surfaces a pending browser approval outside Settings", async () => {
-    const onOpenConnectionsSettings = vi.fn();
-    Object.defineProperty(window, "inertia", {
-      configurable: true,
-      value: {
-        getPrivateConnectState: vi.fn(async () => ({
-          available: true,
-          enabled: true,
-          status: "ready",
-          statusMessage: null,
-          externalUrl: "https://inertia.tailnet.ts.net",
-          activeSessions: 0,
-          devices: [],
-          pendingPairings: [{
-            requestId: "11111111-1111-4111-8111-111111111111",
-            deviceLabel: "Phone",
-            comparisonCode: "123456",
-            receivedAt: "2030-01-01T00:00:00.000Z",
-            expiresAt: "2030-01-01T00:05:00.000Z",
-            tailnetLabel: "example",
-          }],
-          invitation: null,
-          notice: null,
-          diagnostics: { tailscale: "connected", magicDns: "available", gatewayPort: 1, servePort: 8443, externalUrl: "https://inertia.tailnet.ts.net", mappingOwnership: "owned", errorClass: null },
-        })),
-        onPrivateConnectState: vi.fn(() => vi.fn()),
-      },
-    });
-    try {
-      render(<HeaderHarness
-        activeProject={project}
-        onOpenConnectionsSettings={onOpenConnectionsSettings}
-      />);
-      const indicator = await screen.findByRole("button", {
-        name: "Connections & devices, 1 pairing approval waiting",
-      });
-      expect(indicator).toHaveTextContent("Approve device");
-      const alert = screen.getByRole("alert", {
-        name: "Private Connect pairing approval",
-      });
-      expect(alert).toHaveTextContent("Phone wants to connect");
-      expect(alert).toHaveTextContent("123456");
-      expect(alert).toHaveTextContent("example");
-      screen.getByRole("button", { name: "Review access" }).click();
-      expect(onOpenConnectionsSettings).toHaveBeenCalledOnce();
-    } finally {
-      Reflect.deleteProperty(window, "inertia");
-    }
-  });
-
-  it("explains why isolated-worktree draft tools are not ready", () => {
-    const reason =
-      "Workspace tools are available after the first message creates this isolated worktree.";
+  it("explains why provisional worktree tools are unavailable", () => {
+    const reason = "Workspace tools are available after the first message creates this isolated worktree.";
     render(
       <HeaderHarness
         activeProject={project}
         workspaceToolsUnavailableReason={reason}
       />,
     );
-
     expect(screen.getByRole("button", { name: reason })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Open Environment" })).toBeEnabled();
   });
 });

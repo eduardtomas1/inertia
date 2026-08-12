@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 
 import { WorkspaceChangesPanel } from "../../src/renderer/src/components/WorkspaceChangesPanel";
+import { ChangesPanel } from "../../src/renderer/src/components/ChangesPanel";
 import type { ChangedFile, ServerEvent, WorkspaceGitSnapshot } from "../../src/shared/contracts";
 
 const reviewReceipt = {
@@ -111,6 +112,145 @@ const snapshot: WorkspaceGitSnapshot = {
 };
 
 describe("WorkspaceChangesPanel repository scope", () => {
+  it("keeps a keyboard-focusable stop control beside an active selection question", async () => {
+    let finishQuestion: (() => void) | undefined;
+    let finishCancellation: (() => void) | undefined;
+    const onAsk = vi.fn(() => new Promise<void>((resolve) => {
+      finishQuestion = resolve;
+    }));
+    const onCancelAsk = vi.fn(() => new Promise<void>((resolve) => {
+      finishCancellation = resolve;
+    }));
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{
+          patch: patchFor("README.md"),
+          truncated: false,
+          files: [changedFile("README.md")],
+        }}
+        selectedPath="README.md"
+        summary={null}
+        onSelectFile={vi.fn()}
+        onRefresh={vi.fn()}
+        onAsk={onAsk}
+        onCancelAsk={onCancelAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+
+    fireEvent.click((await screen.findByText("after")).closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask agent" }));
+
+    const stop = await screen.findByRole("button", { name: "Stop asking" });
+    stop.focus();
+    expect(document.activeElement).toBe(stop);
+    expect(screen.queryByRole("button", { name: "Ask agent" })).not.toBeInTheDocument();
+    fireEvent.click(stop);
+    expect(onCancelAsk).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Stopping…$/u })).toBeDisabled();
+
+    await act(async () => {
+      finishCancellation?.();
+      finishQuestion?.();
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Stopping…$/u }))
+      .not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Refresh changes" }))
+      .toHaveFocus();
+  });
+
+  it("restores the stop control after selection UI unmounts and reports cancellation failure", async () => {
+    const onCancelAsk = vi.fn(async () => {
+      throw new Error("The active review question was already released.");
+    });
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{
+          patch: patchFor("README.md"),
+          truncated: false,
+          files: [changedFile("README.md")],
+        }}
+        selectedPath="README.md"
+        summary={null}
+        questionRunning
+        onSelectFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onCancelAsk={onCancelAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+
+    const stop = screen.getByRole("button", { name: "Stop asking" });
+    stop.focus();
+    expect(document.activeElement).toBe(stop);
+    fireEvent.click(stop);
+
+    expect(onCancelAsk).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(
+      "The active review question was already released.",
+    )).toHaveAttribute("role", "alert");
+    expect(screen.getByRole("button", { name: "Stop asking" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Stop asking" })).toHaveFocus();
+
+    fireEvent.click(screen.getByText("after").closest("button")!);
+    expect(screen.getByRole("button", { name: "Ask about" })).toBeDisabled();
+  });
+
+  it("clears a completed stop attempt before a later question starts", async () => {
+    const onCancelAsk = vi.fn(async () => undefined);
+    const panel = (questionRunning: boolean): React.JSX.Element => (
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{
+          patch: patchFor("README.md"),
+          truncated: false,
+          files: [changedFile("README.md")],
+        }}
+        selectedPath="README.md"
+        summary={null}
+        questionRunning={questionRunning}
+        onSelectFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onCancelAsk={onCancelAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />
+    );
+    const view = render(panel(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop asking" }));
+    expect(screen.getByRole("button", { name: /Stopping…$/u })).toBeDisabled();
+
+    view.rerender(panel(false));
+    expect(screen.queryByRole("button", { name: "Stop asking" }))
+      .not.toBeInTheDocument();
+    view.rerender(panel(true));
+    expect(screen.getByRole("button", { name: "Stop asking" })).toBeEnabled();
+  });
+
   it("switches one flat file navigator between repositories without losing identity", async () => {
     const onLoadRepositoryDiff = vi.fn(async (
       repositoryPath: string,
@@ -288,7 +428,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
       .toBeInTheDocument();
   });
 
-  it("runs commit and push against the selected nested repository identity", async () => {
+  it("runs requested commit and push actions against the exact nested repository identity", async () => {
     const actionable = structuredClone(snapshot);
     actionable.repositories[0]!.authorityRef = "22222222-2222-4222-8222-222222222222";
     actionable.repositories[0]!.authorityRef =
@@ -335,6 +475,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
           requestId: crypto.randomUUID(),
         });
     const onRefresh = vi.fn();
+    const onChangesRequestHandled = vi.fn();
     const patchFor = (path: string) => [
       `diff --git a/${path} b/${path}`,
       `--- a/${path}`,
@@ -362,7 +503,14 @@ describe("WorkspaceChangesPanel repository scope", () => {
         ...(commitReview ? { commitReview: reviewReceipt } : {}),
       };
     });
-    const panel = (nextSnapshot: WorkspaceGitSnapshot) => (
+    const panel = (
+      nextSnapshot: WorkspaceGitSnapshot,
+      changesRequest?: {
+        repositoryPath: string;
+        action: "review" | "commit" | "push";
+        revision: number;
+      },
+    ) => (
       <WorkspaceChangesPanel
         projectName="Inertia"
         projectId={projectId}
@@ -382,6 +530,8 @@ describe("WorkspaceChangesPanel repository scope", () => {
         onDeleteNote={vi.fn(async () => undefined)}
         onAddTextToPrompt={vi.fn()}
         onAddToPrompt={vi.fn()}
+        changesRequest={changesRequest}
+        onChangesRequestHandled={onChangesRequestHandled}
       />
     );
     const view = render(panel(actionable));
@@ -390,14 +540,15 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(within(rootActions).getByRole("button", { name: "Commit" }))
       .toBeEnabled();
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Repository scope" }), {
-      target: { value: "modules/alpha" },
-    });
-    const scopeActions = await screen.findByLabelText(
-      "Actions for modules/alpha",
-    );
-    fireEvent.click(within(scopeActions).getByRole("button", { name: "Commit" }));
+    view.rerender(panel(actionable, {
+      repositoryPath: "modules/alpha",
+      action: "commit",
+      revision: 1,
+    }));
     const dialog = await screen.findByRole("dialog", { name: "Commit changes" });
+    expect(screen.getByRole("combobox", { name: "Repository scope" }))
+      .toHaveValue("modules/alpha");
+    expect(onChangesRequestHandled).toHaveBeenCalledWith(1);
     expect(await within(dialog).findByText("2 selected hunks are unreviewed."))
       .toBeInTheDocument();
     expect(onLoadRepositoryDiff).toHaveBeenCalledWith(
@@ -435,11 +586,11 @@ describe("WorkspaceChangesPanel repository scope", () => {
     pushedNested.clean = true;
     pushedNested.insertions = 0;
     pushedNested.deletions = 0;
-    view.rerender(panel(pushed));
-    const refreshedActions = await screen.findByLabelText(
-      "Actions for modules/alpha",
-    );
-    fireEvent.click(within(refreshedActions).getByRole("button", { name: "Push 1" }));
+    view.rerender(panel(pushed, {
+      repositoryPath: "modules/alpha",
+      action: "push",
+      revision: 2,
+    }));
     await waitFor(() => expect(run).toHaveBeenCalledWith("git.push", {
       type: "git.push",
       payload: {
@@ -449,6 +600,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
         authorityRef: nested.authorityRef,
       },
     }));
+    expect(onChangesRequestHandled).toHaveBeenCalledWith(2);
 
     const behind = structuredClone(pushed);
     const behindNested = behind.repositories.find(

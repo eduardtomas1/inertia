@@ -3,6 +3,7 @@ import {
   parseCodexApprovalRequest,
 } from "./approvals";
 import {
+  codexGoalContinuationGraceMs,
   codexSubagentDrainTimeoutMs,
   commandExecutionLabel,
   type CodexRunPhase,
@@ -28,11 +29,15 @@ import {
 } from "./questions";
 import { completedReasoningSummary } from "./reasoning";
 import { parseCodexTokenUsage } from "./usage";
+import type { AgentGoalStatus } from "../../shared/contracts";
 import { parseCodexRateLimits } from "../codex-metadata";
 import {
   providerActivityDetailSections,
 } from "../provider/activity-detail";
-import type { ProviderRunFailure } from "../provider/contracts";
+import type {
+  ProviderGoalSnapshot,
+  ProviderRunFailure,
+} from "../provider/contracts";
 import type {
   AgentApprovalDecision,
   AgentApprovalRequest,
@@ -63,7 +68,7 @@ export interface CodexAppServerEventHost {
   setPhase: (phase: CodexRunPhase) => void;
   providerThreadId: () => string | undefined;
   activeTurnId: () => string | undefined;
-  setActiveTurnId: (turnId: string) => void;
+  setActiveTurnId: (turnId: string | undefined) => void;
   cancelRequested: () => boolean;
   lastError: () => string | undefined;
   setLastError: (message: string) => void;
@@ -129,6 +134,7 @@ export class CodexAppServerEvents {
   private readonly pendingInputs = new Map<string, PendingInput>();
   private readonly deltaItems = new Set<string>();
   private readonly reasoningDeltaItems = new Set<string>();
+  private readonly completedTurnIds = new Set<string>();
   private readonly childParents = new Map<string, string>();
   private readonly childResults = new Map<string, CappedTextBuffer>();
   private readonly childDeltaItems = new Set<string>();
@@ -141,11 +147,28 @@ export class CodexAppServerEvents {
   private pendingParentCompletion: PendingParentCompletion | null = null;
   private subagentDrainTimer: NodeJS.Timeout | undefined;
   private readonly subagentDrainTimeoutMs: number;
+  private goalContinuationTimer: NodeJS.Timeout | undefined;
+  private readonly goalContinuationGraceMs: number;
+  private pendingGoalMutationCompletion: PendingParentCompletion | null = null;
+  private nativeGoalStatus: AgentGoalStatus | null;
+  private nativeGoalSnapshot: ProviderGoalSnapshot | null = null;
+  private nativeGoalUpdatedAt: string | null = null;
+  private nativeGoalSequence = 0;
+  private nativeGoalFingerprint: string | null = null;
+  private readonly nativeGoalRevisionFingerprints = new Set<string>();
+  private pendingGoalMutations = 0;
+  private pendingGoalActivations = 0;
 
   constructor(private readonly host: CodexAppServerEventHost) {
     this.subagentDrainTimeoutMs = codexSubagentDrainTimeoutMs(
       host.options.subagentDrainTimeoutMs,
     );
+    this.goalContinuationGraceMs = codexGoalContinuationGraceMs(
+      host.options.goalContinuationGraceMs,
+    );
+    this.nativeGoalStatus = host.options.goalContinuationExpected
+      ? "active"
+      : null;
   }
 
   dispose(): void {
@@ -153,8 +176,14 @@ export class CodexAppServerEvents {
       clearTimeout(this.subagentDrainTimer);
       this.subagentDrainTimer = undefined;
     }
+    if (this.goalContinuationTimer) {
+      clearTimeout(this.goalContinuationTimer);
+      this.goalContinuationTimer = undefined;
+    }
     this.pendingParentCompletion = null;
+    this.pendingGoalMutationCompletion = null;
     this.liveSubagentIds.clear();
+    this.completedTurnIds.clear();
   }
 
   cancelPendingParentCompletion(): boolean {
@@ -162,6 +191,66 @@ export class CodexAppServerEvents {
     this.dispose();
     this.host.finish("cancelled", null, null);
     return true;
+  }
+
+  hasObservedTurn(turnId: string): boolean {
+    return this.host.activeTurnId() === turnId
+      || this.completedTurnIds.has(turnId);
+  }
+
+  goalProjectionSequence(): number {
+    return this.nativeGoalSequence;
+  }
+
+  beginGoalMutation(activatesGoal: boolean): void {
+    this.pendingGoalMutations += 1;
+    if (activatesGoal) this.pendingGoalActivations += 1;
+    if (this.pendingParentCompletion) {
+      this.discardPendingParentCompletion();
+      this.host.setActiveTurnId(undefined);
+      this.host.setPhase("awaiting-goal-continuation");
+    }
+    if (this.host.phase() !== "awaiting-goal-continuation") return;
+    if (this.goalContinuationTimer) {
+      clearTimeout(this.goalContinuationTimer);
+      this.goalContinuationTimer = undefined;
+    }
+    this.discardPendingParentCompletion();
+  }
+
+  endGoalMutation(activatesGoal: boolean): void {
+    if (this.pendingGoalMutations > 0) {
+      this.pendingGoalMutations -= 1;
+    }
+    if (activatesGoal && this.pendingGoalActivations > 0) {
+      this.pendingGoalActivations -= 1;
+    }
+    if (this.pendingGoalMutations === 0) {
+      const pendingCompletion = this.pendingGoalMutationCompletion;
+      if (pendingCompletion) {
+        this.pendingGoalMutationCompletion = null;
+        this.completeParentTurn(
+          pendingCompletion.status,
+          pendingCompletion.exitCode,
+        );
+        return;
+      }
+      if (this.host.phase() !== "awaiting-goal-continuation") return;
+      if (this.nativeGoalStatus === "active") {
+        this.armGoalContinuationTimer();
+      } else {
+        this.finishAwaitingGoalContinuation();
+      }
+    }
+  }
+
+  awaitInitialGoalTurn(): void {
+    // The provider can start the first goal turn before the goal/set response
+    // continuation resumes. In that case the event-driven running phase owns
+    // the lifecycle already. Otherwise, bound the wait exactly like every
+    // later provider-authored goal continuation.
+    if (this.host.phase() !== "starting-turn") return;
+    this.awaitGoalContinuation();
   }
 
   settleInteractions(): void {
@@ -387,35 +476,45 @@ export class CodexAppServerEvents {
     ) return;
 
     if (method === "thread/goal/updated") {
-      const update = parseCodexGoalUpdatedNotification(params);
-      if (
-        update
-        && update.threadId === this.host.providerThreadId()
-      ) {
-        this.host.options.onGoalUpdated?.(update.threadId, update.goal);
-      }
+      this.projectGoalUpdate(params);
       return;
     }
     if (method === "thread/goal/cleared") {
       const threadId = parseCodexGoalClearedNotification(params);
-      if (threadId && threadId === this.host.providerThreadId()) {
-        this.host.options.onGoalCleared?.(threadId);
-      }
+      if (threadId) this.projectGoalCleared(threadId);
       return;
     }
 
     if (method === "turn/started") {
       const phase = this.host.phase();
-      if (phase !== "starting-turn" && phase !== "running") return;
+      if (
+        phase !== "starting-turn"
+        && phase !== "running"
+        && phase !== "awaiting-goal-continuation"
+      ) return;
+      if (
+        phase === "awaiting-goal-continuation"
+        && this.nativeGoalStatus !== "active"
+        && this.pendingGoalActivations === 0
+      ) return;
       if (
         !this.host.providerThreadId()
         || notificationThreadId !== this.host.providerThreadId()
         || !notificationTurnId
+        || this.completedTurnIds.has(notificationTurnId)
       ) return;
       if (
-        this.host.activeTurnId()
+        phase !== "awaiting-goal-continuation"
+        && this.host.activeTurnId()
         && notificationTurnId !== this.host.activeTurnId()
       ) return;
+      if (this.goalContinuationTimer) {
+        clearTimeout(this.goalContinuationTimer);
+        this.goalContinuationTimer = undefined;
+      }
+      if (phase === "awaiting-goal-continuation") {
+        this.discardPendingParentCompletion();
+      }
       this.host.setActiveTurnId(notificationTurnId);
       this.host.setPhase("running");
       this.host.options.onStatus?.("running");
@@ -488,6 +587,8 @@ export class CodexAppServerEvents {
       return;
     }
     if (method === "turn/completed") {
+      if (!notificationTurnId) return;
+      this.completedTurnIds.add(notificationTurnId);
       const turn = objectValue(params.turn);
       const status = stringValue(turn?.status);
       const turnError = objectValue(turn?.error);
@@ -522,7 +623,14 @@ export class CodexAppServerEvents {
         );
         this.completeParentTurn("failed", 1);
       } else if (status === "completed") {
-        this.completeParentTurn("completed", 0);
+        if (
+          this.nativeGoalStatus === "active"
+          || this.pendingGoalMutations > 0
+        ) {
+          this.awaitGoalContinuation();
+        } else {
+          this.completeParentTurn("completed", 0);
+        }
       } else {
         const detail = status
           ? `Unsupported parent turn status: ${status}`
@@ -537,10 +645,160 @@ export class CodexAppServerEvents {
     }
   }
 
+  projectGoalResponse(
+    threadId: string,
+    goal: unknown,
+    sequenceAtResponse: number,
+  ): ProviderGoalSnapshot | null {
+    const update = parseCodexGoalUpdatedNotification({ threadId, goal });
+    if (!update || update.threadId !== this.host.providerThreadId()) {
+      return null;
+    }
+    // The decoder can accept later notifications before the awaiting request
+    // resumes. Prefer that sequenced snapshot when second-resolution provider
+    // timestamps cannot distinguish the response from the later update.
+    const supersededByNotification =
+      this.nativeGoalSequence > sequenceAtResponse
+      && (
+        this.nativeGoalSnapshot === null
+        || (
+          this.nativeGoalUpdatedAt !== null
+          && update.goal.updatedAt <= this.nativeGoalUpdatedAt
+        )
+      );
+    if (supersededByNotification) {
+      if (!this.nativeGoalSnapshot) {
+        throw new Error(
+          "Codex cleared the goal before the update completed.",
+        );
+      }
+      return this.nativeGoalSnapshot;
+    }
+    if (!this.acceptGoalUpdate(update.threadId, update.goal, "response")) {
+      return this.nativeGoalSnapshot ?? update.goal;
+    }
+    return update.goal;
+  }
+
+  projectGoalCleared(threadId: string): boolean {
+    if (threadId !== this.host.providerThreadId()) return false;
+    this.nativeGoalStatus = null;
+    this.nativeGoalSnapshot = null;
+    this.nativeGoalUpdatedAt = null;
+    this.nativeGoalFingerprint = null;
+    this.nativeGoalRevisionFingerprints.clear();
+    this.nativeGoalSequence += 1;
+    this.host.options.onGoalCleared?.(threadId);
+    this.finishAwaitingGoalContinuation();
+    return true;
+  }
+
+  projectGoalClearResponse(
+    threadId: string,
+    sequenceAtResponse: number,
+  ): boolean {
+    if (threadId !== this.host.providerThreadId()) return false;
+    if (this.nativeGoalSequence > sequenceAtResponse) {
+      return this.nativeGoalSnapshot === null;
+    }
+    return this.projectGoalCleared(threadId);
+  }
+
+  private projectGoalUpdate(
+    params: JsonObject,
+  ): ProviderGoalSnapshot | null {
+    const update = parseCodexGoalUpdatedNotification(params);
+    if (!update || update.threadId !== this.host.providerThreadId()) {
+      return null;
+    }
+    return this.acceptGoalUpdate(update.threadId, update.goal)
+      ? update.goal
+      : null;
+  }
+
+  private acceptGoalUpdate(
+    threadId: string,
+    goal: ProviderGoalSnapshot,
+    source: "notification" | "response" = "notification",
+  ): boolean {
+    if (
+      this.nativeGoalUpdatedAt
+      && goal.updatedAt < this.nativeGoalUpdatedAt
+    ) return false;
+    const fingerprint = JSON.stringify([
+      goal.objective,
+      goal.status,
+      goal.tokenBudget,
+      goal.tokensUsed,
+      goal.timeUsedSeconds,
+      goal.createdAt,
+      goal.updatedAt,
+    ]);
+    if (goal.updatedAt !== this.nativeGoalUpdatedAt) {
+      this.nativeGoalRevisionFingerprints.clear();
+      this.nativeGoalFingerprint = null;
+    } else if (
+      source === "notification"
+      && fingerprint !== this.nativeGoalFingerprint
+      && this.nativeGoalRevisionFingerprints.has(fingerprint)
+    ) {
+      return false;
+    }
+    this.nativeGoalUpdatedAt = goal.updatedAt;
+    this.nativeGoalStatus = goal.status;
+    this.nativeGoalSnapshot = goal;
+    this.nativeGoalFingerprint = fingerprint;
+    this.nativeGoalRevisionFingerprints.add(fingerprint);
+    this.nativeGoalSequence += 1;
+    this.host.options.onGoalUpdated?.(threadId, goal);
+    if (goal.status !== "active") {
+      this.finishAwaitingGoalContinuation();
+    }
+    return true;
+  }
+
+  private awaitGoalContinuation(): void {
+    this.host.setActiveTurnId(undefined);
+    this.host.setPhase("awaiting-goal-continuation");
+    this.armGoalContinuationTimer();
+  }
+
+  private armGoalContinuationTimer(): void {
+    if (
+      this.goalContinuationTimer
+      || this.pendingGoalMutations > 0
+      || this.host.phase() !== "awaiting-goal-continuation"
+      || this.nativeGoalStatus !== "active"
+    ) return;
+    this.goalContinuationTimer = setTimeout(() => {
+      this.goalContinuationTimer = undefined;
+      this.host.rememberFailure(
+        "goal-continuation-timeout",
+        "Codex kept the goal active but did not start another turn in time.",
+      );
+      this.completeParentTurn("failed", 1);
+    }, this.goalContinuationGraceMs);
+    this.goalContinuationTimer.unref();
+  }
+
+  private finishAwaitingGoalContinuation(): void {
+    if (this.host.phase() !== "awaiting-goal-continuation") return;
+    if (this.goalContinuationTimer) {
+      clearTimeout(this.goalContinuationTimer);
+      this.goalContinuationTimer = undefined;
+    }
+    if (this.pendingGoalMutations > 0) return;
+    this.completeParentTurn("completed", 0);
+  }
+
   private completeParentTurn(
     status: CodexAppServerResult["status"],
     exitCode: number | null,
   ): void {
+    if (status !== "cancelled" && this.pendingGoalMutations > 0) {
+      this.pendingGoalMutationCompletion ??= { status, exitCode };
+      return;
+    }
     if (status !== "completed" || this.liveSubagentIds.size === 0) {
       this.host.finish(status, exitCode, null);
       return;
@@ -563,6 +821,14 @@ export class CodexAppServerEvents {
       this.subagentDrainTimer = undefined;
     }
     this.host.finish(completion.status, completion.exitCode, null);
+  }
+
+  private discardPendingParentCompletion(): void {
+    this.pendingParentCompletion = null;
+    if (this.subagentDrainTimer) {
+      clearTimeout(this.subagentDrainTimer);
+      this.subagentDrainTimer = undefined;
+    }
   }
 
   private emitActivity(

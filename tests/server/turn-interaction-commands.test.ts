@@ -14,11 +14,14 @@ import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
 import {
+  PDF_MODULE_INITIALIZATION_TIMEOUT_MS,
+} from "../../src/server/runtime/attachments/document-attachment-context";
+import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
+import {
   createTurnInteractionCommandHandler,
   type TurnInteractionCommandDependencies,
 } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
-import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const execFileAsync = promisify(execFile);
@@ -183,6 +186,14 @@ function dependencies(options: {
       createMessage: vi.fn(() => ({ id: "message-id" })),
       updateConversation: vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["store"],
+    conversationAttachments: {
+      retain: vi.fn(async (payloads: Array<{
+        attachment: ChatAttachment;
+      }>) => payloads.map(({ attachment }) => attachment)),
+      release: vi.fn(async () => undefined),
+      acceptRetention: vi.fn(),
+      releaseRetention: vi.fn(async () => undefined),
+    } as unknown as TurnInteractionCommandDependencies["conversationAttachments"],
     backendProfileController: {
       validateSelection: vi.fn((selection) =>
         options.validatedSelection ?? selection),
@@ -212,6 +223,7 @@ function dependencies(options: {
         ]),
       }]),
       relinquishAll: options.relinquishAll,
+      releaseAll: vi.fn(async () => undefined),
     } as unknown as TurnInteractionCommandDependencies["attachmentResolver"],
     generatedAttachments: options.generatedAttachments ?? {
       release: vi.fn(async () => undefined),
@@ -241,6 +253,68 @@ function dependencies(options: {
     send: vi.fn(),
   };
 }
+
+describe("turn stop cleanup", () => {
+  it("does not acknowledge Stop until provider cleanup is confirmed", async () => {
+    let release!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runtime = dependencies({
+      queue: vi.fn(),
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    const cancel = vi.fn(() => true);
+    const waitForProviderCleanup = vi.fn(async () => await cleanup);
+    Object.assign(runtime.turns, { cancel, waitForProviderCleanup });
+    vi.mocked(runtime.turns.isActive).mockReturnValue(false);
+    Object.assign(runtime.isolatedRuns, {
+      stopConversation: vi.fn(() => false),
+    });
+    const handler = createTurnInteractionCommandHandler(runtime);
+    let settled = false;
+    const result = handler({} as never, {
+      type: "agent.stop",
+      requestId: "33333333-3333-4333-8333-333333333333",
+      payload: { conversationId },
+    }).finally(() => {
+      settled = true;
+    });
+
+    await vi.waitFor(() => expect(waitForProviderCleanup).toHaveBeenCalledWith([
+      conversationId,
+    ]));
+    expect(settled).toBe(false);
+
+    release();
+    await expect(result).resolves.toBe("mutation");
+    expect(cancel).toHaveBeenCalledWith(conversationId);
+  });
+
+  it("reports that Resume remains unavailable when cleanup is unconfirmed", async () => {
+    const runtime = dependencies({
+      queue: vi.fn(),
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    Object.assign(runtime.turns, {
+      cancel: vi.fn(() => true),
+      waitForProviderCleanup: vi.fn(async () => undefined),
+    });
+    vi.mocked(runtime.turns.isActive).mockReturnValue(true);
+    Object.assign(runtime.isolatedRuns, {
+      stopConversation: vi.fn(() => false),
+    });
+    const handler = createTurnInteractionCommandHandler(runtime);
+
+    await expect(handler({} as never, {
+      type: "agent.stop",
+      requestId: "33333333-3333-4333-8333-333333333333",
+      payload: { conversationId },
+    })).rejects.toThrow(
+      "provider cleanup could not be confirmed. Resume remains unavailable",
+    );
+  });
+});
 
 describe("message attachment ownership transfer", () => {
   it.each([
@@ -286,7 +360,7 @@ describe("message attachment ownership transfer", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  }, 20_000);
+  }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
 
   it("cleans a generated page when aggregate preparation times out after the private write", async () => {
     vi.useFakeTimers();
@@ -371,6 +445,12 @@ describe("message attachment ownership transfer", () => {
       )).resolves.toBe("handled");
       expect(generatedAttachments.usage()).toEqual({ bytes: 0, records: 0 });
       expect(handlerDependencies.store.createMessage).toHaveBeenCalledOnce();
+      expect(handlerDependencies.conversationAttachments.acceptRetention)
+        .toHaveBeenCalledOnce();
+      expect(handlerDependencies.attachmentResolver?.releaseAll)
+        .toHaveBeenCalledWith([pdf.id]);
+      expect(handlerDependencies.conversationAttachments.releaseRetention)
+        .not.toHaveBeenCalled();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -554,6 +634,83 @@ describe("message attachment ownership transfer", () => {
     }
   });
 
+  it("aborts durable retention at the aggregate preparation deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const relinquishAll = vi.fn(async () => undefined);
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll,
+        enableProviders: false,
+      });
+      const abortObserved = vi.fn();
+      vi.mocked(handlerDependencies.conversationAttachments.retain)
+        .mockImplementation((_payloads, signal) => new Promise(
+          (_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              abortObserved();
+              reject(signal.reason);
+            }, { once: true });
+          },
+        ));
+      const handling = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      )({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+
+      await vi.advanceTimersByTimeAsync(
+        MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
+      );
+      await rejection;
+
+      expect(abortObserved).toHaveBeenCalledOnce();
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+      expect(handlerDependencies.store.createMessage).not.toHaveBeenCalled();
+      expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("releases durable retention that completes after its deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+        enableProviders: false,
+      });
+      let completeRetention!: (attachments: ChatAttachment[]) => void;
+      vi.mocked(handlerDependencies.conversationAttachments.retain)
+        .mockReturnValue(new Promise((resolve) => {
+          completeRetention = resolve;
+        }));
+      const handling = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      )({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+
+      await vi.advanceTimersByTimeAsync(
+        MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
+      );
+      await rejection;
+
+      completeRetention([{ ...trustedAttachment, path: "/durable/reference.png" }]);
+      await vi.waitFor(() => {
+        expect(handlerDependencies.conversationAttachments.releaseRetention)
+          .toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f-]{36}$/u));
+      });
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+      expect(handlerDependencies.store.createMessage).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("projects an active follow-up without hydrating the live stream", async () => {
     const followUp: ChatMessage = {
       id: "77777777-7777-4777-8777-777777777777",
@@ -603,6 +760,36 @@ describe("message attachment ownership transfer", () => {
     expect(handlerDependencies.broadcastSnapshot).toHaveBeenCalledOnce();
   });
 
+  it("queues providers against the retained copy and persists its identity", async () => {
+    const queue = vi.fn(() => queuedTurn());
+    const relinquishAll = vi.fn(async () => undefined);
+    const handlerDependencies = dependencies({ queue, relinquishAll });
+    const retainedAttachment: ChatAttachment = {
+      ...trustedAttachment,
+      path: "/private/conversation-attachments/request.png",
+    };
+    vi.mocked(handlerDependencies.conversationAttachments.retain)
+      .mockResolvedValueOnce([retainedAttachment]);
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).resolves.toBe("handled");
+
+    expect(queue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [retainedAttachment],
+        imagePaths: [retainedAttachment.path],
+      }),
+      expect.any(Function),
+    );
+    expect(relinquishAll).not.toHaveBeenCalled();
+    expect(handlerDependencies.conversationAttachments.acceptRetention)
+      .toHaveBeenCalledOnce();
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
+      .not.toHaveBeenCalled();
+  });
+
   it("relinquishes ownership when provider readiness rejects the send", async () => {
     const relinquishAll = vi.fn(async () => undefined);
     const queue = vi.fn();
@@ -622,6 +809,8 @@ describe("message attachment ownership transfer", () => {
     expect(queue).not.toHaveBeenCalled();
     expect(relinquishAll).toHaveBeenCalledOnce();
     expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
+      .not.toHaveBeenCalled();
   });
 
   it("keeps a rejected capability available for a renderer retry", async () => {
@@ -643,15 +832,45 @@ describe("message attachment ownership transfer", () => {
     expect(queue).toHaveBeenCalledTimes(1);
     expect(relinquishAll).toHaveBeenCalledOnce();
     expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
+      .toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f-]{36}$/u));
 
     await expect(handler({} as never, messageCommand())).resolves.toBe(
       "handled",
     );
     expect(queue).toHaveBeenCalledTimes(2);
-    expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({
-      attachments: [trustedAttachment],
-    }));
+    expect(queue).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        attachments: [trustedAttachment],
+      }),
+      expect.any(Function),
+    );
     expect(relinquishAll).toHaveBeenCalledOnce();
+    expect(handlerDependencies.conversationAttachments.retain)
+      .toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps retention accepted when live queue adoption fails after persistence", async () => {
+    const queue = vi.fn((
+      _request: unknown,
+      onPersisted: () => void,
+    ) => {
+      onPersisted();
+      throw new Error("queue adoption failed after persistence");
+    });
+    const relinquishAll = vi.fn(async () => undefined);
+    const handlerDependencies = dependencies({ queue, relinquishAll });
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).rejects.toThrow("queue adoption failed after persistence");
+
+    expect(handlerDependencies.conversationAttachments.acceptRetention)
+      .toHaveBeenCalledOnce();
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
+      .not.toHaveBeenCalled();
+    expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
   });
 
   it("rejects stale skills before attempting a reversal checkpoint", async () => {
@@ -696,9 +915,10 @@ describe("message attachment ownership transfer", () => {
     const handler = createTurnInteractionCommandHandler(handlerDependencies);
 
     await expect(handler({} as never, command)).resolves.toBe("handled");
-    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
-      skills: [skill],
-    }));
+    expect(queue).toHaveBeenCalledWith(
+      expect.objectContaining({ skills: [skill] }),
+      expect.any(Function),
+    );
     expect(resolveSkills.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(handlerDependencies.store.conversationPath)
         .mock.invocationCallOrder[0]!,
@@ -815,6 +1035,43 @@ describe("message attachment ownership transfer", () => {
     }
   });
 
+  it("removes a captured checkpoint when durable attachment retention fails", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "inertia-attachment-retain-"));
+    try {
+      await execFileAsync("git", ["init", "--quiet", repository]);
+      await writeFile(join(repository, "request.txt"), "pending\n");
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+        conversationPath: repository,
+      });
+      vi.mocked(handlerDependencies.conversationAttachments.retain)
+        .mockRejectedValueOnce(new Error("Conversation attachment storage is full."));
+
+      await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        messageCommand(),
+      )).rejects.toThrow("Conversation attachment storage is full.");
+
+      expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+      expect(handlerDependencies.attachmentResolver?.relinquishAll)
+        .toHaveBeenCalledWith([trustedAttachment.id]);
+      expect(handlerDependencies.conversationAttachments.releaseRetention)
+        .toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f-]{36}$/u));
+      const { stdout } = await execFileAsync("git", [
+        "-C",
+        repository,
+        "for-each-ref",
+        "--format=%(refname)",
+        `refs/inertia/checkpoints/${conversationId}/`,
+      ]);
+      expect(stdout.trim()).toBe("");
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
+  });
+
   it("does not release after an authoritative turn accepts ownership", async () => {
     const relinquishAll = vi.fn(async () => undefined);
     const queue = vi.fn(() => queuedTurn());
@@ -852,10 +1109,13 @@ describe("message attachment ownership transfer", () => {
     await expect(handler({} as never, messageCommand(false))).resolves.toBe(
       "handled",
     );
-    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
-      conversationId,
-      activateConversation: false,
-    }));
+    expect(queue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId,
+        activateConversation: false,
+      }),
+      expect.any(Function),
+    );
   });
 
   it("settles an accepted queued turn if acknowledgement work throws before start", async () => {

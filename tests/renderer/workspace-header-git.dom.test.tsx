@@ -67,9 +67,6 @@ function renderHeader(
       branches={[]}
       actions={[]}
       busy={false}
-      activityOpen={false}
-      activeRunCount={0}
-      attentionRunCount={0}
       onOpenSidebar={vi.fn()}
       onToggleTools={vi.fn()}
       onOpenEnvironment={vi.fn()}
@@ -88,7 +85,6 @@ function renderHeader(
       onPull={vi.fn()}
       onPush={onPush}
       onRunAction={vi.fn()}
-      onToggleActivity={vi.fn()}
     />,
   );
 }
@@ -125,6 +121,22 @@ describe("WorkspaceHeader Git pull request availability", () => {
       .not.toBeInTheDocument();
   });
 
+  it("omits Runs and keeps the remaining utility actions adjacent", () => {
+    renderHeader(status(false));
+
+    expect(screen.queryByRole("button", { name: /^Open runs/u }))
+      .not.toBeInTheDocument();
+    const actions = screen.getAllByRole("button");
+    const environment = actions.findIndex((button) =>
+      button.getAttribute("aria-label") === "Open Environment");
+    expect(actions[environment + 1]).toHaveAccessibleName(
+      "Change theme (current: dark)",
+    );
+    expect(actions[environment + 2]).toHaveAccessibleName(
+      "Open workspace tools",
+    );
+  });
+
   it("uses one contextual primary action and keeps the complete Git menu", async () => {
     const onCommit = vi.fn();
     const current = status(true, {
@@ -155,9 +167,6 @@ describe("WorkspaceHeader Git pull request availability", () => {
         branches={[]}
         actions={[]}
         busy={false}
-        activityOpen={false}
-        activeRunCount={0}
-        attentionRunCount={0}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
         onOpenEnvironment={vi.fn()}
@@ -176,7 +185,6 @@ describe("WorkspaceHeader Git pull request availability", () => {
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onToggleActivity={vi.fn()}
       />,
     );
 
@@ -213,9 +221,6 @@ describe("WorkspaceHeader Git pull request availability", () => {
         branches={[]}
         actions={[]}
         busy={false}
-        activityOpen={false}
-        activeRunCount={0}
-        attentionRunCount={0}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
         onOpenEnvironment={vi.fn()}
@@ -234,7 +239,6 @@ describe("WorkspaceHeader Git pull request availability", () => {
         onPull={onPull}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onToggleActivity={vi.fn()}
       />,
     );
 

@@ -46,15 +46,15 @@ test("opens Environment by default with reachable responsive geometry", async ({
       await expect(environmentTab).toHaveAttribute("aria-selected", "true");
       await expect(environmentPanel).toBeVisible();
       await expect(environmentPanel.getByRole("button", { name: /Changes/u })).toBeVisible();
-      await expect(environmentPanel.locator(
-        ".environment-primary-list > .environment-row",
-      ).filter({ hasText: "Worktree" })).toBeVisible();
+      await expect(environmentPanel.locator("details > summary").filter({
+        hasText: /Worktree|Project directory/u,
+      })).toBeVisible();
       await expect(environmentPanel.getByText("Commit and Push", { exact: true })).toBeVisible();
       await expect(environmentPanel.getByText("Local Servers", { exact: true })).toBeVisible();
       await expect(environmentPanel.getByRole("heading", { name: "Repository" })).toBeVisible();
       await expect(environmentPanel.getByRole("heading", { name: "Editor" })).toBeVisible();
       await expect(environmentPanel.getByText("Ready", { exact: true })).toHaveCount(0);
-      await expect(environmentPanel.getByText("Usage", { exact: true })).toHaveCount(0);
+      await expect(environmentPanel.getByText("Usage", { exact: true })).toBeVisible();
       await expect(environmentPanel.getByText("Recap", { exact: true })).toHaveCount(0);
       await expect(environmentPanel.getByRole("heading", { name: "Recent attachments" })).toHaveCount(0);
       await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
@@ -115,11 +115,17 @@ test("opens Environment by default with reachable responsive geometry", async ({
           });
         }
 
-        const disclosures = environmentPanel.locator("details > summary");
-        await expect(disclosures).toHaveCount(3);
-        const branchDisclosure = disclosures.nth(0);
-        const commitDisclosure = disclosures.nth(1);
-        const serverDisclosure = disclosures.nth(2);
+        const primaryDisclosures = environmentPanel.locator(
+          ".environment-primary-list > details > summary",
+        );
+        await expect(primaryDisclosures).toHaveCount(4);
+        const workspaceDisclosure = primaryDisclosures.nth(0);
+        const branchDisclosure = primaryDisclosures.nth(1);
+        const commitDisclosure = primaryDisclosures.nth(2);
+        const serverDisclosure = primaryDisclosures.nth(3);
+        const usageDisclosure = environmentPanel.locator(
+          ".environment-usage-section details > summary",
+        );
 
         if (theme === "dark") {
           const changes = environmentPanel.getByRole("button", { name: /Changes/u });
@@ -129,23 +135,33 @@ test("opens Environment by default with reachable responsive geometry", async ({
           });
           await changes.focus();
           await page.keyboard.press("Tab");
+          await expect(workspaceDisclosure).toBeFocused();
+          await page.keyboard.press("Tab");
           await expect(branchDisclosure).toBeFocused();
           await page.keyboard.press("Tab");
           await expect(commitDisclosure).toBeFocused();
           await page.keyboard.press("Tab");
           await expect(serverDisclosure).toBeFocused();
           await page.keyboard.press("Tab");
+          await expect(usageDisclosure).toBeFocused();
+          await page.keyboard.press("Tab");
           await expect(repository).toBeFocused();
         }
 
-        for (const disclosure of [branchDisclosure, commitDisclosure, serverDisclosure]) {
+        for (const disclosure of [
+          workspaceDisclosure,
+          branchDisclosure,
+          commitDisclosure,
+          serverDisclosure,
+        ]) {
           await disclosure.click();
         }
         await expect(environmentPanel.locator("code")).toContainText("/");
         await expect(environmentPanel.getByRole("button", {
-          name: "Review changes",
+          name: "Review",
+          exact: true,
         })).toBeVisible();
-        await expect(environmentPanel.getByText("Open a local URL in Preview to show it here."))
+        await expect(environmentPanel.getByText("No validated local service ports are active."))
           .toBeVisible();
         const expandedLabel = `environment-expanded-${theme}`;
         const expandedPath = testInfo.outputPath(`${expandedLabel}.png`);
@@ -168,7 +184,12 @@ test("opens Environment by default with reachable responsive geometry", async ({
             contentType: "image/png",
           });
         }
-        for (const disclosure of [branchDisclosure, commitDisclosure, serverDisclosure]) {
+        for (const disclosure of [
+          workspaceDisclosure,
+          branchDisclosure,
+          commitDisclosure,
+          serverDisclosure,
+        ]) {
           await disclosure.click();
         }
 

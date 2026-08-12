@@ -19,6 +19,7 @@ describe("classic sidebar current-state presentation", () => {
     expect(sidebarSource).toContain(
       "aria-current={snapshot?.activeConversationId === conversation.id",
     );
+    expect(sidebarSource).toContain('aria-current={isActive ? "page" : undefined}');
     expect(sidebarSource).toContain(
       "aria-label={`Project status: ${project.status}`}",
     );
@@ -51,11 +52,6 @@ describe("classic sidebar current-state presentation", () => {
     expect(styles).toMatch(
       /\.thread-status-dot\.is-completed,\s*\.thread-status-dot\.is-idle\s*\{[^}]*opacity:\s*\.42;/su,
     );
-    expect(styles).toMatch(
-      /\.thread-filter-bar button\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/su,
-    );
-    expect(styles).not.toMatch(
-      /\.thread-filter-bar button\s*\{[^}]*border-radius:\s*999px;/su,
-    );
+    expect(sidebarSource).not.toContain('className="thread-filter-bar"');
   });
 });

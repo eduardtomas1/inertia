@@ -1,4 +1,9 @@
-import { useId, useRef, type ReactNode } from "react";
+import {
+  useId,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import {
   Boxes,
   ChevronDown,
@@ -77,6 +82,25 @@ export function WorkspacePanel({
     });
   };
 
+  const handleTabKeyDown = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    currentTab: WorkspacePanelTab,
+  ): void => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const currentIndex = tabs.indexOf(currentTab);
+    if (currentIndex < 0 || tabs.length === 0) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : event.key === "ArrowLeft"
+          ? currentIndex === 0 ? tabs.length - 1 : currentIndex - 1
+          : currentIndex === tabs.length - 1 ? 0 : currentIndex + 1;
+    const nextTab = tabs[nextIndex];
+    if (nextTab) selectWorkspaceTool(nextTab, true);
+  };
+
   return (
     <aside
       ref={panelRef}
@@ -97,6 +121,7 @@ export function WorkspacePanel({
                 aria-controls={`${panelId}-content`}
                 data-workspace-tab="environment"
                 onFocus={() => prefetchWorkspaceTool("environment")}
+                onKeyDown={(event) => handleTabKeyDown(event, "environment")}
               >
                 Environment
               </button>
@@ -152,23 +177,6 @@ export function WorkspacePanel({
           className="workspace-panel-tablist"
           role="tablist"
           aria-label="Workspace tools"
-          onKeyDown={(event) => {
-            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-            const tabElements = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
-            if (tabElements.length === 0) return;
-            event.preventDefault();
-            const current = tabElements.indexOf(document.activeElement as HTMLElement);
-            const next = event.key === "Home"
-              ? 0
-              : event.key === "End"
-                ? tabElements.length - 1
-                : event.key === "ArrowLeft"
-                  ? current <= 0 ? tabElements.length - 1 : current - 1
-                  : current < 0 || current === tabElements.length - 1 ? 0 : current + 1;
-            tabElements[next]?.focus();
-            const nextTab = tabs[next];
-            if (nextTab) selectWorkspaceTool(nextTab, true);
-          }}
         >
           {tabs.map((tab) => {
             const meta = tabMeta[tab];
@@ -189,6 +197,7 @@ export function WorkspacePanel({
                 onFocus={() => prefetchWorkspaceTool(tab)}
                 onPointerDown={() => prefetchWorkspaceTool(tab)}
                 onPointerEnter={() => prefetchWorkspaceTool(tab)}
+                onKeyDown={(event) => handleTabKeyDown(event, tab)}
                 onClick={(event) => selectWorkspaceTool(tab, event.detail === 0)}
                 key={tab}
               >

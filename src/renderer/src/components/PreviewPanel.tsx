@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PreviewBounds } from "@shared/desktop";
 import {
   previewNavigationTarget,
@@ -8,10 +8,15 @@ import {
   nativePreviewSuspended,
   NATIVE_PREVIEW_SUSPENSION_CHANGED,
 } from "../utils/nativePreviewOverlay";
+import {
+  registerWorkspacePreviewAddress,
+  type WorkspacePreviewOwner,
+} from "../utils/workspacePreviewFocus";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe2, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
 
 export type PreviewPanelProps = {
+  owner: WorkspacePreviewOwner;
   url: string;
   loading?: boolean;
   canGoBack?: boolean;
@@ -67,6 +72,7 @@ export function safePreviewUrl(
 }
 
 export function PreviewPanel({
+  owner,
   url,
   loading = false,
   canGoBack = false,
@@ -81,6 +87,9 @@ export function PreviewPanel({
   const [draftUrl, setDraftUrl] = useState(url);
   const [validationError, setValidationError] = useState<string | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const addressRef = useCallback((address: HTMLInputElement | null) => {
+    registerWorkspacePreviewAddress(owner, address);
+  }, [owner]);
   const currentLocation = useMemo(() => safePreviewUrl(url), [url]);
 
   useEffect(() => {
@@ -163,6 +172,7 @@ export function PreviewPanel({
             ? <LockKeyhole size={14} aria-label="Secure HTTPS address" />
             : <Globe2 size={14} aria-hidden="true" />}
           <input
+            ref={addressRef}
             type="text"
             inputMode="url"
             value={draftUrl}

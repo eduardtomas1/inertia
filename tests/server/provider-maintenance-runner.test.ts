@@ -86,6 +86,7 @@ describe("provider maintenance runner", () => {
     });
 
     expect(result.status).toBe("succeeded");
+    expect(result.cleanupConfirmed).toBe(true);
     expect(result.output).toContain("[redacted]");
     expect(result.output).not.toContain("api_key");
     expect(result.output).not.toContain("super-secret-value");
@@ -254,6 +255,7 @@ describe("provider maintenance runner", () => {
       exitCode: null,
       signal: null,
       message: "Provider update process tree could not be confirmed stopped.",
+      cleanupConfirmed: false,
     });
     expect(terminateProcessTree.mock.calls.map(([, force]) => force)).toEqual([
       false,

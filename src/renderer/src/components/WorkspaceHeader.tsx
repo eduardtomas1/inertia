@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Activity, ChevronDown, FolderOpen, GitBranch, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
+import { ChevronDown, FolderOpen, GitBranch, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
@@ -9,7 +9,6 @@ import { usePrivateConnectState } from "../hooks/usePrivateConnectState";
 import type { HeaderGitActionId } from "../utils/headerGitActions";
 import { primaryHeaderGitAction } from "../utils/primaryHeaderGitAction";
 import {
-  loadActivityCenter,
   loadCommitDialog,
 } from "./lazySurfaceLoaders";
 
@@ -27,9 +26,6 @@ type WorkspaceHeaderProps = {
   branches: GitBranchInfo[];
   actions: ProjectAction[];
   busy: boolean;
-  activityOpen: boolean;
-  activeRunCount: number;
-  attentionRunCount: number;
   onOpenSidebar: () => void;
   onToggleTools: () => void;
   workspaceToolsUnavailableReason?: string | null;
@@ -49,7 +45,6 @@ type WorkspaceHeaderProps = {
   onPull: () => void;
   onPush: () => void;
   onRunAction: (action: ProjectAction) => void;
-  onToggleActivity: () => void;
 };
 
 export function WorkspaceHeader({
@@ -63,9 +58,6 @@ export function WorkspaceHeader({
   branches,
   actions,
   busy,
-  activityOpen,
-  activeRunCount,
-  attentionRunCount,
   onOpenSidebar,
   onToggleTools,
   workspaceToolsUnavailableReason = null,
@@ -85,7 +77,6 @@ export function WorkspaceHeader({
   onPull,
   onPush,
   onRunAction,
-  onToggleActivity,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | "git" | null>(null);
   const privateConnectLoad = usePrivateConnectState();
@@ -98,12 +89,6 @@ export function WorkspaceHeader({
   const eyebrow = view === "settings"
     ? null
     : project?.name && conversation ? project.name : "Inertia";
-  const activityBadgeCount = attentionRunCount || activeRunCount;
-  const activityLabel = attentionRunCount > 0
-    ? `Open runs, ${attentionRunCount} ${attentionRunCount === 1 ? "item needs" : "items need"} attention`
-    : activeRunCount > 0
-      ? `Open runs, ${activeRunCount} active`
-      : "Open runs";
   const contextMismatch = conversationContextMismatch(project, conversation, gitStatus);
   const canCreateInWorktree = Boolean(conversation?.worktreePath);
   const canCreateOnBranch = !canCreateInWorktree && Boolean(gitStatus?.branch);
@@ -381,18 +366,6 @@ export function WorkspaceHeader({
             </IconButton>
           </div>
         )}
-        <IconButton
-          label={activityLabel}
-          className={`activity-center-button${attentionRunCount > 0 ? " has-attention" : ""}`}
-          aria-pressed={activityOpen}
-          onFocus={() => void loadActivityCenter()}
-          onPointerDown={() => void loadActivityCenter()}
-          onPointerEnter={() => void loadActivityCenter()}
-          onClick={onToggleActivity}
-        >
-          <Activity size={17} />
-          {activityBadgeCount > 0 && <span className="activity-count">{activityBadgeCount > 9 ? "9+" : activityBadgeCount}</span>}
-        </IconButton>
         <IconButton label={`Change theme (current: ${theme})`} onClick={onCycleTheme}><SunMoon size={17} /></IconButton>
         {view === "workspace" ? (
           <IconButton

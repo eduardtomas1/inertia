@@ -72,7 +72,6 @@ export interface PreviewState { url: string; loading: boolean; canGoBack: boolea
 export interface PreviewStateUpdate extends PreviewState {
   ownerId: "primary" | "secondary";
   contextId: string;
-  ready: boolean;
 }
 
 export type ProjectPathAction = "open-externally" | "reveal";

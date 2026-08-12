@@ -20,6 +20,8 @@ import type {
 } from "../../../shared/contracts";
 import type {
   ProviderActivityEvent,
+  ProviderGoalMutation,
+  ProviderGoalSnapshot,
   ProviderMetadataEvent,
   ProviderRunCallbacks,
   ProviderRunInput,
@@ -71,6 +73,15 @@ export interface TurnProviderRuntime {
     content: string,
     identity: { runId: string; turnId: string },
   ): Promise<boolean>;
+  setGoal?(
+    conversationId: string,
+    input: ProviderGoalMutation,
+    identity: { runId: string; turnId: string },
+  ): Promise<ProviderGoalSnapshot | null>;
+  clearGoal?(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): Promise<boolean | "superseded">;
   stopSubagent?(
     conversationId: string,
     providerTaskId: string,
@@ -165,6 +176,11 @@ export interface QueueTurnRequest {
     status: AgentTurnTerminalStatus,
     turnId: string,
   ) => void | Promise<void>;
+  /** Privileged runtime-only launch mode; never accepted from renderer IPC. */
+  goalStart?: {
+    objective?: string;
+    tokenBudget?: number | null;
+  };
 }
 
 export interface QueuedTurn {
@@ -177,6 +193,7 @@ export type TurnTerminalCause =
   | "provider-error"
   | "provider-process-exit"
   | "provider-process-crash"
+  | "goal-continuation-timeout"
   | "user-cancelled"
   | "approval-cancelled"
   | "unsupported-interaction"
@@ -188,6 +205,16 @@ export type TurnTerminalCause =
   | "turn-start-failed"
   | "stream-persistence-failed"
   | "checkpoint-association-failed";
+
+export interface NativeGoalStartAcknowledgement {
+  objective?: string;
+  tokenBudget?: number | null;
+  latestGoal: ProviderGoalSnapshot | null;
+  cleared: boolean;
+  settlementQueued: boolean;
+  resolve(goal: ProviderGoalSnapshot): void;
+  reject(error: Error): void;
+}
 
 export interface ActiveTurn {
   turn: AgentTurn;
@@ -203,6 +230,7 @@ export interface ActiveTurn {
   workspaceRunCreated: boolean;
   providerRunStarted: boolean;
   providerStartAcknowledgement: ((started: boolean) => void) | null;
+  nativeGoalStartAcknowledgement: NativeGoalStartAcknowledgement | null;
   attachmentsReleased: boolean;
   attachmentRelease: Promise<void> | null;
   acceptingProviderEvents: boolean;

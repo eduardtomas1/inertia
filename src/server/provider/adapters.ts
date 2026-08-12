@@ -474,6 +474,55 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
   if (input.prompt.length > MAX_PROMPT_CHARS || input.prompt.includes("\0")) {
     throw new ProviderRuntimeError("invalid_input", "The prompt is too large.");
   }
+  if (
+    input.goalContinuationExpected !== undefined
+    && typeof input.goalContinuationExpected !== "boolean"
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The goal continuation hint is invalid.",
+    );
+  }
+  if (
+    input.goalContinuationExpected === true
+    && (
+      input.providerId !== "codex"
+      || input.harnessId !== "codex-app-server"
+      || (!input.sessionId && !input.goalStart)
+    )
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The goal continuation hint is invalid.",
+    );
+  }
+  if (input.goalStart) {
+    const objective = input.goalStart.objective?.trim();
+    const budget = input.goalStart.tokenBudget;
+    if (
+      input.providerId !== "codex"
+      || input.harnessId !== "codex-app-server"
+      || (input.goalStart.objective !== undefined && (
+        !objective
+        || objective.length > 4_000
+        || objective.includes("\0")
+      ))
+      || (
+        budget !== undefined
+        && budget !== null
+        && (
+          !Number.isSafeInteger(budget)
+          || budget < 1
+          || budget > 1_000_000_000
+        )
+      )
+    ) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        "The native goal start request is invalid.",
+      );
+    }
+  }
   for (const value of [input.runId, input.turnId, input.model, input.sessionId]) {
     if (value !== undefined && (!value.trim() || value.length > 512 || value.includes("\0"))) {
       throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");

@@ -51,6 +51,9 @@ import {
 } from "../duo/duo-active-turn-quarantine";
 import { hasActiveTurnCheckout, providerConversationIds } from "./turn-checkout-activity";
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
+import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
+import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
+import { providerFailureCause } from "./turn-provider-result";
 
 interface ProviderStartAttempt {
   accepted: boolean;
@@ -90,9 +93,11 @@ export class TurnController {
   private readonly interactions: TurnInteractionCoordinator;
   private readonly settlement: TurnSettlementCoordinator;
   private readonly providerEvents: TurnProviderEventProjector;
+  private readonly nativeGoals: TurnNativeGoalCoordinator;
   private readonly settlementTasks = new Set<Promise<unknown>>();
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
   private readonly providerRunOwnershipBarriers = new Map<string, Promise<void>>();
+  private readonly nativeGoalMutations = new TurnNativeGoalMutationGate();
   private closing = false;
 
   constructor(
@@ -179,6 +184,16 @@ export class TurnController {
       now: () => this.now(),
       transition: (active, status) => this.transition(active, status),
     });
+    this.nativeGoals = new TurnNativeGoalCoordinator({
+      store: this.store,
+      providers: this.providers,
+      hooks: this.hooks,
+      activeForConversation: (conversationId) =>
+        this.activeByConversation.get(conversationId),
+      activeForTurn: (turnId) => this.activeByTurn.get(turnId),
+      queue: (request) => this.queue(request),
+      start: (turnId) => this.start(turnId),
+    });
   }
 
   isActive(conversationId: string): boolean {
@@ -186,6 +201,20 @@ export class TurnController {
       || this.providers.isRunning(conversationId)
       || this.store.providerRunOwnership.forConversation(conversationId)
         .length > 0;
+  }
+
+  async withNativeGoalMutation<T>(conversationId: string, operation: () => Promise<T>): Promise<T> {
+    return await this.nativeGoalMutations.run(conversationId, operation);
+  }
+
+  async setNativeGoal(
+    input: Parameters<TurnNativeGoalCoordinator["set"]>[0],
+  ): ReturnType<TurnNativeGoalCoordinator["set"]> {
+    return this.nativeGoals.set(input);
+  }
+
+  async clearNativeGoal(conversationId: string): Promise<boolean | "superseded" | null> {
+    return await this.nativeGoals.clear(conversationId);
   }
 
   isClosing(): boolean {
@@ -422,6 +451,12 @@ export class TurnController {
 
   queue(request: QueueTurnRequest): QueuedTurn {
     if (this.closing) throw new Error("The local runtime is shutting down.");
+    if (
+      !request.goalStart
+      && this.nativeGoalMutations.blocksTurnAdmission(request.conversationId)
+    ) {
+      throw new Error("A Codex goal update is in progress for this conversation.");
+    }
     this.store.assertDuoComparisonTurnAllowed(
       request.conversationId,
       request.authorizedDuoComparisonLaunchId,
@@ -448,6 +483,9 @@ export class TurnController {
     if (this.closing) throw new Error("The local runtime is shutting down.");
     for (const request of requests) {
       this.store.assertDuoComparisonTurnAllowed(request.conversationId);
+      if (this.nativeGoalMutations.blocksTurnAdmission(request.conversationId)) {
+        throw new Error("A Codex goal update is in progress for this conversation.");
+      }
       if (this.isActive(request.conversationId)) {
         throw new Error("A Duo conversation already has an active turn.");
       }
@@ -722,7 +760,13 @@ export class TurnController {
             return;
           }
           acknowledge(true);
-          if (this.store.agentTurn(active.turn.id).status === "starting") {
+          // App Server harness acceptance happens before initialize/thread open
+          // and, for ordinary turns, before turn/start is acknowledged. Keep
+          // Codex truthfully `starting` until its protocol emits `running`.
+          if (
+            active.turn.harnessId !== "codex-app-server"
+            && this.store.agentTurn(active.turn.id).status === "starting"
+          ) {
             if (this.transition(active, "running")) {
               this.broadcastConversationShell(active);
             }
@@ -979,6 +1023,7 @@ export class TurnController {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
       this.providerEvents.project(active, event);
+      this.nativeGoals.handleEvent(active, event);
       return true;
     } catch (error) {
       this.providers.cancel(active.conversation.id);
@@ -1029,16 +1074,10 @@ export class TurnController {
     } else if (result.status === "cancelled") {
       this.settle(active, "cancelled", "user-cancelled", "Stopped");
     } else {
-      const transportFailure = result.failure
-        ? result.failure.reason !== "codex-error"
-        : result.exitCode !== null || result.signal !== null;
-      const cause = transportFailure
-        ? "provider-process-exit"
-        : "provider-error";
       this.settle(
         active,
         "failed",
-        cause,
+        providerFailureCause(result),
         result.error ?? "The provider could not complete the request.",
         result.failure,
       );
@@ -1167,6 +1206,7 @@ export class TurnController {
   }
 
   private cleanup(active: ActiveTurn): void {
+    this.nativeGoals.cleanup(active);
     active.assistantStream.dispose();
     active.reasoningStream.dispose();
     for (const requestId of active.approvalIds) this.pendingApprovals.delete(requestId);

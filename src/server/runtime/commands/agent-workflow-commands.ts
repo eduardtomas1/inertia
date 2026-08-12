@@ -21,6 +21,7 @@ export function createAgentWorkflowCommandHandler(
 ): RuntimeCommandHandler {
   return defineRuntimeCommandHandler([
     "agent.workflow.load",
+    "agent.workflow.saved.load",
     "agent.goal.set",
     "agent.goal.clear",
     "agent.skills.list",
@@ -30,6 +31,18 @@ export function createAgentWorkflowCommandHandler(
         const workflow = command.payload.refresh
           ? await dependencies.workflows.refresh(command.payload.conversationId)
           : dependencies.workflows.state(command.payload.conversationId);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "agent.workflow", workflow },
+        });
+        return "handled";
+      }
+      case "agent.workflow.saved.load": {
+        const workflow = dependencies.workflows.state(
+          command.payload.conversationId,
+          false,
+        );
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,

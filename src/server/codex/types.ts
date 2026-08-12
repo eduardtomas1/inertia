@@ -11,6 +11,7 @@ import type {
   CodexResponsesHarnessConfiguration,
   ProviderActivityEvent,
   ProviderGoalSnapshot,
+  ProviderGoalMutation,
   ProviderRunFailure,
 } from "../provider/contracts";
 import type { ProcessTreeTerminator } from "../process-lifecycle";
@@ -51,6 +52,7 @@ export interface CodexAppServerOptions {
    * turn outcomes after the parent completes.
    */
   subagentDrainTimeoutMs?: number;
+  goalContinuationGraceMs?: number;
   /** Test-only transport bounds; production callers use the hardened defaults. */
   protocolLimits?: {
     maxFrameBytes: number;
@@ -93,6 +95,11 @@ export interface CodexAppServerOptions {
     progress: string | null;
     result: string | null;
   }) => void;
+  goalStart?: {
+    objective?: string;
+    tokenBudget?: number | null;
+  };
+  goalContinuationExpected?: boolean;
 }
 
 export interface CodexAppServerResult {
@@ -116,4 +123,6 @@ export interface CodexAppServerRun {
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   steer?: (content: string) => Promise<boolean>;
+  setGoal: (input: ProviderGoalMutation) => Promise<ProviderGoalSnapshot>;
+  clearGoal: () => Promise<boolean>;
 }

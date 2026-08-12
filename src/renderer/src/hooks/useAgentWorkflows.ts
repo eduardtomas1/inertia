@@ -21,6 +21,7 @@ import type { ConnectionStatus } from "./useInertiaConnection";
 export interface AgentWorkflowProjection {
   state: AgentWorkflowState | null;
   loading: boolean;
+  mutating: boolean;
   error: string | null;
   selectedSkillIds: readonly string[];
   refresh: (providerRefresh?: boolean) => Promise<void>;
@@ -50,6 +51,10 @@ function publicMessage(error: unknown): string {
   return error instanceof Error
     ? error.message
     : "Agent workflows could not be loaded.";
+}
+
+function isRecoverySafetyError(error: unknown): boolean {
+  return publicMessage(error).includes("recovery safety mode");
 }
 
 export function agentWorkflowRouteIdentity(
@@ -83,6 +88,7 @@ export function useAgentWorkflows({
 }: UseAgentWorkflowsOptions): AgentWorkflowProjection {
   const [state, setState] = useState<AgentWorkflowState | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const generationRef = useRef(0);
@@ -93,6 +99,7 @@ export function useAgentWorkflows({
     identity: string | null | undefined;
     status: ConnectionStatus | undefined;
   }>({ identity: undefined, status: undefined });
+  const mutationInFlightRef = useRef(false);
   activeConversationIdRef.current = activeConversationId;
   statusRef.current = status;
 
@@ -104,13 +111,25 @@ export function useAgentWorkflows({
     setLoading(true);
     setError(null);
     try {
-      const event = resultEvent(await request({
-        type: "agent.workflow.load",
-        payload: {
-          conversationId: targetId,
-          refresh: providerRefresh,
-        },
-      }));
+      let response: ServerEvent;
+      let savedOnlyWarning: string | null = null;
+      try {
+        response = await request({
+          type: "agent.workflow.load",
+          payload: {
+            conversationId: targetId,
+            refresh: providerRefresh,
+          },
+        });
+      } catch (loadError) {
+        if (!isRecoverySafetyError(loadError)) throw loadError;
+        savedOnlyWarning = publicMessage(loadError);
+        response = await request({
+          type: "agent.workflow.saved.load",
+          payload: { conversationId: targetId },
+        });
+      }
+      const event = resultEvent(response);
       if (event.result.kind !== "agent.workflow") {
         throw new Error(
           "The local service returned an unexpected workflow response.",
@@ -121,6 +140,7 @@ export function useAgentWorkflows({
         || event.result.workflow.conversationId !== targetId
       ) return;
       setState(event.result.workflow);
+      if (savedOnlyWarning) setError(savedOnlyWarning);
       const available = new Set(
         event.result.workflow.skills.map(({ id }) => id),
       );
@@ -196,6 +216,22 @@ export function useAgentWorkflows({
     }
   }), [activeConversationId, load, subscribe]);
 
+  const runGoalMutation = useCallback(async (
+    operation: () => Promise<void>,
+  ): Promise<void> => {
+    if (mutationInFlightRef.current) {
+      throw new Error("Another goal change is already in progress.");
+    }
+    mutationInFlightRef.current = true;
+    setMutating(true);
+    try {
+      await operation();
+    } finally {
+      mutationInFlightRef.current = false;
+      setMutating(false);
+    }
+  }, []);
+
   const setGoal = useCallback(async (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -203,24 +239,28 @@ export function useAgentWorkflows({
     tokenBudget?: number | null;
   }): Promise<void> => {
     if (!activeConversationId) return;
-    await request({
-      type: "agent.goal.set",
-      payload: {
-        conversationId: activeConversationId,
-        ...input,
-      },
+    await runGoalMutation(async () => {
+      await request({
+        type: "agent.goal.set",
+        payload: {
+          conversationId: activeConversationId,
+          ...input,
+        },
+      });
     });
-  }, [activeConversationId, request]);
+  }, [activeConversationId, request, runGoalMutation]);
 
   const clearGoal = useCallback(async (
     source: AgentGoalSource,
   ): Promise<void> => {
     if (!activeConversationId) return;
-    await request({
-      type: "agent.goal.clear",
-      payload: { conversationId: activeConversationId, source },
+    await runGoalMutation(async () => {
+      await request({
+        type: "agent.goal.clear",
+        payload: { conversationId: activeConversationId, source },
+      });
     });
-  }, [activeConversationId, request]);
+  }, [activeConversationId, request, runGoalMutation]);
 
   const listSkills = useCallback(async (
     forceReload = false,
@@ -288,6 +328,7 @@ export function useAgentWorkflows({
   return useMemo(() => ({
     state: activeConversationId ? state : null,
     loading: activeConversationId ? loading : false,
+    mutating: activeConversationId ? mutating : false,
     error: activeConversationId ? error : null,
     selectedSkillIds: activeConversationId ? selectedSkillIds : [],
     refresh: load,
@@ -304,6 +345,7 @@ export function useAgentWorkflows({
     listSkills,
     load,
     loading,
+    mutating,
     selectedSkillIds,
     setGoal,
     state,

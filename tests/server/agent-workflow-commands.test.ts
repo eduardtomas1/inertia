@@ -32,6 +32,31 @@ function dependencies(
 }
 
 describe("agent workflow commands", () => {
+  it("loads saved workflow state without a provider refresh", async () => {
+    const state = vi.fn(() => ({
+      conversationId: clearCommand.payload.conversationId,
+    }));
+    const refresh = vi.fn();
+    const runtime = {
+      workflows: { state, refresh } as unknown as AgentWorkflowController,
+      broadcast: vi.fn(),
+      send: vi.fn(),
+    };
+    const handler = createAgentWorkflowCommandHandler(runtime);
+
+    await expect(handler({} as never, {
+      type: "agent.workflow.saved.load",
+      requestId: clearCommand.requestId,
+      payload: { conversationId: clearCommand.payload.conversationId },
+    })).resolves.toBe("handled");
+
+    expect(state).toHaveBeenCalledWith(
+      clearCommand.payload.conversationId,
+      false,
+    );
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it.each([
     { cleared: true, expectedBroadcasts: 1 },
     { cleared: false, expectedBroadcasts: 0 },

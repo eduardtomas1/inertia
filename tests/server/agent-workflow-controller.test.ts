@@ -96,6 +96,7 @@ function sameNativeGoalPayload(left: AgentGoal, right: AgentGoal): boolean {
 function harness(options: {
   current?: Conversation;
   goals?: AgentGoal[];
+  nativeGoalTombstone?: AgentGoal;
   now?: Date;
   claudeSkills?: Array<{
     name: string;
@@ -121,6 +122,7 @@ function harness(options: {
 } {
   const current = options.current ?? conversation();
   const goals = [...(options.goals ?? [])];
+  let nativeGoalTombstone = options.nativeGoalTombstone;
   const clear = vi.fn((
     conversationId: string,
     source: AgentGoal["source"],
@@ -144,6 +146,13 @@ function harness(options: {
       goal: AgentGoal,
       authoritativeMutation = false,
     ) => {
+      if (
+        !authoritativeMutation
+        && nativeGoalTombstone?.providerSessionId === goal.providerSessionId
+        && nativeGoalTombstone.updatedAt >= goal.updatedAt
+      ) {
+        return { goal: null, changed: false };
+      }
       const existing = goals.find(({ source }) => source === "codex-native");
       if (
         existing
@@ -160,6 +169,7 @@ function harness(options: {
       }
       clear(goal.conversationId, goal.source);
       goals.push(goal);
+      nativeGoalTombstone = undefined;
       return { goal, changed: true };
     }),
     clearAgentGoal: clear,
@@ -267,6 +277,18 @@ describe("AgentWorkflowController", () => {
     );
   });
 
+  it("advertises native goals before Codex establishes its provider thread", () => {
+    const runtime = harness({
+      current: conversation({ providerSessionId: null }),
+    });
+
+    expect(runtime.controller.state("conversation-1").goalCapability)
+      .toMatchObject({
+        kind: "codex-native",
+        available: true,
+      });
+  });
+
   it("patches native status without resending a stale objective or budget", async () => {
     controlRequest.mockImplementation(async (
       method: string,
@@ -295,6 +317,396 @@ describe("AgentWorkflowController", () => {
 
     expect(updated.objective).toBe("Externally updated objective");
     expect(updated.status).toBe("paused");
+  });
+
+  it("starts an idle native goal through the durable turn runtime", async () => {
+    const runtime = harness();
+    const setNativeGoal = vi.fn(async () => ({
+      objective: "Run until verified",
+      status: "active" as const,
+      tokenBudget: 12_000,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    }));
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal,
+      clearNativeGoal: vi.fn(async () => null),
+    });
+    const controlCalls = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: "Run until verified",
+      status: "active",
+      tokenBudget: 12_000,
+    })).resolves.toMatchObject({
+      source: "codex-native",
+      providerSessionId: "thread-1",
+      objective: "Run until verified",
+      status: "active",
+      tokenBudget: 12_000,
+    });
+
+    expect(setNativeGoal).toHaveBeenCalledWith({
+      conversationId: "conversation-1",
+      objective: "Run until verified",
+      status: "active",
+      tokenBudget: 12_000,
+    });
+    expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
+  });
+
+  it("starts a first-action goal and binds it to the provider thread it creates", async () => {
+    const current = conversation({ providerSessionId: null });
+    const runtime = harness({ current });
+    const setNativeGoal = vi.fn(async () => {
+      current.providerSessionId = "thread-created-by-goal";
+      return {
+        objective: "Make the first action real",
+        status: "active" as const,
+        tokenBudget: 8_000,
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z",
+      };
+    });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal,
+      clearNativeGoal: vi.fn(async () => null),
+    });
+    const controlCalls = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: "Make the first action real",
+      status: "active",
+      tokenBudget: 8_000,
+    })).resolves.toMatchObject({
+      source: "codex-native",
+      providerSessionId: "thread-created-by-goal",
+      objective: "Make the first action real",
+      status: "active",
+    });
+
+    expect(setNativeGoal).toHaveBeenCalledOnce();
+    expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
+    expect(runtime.goals).toEqual([
+      expect.objectContaining({
+        providerSessionId: "thread-created-by-goal",
+        status: "active",
+      }),
+    ]);
+  });
+
+  it("serializes competing first-action goal starts across thread creation", async () => {
+    const current = conversation({ providerSessionId: null });
+    const runtime = harness({ current });
+    let releaseStart!: () => void;
+    const startup = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const setNativeGoal = vi.fn(async () => {
+      await startup;
+      current.providerSessionId = "thread-created-once";
+      return {
+        objective: "Create exactly one thread",
+        status: "active" as const,
+        tokenBudget: null,
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z",
+      };
+    });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal,
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    const first = runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: "Create exactly one thread",
+      status: "active",
+    });
+    const competing = runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: "Do not race another thread",
+      status: "active",
+    });
+    await vi.waitFor(() => expect(setNativeGoal).toHaveBeenCalledOnce());
+    releaseStart();
+
+    await expect(first).resolves.toMatchObject({
+      providerSessionId: "thread-created-once",
+    });
+    await expect(competing).rejects.toThrow(
+      "The Codex thread changed before the goal could be started.",
+    );
+    expect(setNativeGoal).toHaveBeenCalledOnce();
+  });
+
+  it("requires an effective budget change before resuming a limited goal", async () => {
+    const limited = nativeGoal({
+      status: "budgetLimited",
+      tokenBudget: 2_000,
+      tokensUsed: 1_500,
+    });
+    const runtime = harness({ goals: [limited] });
+    const setNativeGoal = vi.fn(async () => ({
+      objective: limited.objective,
+      status: "active" as const,
+      tokenBudget: null,
+      tokensUsed: limited.tokensUsed!,
+      timeUsedSeconds: limited.timeUsedSeconds!,
+      createdAt: limited.createdAt,
+      updatedAt: "2030-01-01T00:00:01.000Z",
+    }));
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal,
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      status: "active",
+    })).rejects.toThrow("Raise or remove the exhausted token budget");
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      status: "active",
+      tokenBudget: 1_600,
+    })).rejects.toThrow("must be greater than the exhausted usage or prior limit");
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      status: "active",
+      tokenBudget: null,
+    })).resolves.toMatchObject({
+      status: "active",
+      tokenBudget: null,
+    });
+    expect(setNativeGoal).toHaveBeenCalledWith({
+      conversationId: "conversation-1",
+      status: "active",
+      tokenBudget: null,
+    });
+  });
+
+  it("does not treat an unchanged local token target as budget recovery", async () => {
+    const local = nativeGoal({
+      source: "inertia-local",
+      providerSessionId: null,
+      status: "budgetLimited",
+      tokenBudget: 2_000,
+      tokensUsed: null,
+      timeUsedSeconds: null,
+      synchronizedAt: null,
+    });
+    const runtime = harness({ goals: [local] });
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "inertia-local",
+      status: "active",
+      tokenBudget: 2_000,
+    })).rejects.toThrow("must be greater than the exhausted usage or prior limit");
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "inertia-local",
+      status: "active",
+      tokenBudget: null,
+    })).resolves.toMatchObject({
+      source: "inertia-local",
+      status: "active",
+      tokenBudget: null,
+      tokensUsed: null,
+    });
+  });
+
+  it("preserves the new session goal when an idle start rotates the thread", async () => {
+    const current = conversation();
+    const runtime = harness({ current });
+    const rotatedGoal = nativeGoal({
+      providerSessionId: "thread-2",
+      objective: "Goal owned by the resumed thread",
+    });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => {
+        current.providerSessionId = "thread-2";
+        runtime.goals.push(rotatedGoal);
+        return {
+          objective: "Stale acknowledgement",
+          status: "active" as const,
+          tokenBudget: 12_000,
+          tokensUsed: 0,
+          timeUsedSeconds: 0,
+          createdAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z",
+        };
+      }),
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: "Start across resume",
+      status: "active",
+    })).rejects.toThrow(
+      "The Codex thread changed before the goal could be updated.",
+    );
+    expect(runtime.goals).toEqual([rotatedGoal]);
+  });
+
+  it("preserves a same-revision goal event newer than the start acknowledgement", async () => {
+    const runtime = harness();
+    const acknowledgement = {
+      objective: "Run until verified",
+      status: "active" as const,
+      tokenBudget: 12_000,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    };
+    const terminal = nativeGoal({
+      objective: acknowledgement.objective,
+      status: "complete",
+      tokenBudget: acknowledgement.tokenBudget,
+      tokensUsed: 500,
+      timeUsedSeconds: 1,
+      createdAt: acknowledgement.createdAt,
+      updatedAt: acknowledgement.updatedAt,
+    });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => {
+        runtime.goals.push(terminal);
+        return acknowledgement;
+      }),
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: acknowledgement.objective,
+      status: "active",
+      tokenBudget: acknowledgement.tokenBudget,
+    })).resolves.toMatchObject({
+      status: "complete",
+      tokensUsed: 500,
+    });
+    expect(runtime.goals).toEqual([terminal]);
+  });
+
+  it("persists a confirmed recreation across an equal-revision clear tombstone", async () => {
+    const recreated = nativeGoal({
+      objective: "Recreate after clear",
+      status: "active",
+      tokenBudget: 12_000,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    });
+    const runtime = harness({ nativeGoalTombstone: recreated });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => ({
+        objective: recreated.objective,
+        status: recreated.status,
+        tokenBudget: recreated.tokenBudget,
+        tokensUsed: recreated.tokensUsed!,
+        timeUsedSeconds: recreated.timeUsedSeconds!,
+        createdAt: recreated.createdAt,
+        updatedAt: recreated.updatedAt,
+      })),
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      objective: recreated.objective,
+      status: "active",
+      tokenBudget: recreated.tokenBudget,
+    })).resolves.toMatchObject({
+      objective: "Recreate after clear",
+      status: "active",
+    });
+    expect(runtime.goals).toEqual([expect.objectContaining({
+      objective: "Recreate after clear",
+      status: "active",
+    })]);
+  });
+
+  it("routes an active native goal clear through its exact live run", async () => {
+    const runtime = harness({ goals: [nativeGoal()] });
+    const clearNativeGoal = vi.fn(async () => true);
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => null),
+      clearNativeGoal,
+    });
+    const controlCalls = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.clearGoal(
+      "conversation-1",
+      "codex-native",
+    )).resolves.toBe(true);
+
+    expect(clearNativeGoal).toHaveBeenCalledWith("conversation-1");
+    expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
+    expect(runtime.goals).toEqual([]);
+  });
+
+  it("holds fallback control mutations inside the turn-admission gate", async () => {
+    const runtime = harness({ goals: [nativeGoal()] });
+    const mutationConversations: string[] = [];
+    const withNativeGoalMutation = async <T>(
+      _conversationId: string,
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      mutationConversations.push(_conversationId);
+      return await operation();
+    };
+    runtime.controller.attachNativeGoalRuntime({
+      withNativeGoalMutation,
+      setNativeGoal: vi.fn(async () => null),
+      clearNativeGoal: vi.fn(async () => null),
+    });
+
+    await runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      status: "paused",
+    });
+
+    expect(mutationConversations).toEqual(["conversation-1"]);
+  });
+
+  it("preserves a native goal when a live clear is superseded", async () => {
+    const runtime = harness({ goals: [nativeGoal()] });
+    runtime.controller.attachNativeGoalRuntime({
+      setNativeGoal: vi.fn(async () => null),
+      clearNativeGoal: vi.fn(async () => "superseded" as const),
+    });
+    const controlCalls = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.clearGoal(
+      "conversation-1",
+      "codex-native",
+    )).resolves.toBe(false);
+
+    expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
+    expect(runtime.goals).toEqual([nativeGoal()]);
   });
 
   it("serializes native goal mutations for one provider thread", async () => {

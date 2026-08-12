@@ -77,6 +77,18 @@ interface ProviderRunRequest {
   sessionId?: string;
   imagePaths?: readonly string[];
   skills?: readonly ProviderSkillInput[];
+  /**
+   * Privileged Codex-only launch mode for a user-authored native goal. The
+   * App Server owns the automatic turns started by this mutation; `prompt`
+   * remains the durable visible request label and is not sent as a turn.
+   */
+  goalStart?: {
+    objective?: string;
+    tokenBudget?: number | null;
+  };
+  /** Saved evidence used only to keep a resumed Codex run alive long enough
+   * for an active goal's provider-authored continuation to start. */
+  goalContinuationExpected?: boolean;
 }
 
 export type ProviderRunInput = ProviderRunRequest &
@@ -99,6 +111,7 @@ export const PROVIDER_FAILURE_REASONS = [
   "process-exit",
   "process-signal",
   "rpc-timeout",
+  "goal-continuation-timeout",
   "codex-error",
   "transport-closed",
 ] as const;
@@ -191,6 +204,12 @@ export interface ProviderGoalSnapshot {
   timeUsedSeconds: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProviderGoalMutation {
+  objective?: string;
+  status: AgentGoalStatus;
+  tokenBudget?: number | null;
 }
 
 /** A provider-authored update to the current goal for one native session. */

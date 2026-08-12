@@ -228,6 +228,16 @@ describe("agent harness architecture", () => {
               return true;
             },
             respondToInput: () => false,
+            setGoal: async () => ({
+              status: "active",
+              objective: "Test goal",
+              tokenBudget: null,
+              tokensUsed: 0,
+              timeUsedSeconds: 0,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            }),
+            clearGoal: async () => true,
           },
         };
       },
@@ -295,6 +305,16 @@ describe("agent harness architecture", () => {
             kind: "codex-app-server",
             respondToApproval: () => false,
             respondToInput: () => false,
+            setGoal: async () => ({
+              status: "active",
+              objective: "Test goal",
+              tokenBudget: null,
+              tokensUsed: 0,
+              timeUsedSeconds: 0,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            }),
+            clearGoal: async () => true,
           },
         };
       },
@@ -333,6 +353,81 @@ describe("agent harness architecture", () => {
     resolveResult(resultForHarness(runInput, "complete"));
     await expect(run).resolves.toMatchObject({ status: "completed" });
     expect(disposed).toBe(1);
+  });
+
+  it("routes goal mutations only to the exact owned Codex run identity", async () => {
+    let resolveResult!: (result: ProviderRunResult) => void;
+    const goalInputs: unknown[] = [];
+    let clearCount = 0;
+    const harness: AgentHarness = {
+      id: "codex-app-server",
+      providerId: "codex",
+      capabilities: CODEX_APP_SERVER_HARNESS_CAPABILITIES,
+      supports: () => true,
+      start: () => ({
+        harnessId: "codex-app-server",
+        providerId: "codex",
+        result: new Promise<ProviderRunResult>((resolve) => {
+          resolveResult = resolve;
+        }),
+        cancel: () => undefined,
+        extension: {
+          kind: "codex-app-server",
+          respondToApproval: () => false,
+          respondToInput: () => false,
+          setGoal: async (goalInput) => {
+            goalInputs.push(goalInput);
+            return {
+              objective: goalInput.objective ?? "Existing objective",
+              status: goalInput.status,
+              tokenBudget: goalInput.tokenBudget ?? null,
+              tokensUsed: 0,
+              timeUsedSeconds: 0,
+              createdAt: "2030-01-01T00:00:00.000Z",
+              updatedAt: "2030-01-01T00:00:00.000Z",
+            };
+          },
+          clearGoal: async () => {
+            clearCount += 1;
+            return clearCount === 1;
+          },
+        },
+      }),
+    };
+    const manager = new ProviderManager({}, new AgentHarnessRegistry([harness]));
+    const run = manager.run(input("codex"));
+
+    await expect(manager.setGoal(
+      "conversation-codex",
+      { objective: "Owned goal", status: "active", tokenBudget: 8_000 },
+      { runId: "wrong-run", turnId: "turn-codex" },
+    )).resolves.toBeNull();
+    await expect(manager.setGoal(
+      "conversation-codex",
+      { objective: "Owned goal", status: "active", tokenBudget: 8_000 },
+      { runId: "run-codex", turnId: "turn-codex" },
+    )).resolves.toMatchObject({ objective: "Owned goal", status: "active" });
+    await expect(manager.clearGoal(
+      "conversation-codex",
+      { runId: "run-codex", turnId: "wrong-turn" },
+    )).resolves.toBe(false);
+    await expect(manager.clearGoal(
+      "conversation-codex",
+      { runId: "run-codex", turnId: "turn-codex" },
+    )).resolves.toBe(true);
+    await expect(manager.clearGoal(
+      "conversation-codex",
+      { runId: "run-codex", turnId: "turn-codex" },
+    )).resolves.toBe("superseded");
+
+    expect(goalInputs).toEqual([{
+      objective: "Owned goal",
+      status: "active",
+      tokenBudget: 8_000,
+    }]);
+    expect(clearCount).toBe(2);
+    resolveResult(resultForHarness(input("codex"), "Done"));
+    await run;
   });
 
   it("rejects mismatched and delayed provider events by conversation, run, and turn identity", async () => {

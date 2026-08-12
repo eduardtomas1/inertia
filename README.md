@@ -25,7 +25,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
 - Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
 - Save up to 30 reusable prompt presets, search and organize them, and insert one into the selected composer without sending it. Optional route binding stores only harness, backend, model, and reasoning identity—never attachments, chat context, endpoints, continuation state, or credentials.
-- Start from a compact Environment summary of the current branch, changes, active work, delegated agents, and attached context, while keeping the full workspace tools one click away.
+- Start from a compact Environment summary with Changes, worktree, branch, Git actions, validated local servers, provider context, repository, editor, sent attachments, and delegated work, while keeping the full workspace tools one click away.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
 - Continue an eligible native Codex, Claude, Cursor, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle.
 - Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
@@ -64,10 +64,11 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - The transcript reads like one calm engineering document: a light request, an understandable workstream, a clean final answer, and a quiet supporting ledger.
 - Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
 - Provider updates and compact tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
-- The Work sidebar keeps running, blocked, completed, and failed chats visible with the persisted attention state needed to review or dismiss them.
+- The search-first Work sidebar groups recent, earlier, done, and snoozed tasks into compact rows with their genuine provider mark, repository, branch, status, and time.
+- Sent images and documents stay visible beside the message that owns them after sending, reload, and restart instead of disappearing from the transcript.
 - Open project-file references from prose or fenced-code labels directly in Files, then edit supported text files in a focused dialog that refuses to overwrite content changed since it was opened.
 - Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
-- Codex-native goals and Inertia-local objectives keep their source visible, while next-turn skills stay route-bound and never expose provider paths or contents.
+- Codex-native goals and Inertia-local objectives keep their source visible. Native goals can start before the first ordinary message, continue across automatic turns, and resume truthfully after Stop or restart, while next-turn skills stay route-bound and never expose provider paths or contents.
 - Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
 - Long transcripts keep stable rows, preview distant requests from the conversation minimap, and load heavier detail only when opened, while bounded runtime updates resume safely after a restart.
@@ -87,18 +88,28 @@ Nested module repositories keep their own review marks, notes, questions, and se
 
 ### Keep the workspace moving
 
-- The Work sidebar and transcript keep active, blocked, completed, and failed agent work close to the conversation that owns it.
+- The Work sidebar and transcript keep active, blocked, completed, and failed agent work close to the conversation that owns it, while Environment retains the exact Stop, preview, acknowledge, and dismiss controls for work that still needs action.
 - Native previews, terminals, files, and Git reviews stay scoped to their owning chat when two different projects share the split workspace.
 - App turns, native provider terminals, project actions, reviews, and Git operations share canonical checkout authority, so independent entry points cannot silently edit the same worktree at once.
 - Work-first navigation surfaces chats that are running, waiting for approval or input, completed in the background, unread, failed, or settled.
 - Related checkouts and worktrees can group by their real Git identity, while repository folders remain clearly labeled and independently controllable.
 - Move between branches, use isolated worktrees for parallel threads, and open detected service previews from their owning workspace.
 
+![Search-first Work rows with provider, repository, branch, status, and time](docs/screenshots/inertia-work.png)
+
 ![Inertia in light mode](docs/screenshots/inertia-light.png)
 
 ### Find anything without leaving the flow
 
 ![Search commands, projects, and threads in Inertia](docs/screenshots/inertia-search.png)
+
+### Understand local agent usage without invented numbers
+
+Usage turns locally recorded terminal-turn token snapshots into a clear 7-, 30-, or 90-day view. Compare measured provider totals, explore daily activity, and switch the breakdown between models and days while coverage labels explain which turns expose enough data to count.
+
+Inertia does not estimate price from a model name or send usage to a hosted analytics service. When providers do not expose cost, the Cost control stays unavailable and says why. Provider account windows remain separate in Environment because context usage, account quota, and historical processed tokens are different measurements.
+
+![Locally measured provider and model usage in Inertia](docs/screenshots/inertia-usage.png)
 
 ### Settings that stay understandable
 
@@ -108,7 +119,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - See when a supported provider CLI has an update and run the official update flow without leaving Inertia.
 - Use the built-in Kimi coding profile through the Claude harness, or define a compatible custom endpoint with explicit models and routing.
 - Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
-- Choose whether Inertia opens on the compact Environment summary or the full workspace tools; fresh installs use the calmer summary.
+- Choose whether Inertia opens on the compact Environment summary or the full workspace tools; fresh installs use Environment, and no decorative Ready label competes with its actionable rows.
 
 ### Private Connect, without surrendering the desktop
 
@@ -163,13 +174,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.30
+### Version 0.0.31
 
-This release turns Git into a clearer end-to-end workspace workflow. Root and nested repositories keep independent review and action state; the header surfaces contextual Commit, Pull, Push or Publish, and Pull request controls; and every commit is bound to the exact prospective content reviewed before a crash-safe, race-checked transaction changes Git state.
+This release simplifies the everyday surface without removing execution truth. Work becomes a compact search-first task list with genuine provider marks; Environment opens by default with branch, changes, Git actions, services, usage, attachments, and delegated work; the duplicate Activity/Runs popup is gone; and a dedicated Usage dashboard shows only locally measured token data with explicit coverage and no invented cost.
 
-Completed answers settle where reading starts, the Work sidebar preserves attention and ownership context, and delegated work stays compact without hiding live or failed branches. Reusable prompt presets add deliberate route-aware composition, while Duo recovery, scanned-PDF inputs, provider process ownership, attachments, and persistent workspace and worktree receipts close the deeper failure paths behind those visible improvements.
+Under that calmer interface, Codex goals now start, continue, stop, resume, and recover durably; sent images and documents remain visible; Claude media events stay byte-bounded; Duo deletion and provider cleanup recover conservatively; and schemas 55–58 add durable provider ownership, sanitized attachment capabilities, and validated Usage indexing.
 
-Download [Inertia v0.0.30](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.30):
+Download [Inertia v0.0.31](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.31):
 
 | Platform | Download |
 | --- | --- |

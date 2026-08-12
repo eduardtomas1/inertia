@@ -4,6 +4,32 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.31 — 2026-08-12
+
+### Work, Environment, and Usage stay compact and truthful
+
+- Work is now a clean, search-first task list grouped into Recent, Yesterday, Earlier, Done, and Snoozed. Compact rows keep the genuine bundled Codex, Claude, Cursor, or OpenCode mark beside repository, branch, status, and time without the old filter strip or a second Runs surface.
+- The duplicate Activity/Runs popup is gone. Live services, failed checks, acknowledgements, previews, and Stop remain available in the owning workspace's Environment panel, with conversation context preserved when more than one chat can act on similar work.
+- Environment opens by default for fresh workspaces and follows the compact Codex-style hierarchy: Changes, worktree, branch, Commit and Push, validated local servers, provider usage, repository, editor, attachments, and delegated work. It avoids a decorative Ready badge while keeping real recovery, offline, and attention states visible.
+- A dedicated Usage destination adds 7-, 30-, and 90-day provider, model, and day views for locally measured terminal-turn tokens. Coverage and missing data stay explicit, provider marks remain distinct, and cost is unavailable rather than estimated or fabricated.
+
+### Goals and sent context survive real interruptions
+
+- Codex-native goals continue automatically across provider turns, create a native thread when Set Goal is the first action, and remain resumable after Stop or a hard runtime restart. Continuation timeouts fail visibly instead of leaving an Active goal without a runner, goal mutations serialize with startup, and budget-limited work requires a deliberately raised or removed token target before resuming.
+- Images, PDFs, and other sent attachments remain visible with their messages after sending and restart. Private copies use durable reference-counted retention, bounded startup reconciliation, exact capability validation, fail-closed symlink containment, and cleanup that waits for owned child processes before releasing its mutation barrier.
+- Claude media delivery now budgets UTF-8 bytes as well as event count, preserving bounded image and PDF inputs without splitting or silently corrupting multibyte provider output.
+
+### Provider and Duo recovery remains fail closed
+
+- Provider ownership is recorded durably before execution and retired only after authoritative cleanup. Raw crashes, unexpected Codex app-server exits, failed process-tree termination, and stale runtime generations keep mutations, attachments, and deletion fenced until recovery can prove ownership is gone.
+- Duo restores incomplete launch and deletion state conservatively, preserves exact checkout reservations through retries, and refuses project or conversation deletion while a provider, terminal, attachment, generated file, or revalidated worktree remains owned.
+- Runtime cleanup receipts and generation leases use bounded, owner-private, direct-root journals with exact crash replay, no-follow reads, BigInt filesystem identity, and platform-aware process termination. Synthetic downgrade fixtures and Windows lifecycle tests now exercise those same authority boundaries without weakening production migrations.
+- Database schema 55 adds durable provider-run ownership, schema 56 sanitizes persisted attachment capabilities, and schemas 57–58 add and validate Usage indexing while invalidating legacy starts that cannot be attributed safely.
+
+### Release confidence
+
+- Architecture and both lint layers, all TypeScript projects, more than 3,300 unit and integration tests, 285 portable provider contracts, focused Electron scenarios, production audits, renderer budgets, desktop performance, package smoke, Electron fuses, and exact-head Linux, macOS, and Windows gates protect the release.
+
 ## 0.0.30 — 2026-08-10
 
 ### Git actions stay visual, reviewed, and repository-scoped

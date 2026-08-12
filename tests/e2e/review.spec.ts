@@ -7,6 +7,7 @@ import {
 } from "../../src/shared/model-routing";
 import { selectionAnswerFixtureMarkup } from "./support/selection-answer-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -39,7 +40,7 @@ test("keeps the Changes panel readable when the side tool area is narrow", async
   await expect(gitMenuTrigger.locator("svg").last()).toBeVisible();
   await resizeWindow(1040, 800);
   await ensureWorkspaceTools();
-  await page.getByRole("tab", { name: /Changes/ }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   const picker = page.getByRole("combobox", { name: "Repository and changed file" });
   await expect(picker).toBeVisible();
   await expect(picker.locator("option:checked")).toHaveText("M · sample.ts");
@@ -65,7 +66,7 @@ test("keeps the Changes panel readable when the side tool area is narrow", async
 test("adds a selected diff range to the next agent prompt", async () => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
-  await page.getByRole("tab", { name: /Changes/ }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   const addedLine = page.locator(".diff-line.is-addition").filter({ hasText: "export const ready = true;" }).first();
   await expect(addedLine).toBeVisible();
   await addedLine.click();
@@ -80,7 +81,7 @@ test("adds a selected diff range to the next agent prompt", async () => {
 test("keeps a contextual selection answer readable and dismissible across responsive layouts", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
-  await page.getByRole("tab", { name: /Changes/ }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   const hunkHeader = page.locator(".diff-hunk-header").first();
   await expect(hunkHeader).toBeVisible();
 

@@ -16,10 +16,12 @@ import { PaneResizeHandle } from "./PaneResizeHandle";
 import type { SettingsViewProps } from "./SettingsView";
 import { LoadingMark } from "./ui";
 import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
+import type { EnvironmentPanelProps } from "./EnvironmentPanel";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadFilesPanel,
+  loadEnvironmentPanel,
   loadGoalPanel,
   loadHistoricalDiffPanel,
   loadPlanPanel,
@@ -29,6 +31,9 @@ import {
   loadWorkspaceChangesPanel,
 } from "./lazySurfaceLoaders";
 
+const EnvironmentPanel = lazy(async () => ({
+  default: (await loadEnvironmentPanel()).EnvironmentPanel,
+}));
 const FilesPanel = lazy(async () => ({
   default: (await loadFilesPanel()).FilesPanel,
 }));
@@ -62,6 +67,7 @@ function WorkspaceToolFallback(): JSX.Element {
 export interface WorkspaceToolScene {
   activeTool: WorkspacePanelTab | null;
   panel: Omit<ComponentProps<typeof WorkspacePanel>, "children">;
+  environment: EnvironmentPanelProps;
   historicalDiff: ComponentProps<typeof HistoricalDiffPanel> | null;
   changes: ComponentProps<typeof WorkspaceChangesPanel>;
   files: ComponentProps<typeof FilesPanel>;
@@ -128,6 +134,9 @@ function WorkspaceToolSurface({
       {tools && (
         <WorkspacePanel {...tools.panel}>
           <Suspense fallback={<WorkspaceToolFallback />}>
+            {tools.activeTool === "environment" && (
+              <EnvironmentPanel {...tools.environment} />
+            )}
             {tools.activeTool === "changes" && (
               tools.historicalDiff
                 ? <HistoricalDiffPanel {...tools.historicalDiff} />

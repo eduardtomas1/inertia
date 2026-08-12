@@ -52,6 +52,7 @@ import type {
   WorkspaceEntriesPage,
   WorkspaceFilePreview,
 } from "./workspace";
+import type { UsageDashboard } from "./usage-dashboard";
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -161,6 +162,7 @@ export type ServerEvent =
         | { kind: "backend.default"; value: ModelBackendDefault | null }
         | { kind: "provider.maintenance"; providers: ProviderMaintenanceStatus[] }
         | { kind: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
+        | { kind: "usage.dashboard"; dashboard: UsageDashboard }
         | { kind: "agent.workflow"; workflow: AgentWorkflowState }
         | {
             kind: "agent.skills";

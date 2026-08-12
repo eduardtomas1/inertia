@@ -77,7 +77,7 @@ import { SettingsRepository } from "./persistence/settings-repository";
 import { SnapshotRepository } from "./persistence/snapshot-repository";
 import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "./persistence/stored-conversation-workspace";
 import { TranscriptRepository } from "./persistence/transcript-repository";
-import { TurnLedgerRepository } from "./persistence/turn-ledger-repository";
+import { TurnLedgerRepository, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import type {
   AgentTurnRow,
@@ -1030,7 +1030,7 @@ export class RuntimeStore {
   usageForConversation(conversationId: string): ThreadUsageSnapshot | null {
     return this.executionLedgerRepository.usageForConversation(conversationId);
   }
-
+  usageDashboard(range: UsageDashboardRange) { return this.turnLedgerRepository.usageDashboard(range); }
   checkpointCount(conversationId: string): number {
     return this.executionLedgerRepository.checkpointCount(conversationId);
   }

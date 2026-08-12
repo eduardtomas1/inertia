@@ -120,6 +120,34 @@ describe("client command contract", () => {
     expect(clientCommandSchema.safeParse(command).success).toBe(false);
   });
 
+  it("accepts only bounded usage dashboard ranges", () => {
+    const base = {
+      type: "usage.dashboard.get",
+      requestId: crypto.randomUUID(),
+      payload: {
+        days: 30,
+        fromInclusive: "2026-06-01T00:00:00.000Z",
+        toExclusive: "2026-07-01T00:00:00.000Z",
+        endDate: "2026-06-30",
+        timeZone: "Europe/Madrid",
+      },
+    };
+    for (const days of [7, 30, 90]) {
+      expect(clientCommandSchema.safeParse({
+        ...base,
+        payload: { ...base.payload, days },
+      }).success).toBe(true);
+    }
+    for (const command of [
+      { ...base, payload: { ...base.payload, days: 14 } },
+      { ...base, payload: { ...base.payload, endDate: "June 30" } },
+      { ...base, payload: { ...base.payload, fromInclusive: "yesterday" } },
+      { ...base, payload: { ...base.payload, credential: "secret" } },
+    ]) {
+      expect(clientCommandSchema.safeParse(command).success).toBe(false);
+    }
+  });
+
   it("rejects unreasonable terminal dimensions", () => {
     const command = {
       type: "terminal.resize",

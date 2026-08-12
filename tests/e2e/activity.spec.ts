@@ -7,6 +7,10 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import {
+  ensureWorkspaceTools,
+  selectWorkspaceTool,
+} from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -34,7 +38,7 @@ test("omits Runs and preserves adjacent toolbar navigation responsively", async 
   const verifyToolbar = async (): Promise<void> => {
     const header = page.locator(".workspace-header");
     const environment = header.getByRole("button", {
-      name: /environment summary$/u,
+      name: "Open Environment",
     });
     const theme = header.getByRole("button", {
       name: /^Change theme/u,
@@ -50,17 +54,12 @@ test("omits Runs and preserves adjacent toolbar navigation responsively", async 
     await expect(theme).toBeVisible();
     await expect(tools).toBeVisible();
 
-    if (await environment.getAttribute("aria-pressed") === "true") {
-      await environment.click();
-      await expect(page.getByRole("dialog", { name: "Environment summary" }))
-        .toHaveCount(0);
-    }
     await environment.click();
-    await expect(page.getByRole("dialog", { name: "Environment summary" }))
+    await expect(page.getByRole("tabpanel", { name: "Environment" }))
       .toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(environment).toBeFocused();
+    await expect(environment).toHaveAttribute("aria-pressed", "true");
 
+    await environment.focus();
     await page.keyboard.press("Tab");
     await expect(theme).toBeFocused();
     await page.keyboard.press("Tab");
@@ -69,7 +68,7 @@ test("omits Runs and preserves adjacent toolbar navigation responsively", async 
     const gaps = await Promise.all([
       environment.evaluate((button) => {
         const current = button.getBoundingClientRect();
-        const next = button.closest(".environment-summary-anchor")
+        const next = button.closest(".environment-panel-anchor")
           ?.nextElementSibling?.getBoundingClientRect();
         return next ? next.left - current.right : Number.NaN;
       }),
@@ -143,13 +142,15 @@ test("keeps preview and failed-run actions in Environment", async () => {
   try {
     await page.reload();
     await resizeWindow(420, 760);
-    const environment = page.getByRole("dialog", {
-      name: "Environment summary",
-    });
-    if (await environment.count() === 0) {
-      await page.getByRole("button", { name: /environment summary$/u })
-        .click();
-    }
+    const tools = await ensureWorkspaceTools(page);
+    await selectWorkspaceTool(tools, "Environment");
+    const environment = tools.getByRole("tabpanel", { name: "Environment" });
+    await environment.locator("details > summary").filter({
+      hasText: "Local Servers",
+    }).click();
+    await environment.locator("details > summary").filter({
+      hasText: "Active work",
+    }).click();
     await expect(environment.getByText("Docs preview", { exact: false }))
       .toBeVisible();
     await expect(environment.getByText("Typecheck fixture", { exact: false }))
@@ -348,7 +349,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
       await page.getByRole("button", { name: "Open workspace tools" }).click();
     }
-    await page.getByRole("tab", { name: /Goal/ }).click();
+    await selectWorkspaceTool(page.locator(".workspace-panel"), "Goal");
     const goalPanel = page.getByRole("region", {
       name: "Goals and agent workflows",
     });

@@ -1207,9 +1207,25 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
       conversationWorktreeOwnershipMigration,
       workspacePathAuthoritiesMigration,
       promptPresetMigrationDefinition,
+      providerRunOwnershipMigration,
+      sanitizePersistedAttachmentCapabilities,
+      {
+        name: "IndexUsageDashboardCompletedTurns",
+        up: `
+          DROP INDEX IF EXISTS agent_turns_usage_dashboard_completed_idx;
+          CREATE INDEX agent_turns_usage_dashboard_completed_idx
+          ON agent_turns(association, completed_at ASC, id ASC);
+        `,
+      },
+      {
+        name: "InvalidateLegacyUnownedTurnUsageStarts",
+        up: `
+          UPDATE agent_turns
+          SET usage_start_json = NULL
+          WHERE usage_start_json IS NOT NULL;
+        `,
+      },
     );
-    migrationExtensions.push(providerRunOwnershipMigration);
-    migrationExtensions.push(sanitizePersistedAttachmentCapabilities);
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

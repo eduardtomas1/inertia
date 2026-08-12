@@ -428,7 +428,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
       .toBeInTheDocument();
   });
 
-  it("runs commit and push against the selected nested repository identity", async () => {
+  it("runs requested commit and push actions against the exact nested repository identity", async () => {
     const actionable = structuredClone(snapshot);
     actionable.repositories[0]!.authorityRef = "22222222-2222-4222-8222-222222222222";
     actionable.repositories[0]!.authorityRef =
@@ -475,6 +475,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
           requestId: crypto.randomUUID(),
         });
     const onRefresh = vi.fn();
+    const onChangesRequestHandled = vi.fn();
     const patchFor = (path: string) => [
       `diff --git a/${path} b/${path}`,
       `--- a/${path}`,
@@ -502,7 +503,14 @@ describe("WorkspaceChangesPanel repository scope", () => {
         ...(commitReview ? { commitReview: reviewReceipt } : {}),
       };
     });
-    const panel = (nextSnapshot: WorkspaceGitSnapshot) => (
+    const panel = (
+      nextSnapshot: WorkspaceGitSnapshot,
+      changesRequest?: {
+        repositoryPath: string;
+        action: "review" | "commit" | "push";
+        revision: number;
+      },
+    ) => (
       <WorkspaceChangesPanel
         projectName="Inertia"
         projectId={projectId}
@@ -522,6 +530,8 @@ describe("WorkspaceChangesPanel repository scope", () => {
         onDeleteNote={vi.fn(async () => undefined)}
         onAddTextToPrompt={vi.fn()}
         onAddToPrompt={vi.fn()}
+        changesRequest={changesRequest}
+        onChangesRequestHandled={onChangesRequestHandled}
       />
     );
     const view = render(panel(actionable));
@@ -530,14 +540,15 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(within(rootActions).getByRole("button", { name: "Commit" }))
       .toBeEnabled();
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Repository scope" }), {
-      target: { value: "modules/alpha" },
-    });
-    const scopeActions = await screen.findByLabelText(
-      "Actions for modules/alpha",
-    );
-    fireEvent.click(within(scopeActions).getByRole("button", { name: "Commit" }));
+    view.rerender(panel(actionable, {
+      repositoryPath: "modules/alpha",
+      action: "commit",
+      revision: 1,
+    }));
     const dialog = await screen.findByRole("dialog", { name: "Commit changes" });
+    expect(screen.getByRole("combobox", { name: "Repository scope" }))
+      .toHaveValue("modules/alpha");
+    expect(onChangesRequestHandled).toHaveBeenCalledWith(1);
     expect(await within(dialog).findByText("2 selected hunks are unreviewed."))
       .toBeInTheDocument();
     expect(onLoadRepositoryDiff).toHaveBeenCalledWith(
@@ -575,11 +586,11 @@ describe("WorkspaceChangesPanel repository scope", () => {
     pushedNested.clean = true;
     pushedNested.insertions = 0;
     pushedNested.deletions = 0;
-    view.rerender(panel(pushed));
-    const refreshedActions = await screen.findByLabelText(
-      "Actions for modules/alpha",
-    );
-    fireEvent.click(within(refreshedActions).getByRole("button", { name: "Push 1" }));
+    view.rerender(panel(pushed, {
+      repositoryPath: "modules/alpha",
+      action: "push",
+      revision: 2,
+    }));
     await waitFor(() => expect(run).toHaveBeenCalledWith("git.push", {
       type: "git.push",
       payload: {
@@ -589,6 +600,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
         authorityRef: nested.authorityRef,
       },
     }));
+    expect(onChangesRequestHandled).toHaveBeenCalledWith(2);
 
     const behind = structuredClone(pushed);
     const behindNested = behind.repositories.find(

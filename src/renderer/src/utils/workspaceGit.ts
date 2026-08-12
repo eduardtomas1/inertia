@@ -28,6 +28,14 @@ export interface WorkspaceGitFileIdentity {
   filePath: string;
 }
 
+export type WorkspaceChangesRequestedAction = "review" | "commit" | "push";
+
+export interface WorkspaceChangesRequest {
+  repositoryPath: string;
+  action: WorkspaceChangesRequestedAction;
+  revision: number;
+}
+
 export function workspaceGitIdentity(identity: WorkspaceGitFileIdentity): string {
   return `${identity.repositoryPath.length}:${identity.repositoryPath}${identity.filePath}`;
 }

@@ -1,10 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ChevronDown, FolderOpen, GitBranch, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
-import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
-import { EnvironmentSummary } from "./EnvironmentSummary";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
 import { usePrivateConnectState } from "../hooks/usePrivateConnectState";
@@ -12,8 +10,8 @@ import type { HeaderGitActionId } from "../utils/headerGitActions";
 import { primaryHeaderGitAction } from "../utils/primaryHeaderGitAction";
 import {
   loadCommitDialog,
-  loadTerminalPanel,
 } from "./lazySurfaceLoaders";
+import type { AppView } from "../appView";
 
 const loadWorkspaceGitActionMenu = () => import("./WorkspaceGitActionMenu");
 const WorkspaceGitActionMenu = lazy(loadWorkspaceGitActionMenu);
@@ -21,7 +19,7 @@ const WorkspaceGitActionMenu = lazy(loadWorkspaceGitActionMenu);
 type WorkspaceHeaderProps = {
   project: Project | null;
   conversation: Conversation | null;
-  view: "workspace" | "settings";
+  view: AppView;
   activeTool: WorkspacePanelTab | null;
   sidebarCollapsed: boolean;
   theme: ThemePreference;
@@ -29,12 +27,10 @@ type WorkspaceHeaderProps = {
   branches: GitBranchInfo[];
   actions: ProjectAction[];
   busy: boolean;
-  environmentSummary: EnvironmentSummarySnapshot;
-  environmentOpen: boolean;
   onOpenSidebar: () => void;
   onToggleTools: () => void;
   workspaceToolsUnavailableReason?: string | null;
-  onSetEnvironmentOpen: (open: boolean) => void;
+  onOpenEnvironment: () => void;
   onCycleTheme: () => void;
   onOpenSettings: () => void;
   onOpenConnectionsSettings: () => void;
@@ -50,16 +46,6 @@ type WorkspaceHeaderProps = {
   onPull: () => void;
   onPush: () => void;
   onRunAction: (action: ProjectAction) => void;
-  onStopRun: (run: EnvironmentSummarySnapshot["checks"][number]) => void;
-  onOpenRunPreview: (
-    run: EnvironmentSummarySnapshot["checks"][number],
-  ) => void;
-  onAcknowledgeRun: (
-    run: EnvironmentSummarySnapshot["checks"][number],
-  ) => void;
-  onDismissRun: (
-    run: EnvironmentSummarySnapshot["checks"][number],
-  ) => void;
 };
 
 export function WorkspaceHeader({
@@ -73,12 +59,10 @@ export function WorkspaceHeader({
   branches,
   actions,
   busy,
-  environmentSummary,
-  environmentOpen,
   onOpenSidebar,
   onToggleTools,
   workspaceToolsUnavailableReason = null,
-  onSetEnvironmentOpen,
+  onOpenEnvironment,
   onCycleTheme,
   onOpenSettings,
   onOpenConnectionsSettings,
@@ -94,10 +78,6 @@ export function WorkspaceHeader({
   onPull,
   onPush,
   onRunAction,
-  onStopRun,
-  onOpenRunPreview,
-  onAcknowledgeRun,
-  onDismissRun,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | "git" | null>(null);
   const privateConnectLoad = usePrivateConnectState();
@@ -106,14 +86,12 @@ export function WorkspaceHeader({
   const pendingPrivateConnectPairing = privateConnect?.pendingPairings[0] ?? null;
   useNativePreviewSuspension(menu !== null);
   const headerActionsRef = useRef<HTMLDivElement>(null);
-  const environmentAnchorRef = useRef<HTMLDivElement>(null);
-  const focusEnvironmentTrigger = useCallback((): void => {
-    environmentAnchorRef.current?.querySelector<HTMLButtonElement>(
-      ":scope > button",
-    )?.focus();
-  }, []);
-  const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
-  const eyebrow = view === "settings"
+  const title = view === "settings"
+    ? "Settings"
+    : view === "usage"
+      ? "Usage"
+      : conversation?.title ?? project?.name ?? "Workspace";
+  const eyebrow = view !== "workspace"
     ? null
     : project?.name && conversation ? project.name : "Inertia";
   const contextMismatch = conversationContextMismatch(project, conversation, gitStatus);
@@ -150,29 +128,6 @@ export function WorkspaceHeader({
           : current < 0 || current === items.length - 1 ? 0 : current + 1;
     items[next]?.focus();
   };
-
-  useEffect(() => {
-    if (!environmentOpen) return;
-    const closeOnPointerDown = (event: PointerEvent): void => {
-      if (
-        event.target instanceof Node
-        && !environmentAnchorRef.current?.contains(event.target)
-      ) {
-        onSetEnvironmentOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      onSetEnvironmentOpen(false);
-      focusEnvironmentTrigger();
-    };
-    document.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [environmentOpen, focusEnvironmentTrigger, onSetEnvironmentOpen]);
 
   useEffect(() => {
     if (!menu) return;
@@ -277,7 +232,7 @@ export function WorkspaceHeader({
           <>
             {actions.length > 0 && (
               <div className="header-popover-anchor" data-header-menu="action">
-                <button type="button" className="header-button" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => { onSetEnvironmentOpen(false); setMenu(menu === "action" ? null : "action"); }}>
+                <button type="button" className="header-button" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
                   <Plus size={14} /><span>Add action</span>
                 </button>
                 {menu === "action" && (
@@ -297,7 +252,7 @@ export function WorkspaceHeader({
                   aria-haspopup="menu"
                   aria-controls="workspace-header-branch-menu"
                   aria-label={contextMismatch ? `Checkout context differs, current branch ${gitStatus.branch ?? "detached"}` : undefined}
-                  onClick={() => { onSetEnvironmentOpen(false); const next = menu === "branch" ? null : "branch"; setMenu(next); if (next) onRefreshBranches(); }}
+                  onClick={() => { const next = menu === "branch" ? null : "branch"; setMenu(next); if (next) onRefreshBranches(); }}
                 >
                   <GitBranch size={14} /><span>{gitStatus.branch ?? "Detached"}</span>{contextMismatch && <span className="checkout-context-dot" aria-hidden="true" />}<ChevronDown size={12} />
                 </button>
@@ -381,7 +336,6 @@ export function WorkspaceHeader({
                     onFocus={() => void loadWorkspaceGitActionMenu()}
                     onPointerEnter={() => void loadWorkspaceGitActionMenu()}
                     onClick={() => {
-                      onSetEnvironmentOpen(false);
                       setMenu(menu === "git" ? null : "git");
                     }}
                   >
@@ -403,54 +357,36 @@ export function WorkspaceHeader({
             )}
           </>
         )}
-        <div
-          className="header-popover-anchor environment-summary-anchor"
-          ref={environmentAnchorRef}
-        >
-          <IconButton
-            label={environmentOpen ? "Close environment summary" : "Open environment summary"}
-            aria-expanded={environmentOpen}
-            aria-controls="environment-summary-popover"
-            aria-pressed={environmentOpen}
-            onClick={() => {
-              setMenu(null);
-              onSetEnvironmentOpen(!environmentOpen);
-            }}
-          >
-            <ListFilter size={17} />
-          </IconButton>
-          {environmentOpen && (
-            <div
-              className="environment-summary-popover"
-              id="environment-summary-popover"
+        {view === "workspace" && project && (
+          <div className="header-popover-anchor environment-panel-anchor">
+            <IconButton
+              label="Open Environment"
+              aria-pressed={activeTool === "environment"}
+              onClick={() => {
+                setMenu(null);
+                onOpenEnvironment();
+              }}
             >
-              <EnvironmentSummary
-                summary={environmentSummary}
-                onStopRun={onStopRun}
-                onOpenRunPreview={onOpenRunPreview}
-                onAcknowledgeRun={onAcknowledgeRun}
-                onDismissRun={onDismissRun}
-                onRestoreActionFocus={focusEnvironmentTrigger}
-              />
-            </div>
-          )}
-        </div>
+              <ListFilter size={17} />
+            </IconButton>
+          </div>
+        )}
         <IconButton label={`Change theme (current: ${theme})`} onClick={onCycleTheme}><SunMoon size={17} /></IconButton>
         {view === "workspace" ? (
           <IconButton
-            label={workspaceToolsUnavailableReason
-              ?? (activeTool ? "Close workspace tools" : "Open workspace tools")}
+            label={activeTool
+              ? "Close workspace tools"
+              : workspaceToolsUnavailableReason ?? "Open workspace tools"}
             aria-pressed={Boolean(activeTool)}
-            onFocus={() => void loadTerminalPanel()}
-            onPointerDown={() => void loadTerminalPanel()}
-            onPointerEnter={() => void loadTerminalPanel()}
             onClick={onToggleTools}
-            disabled={!project || Boolean(workspaceToolsUnavailableReason)}
+            disabled={!project || Boolean(workspaceToolsUnavailableReason && !activeTool)}
           >
             {activeTool ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
           </IconButton>
-        ) : (
+        ) : view === "settings" ? (
           <IconButton label="Settings" aria-current="page" onClick={onOpenSettings}><Settings size={17} /></IconButton>
+        ) : (
+          <IconButton label="Open settings" onClick={onOpenSettings}><Settings size={17} /></IconButton>
         )}
       </div>
     </header>

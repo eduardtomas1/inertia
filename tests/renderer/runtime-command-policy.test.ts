@@ -27,6 +27,10 @@ describe("runtime command delivery policy", () => {
       timeoutMs: 15_000,
       timeoutDelivery: "rejected",
     });
+    expect(runtimeCommandPolicy("usage.dashboard.get")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "rejected",
+    });
     expect(runtimeCommandPolicy("conversation.detail.load")).toEqual({
       timeoutMs: CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "rejected",

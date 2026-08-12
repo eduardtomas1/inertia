@@ -1,5 +1,23 @@
 export type WorkspacePreviewOwner = "primary" | "secondary";
 
+export function routeWorkspaceRunPreview<Run extends {
+  conversationId: string | null;
+}>(
+  run: Run,
+  secondaryConversationId: string | null,
+  openPrimary: (run: Run) => void,
+  openSecondary: (run: Run) => void,
+): void {
+  if (
+    run.conversationId !== null
+    && run.conversationId === secondaryConversationId
+  ) {
+    openSecondary(run);
+    return;
+  }
+  openPrimary(run);
+}
+
 interface PendingWorkspacePreviewFocus {
   owner: WorkspacePreviewOwner;
   initialActiveElement: Element | null;

@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
-import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
 import type {
   GitStatusSnapshot,
   Project,
@@ -22,16 +21,6 @@ const project: Project = {
   status: "ready",
   createdAt: "2026-07-29T10:00:00.000Z",
   updatedAt: "2026-07-29T10:00:00.000Z",
-};
-
-const summary: EnvironmentSummarySnapshot = {
-  projectName: "Inertia",
-  runtime: { status: "online", label: "Ready" },
-  changes: null,
-  branch: { label: "Branch", value: "feature/pr" },
-  checks: [],
-  subagents: [],
-  attachments: [],
 };
 
 function status(
@@ -78,11 +67,9 @@ function renderHeader(
       branches={[]}
       actions={[]}
       busy={false}
-      environmentSummary={summary}
-      environmentOpen={false}
       onOpenSidebar={vi.fn()}
       onToggleTools={vi.fn()}
-      onSetEnvironmentOpen={vi.fn()}
+      onOpenEnvironment={vi.fn()}
       onCycleTheme={vi.fn()}
       onOpenSettings={vi.fn()}
       onOpenConnectionsSettings={vi.fn()}
@@ -98,10 +85,6 @@ function renderHeader(
       onPull={vi.fn()}
       onPush={onPush}
       onRunAction={vi.fn()}
-      onStopRun={vi.fn()}
-      onOpenRunPreview={vi.fn()}
-      onAcknowledgeRun={vi.fn()}
-      onDismissRun={vi.fn()}
     />,
   );
 }
@@ -145,7 +128,7 @@ describe("WorkspaceHeader Git pull request availability", () => {
       .not.toBeInTheDocument();
     const actions = screen.getAllByRole("button");
     const environment = actions.findIndex((button) =>
-      button.getAttribute("aria-label") === "Open environment summary");
+      button.getAttribute("aria-label") === "Open Environment");
     expect(actions[environment + 1]).toHaveAccessibleName(
       "Change theme (current: dark)",
     );
@@ -184,11 +167,9 @@ describe("WorkspaceHeader Git pull request availability", () => {
         branches={[]}
         actions={[]}
         busy={false}
-        environmentSummary={summary}
-        environmentOpen={false}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
-        onSetEnvironmentOpen={vi.fn()}
+        onOpenEnvironment={vi.fn()}
         onCycleTheme={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenConnectionsSettings={vi.fn()}
@@ -204,10 +185,6 @@ describe("WorkspaceHeader Git pull request availability", () => {
         onPull={vi.fn()}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onStopRun={vi.fn()}
-        onOpenRunPreview={vi.fn()}
-        onAcknowledgeRun={vi.fn()}
-        onDismissRun={vi.fn()}
       />,
     );
 
@@ -244,11 +221,9 @@ describe("WorkspaceHeader Git pull request availability", () => {
         branches={[]}
         actions={[]}
         busy={false}
-        environmentSummary={summary}
-        environmentOpen={false}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
-        onSetEnvironmentOpen={vi.fn()}
+        onOpenEnvironment={vi.fn()}
         onCycleTheme={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenConnectionsSettings={vi.fn()}
@@ -264,10 +239,6 @@ describe("WorkspaceHeader Git pull request availability", () => {
         onPull={onPull}
         onPush={vi.fn()}
         onRunAction={vi.fn()}
-        onStopRun={vi.fn()}
-        onOpenRunPreview={vi.fn()}
-        onAcknowledgeRun={vi.fn()}
-        onDismissRun={vi.fn()}
       />,
     );
 

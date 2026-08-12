@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../src/server/database";
+import { selectWorkspaceTool } from "./support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -109,7 +110,7 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
   if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
     await page.getByRole("button", { name: "Open workspace tools" }).click();
   }
-  await page.getByRole("tab", { name: /Changes/ }).click();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
 
   const changes = page.getByLabel("Workspace changes");
   const repositoryList = changes.getByRole("navigation", {

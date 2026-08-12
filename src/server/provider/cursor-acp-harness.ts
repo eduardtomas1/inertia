@@ -51,6 +51,7 @@ const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 20;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
+const COMMAND_ADVERTISEMENT_TIMEOUT_MS = 2_000;
 
 export function cursorAcpProcessInvocation(
   executable: string,
@@ -90,6 +91,8 @@ interface CursorContextUsage { usedTokens: number | null; maxTokens: number | nu
 export interface CursorAcpHarnessOptions {
   /** Test seam for the owned ACP process-tree lifecycle. */
   terminateProcessTree?: ProcessTreeTerminator;
+  /** Test seam for the bounded post-load command advertisement wait. */
+  commandAdvertisementTimeoutMs?: number;
 }
 
 export function createCursorAcpHarness(
@@ -101,13 +104,18 @@ export function createCursorAcpHarness(
     capabilities: CURSOR_ACP_CAPABILITIES,
     supports: (input) => input.providerId === "cursor",
     start: (startOptions) =>
-      startCursorRun(startOptions, options.terminateProcessTree),
+      startCursorRun(
+        startOptions,
+        options.terminateProcessTree,
+        options.commandAdvertisementTimeoutMs,
+      ),
   };
 }
 
 function startCursorRun(
   options: AgentHarnessStartOptions,
   terminateProcessTree?: ProcessTreeTerminator,
+  commandAdvertisementTimeoutMs = COMMAND_ADVERTISEMENT_TIMEOUT_MS,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
@@ -126,6 +134,10 @@ function startCursorRun(
   let cancelRequested = false;
   let supportsImages = false;
   let availableCommandNames: Set<string> | null = null;
+  let resolveCommandAdvertisement!: () => void;
+  const commandAdvertisement = new Promise<void>((resolve) => {
+    resolveCommandAdvertisement = resolve;
+  });
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
   const toolActivities = new Map<
     string,
@@ -174,6 +186,7 @@ function startCursorRun(
           params.update.availableCommands.map(({ name }) =>
             name.replace(/^\//u, "").toLowerCase()),
         );
+        resolveCommandAdvertisement();
       }
       handleCursorUpdate(
         params,
@@ -302,10 +315,19 @@ function startCursorRun(
       options.input.reasoningEffort,
     );
     emitCursorMetadata(configuredOptions, supportsImages, emitter.rich);
-    if (
-      options.input.operation?.kind === "compact"
-      && !availableCommandNames?.has("summarize")
-    ) {
+    if (options.input.operation?.kind === "compact") {
+      await waitForCursorCommandAdvertisement(
+        commandAdvertisement,
+        commandAdvertisementTimeoutMs,
+      );
+      if (availableCommandNames === null) {
+        throw new Error(
+          "This Cursor ACP session did not advertise its available commands.",
+        );
+      }
+    }
+    if (options.input.operation?.kind === "compact"
+      && !availableCommandNames?.has("summarize")) {
       throw new Error(
         "This Cursor ACP session does not advertise its summarize command.",
       );
@@ -396,6 +418,24 @@ function startCursorRun(
     cancel,
     extension: { kind: "cursor-acp", respondToApproval: settleApproval, respondToInput: settleInput },
   };
+}
+
+async function waitForCursorCommandAdvertisement(
+  advertisement: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      advertisement,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, Math.max(0, timeoutMs));
+        timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function cursorPermission(

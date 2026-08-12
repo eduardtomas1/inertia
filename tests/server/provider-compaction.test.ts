@@ -111,6 +111,43 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
   });
 
+  it("does not accept a stale same-thread Codex item before requesting compaction", async () => {
+    const root = portableFixtureRoot("Codex compact stale item");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "codex");
+    writeNodeSubcommand(root, "app-server", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fixture" } });
+  if (message.method === "initialized") return;
+  if (message.method === "thread/resume") {
+    send({ method: "item/completed", params: { threadId: message.params.threadId, item: { id: "compact-stale", type: "contextCompaction" } } });
+    return send({ id: message.id, result: { thread: { id: message.params.threadId } } });
+  }
+  if (message.method === "thread/compact/start") {
+    send({ id: message.id, result: {} });
+    return setTimeout(() => process.exit(0), 10);
+  }
+});
+`);
+    const manager = new ProviderManager({ commands: { codex: command } });
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "codex-compact-stale-item",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-existing",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("early"),
+    });
+  });
+
   it("forwards Claude focus text and requires native completion proof", async () => {
     const root = portableFixtureRoot("Claude compact");
     roots.push(root);

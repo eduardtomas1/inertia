@@ -176,16 +176,16 @@ export function useAppRuntimeActions(options: {
     targetConversationId: string,
     instruction?: string,
   ): Promise<ConversationCompactionResult> => {
-    const event = await run(
-      `conversation.compact:${targetConversationId}`,
-      {
-        type: "conversation.compact",
-        payload: {
-          conversationId: targetConversationId,
-          ...(instruction ? { instruction } : {}),
-        },
+    // The composer owns this operation's pending and error state by
+    // conversation. Do not promote a hidden owner's failure into the global
+    // action toast for whichever conversation is currently visible.
+    const event = await sendCommand(withRequestId({
+      type: "conversation.compact",
+      payload: {
+        conversationId: targetConversationId,
+        ...(instruction ? { instruction } : {}),
       },
-    );
+    }));
     if (
       event.type !== "request.result"
       || event.result.kind !== "conversation.compacted"
@@ -195,7 +195,7 @@ export function useAppRuntimeActions(options: {
       );
     }
     return event.result;
-  }, [run]);
+  }, [sendCommand]);
 
   return {
     sendingConversationIds,

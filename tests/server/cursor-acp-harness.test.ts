@@ -47,6 +47,7 @@ function compactingCursorAgent(
   name: string,
   capturePath: string,
   advertisedCommands: readonly string[] | null = null,
+  advertiseAfterLoadResponse = false,
 ): string {
   const command = portableNodeExecutable(root, name);
   writeNodeSubcommand(root, "acp", `
@@ -58,8 +59,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "Cursor", version: "test" } } });
   if (message.method === "session/load") {
-    ${advertisedCommands === null ? "" : `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: ${JSON.stringify(advertisedCommands.map((entry) => ({ name: entry, description: entry })))} } } });`}
-    return send({ jsonrpc: "2.0", id: message.id, result: { modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+    ${advertiseAfterLoadResponse || advertisedCommands === null ? "" : `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: ${JSON.stringify(advertisedCommands.map((entry) => ({ name: entry, description: entry })))} } } });`}
+    send({ jsonrpc: "2.0", id: message.id, result: { modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+    ${!advertiseAfterLoadResponse || advertisedCommands === null ? "" : `return setTimeout(() => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: ${JSON.stringify(advertisedCommands.map((entry) => ({ name: entry, description: entry })))} } } }), 10);`}
+    return;
   }
   if (message.method === "session/prompt") {
     fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(message.params.prompt));
@@ -204,6 +207,34 @@ describe.sequential("Cursor ACP harness", () => {
     expect(captured).not.toContain("remember retrieval exactly");
   });
 
+  it("waits for Cursor's command advertisement after the load response", async () => {
+    const root = portableFixtureRoot("cursor ACP delayed compact capability");
+    roots.push(root);
+    const capturePath = join(root, "compact-prompt.json");
+    const command = compactingCursorAgent(
+      root,
+      "cursor-compact-delayed-capability",
+      capturePath,
+      ["summarize"],
+      true,
+    );
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-compact-delayed-capability",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "cursor-compact-session",
+    }))).resolves.toMatchObject({ status: "completed" });
+    expect(readFileSync(capturePath, "utf8")).toContain("/summarize");
+  });
+
   it("rejects compaction when Cursor explicitly omits summarize", async () => {
     const root = portableFixtureRoot("cursor ACP compact unsupported");
     roots.push(root);
@@ -245,7 +276,9 @@ describe.sequential("Cursor ACP harness", () => {
     );
     const manager = new ProviderManager(
       { commands: { cursor: command } },
-      new AgentHarnessRegistry([createCursorAcpHarness()]),
+      new AgentHarnessRegistry([createCursorAcpHarness({
+        commandAdvertisementTimeoutMs: 25,
+      })]),
     );
 
     await expect(manager.compact(nativeProviderRunInput({
@@ -258,7 +291,7 @@ describe.sequential("Cursor ACP harness", () => {
       sessionId: "cursor-compact-session",
     }))).resolves.toMatchObject({
       status: "failed",
-      message: expect.stringContaining("does not advertise"),
+      message: expect.stringContaining("did not advertise"),
     });
     expect(() => readFileSync(capturePath, "utf8")).toThrow();
   });

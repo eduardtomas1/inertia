@@ -272,6 +272,7 @@ function startCodexCompaction(
         modelProvider: options.harnessConfiguration,
       });
       let resolveCompaction!: () => void;
+      let compactionInitiated = false;
       const compacted = new Promise<void>((resolve, reject) => {
         resolveCompaction = resolve;
         completionTimer = setTimeout(
@@ -288,6 +289,12 @@ function startCodexCompaction(
         processLabel: "Codex compaction process tree",
         signal: abortController.signal,
         onNotification: (method, params) => {
+          // App Server does not expose a request/item correlation ID for
+          // thread/compact/start. Its bounded authority is therefore a
+          // matching terminal event on this one-shot control connection,
+          // after local request initiation and before the operation timeout.
+          // A buffered completion observed while resuming proves nothing.
+          if (!compactionInitiated) return;
           if (method !== "item/completed") return;
           if (params.threadId !== sessionId) return;
           const item = objectValue(params.item);
@@ -337,7 +344,12 @@ function startCodexCompaction(
           );
         }
         emitter.status("running");
-        await client.request("thread/compact/start", { threadId: sessionId });
+        const compactRequest = client.request(
+          "thread/compact/start",
+          { threadId: sessionId },
+        );
+        compactionInitiated = true;
+        await compactRequest;
         await compacted;
       });
       emitter.status("completed");

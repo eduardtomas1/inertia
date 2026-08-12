@@ -245,6 +245,42 @@ describe("composer asynchronous ownership", () => {
     expect(screen.getByText("First chat context compacted.")).toBeVisible();
   });
 
+  it("settles a hidden compaction failure only on its owning chat", async () => {
+    const first = conversation("37373737-3737-4737-8737-373737373737");
+    const second = conversation("47474747-4747-4747-8747-474747474747");
+    const operation = deferred<ServerEvent>();
+    const setActionError = vi.fn();
+    const RuntimeComposer = ({ owner }: { owner: Conversation }) => {
+      const actions = useAppRuntimeActions({
+        sendCommand: () => operation.promise,
+        refreshDetail: vi.fn(),
+        setBusyAction: vi.fn(),
+        setActionError,
+      });
+      return <Composer {...composerProps(owner, {
+        onCompact: async (instruction) =>
+          await actions.compactConversation(owner.id, instruction),
+      })} />;
+    };
+    const view = render(<RuntimeComposer owner={first} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "/compact" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "Enter",
+    });
+
+    view.rerender(<RuntimeComposer owner={second} />);
+    await act(async () => operation.reject(new Error("First chat failed")));
+    expect(screen.queryByText("First chat failed")).not.toBeInTheDocument();
+    expect(setActionError).not.toHaveBeenCalled();
+
+    view.rerender(<RuntimeComposer owner={first} />);
+    expect(screen.queryByText("Compacting provider context…"))
+      .not.toBeInTheDocument();
+    expect(screen.getByText("First chat failed")).toBeVisible();
+  });
+
   it("runs the uniquely matched partial compact command without sending it", async () => {
     const current = conversation("08080808-0808-4808-8808-080808080808");
     const onCompact = vi.fn(async () => ({
@@ -632,6 +668,28 @@ describe("composer asynchronous ownership", () => {
 
     await rejection;
     expect(setActionError).toHaveBeenCalledWith("Runtime rejected access");
+  });
+
+  it("leaves compaction failures with the conversation-owned composer notice", async () => {
+    const request = deferred<ServerEvent>();
+    const setActionError = vi.fn();
+    const setBusyAction = vi.fn();
+    const hook = renderHook(() => useAppRuntimeActions({
+      sendCommand: () => request.promise,
+      refreshDetail: vi.fn(),
+      setBusyAction,
+      setActionError,
+    }));
+
+    const compaction = hook.result.current.compactConversation(
+      "49494949-4949-4949-8949-494949494949",
+    );
+    const rejection = expect(compaction).rejects.toThrow("Compaction failed");
+    await act(async () => request.reject(new Error("Compaction failed")));
+
+    await rejection;
+    expect(setActionError).not.toHaveBeenCalled();
+    expect(setBusyAction).not.toHaveBeenCalled();
   });
 
   it("keeps access changes pending until the runtime acknowledges them", async () => {

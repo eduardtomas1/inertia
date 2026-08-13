@@ -291,4 +291,47 @@ describe("conversation attachment store utility runner", () => {
       vi.useRealTimers();
     }
   });
+
+  it("rejects active sibling success after another helper exit is unconfirmed", async () => {
+    vi.useFakeTimers();
+    try {
+      const children: FakeUtilityProcess[] = [];
+      const runner = createConversationAttachmentStoreUtilityRunner({
+        spawn: () => {
+          const child = new FakeUtilityProcess();
+          children.push(child);
+          return utility(child);
+        },
+        maxActiveOperations: 2,
+        maxPendingOperations: 1,
+        killGraceMs: 10,
+      });
+      const controller = new AbortController();
+      const failed = runner(operation, controller.signal);
+      const sibling = runner({ ...operation, name: crypto.randomUUID() });
+      const failedResult = expect(failed.result).rejects.toThrow("cancelled");
+      const failedStopped = expect(failed.stopped).rejects.toThrow("unconfirmed");
+      const siblingResult = expect(sibling.result).rejects.toThrow("unconfirmed");
+      children.forEach((child) => child.emit("spawn"));
+      children[1].emit("message", {
+        type: "conversation-attachment-store.result",
+        ok: true,
+      });
+      controller.abort(new Error("cancelled active helper"));
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(children[1].kill).toHaveBeenCalledOnce();
+      children[1].emit("exit", 0);
+      await failedResult;
+      await failedStopped;
+      await siblingResult;
+      await expect(sibling.stopped).resolves.toBeUndefined();
+      const future = runner({ ...operation, name: crypto.randomUUID() });
+      await expect(future.result).rejects.toThrow("unconfirmed");
+      await expect(future.stopped).rejects.toThrow("unconfirmed");
+      expect(children).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

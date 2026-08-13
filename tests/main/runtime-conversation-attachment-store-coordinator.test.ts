@@ -303,4 +303,55 @@ describe("runtime conversation attachment store coordinator", () => {
     }));
     await expect(coordinator.shutdown()).resolves.toBe(false);
   });
+
+  it("does not publish concurrent success after generation shutdown becomes unconfirmed", async () => {
+    const failedResult = deferred<void>();
+    const failedStopped = deferred<void>();
+    const siblingResult = deferred<void>();
+    const siblingStopped = deferred<void>();
+    const executions = [
+      { result: failedResult.promise, stopped: failedStopped.promise },
+      { result: siblingResult.promise, stopped: siblingStopped.promise },
+    ];
+    const post = vi.fn();
+    const record = peer();
+    const coordinator = new RuntimeConversationAttachmentStoreCoordinator({
+      runner: vi.fn(() => ({
+        ...executions.shift()!,
+        ready: Promise.resolve(false),
+      })) as never,
+      authority,
+      accepts: () => true,
+      post,
+    });
+    const failed = request();
+    const sibling = request();
+    coordinator.handle(record, failed);
+    coordinator.handle(record, sibling);
+    failedResult.reject(new Error("failed"));
+    failedStopped.reject(new Error("unconfirmed"));
+    await vi.waitFor(() => expect(post).toHaveBeenCalledWith(
+      record,
+      expect.objectContaining({
+        requestId: failed.requestId,
+        ok: false,
+        shutdownConfirmed: false,
+      }),
+    ));
+    siblingResult.resolve();
+    siblingStopped.resolve();
+    await vi.waitFor(() => expect(post).toHaveBeenCalledWith(
+      record,
+      expect.objectContaining({
+        requestId: sibling.requestId,
+        ok: false,
+        shutdownConfirmed: false,
+      }),
+    ));
+    expect(post).not.toHaveBeenCalledWith(
+      record,
+      expect.objectContaining({ requestId: sibling.requestId, ok: true }),
+    );
+    await expect(coordinator.drain(record)).resolves.toBe(false);
+  });
 });

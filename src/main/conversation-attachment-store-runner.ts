@@ -260,6 +260,7 @@ export function createConversationAttachmentStoreUtilityRunner(
   let activeOperations = 0;
   let poisonError: Error | null = null;
   const queued: QueuedOperation[] = [];
+  const activeControllers = new Set<AbortController>();
   const failQueued = (next: QueuedOperation, error: Error): void => {
     next.signal?.removeEventListener("abort", next.onAbort);
     next.rejectResult(error);
@@ -271,6 +272,9 @@ export function createConversationAttachmentStoreUtilityRunner(
       "Conversation attachment utility shutdown is unconfirmed.",
     );
     for (const next of queued.splice(0)) failQueued(next, poisonError);
+    for (const controller of activeControllers) {
+      controller.abort(poisonError);
+    }
     return poisonError;
   };
   const pump = (): void => {
@@ -289,13 +293,19 @@ export function createConversationAttachmentStoreUtilityRunner(
         continue;
       }
       activeOperations += 1;
-      const running = runNow(next.operation, next.signal);
+      const controller = new AbortController();
+      activeControllers.add(controller);
+      const signal = next.signal
+        ? AbortSignal.any([next.signal, controller.signal])
+        : controller.signal;
+      const running = runNow(next.operation, signal);
       void running.result.then(next.resolveResult, next.rejectResult);
       void running.ready.then(next.resolveReady);
       void running.stopped.then(
         next.resolveStopped,
         () => next.rejectStopped(poison()),
       ).finally(() => {
+        activeControllers.delete(controller);
         activeOperations -= 1;
         pump();
       });

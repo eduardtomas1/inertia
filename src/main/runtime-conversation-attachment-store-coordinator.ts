@@ -185,6 +185,10 @@ export class RuntimeConversationAttachmentStoreCoordinator {
       const shutdownConfirmed = await stopped;
       if (this.pending.get(event.requestId) !== pending) return shutdownConfirmed;
       if (state.suppressReplies) return shutdownConfirmed;
+      if (!state.shutdownConfirmed) {
+        this.reply(record, event.requestId, publicFailure(false));
+        return false;
+      }
       if (!operationSucceeded || !shutdownConfirmed) {
         this.reply(record, event.requestId, publicFailure(shutdownConfirmed));
         return shutdownConfirmed;

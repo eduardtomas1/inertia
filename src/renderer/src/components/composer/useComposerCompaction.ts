@@ -36,20 +36,36 @@ export function useComposerCompaction(options: {
   clearCompactNotice: () => void;
   compact: (command: CompactComposerCommand) => Promise<void>;
 } {
+  const {
+    conversationId,
+    message,
+    canSend,
+    running,
+    blocked,
+    flushDraftPersistence,
+    editorRevisions,
+    conversationIdRef,
+    mountedRef,
+    submittingRef,
+    draftValueRef,
+    textareaRef,
+    setMessage,
+    setSubmitting,
+    onCompact,
+  } = options;
   const [compactNotices, setCompactNotices] = useState<Readonly<
     Record<string, ComposerCompactNotice>
   >>({});
   const operationSequence = useRef(0);
   const activeOperations = useRef(new Map<string, number>());
-  const compactNotice = compactNotices[options.conversationId] ?? null;
+  const compactNotice = compactNotices[conversationId] ?? null;
   const clearCompactNotice = useCallback(() => {
     setCompactNotices((current) => {
-      if (!(options.conversationId in current)) return current;
       const next = { ...current };
-      delete next[options.conversationId];
+      delete next[conversationId];
       return next;
     });
-  }, [options.conversationId]);
+  }, [conversationId]);
   const setCompactNotice = (
     conversationId: string,
     notice: ComposerCompactNotice,
@@ -60,52 +76,52 @@ export function useComposerCompaction(options: {
     }));
   };
   const compact = async (command: CompactComposerCommand): Promise<void> => {
-    const ownerId = options.conversationId;
+    const ownerId = conversationId;
     if (
-      options.submittingRef.current
+      submittingRef.current
       || activeOperations.current.has(ownerId)
     ) return;
-    if (options.running) {
-      setCompactNotice(options.conversationId, {
+    if (running) {
+      setCompactNotice(conversationId, {
         kind: "error",
-        message: "Wait for the current provider turn to finish before compacting this chat.",
+        message: "Wait for the current provider turn to finish.",
       });
       return;
     }
-    if (!options.canSend) {
-      setCompactNotice(options.conversationId, {
+    if (!canSend) {
+      setCompactNotice(conversationId, {
         kind: "error",
-        message: "This chat's provider route is not ready for context compaction.",
+        message: "Provider not ready for compaction.",
       });
       return;
     }
-    if (options.blocked) {
-      setCompactNotice(options.conversationId, {
+    if (blocked) {
+      setCompactNotice(conversationId, {
         kind: "error",
-        message: "Remove attachments, preview or diff context, file references, and selected skills before compacting.",
+        message: "Remove attachments or context before compacting.",
       });
       return;
     }
-    options.flushDraftPersistence();
-    const submittedDraft = options.message;
-    const submittedRevision = options.editorRevisions.current.get(ownerId) ?? 0;
+    flushDraftPersistence();
+    const submittedDraft = message;
+    const submittedRevision = editorRevisions.current.get(ownerId) ?? 0;
     operationSequence.current += 1;
     const operationId = operationSequence.current;
     activeOperations.current.set(ownerId, operationId);
-    options.submittingRef.current = true;
-    options.setSubmitting(true);
+    submittingRef.current = true;
+    setSubmitting(true);
     setCompactNotice(ownerId, {
       kind: "working",
-      message: "Compacting provider context…",
+      message: "Compacting…",
     });
     try {
-      const result = await options.onCompact(command.instruction);
+      const result = await onCompact(command.instruction);
       if (
-        !options.mountedRef.current
+        !mountedRef.current
         || activeOperations.current.get(ownerId) !== operationId
       ) return;
-      const ownsVisibleComposer = options.conversationIdRef.current === ownerId;
-      if ((options.editorRevisions.current.get(ownerId) ?? 0) === submittedRevision) {
+      const ownsVisibleComposer = conversationIdRef.current === ownerId;
+      if ((editorRevisions.current.get(ownerId) ?? 0) === submittedRevision) {
         try {
           const key = `inertia:draft:${ownerId}`;
           if (window.localStorage.getItem(key) === submittedDraft) {
@@ -115,36 +131,36 @@ export function useComposerCompaction(options: {
           // The completed in-memory command can still settle without storage.
         }
         if (ownsVisibleComposer) {
-          options.draftValueRef.current = "";
-          options.setMessage("");
+          draftValueRef.current = "";
+          setMessage("");
         }
       }
       setCompactNotice(ownerId, { kind: "success", message: result.message });
-      if (ownsVisibleComposer) options.textareaRef.current?.focus();
+      if (ownsVisibleComposer) textareaRef.current?.focus();
     } catch (error) {
       if (
-        options.mountedRef.current
+        mountedRef.current
         && activeOperations.current.get(ownerId) === operationId
       ) {
         setCompactNotice(ownerId, {
           kind: "error",
           message: error instanceof Error
             ? error.message
-            : "The provider could not compact this chat.",
+            : "Context compaction failed.",
         });
-        if (options.conversationIdRef.current === ownerId) {
-          options.textareaRef.current?.focus();
+        if (conversationIdRef.current === ownerId) {
+          textareaRef.current?.focus();
         }
       }
     } finally {
       if (activeOperations.current.get(ownerId) === operationId) {
         activeOperations.current.delete(ownerId);
         if (
-          options.mountedRef.current
-          && options.conversationIdRef.current === ownerId
+          mountedRef.current
+          && conversationIdRef.current === ownerId
         ) {
-          options.submittingRef.current = false;
-          options.setSubmitting(false);
+          submittingRef.current = false;
+          setSubmitting(false);
         }
       }
     }

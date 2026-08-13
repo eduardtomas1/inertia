@@ -67,7 +67,7 @@ export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 export const DRAFT_PERSISTENCE_MAX_WAIT_MS = 1_000;
 const ignorePromptPresetMutation = (): Promise<void> => Promise.resolve();
 const unavailableCompaction = (): Promise<never> => Promise.reject(new Error(
-  "Context compaction is unavailable for this chat.",
+  "Compaction unavailable.",
 ));
 
 export const Composer = memo(function Composer({
@@ -481,7 +481,7 @@ export const Composer = memo(function Composer({
     markEditorChanged();
     draftValueRef.current = next;
     persistDraftChange(conversation.id, previous, next);
-    clearCompactNotice();
+    if (compactNotice) clearCompactNotice();
     setMessage(next);
   };
 

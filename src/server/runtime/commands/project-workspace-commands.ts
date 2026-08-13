@@ -266,6 +266,7 @@ export function createProjectWorkspaceCommandHandler(
           },
         );
         let file;
+        let usedFallback = false;
         try {
           file = await readFile(command.payload.path);
         } catch (error) {
@@ -278,6 +279,7 @@ export function createProjectWorkspaceCommandHandler(
             );
           if (!canUseFallback) throw error;
           file = await readFile(fallbackPath);
+          usedFallback = true;
         }
         const authorityRef = await dependencies.secureFileAuthorities.issue(
           socket,
@@ -297,6 +299,7 @@ export function createProjectWorkspaceCommandHandler(
           requestId: command.requestId,
           result: {
             kind: "workspace.file",
+            usedFallback,
             file: {
               path: file.path,
               content: file.content,
@@ -356,6 +359,7 @@ export function createProjectWorkspaceCommandHandler(
           requestId: command.requestId,
           result: {
             kind: "workspace.file",
+            usedFallback: false,
             file: {
               path: file.path,
               content: file.content,

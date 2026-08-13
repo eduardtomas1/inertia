@@ -531,9 +531,10 @@ describe("workspace pane authority", () => {
       });
       const path = literalExists
         ? command.payload.path
-        : command.payload.fallbackPath ?? command.payload.path;
+        : "src/Example.ts";
       return Promise.resolve(result({
         kind: "workspace.file",
+        usedFallback: !literalExists,
         file: {
           path,
           content: Array.from(
@@ -574,13 +575,13 @@ describe("workspace pane authority", () => {
     act(() =>
       hook.result.current.selectWorkspaceFile("src/example.ts:42:7"));
     await waitFor(() => {
-      expect(hook.result.current.filePreview?.path).toBe("src/example.ts");
+      expect(hook.result.current.filePreview?.path).toBe("src/Example.ts");
     });
     expect(requests).toEqual([{
       path: "src/example.ts:42:7",
       fallbackPath: "src/example.ts",
     }]);
-    expect(hook.result.current.selectedFile).toBe("src/example.ts");
+    expect(hook.result.current.selectedFile).toBe("src/Example.ts");
     expect(hook.result.current.selectedFileLocation).toEqual({
       startLine: 42,
       startColumn: 7,
@@ -730,6 +731,7 @@ describe("workspace pane authority", () => {
     await act(async () => {
       settlePreview?.(result({
         kind: "workspace.file",
+        usedFallback: false,
         file: {
           path: "src/example.ts",
           content: "export const value = 1;\n",

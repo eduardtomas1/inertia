@@ -193,6 +193,8 @@ describe("runtime secure-file authority lifetime", () => {
     );
     expect(read.result.kind === "workspace.file" && read.result.file.path)
       .toBe("App.java");
+    expect(read.result.kind === "workspace.file" && read.result.usedFallback)
+      .toBe(true);
   });
 
   it.runIf(process.platform !== "win32")(

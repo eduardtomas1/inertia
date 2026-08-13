@@ -372,6 +372,7 @@ describe("server event request-result trust boundary", () => {
     },
     {
       kind: "workspace.file",
+      usedFallback: false,
       file: {
         path: "src/example.ts",
         content: "export {};",
@@ -588,6 +589,18 @@ describe("server event request-result trust boundary", () => {
     },
     { kind: "workspace.entries", directory: "", entries: [{ path: "x" }], truncated: false },
     { kind: "workspace.file", file: { path: "x", content: 7 } },
+    {
+      kind: "workspace.file",
+      usedFallback: "yes",
+      file: {
+        path: "x",
+        content: "x",
+        truncated: false,
+        language: "text",
+        contentDigest: "sha256:abc",
+        modifiedAt: "2030-01-01T00:00:00.000Z",
+      },
+    },
     { kind: "git.branches", branches: [{ name: "main", current: "yes" }] },
     { kind: "project.actions", actions: [{ id: "test", label: "Test", command: "x", preview: "no" }] },
     { kind: "duo.pending", launchIds: [7], hasMore: false },

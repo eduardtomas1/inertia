@@ -210,7 +210,10 @@ export function useWorkspaceFiles({
     const readFile = async (
       candidate: string,
       fallbackPath?: string,
-    ): Promise<WorkspaceFilePreview> => {
+    ): Promise<{
+      file: WorkspaceFilePreview;
+      usedFallback: boolean;
+    }> => {
       const event = resultEvent(await request({
         type: "workspace.file.read",
         payload: {
@@ -223,7 +226,10 @@ export function useWorkspaceFiles({
       if (event.result.kind !== "workspace.file") {
         throw new Error("Unexpected file response.");
       }
-      return event.result.file;
+      return {
+        file: event.result.file,
+        usedFallback: event.result.usedFallback,
+      };
     };
     const readReference = async (): Promise<{
       file: WorkspaceFilePreview;
@@ -232,13 +238,12 @@ export function useWorkspaceFiles({
       const fallback = requestedLocation || literalPath
         ? null
         : workspaceFileReference(path);
-      const file = await readFile(path, fallback?.path);
-      const usedFallback = fallback && file.path === fallback.path;
+      const { file, usedFallback } = await readFile(path, fallback?.path);
       return {
         file,
         ...(requestedLocation
           ? { location: requestedLocation }
-          : usedFallback
+          : usedFallback && fallback
             ? { location: fallback.location }
             : {}),
       };

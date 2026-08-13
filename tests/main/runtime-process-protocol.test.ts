@@ -724,10 +724,12 @@ describe("runtime process protocol", () => {
   it("strictly validates opaque attachment requests and trusted descriptors", () => {
     const requestId = crypto.randomUUID();
     const attachmentId = crypto.randomUUID();
+    const handoffId = crypto.randomUUID();
     const request = {
       type: "runtime.attachment-request",
       requestId,
       attachmentId,
+      handoffId,
     };
     const attachment = {
       id: attachmentId,

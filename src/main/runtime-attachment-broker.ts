@@ -21,6 +21,7 @@ type AttachmentEvent = Extract<
 export interface RuntimeAttachmentBroker {
   resolve(
     attachmentId: string,
+    handoffId: string,
     signal?: AbortSignal,
   ): Promise<TrustedRuntimeAttachment | null>;
   release(
@@ -232,6 +233,7 @@ export class RuntimeAttachmentBrokerCoordinator<
     try {
       const attachment = await this.options.broker!.resolve(
         event.attachmentId,
+        event.handoffId,
         pending.controller.signal,
       );
       if (this.pending.get(event.requestId) !== pending) return;

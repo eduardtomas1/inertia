@@ -26,6 +26,7 @@ import {
   DRAFT_PERSISTENCE_MAX_WAIT_MS,
 } from "../../src/renderer/src/components/composer/Composer";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
+import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
 
 const provider: ProviderInfo = {
@@ -487,6 +488,81 @@ describe("composer asynchronous ownership", () => {
 
     await rejection;
     expect(setActionError).toHaveBeenCalledWith("Runtime rejected access");
+  });
+
+  it("prepares and settles the exact attachment handoff around message send", async () => {
+    const prepareAttachmentHandoff = vi.fn(async () => undefined);
+    const finishAttachmentHandoff = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { prepareAttachmentHandoff, finishAttachmentHandoff },
+    });
+    const sendCommand = vi.fn(async (command) => ({
+      type: "request.result" as const,
+      requestId: command.requestId,
+      result: {
+        kind: "message.accepted" as const,
+        conversationId: "19191919-1919-4919-8919-191919191919",
+        turnId: "29292929-2929-4929-8929-292929292929",
+        userMessageId: "39393939-3939-4939-8939-393939393939",
+        disposition: "new-turn" as const,
+      },
+    }));
+    const hook = renderHook(() => useAppRuntimeActions({
+      sendCommand,
+      refreshDetail: vi.fn(),
+      setBusyAction: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+    const selected = attachment("49494949-4949-4949-8949-494949494949");
+
+    await act(async () => {
+      await hook.result.current.sendMessageToConversation(
+        "19191919-1919-4919-8919-191919191919",
+        "Inspect this image.",
+        [selected],
+      );
+    });
+
+    const sent = sendCommand.mock.calls[0]![0];
+    expect(prepareAttachmentHandoff).toHaveBeenCalledWith({
+      requestId: sent.requestId,
+      attachmentIds: [selected.id],
+    });
+    expect(sendCommand).toHaveBeenCalledAfter(prepareAttachmentHandoff);
+    expect(finishAttachmentHandoff).toHaveBeenCalledWith(sent.requestId);
+  });
+
+  it.each([
+    { delivery: "rejected" as const, finishes: true },
+    { delivery: "ambiguous" as const, finishes: false },
+  ])("settles a $delivery attachment send handoff truthfully", async ({
+    delivery,
+    finishes,
+  }) => {
+    const prepareAttachmentHandoff = vi.fn(async () => undefined);
+    const finishAttachmentHandoff = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { prepareAttachmentHandoff, finishAttachmentHandoff },
+    });
+    const hook = renderHook(() => useAppRuntimeActions({
+      sendCommand: vi.fn(async () => {
+        throw new RuntimeCommandError("send failed", delivery);
+      }),
+      refreshDetail: vi.fn(),
+      setBusyAction: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    await expect(hook.result.current.sendMessageToConversation(
+      "19191919-1919-4919-8919-191919191919",
+      "Inspect this image.",
+      [attachment("49494949-4949-4949-8949-494949494949")],
+    )).rejects.toThrow("send failed");
+
+    expect(prepareAttachmentHandoff).toHaveBeenCalledOnce();
+    expect(finishAttachmentHandoff).toHaveBeenCalledTimes(finishes ? 1 : 0);
   });
 
   it("keeps access changes pending until the runtime acknowledges them", async () => {

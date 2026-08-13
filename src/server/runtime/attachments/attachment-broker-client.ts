@@ -66,6 +66,7 @@ export class RuntimeAttachmentBrokerClient implements RuntimeAttachmentBroker {
 
   resolve(
     attachmentId: string,
+    handoffId: string,
     signal?: AbortSignal,
   ): Promise<TrustedRuntimeAttachment | null> {
     if (
@@ -126,6 +127,7 @@ export class RuntimeAttachmentBrokerClient implements RuntimeAttachmentBroker {
           type: "runtime.attachment-request",
           requestId,
           attachmentId,
+          handoffId,
         });
         pending.posted = true;
       } catch {

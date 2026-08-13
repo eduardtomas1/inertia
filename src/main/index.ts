@@ -22,9 +22,7 @@ import {
   parseBackendCredentialProfileRequest,
   parseSetBackendCredentialRequest,
 } from "../shared/backend-credentials.js";
-import {
-  MAX_CHAT_ATTACHMENTS,
-} from "../shared/attachments.js";
+import { MAX_CHAT_ATTACHMENTS } from "../shared/attachments.js";
 import {
   builtInKimiClaudeBackendProfile,
   KIMI_CLAUDE_BUILTIN_PROFILE_ID,
@@ -35,9 +33,7 @@ import {
   parseDesktopNotificationRequest,
   parseOpenProjectPathRequest,
 } from "../shared/desktop.js";
-import {
-  safeHttpUrl,
-} from "../shared/preview-url.js";
+import { safeHttpUrl } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import {
   validateSelectedAttachmentCount,
@@ -52,6 +48,7 @@ import {
   removeAttachmentStorageSession,
   type AttachmentStorageReservation,
 } from "./attachment-registry.js";
+import { registerAttachmentLifecycleIpc } from "./attachment-ipc.js";
 import {
   closeConversationAttachmentAccess,
   type ConversationAttachmentAccess,
@@ -68,10 +65,7 @@ import {
   backendSecretReferenceForProfile,
 } from "./credential-vault.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
-import {
-  PreviewBroker,
-  hardenDesktopSession,
-} from "./preview-broker.js";
+import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import { stopRuntimeAndPrivateConnect } from "./runtime-shutdown-coordination.js";
@@ -90,7 +84,6 @@ import {
   type WindowThemePreference,
   writeWindowThemePreference,
 } from "./window-appearance.js";
-
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
   runtimeReady: "inertia:runtime-ready",
@@ -104,6 +97,8 @@ const IPC = {
   checkAppUpdate: "inertia:check-app-update",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
+  prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
+  finishAttachmentHandoff: "inertia:finish-attachment-handoff",
   releaseAttachment: "inertia:release-attachment",
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
@@ -125,7 +120,6 @@ const IPC = {
 
 const APP_SCHEME = "inertia";
 const APP_HOST = "bundle";
-
 protocol.registerSchemesAsPrivileged([
   {
     scheme: APP_SCHEME,
@@ -677,14 +671,15 @@ function registerIpcHandlers(): void {
     return await attachmentRegistry().import(value);
   });
 
-  ipcMain.handle(IPC.releaseAttachment, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
-    const [value] = args;
-    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
-      throw new Error("Invalid attachment.");
-    }
-    if (runtimeSupervisor?.deferAttachmentRelease(value)) return;
-    await attachmentRegistry().release(value);
+  registerAttachmentLifecycleIpc({
+    channels: {
+      prepare: IPC.prepareAttachmentHandoff,
+      finish: IPC.finishAttachmentHandoff,
+      release: IPC.releaseAttachment,
+    },
+    assertTrusted: assertTrustedIpc,
+    registry: attachmentRegistry,
+    supervisor: () => runtimeSupervisor,
   });
 
   ipcMain.handle(IPC.openAttachmentExternally, async (event, ...args) => {
@@ -1028,8 +1023,12 @@ async function bootstrap(): Promise<void> {
   runtimeSupervisor = new RuntimeSupervisor({
     systemBootId: bootstrapSafety.systemBootId,
     attachmentBroker: {
-      resolve: (attachmentId, signal) =>
-        attachmentRegistry().resolve(attachmentId, signal),
+      resolve: (attachmentId, handoffId, signal) =>
+        attachmentRegistry().resolveForRuntime(
+          attachmentId,
+          handoffId,
+          signal,
+        ),
       release: (attachmentId) =>
         attachmentRegistry().release(attachmentId),
     },

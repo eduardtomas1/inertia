@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  constants,
-} from "node:fs";
+import { constants } from "node:fs";
 import {
   type FileHandle,
   lstat,
@@ -24,7 +22,10 @@ import {
   sep,
 } from "node:path";
 
-import { MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from "../shared/attachments.js";
+import {
+  MAX_CHAT_ATTACHMENTS,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+} from "../shared/attachments.js";
 import type { ChatAttachment } from "../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments.js";
 import {
@@ -36,6 +37,7 @@ const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 const ATTACHMENT_RELEASE_ATTEMPTS = 3;
 const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
+const ATTACHMENT_HANDOFF_TIMEOUT_MS = 210_000;
 const ATTACHMENT_SESSION_PREFIX = "session-";
 const ATTACHMENT_SESSION_DIRECTORY =
   /^session-[A-Za-z0-9_-]{6}$/u;
@@ -47,9 +49,22 @@ const TRANSIENT_UNLINK_CODES = new Set([
 ]);
 const OWNED_ATTACHMENT_FILE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json)$/iu;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
   readonly extension: string;
+}
+
+interface PendingAttachmentRelease {
+  readonly promise: Promise<boolean>;
+  begin(): boolean;
+  cancel(): boolean;
+}
+
+interface PendingAttachmentHandoff {
+  readonly attachmentIds: Set<string>;
+  readonly timer: ReturnType<typeof setTimeout>;
 }
 
 export interface ValidatedAttachmentPreview {
@@ -406,7 +421,9 @@ function fullReservation(): AttachmentStorageReservation {
 
 export class AttachmentRegistry {
   private readonly records = new Map<string, AttachmentRegistryRecord>();
-  private readonly releases = new Map<string, Promise<boolean>>();
+  private readonly releases = new Map<string, PendingAttachmentRelease>();
+  private readonly handoffs = new Map<string, PendingAttachmentHandoff>();
+  private readonly attachmentHandoffs = new Map<string, Set<string>>();
   private readonly revokedAttachmentIds = new Set<string>();
   private readonly maxRecords: number;
   private readonly maxBytes: number;
@@ -449,6 +466,80 @@ export class AttachmentRegistry {
         0,
       ),
     };
+  }
+
+  async prepareHandoff(
+    handoffId: string,
+    attachmentIds: readonly string[],
+    runtimeOwnsAttachment: (attachmentId: string) => boolean,
+  ): Promise<void> {
+    if (
+      this.disposed
+      || !UUID_PATTERN.test(handoffId)
+      || attachmentIds.length < 1
+      || attachmentIds.length > MAX_CHAT_ATTACHMENTS
+      || new Set(attachmentIds).size !== attachmentIds.length
+      || attachmentIds.some((id) => !UUID_PATTERN.test(id))
+    ) {
+      throw new Error("Invalid attachment handoff.");
+    }
+    await this.importTail;
+    if (this.disposed || this.handoffs.has(handoffId)) {
+      throw new Error("Attachment handoff is unavailable.");
+    }
+    // This check and the supersession below intentionally remain synchronous
+    // after import serialization. Runtime claims are recorded synchronously in
+    // the main-process coordinator, so the event loop orders an old claim
+    // either before this check (and rejects the retry) or after supersession
+    // (and the old token can no longer resolve).
+    for (const id of attachmentIds) {
+      if (
+        !this.records.has(id)
+        || this.revokedAttachmentIds.has(id)
+        || this.releases.has(id)
+        || runtimeOwnsAttachment(id)
+      ) {
+        throw new Error("Attachment handoff is unavailable.");
+      }
+    }
+    const supersededHandoffIds = new Set(attachmentIds.flatMap((id) =>
+      [...this.attachmentHandoffs.get(id) ?? []]));
+    for (const oldHandoffId of supersededHandoffIds) {
+      const oldHandoff = this.handoffs.get(oldHandoffId);
+      if ([...(oldHandoff?.attachmentIds ?? [])].some(runtimeOwnsAttachment)) {
+        throw new Error("Attachment handoff is unavailable.");
+      }
+    }
+    // A retry after ambiguous transport delivery is the renderer's explicit
+    // reconciliation signal. Once no part of an intersecting old handoff is
+    // runtime-owned, invalidate its entire token before installing the new
+    // one; a late old resolve will then fail closed.
+    this.retireAttachmentHandoffs(attachmentIds);
+    const handoff: PendingAttachmentHandoff = {
+      attachmentIds: new Set(attachmentIds),
+      timer: setTimeout(
+        () => this.finishHandoff(handoffId),
+        ATTACHMENT_HANDOFF_TIMEOUT_MS,
+      ),
+    };
+    handoff.timer.unref();
+    this.handoffs.set(handoffId, handoff);
+    for (const id of attachmentIds) {
+      this.attachmentHandoffs.set(id, new Set([handoffId]));
+    }
+  }
+
+  finishHandoff(handoffId: string): void {
+    const handoff = this.handoffs.get(handoffId);
+    if (!handoff) return;
+    this.handoffs.delete(handoffId);
+    clearTimeout(handoff.timer);
+    for (const id of handoff.attachmentIds) {
+      this.detachHandoffAttachment(handoffId, id);
+      if (!this.attachmentHandoffs.has(id)) {
+        this.releases.get(id)?.begin();
+      }
+    }
   }
 
   async import(values: readonly unknown[]): Promise<ChatAttachment[]> {
@@ -538,6 +629,21 @@ export class AttachmentRegistry {
     return (await this.readValidated(id, signal))?.attachment ?? null;
   }
 
+  /**
+   * Claims a capability for exactly one renderer-prepared message send. The
+   * send request UUID binds the cross-IPC handoff, so an unrelated runtime
+   * resolve cannot revive a genuine renderer deletion.
+   */
+  async resolveForRuntime(
+    id: string,
+    handoffId: string,
+    signal?: AbortSignal,
+  ): Promise<TrustedRuntimeAttachment | null> {
+    assertNotAborted(signal);
+    if (!this.consumeHandoff(handoffId, id)) return null;
+    return await this.resolve(id, signal);
+  }
+
   private async readValidated(
     id: string,
     signal?: AbortSignal,
@@ -618,15 +724,51 @@ export class AttachmentRegistry {
   }
 
   async release(id: string): Promise<boolean> {
+    return await this.startRelease(id, true);
+  }
+
+  async releaseFromRenderer(id: string): Promise<boolean> {
+    return await this.startRelease(id, !this.attachmentHandoffs.has(id));
+  }
+
+  private async startRelease(
+    id: string,
+    beginImmediately: boolean,
+  ): Promise<boolean> {
     const pending = this.releases.get(id);
-    if (pending) return await pending;
+    if (pending) {
+      if (beginImmediately) pending.begin();
+      return await pending.promise;
+    }
     const record = this.records.get(id);
     if (!record) return false;
     this.revokedAttachmentIds.add(id);
-    const release = this.releaseRecord(record);
+    let beginRelease = (): boolean => false;
+    let cancelRelease = (): boolean => false;
+    const releasePromise = new Promise<boolean>((resolveRelease, rejectRelease) => {
+      let settled = false;
+      beginRelease = () => {
+        if (settled) return false;
+        settled = true;
+        void this.releaseRecord(record).then(resolveRelease, rejectRelease);
+        return true;
+      };
+      cancelRelease = () => {
+        if (settled) return false;
+        settled = true;
+        resolveRelease(false);
+        return true;
+      };
+    });
+    const release: PendingAttachmentRelease = {
+      promise: releasePromise,
+      begin: beginRelease,
+      cancel: cancelRelease,
+    };
     this.releases.set(id, release);
+    if (beginImmediately) release.begin();
     try {
-      return await release;
+      return await release.promise;
     } finally {
       if (this.releases.get(id) === release) {
         this.releases.delete(id);
@@ -643,12 +785,78 @@ export class AttachmentRegistry {
 
   private async disposeExclusive(): Promise<void> {
     await this.importTail;
-    await Promise.allSettled(this.releases.values());
+    for (const handoff of this.handoffs.values()) clearTimeout(handoff.timer);
+    this.handoffs.clear();
+    this.attachmentHandoffs.clear();
+    const releases = [...this.releases.values()];
+    for (const release of releases) release.cancel();
+    await Promise.allSettled(releases.map(({ promise }) => promise));
     const records = [...this.records.values()];
     this.records.clear();
     this.revokedAttachmentIds.clear();
     await Promise.all(records.map(({ path }) =>
       unlink(path).catch(() => undefined)));
+  }
+
+  private cancelPendingRelease(id: string): boolean {
+    const pending = this.releases.get(id);
+    if (!pending || !pending.cancel()) return false;
+    if (this.releases.get(id) === pending) this.releases.delete(id);
+    this.revokedAttachmentIds.delete(id);
+    return true;
+  }
+
+  private consumeHandoff(handoffId: string, attachmentId: string): boolean {
+    const handoff = this.handoffs.get(handoffId);
+    if (!handoff?.attachmentIds.has(attachmentId)) return false;
+    const pending = this.releases.get(attachmentId);
+    if (pending && !this.cancelPendingRelease(attachmentId)) return false;
+    handoff.attachmentIds.delete(attachmentId);
+    this.detachHandoffAttachment(handoffId, attachmentId);
+    if (handoff.attachmentIds.size === 0) {
+      this.handoffs.delete(handoffId);
+      clearTimeout(handoff.timer);
+    }
+    return true;
+  }
+
+  private detachHandoffAttachment(
+    handoffId: string,
+    attachmentId: string,
+  ): void {
+    const handoffs = this.attachmentHandoffs.get(attachmentId);
+    handoffs?.delete(handoffId);
+    if (handoffs?.size === 0) this.attachmentHandoffs.delete(attachmentId);
+  }
+
+  private retireAttachmentHandoffs(attachmentIds: readonly string[]): void {
+    const handoffIds = new Set(attachmentIds.flatMap((attachmentId) =>
+      [...this.attachmentHandoffs.get(attachmentId) ?? []]));
+    for (const handoffId of handoffIds) {
+      const handoff = this.handoffs.get(handoffId);
+      if (!handoff) continue;
+      this.handoffs.delete(handoffId);
+      clearTimeout(handoff.timer);
+      for (const attachmentId of handoff.attachmentIds) {
+        this.detachHandoffAttachment(handoffId, attachmentId);
+        if (!this.attachmentHandoffs.has(attachmentId)) {
+          this.releases.get(attachmentId)?.begin();
+        }
+      }
+    }
+  }
+
+  private dropAttachmentHandoffs(attachmentId: string): void {
+    const handoffIds = this.attachmentHandoffs.get(attachmentId);
+    this.attachmentHandoffs.delete(attachmentId);
+    for (const handoffId of handoffIds ?? []) {
+      const handoff = this.handoffs.get(handoffId);
+      handoff?.attachmentIds.delete(attachmentId);
+      if (handoff?.attachmentIds.size === 0) {
+        this.handoffs.delete(handoffId);
+        clearTimeout(handoff.timer);
+      }
+    }
   }
 
   private async releaseRecord(
@@ -658,6 +866,7 @@ export class AttachmentRegistry {
     if (this.records.get(record.id) === record) {
       this.records.delete(record.id);
     }
+    this.dropAttachmentHandoffs(record.id);
     this.revokedAttachmentIds.delete(record.id);
     return true;
   }

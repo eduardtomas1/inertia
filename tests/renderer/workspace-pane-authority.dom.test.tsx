@@ -450,6 +450,64 @@ describe("workspace pane authority", () => {
     expect(openFile).toHaveBeenCalledWith("README");
   });
 
+  it("does not finish opening a file after its workspace owner changes", async () => {
+    let rejectInspection: ((reason?: unknown) => void) | undefined;
+    let current = true;
+    const openDirectory = vi.fn(async () => undefined);
+    const openFile = vi.fn();
+    const pending = openWorkspaceEntry("src/secret.ts:12", {
+      inspectDirectory: () => new Promise((_resolve, reject) => {
+        rejectInspection = reject;
+      }),
+      openDirectory,
+      openFile,
+      isCurrent: () => current,
+    }, { startLine: 12, endLine: 12 });
+
+    current = false;
+    rejectInspection?.(new Error("not a directory"));
+
+    await expect(pending).resolves.toBe("stale");
+    expect(openDirectory).not.toHaveBeenCalled();
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("ignores a file-selection callback captured by an old owner", async () => {
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "project.actions") {
+        return Promise.resolve(result({
+          kind: "project.actions",
+          actions: [],
+        }));
+      }
+      return Promise.reject(new Error("An old owner tried to read a file."));
+    });
+    const hook = renderHook((owner: {
+      project: Project;
+      conversation: Conversation;
+    }) => useWorkspaceFiles({
+      ...owner,
+      enabled: true,
+      loadOnMount: false,
+      online: true,
+      request,
+      setActionError: vi.fn(),
+    }), {
+      initialProps: { project: alpha, conversation: alphaChat },
+    });
+    const staleSelection = hook.result.current.selectWorkspaceFile;
+
+    hook.rerender({ project: beta, conversation: betaChat });
+    act(() => staleSelection("src/private.ts:12"));
+    await act(async () => await Promise.resolve());
+
+    expect(request.mock.calls.some(
+      ([command]) => command.type === "workspace.file.read",
+    )).toBe(false);
+    expect(hook.result.current.selectedFile).toBeNull();
+    expect(hook.result.current.filePreview).toBeNull();
+  });
+
   it("opens literal colon filenames before retrying a Codex source location", async () => {
     const requests: Array<{ path: string; fallbackPath?: string }> = [];
     let literalExists = true;
@@ -528,6 +586,43 @@ describe("workspace pane authority", () => {
       startColumn: 7,
       endLine: 42,
     });
+  });
+
+  it("does not reinterpret an encoded literal colon as a source location", async () => {
+    const paths: Array<{ path: string; fallbackPath?: string }> = [];
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "project.actions") {
+        return Promise.resolve(result({ kind: "project.actions", actions: [] }));
+      }
+      if (command.type !== "workspace.file.read") {
+        return Promise.reject(new Error("Unexpected command"));
+      }
+      paths.push({
+        path: command.payload.path,
+        ...(command.payload.fallbackPath
+          ? { fallbackPath: command.payload.fallbackPath }
+          : {}),
+      });
+      return Promise.reject(new Error("Literal file not found"));
+    });
+    const hook = renderHook(() => useWorkspaceFiles({
+      project: alpha,
+      conversation: alphaChat,
+      enabled: true,
+      loadOnMount: false,
+      online: true,
+      request,
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.selectWorkspaceFile(
+      "src/Service.java:42",
+      undefined,
+      true,
+    ));
+    await waitFor(() => expect(hook.result.current.filePreviewError)
+      .toBe("Literal file not found"));
+    expect(paths).toEqual([{ path: "src/Service.java:42" }]);
   });
 
   it("does not let delayed project actions replace the new owner's actions", async () => {

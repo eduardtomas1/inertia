@@ -60,6 +60,9 @@ describe("response Markdown", () => {
     expect(resolveResponseLink("/work/project", "app.ts:42")).toEqual({ kind: "project", relativePath: "app.ts:42", action: "reveal" });
     expect(resolveResponseLink("/work/project", "src/app.ts:42:7")).toEqual({ kind: "project", relativePath: "src/app.ts:42:7", action: "reveal" });
     expect(resolveResponseLink("/work/project", "README:42")).toEqual({ kind: "project", relativePath: "README:42", action: "reveal" });
+    expect(resolveResponseLink("/work/project", "src/Service%23L12")).toEqual({ kind: "project", relativePath: "src/Service#L12", action: "reveal", literalPath: true });
+    expect(resolveResponseLink("/work/project", "src/Service.java%3A42")).toEqual({ kind: "project", relativePath: "src/Service.java:42", action: "reveal", literalPath: true });
+    expect(resolveResponseLink("/work/project", "src/why%3F.java")).toEqual({ kind: "project", relativePath: "src/why?.java", action: "reveal", literalPath: true });
     expect(resolveResponseLink("/work/project", "../secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "%2e%2e/%2e%2e/secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "src/%00secret.txt")).toEqual({ kind: "unsafe" });
@@ -101,6 +104,16 @@ describe("response Markdown", () => {
     ].join("\n"));
     expect(mismatchedFence).toContain('data-language-family="java"');
     expect(mismatchedFence).toContain("language-java");
+
+    const unsupportedFileGrammar = render([
+      "```typescript file=src/main/Main.kt",
+      'fun main() = println("hello")',
+      "```",
+    ].join("\n"));
+    expect(unsupportedFileGrammar).toContain('data-language-family="java"');
+    expect(unsupportedFileGrammar).toContain("language-kotlin");
+    expect(unsupportedFileGrammar).not.toContain("language-typescript");
+    expect(unsupportedFileGrammar).not.toContain('class="hljs');
   });
 
   it("renders editorial quote, inline code, image, and long-link semantics without weakening sanitization", () => {

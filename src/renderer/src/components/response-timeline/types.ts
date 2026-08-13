@@ -65,6 +65,7 @@ export interface ResponseTimelineProps {
   onOpenTurnFile: (
     path: string,
     location?: WorkspaceFileLocation,
+    literalPath?: boolean,
   ) => void;
   onStop: () => void;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;

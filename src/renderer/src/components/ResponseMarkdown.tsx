@@ -89,6 +89,7 @@ type ResponseMarkdownProps = {
   onOpenProjectFile?: (
     path: string,
     location?: WorkspaceFileLocation,
+    literalPath?: boolean,
   ) => void;
 };
 
@@ -99,6 +100,7 @@ type ProjectLink =
       relativePath: string;
       action: "reveal";
       location?: WorkspaceFileLocation;
+      literalPath?: boolean;
     }
   | { kind: "anchor"; href: string }
   | { kind: "unsafe" };
@@ -118,9 +120,10 @@ function preserveCodeMeta() {
         const fallback = workspaceFileReferenceFallback(node.url);
         if (
           /^[a-z]:[\\/]/iu.test(node.url)
-          || (fallback !== null && !/[\\/]/u.test(fallback))
         ) {
           node.url = node.url.replace(":", "%3A");
+        } else if (fallback !== null && !/[\\/]/u.test(fallback)) {
+          node.url = `./${node.url}`;
         }
       }
       if (node.type === "code" && typeof node.meta === "string" && node.meta.trim()) {
@@ -185,6 +188,10 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
     ) return { kind: "unsafe" };
   }
   const hashIndex = href.indexOf("#");
+  const rawPath = href.slice(0, hashIndex >= 0 ? hashIndex : undefined)
+    .split("?", 1)[0]!;
+  const encodedPathDelimiter = !/^[a-z]%3a[\\/]/iu.test(rawPath)
+    && /%(?:23|3a|3f)/iu.test(rawPath);
   const location = hashIndex >= 0
     ? workspaceFileLocationFromFragment(href.slice(hashIndex))
     : null;
@@ -221,6 +228,7 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
         relativePath,
         action: "reveal",
         ...(location ? { location } : {}),
+        ...(encodedPathDelimiter ? { literalPath: true } : {}),
       }
     : { kind: "unsafe" };
 }
@@ -401,6 +409,7 @@ function CodeBlock({
   onOpenProjectFile?: (
     path: string,
     location?: WorkspaceFileLocation,
+    literalPath?: boolean,
   ) => void;
 }): React.JSX.Element {
   const child = Children.toArray(children)[0];
@@ -464,7 +473,13 @@ function CodeBlock({
                 title={`Open ${fileTarget.relativePath} in Files`}
                 data-language-family={sourceLanguage.family}
                 onClick={() => {
-                  if (fileTarget.location) {
+                  if (fileTarget.literalPath) {
+                    onOpenProjectFile(
+                      fileTarget.relativePath,
+                      fileTarget.location ?? undefined,
+                      true,
+                    );
+                  } else if (fileTarget.location) {
                     onOpenProjectFile(
                       fileTarget.relativePath,
                       fileTarget.location,
@@ -519,6 +534,7 @@ interface MarkdownRenderContextValue {
   onOpenProjectFile?: (
     path: string,
     location?: WorkspaceFileLocation,
+    literalPath?: boolean,
   ) => void;
 }
 
@@ -558,7 +574,13 @@ function MarkdownLink({
     return <a {...props} className={projectLinkClass} data-language-family={language.family} href={href} onClick={(event) => {
       event.preventDefault();
       if (onOpenProjectFile && !responseLinkHasDirectoryHint(href)) {
-        if (target.location) {
+        if (target.literalPath) {
+          onOpenProjectFile(
+            target.relativePath,
+            target.location ?? undefined,
+            true,
+          );
+        } else if (target.location) {
           onOpenProjectFile(target.relativePath, target.location);
         } else {
           onOpenProjectFile(target.relativePath);

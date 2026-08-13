@@ -4,6 +4,50 @@ import { describe, expect, it, vi } from "vitest";
 import { ResponseMarkdown } from "../../src/renderer/src/components/ResponseMarkdown";
 
 describe("ResponseMarkdown project files", () => {
+  it("keeps encoded delimiters as literal project filenames", () => {
+    const onOpenProjectFile = vi.fn();
+    render(
+      <ResponseMarkdown
+        content={[
+          "[literal hash](src/Service%23L12)",
+          "[literal colon](src/Service.java%3A42)",
+          "[literal question](src/why%3F.java)",
+          "[extensionless source](Dockerfile:42)",
+        ].join("\n\n")}
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+        onOpenProjectFile={onOpenProjectFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "literal hash" }));
+    fireEvent.click(screen.getByRole("link", { name: "literal colon" }));
+    fireEvent.click(screen.getByRole("link", { name: "literal question" }));
+    fireEvent.click(screen.getByRole("link", {
+      name: "extensionless source",
+    }));
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(
+      1,
+      "src/Service#L12",
+      undefined,
+      true,
+    );
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(
+      2,
+      "src/Service.java:42",
+      undefined,
+      true,
+    );
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(
+      3,
+      "src/why?.java",
+      undefined,
+      true,
+    );
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(4, "Dockerfile:42");
+  });
+
   it("preserves Windows drive and top-level source links through Markdown", () => {
     const onOpenProjectFile = vi.fn();
     render(

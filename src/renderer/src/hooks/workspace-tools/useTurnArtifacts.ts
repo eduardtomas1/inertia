@@ -22,6 +22,7 @@ interface TurnArtifactsOptions {
   openWorkspaceFile: (
     path: string,
     location?: WorkspaceFileLocation,
+    literalPath?: boolean,
   ) => void;
   loadGit: LoadWorkspaceGit;
 }
@@ -143,9 +144,12 @@ export function useTurnArtifacts({
   const openTurnFile = useCallback((
     path: string,
     location?: WorkspaceFileLocation,
+    literalPath?: boolean,
   ) => {
     if (!project || !conversation) return;
-    if (location) openWorkspaceFile(path, location);
+    if (location || literalPath) {
+      openWorkspaceFile(path, location, literalPath);
+    }
     else openWorkspaceFile(path);
   }, [conversation, openWorkspaceFile, project]);
 

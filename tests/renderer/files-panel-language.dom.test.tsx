@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { FilesPanel } from "../../src/renderer/src/components/FilesPanel";
@@ -14,6 +14,18 @@ const JAVA_CONTENT = [
 
 describe("FilesPanel language presentation", () => {
   it("highlights Java and focuses a validated source range", async () => {
+    let resizeCallback: ResizeObserverCallback | null = null;
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+
+      observe(): void {}
+      disconnect(): void {
+        disconnect();
+      }
+    });
     const scrollIntoView = vi.spyOn(HTMLElement.prototype, "scrollIntoView")
       .mockImplementation(() => undefined);
     const { container } = render(
@@ -67,7 +79,15 @@ describe("FilesPanel language presentation", () => {
       block: "center",
       inline: "nearest",
     });
+    fireEvent.wheel(screen.getByLabelText(
+      "Contents of src/OrderService.java",
+    ));
+    expect(disconnect).toHaveBeenCalled();
+    scrollIntoView.mockClear();
+    act(() => resizeCallback?.([], {} as ResizeObserver));
+    expect(scrollIntoView).not.toHaveBeenCalled();
     scrollIntoView.mockRestore();
+    vi.unstubAllGlobals();
   });
 
   it("keeps an unknown extension neutral instead of trusting protocol metadata", () => {

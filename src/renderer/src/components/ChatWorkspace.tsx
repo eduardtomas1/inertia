@@ -180,6 +180,7 @@ type ChatWorkspaceProps = {
   onOpenTurnFile: (
     path: string,
     location?: WorkspaceFileLocation,
+    literalPath?: boolean,
   ) => void;
   onClearPromptContext?: () => void;
   onLatestContentVisibilityChange?: (visible: boolean) => void;

@@ -185,10 +185,14 @@ export function FilesPanel({
   useEffect(() => {
     if (!previewPath || !selectedLocation) return;
     let frame: number | null = null;
+    let observer: ResizeObserver | null = null;
+    let userMoved = false;
     const reveal = (moveFocus: boolean): void => {
+      if (userMoved) return;
       if (frame !== null) window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         frame = null;
+        if (userMoved) return;
         const line = previewLineRefs.current.get(selectedLocation.startLine);
         if (!line) return;
         line.scrollIntoView({ block: "center", inline: "nearest" });
@@ -196,13 +200,32 @@ export function FilesPanel({
       });
     };
     reveal(true);
-    const observer = typeof ResizeObserver === "undefined"
+    observer = typeof ResizeObserver === "undefined"
       ? null
       : new ResizeObserver(() => reveal(false));
-    if (previewCodeRef.current) observer?.observe(previewCodeRef.current);
+    const previewCode = previewCodeRef.current;
+    const stopRecentering = (): void => {
+      userMoved = true;
+      observer?.disconnect();
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
+    };
+    if (previewCode) {
+      observer?.observe(previewCode);
+      previewCode.addEventListener("keydown", stopRecentering, { once: true });
+      previewCode.addEventListener("pointerdown", stopRecentering, { once: true });
+      previewCode.addEventListener("touchstart", stopRecentering, { once: true });
+      previewCode.addEventListener("wheel", stopRecentering, { once: true });
+    }
     return () => {
       observer?.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
+      previewCode?.removeEventListener("keydown", stopRecentering);
+      previewCode?.removeEventListener("pointerdown", stopRecentering);
+      previewCode?.removeEventListener("touchstart", stopRecentering);
+      previewCode?.removeEventListener("wheel", stopRecentering);
     };
   }, [previewPath, selectedLocation]);
 

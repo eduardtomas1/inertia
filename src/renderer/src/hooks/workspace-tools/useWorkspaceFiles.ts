@@ -63,6 +63,9 @@ export function useWorkspaceFiles({
   const filePreviewRequestGenerationRef = useRef(0);
   const actionsRequestGenerationRef = useRef(0);
   const automaticallyLoadedAuthorityRef = useRef<string | null>(null);
+  const authority = `${enabled ? "enabled" : "disabled"}\0${project?.id ?? ""}\0${conversation?.id ?? ""}`;
+  const authorityRef = useRef(authority);
+  authorityRef.current = authority;
   const mentions = useWorkspaceMentions({
     enabled,
     project,
@@ -195,8 +198,9 @@ export function useWorkspaceFiles({
   const selectWorkspaceFile = useCallback((
     path: string,
     requestedLocation?: WorkspaceFileLocation,
+    literalPath = false,
   ) => {
-    if (!project) return;
+    if (!project || authorityRef.current !== authority) return;
     const generation = ++filePreviewRequestGenerationRef.current;
     setSelectedFile(path);
     setSelectedFileLocation(null);
@@ -225,7 +229,9 @@ export function useWorkspaceFiles({
       file: WorkspaceFilePreview;
       location?: WorkspaceFileLocation;
     }> => {
-      const fallback = requestedLocation ? null : workspaceFileReference(path);
+      const fallback = requestedLocation || literalPath
+        ? null
+        : workspaceFileReference(path);
       const file = await readFile(path, fallback?.path);
       const usedFallback = fallback && file.path === fallback.path;
       return {
@@ -240,6 +246,7 @@ export function useWorkspaceFiles({
     void readReference().then(({ file, location }) => {
       if (
         filePreviewRequestGenerationRef.current === generation
+        && authorityRef.current === authority
       ) {
         setSelectedFile(file.path);
         setSelectedFileLocation(
@@ -248,18 +255,24 @@ export function useWorkspaceFiles({
         setFilePreview(file);
       }
     }).catch((error) => {
-      if (filePreviewRequestGenerationRef.current !== generation) return;
+      if (
+        filePreviewRequestGenerationRef.current !== generation
+        || authorityRef.current !== authority
+      ) return;
       const message = error instanceof Error
         ? error.message
         : "The file could not be opened.";
       setFilePreviewError(message);
       setActionError(message);
     }).finally(() => {
-      if (filePreviewRequestGenerationRef.current === generation) {
+      if (
+        filePreviewRequestGenerationRef.current === generation
+        && authorityRef.current === authority
+      ) {
         setFilePreviewLoading(false);
       }
     });
-  }, [conversation?.id, project, request, setActionError]);
+  }, [authority, conversation?.id, project, request, setActionError]);
 
   const saveWorkspaceFile = useCallback(async (
     path: string,

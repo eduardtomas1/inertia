@@ -346,6 +346,7 @@ const CommentaryRow = memo(function CommentaryRow({
               projectId={projectId}
               conversationId={conversationId}
               defaultCodeWrap={defaultCodeWrap}
+              announceCopyFeedback={entry.message !== null}
               onOpenProjectFile={onOpenProjectFile}
             />
           )}

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
@@ -74,6 +74,18 @@ function userMessage(): ChatMessage {
   };
 }
 
+function commentaryMessage(content: string): ChatMessage {
+  return {
+    id: "commentary-agent-loading",
+    conversationId,
+    turnId: "turn-agent-loading",
+    role: "assistant",
+    content,
+    attachments: [],
+    createdAt: "2026-08-12T12:00:04.000Z",
+  };
+}
+
 function activity(title: string, kind: AgentActivity["kind"] = "tool"): AgentActivity {
   return {
     id: "activity-agent-loading",
@@ -108,6 +120,7 @@ interface StateInput {
   streamingText?: string;
   streamingReasoning?: string;
   streamingChannel?: "text" | "reasoning" | null;
+  commentaryContent?: string;
 }
 
 function stateProps(
@@ -116,7 +129,12 @@ function stateProps(
 ): React.ComponentProps<typeof ResponseTimeline> {
   return {
     turns: [agentTurn(input.status)],
-    messages: [userMessage()],
+    messages: [
+      userMessage(),
+      ...(input.commentaryContent
+        ? [commentaryMessage(input.commentaryContent)]
+        : []),
+    ],
     activities: input.activities ?? [],
     reasonings: input.reasonings ?? [],
     plans: [],
@@ -216,7 +234,19 @@ describe("agent loading and trace DOM", () => {
   });
 
   it("presents retained reconnect text as historical until text owns the channel", () => {
-    const input = { streamingText: "Visible before reconnect." };
+    const input = {
+      streamingText: [
+        "Visible before reconnect.",
+        "",
+        "```ts",
+        "const historical = true;",
+        "```",
+        "",
+        "| State | Live |",
+        "| --- | --- |",
+        "| Retained | No |",
+      ].join("\n"),
+    };
     const { onStop, rerender } = renderState(input);
 
     const historical = screen.getByLabelText("Agent update");
@@ -224,6 +254,10 @@ describe("agent loading and trace DOM", () => {
     expect(historical).not.toHaveAttribute("role", "status");
     expect(historical).not.toHaveAttribute("aria-live");
     expect(historical.querySelector("[aria-live]")).toBeNull();
+    expect(historical.querySelector("[role=status]")).toBeNull();
+    expect(within(historical).getByTitle("Copy code")).toBeInTheDocument();
+    expect(within(historical).getByRole("button", { name: "Markdown" }))
+      .toBeInTheDocument();
     expect(historical.querySelector(".response-markdown"))
       .not.toHaveClass("is-streaming");
     expect(screen.queryByLabelText("Live agent update")).not
@@ -238,6 +272,26 @@ describe("agent loading and trace DOM", () => {
     expect(live).toHaveClass("is-streaming");
     expect(live.querySelector(".response-markdown"))
       .toHaveClass("is-streaming");
+  });
+
+  it("retains copy-feedback announcements for persisted commentary", () => {
+    const { container } = renderState({
+      commentaryContent: [
+        "```ts",
+        "const persisted = true;",
+        "```",
+        "",
+        "| State |",
+        "| --- |",
+        "| Persisted |",
+      ].join("\n"),
+    });
+    const persisted = container.querySelector(
+      '[data-assistant-commentary-id="commentary-agent-loading"]',
+    );
+    expect(persisted).not.toBeNull();
+    expect(persisted?.querySelectorAll('[role="status"][aria-live="polite"]'))
+      .toHaveLength(2);
   });
 
   it("rerenders a channel-only transition back to honest generic work", () => {

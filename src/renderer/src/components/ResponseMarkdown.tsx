@@ -120,6 +120,7 @@ type ResponseMarkdownProps = {
   conversationId?: string;
   defaultCodeWrap: boolean;
   streaming?: boolean;
+  announceCopyFeedback?: boolean;
   onOpenProjectFile?: (path: string) => void;
 };
 
@@ -317,6 +318,7 @@ export function tableAsMarkdown(rows: string[][]): string {
 }
 
 function MarkdownTable({ children, ...props }: ComponentProps<"table">): React.JSX.Element {
+  const { announceCopyFeedback } = useMarkdownRenderContext();
   const rows = useMemo(() => tableRowsFromNode(children), [children]);
   const markdownCopy = useCopiedState();
   const csvCopy = useCopiedState();
@@ -332,13 +334,15 @@ function MarkdownTable({ children, ...props }: ComponentProps<"table">): React.J
           {markdownCopy.error ?? csvCopy.error}
         </p>
       )}
-      <span className="visually-hidden" role="status" aria-live="polite">
-        {markdownCopy.copied
-          ? "Table copied as Markdown."
-          : csvCopy.copied
-            ? "Table copied as CSV."
-            : ""}
-      </span>
+      {announceCopyFeedback && (
+        <span className="visually-hidden" role="status" aria-live="polite">
+          {markdownCopy.copied
+            ? "Table copied as Markdown."
+            : csvCopy.copied
+              ? "Table copied as CSV."
+              : ""}
+        </span>
+      )}
       <div className="response-table-scroll"><table {...props}>{children}</table></div>
     </div>
   );
@@ -388,6 +392,7 @@ function CodeBlock({
   projectRoot: string;
   onOpenProjectFile?: (path: string) => void;
 }): React.JSX.Element {
+  const { announceCopyFeedback } = useMarkdownRenderContext();
   const child = Children.toArray(children)[0];
   const element = isValidElement<{
     className?: string;
@@ -441,9 +446,11 @@ function CodeBlock({
           {clipboard.error}
         </p>
       )}
-      <span className="visually-hidden" role="status" aria-live="polite">
-        {clipboard.copied ? "Code copied to clipboard." : ""}
-      </span>
+      {announceCopyFeedback && (
+        <span className="visually-hidden" role="status" aria-live="polite">
+          {clipboard.copied ? "Code copied to clipboard." : ""}
+        </span>
+      )}
       <pre className={wrap ? "wraps" : undefined}><HighlightedCode code={code} language={language} enabled={!streaming} /></pre>
     </div>
   );
@@ -455,6 +462,7 @@ interface MarkdownRenderContextValue {
   conversationId?: string;
   defaultCodeWrap: boolean;
   streaming: boolean;
+  announceCopyFeedback: boolean;
   onOpenProjectFile?: (path: string) => void;
 }
 
@@ -553,6 +561,7 @@ function ResponseMarkdownComponent({
   conversationId,
   defaultCodeWrap,
   streaming = false,
+  announceCopyFeedback = true,
   onOpenProjectFile,
 }: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
@@ -562,8 +571,10 @@ function ResponseMarkdownComponent({
     conversationId,
     defaultCodeWrap,
     streaming,
+    announceCopyFeedback,
     onOpenProjectFile,
   }), [
+    announceCopyFeedback,
     conversationId,
     defaultCodeWrap,
     onOpenProjectFile,

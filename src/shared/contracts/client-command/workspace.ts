@@ -34,6 +34,7 @@ export const workspaceCommandSchemas = [
         projectId: z.string().uuid(),
         conversationId: z.string().uuid().optional(),
         path: workspaceFilePathSchema,
+        fallbackPath: workspaceFilePathSchema.optional(),
       }).strict(),
     })
     .strict(),

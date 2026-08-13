@@ -55,10 +55,11 @@ describe("response Markdown", () => {
     expect(html).not.toContain("<script");
     expect(html).not.toContain("onerror");
     expect(html).not.toContain("<iframe");
-    expect(resolveResponseLink("/work/project", "src/app.ts#L4")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal" });
-    expect(resolveResponseLink("/work/project", "/work/project/src/app.ts#L4")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal" });
+    expect(resolveResponseLink("/work/project", "src/app.ts#L4")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal", location: { startLine: 4, endLine: 4 } });
+    expect(resolveResponseLink("/work/project", "/work/project/src/app.ts#L4-L7")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal", location: { startLine: 4, endLine: 7 } });
     expect(resolveResponseLink("/work/project", "app.ts:42")).toEqual({ kind: "project", relativePath: "app.ts:42", action: "reveal" });
     expect(resolveResponseLink("/work/project", "src/app.ts:42:7")).toEqual({ kind: "project", relativePath: "src/app.ts:42:7", action: "reveal" });
+    expect(resolveResponseLink("/work/project", "README:42")).toEqual({ kind: "project", relativePath: "README:42", action: "reveal" });
     expect(resolveResponseLink("/work/project", "../secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "%2e%2e/%2e%2e/secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "src/%00secret.txt")).toEqual({ kind: "unsafe" });
@@ -78,6 +79,28 @@ describe("response Markdown", () => {
     expect(html).toContain("&lt;");
     expect(html).not.toContain("<script");
     expect(html).not.toContain("<img");
+  });
+
+  it("infers Java highlighting and a restrained language family from a real file", () => {
+    const html = render([
+      "```text file=src/main/OrderService.java",
+      "public final class OrderService {",
+      "  private String state = \"ready\";",
+      "}",
+      "```",
+    ].join("\n"));
+    expect(html).toContain('data-language-family="java"');
+    expect(html).toContain("language-java");
+    expect(html).toContain("hljs-keyword");
+    expect(html).toContain("hljs-string");
+
+    const mismatchedFence = render([
+      "```python file=src/main/OrderService.java",
+      "public final class OrderService {}",
+      "```",
+    ].join("\n"));
+    expect(mismatchedFence).toContain('data-language-family="java"');
+    expect(mismatchedFence).toContain("language-java");
   });
 
   it("renders editorial quote, inline code, image, and long-link semantics without weakening sanitization", () => {
@@ -139,5 +162,7 @@ describe("response Markdown", () => {
     expect(resolveResponseLink("C:\\Work Space\\Project", "src\\index.ts")).toEqual({ kind: "project", relativePath: "src/index.ts", action: "reveal" });
     expect(resolveResponseLink("C:\\Work Space\\Project", "C:\\Work Space\\Project\\src\\index.ts:42:7")).toEqual({ kind: "project", relativePath: "src/index.ts:42:7", action: "reveal" });
     expect(resolveResponseLink("C:\\Work Space\\Project", "..\\Elsewhere\\secret.ts")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("\\\\Server\\Share\\Project", "\\\\server\\share\\project\\src/App.java#L4")).toEqual({ kind: "project", relativePath: "src/App.java", action: "reveal", location: { startLine: 4, endLine: 4 } });
+    expect(resolveResponseLink("\\\\Server\\Share\\Project", "//server/other/project/src/App.java#L4")).toEqual({ kind: "unsafe" });
   });
 });

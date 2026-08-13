@@ -169,6 +169,59 @@ async function replaceWorkspaceRoot(
 }
 
 describe("runtime secure-file authority lifetime", () => {
+  it("uses a source-reference fallback only when the literal path is absent", async () => {
+    const { data, workspace } = fixture();
+    writeFileSync(join(workspace, "App.java"), "class App {}\n");
+    const { socket, events, projectId, conversationId } =
+      await connectRuntime(data, workspace);
+    const readId = randomUUID();
+    send(socket, {
+      type: "workspace.file.read",
+      requestId: readId,
+      payload: {
+        projectId,
+        conversationId,
+        path: "App.java:42",
+        fallbackPath: "App.java",
+      },
+    });
+    const read = await events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === readId
+        && event.result.kind === "workspace.file",
+    );
+    expect(read.result.kind === "workspace.file" && read.result.file.path)
+      .toBe("App.java");
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "does not replace an oversized literal colon file with its fallback",
+    async () => {
+      const { data, workspace } = fixture();
+      writeFileSync(join(workspace, "App.java"), "class App {}\n");
+      writeFileSync(join(workspace, "App.java:42"), "x".repeat(1024 * 1024 + 1));
+      const { socket, events, projectId, conversationId } =
+        await connectRuntime(data, workspace);
+      const readId = randomUUID();
+      send(socket, {
+        type: "workspace.file.read",
+        requestId: readId,
+        payload: {
+          projectId,
+          conversationId,
+          path: "App.java:42",
+          fallbackPath: "App.java",
+        },
+      });
+      const rejected = await events.next(
+        (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+          event.type === "request.error" && event.requestId === readId,
+      );
+      expect(rejected.message).toMatch(/size limit/i);
+    },
+  );
+
   it("rejects a workspace save when its preview root is replaced", async () => {
     const { root, data, workspace } = fixture();
     const moved = join(root, "workspace-moved");

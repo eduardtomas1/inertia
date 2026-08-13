@@ -7,6 +7,7 @@ import type {
 } from "@shared/contracts";
 import type { WorkspacePanelTab } from "../components/WorkspacePanel";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import { useTurnArtifacts } from "./workspace-tools/useTurnArtifacts";
 import { useWorkspaceFiles } from "./workspace-tools/useWorkspaceFiles";
 import { useWorkspaceGit } from "./workspace-tools/useWorkspaceGit";
@@ -36,13 +37,15 @@ export async function openWorkspaceEntry(
   actions: {
     inspectDirectory: (path: string) => Promise<unknown>;
     openDirectory: (path: string) => Promise<unknown>;
-    openFile: (path: string) => void;
+    openFile: (path: string, location?: WorkspaceFileLocation) => void;
   },
+  location?: WorkspaceFileLocation,
 ): Promise<"directory" | "file"> {
   try {
     await actions.inspectDirectory(path);
   } catch {
-    actions.openFile(path);
+    if (location) actions.openFile(path, location);
+    else actions.openFile(path);
     return "file";
   }
   await actions.openDirectory(path);
@@ -88,7 +91,10 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
   const selectWorkspaceFile = files.selectWorkspaceFile;
   const requestWorkspaceEntries = files.requestWorkspaceEntries;
   const setActiveTool = options.setActiveTool;
-  const openWorkspaceFile = useCallback((path: string): void => {
+  const openWorkspaceFile = useCallback((
+    path: string,
+    location?: WorkspaceFileLocation,
+  ): void => {
     const projectId = options.project?.id;
     if (!projectId) return;
     void openWorkspaceEntry(path, {
@@ -103,11 +109,11 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
             relativePath: directory,
             action: "reveal",
         }),
-      openFile: (file) => {
-        selectWorkspaceFile(file);
+      openFile: (file, fileLocation) => {
+        selectWorkspaceFile(file, fileLocation);
         setActiveTool("files");
       },
-    }).catch(() => undefined);
+    }, location).catch(() => undefined);
   }, [
     options.conversation?.id,
     options.project?.id,

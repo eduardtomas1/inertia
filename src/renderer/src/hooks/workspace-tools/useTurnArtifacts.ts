@@ -6,6 +6,7 @@ import type {
   TurnGitDiffSnapshot,
 } from "@shared/contracts";
 import type { WorkspacePanelTab } from "../../components/WorkspacePanel";
+import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import {
   resultEvent,
   type CommandWithoutId,
@@ -18,7 +19,10 @@ interface TurnArtifactsOptions {
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   setActionError: (message: string | null) => void;
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
-  openWorkspaceFile: (path: string) => void;
+  openWorkspaceFile: (
+    path: string,
+    location?: WorkspaceFileLocation,
+  ) => void;
   loadGit: LoadWorkspaceGit;
 }
 
@@ -136,9 +140,13 @@ export function useTurnArtifacts({
     }
   }, [conversation, project, request, setActionError, setActiveTool]);
 
-  const openTurnFile = useCallback((path: string) => {
+  const openTurnFile = useCallback((
+    path: string,
+    location?: WorkspaceFileLocation,
+  ) => {
     if (!project || !conversation) return;
-    openWorkspaceFile(path);
+    if (location) openWorkspaceFile(path, location);
+    else openWorkspaceFile(path);
   }, [conversation, openWorkspaceFile, project]);
 
   const showCurrentChanges = useCallback(() => {

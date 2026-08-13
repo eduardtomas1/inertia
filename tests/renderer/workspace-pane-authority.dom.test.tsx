@@ -451,7 +451,7 @@ describe("workspace pane authority", () => {
   });
 
   it("opens literal colon filenames before retrying a Codex source location", async () => {
-    const requests: string[] = [];
+    const requests: Array<{ path: string; fallbackPath?: string }> = [];
     let literalExists = true;
     const request = vi.fn((
       command: CommandWithoutId,
@@ -465,19 +465,23 @@ describe("workspace pane authority", () => {
       if (command.type !== "workspace.file.read") {
         return Promise.reject(new Error("Unexpected command"));
       }
-      requests.push(command.payload.path);
-      if (
-        command.payload.path === "src/example.ts:42:7"
-        && !literalExists
-      ) {
-        return Promise.reject(new Error("File not found"));
-      }
-      const path = command.payload.path;
+      requests.push({
+        path: command.payload.path,
+        ...(command.payload.fallbackPath
+          ? { fallbackPath: command.payload.fallbackPath }
+          : {}),
+      });
+      const path = literalExists
+        ? command.payload.path
+        : command.payload.fallbackPath ?? command.payload.path;
       return Promise.resolve(result({
         kind: "workspace.file",
         file: {
           path,
-          content: "export const value = 1;\n",
+          content: Array.from(
+            { length: 50 },
+            (_, index) => `export const value${index + 1} = ${index + 1};`,
+          ).join("\n"),
           truncated: false,
           language: "ts",
           contentDigest: "a".repeat(64),
@@ -501,7 +505,11 @@ describe("workspace pane authority", () => {
       expect(hook.result.current.filePreview?.path)
         .toBe("src/example.ts:42:7");
     });
-    expect(requests).toEqual(["src/example.ts:42:7"]);
+    expect(requests).toEqual([{
+      path: "src/example.ts:42:7",
+      fallbackPath: "src/example.ts",
+    }]);
+    expect(hook.result.current.selectedFileLocation).toBeNull();
 
     literalExists = false;
     requests.length = 0;
@@ -510,11 +518,16 @@ describe("workspace pane authority", () => {
     await waitFor(() => {
       expect(hook.result.current.filePreview?.path).toBe("src/example.ts");
     });
-    expect(requests).toEqual([
-      "src/example.ts:42:7",
-      "src/example.ts",
-    ]);
+    expect(requests).toEqual([{
+      path: "src/example.ts:42:7",
+      fallbackPath: "src/example.ts",
+    }]);
     expect(hook.result.current.selectedFile).toBe("src/example.ts");
+    expect(hook.result.current.selectedFileLocation).toEqual({
+      startLine: 42,
+      startColumn: 7,
+      endLine: 42,
+    });
   });
 
   it("does not let delayed project actions replace the new owner's actions", async () => {

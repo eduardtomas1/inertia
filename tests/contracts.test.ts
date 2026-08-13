@@ -322,6 +322,15 @@ describe("client command contract", () => {
         payload: { projectId, path },
       }).success).toBe(true);
     }
+    expect(clientCommandSchema.safeParse({
+      type: "workspace.file.read",
+      requestId,
+      payload: {
+        projectId,
+        path: "src/App.java:42",
+        fallbackPath: "src/App.java",
+      },
+    }).success).toBe(true);
 
     for (const directory of [
       "../outside",

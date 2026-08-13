@@ -84,7 +84,12 @@ describe("FilesPanel language presentation", () => {
     ));
     expect(disconnect).toHaveBeenCalled();
     scrollIntoView.mockClear();
-    act(() => resizeCallback?.([], {} as ResizeObserver));
+    await act(async () => {
+      resizeCallback?.([], {} as ResizeObserver);
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+    });
     expect(scrollIntoView).not.toHaveBeenCalled();
     scrollIntoView.mockRestore();
     vi.unstubAllGlobals();

@@ -203,6 +203,22 @@ test("opens a language-aware project link at its exact validated Java range", as
       : null;
   });
   expect(geometry).toEqual({ previewInside: true, lineVisible: true });
+
+  const previewCode = narrowPanel.getByLabel(
+    "Contents of src/demo/OrderService.java",
+  );
+  await previewCode.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      deltaY: -200,
+    }));
+    element.scrollTop = 0;
+  });
+  await app.resizeWindow(780, 760);
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  expect(await previewCode.evaluate((element) => element.scrollTop)).toBe(0);
   await app.expectNoViewportOverflow();
   expect(app.rendererErrors).toEqual([]);
 });

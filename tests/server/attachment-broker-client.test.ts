@@ -6,6 +6,7 @@ import type { RuntimeWorkerEvent } from "../../src/node/runtime-process-protocol
 import { RuntimeAttachmentBrokerClient } from "../../src/server/runtime/attachments/attachment-broker-client";
 
 const attachmentId = "11111111-1111-4111-8111-111111111111";
+const handoffId = "22222222-2222-4222-8222-222222222222";
 const attachment = {
   id: attachmentId,
   name: "preview.png",
@@ -27,11 +28,12 @@ describe("RuntimeAttachmentBrokerClient", () => {
     const client = new RuntimeAttachmentBrokerClient(
       (event) => posted.push(event),
     );
-    const resolved = client.resolve(attachmentId);
+    const resolved = client.resolve(attachmentId, handoffId);
     const request = posted[0];
     expect(request).toMatchObject({
       type: "runtime.attachment-request",
       attachmentId,
+      handoffId,
     });
     expect(JSON.stringify(request)).not.toContain(attachment.path);
     if (request?.type !== "runtime.attachment-request") throw new Error("missing request");
@@ -51,7 +53,7 @@ describe("RuntimeAttachmentBrokerClient", () => {
     const client = new RuntimeAttachmentBrokerClient(
       (event) => posted.push(event),
     );
-    const missing = client.resolve(attachmentId);
+    const missing = client.resolve(attachmentId, handoffId);
     const missingRequest = posted.at(-1);
     if (missingRequest?.type !== "runtime.attachment-request") throw new Error("missing request");
     client.handle({
@@ -63,7 +65,7 @@ describe("RuntimeAttachmentBrokerClient", () => {
     });
     await expect(missing).resolves.toBeNull();
 
-    const unavailable = client.resolve(attachmentId);
+    const unavailable = client.resolve(attachmentId, handoffId);
     const unavailableRequest = posted.at(-1);
     if (unavailableRequest?.type !== "runtime.attachment-request") throw new Error("missing request");
     client.handle({
@@ -154,7 +156,7 @@ describe("RuntimeAttachmentBrokerClient", () => {
 
   it("times out, cancels, and closes pending requests", async () => {
     const client = new RuntimeAttachmentBrokerClient(() => undefined, 25);
-    const timedOut = client.resolve(attachmentId);
+    const timedOut = client.resolve(attachmentId, handoffId);
     const timeoutExpectation = expect(timedOut).rejects.toThrow(
       /could not be verified/u,
     );
@@ -162,18 +164,18 @@ describe("RuntimeAttachmentBrokerClient", () => {
     await timeoutExpectation;
 
     const controller = new AbortController();
-    const cancelled = client.resolve(attachmentId, controller.signal);
+    const cancelled = client.resolve(attachmentId, handoffId, controller.signal);
     controller.abort();
     await expect(cancelled).rejects.toThrow(/could not be verified/u);
 
-    const pending = client.resolve(attachmentId);
+    const pending = client.resolve(attachmentId, handoffId);
     const pendingRelease = client.release(attachmentId);
     const pendingRelinquish = client.relinquish(attachmentId);
     client.close();
     await expect(pending).rejects.toThrow(/could not be verified/u);
     await expect(pendingRelease).rejects.toThrow(/could not be verified/u);
     await expect(pendingRelinquish).rejects.toThrow(/could not be verified/u);
-    await expect(client.resolve(attachmentId)).rejects.toThrow(
+    await expect(client.resolve(attachmentId, handoffId)).rejects.toThrow(
       /could not be verified/u,
     );
     await expect(client.release(attachmentId)).rejects.toThrow(
@@ -191,7 +193,7 @@ describe("RuntimeAttachmentBrokerClient", () => {
       (event) => posted.push(event),
       25,
     );
-    const resolved = client.resolve(attachmentId);
+    const resolved = client.resolve(attachmentId, handoffId);
     const resolveRequest = posted[0];
     if (resolveRequest?.type !== "runtime.attachment-request") {
       throw new Error("missing resolve request");
@@ -236,7 +238,7 @@ describe("RuntimeAttachmentBrokerClient", () => {
       (event) => posted.push(event),
       25,
     );
-    const resolved = client.resolve(attachmentId);
+    const resolved = client.resolve(attachmentId, handoffId);
     const resolveRequest = posted[0];
     if (resolveRequest?.type !== "runtime.attachment-request") {
       throw new Error("missing resolve request");
@@ -262,9 +264,9 @@ describe("RuntimeAttachmentBrokerClient", () => {
       (event) => posted.push(event),
     );
     const pending = Array.from({ length: 512 }, () =>
-      client.resolve(attachmentId).catch(() => null));
+      client.resolve(attachmentId, handoffId).catch(() => null));
 
-    await expect(client.resolve(attachmentId)).rejects.toThrow(
+    await expect(client.resolve(attachmentId, handoffId)).rejects.toThrow(
       /could not be verified/u,
     );
     expect(posted).toHaveLength(512);

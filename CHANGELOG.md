@@ -4,6 +4,18 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.32 — 2026-08-13
+
+### Attachments stay owned throughout sending
+
+- Image, PDF, and file sends now bind each staged attachment to the exact renderer request before submission. A late utility-runtime claim can no longer lose a race with renderer cleanup and make an otherwise valid send fail.
+- Ambiguous transport outcomes remain retryable without weakening ownership. A retry retires the complete intersecting handoff only when neither the current nor a quarantined runtime owns any attachment; omitted files resume their pending cleanup, stale request tokens fail closed, and unlink failures cannot be mistaken for successful release.
+- Abandoned handoffs remain bounded, renderer and runtime identities are validated across preload and IPC, and cleanup rechecks ownership after deletion so crossing claims cannot leak or remove a live attachment.
+
+### Release confidence
+
+- The repaired lifecycle is covered across registry, release coordination, preload/runtime protocol, renderer retry behavior, runtime quarantine, attachment resolution, Electron send/preview scenarios, and exact-head Linux, macOS, and Windows gates.
+
 ## 0.0.31 — 2026-08-12
 
 ### Work, Environment, and Usage stay compact and truthful

@@ -21,10 +21,12 @@ import {
 } from "../../../shared/attachments.js";
 import type { ChatAttachment } from "../../../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../../../shared/runtime-attachments.js";
+import { AttachmentResolutionError } from "./attachment-errors.js";
 
 export interface RuntimeAttachmentBroker {
   resolve(
     attachmentId: string,
+    handoffId: string,
     signal?: AbortSignal,
   ): Promise<TrustedRuntimeAttachment | null>;
   release(
@@ -60,7 +62,7 @@ function sameIdentity(
 }
 
 function publicAttachmentError(): Error {
-  return new Error("The selected attachment is no longer available or could not be verified.");
+  return new AttachmentResolutionError();
 }
 
 export class TrustedAttachmentResolver {
@@ -71,18 +73,22 @@ export class TrustedAttachmentResolver {
 
   async resolveAll(
     requested: readonly ChatAttachment[],
+    handoffId: string,
     signal?: AbortSignal,
   ): Promise<ChatAttachment[]> {
-    return (await this.resolvePayloads(requested, signal))
+    return (await this.resolvePayloads(requested, handoffId, signal))
       .map(({ attachment }) => attachment);
   }
 
   async resolvePayloads(
     requested: readonly ChatAttachment[],
+    handoffId: string,
     signal?: AbortSignal,
   ): Promise<ResolvedAttachmentPayload[]> {
     if (requested.length > MAX_CHAT_ATTACHMENTS) throw publicAttachmentError();
     if (requested.length === 0) return [];
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+      .test(handoffId)) throw publicAttachmentError();
     let canonicalRoot: string;
     try {
       canonicalRoot = await realpath(this.trustedRoot);
@@ -99,7 +105,11 @@ export class TrustedAttachmentResolver {
         if (signal?.aborted) throw publicAttachmentError();
         if (seenIds.has(untrusted.id)) throw publicAttachmentError();
         seenIds.add(untrusted.id);
-        const trusted = await this.broker.resolve(untrusted.id, signal);
+        const trusted = await this.broker.resolve(
+          untrusted.id,
+          handoffId,
+          signal,
+        );
         if (!trusted || trusted.id !== untrusted.id) throw publicAttachmentError();
         claimedIds.push(untrusted.id);
         const payload = await this.revalidate(canonicalRoot, trusted, signal);

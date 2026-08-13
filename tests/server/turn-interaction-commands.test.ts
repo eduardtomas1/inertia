@@ -316,6 +316,25 @@ describe("turn stop cleanup", () => {
   });
 });
 
+describe("attachment send handoff", () => {
+  it("binds runtime attachment resolution to the message request identity", async () => {
+    const runtime = dependencies({
+      queue: vi.fn(() => null),
+      relinquishAll: vi.fn(async () => undefined),
+      enableProviders: false,
+    });
+    const handler = createTurnInteractionCommandHandler(runtime);
+    const command = messageCommand();
+
+    await expect(handler({} as never, command)).resolves.toBe("handled");
+    expect(runtime.attachmentResolver?.resolvePayloads).toHaveBeenCalledWith(
+      command.payload.attachments,
+      command.requestId,
+      expect.any(AbortSignal),
+    );
+  });
+});
+
 describe("message attachment ownership transfer", () => {
   it.each([
     { label: "model rejection", queueRejects: false, supportsImages: false },
@@ -579,7 +598,7 @@ describe("message attachment ownership transfer", () => {
       const abortObserved = vi.fn();
       vi.mocked(
         handlerDependencies.attachmentResolver!.resolvePayloads,
-      ).mockImplementation((_requested, signal) =>
+      ).mockImplementation((_requested, _handoffId, signal) =>
         new Promise((_resolve, reject) => {
           signal?.addEventListener("abort", () => {
             abortObserved();

@@ -25,6 +25,8 @@ import {
 } from "../../src/main/attachment-registry";
 
 const directories: string[] = [];
+const handoffId = "22222222-2222-4222-8222-222222222222";
+const retryHandoffId = "33333333-3333-4333-8333-333333333333";
 const png = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
@@ -259,6 +261,265 @@ describe("main-owned attachment registry", () => {
     await expect(attachments.release(imported!.id)).resolves.toBe(false);
     await expect(attachments.resolve(imported!.id)).resolves.toBeNull();
     await expect(readFile(importedPath)).rejects.toThrow();
+  });
+
+  it("lets a submitted attachment resolve across a racing renderer release", async () => {
+    const { registry: attachments } = await registry();
+    const [imported] = await attachments.import([{
+      name: "submitted.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    await attachments.prepareHandoff(handoffId, [imported!.id], () => false);
+    const rendererRelease = attachments.releaseFromRenderer(imported!.id);
+    await expect(attachments.resolveForRuntime(
+      imported!.id,
+      handoffId,
+    )).resolves.toMatchObject({
+      id: imported!.id,
+      name: "submitted.png",
+    });
+    await expect(rendererRelease).resolves.toBe(false);
+    await expect(attachments.preview(imported!.id)).resolves.toMatchObject({
+      bytes: png,
+      mimeType: "image/png",
+    });
+    await expect(attachments.release(imported!.id)).resolves.toBe(true);
+  });
+
+  it("does not expire a prepared send at the former renderer grace boundary", async () => {
+    vi.useFakeTimers();
+    try {
+      const { registry: attachments } = await registry();
+      const [imported] = await attachments.import([{
+        name: "delayed-send.png",
+        mimeType: "image/png",
+        data: png,
+      }]);
+      const importedPath = (await attachments.resolve(imported!.id))!.path;
+
+      await attachments.prepareHandoff(handoffId, [imported!.id], () => false);
+      const rendererRelease = attachments.releaseFromRenderer(imported!.id);
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(readFile(importedPath)).resolves.toEqual(png);
+      await vi.advanceTimersByTimeAsync(9_750);
+
+      await expect(attachments.resolveForRuntime(
+        imported!.id,
+        handoffId,
+      )).resolves.toMatchObject({ id: imported!.id });
+      await expect(rendererRelease).resolves.toBe(false);
+      await expect(attachments.release(imported!.id)).resolves.toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds an abandoned handoff only after the full send timeout window", async () => {
+    vi.useFakeTimers();
+    try {
+      const { registry: attachments } = await registry();
+      const [imported] = await attachments.import([{
+        name: "abandoned-send.png",
+        mimeType: "image/png",
+        data: png,
+      }]);
+      const importedPath = (await attachments.resolve(imported!.id))!.path;
+
+      await attachments.prepareHandoff(handoffId, [imported!.id], () => false);
+      const rendererRelease = attachments.releaseFromRenderer(imported!.id);
+      await vi.advanceTimersByTimeAsync(209_999);
+      await expect(readFile(importedPath)).resolves.toEqual(png);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(rendererRelease).resolves.toBe(true);
+      await expect(readFile(importedPath)).rejects.toThrow();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("supersedes an unconsumed ambiguous handoff for an explicit retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const { registry: attachments } = await registry();
+      const [imported] = await attachments.import([{
+        name: "retry.png",
+        mimeType: "image/png",
+        data: png,
+      }]);
+
+      await attachments.prepareHandoff(handoffId, [imported!.id], () => false);
+      expect(vi.getTimerCount()).toBe(1);
+      await attachments.prepareHandoff(
+        retryHandoffId,
+        [imported!.id],
+        () => false,
+      );
+      expect(vi.getTimerCount()).toBe(1);
+
+      await expect(attachments.resolveForRuntime(
+        imported!.id,
+        handoffId,
+      )).resolves.toBeNull();
+      await expect(attachments.resolveForRuntime(
+        imported!.id,
+        retryHandoffId,
+      )).resolves.toMatchObject({ id: imported!.id });
+      expect(vi.getTimerCount()).toBe(0);
+      await expect(attachments.release(imported!.id)).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retires an entire old handoff when a subset is released and retried", async () => {
+    const { registry: attachments } = await registry();
+    const [first, second] = await attachments.import([{
+      name: "retry.png",
+      mimeType: "image/png",
+      data: png,
+    }, {
+      name: "discarded.png",
+      mimeType: "image/png",
+      data: alternatePng,
+    }]);
+
+    await attachments.prepareHandoff(
+      handoffId,
+      [first!.id, second!.id],
+      () => false,
+    );
+    const secondRelease = attachments.releaseFromRenderer(second!.id);
+    await attachments.prepareHandoff(retryHandoffId, [first!.id], () => false);
+    await expect(secondRelease).resolves.toBe(true);
+
+    await expect(attachments.resolveForRuntime(
+      first!.id,
+      handoffId,
+    )).resolves.toBeNull();
+    await expect(attachments.resolveForRuntime(
+      second!.id,
+      handoffId,
+    )).resolves.toBeNull();
+    await expect(attachments.resolveForRuntime(
+      first!.id,
+      retryHandoffId,
+    )).resolves.toMatchObject({ id: first!.id });
+    await expect(attachments.resolve(second!.id)).resolves.toBeNull();
+    await expect(attachments.release(first!.id)).resolves.toBe(true);
+  });
+
+  it("rejects a retry while the runtime owns the earlier send", async () => {
+    const { registry: attachments } = await registry();
+    const [imported] = await attachments.import([{
+      name: "already-claimed.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    await attachments.prepareHandoff(handoffId, [imported!.id], () => false);
+    await expect(attachments.resolveForRuntime(
+      imported!.id,
+      handoffId,
+    )).resolves.toMatchObject({ id: imported!.id });
+
+    await expect(attachments.prepareHandoff(
+      retryHandoffId,
+      [imported!.id],
+      (id) => id === imported!.id,
+    )).rejects.toThrow("Attachment handoff is unavailable.");
+    await expect(attachments.resolve(imported!.id)).resolves.toMatchObject({
+      id: imported!.id,
+    });
+    await expect(attachments.release(imported!.id)).resolves.toBe(true);
+  });
+
+  it("does not supersede another claimed member of the old handoff", async () => {
+    const { registry: attachments } = await registry();
+    const [first, second] = await attachments.import([{
+      name: "retry.png",
+      mimeType: "image/png",
+      data: png,
+    }, {
+      name: "claimed.png",
+      mimeType: "image/png",
+      data: alternatePng,
+    }]);
+
+    await attachments.prepareHandoff(
+      handoffId,
+      [first!.id, second!.id],
+      () => false,
+    );
+    await expect(attachments.prepareHandoff(
+      retryHandoffId,
+      [first!.id],
+      (id) => id === second!.id,
+    )).rejects.toThrow("Attachment handoff is unavailable.");
+
+    await expect(attachments.resolveForRuntime(
+      first!.id,
+      handoffId,
+    )).resolves.toMatchObject({ id: first!.id });
+    await expect(attachments.resolveForRuntime(
+      second!.id,
+      handoffId,
+    )).resolves.toMatchObject({ id: second!.id });
+    await Promise.all([
+      attachments.release(first!.id),
+      attachments.release(second!.id),
+    ]);
+  });
+
+  it("finishes an unused handoff into its pending renderer deletion", async () => {
+    const { registry: attachments } = await registry();
+    const [imported] = await attachments.import([{
+      name: "abandoned-send.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    await attachments.prepareHandoff(handoffId, [imported!.id], () => false);
+    const rendererRelease = attachments.releaseFromRenderer(imported!.id);
+    attachments.finishHandoff(handoffId);
+
+    await expect(rendererRelease).resolves.toBe(true);
+    await expect(attachments.resolve(imported!.id)).resolves.toBeNull();
+  });
+
+  it("cannot revive a renderer deletion after unlink has started", async () => {
+    let finishUnlink!: () => void;
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>(
+      () => new Promise<void>((resolveUnlink) => {
+        finishUnlink = resolveUnlink;
+      }),
+    );
+    const { registry: attachments } = await registry(undefined, unlinkFile);
+    const [imported] = await attachments.import([{
+      name: "deleting.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    await attachments.prepareHandoff(handoffId, [imported!.id], () => false);
+    const rendererRelease = attachments.releaseFromRenderer(imported!.id);
+    attachments.finishHandoff(handoffId);
+    await expect(attachments.prepareHandoff(
+      retryHandoffId,
+      [imported!.id],
+      () => false,
+    )).rejects.toThrow("Attachment handoff is unavailable.");
+    await expect(attachments.resolveForRuntime(
+      imported!.id,
+      handoffId,
+    )).resolves.toBeNull();
+    finishUnlink();
+
+    await expect(rendererRelease).resolves.toBe(true);
   });
 
   it("disposes every live capability and its private file", async () => {

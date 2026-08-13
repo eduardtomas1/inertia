@@ -295,6 +295,13 @@ export interface DesktopBridge {
   checkAppUpdate: (force?: boolean) => Promise<AppUpdateStatus>;
   selectAttachments: () => Promise<DesktopAttachment[]>;
   importAttachments: (files: AttachmentImport[]) => Promise<DesktopAttachment[]>;
+  /** Pins one exact send request across the renderer/runtime IPC handoff. */
+  prepareAttachmentHandoff: (request: {
+    requestId: string;
+    attachmentIds: string[];
+  }) => Promise<void>;
+  /** Drops an unused handoff without deleting attachments retained for retry. */
+  finishAttachmentHandoff: (requestId: string) => Promise<void>;
   /** Releases an unsent temporary attachment and its privileged preview registration. */
   releaseAttachment: (id: string) => Promise<void>;
   /** Opens only a revalidated opaque PDF attachment in the platform's default app. */

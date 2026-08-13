@@ -126,6 +126,17 @@ export class RuntimeSecureFileCoordinator {
     }
   }
 
+  hasConversationAttachmentOperations(record: RuntimeProcessRecord | null): boolean {
+    return this.conversationAttachmentStore.hasOperations(record);
+  }
+
+  drain(
+    record: RuntimeProcessRecord | null,
+    suppressReplies = false,
+  ): Promise<boolean> {
+    return this.conversationAttachmentStore.drain(record, suppressReplies);
+  }
+
   async shutdown(): Promise<boolean> {
     const [secureFiles, conversationAttachments] = await Promise.all([
       this.broker?.shutdown?.() ?? Promise.resolve(true),

@@ -13,6 +13,11 @@ import {
   type RuntimeSecureFileBroker,
 } from "../../src/main/runtime-supervisor";
 import { RuntimeCleanupReceiptJournal } from "../../src/main/runtime-cleanup-receipts";
+import {
+  encodeConversationAttachmentStoreOperation,
+  type ConversationAttachmentStoreAnyOperationRunner,
+  type ConversationAttachmentStoreAuthority,
+} from "../../src/node/conversation-attachment-store-child";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 import {
   privateConnectRuntimeGrantsFromProjectIds,
@@ -37,6 +42,12 @@ const projectPathRequest = {
   conversationId: "22222222-2222-4222-8222-222222222222",
   relativePath: "src/index.ts",
   action: "open-externally" as const,
+};
+const conversationAttachmentStoreAuthority: ConversationAttachmentStoreAuthority = {
+  root: resolve(tmpdir(), "conversation-attachments"),
+  dev: "1",
+  ino: "2",
+  uid: "501",
 };
 
 class FakeUtilityProcess extends EventEmitter {
@@ -97,6 +108,8 @@ function createHarness(options: {
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;
+  conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
+  conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
   attachmentBroker?: RuntimeAttachmentBroker;
   attachmentRequestTimeoutMs?: number;
   databaseRecoveryRequestTimeoutMs?: number;
@@ -127,6 +140,9 @@ function createHarness(options: {
     credentialBroker: options.credentialBroker,
     credentialRequestTimeoutMs: options.credentialRequestTimeoutMs,
     secureFileBroker: options.secureFileBroker,
+    conversationAttachmentStoreRunner: options.conversationAttachmentStoreRunner,
+    conversationAttachmentStoreAuthority:
+      options.conversationAttachmentStoreAuthority,
     attachmentBroker: options.attachmentBroker,
     attachmentRequestTimeoutMs: options.attachmentRequestTimeoutMs,
     databaseRecoveryRequestTimeoutMs: options.databaseRecoveryRequestTimeoutMs,
@@ -1493,6 +1509,112 @@ describe("RuntimeSupervisor", () => {
     children[1].message({ type: "runtime.ready", websocketUrl: secondUrl });
     expect(supervisor.connection()).toEqual({ websocketUrl: secondUrl });
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 2 });
+  });
+
+  it("waits for the crashed generation store helper before restarting", async () => {
+    let rejectResult!: (error: Error) => void;
+    let resolveStopped!: () => void;
+    let observedSignal: AbortSignal | undefined;
+    const runner = vi.fn((
+      _operation: unknown,
+      signal?: AbortSignal,
+    ) => {
+      observedSignal = signal;
+      const result = new Promise<void>((_resolve, reject) => {
+        rejectResult = reject;
+      });
+      signal?.addEventListener("abort", () => {
+        rejectResult(new Error("cancelled"));
+      }, { once: true });
+      const stopped = new Promise<void>((resolveStoppedPromise) => {
+        resolveStopped = resolveStoppedPromise;
+      });
+      return { result, stopped, ready: Promise.resolve(false) };
+    });
+    const { children, supervisor } = createHarness({
+      conversationAttachmentStoreRunner: runner as never,
+      conversationAttachmentStoreAuthority,
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    children[0].message({
+      type: "runtime.conversation-attachment-store-request",
+      requestId: crypto.randomUUID(),
+      encodedOperation: encodeConversationAttachmentStoreOperation({
+        operation: "remove",
+        root: conversationAttachmentStoreAuthority.root,
+        rootDev: conversationAttachmentStoreAuthority.dev,
+        rootIno: conversationAttachmentStoreAuthority.ino,
+        rootUid: conversationAttachmentStoreAuthority.uid,
+        name: crypto.randomUUID(),
+      }),
+    });
+    expect(runner).toHaveBeenCalledOnce();
+
+    children[0].exit(9);
+    await vi.advanceTimersByTimeAsync(runtimeRestartDelayMs(0));
+    expect(observedSignal?.aborted).toBe(true);
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot().restartScheduled).toBe(false);
+
+    resolveStopped();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(supervisor.snapshot().restartScheduled).toBe(true);
+    await vi.advanceTimersByTimeAsync(runtimeRestartDelayMs(0));
+    expect(children).toHaveLength(2);
+  });
+
+  it("blocks restart when a crashed generation store helper exit is unconfirmed", async () => {
+    let rejectResult!: (error: Error) => void;
+    let rejectStopped!: (error: Error) => void;
+    const runner = vi.fn((
+      _operation: unknown,
+      signal?: AbortSignal,
+    ) => {
+      const result = new Promise<void>((_resolve, reject) => {
+        rejectResult = reject;
+      });
+      signal?.addEventListener("abort", () => {
+        rejectResult(new Error("cancelled"));
+      }, { once: true });
+      const stopped = new Promise<void>((_resolve, reject) => {
+        rejectStopped = reject;
+      });
+      return { result, stopped, ready: Promise.resolve(false) };
+    });
+    const { children, supervisor } = createHarness({
+      conversationAttachmentStoreRunner: runner as never,
+      conversationAttachmentStoreAuthority,
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    children[0].message({
+      type: "runtime.conversation-attachment-store-request",
+      requestId: crypto.randomUUID(),
+      encodedOperation: encodeConversationAttachmentStoreOperation({
+        operation: "remove",
+        root: conversationAttachmentStoreAuthority.root,
+        rootDev: conversationAttachmentStoreAuthority.dev,
+        rootIno: conversationAttachmentStoreAuthority.ino,
+        rootUid: conversationAttachmentStoreAuthority.uid,
+        name: crypto.randomUUID(),
+      }),
+    });
+
+    children[0].exit(9);
+    rejectStopped(new Error("utility exit unconfirmed"));
+    await vi.advanceTimersByTimeAsync(runtimeRestartDelayMs(0) * 2);
+
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      restartScheduled: false,
+      lastError: "Conversation attachment storage shutdown could not be confirmed.",
+    });
+    supervisor.start();
+    expect(children).toHaveLength(1);
   });
 
   it("recycles through trusted shutdown and waits for the exact replacement readiness", async () => {

@@ -17,6 +17,10 @@ const PACKAGE_SMOKE_TEXT = "Packaged PDF extraction works";
 export type PackagedPdfSmokeResult =
   | { ok: true; content: string }
   | { ok: false; message: string };
+export type PackagedImageSmokeResult =
+  | { ok: true }
+  | { ok: false; message: string };
+export type PackagedSmokeResult = PackagedPdfSmokeResult | PackagedImageSmokeResult;
 
 interface PackagedPdfSmokeFileOperations {
   open: typeof open;
@@ -32,9 +36,9 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw signal.reason;
 }
 
-export async function writePackagedPdfSmokeResult(
+export async function writePackagedSmokeResult(
   resultPath: string,
-  result: PackagedPdfSmokeResult,
+  result: PackagedSmokeResult,
   options: PackagedPdfSmokeWriteOptions = {},
 ): Promise<void> {
   const partialPath = join(
@@ -78,6 +82,8 @@ export async function writePackagedPdfSmokeResult(
   if (primaryError !== undefined) throw primaryError;
 }
 
+export const writePackagedPdfSmokeResult = writePackagedSmokeResult;
+
 export async function runPackagedPdfSmoke(
   inputPath: string,
   resultPath: string,
@@ -115,7 +121,7 @@ export async function runPackagedPdfSmoke(
       message: detail || "The packaged PDF stack failed.",
     };
   }
-  await writePackagedPdfSmokeResult(
+  await writePackagedSmokeResult(
     resultPath,
     result,
     { signal },

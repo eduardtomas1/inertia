@@ -771,30 +771,46 @@ export class RuntimeSupervisor {
 
   private handleExit(record: RuntimeProcessRecord, code: number): void {
     if (this.current !== record) return;
-    if (
-      this.testRecycle.owns(record)
-      && (!record.cleanupConfirmed || !record.ready)
-    ) {
-      this.rejectTestRecycle(
-        record,
-        "The recycled runtime exited before clean readiness was confirmed.",
-        !record.cleanupConfirmed,
-      );
+    if (this.testRecycle.owns(record) && (!record.cleanupConfirmed || !record.ready)) {
+      this.rejectTestRecycle(record, "The recycled runtime exited before clean readiness was confirmed.", !record.cleanupConfirmed);
     }
     this.clearTimerValue("startupTimer");
     this.clearTimerValue("stableTimer");
     this.rejectProjectPaths(record, "The local service stopped before the project path was resolved.");
-    this.rejectDatabaseRecoveryRequests(
-      record,
-      "The local service stopped before the database recovery request completed.",
-    );
-    this.rejectPrivateConnectRuntimeRequests(
-      record,
-      "The local service stopped before the Private Connect request completed.",
-    );
+    this.rejectDatabaseRecoveryRequests(record, "The local service stopped before the database recovery request completed.");
+    this.rejectPrivateConnectRuntimeRequests(record, "The local service stopped before the Private Connect request completed.");
     this.clearCredentialRequests(record);
     this.secureFiles.clear(record);
+    if (!this.secureFiles.hasConversationAttachmentOperations(record)) {
+      this.handleDrainedExit(record, code, true);
+      return;
+    }
+    void this.secureFiles.drain(record, true).then(
+      (confirmed) => this.handleDrainedExit(record, code, confirmed),
+      () => this.handleDrainedExit(record, code, false),
+    );
+  }
 
+  private handleDrainedExit(record: RuntimeProcessRecord, code: number, secureFileCleanupConfirmed: boolean): void {
+    if (this.current !== record) return;
+    if (!secureFileCleanupConfirmed) {
+      record.cleanupConfirmed = false;
+      this.current = null;
+      this.websocketUrl = null;
+      this.databaseRecoveryReport = null;
+      this.databaseRecoveryNoticePending = false;
+      this.clearShutdownTimers();
+      this.quarantined.add(record);
+      this.restartBlocked = true;
+      this.desiredRunning = false;
+      this.phase = "stopped";
+      this.lastError = "Conversation attachment storage shutdown could not be confirmed.";
+      this.rejectTestRecycle(record, this.lastError, true);
+      this.resolveStop?.(false);
+      this.resolveStop = null;
+      this.emitState();
+      return;
+    }
     if (!record.cleanupConfirmed && !record.processTreeTermination) {
       this.current = null;
       this.websocketUrl = null;
@@ -802,10 +818,8 @@ export class RuntimeSupervisor {
       this.databaseRecoveryNoticePending = false;
       this.clearShutdownTimers();
       this.quarantined.add(record);
-      this.lastError = unconfirmedRuntimeCleanupMessage(
-        this.systemBootId,
-        "The runtime exited before complete process-tree cleanup was confirmed.",
-      );
+      this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+        "The runtime exited before complete process-tree cleanup was confirmed.");
       if (!this.desiredRunning) {
         this.phase = "stopped";
         this.restartBlocked = true;
@@ -836,24 +850,15 @@ export class RuntimeSupervisor {
         this.settleStopped(record);
         return;
       }
-      if (
-        confirmed
-        && record.cleanupConfirmed
-        && !this.completeGenerationCleanup(record)
-      ) {
-        return;
-      }
+      if (confirmed && record.cleanupConfirmed
+        && !this.completeGenerationCleanup(record)) return;
       this.current = null;
       this.websocketUrl = null;
       this.databaseRecoveryReport = null;
       this.databaseRecoveryNoticePending = false;
       this.clearShutdownTimers();
       if (!confirmed) {
-        this.rejectTestRecycle(
-          record,
-          "The recycled runtime process tree could not be confirmed stopped.",
-          false,
-        );
+        this.rejectTestRecycle(record, "The recycled runtime process tree could not be confirmed stopped.", false);
         this.quarantined.add(record);
         this.restartBlocked = true;
         this.desiredRunning = false;
@@ -864,10 +869,8 @@ export class RuntimeSupervisor {
       }
       if (!record.cleanupConfirmed) {
         this.quarantined.add(record);
-        this.lastError = unconfirmedRuntimeCleanupMessage(
-          this.systemBootId,
-          "The runtime process tree was stopped, but prior detached work could not be confirmed cleaned up.",
-        );
+        this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+          "The runtime process tree was stopped, but prior detached work could not be confirmed cleaned up.");
         if (this.unconfirmedRestarts >= runtimeSupervisorDefaults.maxUnconfirmedRestarts) {
           this.restartBlocked = true;
           this.desiredRunning = false;
@@ -886,11 +889,7 @@ export class RuntimeSupervisor {
         this.spawnNext();
         const replacement = this.current;
         if (!replacement || !this.testRecycle.bindReplacement(replacement)) {
-          this.rejectTestRecycle(
-            record,
-            "The clean runtime replacement could not be started.",
-            false,
-          );
+          this.rejectTestRecycle(record, "The clean runtime replacement could not be started.", false);
         }
         return;
       }

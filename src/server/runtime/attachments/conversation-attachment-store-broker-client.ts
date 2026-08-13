@@ -126,10 +126,7 @@ export class RuntimeConversationAttachmentStoreBrokerClient {
           "Conversation attachment retention was cancelled.",
         ));
       }
-      this.post({
-        type: "runtime.conversation-attachment-store-cancel",
-        requestId,
-      });
+      this.postCancel(requestId);
     };
     const timer = setTimeout(() => {
       const pending = this.pending.get(requestId);
@@ -140,10 +137,7 @@ export class RuntimeConversationAttachmentStoreBrokerClient {
           "Conversation attachment storage did not respond in time.",
         ));
       }
-      this.post({
-        type: "runtime.conversation-attachment-store-cancel",
-        requestId,
-      });
+      this.postCancel(requestId);
     }, Math.max(1, Math.min(Math.trunc(this.timeoutMs), 60_000)));
     timer.unref();
     this.pending.set(requestId, {
@@ -228,10 +222,23 @@ export class RuntimeConversationAttachmentStoreBrokerClient {
       // Do not resolve `stopped` here. Only main can confirm the utility
       // process exited, and runtime shutdown must remain unconfirmed if that
       // correlated result never arrives.
+      this.postCancel(requestId);
+    }
+  }
+
+  private postCancel(requestId: string): void {
+    try {
       this.post({
         type: "runtime.conversation-attachment-store-cancel",
         requestId,
       });
+    } catch {
+      this.finish(
+        requestId,
+        unavailable("Conversation attachment storage shutdown could not be confirmed."),
+        undefined,
+        false,
+      );
     }
   }
 

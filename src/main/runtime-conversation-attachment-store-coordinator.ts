@@ -33,6 +33,13 @@ interface PendingStoreOperation {
   readonly completion: Promise<boolean>;
 }
 
+interface StoreRecordState {
+  readonly completions: Set<Promise<boolean>>;
+  shutdownConfirmed: boolean;
+  draining: boolean;
+  suppressReplies: boolean;
+}
+
 interface RuntimeConversationAttachmentStoreCoordinatorOptions {
   readonly runner?: ConversationAttachmentStoreAnyOperationRunner;
   readonly authority?: ConversationAttachmentStoreAuthority;
@@ -83,6 +90,8 @@ function encodeReceipt(receipt: ConversationAttachmentStoreReadReceipt): string 
 export class RuntimeConversationAttachmentStoreCoordinator {
   private readonly pending = new Map<string, PendingStoreOperation>();
   private readonly usedRequestIds = new WeakMap<RuntimeProcessRecord, Set<string>>();
+  private readonly recordStates = new WeakMap<RuntimeProcessRecord, StoreRecordState>();
+  private readonly activeRecords = new Set<RuntimeProcessRecord>();
 
   constructor(
     private readonly options: RuntimeConversationAttachmentStoreCoordinatorOptions,
@@ -94,7 +103,15 @@ export class RuntimeConversationAttachmentStoreCoordinator {
       if (pending?.record === record) pending.controller.abort();
       return;
     }
-    if (!this.options.accepts(record)) return;
+    if (!this.options.accepts(record)) {
+      this.reply(record, event.requestId, publicFailure());
+      return;
+    }
+    const existingState = this.recordStates.get(record);
+    if (existingState?.draining) {
+      this.reply(record, event.requestId, publicFailure());
+      return;
+    }
     const used = this.usedRequestIds.get(record) ?? new Set<string>();
     this.usedRequestIds.set(record, used);
     if (used.has(event.requestId) || this.pending.has(event.requestId)) {
@@ -122,6 +139,12 @@ export class RuntimeConversationAttachmentStoreCoordinator {
       return;
     }
     const controller = new AbortController();
+    const state = existingState ?? {
+      completions: new Set<Promise<boolean>>(),
+      shutdownConfirmed: true,
+      draining: false,
+      suppressReplies: false,
+    };
     let execution: {
       readonly result: Promise<void | ConversationAttachmentStoreReadReceipt>;
       readonly stopped: Promise<void>;
@@ -136,11 +159,15 @@ export class RuntimeConversationAttachmentStoreCoordinator {
       this.reply(record, event.requestId, publicFailure());
       return;
     }
+    if (!existingState) {
+      this.recordStates.set(record, state);
+      this.activeRecords.add(record);
+    }
     // Observe shutdown immediately so a fast helper failure cannot become an
     // unhandled rejection while its operation result is still settling.
     const stopped = execution.stopped.then(() => true, () => false);
     let pending!: PendingStoreOperation;
-    const completion = (async (): Promise<boolean> => {
+    const operationCompletion = (async (): Promise<boolean> => {
       let receipt: void | ConversationAttachmentStoreReadReceipt;
       let operationSucceeded = false;
       try {
@@ -150,9 +177,8 @@ export class RuntimeConversationAttachmentStoreCoordinator {
         receipt = undefined;
       }
       const shutdownConfirmed = await stopped;
-      if (
-        this.pending.get(event.requestId) !== pending
-      ) return shutdownConfirmed;
+      if (this.pending.get(event.requestId) !== pending) return shutdownConfirmed;
+      if (state.suppressReplies) return shutdownConfirmed;
       if (!operationSucceeded || !shutdownConfirmed) {
         this.reply(record, event.requestId, publicFailure(shutdownConfirmed));
         return shutdownConfirmed;
@@ -172,13 +198,34 @@ export class RuntimeConversationAttachmentStoreCoordinator {
         encodedReceipt,
       });
       return true;
-    })().finally(() => {
+    })();
+    let completion!: Promise<boolean>;
+    completion = operationCompletion.then(
+      (confirmed) => {
+        if (!confirmed) state.shutdownConfirmed = false;
+        return confirmed;
+      },
+      () => {
+        state.shutdownConfirmed = false;
+        return false;
+      },
+    ).finally(() => {
       if (this.pending.get(event.requestId) === pending) {
         this.pending.delete(event.requestId);
+      }
+      state.completions.delete(completion);
+      if (
+        state.completions.size === 0
+        && state.shutdownConfirmed
+        && !state.draining
+      ) {
+        this.recordStates.delete(record);
+        this.activeRecords.delete(record);
       }
     });
     pending = { record, controller, completion };
     this.pending.set(event.requestId, pending);
+    state.completions.add(completion);
   }
 
   clear(record: RuntimeProcessRecord | null): void {
@@ -186,14 +233,41 @@ export class RuntimeConversationAttachmentStoreCoordinator {
     for (const pending of this.pending.values()) {
       if (pending.record === record) pending.controller.abort();
     }
+  }
+
+  hasOperations(record: RuntimeProcessRecord | null): boolean {
+    return record !== null && this.recordStates.has(record);
+  }
+
+  async drain(
+    record: RuntimeProcessRecord | null,
+    suppressReplies = false,
+  ): Promise<boolean> {
+    if (!record) return true;
+    this.clear(record);
+    const state = this.recordStates.get(record);
+    if (!state) {
+      this.usedRequestIds.delete(record);
+      return true;
+    }
+    state.draining = true;
+    state.suppressReplies ||= suppressReplies;
+    while (state.completions.size > 0) {
+      const results = await Promise.all(state.completions);
+      if (!results.every(Boolean)) state.shutdownConfirmed = false;
+    }
+    if (!state.shutdownConfirmed) return false;
+    this.recordStates.delete(record);
+    this.activeRecords.delete(record);
     this.usedRequestIds.delete(record);
+    return true;
   }
 
   async shutdown(): Promise<boolean> {
-    const pending = [...this.pending.values()];
-    for (const operation of pending) operation.controller.abort();
-    const results = await Promise.all(pending.map((operation) =>
-      operation.completion.catch(() => false)));
+    const results = await Promise.all(Array.from(
+      this.activeRecords,
+      (record) => this.drain(record).catch(() => false),
+    ));
     return results.every(Boolean);
   }
 

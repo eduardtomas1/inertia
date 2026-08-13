@@ -18,14 +18,24 @@ const STORE_OPERATION_TIMEOUT_MS = 30_000;
 const STORE_OPERATION_KILL_GRACE_MS = 3_000;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MAX_METADATA_BYTES = 4 * 1024;
+const MAX_ACTIVE_OPERATIONS = 4;
+const MAX_PENDING_OPERATIONS = 64;
 
 type StoreOperation = ConversationAttachmentStoreOperation
   | ConversationAttachmentStoreReadOperation;
+
+interface StoreExecution {
+  readonly result: Promise<void | ConversationAttachmentStoreReadReceipt>;
+  readonly stopped: Promise<void>;
+  readonly ready: Promise<boolean>;
+}
 
 export interface ConversationAttachmentStoreUtilityRunnerOptions {
   spawn(cwd: string): UtilityProcess;
   timeoutMs?: number;
   killGraceMs?: number;
+  maxActiveOperations?: number;
+  maxPendingOperations?: number;
 }
 
 function cancelled(signal?: AbortSignal): Error {
@@ -76,14 +86,18 @@ export function createConversationAttachmentStoreUtilityRunner(
       10_000,
     ),
   );
-  function run(
+  const maxActiveOperations = Math.max(
+    1,
+    Math.min(Math.trunc(options.maxActiveOperations ?? MAX_ACTIVE_OPERATIONS), 16),
+  );
+  const maxPendingOperations = Math.max(
+    0,
+    Math.min(Math.trunc(options.maxPendingOperations ?? MAX_PENDING_OPERATIONS), 256),
+  );
+  function runNow(
     operation: StoreOperation,
     signal?: AbortSignal,
-  ): {
-    readonly result: Promise<void | ConversationAttachmentStoreReadReceipt>;
-    readonly stopped: Promise<void>;
-    readonly ready: Promise<boolean>;
-  } {
+  ): StoreExecution {
     let resolveStopped!: () => void;
     let rejectStopped!: (error: Error) => void;
     let resolveReady!: (observed: boolean) => void;
@@ -120,6 +134,7 @@ export function createConversationAttachmentStoreUtilityRunner(
       let stoppingError: Error | null = null;
       let killGraceTimer: NodeJS.Timeout | null = null;
       let settled = false;
+      let spawned = false;
       const cleanup = (): void => {
         clearTimeout(timer);
         if (killGraceTimer) clearTimeout(killGraceTimer);
@@ -173,6 +188,7 @@ export function createConversationAttachmentStoreUtilityRunner(
       timer.unref();
       signal?.addEventListener("abort", onAbort, { once: true });
       child.once("spawn", () => {
+        spawned = true;
         if (stoppingError || signal?.aborted) {
           onAbort();
           return;
@@ -189,6 +205,10 @@ export function createConversationAttachmentStoreUtilityRunner(
         }
       });
       child.on("message", (value) => {
+        if (!spawned) {
+          stop(new Error("Conversation attachment operation returned a result before startup."));
+          return;
+        }
         const event = parseConversationAttachmentStoreWorkerEvent(value);
         if (!event || reported) {
           stop(new Error("Conversation attachment operation returned an invalid result."));
@@ -208,13 +228,117 @@ export function createConversationAttachmentStoreUtilityRunner(
       child.once("error", () => {
         stop(new Error("Conversation attachment operation stopped unexpectedly."));
       });
-      child.once("exit", () => {
+      (child as unknown as {
+        once(
+          event: "exit",
+          listener: (code: number, signal?: string) => void,
+        ): void;
+      }).once("exit", (code, signal) => {
         if (killGraceTimer) clearTimeout(killGraceTimer);
         resolveStopped();
-        settle(stoppingError ?? undefined);
+        settle(stoppingError ?? (
+          code === 0 && !signal
+            ? undefined
+            : new Error("Conversation attachment operation stopped unexpectedly.")
+        ));
       });
     });
     return { result, stopped, ready };
   }
+  interface QueuedOperation {
+    readonly operation: StoreOperation;
+    readonly signal: AbortSignal | undefined;
+    readonly resolveResult: (
+      value: void | ConversationAttachmentStoreReadReceipt,
+    ) => void;
+    readonly rejectResult: (error: Error) => void;
+    readonly resolveStopped: () => void;
+    readonly rejectStopped: (error: Error) => void;
+    readonly resolveReady: (observed: boolean) => void;
+    readonly onAbort: () => void;
+  }
+  let activeOperations = 0;
+  const queued: QueuedOperation[] = [];
+  const pump = (): void => {
+    while (activeOperations < maxActiveOperations && queued.length > 0) {
+      const next = queued.shift();
+      if (!next) return;
+      next.signal?.removeEventListener("abort", next.onAbort);
+      if (next.signal?.aborted) {
+        next.rejectResult(cancelled(next.signal));
+        next.resolveStopped();
+        next.resolveReady(false);
+        continue;
+      }
+      activeOperations += 1;
+      const running = runNow(next.operation, next.signal);
+      void running.result.then(next.resolveResult, next.rejectResult);
+      void running.ready.then(next.resolveReady);
+      void running.stopped.then(next.resolveStopped, next.rejectStopped).finally(() => {
+        activeOperations -= 1;
+        pump();
+      });
+    }
+  };
+  const run = (
+    operation: StoreOperation,
+    signal?: AbortSignal,
+  ): StoreExecution => {
+    let resolveResult!: (
+      value: void | ConversationAttachmentStoreReadReceipt,
+    ) => void;
+    let rejectResult!: (error: Error) => void;
+    let resolveStopped!: () => void;
+    let rejectStopped!: (error: Error) => void;
+    let resolveReady!: (observed: boolean) => void;
+    const result = new Promise<void | ConversationAttachmentStoreReadReceipt>((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
+    const stopped = new Promise<void>((resolve, reject) => {
+      resolveStopped = resolve;
+      rejectStopped = reject;
+    });
+    const ready = new Promise<boolean>((resolve) => { resolveReady = resolve; });
+    const failWithoutSpawn = (error: Error): void => {
+      rejectResult(error);
+      resolveStopped();
+      resolveReady(false);
+    };
+    if (signal?.aborted) {
+      failWithoutSpawn(cancelled(signal));
+      return { result, stopped, ready };
+    }
+    if (
+      activeOperations >= maxActiveOperations
+      && queued.length >= maxPendingOperations
+    ) {
+      failWithoutSpawn(new Error(
+        "Conversation attachment storage is at its bounded capacity.",
+      ));
+      return { result, stopped, ready };
+    }
+    let entry!: QueuedOperation;
+    const onAbort = (): void => {
+      const index = queued.indexOf(entry);
+      if (index < 0) return;
+      queued.splice(index, 1);
+      failWithoutSpawn(cancelled(signal));
+    };
+    entry = {
+      operation,
+      signal,
+      resolveResult,
+      rejectResult,
+      resolveStopped,
+      rejectStopped,
+      resolveReady,
+      onAbort,
+    };
+    queued.push(entry);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    pump();
+    return { result, stopped, ready };
+  };
   return run as ConversationAttachmentStoreAnyOperationRunner;
 }

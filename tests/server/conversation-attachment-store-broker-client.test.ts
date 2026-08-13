@@ -92,4 +92,40 @@ describe("runtime conversation attachment store broker client", () => {
     await expect(running.result).rejects.toThrow("shutdown could not be confirmed");
     await expect(running.stopped).rejects.toThrow("shutdown could not be confirmed");
   });
+
+  it("settles result and stopped on a correlated unavailable reply", async () => {
+    const posted: RuntimeWorkerEvent[] = [];
+    const client = new RuntimeConversationAttachmentStoreBrokerClient(
+      (event) => posted.push(event),
+    );
+    const running = client.runner(operation);
+    const request = posted[0];
+    if (request?.type !== "runtime.conversation-attachment-store-request") {
+      throw new Error("The store request was not posted.");
+    }
+
+    client.handle({
+      type: "runtime.conversation-attachment-store-result",
+      requestId: request.requestId,
+      ok: false,
+      shutdownConfirmed: true,
+      message: "Conversation attachment storage could not complete the operation.",
+    });
+
+    await expect(running.result).rejects.toThrow("could not complete");
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("fails closed without throwing when cancellation cannot be posted", async () => {
+    let posts = 0;
+    const client = new RuntimeConversationAttachmentStoreBrokerClient(() => {
+      posts += 1;
+      if (posts > 1) throw new Error("runtime IPC closed");
+    });
+    const running = client.runner(operation);
+
+    expect(() => client.close()).not.toThrow();
+    await expect(running.result).rejects.toThrow("storage stopped");
+    await expect(running.stopped).rejects.toThrow("shutdown could not be confirmed");
+  });
 });

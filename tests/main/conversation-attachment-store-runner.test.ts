@@ -88,6 +88,43 @@ describe("conversation attachment store utility runner", () => {
     await expect(running.ready).resolves.toBe(false);
   });
 
+  it.each([
+    [1, undefined],
+    [0, "SIGKILL"],
+  ])("rejects a success frame followed by abnormal exit (%s, %s)", async (
+    code,
+    signal,
+  ) => {
+    const child = new FakeUtilityProcess();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("message", {
+      type: "conversation-attachment-store.result",
+      ok: true,
+    });
+    child.emit("exit", code, signal);
+    await expect(running.result).rejects.toThrow("stopped unexpectedly");
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("rejects a result received before utility startup", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("message", {
+      type: "conversation-attachment-store.result",
+      ok: true,
+    });
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toThrow("before startup");
+  });
+
   it("bounds timeout shutdown and distinguishes confirmed from unconfirmed exit", async () => {
     vi.useFakeTimers();
     try {
@@ -137,5 +174,82 @@ describe("conversation attachment store utility runner", () => {
     child.emit("exit", 1);
     await expect(running.result).rejects.toThrow("cancelled by test");
     await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("bounds active utilities and queued operations", async () => {
+    const children: FakeUtilityProcess[] = [];
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => {
+        const child = new FakeUtilityProcess();
+        children.push(child);
+        return utility(child);
+      },
+      maxActiveOperations: 2,
+      maxPendingOperations: 1,
+    });
+    const first = runner(operation);
+    const second = runner({ ...operation, name: crypto.randomUUID() });
+    const queued = runner({ ...operation, name: crypto.randomUUID() });
+    const overflow = runner({ ...operation, name: crypto.randomUUID() });
+    void first.result.catch(() => undefined);
+    void second.result.catch(() => undefined);
+
+    expect(children).toHaveLength(2);
+    await expect(overflow.result).rejects.toThrow("bounded capacity");
+    await expect(overflow.stopped).resolves.toBeUndefined();
+
+    children[0].emit("spawn");
+    children[0].emit("message", {
+      type: "conversation-attachment-store.result",
+      ok: true,
+    });
+    children[0].emit("exit", 0);
+    await expect(first.result).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(children).toHaveLength(3));
+
+    for (const child of children.slice(1)) {
+      child.emit("spawn");
+      child.emit("message", {
+        type: "conversation-attachment-store.result",
+        ok: true,
+      });
+      child.emit("exit", 0);
+    }
+    await expect(second.result).resolves.toBeUndefined();
+    await expect(queued.result).resolves.toBeUndefined();
+  });
+
+  it("cancels queued work without spawning it", async () => {
+    const children: FakeUtilityProcess[] = [];
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => {
+        const child = new FakeUtilityProcess();
+        children.push(child);
+        return utility(child);
+      },
+      maxActiveOperations: 1,
+      maxPendingOperations: 1,
+    });
+    const active = runner(operation);
+    void active.result.catch(() => undefined);
+    const controller = new AbortController();
+    const queued = runner(
+      { ...operation, name: crypto.randomUUID() },
+      controller.signal,
+    );
+    controller.abort(new Error("queued cancellation"));
+
+    await expect(queued.result).rejects.toThrow("queued cancellation");
+    await expect(queued.stopped).resolves.toBeUndefined();
+    expect(children).toHaveLength(1);
+
+    children[0].emit("spawn");
+    children[0].emit("message", {
+      type: "conversation-attachment-store.result",
+      ok: true,
+    });
+    children[0].emit("exit", 0);
+    await expect(active.result).resolves.toBeUndefined();
+    expect(children).toHaveLength(1);
   });
 });

@@ -1,5 +1,5 @@
 import { constants, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -75,6 +75,7 @@ import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
 import { packageSmokeEnvironment } from "./package-smoke-environment.js";
+import { waitForRequestedPackageSmokeResults } from "./package-smoke-results.js";
 import {
   activateThreadNotification,
   waitForThreadNotificationWindowLoad,
@@ -145,29 +146,6 @@ let credentialVault: CredentialVault | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
 let packageSmokeFilePath: string | null = null;
-const PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS = 47_000;
-
-async function waitForPackageSmokePdfResult(path: string): Promise<void> {
-  const deadline = Date.now() + PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (existsSync(path)) {
-      const value = JSON.parse(await readFile(path, "utf8")) as unknown;
-      if (
-        typeof value === "object"
-        && value !== null
-        && "ok" in value
-        && typeof value.ok === "boolean"
-        && (
-          (value.ok && "content" in value && typeof value.content === "string")
-          || (!value.ok && "message" in value && typeof value.message === "string")
-        )
-      ) return;
-      throw new Error("The packaged PDF smoke receipt is invalid.");
-    }
-    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 50));
-  }
-  throw new Error("The packaged PDF smoke receipt was not published before its deadline.");
-}
 const previewBroker = new PreviewBroker({
   getWindow: () => mainWindow,
   openExternal: async (url) => shell.openExternal(url),
@@ -1108,12 +1086,10 @@ async function bootstrap(): Promise<void> {
               resolveWait,
               packageSmokeCodexExecutable ? 10_000 : 100,
             )),
-            packageSmokePdfResult
-              ? waitForPackageSmokePdfResult(packageSmokePdfResult)
-              : Promise.resolve(),
-            packageSmokeImageResult
-              ? waitForPackageSmokePdfResult(packageSmokeImageResult)
-              : Promise.resolve(),
+            waitForRequestedPackageSmokeResults({
+              pdf: packageSmokePdfResult,
+              image: packageSmokeImageResult,
+            }),
           ]);
         }).catch(() => undefined).finally(() => app.quit());
       }

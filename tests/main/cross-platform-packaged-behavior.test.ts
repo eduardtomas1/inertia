@@ -108,8 +108,9 @@ describe("cross-platform packaged behavior contract", () => {
     );
     expect(main.match(/timestampMs: Date\.now\(\)/gu)).toHaveLength(2);
     expect(main).toContain("packageSmokePdf:");
-    expect(main).toContain("waitForPackageSmokePdfResult(packageSmokePdfResult)");
-    expect(main).toContain("const PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS = 47_000;");
+    expect(main).toContain("waitForRequestedPackageSmokeResults({");
+    const results = await source("src/main/package-smoke-results.ts");
+    expect(results).toContain("options.timeoutMs ?? 47_000");
     const worker = await source("src/server/runtime-worker.ts");
     const readiness = worker.lastIndexOf('type: "runtime.ready"');
     const pdfSmoke = worker.lastIndexOf("packageSmokePdfOperation = runPackagedPdfSmoke(");
@@ -117,7 +118,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(pdfSmoke).toBeGreaterThan(readiness);
     expect(worker).toContain("packageSmokePdfController?.abort(");
     expect(worker).toContain("packageSmokePdfOperation?.catch(() => undefined)");
-    expect(main).toContain("JSON.parse(await readFile(path, \"utf8\"))");
+    expect(results).toContain("JSON.parse(await readFile(path, \"utf8\"))");
   });
 
   it("registers runtime socket handlers before sending the first hydration frame", async () => {

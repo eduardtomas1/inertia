@@ -20,11 +20,14 @@ import {
   type IsolatedRunFileSystem,
   type IsolatedRunProviderRuntime,
   type IsolatedRunStore,
+  isolatedRunSelection,
 } from "../../src/server/runtime/reviews/isolated-run-controller";
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
+  modelSelectionSchema,
   nativeModelSelection,
+  withModelSelectionFastMode,
 } from "../../src/shared/model-routing";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
@@ -219,6 +222,138 @@ afterEach(async () => {
 });
 
 describe("IsolatedRunController", () => {
+  it("carries advertised native speed support into fresh isolated runs", async () => {
+    const store = new FakeStore();
+    const provider = new FakeProvider();
+    const controller = new IsolatedRunController(
+      store,
+      provider,
+      "/private/inertia-data",
+      vi.fn(),
+      { id: ids(), fileSystem: fakeFileSystem() },
+    );
+    const selection = isolatedRunSelection({
+      modelSelection: nativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-test",
+      }),
+    }, null, {
+      id: "codex",
+      models: [{
+        id: "gpt-test",
+        label: "GPT Test",
+        description: "Provider-default Fast",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+        fastMode: {
+          providerValue: "priority",
+          label: "Fast",
+          description: "Faster responses",
+          isDefault: true,
+        },
+      }],
+    });
+    const running = controller.run(request({}, { selection }));
+    await providerStarted(provider);
+    expect(provider.inputs[0]).toMatchObject({
+      supportedFastMode: "priority",
+      modelSelection: { providerOptions: {} },
+    });
+    provider.pending[0]!.resolve(resultFor(
+      provider.inputs[0]!,
+      "completed",
+      "Provider response",
+    ));
+    await expect(running).resolves.toMatchObject({ value: "Provider response" });
+  });
+
+  it("omits Fast when an isolated model override does not advertise it", () => {
+    const fastSelection = withModelSelectionFastMode(
+      nativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-fast",
+      }),
+      "priority",
+    );
+
+    expect(isolatedRunSelection({
+      modelSelection: fastSelection,
+    }, "gpt-standard", {
+      id: "codex",
+      models: [{
+        id: "gpt-standard",
+        label: "GPT Standard",
+        description: "Standard-only model",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+        fastMode: null,
+      }],
+    })).toMatchObject({
+      modelSelection: {
+        modelId: "gpt-standard",
+        providerOptions: {},
+      },
+    });
+  });
+
+  it("omits native speed controls from isolated custom backend routes", () => {
+    const custom = modelSelectionSchema.parse({
+      ...nativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-fast",
+      }),
+      backendProfileId: "custom:openai",
+      backendProfileDisplayName: "Custom OpenAI",
+    });
+
+    expect(isolatedRunSelection({
+      modelSelection: custom,
+    }, null, {
+      id: "codex",
+      models: [{
+        id: "gpt-fast",
+        label: "GPT Fast",
+        description: "Native catalog model",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+        fastMode: {
+          providerValue: "priority",
+          label: "Fast",
+          description: "Faster responses",
+          isDefault: false,
+        },
+      }],
+    })).toEqual(expect.objectContaining({
+      modelSelection: expect.objectContaining({ providerOptions: {} }),
+    }));
+    expect(isolatedRunSelection({
+      modelSelection: custom,
+    }, null, {
+      id: "codex",
+      models: [{
+        id: "gpt-fast",
+        label: "GPT Fast",
+        description: "Native catalog model",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+        fastMode: {
+          providerValue: "priority",
+          label: "Fast",
+          description: "Faster responses",
+          isDefault: false,
+        },
+      }],
+    })).not.toHaveProperty("supportedFastMode");
+  });
+
   it("rejects another agent task while a resumed terminal owns the conversation", async () => {
     const store = new FakeStore();
     store.conversationWorkReserved = true;

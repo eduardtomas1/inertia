@@ -98,6 +98,7 @@ export type PromptPresetCommandRunner = (
 
 export type ComposerMenu =
   | "reasoning"
+  | "speed"
   | "mode"
   | "access"
   | "action"
@@ -105,7 +106,7 @@ export type ComposerMenu =
   | "presets"
   | "stash"
   | "more";
-export type MoreSection = "actions" | "reasoning" | "mode" | "access";
+export type MoreSection = "actions" | "reasoning" | "speed" | "mode" | "access";
 
 export interface PendingModelRoute {
   selection: ModelSelection;

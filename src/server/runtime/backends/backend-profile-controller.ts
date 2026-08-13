@@ -19,6 +19,7 @@ import {
   nativeHarnessId,
   nativeModelSelection,
   modelSelectionSchema,
+  routeSupportsNativeFastModeIdentity,
   type ModelSelection,
 } from "../../../shared/model-routing";
 import type { ProviderInfo } from "../../../shared/contracts";
@@ -368,6 +369,23 @@ export class BackendProfileController {
       && selection.backendProfileId !== "builtin:opencode";
   }
 
+  supportsNativeFastModeControl(selectionInput: ModelSelection): boolean {
+    const selection = modelSelectionSchema.parse(selectionInput);
+    if (!routeSupportsNativeFastModeIdentity(selection)) return false;
+    const providerId = selection.harnessId === "codex-app-server"
+      ? "codex"
+      : "claude";
+    const provider = this.runtime.provider(providerId);
+    const model = selection.modelId === "provider-default"
+      ? provider?.models.find(({ isDefault }) => isDefault)
+        ?? provider?.models[0]
+      : provider?.models.find(({ id }) => id === selection.modelId);
+    const expectedProviderValue = providerId === "codex"
+      ? "priority"
+      : "fast";
+    return model?.fastMode?.providerValue === expectedProviderValue;
+  }
+
   private validateReasoningEffort(
     modelLabel: string,
     reasoningOptions: readonly { value: string }[],
@@ -392,12 +410,43 @@ export class BackendProfileController {
     return submitted;
   }
 
-  private rejectUnsupportedProviderOptions(
+  private validateNativeProviderOptions(
+    providerId: ProviderInfo["id"],
+    model: ProviderInfo["models"][number] | undefined,
     selection: ModelSelection,
   ): void {
+    const keys = Object.keys(selection.providerOptions);
+    if (keys.length === 0) return;
+    if (
+      keys.length !== 1
+      || keys[0] !== "fastMode"
+      || typeof selection.providerOptions.fastMode !== "string"
+    ) {
+      throw new BackendProfileControllerError(
+        "The native provider options are invalid.",
+      );
+    }
+    if (providerId !== "codex" && providerId !== "claude") {
+      throw new BackendProfileControllerError(
+        "This provider does not expose a supported Fast mode.",
+      );
+    }
+    const expectedProviderValue = providerId === "codex" ? "priority" : "fast";
+    if (
+      !model?.fastMode
+      || model.fastMode.providerValue !== expectedProviderValue
+      || selection.providerOptions.fastMode !== model.fastMode.providerValue
+    ) {
+      throw new BackendProfileControllerError(
+        `${model?.label ?? selection.modelId} does not currently advertise Fast mode. Choose Standard or refresh provider models.`,
+      );
+    }
+  }
+
+  private rejectUnsupportedProviderOptions(selection: ModelSelection): void {
     if (Object.keys(selection.providerOptions).length === 0) return;
     throw new BackendProfileControllerError(
-      "The selected model does not support provider options.",
+      "The selected model does not support provider options, including unverified Fast mode.",
     );
   }
 
@@ -446,7 +495,11 @@ export class BackendProfileController {
           "That model is no longer offered by the native harness.",
         );
       }
-      this.rejectUnsupportedProviderOptions(submitted);
+      this.validateNativeProviderOptions(
+        nativeProvider,
+        selectedModel,
+        submitted,
+      );
       const reasoningEffort = (
         options.allowUnavailableNativeCatalog
         && catalogFreshness !== "fresh"
@@ -471,6 +524,7 @@ export class BackendProfileController {
             ? selectedModel.label
             : null,
         reasoningEffort,
+        providerOptions: submitted.providerOptions,
       });
     }
     const record = this.recordForSelection(submitted);

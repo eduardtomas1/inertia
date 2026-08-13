@@ -9,7 +9,7 @@ import {
   chooseHorizontalSubmenuSide,
   type HorizontalSubmenuSide,
 } from "../../utils/dismissibleMenu";
-import { menuId } from "./config";
+import { menuId, RESPONSE_SPEED_LABEL } from "./config";
 import type { ComposerMenu, MoreSection } from "./types";
 
 export interface ComposerMenuController {
@@ -40,6 +40,7 @@ export function moreSectionLabel(section: MoreSection): string {
   return ({
     actions: "Actions",
     reasoning: "Reasoning",
+    speed: RESPONSE_SPEED_LABEL,
     mode: "Mode",
     access: "Access",
   })[section];

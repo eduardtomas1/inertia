@@ -8,6 +8,10 @@ import {
 } from "../../src/server/provider/adapters";
 import type { ProviderId, ProviderRunInput } from "../../src/server/provider/contracts";
 import { nativeProviderRunFields } from "./model-route-fixture";
+import {
+  continuationIdentityForSelection,
+  withModelSelectionFastMode,
+} from "../../src/shared/model-routing";
 
 function input(providerId: ProviderId, overrides: Partial<ProviderRunInput> = {}): ProviderRunInput {
   return {
@@ -173,6 +177,78 @@ describe("provider adapter seams", () => {
     expect(validateProviderRunInput(input("claude"))).toBe("conversation-1");
     expect(() => validateProviderRunInput(input("claude", { prompt: "" }))).toThrow("A prompt is required.");
     expect(() => validateProviderRunInput(input("claude", { imagePaths: ["bad\0path"] }))).toThrow("An image path is invalid.");
+  });
+
+  it("validates provider-native Fast mode and continuation transitions exactly", () => {
+    const codex = input("codex");
+    const fastSelection = withModelSelectionFastMode(
+      codex.modelSelection,
+      "priority",
+    );
+    const fastInput = {
+      ...codex,
+      supportedFastMode: "priority" as const,
+      modelSelection: fastSelection,
+      continuationIdentity: continuationIdentityForSelection(
+        fastSelection,
+        null,
+        false,
+      ),
+    };
+    expect(validateProviderRunInput(fastInput)).toBe("conversation-1");
+    expect(() => validateProviderRunInput({
+      ...fastInput,
+      modelSelection: {
+        ...fastSelection,
+        providerOptions: { fastMode: "priority", temperature: 0 },
+      },
+    })).toThrow("Fast mode route is invalid");
+
+    const cursor = input("cursor");
+    expect(() => validateProviderRunInput({
+      ...cursor,
+      modelSelection: {
+        ...cursor.modelSelection,
+        providerOptions: { fastMode: "priority" },
+      },
+      continuationIdentity: {
+        ...cursor.continuationIdentity,
+        performanceModeIdentity: "fast:priority",
+      },
+    })).toThrow("Fast mode route is invalid");
+    expect(() => validateProviderRunInput({
+      ...fastInput,
+      performanceModeTransition: "to-fast",
+    })).toThrow("continuation transition is invalid");
+    expect(validateProviderRunInput({
+      ...codex,
+      supportedFastMode: "priority",
+      sessionId: "thread-fast",
+      performanceModeTransition: "to-standard",
+    })).toBe("conversation-1");
+    expect(validateProviderRunInput({
+      ...codex,
+      supportedFastMode: "priority",
+    })).toBe("conversation-1");
+    expect(() => validateProviderRunInput({
+      ...codex,
+      supportedFastMode: "fast",
+    })).toThrow("Fast mode route is invalid");
+    expect(() => validateProviderRunInput({
+      ...codex,
+      harnessId: "codex-cli",
+      sessionId: "thread-fast",
+      performanceModeTransition: "to-standard",
+    })).toThrow("continuation transition is invalid");
+    expect(() => validateProviderRunInput({
+      ...codex,
+      backendProfile: {
+        ...codex.backendProfile,
+        id: "custom:openai",
+      },
+      sessionId: "thread-fast",
+      performanceModeTransition: "to-standard",
+    })).toThrow("continuation transition is invalid");
   });
 
   it("accepts bounded Codex goal starts with or without an established session", () => {

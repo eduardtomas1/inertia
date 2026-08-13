@@ -103,6 +103,8 @@ export class TurnLedgerRepository {
       || continuationIdentity.backendProfileId !== modelSelection.backendProfileId
       || continuationIdentity.backendConfigurationRevision
         !== modelSelection.backendConfigurationRevision
+      || (continuationIdentity.performanceModeIdentity ?? null)
+        !== (continuationIdentityForSelection(modelSelection).performanceModeIdentity ?? null)
     ) {
       throw new Error("The turn continuation identity does not match its model selection.");
     }

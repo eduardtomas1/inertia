@@ -169,8 +169,34 @@ function claudeModels(models: Awaited<ReturnType<Query["supportedModels"]>>): Pr
         description: `${effort === "xhigh" ? "Extra-high" : effort} reasoning effort`,
       })),
       defaultReasoningEffort: efforts.includes("high") ? "high" : efforts[0] ?? "",
+      fastMode: model.supportsFastMode === true
+        ? {
+            providerValue: "fast",
+            label: "Fast",
+            description: "Faster output with premium usage.",
+            isDefault: false,
+          }
+        : null,
     };
   });
+}
+
+function claudeFastModeFailure(record: Record<string, unknown>): string {
+  const reason = stringValue(record.fast_mode_disabled_reason);
+  const detail = reason === "model_not_allowed"
+    ? "The selected Claude model does not allow Fast mode."
+    : reason === "sdk_opt_in_required"
+      ? "This Claude Agent SDK version did not accept the Fast mode opt-in."
+      : reason === "extra_usage_disabled"
+        ? "Fast mode requires extra usage to be enabled for this Claude account."
+        : reason === "not_first_party"
+          ? "Fast mode is unavailable through this Claude backend."
+          : reason === "disabled_by_env"
+            ? "Fast mode is disabled by the Claude environment."
+            : reason === "free"
+              ? "Fast mode is unavailable on this Claude account tier."
+              : "Claude did not activate Fast mode for this session.";
+  return `${detail} Choose Standard, refresh models, or update Claude Code.`;
 }
 
 export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {
@@ -376,6 +402,15 @@ function startClaudeRun(
     typeof stageClaudeSkillPlugin
   >> = null;
   let selectedSkillsVerified = false;
+  const requestedFastMode = options.input.modelSelection.providerOptions.fastMode;
+  if (requestedFastMode !== undefined && requestedFastMode !== "fast") {
+    throw new Error("Claude received an invalid Fast mode option.");
+  }
+  const supportsFastMode = options.input.supportedFastMode === "fast";
+  const requestedFastModeState = supportsFastMode
+    ? requestedFastMode === "fast" ? "on" : "off"
+    : null;
+  let fastModeVerified = requestedFastModeState === null;
   const ownedProcess = createClaudeOwnedQueryProcess(
     "Claude Code process tree",
     lifecycleDependencies,
@@ -565,6 +600,14 @@ function startClaudeRun(
           // or allow rules that execute before canUseTool can ask the user.
           settingSources: [],
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
+          ...(supportsFastMode
+            ? {
+                settings: {
+                  fastMode: requestedFastMode === "fast",
+                  fastModePerSessionOptIn: true,
+                },
+              }
+            : {}),
           permissionMode: options.input.interactionMode === "plan"
             ? "plan"
             : options.input.access === "full"
@@ -605,6 +648,22 @@ function startClaudeRun(
         );
         if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
         const message = next.value;
+        if (message.type === "system" && message.subtype === "init") {
+          const init = message as unknown as Record<string, unknown>;
+          if (requestedFastModeState === "on") {
+            if (init.fast_mode_state !== requestedFastModeState) {
+              throw new Error(claudeFastModeFailure(init));
+            }
+            fastModeVerified = true;
+          } else if (requestedFastModeState === "off") {
+            if (init.fast_mode_state !== requestedFastModeState) {
+              throw new Error(
+                "Claude did not confirm Standard speed for this session. Start a new chat or update Claude Code.",
+              );
+            }
+            fastModeVerified = true;
+          }
+        }
         if (
           stagedSkillPlugin
           && message.type === "system"
@@ -745,6 +804,13 @@ function startClaudeRun(
         throw new Error("Claude did not confirm the selected isolated skills.");
       }
       if (cancelRequested) return finishResult("cancelled");
+      if (!fastModeVerified) {
+        throw new Error(
+          requestedFastMode === "fast"
+            ? "Claude did not confirm Fast mode for this session. Choose Standard, refresh models, or update Claude Code."
+            : "Claude did not confirm Standard speed for this session. Start a new chat or update Claude Code.",
+        );
+      }
       const completion = delegateLifecycle.complete();
       if (completion.kind === "incomplete") {
         return finishResult(

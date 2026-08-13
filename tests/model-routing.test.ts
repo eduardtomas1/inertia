@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   continuationIdentityForSelection,
+  fastModeProviderValue,
   modelSelectionSchema,
   nativeBackendProfile,
   nativeModelSelection,
   resolveHarnessBackendCompatibility,
   sameContinuationIdentity,
+  withModelSelectionFastMode,
   type ModelBackendProfile,
 } from "../src/shared/model-routing";
 
@@ -85,6 +87,25 @@ describe("model routing contracts", () => {
       modelIdentity: "gpt-5.5",
     })).toBe(false);
     expect(sameContinuationIdentity(identity, null)).toBe(false);
+  });
+
+  it("persists Fast mode as a non-secret provider route identity", () => {
+    const standard = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-5.4",
+    });
+    const fast = withModelSelectionFastMode(standard, "priority");
+
+    expect(fastModeProviderValue(fast)).toBe("priority");
+    expect(fast.providerOptions).toEqual({ fastMode: "priority" });
+    expect(continuationIdentityForSelection(fast)).toMatchObject({
+      performanceModeIdentity: "fast:priority",
+    });
+    expect(sameContinuationIdentity(
+      continuationIdentityForSelection(standard),
+      continuationIdentityForSelection(fast),
+    )).toBe(false);
+    expect(withModelSelectionFastMode(fast, null).providerOptions).toEqual({});
   });
 
   it("rejects mutable or unbounded data outside the safe selection envelope", () => {

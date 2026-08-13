@@ -69,6 +69,13 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
 
   let codexRun: ReturnType<typeof startCodexAppServerRun>;
   try {
+    const fastMode = options.input.modelSelection.providerOptions.fastMode;
+    if (fastMode !== undefined && fastMode !== "priority") {
+      throw new Error("Codex received an invalid Fast mode service tier.");
+    }
+    const serviceTier = options.input.supportedFastMode === "priority"
+      ? fastMode === "priority" ? fastMode : null
+      : undefined;
     if (
       options.harnessConfiguration
       && options.harnessConfiguration.kind !== "codex-responses"
@@ -81,6 +88,7 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       cwd: options.input.cwd,
       prompt: options.input.prompt,
       ...(options.input.model ? { model: options.input.model } : {}),
+      ...(serviceTier !== undefined ? { serviceTier } : {}),
       ...(options.harnessConfiguration
         ? { modelProvider: options.harnessConfiguration }
         : {}),
@@ -157,6 +165,8 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
         ? staleProviderSessionDecision().reason
         : compatibilityError === "full-access-unsupported"
           ? "This Codex App Server version does not support Full Access. Update Codex CLI and try again."
+          : compatibilityError === "fast-mode-unsupported"
+            ? "This Codex App Server version or selected model did not apply the requested response speed. Choose Standard, refresh models, or update Codex CLI."
           : runtimeFailure?.reason === "protocol-overflow"
               ? "Codex produced a protocol message that was too large to process safely."
               : runtimeFailure?.reason === "malformed-protocol"

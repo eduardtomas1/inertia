@@ -10,6 +10,7 @@ import {
   type ServerEvent,
 } from "../../../shared/contracts";
 import {
+  officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
 } from "../../../shared/continuation-policy";
@@ -74,6 +75,9 @@ function requestedConversationModelSelection(
     reasoningEffort: update.reasoningEffort ?? (
       providerChanged ? null : current.modelSelection.reasoningEffort
     ),
+    providerOptions: providerChanged
+      ? {}
+      : current.modelSelection.providerOptions,
   });
 }
 
@@ -493,6 +497,10 @@ export function createConversationCommandHandler(
             hasTurns: latestTurn !== null,
             allowsModelSwitchWithinSession:
               officiallyAllowsModelSwitchWithinSession(route.compatibility),
+            allowsPerformanceModeSwitchWithinSession:
+              officiallyAllowsFastModeSwitchWithinSession(route.compatibility)
+              && dependencies.backendProfileController
+                .supportsNativeFastModeControl(selection),
           });
           if (decision.action === "new-conversation-required") {
             throw new RuntimeRequestError(decision.reason);

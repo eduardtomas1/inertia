@@ -8,6 +8,7 @@ import type {
 import {
   modelSelectionSchema,
   nativeModelSelection,
+  withModelSelectionFastMode,
 } from "../../src/shared/model-routing";
 
 function provider(
@@ -207,6 +208,86 @@ describe("exact composer route state", () => {
       badge: "Model removed",
       title: "GPT Removed is unavailable",
     });
+  });
+
+  it("blocks stale Fast routes until the exact model advertises the native value", () => {
+    const standard = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-current",
+      reasoningEffort: "high",
+    });
+    const fast = withModelSelectionFastMode(standard, "priority");
+    expect(resolveComposerRouteState({
+      conversationProviderId: "codex",
+      selection: fast,
+      providers: [provider()],
+      profiles: [],
+    }).readiness).toMatchObject({
+      ready: false,
+      badge: "Fast unavailable",
+      action: "refresh",
+    });
+
+    const advertised = provider();
+    advertised.models[0]!.fastMode = {
+      providerValue: "priority",
+      label: "Fast",
+      description: "Faster responses with increased usage.",
+      isDefault: false,
+    };
+    expect(resolveComposerRouteState({
+      conversationProviderId: "codex",
+      selection: fast,
+      providers: [advertised],
+      profiles: [],
+    }).readiness).toEqual({ ready: true });
+
+    advertised.models[0]!.fastMode!.providerValue = "turbo";
+    const malformed = resolveComposerRouteState({
+      conversationProviderId: "codex",
+      selection: standard,
+      providers: [advertised],
+      profiles: [],
+    });
+    expect(malformed.model?.fastMode).toBeNull();
+    expect(malformed.readiness).toEqual({ ready: true });
+
+    advertised.models[0]!.fastMode = {
+      providerValue: "priority",
+      label: "Fast",
+      description: "Provider default Fast needs tri-state support.",
+      isDefault: true,
+    };
+    expect(resolveComposerRouteState({
+      conversationProviderId: "codex",
+      selection: standard,
+      providers: [advertised],
+      profiles: [],
+    })).toMatchObject({
+      model: { fastMode: { providerValue: "priority", isDefault: true } },
+      readiness: { ready: true },
+    });
+
+    const cursor = provider();
+    cursor.id = "cursor";
+    cursor.models[0]!.fastMode = {
+      providerValue: "fast",
+      label: "Fast",
+      description: "Unverified metadata must stay hidden.",
+      isDefault: false,
+    };
+    const unsupported = resolveComposerRouteState({
+      conversationProviderId: "cursor",
+      selection: nativeModelSelection({
+        providerId: "cursor",
+        modelId: "gpt-current",
+        reasoningEffort: "high",
+      }),
+      providers: [cursor],
+      profiles: [],
+    });
+    expect(unsupported.model?.fastMode).toBeNull();
+    expect(unsupported.readiness).toEqual({ ready: true });
   });
 
   it("rejects provider disagreement, stale revisions, and unsupported reasoning", () => {

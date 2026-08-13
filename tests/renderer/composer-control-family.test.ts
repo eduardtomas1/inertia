@@ -6,6 +6,10 @@ const settingsSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerSettings.tsx", import.meta.url),
   "utf8",
 );
+const speedOptionsSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerResponseSpeedOptions.tsx", import.meta.url),
+  "utf8",
+);
 const moreMenuSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerMoreMenu.tsx", import.meta.url),
   "utf8",
@@ -24,7 +28,7 @@ const css = readFileSync(
 );
 
 describe("composer setting control family", () => {
-  it("groups reasoning, access, and mode as compact value triggers", () => {
+  it("groups reasoning, speed, access, and mode as compact value triggers", () => {
     const familyStart = settingsSource.indexOf(
       'className="composer-setting-family"',
     );
@@ -34,17 +38,19 @@ describe("composer setting control family", () => {
     expect(family).toContain('role="group"');
     expect(family).toContain('aria-label="Composer settings"');
     expect(family).toContain('data-composer-setting="reasoning"');
+    expect(family).toContain('data-composer-setting="speed"');
     expect(family).toContain('data-composer-setting="access"');
     expect(family).toContain('data-composer-setting="mode"');
     expect(family).toContain('className="composer-setting-value"');
-    expect(family.match(/className="composer-setting-icon"/gu)).toHaveLength(3);
-    expect(family.match(/className="composer-setting-chevron"/gu)).toHaveLength(3);
-    expect(family.match(/size=\{13\}/gu)?.length).toBeGreaterThanOrEqual(3);
-    expect(family.match(/size=\{11\}/gu)?.length).toBeGreaterThanOrEqual(3);
+    expect(family.match(/className="composer-setting-icon"/gu)).toHaveLength(4);
+    expect(family.match(/className="composer-setting-chevron"/gu)).toHaveLength(4);
+    expect(family.match(/size=\{13\}/gu)?.length).toBeGreaterThanOrEqual(4);
+    expect(family.match(/size=\{11\}/gu)?.length).toBeGreaterThanOrEqual(4);
     expect(family).toContain("Current level:");
+    expect(family).toContain("Current speed:");
     expect(family).toContain("Current access:");
     expect(family).toContain("Current mode:");
-    for (const setting of ["reasoning", "access", "mode"]) {
+    for (const setting of ["reasoning", "speed", "access", "mode"]) {
       const triggerStart = family.indexOf(
         `data-composer-setting="${setting}"`,
       );
@@ -55,8 +61,8 @@ describe("composer setting control family", () => {
     }
   });
 
-  it("keeps option detail inside three consistent radio menus", () => {
-    for (const menu of ["reasoning", "access", "mode"]) {
+  it("keeps option detail inside four consistent radio menus", () => {
+    for (const menu of ["reasoning", "speed", "access", "mode"]) {
       expect(settingsSource).toContain(
         `id={menuId("${menu}")}`,
       );
@@ -64,11 +70,15 @@ describe("composer setting control family", () => {
         `setMenuPopover("${menu}", node)`,
       );
     }
-    expect(settingsSource.match(/composer-setting-popover/gu)).toHaveLength(3);
+    expect(settingsSource.match(/composer-setting-popover/gu)).toHaveLength(4);
     expect(settingsSource).toContain('<div className="popover-title">Reasoning</div>');
+    expect(settingsSource).toContain(
+      '<div className="popover-title">{RESPONSE_SPEED_LABEL}</div>',
+    );
     expect(settingsSource).toContain('<div className="popover-title">Project access</div>');
     expect(settingsSource).toContain('<div className="popover-title">Mode</div>');
     expect(settingsSource.match(/role="menuitemradio"/gu)).toHaveLength(3);
+    expect(speedOptionsSource.match(/role="menuitemradio"/gu)).toHaveLength(1);
     expect(settingsSource).toContain("selectedModel.reasoningOptions.map");
     expect(settingsSource).toContain("accessOptions.map");
     expect(settingsSource).toContain('(["build", "plan"] as InteractionMode[])');
@@ -142,6 +152,14 @@ describe("composer setting control family", () => {
   });
 
   it("supports keyboard entry, menu navigation, outside dismissal, and focus restoration", () => {
+    expect(settingsSource).toContain(
+      'import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";',
+    );
+    expect(moreMenuSource).toContain(
+      'import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";',
+    );
+    expect(settingsSource).not.toContain("LazyResponseSpeed");
+    expect(moreMenuSource).not.toContain("LazyResponseSpeed");
     expect(menuHookSource).toContain(
       'if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return',
     );

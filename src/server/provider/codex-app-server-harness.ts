@@ -273,7 +273,10 @@ function startCodexCompaction(
       });
       let resolveCompaction!: () => void;
       let compactionInitiated = false;
+      let compactionInitiatedAtMs: number | null = null;
       let compactionItemId: string | null = null;
+      let compactionTurnId: string | null = null;
+      let compactionStartedAtMs: number | null = null;
       const compacted = new Promise<void>((resolve, reject) => {
         resolveCompaction = resolve;
         completionTimer = setTimeout(
@@ -301,12 +304,29 @@ function startCodexCompaction(
           const item = objectValue(params.item);
           if (item?.type !== "contextCompaction") return;
           const itemId = boundedText(item.id, 512);
-          if (!itemId) return;
+          const turnId = boundedText(params.turnId, 512);
+          if (!itemId || !turnId || compactionInitiatedAtMs === null) return;
           if (method === "item/started") {
+            const startedAtMs = params.startedAtMs;
+            if (
+              typeof startedAtMs !== "number"
+              || !Number.isSafeInteger(startedAtMs)
+              || startedAtMs < compactionInitiatedAtMs
+            ) return;
             compactionItemId ??= itemId;
+            compactionTurnId ??= turnId;
+            compactionStartedAtMs ??= startedAtMs;
             return;
           }
-          if (itemId === compactionItemId) resolveCompaction();
+          const completedAtMs = params.completedAtMs;
+          if (
+            itemId === compactionItemId
+            && turnId === compactionTurnId
+            && compactionStartedAtMs !== null
+            && typeof completedAtMs === "number"
+            && Number.isSafeInteger(completedAtMs)
+            && completedAtMs >= compactionStartedAtMs
+          ) resolveCompaction();
         },
       }, async (client) => {
         const accessPolicy = codexAccessPolicy({
@@ -352,6 +372,7 @@ function startCodexCompaction(
           );
         }
         emitter.status("running");
+        compactionInitiatedAtMs = Date.now();
         const compactRequest = client.request(
           "thread/compact/start",
           { threadId: sessionId },

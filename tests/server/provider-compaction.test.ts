@@ -50,8 +50,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "thread/resume") return send({ id: message.id, result: { thread: { id: message.params.threadId } } });
   if (message.method === "thread/compact/start") {
     send({ id: message.id, result: {} });
-    send({ method: "item/started", params: { threadId: message.params.threadId, item: { id: "compact-1", type: "contextCompaction" } } });
-    return send({ method: "item/completed", params: { threadId: message.params.threadId, item: { id: "compact-1", type: "contextCompaction" } } });
+    send({ method: "item/started", params: { threadId: message.params.threadId, turnId: "compact-turn-1", startedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
+    return send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: "compact-turn-1", completedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
   }
 });
 `);
@@ -75,6 +75,42 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(messages.some(({ method }) => method === "thread/compact/start"))
       .toBe(true);
     expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
+  });
+
+  it("does not accept a stale timestamped Codex lifecycle after requesting compaction", async () => {
+    const root = portableFixtureRoot("Codex compact stale lifecycle");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "codex");
+    writeNodeSubcommand(root, "app-server", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fixture" } });
+  if (message.method === "initialized") return;
+  if (message.method === "thread/resume") return send({ id: message.id, result: { thread: { id: message.params.threadId } } });
+  if (message.method === "thread/compact/start") {
+    send({ id: message.id, result: {} });
+    send({ method: "item/started", params: { threadId: message.params.threadId, turnId: "stale-turn", startedAtMs: 1, item: { id: "compact-stale", type: "contextCompaction" } } });
+    send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: "stale-turn", completedAtMs: 2, item: { id: "compact-stale", type: "contextCompaction" } } });
+    return setTimeout(() => process.exit(0), 10);
+  }
+});
+`);
+    const manager = new ProviderManager({ commands: { codex: command } });
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "codex-compact-stale-lifecycle",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-existing",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("early"),
+    });
   });
 
   it("does not accept a same-thread Codex completion without its post-request start", async () => {

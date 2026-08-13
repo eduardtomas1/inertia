@@ -12,6 +12,7 @@ import { providerProcessInvocation } from "../provider/process";
 import {
   JsonLineDecoder,
   objectValue,
+  rpcId,
   type JsonLineDecoderFailure,
   type JsonObject,
 } from "./protocol";
@@ -183,11 +184,12 @@ export async function withCodexControlClient<T>(
       return;
     }
     const message = objectValue(parsed);
-    const id = typeof message?.id === "number" ? message.id : undefined;
+    const messageId = rpcId(message?.id);
+    const id = typeof messageId === "number" ? messageId : undefined;
     const method = typeof message?.method === "string"
       ? message.method
       : undefined;
-    if (id !== undefined && method !== undefined) {
+    if (messageId !== undefined && method !== undefined) {
       // This one-shot control client has no UI/durable-turn route for server
       // requests such as approvals or elicitation. Never confuse a colliding
       // server request ID with the response to one of our pending requests.

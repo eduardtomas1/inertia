@@ -370,6 +370,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     props.terminalProjections ?? {},
     props.latestTurnSummary?.turn ?? null,
   ), [props.latestTurnSummary?.turn, props.terminalProjections, props.turns]);
+  const projectedProps = useMemo<ResponseTimelineProps>(() =>
+    projectedTurns === props.turns
+      ? props
+      : { ...props, turns: projectedTurns },
+  [projectedTurns, props]);
   const previousTimeline = useRef<ResponseTimelineItem[]>([]);
   const previousBuild = useRef<{
     input: BuildResponseTimelineInput;
@@ -1165,7 +1170,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     ? (
       <TurnTimeline
         turn={item.turn}
-        props={props}
+        props={projectedProps}
         subagents={subagentsByTurn.get(item.turn.id) ?? EMPTY_SUBAGENTS}
         previousArtifactTurnId={previousComparableTurn.get(item.turn.id) ?? null}
         onBeforeToggle={captureExpansionAnchor}
@@ -1176,7 +1181,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       <CompatibilityTimeline
         key={props.conversationId}
         compatibility={item.compatibility}
-        props={props}
+        props={projectedProps}
       />
     );
 

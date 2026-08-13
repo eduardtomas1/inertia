@@ -7,6 +7,7 @@ import type {
   AgentReasoning,
   AgentTurn,
   ChatMessage,
+  SubagentTrace,
 } from "../../src/shared/contracts";
 
 const conversationId = "33333333-3333-4333-8333-333333333333";
@@ -339,6 +340,108 @@ describe("agent loading and trace DOM", () => {
     expect(screen.queryByRole("button", {
       name: "Stop Codex · Codex App Server run",
     })).not.toBeInTheDocument();
+  });
+
+  it("settles nested subagent controls while a newer turn remains active", () => {
+    const baseTurn = agentTurn();
+    const staleTurn: AgentTurn = {
+      ...baseTurn,
+      id: "turn-stale-projected",
+      runId: "run-stale-projected",
+      userMessageId: "user-stale-projected",
+      providerId: "claude",
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "builtin:claude",
+      model: "sonnet",
+      modelAlias: null,
+      modelSelection: {
+        ...baseTurn.modelSelection,
+        harnessId: "claude-agent-sdk",
+        backendProfileId: "builtin:claude",
+        backendProfileDisplayName: "Claude",
+        modelId: "sonnet",
+        alias: null,
+      },
+      continuationIdentity: {
+        harnessId: "claude-agent-sdk",
+        backendProfileId: "builtin:claude",
+        backendConfigurationRevision: 4,
+        endpointIdentity: "native:claude",
+        modelIdentity: null,
+      },
+    };
+    const currentTurn: AgentTurn = {
+      ...baseTurn,
+      id: "turn-current-active",
+      runId: "run-current-active",
+      userMessageId: "user-current-active",
+      requestedAt: "2026-08-12T12:01:00.000Z",
+      startedAt: "2026-08-12T12:01:02.000Z",
+      createdAt: "2026-08-12T12:01:00.000Z",
+      updatedAt: "2026-08-12T12:01:08.000Z",
+    };
+    const delegated: SubagentTrace = {
+      id: "trace-stale-projected",
+      conversationId,
+      runId: staleTurn.runId,
+      turnId: staleTurn.id,
+      providerId: "claude",
+      providerTaskId: "task-stale-projected",
+      providerAgentId: "agent-stale-projected",
+      parentTraceId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-stale-projected",
+      providerRole: "reviewer",
+      providerName: "Settled reviewer",
+      providerStatus: "running",
+      status: "running",
+      isLive: true,
+      description: "Review the prior turn.",
+      progress: "Waiting for terminal persistence.",
+      result: null,
+      sequence: 1,
+      createdAt: "2026-08-12T12:00:03.000Z",
+      updatedAt: "2026-08-12T12:00:07.000Z",
+    };
+    const onStop = vi.fn<() => void>();
+    const owner = `${staleTurn.runId}\0${staleTurn.id}`;
+
+    const { container } = render(<ResponseTimeline
+      {...stateProps({}, onStop)}
+      turns={[staleTurn, currentTurn]}
+      messages={[
+        {
+          ...userMessage(),
+          id: staleTurn.userMessageId,
+          turnId: staleTurn.id,
+        },
+        {
+          ...userMessage(),
+          id: currentTurn.userMessageId,
+          turnId: currentTurn.id,
+          content: "Continue with the next turn.",
+          createdAt: currentTurn.createdAt,
+        },
+      ]}
+      subagents={[delegated]}
+      terminalProjections={{
+        [owner]: { owner, status: "completed", terminalReason: null },
+      }}
+      onFollowUpSubagent={vi.fn()}
+      onStopSubagent={vi.fn(async () => undefined)}
+    />);
+
+    expect(container.querySelector(
+      `[data-turn-id="${staleTurn.id}"] [data-active-work-region]`,
+    )).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop Settled reviewer" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Guide parent" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", {
+      name: "Stop Codex · Codex App Server run",
+    })).toBeInTheDocument();
   });
 
   it("pauses the loader for waiting states and announces no timer changes", () => {

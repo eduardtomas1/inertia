@@ -6,6 +6,7 @@ import type {
   AgentInputRequest,
   AgentPlan,
   AgentReasoning,
+  AgentTurn,
   AppSnapshot,
   ChatMessage,
   CheckpointSummary,
@@ -27,6 +28,7 @@ import type { StreamingAgentChannel } from "../utils/responseTimeline";
 import {
   appendStreamingReasoning,
   appendStreamingText,
+  applyTerminalTurnProjections,
   closeStreamingChannelState,
   closeTextStreamState,
   compareCreatedRecords,
@@ -49,6 +51,7 @@ import {
 } from "../utils/terminalTurnProjection";
 
 const EMPTY_REASONINGS: AgentReasoning[] = [];
+const EMPTY_TURNS: AgentTurn[] = [];
 const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
 const EMPTY_GIT_ARTIFACTS: TurnGitArtifact[] = [];
 const MAX_STREAMING_CHARACTERS = 500_000;
@@ -789,7 +792,11 @@ export function useConversationProjection({
   }, [conversation?.id, resetLiveProjection]);
 
   const activeConversationId = conversation?.id ?? null;
-  const turns = useMemo(() => detail?.agentTurns ?? [], [detail?.agentTurns]);
+  const turns = useMemo(() => applyTerminalTurnProjections(
+    detail?.agentTurns ?? EMPTY_TURNS,
+    terminalProjections,
+    conversation?.latestTurn ?? null,
+  ), [conversation?.latestTurn, detail?.agentTurns, terminalProjections]);
   const messages = useMemo(
     () => mergeProjectionRecords(
       detail?.messages ?? [],

@@ -758,6 +758,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       answer: "",
     })])[0]!;
     const baseProps = {
+      turns: [],
       streamingText: "first",
       streamingReasoning: "reasoning",
       showTimestamps: false,
@@ -793,6 +794,10 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps),
       memoInput(settled, { ...baseProps, showTimestamps: true }),
+    )).toBe(false);
+    expect(sameTurnTimelineProps(
+      memoInput(settled, baseProps),
+      memoInput(settled, { ...baseProps, turns: [{} as AgentTurn] }),
     )).toBe(false);
     const localSubagents: SubagentTrace[] = [];
     expect(sameTurnTimelineProps(

@@ -174,13 +174,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.32
+### Version 0.0.33
 
-This focused release makes image, PDF, and file sending resilient across renderer, main-process, and utility-runtime timing. Each staged attachment is bound to its exact send request before submission, late runtime claims cannot lose a race with renderer cleanup, and ambiguous retries reconcile the complete prior handoff without leaking files or deleting runtime-owned capabilities.
+This focused release repairs image sending in production packages. Durable image persistence now runs through a bounded Electron utility process owned by the main process, so pasted and selected images reach the provider without depending on Electron's disabled `RunAsNode` fuse.
 
-The broader Work, Environment, Usage, goal, and durable sent-attachment improvements from 0.0.31 remain unchanged.
+The new path preserves the private attachment root and runtime-generation boundaries, fails closed when cleanup cannot be confirmed, and is exercised by production-fuse package smoke plus an exact-byte Codex delivery scenario. The attachment ownership repair from 0.0.32 remains unchanged.
 
-Download [Inertia v0.0.32](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.32):
+Download [Inertia v0.0.33](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.33):
 
 | Platform | Download |
 | --- | --- |

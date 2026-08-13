@@ -1034,8 +1034,8 @@ describe("useConversationProjection pending interactions", () => {
       event: {
         type: "agent.completed" as const,
         conversationId: primaryId,
-        runId: `${primaryId}-run`,
-        turnId: `${primaryId}-turn`,
+        runId: `${primaryId}-run-current`,
+        turnId: `${primaryId}-turn-current`,
       },
     },
     {
@@ -1047,15 +1047,47 @@ describe("useConversationProjection pending interactions", () => {
       event: {
         type: "agent.failed" as const,
         conversationId: primaryId,
-        runId: `${primaryId}-run`,
-        turnId: `${primaryId}-turn`,
+        runId: `${primaryId}-run-current`,
+        turnId: `${primaryId}-turn-current`,
         message: "The agent turn was interrupted.",
       },
     },
   ]) {
     it(`projects terminal ${scenario.label} while its detail refresh fails`, async () => {
       const source = createEventSource();
-      const turn = runningTurn();
+      const staleTurn = runningTurn();
+      const turn: AgentTurn = {
+        ...runningTurn(),
+        id: `${primaryId}-turn-current`,
+        runId: `${primaryId}-run-current`,
+        userMessageId: `${primaryId}-user-current`,
+        createdAt: "2026-07-28T12:01:30.000Z",
+        requestedAt: "2026-07-28T12:01:30.000Z",
+        startedAt: "2026-07-28T12:01:31.000Z",
+        updatedAt: "2026-07-28T12:01:31.000Z",
+      };
+      const staleApproval = {
+        ...approval(primaryId, "stale-turn-approval"),
+        runId: staleTurn.runId,
+        turnId: staleTurn.id,
+      };
+      const currentApproval = {
+        ...approval(primaryId, "current-turn-approval"),
+        runId: turn.runId,
+        turnId: turn.id,
+      };
+      const staleInput = {
+        ...inputRequest(primaryId),
+        id: "stale-turn-input",
+        runId: staleTurn.runId,
+        turnId: staleTurn.id,
+      };
+      const currentInput = {
+        ...inputRequest(primaryId),
+        id: "current-turn-input",
+        runId: turn.runId,
+        turnId: turn.id,
+      };
       const runningSnapshot: AppSnapshot = {
         ...snapshot,
         conversations: snapshot.conversations.map((item) =>
@@ -1107,7 +1139,9 @@ describe("useConversationProjection pending interactions", () => {
             state: "ready",
             detail: {
               conversation: conversation(primaryId),
-              agentTurns: [turn],
+              // A failed earlier refresh can retain stale active turn A while
+              // the shell authoritatively names newer active turn B.
+              agentTurns: [staleTurn, turn],
               turnGitArtifacts: [],
               messages: [],
               activities: [],
@@ -1141,7 +1175,17 @@ describe("useConversationProjection pending interactions", () => {
       );
       await waitFor(() => expect(hook.result.current.detailState?.state)
         .toBe("ready"));
-      expect(hook.result.current.turns[0]?.status).toBe("running");
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
+        .toBe("running");
+
+      source.emit({ type: "agent.approval.requested", request: staleApproval });
+      source.emit({ type: "agent.approval.requested", request: currentApproval });
+      source.emit({ type: "agent.input.requested", request: staleInput });
+      source.emit({ type: "agent.input.requested", request: currentInput });
+      expect(hook.result.current.pendingApprovals.map(({ id }) => id).sort())
+        .toEqual(["current-turn-approval", "stale-turn-approval"]);
+      expect(hook.result.current.pendingInputs.map(({ id }) => id).sort())
+        .toEqual(["current-turn-input", "stale-turn-input"]);
 
       source.emit({
         type: "agent.text",
@@ -1153,24 +1197,37 @@ describe("useConversationProjection pending interactions", () => {
       expect(hook.result.current.streamingChannel).toBe("text");
       source.emit({
         ...scenario.event,
-        runId: "stale-terminal-run",
-        turnId: "stale-terminal-turn",
+        runId: staleTurn.runId,
+        turnId: staleTurn.id,
       });
       expect(hook.result.current.streamingChannel).toBe("text");
-      expect(hook.result.current.turns[0]?.status).toBe("running");
+      expect(hook.result.current.turns.find(({ id }) => id === staleTurn.id)?.status)
+        .toBe("running");
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
+        .toBe("running");
       expect(hook.result.current.conversation?.status).toBe("running");
+      expect(hook.result.current.pendingApprovals.map(({ id }) => id).sort())
+        .toEqual(["current-turn-approval", "stale-turn-approval"]);
+      expect(hook.result.current.pendingInputs.map(({ id }) => id).sort())
+        .toEqual(["current-turn-input", "stale-turn-input"]);
       expect(onTerminal).not.toHaveBeenCalled();
       source.emit(scenario.event);
 
       expect(hook.result.current.streamingChannel).toBeNull();
-      expect(hook.result.current.turns[0]).toMatchObject({
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id))
+        .toMatchObject({
         id: turn.id,
         runId: turn.runId,
         status: scenario.status,
       });
-      expect(hook.result.current.turns[0]?.terminalReason).toBe(
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id)
+        ?.terminalReason).toBe(
         scenario.event.type === "agent.failed" ? scenario.event.message : null,
       );
+      expect(hook.result.current.pendingApprovals.map(({ id }) => id))
+        .toEqual(["stale-turn-approval"]);
+      expect(hook.result.current.pendingInputs.map(({ id }) => id))
+        .toEqual(["stale-turn-input"]);
       expect(hook.result.current.conversation).toMatchObject({
         id: primaryId,
         status: scenario.status,
@@ -1190,7 +1247,8 @@ describe("useConversationProjection pending interactions", () => {
       await waitFor(() => expect(detailLoads).toBe(2));
 
       expect(hook.result.current.detailState?.state).toBe("ready");
-      expect(hook.result.current.turns[0]?.status).toBe(scenario.status);
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
+        .toBe(scenario.status);
       expect(hook.result.current.streamingChannel).toBeNull();
       expect(hook.result.current.conversation?.status).toBe(scenario.status);
 
@@ -1224,7 +1282,8 @@ describe("useConversationProjection pending interactions", () => {
               : item),
         },
       });
-      expect(hook.result.current.turns[0]).toMatchObject({
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id))
+        .toMatchObject({
         id: turn.id,
         status: scenario.exactStatus,
         completedAt,

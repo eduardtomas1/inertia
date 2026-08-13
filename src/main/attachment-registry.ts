@@ -1,9 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  constants,
-  lstatSync,
-  realpathSync,
-} from "node:fs";
+import { constants } from "node:fs";
 import {
   type FileHandle,
   lstat,
@@ -41,7 +37,7 @@ const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 const ATTACHMENT_RELEASE_ATTEMPTS = 3;
 const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
-const ATTACHMENT_HANDOFF_TIMEOUT_MS = 30_000;
+const ATTACHMENT_HANDOFF_TIMEOUT_MS = 210_000;
 const ATTACHMENT_SESSION_PREFIX = "session-";
 const ATTACHMENT_SESSION_DIRECTORY =
   /^session-[A-Za-z0-9_-]{6}$/u;
@@ -58,8 +54,6 @@ const UUID_PATTERN =
 
 interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
   readonly extension: string;
-  readonly dev: number;
-  readonly ino: number;
 }
 
 interface PendingAttachmentRelease {
@@ -71,13 +65,6 @@ interface PendingAttachmentRelease {
 interface PendingAttachmentHandoff {
   readonly attachmentIds: Set<string>;
   readonly timer: ReturnType<typeof setTimeout>;
-}
-
-interface AttachmentDirectoryAuthority {
-  readonly path: string;
-  readonly dev: number;
-  readonly ino: number;
-  readonly uid: number | null;
 }
 
 export interface ValidatedAttachmentPreview {
@@ -205,30 +192,6 @@ function sameIdentity(
   right: { dev: number; ino: number },
 ): boolean {
   return left.dev === right.dev && left.ino === right.ino;
-}
-
-function captureAttachmentDirectoryAuthority(
-  directory: string,
-): AttachmentDirectoryAuthority {
-  const requested = resolve(directory);
-  const named = lstatSync(requested);
-  const canonical = realpathSync(requested);
-  assertOwnedDirectory(named);
-  if (
-    canonical !== requested
-    || (
-      process.platform !== "win32"
-      && (named.mode & 0o777) !== 0o700
-    )
-  ) {
-    throw new Error("Temporary attachment storage authority is invalid.");
-  }
-  return {
-    path: canonical,
-    dev: named.dev,
-    ino: named.ino,
-    uid: typeof process.getuid === "function" ? named.uid : null,
-  };
 }
 
 function assertOwnedDirectory(
@@ -472,8 +435,6 @@ export class AttachmentRegistry {
   private readonly handoffs = new Map<string, PendingAttachmentHandoff>();
   private readonly attachmentHandoffs = new Map<string, Set<string>>();
   private readonly revokedAttachmentIds = new Set<string>();
-  private readonly directory: string;
-  private readonly directoryAuthority: AttachmentDirectoryAuthority;
   private readonly maxRecords: number;
   private readonly maxBytes: number;
   private readonly reservedRecords: number;
@@ -484,14 +445,12 @@ export class AttachmentRegistry {
   private disposal: Promise<void> | null = null;
 
   constructor(
-    directory: string,
+    private readonly directory: string,
     limits: AttachmentRegistryLimits = {},
     private readonly unlinkFile: (path: string) => Promise<void> = unlink,
     private readonly waitForRetry:
       (delayMs: number) => Promise<void> = waitForReleaseRetry,
   ) {
-    this.directoryAuthority = captureAttachmentDirectoryAuthority(directory);
-    this.directory = this.directoryAuthority.path;
     this.maxRecords = boundedLimit(
       limits.maxRecords,
       MAX_SESSION_ATTACHMENT_RECORDS,
@@ -536,7 +495,6 @@ export class AttachmentRegistry {
       throw new Error("Invalid attachment handoff.");
     }
     await this.importTail;
-    await this.assertDirectoryAuthority();
     if (this.disposed || this.handoffs.has(handoffId)) {
       throw new Error("Attachment handoff is unavailable.");
     }
@@ -634,7 +592,7 @@ export class AttachmentRegistry {
     } catch (error) {
       await Promise.all(registered.map(async (attachment) => {
         this.records.delete(attachment.id);
-        await this.unlinkOwnedRecord(attachment).catch(() => undefined);
+        await unlink(attachment.path).catch(() => undefined);
       }));
       throw error;
     }
@@ -684,14 +642,11 @@ export class AttachmentRegistry {
     if (this.revokedAttachmentIds.has(id)) return null;
     const record = this.records.get(id);
     if (!record) return null;
-    const canonicalRoot = await this.assertDirectoryAuthority();
+    await mkdir(this.directory, { recursive: true, mode: 0o700 });
     if (this.revokedAttachmentIds.has(id)) return null;
+    const canonicalRoot = await realpath(this.directory);
     const pathInfo = await lstat(record.path);
-    if (
-      !pathInfo.isFile()
-      || pathInfo.isSymbolicLink()
-      || !sameIdentity(record, pathInfo)
-    ) {
+    if (!pathInfo.isFile() || pathInfo.isSymbolicLink()) {
       throw new Error("The registered attachment is not a safe regular file.");
     }
     const canonicalPath = await realpath(record.path);
@@ -715,7 +670,6 @@ export class AttachmentRegistry {
       if (
         !before.isFile()
         || !sameIdentity(pathInfo, before)
-        || !sameIdentity(record, before)
         || before.size !== record.size
       ) {
         throw new Error("The registered attachment changed after import.");
@@ -726,7 +680,6 @@ export class AttachmentRegistry {
       assertNotAborted(signal);
       if (
         after.size !== before.size
-        || !sameIdentity(record, after)
         || after.mtimeMs !== before.mtimeMs
         || after.ctimeMs !== before.ctimeMs
       ) {
@@ -744,7 +697,6 @@ export class AttachmentRegistry {
       ) {
         throw new Error("The registered attachment metadata no longer matches its content.");
       }
-      await this.assertDirectoryAuthority();
       return {
         attachment: {
           id: record.id,
@@ -774,7 +726,10 @@ export class AttachmentRegistry {
     beginImmediately: boolean,
   ): Promise<boolean> {
     const pending = this.releases.get(id);
-    if (pending) return await pending.promise;
+    if (pending) {
+      if (beginImmediately) pending.begin();
+      return await pending.promise;
+    }
     const record = this.records.get(id);
     if (!record) return false;
     this.revokedAttachmentIds.add(id);
@@ -829,8 +784,8 @@ export class AttachmentRegistry {
     const records = [...this.records.values()];
     this.records.clear();
     this.revokedAttachmentIds.clear();
-    await Promise.all(records.map((record) =>
-      this.unlinkOwnedRecord(record).catch(() => undefined)));
+    await Promise.all(records.map(({ path }) =>
+      unlink(path).catch(() => undefined)));
   }
 
   private cancelPendingRelease(id: string): boolean {
@@ -877,62 +832,10 @@ export class AttachmentRegistry {
     }
   }
 
-  private async assertDirectoryAuthority(): Promise<string> {
-    const named = await lstat(this.directory);
-    const canonical = await realpath(this.directory);
-    if (
-      canonical !== this.directoryAuthority.path
-      || !named.isDirectory()
-      || named.isSymbolicLink()
-      || !sameIdentity(this.directoryAuthority, named)
-      || (
-        process.platform !== "win32"
-        && (named.mode & 0o777) !== 0o700
-      )
-      || (
-        this.directoryAuthority.uid !== null
-        && named.uid !== this.directoryAuthority.uid
-      )
-    ) {
-      throw new Error("Temporary attachment storage authority changed.");
-    }
-    return canonical;
-  }
-
-  private async unlinkOwnedRecord(
-    record: AttachmentRegistryRecord,
-  ): Promise<void> {
-    const canonicalRoot = await this.assertDirectoryAuthority();
-    let named: Awaited<ReturnType<typeof lstat>>;
-    try {
-      named = await lstat(record.path);
-    } catch (error) {
-      if (errorCode(error) === "ENOENT") return;
-      throw error;
-    }
-    const canonicalPath = await realpath(record.path);
-    if (
-      !named.isFile()
-      || named.isSymbolicLink()
-      || !sameIdentity(record, named)
-      || canonicalPath !== join(
-        canonicalRoot,
-        `${record.id}.${record.extension}`,
-      )
-    ) {
-      throw new Error("Temporary attachment storage authority changed.");
-    }
-    await this.unlinkFile(record.path);
-  }
-
   private async releaseRecord(
     record: AttachmentRegistryRecord,
   ): Promise<boolean> {
-    await unlinkWithRetry(
-      record.path,
-      async () => this.unlinkOwnedRecord(record),
-      this.waitForRetry,
-    );
+    await unlinkWithRetry(record.path, this.unlinkFile, this.waitForRetry);
     if (this.records.get(record.id) === record) {
       this.records.delete(record.id);
     }
@@ -944,77 +847,25 @@ export class AttachmentRegistry {
   private async persist(
     attachment: ValidatedAttachmentImport,
   ): Promise<AttachmentRegistryRecord> {
-    const canonicalRoot = await this.assertDirectoryAuthority();
+    await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const id = randomUUID();
     const path = join(this.directory, `${id}.${attachment.extension}`);
-    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-    const file = await open(
-      path,
-      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow,
-      0o600,
-    );
-    let identity: Awaited<ReturnType<FileHandle["stat"]>> | null = null;
+    const file = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
     try {
       await file.writeFile(attachment.bytes);
-      identity = await file.stat();
-      if (
-        !identity.isFile()
-        || identity.size !== attachment.size
-        || (
-          process.platform !== "win32"
-          && (identity.mode & 0o777) !== 0o600
-        )
-      ) {
-        throw new Error("Temporary attachment storage changed during import.");
-      }
     } finally {
       await file.close();
     }
-    try {
-      await this.assertDirectoryAuthority();
-      const named = await lstat(path);
-      const canonicalPath = await realpath(path);
-      if (
-        !identity
-        || !named.isFile()
-        || named.isSymbolicLink()
-        || !sameIdentity(identity, named)
-        || canonicalPath !== join(
-          canonicalRoot,
-          `${id}.${attachment.extension}`,
-        )
-      ) {
-        throw new Error("Temporary attachment storage changed during import.");
-      }
-      const record: AttachmentRegistryRecord = {
-        id,
-        name: attachment.displayName,
-        path,
-        mimeType: attachment.mimeType,
-        size: attachment.size,
-        digest: attachment.digest,
-        extension: attachment.extension,
-        dev: identity.dev,
-        ino: identity.ino,
-      };
-      this.records.set(id, record);
-      return record;
-    } catch (error) {
-      if (identity) {
-        const partial: AttachmentRegistryRecord = {
-          id,
-          name: attachment.displayName,
-          path,
-          mimeType: attachment.mimeType,
-          size: attachment.size,
-          digest: attachment.digest,
-          extension: attachment.extension,
-          dev: identity.dev,
-          ino: identity.ino,
-        };
-        await this.unlinkOwnedRecord(partial).catch(() => undefined);
-      }
-      throw error;
-    }
+    const record: AttachmentRegistryRecord = {
+      id,
+      name: attachment.displayName,
+      path,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+      digest: attachment.digest,
+      extension: attachment.extension,
+    };
+    this.records.set(id, record);
+    return record;
   }
 }

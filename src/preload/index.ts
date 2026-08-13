@@ -20,6 +20,8 @@ const IPC = {
   checkAppUpdate: "inertia:check-app-update",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
+  prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
+  finishAttachmentHandoff: "inertia:finish-attachment-handoff",
   releaseAttachment: "inertia:release-attachment",
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
@@ -82,6 +84,10 @@ const bridge: DesktopBridge = Object.freeze({
     >,
   selectAttachments: () => ipcRenderer.invoke(IPC.selectAttachments) as ReturnType<DesktopBridge["selectAttachments"]>,
   importAttachments: (files: Parameters<DesktopBridge["importAttachments"]>[0]) => ipcRenderer.invoke(IPC.importAttachments, files) as ReturnType<DesktopBridge["importAttachments"]>,
+  prepareAttachmentHandoff: (request: Parameters<DesktopBridge["prepareAttachmentHandoff"]>[0]) =>
+    ipcRenderer.invoke(IPC.prepareAttachmentHandoff, request) as Promise<void>,
+  finishAttachmentHandoff: (requestId: string) =>
+    ipcRenderer.invoke(IPC.finishAttachmentHandoff, requestId) as Promise<void>,
   releaseAttachment: (id: string) => ipcRenderer.invoke(IPC.releaseAttachment, id) as Promise<void>,
   openAttachmentExternally: (id: string) =>
     ipcRenderer.invoke(IPC.openAttachmentExternally, id) as Promise<void>,

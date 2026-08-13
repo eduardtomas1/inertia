@@ -25,6 +25,7 @@ import {
 } from "../../src/main/attachment-registry";
 
 const directories: string[] = [];
+const handoffId = "22222222-2222-4222-8222-222222222222";
 const png = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
@@ -269,8 +270,12 @@ describe("main-owned attachment registry", () => {
       data: png,
     }]);
 
+    await attachments.prepareHandoff(handoffId, [imported!.id]);
     const rendererRelease = attachments.releaseFromRenderer(imported!.id);
-    await expect(attachments.resolveForRuntime(imported!.id)).resolves.toMatchObject({
+    await expect(attachments.resolveForRuntime(
+      imported!.id,
+      handoffId,
+    )).resolves.toMatchObject({
       id: imported!.id,
       name: "submitted.png",
     });
@@ -281,6 +286,82 @@ describe("main-owned attachment registry", () => {
     });
 
     await expect(attachments.release(imported!.id)).resolves.toBe(true);
+  });
+
+  it("does not expire a prepared send at the former renderer grace boundary", async () => {
+    vi.useFakeTimers();
+    try {
+      const { registry: attachments } = await registry({
+        handoffTimeoutMs: 1_000,
+      });
+      const [imported] = await attachments.import([{
+        name: "delayed-send.png",
+        mimeType: "image/png",
+        data: png,
+      }]);
+
+      await attachments.prepareHandoff(handoffId, [imported!.id]);
+      const rendererRelease = attachments.releaseFromRenderer(imported!.id);
+      await vi.advanceTimersByTimeAsync(999);
+
+      await expect(attachments.resolveForRuntime(
+        imported!.id,
+        handoffId,
+      )).resolves.toMatchObject({ id: imported!.id });
+      await expect(rendererRelease).resolves.toBe(false);
+      await expect(attachments.release(imported!.id)).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("expires an unconsumed handoff into a pending renderer deletion", async () => {
+    vi.useFakeTimers();
+    try {
+      const { registry: attachments } = await registry({
+        handoffTimeoutMs: 25,
+      });
+      const [imported] = await attachments.import([{
+        name: "abandoned-send.png",
+        mimeType: "image/png",
+        data: png,
+      }]);
+
+      await attachments.prepareHandoff(handoffId, [imported!.id]);
+      const rendererRelease = attachments.releaseFromRenderer(imported!.id);
+      await vi.advanceTimersByTimeAsync(25);
+
+      await expect(rendererRelease).resolves.toBe(true);
+      await expect(attachments.resolve(imported!.id)).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cannot revive a renderer deletion after unlink has started", async () => {
+    let finishUnlink!: () => void;
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>(
+      () => new Promise<void>((resolveUnlink) => {
+        finishUnlink = resolveUnlink;
+      }),
+    );
+    const { registry: attachments } = await registry(undefined, unlinkFile);
+    const [imported] = await attachments.import([{
+      name: "deleting.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    await attachments.prepareHandoff(handoffId, [imported!.id]);
+    const rendererRelease = attachments.releaseFromRenderer(imported!.id);
+    attachments.finishHandoff(handoffId);
+    await expect(attachments.resolveForRuntime(
+      imported!.id,
+      handoffId,
+    )).resolves.toBeNull();
+    finishUnlink();
+
+    await expect(rendererRelease).resolves.toBe(true);
   });
 
   it("disposes every live capability and its private file", async () => {

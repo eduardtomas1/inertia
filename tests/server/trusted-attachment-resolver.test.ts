@@ -21,6 +21,7 @@ import { publicRuntimeError } from "../../src/server/runtime-errors";
 
 const directories: string[] = [];
 const id = "11111111-1111-4111-8111-111111111111";
+const handoffId = "22222222-2222-4222-8222-222222222222";
 const png = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
@@ -76,7 +77,7 @@ describe("trusted runtime attachment resolution", () => {
       size: 1,
     };
 
-    await expect(resolver.resolveAll([rendererPayload])).resolves.toEqual([{
+    await expect(resolver.resolveAll([rendererPayload], handoffId)).resolves.toEqual([{
       id,
       name: "preview.png",
       path: trusted.path,
@@ -95,11 +96,11 @@ describe("trusted runtime attachment resolution", () => {
     });
     const resolver = new TrustedAttachmentResolver(root, attachmentBroker);
 
-    await expect(resolver.resolveAll([trusted])).rejects.toThrow(
+    await expect(resolver.resolveAll([trusted], handoffId)).rejects.toThrow(
       /no longer available|verified/u,
     );
     expect(attachmentBroker.relinquish).toHaveBeenCalledWith(id);
-    await expect(resolver.resolveAll([trusted])).rejects.toSatisfy(
+    await expect(resolver.resolveAll([trusted], handoffId)).rejects.toSatisfy(
       (error: unknown) => publicRuntimeError(error)
         === "The selected attachment is no longer available or could not be verified.",
     );
@@ -129,7 +130,7 @@ describe("trusted runtime attachment resolution", () => {
       broker(tamper(trusted)),
     );
 
-    await expect(resolver.resolveAll([trusted])).rejects.toThrow(
+    await expect(resolver.resolveAll([trusted], handoffId)).rejects.toThrow(
       /no longer available|verified/u,
     );
   });
@@ -142,8 +143,8 @@ describe("trusted runtime attachment resolution", () => {
     }));
     const missing = new TrustedAttachmentResolver(root, broker(null));
 
-    await expect(mismatch.resolveAll([trusted])).rejects.toThrow();
-    await expect(missing.resolveAll([trusted])).rejects.toThrow();
+    await expect(mismatch.resolveAll([trusted], handoffId)).rejects.toThrow();
+    await expect(missing.resolveAll([trusted], handoffId)).rejects.toThrow();
   });
 
   it("rejects an id paired with another registered path", async () => {
@@ -156,7 +157,7 @@ describe("trusted runtime attachment resolution", () => {
       path: await realpath(otherPath),
     }));
 
-    await expect(resolver.resolveAll([trusted])).rejects.toThrow(
+    await expect(resolver.resolveAll([trusted], handoffId)).rejects.toThrow(
       /no longer available|verified/u,
     );
   });
@@ -168,6 +169,7 @@ describe("trusted runtime attachment resolution", () => {
     const attachmentBroker: RuntimeAttachmentBroker = {
       resolve: vi.fn((
         requestedId: string,
+        _handoffId: string,
         signal?: AbortSignal,
       ): Promise<TrustedRuntimeAttachment | null> => {
         if (requestedId === id) return Promise.resolve(trusted);
@@ -194,10 +196,11 @@ describe("trusted runtime attachment resolution", () => {
         mimeType: "image/png",
         size: png.length,
       },
-    ], controller.signal);
+    ], handoffId, controller.signal);
     await vi.waitFor(() => {
       expect(attachmentBroker.resolve).toHaveBeenCalledWith(
         secondId,
+        handoffId,
         controller.signal,
       );
     });

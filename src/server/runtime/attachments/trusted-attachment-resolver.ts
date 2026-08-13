@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants, lstatSync, realpathSync } from "node:fs";
+import { constants } from "node:fs";
 import {
   lstat,
   open,
@@ -9,7 +9,6 @@ import {
   basename,
   isAbsolute,
   relative,
-  resolve,
   sep,
 } from "node:path";
 
@@ -67,42 +66,10 @@ function publicAttachmentError(): Error {
 }
 
 export class TrustedAttachmentResolver {
-  private readonly trustedRoot: string;
-  private readonly rootAuthority: {
-    readonly dev: number;
-    readonly ino: number;
-    readonly uid: number | null;
-  };
-
   constructor(
-    trustedRoot: string,
+    private readonly trustedRoot: string,
     private readonly broker: RuntimeAttachmentBroker,
-  ) {
-    const requested = resolve(trustedRoot);
-    const named = lstatSync(requested);
-    const canonical = realpathSync(requested);
-    if (
-      canonical !== requested
-      || !named.isDirectory()
-      || named.isSymbolicLink()
-      || (
-        process.platform !== "win32"
-        && (
-          (named.mode & 0o777) !== 0o700
-          || (
-            typeof process.getuid === "function"
-            && named.uid !== process.getuid()
-          )
-        )
-      )
-    ) throw publicAttachmentError();
-    this.trustedRoot = canonical;
-    this.rootAuthority = {
-      dev: named.dev,
-      ino: named.ino,
-      uid: typeof process.getuid === "function" ? named.uid : null,
-    };
-  }
+  ) {}
 
   async resolveAll(
     requested: readonly ChatAttachment[],
@@ -122,7 +89,12 @@ export class TrustedAttachmentResolver {
     if (requested.length === 0) return [];
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
       .test(handoffId)) throw publicAttachmentError();
-    const canonicalRoot = await this.assertRootAuthority();
+    let canonicalRoot: string;
+    try {
+      canonicalRoot = await realpath(this.trustedRoot);
+    } catch {
+      throw publicAttachmentError();
+    }
     const claimedIds: string[] = [];
     try {
       const seenIds = new Set<string>();
@@ -214,7 +186,6 @@ export class TrustedAttachmentResolver {
       } finally {
         await file.close();
       }
-      await this.assertRootAuthority();
       return {
         attachment: {
           id: trusted.id,
@@ -225,32 +196,6 @@ export class TrustedAttachmentResolver {
         },
         bytes,
       };
-    } catch {
-      throw publicAttachmentError();
-    }
-  }
-
-  private async assertRootAuthority(): Promise<string> {
-    try {
-      const named = await lstat(this.trustedRoot);
-      const canonical = await realpath(this.trustedRoot);
-      if (
-        canonical !== this.trustedRoot
-        || !named.isDirectory()
-        || named.isSymbolicLink()
-        || !sameIdentity(named, this.rootAuthority)
-        || (
-          process.platform !== "win32"
-          && (
-            (named.mode & 0o777) !== 0o700
-            || (
-              this.rootAuthority.uid !== null
-              && named.uid !== this.rootAuthority.uid
-            )
-          )
-        )
-      ) throw publicAttachmentError();
-      return canonical;
     } catch {
       throw publicAttachmentError();
     }

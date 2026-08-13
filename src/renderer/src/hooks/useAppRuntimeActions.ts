@@ -17,6 +17,7 @@ import {
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
+import { runtimeCommandDelivery } from "../utils/connectionMessages";
 
 export interface AppRuntimeActions {
   sendingConversationIds: ReadonlySet<string>;
@@ -110,18 +111,28 @@ export function useAppRuntimeActions(options: {
     setSendingConversationIds((current) =>
       new Set(current).add(targetConversationId));
     setActionError(null);
+    const command = withRequestId({
+      type: "message.send",
+      payload: {
+        conversationId: targetConversationId,
+        content,
+        attachments,
+        ...(skillIds?.length ? { skillIds: [...skillIds] } : {}),
+        activate,
+        ...(context ? { context } : {}),
+      },
+    });
+    let handoffPrepared = false;
+    let preserveAmbiguousHandoff = false;
     try {
-      const event = await sendCommand(withRequestId({
-        type: "message.send",
-        payload: {
-          conversationId: targetConversationId,
-          content,
-          attachments,
-          ...(skillIds?.length ? { skillIds: [...skillIds] } : {}),
-          activate,
-          ...(context ? { context } : {}),
-        },
-      }));
+      if (attachments.length > 0) {
+        await window.inertia.prepareAttachmentHandoff({
+          requestId: command.requestId,
+          attachmentIds: attachments.map(({ id }) => id),
+        });
+        handoffPrepared = true;
+      }
+      const event = await sendCommand(command);
       if (
         event.type === "request.result"
         && event.result.kind === "message.accepted"
@@ -129,6 +140,7 @@ export function useAppRuntimeActions(options: {
       if (event.type === "request.ok") return null;
       throw new Error("The local service returned an unexpected message response.");
     } catch (error) {
+      preserveAmbiguousHandoff = runtimeCommandDelivery(error) === "ambiguous";
       setActionError(
         error instanceof Error
           ? error.message
@@ -136,6 +148,10 @@ export function useAppRuntimeActions(options: {
       );
       throw error;
     } finally {
+      if (handoffPrepared && !preserveAmbiguousHandoff) {
+        await window.inertia.finishAttachmentHandoff(command.requestId)
+          .catch(() => undefined);
+      }
       setSendingConversationIds((current) => {
         const next = new Set(current);
         next.delete(targetConversationId);

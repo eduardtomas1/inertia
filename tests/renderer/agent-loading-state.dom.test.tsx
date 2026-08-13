@@ -263,6 +263,30 @@ describe("agent loading and trace DOM", () => {
       .toBeInTheDocument();
   });
 
+  it("removes live work and Stop for projected terminal outcomes", () => {
+    const { container, onStop, rerender } = renderState({
+      status: "completed",
+    });
+
+    expect(container.querySelector("[data-active-work-region]"))
+      .not.toBeInTheDocument();
+    expect(container.querySelector(".turn-working-status"))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: "Stop Codex · Codex App Server run",
+    })).not.toBeInTheDocument();
+
+    rerender(<ResponseTimeline {...stateProps({ status: "failed" }, onStop)} />);
+
+    expect(container.querySelector("[data-active-work-region]"))
+      .not.toBeInTheDocument();
+    expect(container.querySelector(".turn-working-status"))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: "Stop Codex · Codex App Server run",
+    })).not.toBeInTheDocument();
+  });
+
   it("pauses the loader for waiting states and announces no timer changes", () => {
     const { container } = renderState({ status: "waiting-for-approval" });
     const grid = container.querySelector(".agent-pixel-loader");

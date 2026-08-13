@@ -6,6 +6,7 @@ import type {
   AgentInputRequest,
   AgentPlan,
   AgentReasoning,
+  AgentTurn,
   AppSnapshot,
   ChatMessage,
   CheckpointSummary,
@@ -16,6 +17,10 @@ import type {
   ThreadUsageSnapshot,
   TurnGitArtifact,
 } from "@shared/contracts";
+import {
+  isAgentTurnTerminalStatus,
+  type AgentTurnTerminalStatus,
+} from "@shared/turn-lifecycle";
 import {
   mergeConversationShell,
   resolveConversationDetail,
@@ -46,6 +51,21 @@ interface FreshHydrationBaseline {
   inputs: Map<string, AgentInputRequest>;
   hydratedApprovals: Set<string>;
   hydratedInputs: Set<string>;
+}
+
+interface TerminalTurnProjection {
+  conversationId: string;
+  runId: string;
+  turnId: string;
+  status: Extract<AgentTurnTerminalStatus, "completed" | "failed">;
+  terminalReason: string | null;
+}
+
+function terminalTurnKey(value: {
+  conversationId: string;
+  turnId: string;
+}): string {
+  return `${value.conversationId}\0${value.turnId}`;
 }
 
 function sameAgentPlan(
@@ -153,6 +173,8 @@ export function useConversationProjection({
     useState<AgentInputRequest[]>([]);
   const [nativePlans, setNativePlans] =
     useState<Record<string, AgentPlan>>({});
+  const [terminalTurnProjections, setTerminalTurnProjections] =
+    useState<Record<string, TerminalTurnProjection>>({});
   const requestGenerationRef = useRef(0);
   const terminalRefreshPendingRef = useRef(false);
   const freshHydrationRef = useRef<FreshHydrationBaseline | null>(null);
@@ -210,6 +232,7 @@ export function useConversationProjection({
     setLiveActivities({});
     setLiveSubagents({});
     setNativePlans({});
+    setTerminalTurnProjections({});
   }, [enabled]);
   useEffect(() => {
     if (status !== "online") setStreamingChannel(null);
@@ -456,6 +479,21 @@ export function useConversationProjection({
         return next;
       });
     }
+    setTerminalTurnProjections((current) => {
+      let next: Record<string, TerminalTurnProjection> | null = null;
+      for (const turn of detail.agentTurns) {
+        if (!isAgentTurnTerminalStatus(turn.status)) continue;
+        const key = terminalTurnKey({
+          conversationId: turn.conversationId,
+          turnId: turn.id,
+        });
+        const projection = current[key];
+        if (!projection || projection.runId !== turn.runId) continue;
+        next ??= { ...current };
+        delete next[key];
+      }
+      return next ?? current;
+    });
   }, [conversation?.id, detail]);
 
   useEffect(() => subscribe((event) => {
@@ -528,6 +566,7 @@ export function useConversationProjection({
         setPendingApprovals([]);
         setPendingInputs([]);
         setNativePlans({});
+        setTerminalTurnProjections({});
       }
       return;
     }
@@ -773,6 +812,17 @@ export function useConversationProjection({
         freshHydrationRef.current.streamingChannelDelta = null;
       }
       setStreamingChannel(null);
+      const projection: TerminalTurnProjection = {
+        conversationId: event.conversationId,
+        runId: event.runId,
+        turnId: event.turnId,
+        status: event.type === "agent.completed" ? "completed" : "failed",
+        terminalReason: event.type === "agent.failed" ? event.message : null,
+      };
+      setTerminalTurnProjections((current) => ({
+        ...current,
+        [terminalTurnKey(projection)]: projection,
+      }));
       terminalRefreshPendingRef.current = true;
       terminalCallbackRef.current();
     }
@@ -789,10 +839,41 @@ export function useConversationProjection({
     setLiveActivities({});
     setLiveSubagents({});
     setNativePlans({});
+    setTerminalTurnProjections({});
   }, [conversation?.id]);
 
   const activeConversationId = conversation?.id ?? null;
-  const turns = useMemo(() => detail?.agentTurns ?? [], [detail?.agentTurns]);
+  const turns = useMemo(() => (detail?.agentTurns ?? []).map((turn): AgentTurn => {
+    const projection = terminalTurnProjections[terminalTurnKey({
+      conversationId: turn.conversationId,
+      turnId: turn.id,
+    })];
+    if (
+      !projection
+      || projection.runId !== turn.runId
+      || isAgentTurnTerminalStatus(turn.status)
+    ) return turn;
+    const shellTurn = conversation?.latestTurn;
+    const exactShellSettlement = shellTurn
+      && shellTurn.id === turn.id
+      && shellTurn.runId === turn.runId
+      && isAgentTurnTerminalStatus(shellTurn.status)
+      ? shellTurn
+      : null;
+    return {
+      ...turn,
+      completedAt: exactShellSettlement
+        ? exactShellSettlement.completedAt
+        : turn.completedAt,
+      status: exactShellSettlement?.status ?? projection.status,
+      terminalReason: exactShellSettlement
+        ? exactShellSettlement.terminalReason
+        : projection.terminalReason,
+      updatedAt: exactShellSettlement
+        ? exactShellSettlement.updatedAt
+        : turn.updatedAt,
+    };
+  }), [conversation?.latestTurn, detail?.agentTurns, terminalTurnProjections]);
   const messages = useMemo(
     () => {
       const merged = new Map<string, ChatMessage>();

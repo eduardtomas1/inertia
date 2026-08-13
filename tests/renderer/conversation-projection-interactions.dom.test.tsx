@@ -7,6 +7,7 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AgentPlan,
+  type AgentTurn,
   type AppSnapshot,
   type ChatMessage,
   type ConversationShell,
@@ -69,6 +70,45 @@ const snapshot: AppSnapshot = {
   activeConversationId: primaryId,
   settings: { ...defaultSettings },
 };
+
+function runningTurn(conversationId = primaryId): AgentTurn {
+  const modelSelection = nativeModelSelection({
+    providerId: "codex",
+    modelId: "default",
+    reasoningEffort: "medium",
+  });
+  return {
+    id: `${conversationId}-turn`,
+    conversationId,
+    runId: `${conversationId}-run`,
+    userMessageId: `${conversationId}-user`,
+    terminalAssistantMessageId: null,
+    providerId: "codex",
+    modelSelection,
+    continuationIdentity: continuationIdentityForSelection(modelSelection),
+    harnessId: modelSelection.harnessId,
+    backendProfileId: modelSelection.backendProfileId,
+    model: modelSelection.modelId,
+    modelAlias: modelSelection.alias,
+    reasoningEffort: modelSelection.reasoningEffort ?? "medium",
+    interactionMode: "build",
+    accessMode: "supervised",
+    providerSessionBefore: null,
+    providerSessionAfter: null,
+    requestedAt: "2026-07-28T12:00:30.000Z",
+    startedAt: "2026-07-28T12:00:31.000Z",
+    completedAt: null,
+    status: "running",
+    terminalReason: null,
+    checkpointId: null,
+    usageAtStart: null,
+    usageAtCompletion: null,
+    configurationRevision: modelSelection.backendConfigurationRevision,
+    association: "authoritative",
+    createdAt: "2026-07-28T12:00:30.000Z",
+    updatedAt: "2026-07-28T12:00:31.000Z",
+  };
+}
 
 function approval(
   conversationId: string,
@@ -983,6 +1023,164 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.streamingText).toBe("");
     expect(onOpenPlan).toHaveBeenCalledWith(primaryId);
   });
+
+  for (const scenario of [
+    {
+      label: "completion",
+      status: "completed" as const,
+      exactStatus: "cancelled" as const,
+      exactReason: "The user stopped the turn.",
+      event: {
+        type: "agent.completed" as const,
+        conversationId: primaryId,
+        runId: `${primaryId}-run`,
+        turnId: `${primaryId}-turn`,
+      },
+    },
+    {
+      label: "failure or interruption",
+      status: "failed" as const,
+      exactStatus: "interrupted" as const,
+      exactReason: "The agent turn was interrupted.",
+      event: {
+        type: "agent.failed" as const,
+        conversationId: primaryId,
+        runId: `${primaryId}-run`,
+        turnId: `${primaryId}-turn`,
+        message: "The agent turn was interrupted.",
+      },
+    },
+  ]) {
+    it(`projects terminal ${scenario.label} while its detail refresh fails`, async () => {
+      const source = createEventSource();
+      const turn = runningTurn();
+      let detailLoads = 0;
+      const request = vi.fn(async (
+        command: CommandWithoutId,
+      ): Promise<ServerEvent> => {
+        if (command.type !== "conversation.detail.load") {
+          return {
+            type: "request.ok",
+            requestId: crypto.randomUUID(),
+          };
+        }
+        detailLoads += 1;
+        if (detailLoads > 1) {
+          throw new Error("The request took too long to complete.");
+        }
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [turn],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        };
+      });
+      const onTerminal = vi.fn();
+      const hook = renderHook(
+        ({ currentSnapshot }: { currentSnapshot: AppSnapshot }) =>
+          useConversationProjection({
+            snapshot: currentSnapshot,
+            status: "online",
+            request,
+            subscribe: source.subscribe,
+            enabled: true,
+            autoOpenPlan: false,
+            onOpenPlan: vi.fn(),
+            onTerminal,
+          }),
+        { initialProps: { currentSnapshot: snapshot } },
+      );
+      await waitFor(() => expect(hook.result.current.detailState?.state)
+        .toBe("ready"));
+      expect(hook.result.current.turns[0]?.status).toBe("running");
+
+      source.emit({
+        type: "agent.text",
+        conversationId: primaryId,
+        runId: turn.runId,
+        turnId: turn.id,
+        text: "Provider output before settlement.",
+      });
+      expect(hook.result.current.streamingChannel).toBe("text");
+      source.emit(scenario.event);
+
+      expect(hook.result.current.streamingChannel).toBeNull();
+      expect(hook.result.current.turns[0]).toMatchObject({
+        id: turn.id,
+        runId: turn.runId,
+        status: scenario.status,
+      });
+      expect(hook.result.current.turns[0]?.terminalReason).toBe(
+        scenario.event.type === "agent.failed" ? scenario.event.message : null,
+      );
+      expect(onTerminal).toHaveBeenCalledOnce();
+
+      source.emit({
+        type: "conversation.detail.invalidated",
+        conversationId: primaryId,
+      });
+      await waitFor(() => expect(detailLoads).toBe(2));
+
+      expect(hook.result.current.detailState?.state).toBe("ready");
+      expect(hook.result.current.turns[0]?.status).toBe(scenario.status);
+      expect(hook.result.current.streamingChannel).toBeNull();
+
+      const completedAt = "2026-07-28T12:02:00.000Z";
+      hook.rerender({
+        currentSnapshot: {
+          ...snapshot,
+          conversations: snapshot.conversations.map((item) =>
+            item.id === primaryId
+              ? {
+                  ...item,
+                  latestTurn: {
+                    id: turn.id,
+                    runId: turn.runId,
+                    status: scenario.exactStatus,
+                    providerId: turn.providerId,
+                    harnessId: turn.harnessId,
+                    backendProfileId: turn.backendProfileId,
+                    modelSelection: turn.modelSelection,
+                    continuationIdentity: turn.continuationIdentity,
+                    model: turn.model,
+                    reasoningEffort: turn.reasoningEffort,
+                    requestedAt: turn.requestedAt,
+                    startedAt: turn.startedAt,
+                    completedAt,
+                    terminalReason: scenario.exactReason,
+                    updatedAt: completedAt,
+                  },
+                }
+              : item),
+        },
+      });
+      expect(hook.result.current.turns[0]).toMatchObject({
+        id: turn.id,
+        status: scenario.exactStatus,
+        completedAt,
+        terminalReason: scenario.exactReason,
+      });
+    });
+  }
 
   it("keeps the last ready thread visible when a refresh request times out", async () => {
     const source = createEventSource();

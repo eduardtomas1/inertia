@@ -771,8 +771,16 @@ export class RuntimeSupervisor {
 
   private handleExit(record: RuntimeProcessRecord, code: number): void {
     if (this.current !== record) return;
+    const exitedBeforeCleanRecycleReadiness = this.testRecycle.owns(record)
+      && (!record.cleanupConfirmed || !record.ready);
     record.acceptingReady = false;
-    if (this.testRecycle.owns(record) && (!record.cleanupConfirmed || !record.ready)) {
+    record.ready = false;
+    this.websocketUrl = null;
+    this.databaseRecoveryReport = null;
+    this.databaseRecoveryNoticePending = false;
+    this.phase = this.desiredRunning ? "restarting" : "stopping";
+    this.emitState();
+    if (exitedBeforeCleanRecycleReadiness) {
       this.rejectTestRecycle(record, "The recycled runtime exited before clean readiness was confirmed.", !record.cleanupConfirmed);
     }
     this.clearTimerValue("startupTimer");
@@ -797,9 +805,6 @@ export class RuntimeSupervisor {
     if (!secureFileCleanupConfirmed) {
       record.cleanupConfirmed = false;
       this.current = null;
-      this.websocketUrl = null;
-      this.databaseRecoveryReport = null;
-      this.databaseRecoveryNoticePending = false;
       this.clearShutdownTimers();
       this.quarantined.add(record);
       this.restartBlocked = true;
@@ -814,9 +819,6 @@ export class RuntimeSupervisor {
     }
     if (!record.cleanupConfirmed && !record.processTreeTermination) {
       this.current = null;
-      this.websocketUrl = null;
-      this.databaseRecoveryReport = null;
-      this.databaseRecoveryNoticePending = false;
       this.clearShutdownTimers();
       this.quarantined.add(record);
       this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
@@ -854,9 +856,6 @@ export class RuntimeSupervisor {
       if (confirmed && record.cleanupConfirmed
         && !this.completeGenerationCleanup(record)) return;
       this.current = null;
-      this.websocketUrl = null;
-      this.databaseRecoveryReport = null;
-      this.databaseRecoveryNoticePending = false;
       this.clearShutdownTimers();
       if (!confirmed) {
         this.rejectTestRecycle(record, "The recycled runtime process tree could not be confirmed stopped.", false);

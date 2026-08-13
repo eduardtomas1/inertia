@@ -1561,6 +1561,12 @@ describe("RuntimeSupervisor", () => {
     expect(runner).toHaveBeenCalledOnce();
 
     children[0].exit(9);
+    expect(() => supervisor.connection()).toThrow("local service is starting");
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "restarting",
+      websocketUrl: null,
+      restartScheduled: false,
+    });
     const lateSecureFileRequestId = crypto.randomUUID();
     children[0].message({
       type: "runtime.secure-file-request",

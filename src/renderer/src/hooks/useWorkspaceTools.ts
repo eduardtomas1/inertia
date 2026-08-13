@@ -34,7 +34,7 @@ interface WorkspaceToolsOptions {
 
 export function useWorkspaceTools(options: WorkspaceToolsOptions) {
   const enabled = options.enabled ?? true;
-  const workspaceAuthority = `${enabled}\0${options.project?.id}\0${options.conversation?.id}`;
+  const workspaceAuthority = `${enabled}${options.project?.id}${options.conversation?.id}`;
   const workspaceAuthorityRef = useRef(workspaceAuthority);
   workspaceAuthorityRef.current = workspaceAuthority;
   const git = useWorkspaceGit({
@@ -73,7 +73,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
   });
   const selectWorkspaceFile = files.selectWorkspaceFile;
   const requestWorkspaceEntries = files.requestWorkspaceEntries;
-  const setActiveTool = options.setActiveTool;
+  const { setActionError, setActiveTool } = options;
   const openWorkspaceFile = useCallback((
     path: string,
     location?: WorkspaceFileLocation,
@@ -94,7 +94,11 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
         selectWorkspaceFile,
         setActiveTool,
       ]),
-    ).catch(() => undefined);
+    ).catch(() => {
+      if (workspaceAuthorityRef.current === workspaceAuthority) {
+        setActionError("File open failed.");
+      }
+    });
   }, [
     options.conversation?.id,
     options.project?.id,
@@ -102,6 +106,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     selectWorkspaceFile,
     setActiveTool,
     workspaceAuthority,
+    setActionError,
   ]);
   const artifacts = useTurnArtifacts({
     project: options.project,

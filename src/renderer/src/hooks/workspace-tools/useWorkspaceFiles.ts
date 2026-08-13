@@ -33,6 +33,8 @@ interface WorkspaceFilesOptions {
   setActionError: (message: string | null) => void;
 }
 
+const loadWorkspaceFileActions = () => import("./selectWorkspaceFile");
+
 export function useWorkspaceFiles({
   project,
   conversation,
@@ -58,7 +60,7 @@ export function useWorkspaceFiles({
   const filePreviewRequestGenerationRef = useRef(0);
   const actionsRequestGenerationRef = useRef(0);
   const automaticallyLoadedAuthorityRef = useRef<string | null>(null);
-  const authority = `${enabled}\0${project?.id}\0${conversation?.id}`;
+  const authority = `${enabled}${project?.id}${conversation?.id}`;
   const authorityRef = useRef(authority);
   authorityRef.current = authority;
   const mentions = useWorkspaceMentions({
@@ -196,7 +198,7 @@ export function useWorkspaceFiles({
     literalPath = false,
   ) => {
     if (!project) return;
-    void import("./selectWorkspaceFile").then(
+    void loadWorkspaceFileActions().then(
       ({ selectWorkspaceFile }) => selectWorkspaceFile([
         path,
         requestedLocation,
@@ -214,7 +216,13 @@ export function useWorkspaceFiles({
         setFilePreviewLoading,
         setActionError,
       ]),
-    ).catch(() => undefined);
+      () => {
+        if (authorityRef.current !== authority) return;
+        const message = "File open failed.";
+        setFilePreviewError(message);
+        setActionError(message);
+      },
+    );
   }, [authority, conversation?.id, project, request, setActionError]);
 
   const saveWorkspaceFile = useCallback(async (
@@ -243,14 +251,14 @@ export function useWorkspaceFiles({
       );
     }
     const generation = filePreviewRequestGenerationRef.current;
-    const { file: savedFile, location } = await import(
-      "./selectWorkspaceFile"
-    ).then(({ saveWorkspaceFile }) => saveWorkspaceFile(
+    const { file: savedFile, location } = await loadWorkspaceFileActions().then(
+      ({ saveWorkspaceFile }) => saveWorkspaceFile(
       request,
       identity,
       content,
       selectedFileLocation,
-    ));
+      ),
+    );
     if (
       filePreviewRequestGenerationRef.current === generation
       && authorityRef.current === authority

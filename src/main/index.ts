@@ -49,8 +49,10 @@ import {
   type AttachmentStorageReservation,
 } from "./attachment-registry.js";
 import { registerAttachmentLifecycleIpc } from "./attachment-ipc.js";
+import { conversationAttachmentStoreRunner } from "./conversation-attachment-store-desktop-runner.js";
 import {
   closeConversationAttachmentAccess,
+  conversationAttachmentStoreAuthority,
   type ConversationAttachmentAccess,
   openPdfAttachment,
   openConversationAttachments,
@@ -72,6 +74,7 @@ import { stopRuntimeAndPrivateConnect } from "./runtime-shutdown-coordination.js
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
+import { packageSmokeEnvironment } from "./package-smoke-environment.js";
 import {
   activateThreadNotification,
   waitForThreadNotificationWindowLoad,
@@ -117,7 +120,6 @@ const IPC = {
   clearBackendCredential: "inertia:clear-backend-credential",
   getBackendCredentialState: "inertia:get-backend-credential-state",
 } as const;
-
 const APP_SCHEME = "inertia";
 const APP_HOST = "bundle";
 protocol.registerSchemesAsPrivileged([
@@ -965,7 +967,11 @@ async function bootstrap(): Promise<void> {
   const dataDirectory = runtimeBootstrap.runtimeDataPath(process.env.INERTIA_DATA_DIR, app.getPath("userData"));
   runtimeDataDirectory = dataDirectory;
   const bootstrapSafety = runtimeBootstrap.prepareRuntimeBootstrapSafety(dataDirectory);
-  conversationAttachments = openConversationAttachments(dataDirectory);
+  conversationAttachments = openConversationAttachments(
+    dataDirectory,
+    conversationAttachmentStoreRunner,
+  );
+  const retainedConversationAttachments = conversationAttachments;
   const defaultWorkspacePath = runtimeBootstrap.runtimeWorkspacePath(process.env.INERTIA_WORKSPACE_DIR, app.getPath("home"));
   credentialVault = new CredentialVault(
     new ElectronSafeStorageBackend(safeStorage),
@@ -978,50 +984,34 @@ async function bootstrap(): Promise<void> {
   // Paint the secure renderer while private attachment storage is reconciled.
   // The renderer can show its bounded starting state until the runtime-ready
   // signal arrives; orphan cleanup no longer blocks the first window.
-  const [, , , attachmentStorage] = await Promise.all([
+  const [, , , attachmentStorage, conversationAttachmentStore] = await Promise.all([
     createWindow(),
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
     createAttachmentStorageSession(attachmentStorageRoot(), {
       preserveExisting: bootstrapSafety.preserveAttachments,
     }),
-    conversationAttachments,
+    retainedConversationAttachments,
   ]);
   attachmentStorageDirectory = attachmentStorage.directory;
   const orphanReservation = attachmentStorage.reservation;
   attachmentReservation = orphanReservation;
 
-  packageSmokeFilePath = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_PACKAGE_SMOKE_FILE === "string"
-    && process.env.INERTIA_PACKAGE_SMOKE_FILE.length <= 4096
-    && !process.env.INERTIA_PACKAGE_SMOKE_FILE.includes("\0")
-    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_FILE)
-    ? process.env.INERTIA_PACKAGE_SMOKE_FILE
-    : null;
-  const packageSmokeCodexExecutable = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED === "string"
-    && process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED.length <= 4096
-    && !process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED.includes("\0")
-    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED)
-    ? process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED
-    : null;
-  const packageSmokePdfInput = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT === "string"
-    && process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT.length <= 4096
-    && !process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT.includes("\0")
-    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT)
-    ? process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT
-    : null;
-  const packageSmokePdfResult = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT === "string"
-    && process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT.length <= 4096
-    && !process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT.includes("\0")
-    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT)
-    ? process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT
-    : null;
+  const packageSmoke = packageSmokeEnvironment();
+  packageSmokeFilePath = packageSmoke.marker;
+  const {
+    codexExecutable: packageSmokeCodexExecutable,
+    pdfInput: packageSmokePdfInput,
+    pdfResult: packageSmokePdfResult,
+    imageInput: packageSmokeImageInput,
+    imageResult: packageSmokeImageResult,
+  } = packageSmoke;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
     systemBootId: bootstrapSafety.systemBootId,
+    conversationAttachmentStoreRunner,
+    conversationAttachmentStoreAuthority:
+      await conversationAttachmentStoreAuthority(conversationAttachmentStore),
     attachmentBroker: {
       resolve: (attachmentId, handoffId, signal) =>
         attachmentRegistry().resolveForRuntime(
@@ -1061,6 +1051,14 @@ async function bootstrap(): Promise<void> {
             packageSmokePdf: {
               inputPath: packageSmokePdfInput,
               resultPath: packageSmokePdfResult,
+            },
+          }
+        : {}),
+      ...(packageSmokeImageInput && packageSmokeImageResult
+        ? {
+            packageSmokeImage: {
+              inputPath: packageSmokeImageInput,
+              resultPath: packageSmokeImageResult,
             },
           }
         : {}),
@@ -1112,6 +1110,9 @@ async function bootstrap(): Promise<void> {
             )),
             packageSmokePdfResult
               ? waitForPackageSmokePdfResult(packageSmokePdfResult)
+              : Promise.resolve(),
+            packageSmokeImageResult
+              ? waitForPackageSmokePdfResult(packageSmokeImageResult)
               : Promise.resolve(),
           ]);
         }).catch(() => undefined).finally(() => app.quit());

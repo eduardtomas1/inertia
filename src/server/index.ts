@@ -9,25 +9,15 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AgentPlan,
-  type AgentTurn,
   type AppSnapshot,
   type ProviderInfo,
   type ProviderMaintenanceProviderId,
   type RuntimeMutationEvent,
   type RuntimeSyncCursor,
 } from "../shared/contracts";
-import type { OpenProjectPathRequest } from "../shared/desktop";
-import type { BackendCredentialStatus } from "../shared/backend-credentials";
-import type {
-  PrivateConnectRuntimeAuthorization,
-  PrivateConnectRuntimeRequest,
-  PrivateConnectRuntimeResponse,
-} from "../shared/private-connect/runtime-contract";
 import {
   validRuntimeGenerationId,
   validSystemBootId,
-  type RuntimePrivateConnectForgetScope,
-  type RuntimePrivateConnectPromptPreparation,
 } from "../node/runtime-process-protocol";
 import { ConversationAttachmentStore } from "../node/conversation-attachment-store";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases";
@@ -66,8 +56,6 @@ import {
 import {
   BackendProfileController,
 } from "./runtime/backends/backend-profile-controller";
-import type { AgentHarnessRegistry } from "./provider/agent-harness-registry";
-import type { ClaudeCompatibleBackendProfile } from "../shared/claude-backend-profiles";
 import { RuntimeSyncHub } from "./runtime/runtime-sync-hub";
 import { SnapshotBroadcastCoalescer } from "./runtime/snapshot-broadcast-coalescer";
 import { WorkspaceRunController } from "./runtime/workspace-run-controller";
@@ -110,7 +98,6 @@ import {
 } from "./runtime/websocket-boundary";
 import {
   TrustedAttachmentResolver,
-  type RuntimeAttachmentBroker,
 } from "./runtime/attachments/trusted-attachment-resolver";
 import { PrivateGeneratedAttachmentStore } from "./runtime/attachments/private-generated-attachments";
 import {
@@ -127,89 +114,19 @@ import {
 import {
   writeDatabaseRecoveryExportFile,
 } from "./persistence/database-export-file";
-import type { DatabaseRecoveryImportResult } from "./persistence/database-export";
 import { runRecoveryImportWorker } from "./persistence/database-recovery-import-worker-client";
+import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-smoke-image";
+import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
+
+export type {
+  RunningRuntime,
+  RuntimeBackendCredentialBroker,
+  RuntimeOptions,
+} from "./runtime-types";
 
 export {
   assembleReadOnlyReviewRequest,
 } from "./runtime/commands/review-support";
-
-export interface RuntimeOptions {
-  dataDirectory: string;
-  defaultWorkspacePath: string;
-  enableProviders?: boolean;
-  /** Trusted host override used before persisted settings are available. */
-  codexBinaryPath?: string;
-  reviewSummaryTimeoutMs?: number;
-  /** Full profiles remain in the privileged runtime and never enter snapshots. */
-  kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
-  backendCredentials?: RuntimeBackendCredentialBroker;
-  /** Trusted main-process import root and capability broker. */
-  attachmentRoot?: string;
-  attachments?: RuntimeAttachmentBroker;
-  /** Test and embedding seam; the desktop runtime uses the default registry. */
-  agentHarnessRegistry?: AgentHarnessRegistry;
-  /** Main-owned root-relative file broker for untrusted workspace paths. */
-  secureFiles?: RuntimeSecureFileBroker;
-  /** Privileged deterministic lifecycle fault; never renderer-controlled. */
-  recoveryImportFault?: {
-    phase: "after-staging-publish" | "during-message-import";
-    markerPath: string;
-    stallMs: number;
-  };
-  runtimeGenerationId: string;
-  systemBootId: string;
-  confirmedTerminatedRuntimeGenerationIds?: readonly string[];
-  priorRuntimeCleanupUnconfirmed?: boolean;
-  onCleanupReceiptConsumed?: (
-    receiptRuntimeGenerationId: string,
-    currentRuntimeGenerationId: string,
-  ) => void;
-  /** Test-only settlement seam; absent from the validated worker protocol. */
-  testOnlyOnTurnSettled?: (turn: AgentTurn) => void | Promise<void>;
-  /** Test-only recovery ordering seam; absent from the validated worker protocol. */
-  testOnlyProjectIdentityRefresh?: Promise<void>;
-  /** Test-only command admission seam; absent from the validated worker protocol. */
-  testOnlyBeforeRuntimeCommand?: () => Promise<void>;
-  /** Test-only provider discovery seam; absent from the validated worker protocol. */
-  testOnlyProviderRefresh?: () => Promise<void>;
-}
-
-export interface RuntimeBackendCredentialBroker {
-  resolve(secretReference: string, signal?: AbortSignal): Promise<string | null>;
-  has(secretReference: string, signal?: AbortSignal): Promise<boolean>;
-  status(secretReference: string, signal?: AbortSignal): Promise<BackendCredentialStatus>;
-  clear(secretReference: string, signal?: AbortSignal): Promise<boolean>;
-  forget(secretReference: string, signal?: AbortSignal): Promise<boolean>;
-}
-
-export interface RunningRuntime {
-  websocketUrl: string;
-  databaseRecovery: ReturnType<RuntimeStore["databaseRecoveryReport"]>;
-  resolveProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
-  privateConnectRequest: (
-    subject: PrivateConnectRuntimeAuthorization,
-    request: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
-  ) => Promise<PrivateConnectRuntimeResponse>;
-  preparePrivateConnectPrompt: (
-    subject: PrivateConnectRuntimeAuthorization,
-    request: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
-  ) => Promise<RuntimePrivateConnectPromptPreparation | PrivateConnectRuntimeResponse>;
-  commitPrivateConnectPrompt: (
-    subject: PrivateConnectRuntimeAuthorization,
-    request: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
-    preparationId: string,
-  ) => PrivateConnectRuntimeResponse;
-  forgetPrivateConnectTranscripts: (scope: RuntimePrivateConnectForgetScope) => void;
-  exportRecoveryData: (path: string, signal?: AbortSignal) => Promise<void>;
-  importRecoveryData: (
-    path: string,
-    targetDirectory: string,
-    signal?: AbortSignal,
-    operationId?: string,
-  ) => Promise<DatabaseRecoveryImportResult>;
-  close: (cause?: "runtime-shutdown" | "runtime-crash") => Promise<void>;
-}
 
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
   if (!validRuntimeGenerationId(options.runtimeGenerationId)) {
@@ -316,7 +233,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   if (priorBootLeasesCleared) {
     store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
   }
-  const conversationAttachments = await ConversationAttachmentStore.open(dataDirectory);
+  const conversationAttachments = await ConversationAttachmentStore.open(
+    dataDirectory,
+    options.conversationAttachmentStoreOperations
+      ? {
+          operationRunner: options.conversationAttachmentStoreOperations,
+          readOperationRunner: options.conversationAttachmentStoreOperations,
+        }
+      : {},
+  );
   if (!runtimeSafetyLock) await conversationAttachments.reconcile(store.attachments());
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
@@ -1062,6 +987,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
 
   return {
+    runPackageSmokeImage: (inputPath, resultPath, signal) =>
+      runPackagedImageRetentionSmoke(
+        inputPath,
+        resultPath,
+        conversationAttachments,
+        signal,
+      ),
     websocketUrl: `ws://127.0.0.1:${address.port}${websocketPath}`,
     databaseRecovery: store.databaseRecoveryReport(),
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {

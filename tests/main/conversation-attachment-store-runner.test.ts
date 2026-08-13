@@ -1,0 +1,141 @@
+import { EventEmitter } from "node:events";
+import { resolve } from "node:path";
+
+import type { UtilityProcess } from "electron";
+import { describe, expect, it, vi } from "vitest";
+
+import { createConversationAttachmentStoreUtilityRunner } from "../../src/main/conversation-attachment-store-runner";
+
+const operation = {
+  operation: "remove" as const,
+  root: resolve("/tmp", "conversation-attachments"),
+  rootDev: "1",
+  rootIno: "2",
+  rootUid: "501",
+  name: "11111111-1111-4111-8111-111111111111",
+};
+
+class FakeUtilityProcess extends EventEmitter {
+  readonly kill = vi.fn(() => true);
+  readonly postMessage = vi.fn();
+}
+
+function utility(child: FakeUtilityProcess): UtilityProcess {
+  return child as unknown as UtilityProcess;
+}
+
+describe("conversation attachment store utility runner", () => {
+  it("waits for exit after a valid result", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("message", {
+      type: "conversation-attachment-store.result",
+      ok: true,
+    });
+    const settled = vi.fn();
+    void running.result.then(settled);
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+
+    child.emit("exit", 0);
+    await expect(running.result).resolves.toBeUndefined();
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("fails a malformed or duplicate event and confirms the killed exit", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("message", { invalid: true });
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toThrow("invalid result");
+    await expect(running.stopped).resolves.toBeUndefined();
+
+    const duplicate = new FakeUtilityProcess();
+    const duplicateRunner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(duplicate),
+    });
+    const duplicateRunning = duplicateRunner(operation);
+    duplicate.emit("spawn");
+    duplicate.emit("message", {
+      type: "conversation-attachment-store.result",
+      ok: true,
+    });
+    duplicate.emit("message", {
+      type: "conversation-attachment-store.result",
+      ok: true,
+    });
+    expect(duplicate.kill).toHaveBeenCalledOnce();
+    duplicate.emit("exit", 1);
+    await expect(duplicateRunning.result).rejects.toThrow("invalid result");
+  });
+
+  it("reports spawn failure without claiming a process was started", async () => {
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => { throw new Error("spawn failed"); },
+    });
+    const running = runner(operation);
+    await expect(running.result).rejects.toThrow("spawn failed");
+    await expect(running.stopped).resolves.toBeUndefined();
+    await expect(running.ready).resolves.toBe(false);
+  });
+
+  it("bounds timeout shutdown and distinguishes confirmed from unconfirmed exit", async () => {
+    vi.useFakeTimers();
+    try {
+      const confirmed = new FakeUtilityProcess();
+      const runner = createConversationAttachmentStoreUtilityRunner({
+        spawn: () => utility(confirmed),
+        timeoutMs: 25,
+        killGraceMs: 10,
+      });
+      const running = runner(operation);
+      void running.result.catch(() => undefined);
+      confirmed.emit("spawn");
+      await vi.advanceTimersByTimeAsync(25);
+      expect(confirmed.kill).toHaveBeenCalledOnce();
+      confirmed.emit("exit", 1);
+      await expect(running.result).rejects.toThrow("timed out");
+      await expect(running.stopped).resolves.toBeUndefined();
+
+      const stuck = new FakeUtilityProcess();
+      const stuckRunner = createConversationAttachmentStoreUtilityRunner({
+        spawn: () => utility(stuck),
+        timeoutMs: 25,
+        killGraceMs: 10,
+      });
+      const stuckRunning = stuckRunner(operation);
+      void stuckRunning.result.catch(() => undefined);
+      void stuckRunning.stopped.catch(() => undefined);
+      stuck.emit("spawn");
+      await vi.advanceTimersByTimeAsync(35);
+      await expect(stuckRunning.result).rejects.toThrow("timed out");
+      await expect(stuckRunning.stopped).rejects.toThrow("unconfirmed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels on abort and waits for the exact exit", async () => {
+    const child = new FakeUtilityProcess();
+    const controller = new AbortController();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation, controller.signal);
+    child.emit("spawn");
+    controller.abort(new Error("cancelled by test"));
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toThrow("cancelled by test");
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+});

@@ -6,7 +6,6 @@ import type {
   PrivateConnectRuntimeRequest,
   PrivateConnectRuntimeResponse,
 } from "../shared/private-connect/runtime-contract";
-
 import type {
   OpenProjectPathRequest,
   RuntimeConnection,
@@ -50,18 +49,13 @@ import type {
   RuntimeSupervisorSnapshot,
   RuntimeSupervisorTimer,
 } from "./runtime-supervisor-types.js";
-
 export type { RuntimeAttachmentBroker } from "./runtime-attachment-broker.js";
-export type {
-  RuntimeCredentialBroker,
-  RuntimeSecureFileBroker,
-  RuntimeSupervisorOptions,
-  RuntimeSupervisorPhase,
-  RuntimeSupervisorSnapshot,
-} from "./runtime-supervisor-types.js";
+export type { RuntimeCredentialBroker, RuntimeSecureFileBroker,
+  RuntimeSupervisorOptions, RuntimeSupervisorPhase,
+  RuntimeSupervisorSnapshot } from "./runtime-supervisor-types.js";
 export { runtimeRestartDelayMs } from "./runtime-supervisor-values.js";
-
-type PrivateConnectPromptRequest = Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>;
+type PrivateConnectPromptRequest = Extract<PrivateConnectRuntimeRequest,
+  { type: "prompt.send" }>;
 
 export class RuntimeSupervisor {
   private readonly spawnProcess: RuntimeSupervisorOptions["spawn"];
@@ -102,10 +96,10 @@ export class RuntimeSupervisor {
   private shutdownDeadlineTimer: RuntimeSupervisorTimer | null = null;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
   private readonly pendingPrivateConnectRuntimeRequests = new Map<string, PendingPrivateConnectRuntimeRequest>();
-  private readonly pendingDatabaseRecoveryRequests =
-    new Map<string, PendingDatabaseRecoveryRequest>();
-  private readonly privateConnectPrompts:
-    RuntimePrivateConnectPromptCoordinator<RuntimeProcessRecord>;
+  private readonly pendingDatabaseRecoveryRequests = new Map<string,
+    PendingDatabaseRecoveryRequest>();
+  private readonly privateConnectPrompts: RuntimePrivateConnectPromptCoordinator<
+    RuntimeProcessRecord>;
   private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
   private readonly secureFiles: RuntimeSecureFileCoordinator;
   private stopPromise: Promise<boolean> | null = null;
@@ -145,6 +139,10 @@ export class RuntimeSupervisor {
     this.credentialBroker = options.credentialBroker;
     this.secureFiles = new RuntimeSecureFileCoordinator({
       broker: options.secureFileBroker,
+      conversationAttachmentStoreRunner:
+        options.conversationAttachmentStoreRunner,
+      conversationAttachmentStoreAuthority:
+        options.conversationAttachmentStoreAuthority,
       accepts: (record) => this.acceptsBrokerRequests(record),
       post: (record, command) => this.post(record.child, command),
     });
@@ -180,7 +178,6 @@ export class RuntimeSupervisor {
     this.clearShutdownTimers();
     this.spawnNext();
   }
-
   connection(): RuntimeConnection {
     const result = runtimeConnection({
       phase: this.phase,
@@ -360,27 +357,23 @@ export class RuntimeSupervisor {
 
   snapshot(): RuntimeSupervisorSnapshot {
     return {
-      phase: this.phase,
-      generation: this.generation,
-      pid: this.current?.child.pid ?? null,
-      websocketUrl: this.websocketUrl,
+      phase: this.phase, generation: this.generation,
+      pid: this.current?.child.pid ?? null, websocketUrl: this.websocketUrl,
       restartAttempt: this.restartAttempt,
-      restartScheduled: this.restartTimer !== null,
-      lastError: this.lastError,
+      restartScheduled: this.restartTimer !== null, lastError: this.lastError,
       databaseRecovery: this.databaseRecoveryReport,
     };
   }
 
   ownsAttachment(attachmentId: string): boolean {
-    return this.attachmentRequests.owns(
-      [this.current, ...this.quarantined], attachmentId,
-    );
+    const records = [this.current, ...this.quarantined];
+    return this.attachmentRequests.owns(records, attachmentId);
   }
 
   deferAttachmentRelease(attachmentId: string): boolean {
-    return this.attachmentRequests.deferRendererReleaseForAny(
-      [this.current, ...this.quarantined], attachmentId,
-    );
+    const records = [this.current, ...this.quarantined];
+    return this.attachmentRequests.deferRendererReleaseForAny(records,
+      attachmentId);
   }
 
   testOnlyRecycle(): Promise<boolean> {
@@ -632,6 +625,13 @@ export class RuntimeSupervisor {
       return;
     }
     if (event.type === "runtime.secure-file-request") {
+      this.secureFiles.handle(record, event);
+      return;
+    }
+    if (
+      event.type === "runtime.conversation-attachment-store-request"
+      || event.type === "runtime.conversation-attachment-store-cancel"
+    ) {
       this.secureFiles.handle(record, event);
       return;
     }

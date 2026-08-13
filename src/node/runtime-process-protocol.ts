@@ -31,6 +31,15 @@ import {
   type SecureFileRequest,
   type SecureFileResult,
 } from "./secure-file-protocol";
+import {
+  parseRuntimeConversationAttachmentStoreEvent,
+  parseRuntimeConversationAttachmentStoreResult,
+  type RuntimeConversationAttachmentStoreEvent,
+  type RuntimeConversationAttachmentStoreResult,
+} from "./conversation-attachment-store-protocol";
+
+export type { RuntimeConversationAttachmentStoreResult }
+  from "./conversation-attachment-store-protocol";
 
 export interface RuntimeWorkerOptions {
   dataDirectory: string;
@@ -49,6 +58,11 @@ export interface RuntimeWorkerOptions {
   kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
   /** Test-only packaged-runtime proof that the native PDF stack can execute. */
   packageSmokePdf?: {
+    inputPath: string;
+    resultPath: string;
+  };
+  /** Test-only packaged proof for fuse-safe durable image retention. */
+  packageSmokeImage?: {
     inputPath: string;
     resultPath: string;
   };
@@ -129,6 +143,7 @@ export type RuntimeWorkerCommand =
   | RuntimeAttachmentResult
   | RuntimeAttachmentReleaseResult
   | RuntimeAttachmentRelinquishResult
+  | RuntimeConversationAttachmentStoreResult
   | RuntimeSecureFileResult;
 
 export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
@@ -285,6 +300,7 @@ export type RuntimeWorkerEvent =
       requestId: string;
       attachmentId: string;
     }
+  | RuntimeConversationAttachmentStoreEvent
   | {
       type: "runtime.credential-request";
       requestId: string;
@@ -336,6 +352,9 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   }
   if (value.type === "runtime.credential-result") {
     return parseRuntimeCredentialResult(value);
+  }
+  if (value.type === "runtime.conversation-attachment-store-result") {
+    return parseRuntimeConversationAttachmentStoreResult(value);
   }
   if (
     value.type === "runtime.secure-file-result"
@@ -483,6 +502,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const hasCodexBinaryPath = Object.hasOwn(options, "codexBinaryPath");
   const hasAttachmentRoot = Object.hasOwn(options, "attachmentRoot");
   const hasPackageSmokePdf = Object.hasOwn(options, "packageSmokePdf");
+  const hasPackageSmokeImage = Object.hasOwn(options, "packageSmokeImage");
   const hasRecoveryImportFault = Object.hasOwn(options, "recoveryImportFault");
   const hasRuntimeGenerationId = Object.hasOwn(options, "runtimeGenerationId");
   const hasSystemBootId = Object.hasOwn(options, "systemBootId");
@@ -502,6 +522,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       + Number(hasCodexBinaryPath)
       + Number(hasAttachmentRoot)
       + Number(hasPackageSmokePdf)
+      + Number(hasPackageSmokeImage)
       + Number(hasRecoveryImportFault)
       + Number(hasConfirmedGenerations)
       + Number(hasPriorRuntimeCleanupUnconfirmed)
@@ -537,6 +558,15 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
         || Object.keys(options.packageSmokePdf).length !== 2
         || !runtimePath(options.packageSmokePdf.inputPath)
         || !runtimePath(options.packageSmokePdf.resultPath)
+      )
+    )
+    || (
+      hasPackageSmokeImage
+      && (
+        !plainObject(options.packageSmokeImage)
+        || Object.keys(options.packageSmokeImage).length !== 2
+        || !runtimePath(options.packageSmokeImage.inputPath)
+        || !runtimePath(options.packageSmokeImage.resultPath)
       )
     )
     || (
@@ -593,6 +623,14 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
             packageSmokePdf: {
               inputPath: (options.packageSmokePdf as Record<string, unknown>).inputPath as string,
               resultPath: (options.packageSmokePdf as Record<string, unknown>).resultPath as string,
+            },
+          }
+        : {}),
+      ...(hasPackageSmokeImage
+        ? {
+            packageSmokeImage: {
+              inputPath: (options.packageSmokeImage as Record<string, unknown>).inputPath as string,
+              resultPath: (options.packageSmokeImage as Record<string, unknown>).resultPath as string,
             },
           }
         : {}),
@@ -697,6 +735,10 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       handoffId: value.handoffId,
     };
   }
+  if (
+    value.type === "runtime.conversation-attachment-store-request"
+    || value.type === "runtime.conversation-attachment-store-cancel"
+  ) return parseRuntimeConversationAttachmentStoreEvent(value);
   if (
     (
       value.type === "runtime.attachment-release-request"

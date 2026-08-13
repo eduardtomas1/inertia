@@ -31,6 +31,7 @@ import {
 } from "@shared/source-language";
 import {
   workspaceFileLocationFromFragment,
+  workspaceFileReference,
   workspaceFileReferenceFallback,
   type WorkspaceFileLocation,
 } from "../utils/workspaceFileReference";
@@ -165,10 +166,16 @@ function normalizedPath(value: string): string {
   return `${prefix}${segments.join("/")}` || (absolute ? prefix : ".");
 }
 
-export function resolveResponseLink(projectRoot: string, rawHref: string): ProjectLink {
+export function resolveResponseLink(
+  projectRoot: string,
+  rawHref: string,
+  syntax: "markdown" | "file" = "markdown",
+): ProjectLink {
   const href = rawHref.trim();
   if (!href || href.includes("\0")) return { kind: "unsafe" };
-  if (href.startsWith("#")) return { kind: "anchor", href };
+  if (syntax === "markdown" && href.startsWith("#")) {
+    return { kind: "anchor", href };
+  }
   const windowsAbsolute = /^[a-z]:[\\/]/iu.test(href);
   const uncAbsolute = /^(?:\\\\|\/\/)/u.test(href);
   const scheme = /^[a-z][a-z0-9+.-]*:/iu.exec(href)?.[0] ?? null;
@@ -187,17 +194,41 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
       || /[\\/]/u.test(fallback)
     ) return { kind: "unsafe" };
   }
-  const hashIndex = href.indexOf("#");
-  const rawPath = href.slice(0, hashIndex >= 0 ? hashIndex : undefined)
-    .split("?", 1)[0]!;
-  const encodedPathDelimiter = !/^[a-z]%3a[\\/]/iu.test(rawPath)
-    && /%(?:23|3a|3f)/iu.test(rawPath);
-  const location = hashIndex >= 0
+  const hashIndex = syntax === "file"
+    ? href.lastIndexOf("#")
+    : href.indexOf("#");
+  const fragmentLocation = hashIndex >= 0
     ? workspaceFileLocationFromFragment(href.slice(hashIndex))
     : null;
+  let rawPath = syntax === "file"
+    ? fragmentLocation
+      ? href.slice(0, hashIndex)
+      : href
+    : href.slice(0, hashIndex >= 0 ? hashIndex : undefined).split("?", 1)[0]!;
+  let location = fragmentLocation;
+  const rawSourceReference = location === null
+    ? workspaceFileReference(rawPath)
+    : null;
+  const rawSourcePathHasEncodedDelimiter = rawSourceReference !== null
+    && /%(?:23|3a|3f)/iu.test(rawSourceReference.path);
+  if (rawSourceReference && rawSourcePathHasEncodedDelimiter) {
+    rawPath = rawSourceReference.path;
+    location = rawSourceReference.location;
+  }
+  if (
+    syntax === "markdown"
+    && rawPath.startsWith("./")
+    && /^[a-z]%3a(?:%2f|%5c|[\\/])/iu.test(rawPath.slice(2))
+  ) {
+    rawPath = rawPath.slice(2);
+  }
+  const encodedWindowsAbsolute = /^[a-z]%3a(?:%2f|%5c|[\\/])/iu.test(rawPath);
+  const encodedPathDelimiter = /%(?:23|3a|3f)/iu.test(
+    encodedWindowsAbsolute ? rawPath.slice(4) : rawPath,
+  );
   let decoded: string;
   try {
-    decoded = decodeURIComponent(href.split("#", 1)[0]!.split("?", 1)[0]!);
+    decoded = decodeURIComponent(rawPath);
   } catch {
     return { kind: "unsafe" };
   }
@@ -430,12 +461,13 @@ function CodeBlock({
     typeof rawMeta === "string" ? rawMeta : undefined,
     language,
   );
-  const fileLanguagePath = meta.file
-    ? workspaceFileReferenceFallback(meta.file) ?? meta.file
-    : "";
   const fileTarget = meta.file
-    ? resolveResponseLink(projectRoot, meta.file)
+    ? resolveResponseLink(projectRoot, meta.file, "file")
     : null;
+  const fileLanguagePath = fileTarget?.kind === "project"
+    ? workspaceFileReferenceFallback(fileTarget.relativePath)
+      ?? fileTarget.relativePath
+    : meta.file ?? "";
   const declaredLanguage = sourceLanguageFromAlias(language);
   const fileLanguage = fileTarget?.kind === "project"
     ? sourceLanguageForFile(fileLanguagePath, code)

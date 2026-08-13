@@ -267,4 +267,40 @@ describe("runtime conversation attachment store coordinator", () => {
     });
     await expect(coordinator.drain(record)).resolves.toBe(false);
   });
+
+  it("rejects subsequent generation work with retained unconfirmed truth", async () => {
+    const record = peer();
+    const post = vi.fn();
+    const runner = vi.fn(() => ({
+      result: Promise.reject(new Error("failed")),
+      stopped: Promise.reject(new Error("unconfirmed")),
+      ready: Promise.resolve(false),
+    }));
+    const coordinator = new RuntimeConversationAttachmentStoreCoordinator({
+      runner: runner as never,
+      authority,
+      accepts: () => true,
+      post,
+    });
+    const first = request();
+    coordinator.handle(record, first);
+    await vi.waitFor(() => expect(post).toHaveBeenCalledWith(
+      record,
+      expect.objectContaining({
+        requestId: first.requestId,
+        ok: false,
+        shutdownConfirmed: false,
+      }),
+    ));
+    const subsequent = request();
+    coordinator.handle(record, subsequent);
+
+    expect(runner).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith(record, expect.objectContaining({
+      requestId: subsequent.requestId,
+      ok: false,
+      shutdownConfirmed: false,
+    }));
+    await expect(coordinator.shutdown()).resolves.toBe(false);
+  });
 });

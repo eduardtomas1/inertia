@@ -108,8 +108,14 @@ export class RuntimeConversationAttachmentStoreCoordinator {
       return;
     }
     const existingState = this.recordStates.get(record);
-    if (existingState?.draining) {
-      this.reply(record, event.requestId, publicFailure());
+    if (existingState && (
+      existingState.draining || !existingState.shutdownConfirmed
+    )) {
+      this.reply(
+        record,
+        event.requestId,
+        publicFailure(existingState.shutdownConfirmed),
+      );
       return;
     }
     const used = this.usedRequestIds.get(record) ?? new Set<string>();

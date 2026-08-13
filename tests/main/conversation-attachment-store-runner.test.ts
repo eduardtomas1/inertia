@@ -252,4 +252,43 @@ describe("conversation attachment store utility runner", () => {
     await expect(active.result).resolves.toBeUndefined();
     expect(children).toHaveLength(1);
   });
+
+  it("permanently poisons queued and future work after unconfirmed exit", async () => {
+    vi.useFakeTimers();
+    try {
+      const children: FakeUtilityProcess[] = [];
+      const runner = createConversationAttachmentStoreUtilityRunner({
+        spawn: () => {
+          const child = new FakeUtilityProcess();
+          children.push(child);
+          return utility(child);
+        },
+        maxActiveOperations: 1,
+        maxPendingOperations: 2,
+        killGraceMs: 10,
+      });
+      const controller = new AbortController();
+      const active = runner(operation, controller.signal);
+      const queued = runner({ ...operation, name: crypto.randomUUID() });
+      const activeResult = expect(active.result).rejects.toThrow("cancelled");
+      const activeStopped = expect(active.stopped).rejects.toThrow("unconfirmed");
+      const queuedResult = expect(queued.result).rejects.toThrow("unconfirmed");
+      const queuedStopped = expect(queued.stopped).rejects.toThrow("unconfirmed");
+      children[0].emit("spawn");
+      controller.abort(new Error("cancelled by poison test"));
+      await vi.advanceTimersByTimeAsync(10);
+
+      await activeResult;
+      await activeStopped;
+      await queuedResult;
+      await queuedStopped;
+      const future = runner({ ...operation, name: crypto.randomUUID() });
+      await expect(future.result).rejects.toThrow("unconfirmed");
+      await expect(future.stopped).rejects.toThrow("unconfirmed");
+      await expect(future.ready).resolves.toBe(false);
+      expect(children).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

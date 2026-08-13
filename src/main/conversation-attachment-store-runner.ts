@@ -258,9 +258,27 @@ export function createConversationAttachmentStoreUtilityRunner(
     readonly onAbort: () => void;
   }
   let activeOperations = 0;
+  let poisonError: Error | null = null;
   const queued: QueuedOperation[] = [];
+  const failQueued = (next: QueuedOperation, error: Error): void => {
+    next.signal?.removeEventListener("abort", next.onAbort);
+    next.rejectResult(error);
+    next.rejectStopped(error);
+    next.resolveReady(false);
+  };
+  const poison = (): Error => {
+    poisonError ??= new Error(
+      "Conversation attachment utility shutdown is unconfirmed.",
+    );
+    for (const next of queued.splice(0)) failQueued(next, poisonError);
+    return poisonError;
+  };
   const pump = (): void => {
-    while (activeOperations < maxActiveOperations && queued.length > 0) {
+    while (
+      !poisonError
+      && activeOperations < maxActiveOperations
+      && queued.length > 0
+    ) {
       const next = queued.shift();
       if (!next) return;
       next.signal?.removeEventListener("abort", next.onAbort);
@@ -274,7 +292,10 @@ export function createConversationAttachmentStoreUtilityRunner(
       const running = runNow(next.operation, next.signal);
       void running.result.then(next.resolveResult, next.rejectResult);
       void running.ready.then(next.resolveReady);
-      void running.stopped.then(next.resolveStopped, next.rejectStopped).finally(() => {
+      void running.stopped.then(
+        next.resolveStopped,
+        () => next.rejectStopped(poison()),
+      ).finally(() => {
         activeOperations -= 1;
         pump();
       });
@@ -307,6 +328,12 @@ export function createConversationAttachmentStoreUtilityRunner(
     };
     if (signal?.aborted) {
       failWithoutSpawn(cancelled(signal));
+      return { result, stopped, ready };
+    }
+    if (poisonError) {
+      rejectResult(poisonError);
+      rejectStopped(poisonError);
+      resolveReady(false);
       return { result, stopped, ready };
     }
     if (

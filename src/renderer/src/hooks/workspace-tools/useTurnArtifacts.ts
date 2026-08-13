@@ -147,10 +147,7 @@ export function useTurnArtifacts({
     literalPath?: boolean,
   ) => {
     if (!project || !conversation) return;
-    if (location || literalPath) {
-      openWorkspaceFile(path, location, literalPath);
-    }
-    else openWorkspaceFile(path);
+    openWorkspaceFile(path, location, literalPath);
   }, [conversation, openWorkspaceFile, project]);
 
   const showCurrentChanges = useCallback(() => {

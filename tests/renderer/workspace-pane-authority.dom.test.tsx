@@ -19,7 +19,7 @@ import { nativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
 import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
-import { openWorkspaceEntry } from "../../src/renderer/src/hooks/useWorkspaceTools";
+import { openWorkspaceEntry } from "../../src/renderer/src/hooks/workspace-tools/openWorkspaceEntry";
 import {
   useWorkspaceFiles,
 } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceFiles";
@@ -447,7 +447,7 @@ describe("workspace pane authority", () => {
     })).resolves.toBe("file");
 
     expect(openDirectory).toHaveBeenCalledWith("docs");
-    expect(openFile).toHaveBeenCalledWith("README");
+    expect(openFile).toHaveBeenCalledWith("README", undefined, undefined);
   });
 
   it("does not finish opening a file after its workspace owner changes", async () => {

@@ -32,44 +32,9 @@ interface WorkspaceToolsOptions {
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
 }
 
-export async function openWorkspaceEntry(
-  path: string,
-  actions: {
-    inspectDirectory: (path: string) => Promise<unknown>;
-    openDirectory: (path: string) => Promise<unknown>;
-    openFile: (
-      path: string,
-      location?: WorkspaceFileLocation,
-      literalPath?: boolean,
-    ) => void;
-    isCurrent?: () => boolean;
-  },
-  location?: WorkspaceFileLocation,
-  literalPath?: boolean,
-): Promise<"directory" | "file" | "stale"> {
-  if (actions.isCurrent && !actions.isCurrent()) return "stale";
-  try {
-    await actions.inspectDirectory(path);
-  } catch {
-    if (actions.isCurrent && !actions.isCurrent()) return "stale";
-    if (location || literalPath) {
-      actions.openFile(path, location, literalPath);
-    }
-    else actions.openFile(path);
-    return "file";
-  }
-  if (actions.isCurrent && !actions.isCurrent()) return "stale";
-  await actions.openDirectory(path);
-  return "directory";
-}
-
 export function useWorkspaceTools(options: WorkspaceToolsOptions) {
   const enabled = options.enabled ?? true;
-  const workspaceAuthority = [
-    enabled ? "enabled" : "disabled",
-    options.project?.id ?? "",
-    options.conversation?.id ?? "",
-  ].join("\0");
+  const workspaceAuthority = `${enabled}\0${options.project?.id}\0${options.conversation?.id}`;
   const workspaceAuthorityRef = useRef(workspaceAuthority);
   workspaceAuthorityRef.current = workspaceAuthority;
   const git = useWorkspaceGit({
@@ -116,24 +81,20 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
   ): void => {
     const projectId = options.project?.id;
     if (!projectId) return;
-    void openWorkspaceEntry(path, {
-      isCurrent: () => workspaceAuthorityRef.current === workspaceAuthority,
-      inspectDirectory: async (directory) =>
-        await requestWorkspaceEntries({ directory }),
-      openDirectory: async (directory) =>
-        await window.inertia.openProjectPath({
-            projectId,
-            ...(options.conversation?.id
-              ? { conversationId: options.conversation.id }
-              : {}),
-            relativePath: directory,
-            action: "reveal",
-        }),
-      openFile: (file, fileLocation, exactPath) => {
-        selectWorkspaceFile(file, fileLocation, exactPath);
-        setActiveTool("files");
-      },
-    }, location, literalPath).catch(() => undefined);
+    void import("./workspace-tools/openWorkspaceEntry").then(
+      ({ openWorkspaceFile }) => openWorkspaceFile([
+        path,
+        location,
+        literalPath,
+        workspaceAuthorityRef,
+        workspaceAuthority,
+        requestWorkspaceEntries,
+        projectId,
+        options.conversation?.id,
+        selectWorkspaceFile,
+        setActiveTool,
+      ]),
+    ).catch(() => undefined);
   }, [
     options.conversation?.id,
     options.project?.id,

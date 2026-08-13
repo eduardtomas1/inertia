@@ -160,7 +160,11 @@ describe("useTurnArtifacts", () => {
         laterTurnId: "turn-after",
       },
     });
-    expect(openWorkspaceFile).toHaveBeenCalledWith("src/split.ts");
+    expect(openWorkspaceFile).toHaveBeenCalledWith(
+      "src/split.ts",
+      undefined,
+      undefined,
+    );
     expect(setActiveTool).toHaveBeenCalledWith("changes");
   });
 

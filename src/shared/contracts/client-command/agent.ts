@@ -24,6 +24,14 @@ export const agentCommandSchemas = [
         .strict(),
     })
     .strict(),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.compact"),
+    payload: z.strictObject({
+      conversationId: z.uuid(),
+      instruction: z.string().trim().min(1).max(4_000).optional(),
+    }),
+  }),
   z
     .object({
       ...requestBase,

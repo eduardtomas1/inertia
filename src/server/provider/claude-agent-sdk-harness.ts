@@ -402,6 +402,8 @@ function startClaudeRun(
     typeof stageClaudeSkillPlugin
   >> = null;
   let selectedSkillsVerified = false;
+  let compactSucceeded = false;
+  let compactFailure: string | undefined;
   const requestedFastMode = options.input.modelSelection.providerOptions.fastMode;
   if (requestedFastMode !== undefined && requestedFastMode !== "fast") {
     throw new Error("Claude received an invalid Fast mode option.");
@@ -559,7 +561,11 @@ function startClaudeRun(
       );
   const providerResult = (async (): Promise<ProviderRunResult> => {
     try {
-      const prompt = await claudePrompt(options.input.prompt, options.input.imagePaths ?? []);
+      const compactInstruction = options.input.operation?.instruction;
+      const promptText = options.input.operation?.kind === "compact"
+        ? `/compact${compactInstruction ? ` ${compactInstruction}` : ""}`
+        : options.input.prompt;
+      const prompt = await claudePrompt(promptText, options.input.imagePaths ?? []);
       if (!promptChannel.push(prompt)) {
         return finishResult("cancelled");
       }
@@ -648,21 +654,24 @@ function startClaudeRun(
         );
         if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
         const message = next.value;
-        if (message.type === "system" && message.subtype === "init") {
-          const init = message as unknown as Record<string, unknown>;
-          if (requestedFastModeState === "on") {
-            if (init.fast_mode_state !== requestedFastModeState) {
-              throw new Error(claudeFastModeFailure(init));
-            }
-            fastModeVerified = true;
-          } else if (requestedFastModeState === "off") {
-            if (init.fast_mode_state !== requestedFastModeState) {
-              throw new Error(
-                "Claude did not confirm Standard speed for this session. Start a new chat or update Claude Code.",
-              );
-            }
-            fastModeVerified = true;
+        drainTerminalSubagents = false;
+        eventBudget.observe(message);
+        const record = message as unknown as Record<string, unknown>;
+        const messageSessionId = stringValue(record.session_id);
+        const initAttestsRequestedSession = messageSessionId !== undefined
+          && (options.input.sessionId === undefined
+            || messageSessionId === options.input.sessionId);
+        if (message.type === "system" && message.subtype === "init"
+          && initAttestsRequestedSession) {
+          if (requestedFastModeState === "on"
+            && record.fast_mode_state !== requestedFastModeState) {
+            throw new Error(claudeFastModeFailure(record));
           }
+          if (requestedFastModeState === "off"
+            && record.fast_mode_state !== requestedFastModeState) {
+            throw new Error("Claude did not confirm Standard speed for this session. Start a new chat or update Claude Code.");
+          }
+          if (requestedFastModeState !== null) fastModeVerified = true;
         }
         if (
           stagedSkillPlugin
@@ -674,9 +683,8 @@ function startClaudeRun(
           }
           selectedSkillsVerified = true;
         }
-        drainTerminalSubagents = false;
-        eventBudget.observe(message);
-        const record = message as unknown as Record<string, unknown>;
+        const provesRequestedCompaction = options.input.operation?.kind === "compact"
+          && messageSessionId === options.input.sessionId;
         if (typeof record.session_id === "string" && record.session_id !== sessionId) {
           sessionId = record.session_id;
           emitter.session(sessionId);
@@ -781,7 +789,24 @@ function startClaudeRun(
           }
           continue;
         }
+        if (message.type === "system" && message.subtype === "status") {
+          if (provesRequestedCompaction
+            && message.compact_result === "success" && !compactFailure) {
+            compactSucceeded = true;
+          }
+          if (provesRequestedCompaction && message.compact_result === "failed") {
+            compactSucceeded = false;
+            compactFailure = message.compact_error?.trim()
+              || "Claude reported that context compaction failed.";
+          }
+          continue;
+        }
         if (message.type === "system" && message.subtype === "compact_boundary") {
+          if (
+            provesRequestedCompaction
+            && message.compact_metadata.trigger === "manual"
+            && !compactFailure
+          ) compactSucceeded = true;
           refreshContextUsage();
           continue;
         }
@@ -804,6 +829,16 @@ function startClaudeRun(
         throw new Error("Claude did not confirm the selected isolated skills.");
       }
       if (cancelRequested) return finishResult("cancelled");
+      if (options.input.operation?.kind === "compact"
+        && (compactFailure || !compactSucceeded)) {
+        return finishResult(
+          "failed",
+          routeFailure(
+            compactFailure
+              ?? "Claude did not confirm that context compaction completed.",
+          ),
+        );
+      }
       if (!fastModeVerified) {
         throw new Error(
           requestedFastMode === "fast"

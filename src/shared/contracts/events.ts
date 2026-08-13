@@ -18,6 +18,7 @@ import type {
   AgentInputRequest,
   AgentPlan,
   ChatMessage,
+  ConversationCompactionResult,
   MessageSendAcceptance,
   SubagentTrace,
   ThreadUsageSnapshot,
@@ -152,6 +153,7 @@ export type ServerEvent =
         | { kind: "project.created"; projectId: string }
         | { kind: "conversation.created"; conversationId: string }
         | MessageSendAcceptance
+        | ConversationCompactionResult
         | DuoPreparedResult
         | DuoPendingResult
         | DuoStatusResult

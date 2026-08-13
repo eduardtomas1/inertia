@@ -49,6 +49,7 @@ import {
   type ProviderId,
   type ProviderGoalMutation,
   type ProviderGoalSnapshot,
+  type ProviderCompactionResult,
   type ProviderManagerOptions,
   type ProviderRunCallbacks,
   type ProviderRunInput,
@@ -70,6 +71,7 @@ import {
   providerTerminalResumeLaunch,
   type ProviderTerminalResumeLaunch,
 } from "./provider/terminal-resume";
+import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../shared/runtime-command-timeouts";
 
 export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider, detectProviders };
 export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
@@ -742,6 +744,70 @@ export class ProviderManager {
     );
     active.result = result;
     return result;
+  }
+
+  compact(
+    input: ProviderRunInput,
+    instruction?: string,
+    callbacks: ProviderRunCallbacks = {},
+  ): Promise<ProviderCompactionResult> {
+    const operationInput: ProviderRunInput = {
+      ...input,
+      prompt: "/compact",
+      // Context compaction is a turnless control operation, never a user turn
+      // with authority to execute tools. Force interactive policy even when
+      // the conversation normally runs with elevated access so every provider
+      // approval/input reaches the fail-closed callbacks below.
+      access: "supervised",
+      operation: {
+        kind: "compact",
+        ...(instruction ? { instruction } : {}),
+      },
+    };
+    const instructionForwarded = operationInput.providerId === "claude"
+      && instruction !== undefined;
+    let interactionError: string | undefined;
+    const rejectInteractiveCompaction = (
+      interaction: "approval" | "input",
+    ): void => {
+      if (interactionError) return;
+      interactionError = `Provider compaction requested interactive ${interaction} that a turnless operation cannot answer.`;
+      this.cancel(input.conversationId ?? input.threadId ?? "");
+    };
+    const providerResult = this.run(operationInput, {
+      ...callbacks,
+      onApproval: () => rejectInteractiveCompaction("approval"),
+      onInput: () => rejectInteractiveCompaction("input"),
+    });
+    const timer = setTimeout(() => {
+      this.cancel(input.conversationId ?? input.threadId ?? "");
+    }, PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS);
+    timer.unref();
+    return providerResult.then((result) => {
+      const requestedSessionId = operationInput.sessionId!;
+      const sessionError = result.sessionId === requestedSessionId
+        ? undefined
+        : "The provider did not confirm compaction of the exact selected session.";
+      const operationError = interactionError ?? sessionError;
+      const status = operationError ? "failed" as const : result.status;
+      const error = operationError ?? result.error;
+      const message = status !== "completed"
+        ? error ?? "The provider could not compact this chat."
+        : instruction && !instructionForwarded
+          ? `${PROVIDER_INFO[result.providerId].name} compacted the context, but does not accept a focus instruction through this integration, so the instruction was not forwarded.`
+          : instructionForwarded
+            ? "Context compacted with the focus instruction."
+            : "Context compacted.";
+      return {
+        providerId: result.providerId,
+        conversationId: result.conversationId,
+        status,
+        instructionForwarded,
+        message,
+        ...(error ? { error } : {}),
+        cleanupConfirmed: result.cleanupConfirmed,
+      };
+    }).finally(() => clearTimeout(timer));
   }
 
   cancel(conversationId: string): boolean {

@@ -190,6 +190,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     return;
   }
+  if (message.method === "thread/compact/start") {
+    send({ id: message.id, result: {} });
+    send({ method: "item/started", params: { threadId, turnId: "compact-turn-1", startedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
+    send({ method: "item/completed", params: { threadId, turnId: "compact-turn-1", completedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
+    return;
+  }
   if (message.method === "thread/goal/set") {
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-live-mutation-error") {
       sendBatch([
@@ -2473,7 +2479,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(manager.activeConversationIds()).toEqual([]);
     await manager.disposeAll();
   });
-
   it("settles a missing App Server executable without leaving an active run", async () => {
     const root = portableFixtureRoot("missing app server");
     roots.push(root);

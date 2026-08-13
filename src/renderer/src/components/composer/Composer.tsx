@@ -1,25 +1,12 @@
 import {
-  lazy,
-  memo,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+  lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState,
 } from "react";
 import clsx from "clsx";
-import type {
-  ChatAttachment,
-  PromptPreset,
-} from "@shared/contracts";
+import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { MAX_CHAT_ATTACHMENTS } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
-import {
-  fastModeProviderValue,
-  legacyProviderIdForHarness,
-  routeSupportsNativeFastModeIdentity,
-  withModelSelectionFastMode,
+import { fastModeProviderValue, legacyProviderIdForHarness,
+  routeSupportsNativeFastModeIdentity, withModelSelectionFastMode,
 } from "../../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
@@ -36,9 +23,7 @@ import {
   composerFollowUpState,
   composerPrimaryActionState,
 } from "../../utils/composerPrimaryAction";
-import {
-  composerHarnessLabel,
-} from "./config";
+import { composerHarnessLabel } from "./config";
 import {
   addPromptStashEntry,
   advanceRecurringPrompt,
@@ -61,6 +46,8 @@ import {
   COMPOSER_PREFILL_EVENT,
   type ComposerPrefillDetail,
 } from "../../utils/composerPrefill";
+import { parseCompactComposerCommand } from "../../utils/composerCommands";
+import { useComposerCompaction } from "./useComposerCompaction";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -73,14 +60,15 @@ const ChatResumeControl = lazy(async () => ({
 const ChatGoalControl = lazy(async () => ({
   default: (await import("../ChatGoalControl")).ChatGoalControl,
 }));
-
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // The first non-empty edit is synchronous. During uninterrupted typing, a
 // force-terminated renderer can lose at most this much newer draft history;
 // ordinary lifecycle boundaries still flush the exact pending owner/value.
 export const DRAFT_PERSISTENCE_MAX_WAIT_MS = 1_000;
-
 const ignorePromptPresetMutation = (): Promise<void> => Promise.resolve();
+const unavailableCompaction = (): Promise<never> => Promise.reject(new Error(
+  "Compaction unavailable.",
+));
 
 export const Composer = memo(function Composer({
   conversation,
@@ -105,6 +93,7 @@ export const Composer = memo(function Composer({
   providerIdentityLabels,
   goal,
   onSend,
+  onCompact = unavailableCompaction,
   onListSkills,
   onToggleSkill,
   onClearSelectedSkills,
@@ -492,6 +481,7 @@ export const Composer = memo(function Composer({
     markEditorChanged();
     draftValueRef.current = next;
     persistDraftChange(conversation.id, previous, next);
+    if (compactNotice) clearCompactNotice();
     setMessage(next);
   };
 
@@ -516,6 +506,11 @@ export const Composer = memo(function Composer({
   };
 
   const submit = async () => {
+    const compactCommand = parseCompactComposerCommand(message);
+    if (compactCommand) {
+      await compact(compactCommand);
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -760,9 +755,7 @@ export const Composer = memo(function Composer({
   const selectedReasoning = conversation.modelSelection.reasoningEffort
     ?? selectedModel?.defaultReasoningEffort
     ?? "";
-  const selectedFastMode = fastModeProviderValue(
-    conversation.modelSelection,
-  ) !== null;
+  const selectedFastMode = fastModeProviderValue(conversation.modelSelection) !== null;
   const routeReadiness = routeState.readiness;
   const selectedIdentityLabel = selectedBackendProfile
     ? `${composerHarnessLabel(selectedBackendProfile.harnessId)} · ${selectedBackendProfile.displayName} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
@@ -785,6 +778,17 @@ export const Composer = memo(function Composer({
     stopping,
   });
   const canSend = primaryAction === "send-ready";
+  const { compactNotice, clearCompactNotice, compact } = useComposerCompaction({
+    conversationId: conversation.id, message, canSend, running,
+    blocked: attachments.length > 0
+      || Boolean(promptContext)
+      || previewContextSelected
+      || fileReferences.length > 0
+      || selectedSkillIds.length > 0,
+    flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
+    editorRevisions: editorRevisionsRef,
+    draftValueRef, textareaRef, setMessage, setSubmitting, onCompact,
+  });
   const followUpState = composerFollowUpState({
     running,
     harnessId: latestTurn?.harnessId ?? null,
@@ -1151,6 +1155,8 @@ export const Composer = memo(function Composer({
           mentionResults={mentionResults}
           onAddFileReference={addFileReference}
           slashMatch={slashMatch}
+          onCompactCommand={() => void compact({ kind: "compact" })}
+          compactNotice={compactNotice}
           goalAvailable={Boolean(goal)}
           onOpenGoal={() => {
             updateMessage("");

@@ -179,6 +179,30 @@ describe("provider adapter seams", () => {
     expect(() => validateProviderRunInput(input("claude", { imagePaths: ["bad\0path"] }))).toThrow("An image path is invalid.");
   });
 
+  it("owns a provider control operation without inventing a durable turn", () => {
+    expect(validateProviderRunInput(input("claude", {
+      runId: "compact-operation-1",
+      sessionId: "session-1",
+      operation: { kind: "compact" },
+    }))).toBe("conversation-1");
+    expect(() => validateProviderRunInput(input("claude", {
+      runId: "ordinary-run-1",
+    }))).toThrow("Run and turn identities must be provided together.");
+    expect(() => validateProviderRunInput(input("claude", {
+      runId: "compact-operation-1",
+      turnId: "invented-turn-1",
+      sessionId: "session-1",
+      operation: { kind: "compact" },
+    }))).toThrow("provider compaction request is invalid");
+    expect(() => validateProviderRunInput(input("claude", {
+      runId: "compact-operation-1",
+      sessionId: "session-1",
+      supportedFastMode: "fast",
+      performanceModeTransition: "to-standard",
+      operation: { kind: "compact" },
+    }))).toThrow("provider compaction request is invalid");
+  });
+
   it("validates provider-native Fast mode and continuation transitions exactly", () => {
     const codex = input("codex");
     const fastSelection = withModelSelectionFastMode(

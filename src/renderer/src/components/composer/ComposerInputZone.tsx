@@ -63,6 +63,11 @@ export interface ComposerInputZoneProps {
   mentionResults: WorkspaceEntry[];
   onAddFileReference: (path: string) => void;
   slashMatch: RegExpExecArray | null;
+  onCompactCommand: () => void;
+  compactNotice: {
+    kind: "working" | "success" | "error";
+    message: string;
+  } | null;
   goalAvailable: boolean;
   onOpenGoal: () => void;
   onOpenResume: () => void;
@@ -104,6 +109,8 @@ export function ComposerInputZone({
   mentionResults,
   onAddFileReference,
   slashMatch,
+  onCompactCommand,
+  compactNotice,
   goalAvailable,
   onOpenGoal,
   onOpenResume,
@@ -112,6 +119,7 @@ export function ComposerInputZone({
   const slashCommands: ComposerSlashCommand[] = [
     { id: "goal", label: "View or set this chat's goal", action: onOpenGoal, disabled: !goalAvailable, disabledWhileRunning: false },
     { id: "resume", label: "Resume a provider chat from this folder", action: onOpenResume, disabled: false, disabledWhileRunning: false },
+    { id: "compact", label: "Compact this chat's provider context", action: onCompactCommand, disabled: false, disabledWhileRunning: true },
     { id: "plan", label: "Plan mode", mode: "plan", disabled: false, disabledWhileRunning: true },
     { id: "build", label: "Build mode", mode: "build", disabled: false, disabledWhileRunning: true },
   ];
@@ -242,6 +250,21 @@ export function ComposerInputZone({
             onDismiss={onDismissPendingRoute}
             onCreate={onCreateRouteConversation}
           />
+        )}
+        {compactNotice && (
+          <div
+            className={clsx(
+              "composer-compact-notice",
+              `is-${compactNotice.kind}`,
+            )}
+            role={compactNotice.kind === "error" ? "alert" : "status"}
+            aria-live={compactNotice.kind === "error" ? "assertive" : "polite"}
+          >
+            {compactNotice.kind === "working" && (
+              <span className="loading-mark" aria-hidden="true" />
+            )}
+            <span>{compactNotice.message}</span>
+          </div>
         )}
         <textarea
           ref={textareaRef}

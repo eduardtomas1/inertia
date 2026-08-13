@@ -108,6 +108,11 @@ interface OpenCodeUsageState {
 interface OpenCodeEventState {
   retainedPartChars: number;
 }
+interface OpenCodeManualCompactionProof {
+  initiatedAt: number | null;
+  messageId: string | null;
+  startedAt: number | null;
+}
 
 export interface OpenCodeSdkHarnessOptions {
   /**
@@ -127,6 +132,8 @@ export interface OpenCodeSdkHarnessOptions {
    */
   initializationTimeoutMs?: number;
   terminateProcessTree?: ProcessTreeTerminator;
+  /** Test seam for the local manual-compaction initiation timestamp. */
+  compactionTimestampNow?: () => number;
 }
 
 export interface OpenCodeSdkMetadataOptions {
@@ -154,12 +161,18 @@ export function createOpenCodeSdkHarness(
 ): AgentHarness {
   const deadlines = openCodeRunDeadlines(options);
   const terminateOwnedProcessTree = options.terminateProcessTree ?? terminateProcessTreeAndWait;
+  const compactionTimestampNow = options.compactionTimestampNow ?? Date.now;
   return {
     id: "opencode-sdk",
     providerId: "opencode",
     capabilities: OPENCODE_SDK_CAPABILITIES,
     supports: (input) => input.providerId === "opencode",
-    start: (startOptions) => startOpenCodeRun(startOptions, deadlines, terminateOwnedProcessTree),
+    start: (startOptions) => startOpenCodeRun(
+      startOptions,
+      deadlines,
+      terminateOwnedProcessTree,
+      compactionTimestampNow,
+    ),
   };
 }
 
@@ -233,6 +246,7 @@ function startOpenCodeRun(
   options: AgentHarnessStartOptions,
   deadlines: OpenCodeRunDeadlines,
   terminateOwnedProcessTree: ProcessTreeTerminator,
+  compactionTimestampNow: () => number,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
@@ -473,6 +487,12 @@ function startOpenCodeRun(
       usageState.maxTokens = finite(effectiveModel?.limit.context);
       const subscribed = await client.event.subscribe({ directory: options.input.cwd }, { signal: eventAbort.signal, throwOnError: true });
       armEventInactivityDeadline();
+      const compacting = options.input.operation?.kind === "compact";
+      const manualCompaction: OpenCodeManualCompactionProof = {
+        initiatedAt: null,
+        messageId: null,
+        startedAt: null,
+      };
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
         onActivity: armEventInactivityDeadline,
         onEvent: (event) => handleOpenCodeEvent(
@@ -489,21 +509,32 @@ function startOpenCodeRun(
           eventState,
           failInteraction,
         ),
-        isDone: (event) => event.type === "session.idle" || event.type === "session.error",
+        isDone: (event) => compacting
+          ? event.type === "session.error"
+            || completesRequestedOpenCodeCompaction(event, manualCompaction)
+          : event.type === "session.idle" || event.type === "session.error",
       });
-      const prompt = client.session.promptAsync({
-        sessionID: sessionId,
-        directory: options.input.cwd,
-        ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
-        ...(agent ? { agent: agent.name } : {}),
-        ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
-        parts: [
-          { type: "text", text: options.input.prompt },
-          ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),
-        ],
-      }, { throwOnError: true });
-      const completion = Promise.all([prompt, pump]);
-      await Promise.race([prompt, completion, runInterrupted]);
+      const providerOperation = compacting
+        ? (() => {
+            manualCompaction.initiatedAt = compactionTimestampNow();
+            return client!.v2.session.compact(
+              { sessionID: sessionId },
+              { signal: eventAbort.signal, throwOnError: true },
+            );
+          })()
+        : client.session.promptAsync({
+            sessionID: sessionId,
+            directory: options.input.cwd,
+            ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
+            ...(agent ? { agent: agent.name } : {}),
+            ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
+            parts: [
+              { type: "text", text: options.input.prompt },
+              ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),
+            ],
+          }, { throwOnError: true });
+      const completion = Promise.all([providerOperation, pump]);
+      await Promise.race([providerOperation, completion, runInterrupted]);
       if (!cancelRequested && !terminalError) emitter.status("running");
       await Promise.race([completion, runInterrupted]);
       outcome = cancelRequested
@@ -602,6 +633,42 @@ function startOpenCodeRun(
     cancel: cancelOwnedRun,
     extension: { kind: "opencode-sdk", respondToApproval: settleApproval, respondToInput: settleInput },
   };
+}
+
+function completesRequestedOpenCodeCompaction(
+  event: Event,
+  proof: OpenCodeManualCompactionProof,
+): boolean {
+  if (
+    proof.initiatedAt === null
+    || (
+      event.type !== "session.next.compaction.started"
+      && event.type !== "session.next.compaction.ended"
+    )
+  ) return false;
+  const properties = event.properties;
+  const timestamp = properties.timestamp;
+  const messageId = properties.messageID;
+  if (
+    properties.reason !== "manual"
+    || typeof timestamp !== "number"
+    || !Number.isFinite(timestamp)
+    || timestamp <= proof.initiatedAt
+    || typeof messageId !== "string"
+    || !messageId.trim()
+    || messageId.length > 512
+    || messageId.includes("\0")
+  ) return false;
+  if (event.type === "session.next.compaction.started") {
+    if (proof.messageId !== null) return false;
+    proof.messageId = messageId;
+    proof.startedAt = timestamp;
+    return false;
+  }
+  return proof.messageId !== null
+    && proof.startedAt !== null
+    && timestamp >= proof.startedAt
+    && messageId === proof.messageId;
 }
 
 async function pumpOpenCodeEvents(
@@ -773,7 +840,10 @@ function handleOpenCodeEvent(
     const message = error ? errorMessage(error) : "OpenCode reported a session error.";
     emitter.activity("system", "failed", bounded(message));
     throw new Error(message);
-  } else if (event.type === "session.compacted") {
+  } else if (
+    event.type === "session.compacted"
+    || event.type === "session.next.compaction.ended"
+  ) {
     usageState.currentContextTokens = null;
     emitOpenCodeUsageSnapshot(usageState, emitter.rich);
     emitter.activity("system", "info", "OpenCode compacted the session context");

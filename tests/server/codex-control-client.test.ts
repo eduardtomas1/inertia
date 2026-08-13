@@ -123,6 +123,97 @@ describe("Codex control client", () => {
       .toHaveBeenCalledWith(fixture.child, true);
   });
 
+  it("delivers bounded App Server notifications to the control observer", async () => {
+    const onNotification = vi.fn();
+    const fixture = fakeChild((text) => {
+      const message = JSON.parse(text) as {
+        id?: number;
+        method: string;
+      };
+      if (message.id === undefined) return;
+      fixture.stdout.write(`${JSON.stringify({
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          item: { type: "contextCompaction", id: "compact-1" },
+        },
+      })}\n`);
+      fixture.stdout.write(`${JSON.stringify({
+        id: message.id,
+        result: {},
+      })}\n`);
+    });
+
+    await expect(withCodexControlClient({
+      ...options(fixture.child),
+      onNotification,
+    }, async ({ request }) => await request("thread/compact/start", {
+      threadId: "thread-1",
+    }))).resolves.toEqual({});
+    expect(onNotification).toHaveBeenCalledWith(
+      "item/completed",
+      expect.objectContaining({ threadId: "thread-1" }),
+    );
+  });
+
+  it("fails closed on a server request even when its ID collides", async () => {
+    const fixture = fakeChild((text) => {
+      const message = JSON.parse(text) as {
+        id?: number;
+        method: string;
+      };
+      if (message.id === undefined) return;
+      if (message.method === "initialize") {
+        fixture.stdout.write(`${JSON.stringify({
+          id: message.id,
+          result: {},
+        })}\n`);
+        return;
+      }
+      fixture.stdout.write(`${JSON.stringify({
+        id: message.id,
+        method: "item/commandExecution/requestApproval",
+        params: { threadId: "thread-1" },
+      })}\n`);
+    });
+
+    await expect(withCodexControlClient(
+      options(fixture.child),
+      async ({ request }) => await request("thread/compact/start", {
+        threadId: "thread-1",
+      }),
+    )).rejects.toThrow("unexpected server request");
+  });
+
+  it("fails closed on a string-ID server request", async () => {
+    const fixture = fakeChild((text) => {
+      const message = JSON.parse(text) as {
+        id?: number;
+        method: string;
+      };
+      if (message.id === undefined) return;
+      if (message.method === "initialize") {
+        fixture.stdout.write(`${JSON.stringify({
+          id: message.id,
+          result: {},
+        })}\n`);
+        return;
+      }
+      fixture.stdout.write(`${JSON.stringify({
+        id: "approval-rpc",
+        method: "item/commandExecution/requestApproval",
+        params: { threadId: "thread-1" },
+      })}\n`);
+    });
+
+    await expect(withCodexControlClient(
+      options(fixture.child),
+      async ({ request }) => await request("thread/compact/start", {
+        threadId: "thread-1",
+      }),
+    )).rejects.toThrow("unexpected server request");
+  });
+
   it("bounds an unanswered request and still terminates exactly once", async () => {
     vi.useFakeTimers();
     try {
@@ -189,6 +280,25 @@ describe("Codex control client", () => {
     }, async () => "completed")).rejects.toMatchObject({
       code: "process-tree-termination-unconfirmed",
       message: "Codex goal process tree could not be confirmed stopped.",
+    });
+    expect(terminateProcessTree).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the control failure when cleanup is also unconfirmed", async () => {
+    const fixture = fakeChild(() => {
+      fixture.stdout.end();
+    });
+    const terminateProcessTree = vi.fn(async () => false);
+
+    await expect(withCodexControlClient({
+      ...options(fixture.child),
+      processLabel: "Codex compaction process tree",
+      terminateProcessTree,
+    }, async () => "unreachable")).rejects.toMatchObject({
+      code: "process-tree-termination-unconfirmed",
+      message: expect.stringMatching(
+        /output closed early.*Cleanup also failed: Codex compaction process tree could not be confirmed stopped\./,
+      ),
     });
     expect(terminateProcessTree).toHaveBeenCalledOnce();
   });

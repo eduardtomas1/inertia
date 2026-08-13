@@ -4083,6 +4083,21 @@ button.environment-row:focus-visible,
 .composer-context button { display: grid; width: 20px; height: 20px; place-items: center; border-radius: var(--radius-small); color: var(--text-muted); background: transparent; }
 .composer-context button:hover { color: var(--text); background: var(--surface-hover); }
 
+.composer-compact-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  font-size: var(--ui-font-micro);
+}
+
+.composer-compact-notice.is-success { color: var(--success); }
+.composer-compact-notice.is-error { color: var(--danger); }
+
 .composer-preview-context {
   display: flex;
   min-width: 0;

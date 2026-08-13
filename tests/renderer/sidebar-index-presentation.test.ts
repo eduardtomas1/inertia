@@ -35,6 +35,7 @@ describe("sidebar index presentation contracts", () => {
 
   it("exposes selected, focus, and status boundaries in forced colors", () => {
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread\.is-active[\s\S]*?border-color:\s*Highlight;/u);
+    expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread\.is-active \.activity-thread-select,[\s\S]*?color:\s*HighlightText;/u);
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread-select:focus-visible[\s\S]*?outline-color:\s*Highlight;/u);
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread-state-mark,[\s\S]*?border:\s*1px solid CanvasText;/u);
   });

@@ -172,8 +172,20 @@ export function useSidebarWorkIndex({
     ));
   }, [navigationRef]);
   useLayoutEffect(() => {
-    if (virtualized) updateViewport();
-  }, [compact, items.length, updateViewport, virtualized]);
+    if (!virtualized) return;
+    updateViewport();
+    const navigation = navigationRef.current;
+    if (!navigation) return;
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(updateViewport);
+    observer?.observe(navigation);
+    window.addEventListener("resize", updateViewport);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, [compact, items.length, navigationRef, updateViewport, virtualized]);
   let renderedItems: Array<{
     index: number;
     item: WorkIndexItem;

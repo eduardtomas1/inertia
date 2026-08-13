@@ -403,6 +403,33 @@ describe("compact Work sidebar", () => {
       .toHaveAttribute("aria-current", "page");
   });
 
+  it("refreshes a virtualized Work window when its viewport grows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `resize-${index}`,
+      `Resizable work ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    const view = renderSidebar(entries);
+    const navigation = view.container.querySelector<HTMLElement>(".project-list");
+    const stream = view.container.querySelector<HTMLElement>(
+      ".activity-thread-stream",
+    );
+    expect(navigation).not.toBeNull();
+    expect(stream).not.toBeNull();
+    const initialRows = stream?.querySelectorAll(".activity-thread").length ?? 0;
+
+    Object.defineProperty(navigation, "clientHeight", {
+      configurable: true,
+      value: 2_400,
+    });
+    fireEvent(window, new Event("resize"));
+
+    const resizedRows = stream?.querySelectorAll(".activity-thread").length ?? 0;
+    expect(resizedRows).toBeGreaterThan(initialRows);
+  });
+
   it("keeps Home and End keyboard navigation working across virtual windows", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

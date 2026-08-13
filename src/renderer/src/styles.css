@@ -14344,6 +14344,16 @@ button.sent-attachment-open:focus-visible {
     box-shadow: none;
   }
 
+  .activity-thread.is-active .activity-thread-select,
+  .activity-thread.is-active .work-thread-meta,
+  .activity-thread.is-active .activity-thread-trailing,
+  .activity-thread.is-active .activity-thread-status-label,
+  .activity-thread.is-active .conversation-pin,
+  .activity-thread.is-active .conversation-split-mark,
+  .activity-thread.is-active .thread-unread-mark {
+    color: HighlightText;
+  }
+
   .activity-thread-select:focus-visible,
   .work-thread-section-toggle:focus-visible {
     outline-color: Highlight;

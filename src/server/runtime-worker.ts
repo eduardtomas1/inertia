@@ -5,6 +5,9 @@ import {
 import { startRuntime, type RunningRuntime } from "./index.js";
 import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-broker-client.js";
 import { RuntimeAttachmentBrokerClient } from "./runtime/attachments/attachment-broker-client.js";
+import {
+  RuntimeConversationAttachmentStoreBrokerClient,
+} from "./runtime/attachments/conversation-attachment-store-broker-client.js";
 import { runPackagedPdfSmoke } from "./runtime/attachments/package-smoke-pdf.js";
 import {
   BoundedDatabaseRecoveryReceipts,
@@ -29,6 +32,8 @@ let stopping = false;
 let shutdownExitCode = 0;
 let packageSmokePdfController: AbortController | null = null;
 let packageSmokePdfOperation: Promise<void> | null = null;
+let packageSmokeImageController: AbortController | null = null;
+let packageSmokeImageOperation: Promise<void> | null = null;
 const parentPort = process.parentPort;
 
 if (!parentPort) throw new Error("The runtime worker must run as an Electron utility process.");
@@ -54,6 +59,8 @@ function postDatabaseRecoveryResult(
 
 const credentials = new RuntimeCredentialBrokerClient({ post });
 const attachments = new RuntimeAttachmentBrokerClient(post);
+const conversationAttachmentStore =
+  new RuntimeConversationAttachmentStoreBrokerClient(post);
 const secureFiles = new RuntimeSecureFileBrokerClient(post);
 
 async function finishShutdown(
@@ -67,6 +74,7 @@ async function finishShutdown(
     closeBrokers: () => {
       credentials.close();
       attachments.close();
+      conversationAttachmentStore.close();
       secureFiles.close();
     },
     post,
@@ -81,9 +89,11 @@ async function shutdown(exitCode = 0): Promise<void> {
   const activeRuntime = runtime;
   runtime = null;
   packageSmokePdfController?.abort(new Error("The packaged PDF smoke was cancelled during shutdown."));
+  packageSmokeImageController?.abort(new Error("The packaged image smoke was cancelled during shutdown."));
   await Promise.all([
     databaseRecoveryOperations.closeAndDrain(),
     packageSmokePdfOperation?.catch(() => undefined) ?? Promise.resolve(),
+    packageSmokeImageOperation?.catch(() => undefined) ?? Promise.resolve(),
   ]);
   // startRuntime owns completion if a shutdown request races its startup.
   if (starting && !activeRuntime) return;
@@ -111,6 +121,10 @@ parentPort.on("message", (messageEvent) => {
   }
   if (command.type === "runtime.attachment-relinquish-result") {
     attachments.handleRelinquish(command);
+    return;
+  }
+  if (command.type === "runtime.conversation-attachment-store-result") {
+    conversationAttachmentStore.handle(command);
     return;
   }
   if (command.type === "runtime.secure-file-result") {
@@ -405,6 +419,7 @@ parentPort.on("message", (messageEvent) => {
     }),
     backendCredentials: credentials,
     attachments,
+    conversationAttachmentStoreOperations: conversationAttachmentStore.runner,
     secureFiles,
   }).then(async (startedRuntime) => {
     starting = false;
@@ -427,6 +442,19 @@ parentPort.on("message", (messageEvent) => {
       ).catch(() => undefined).finally(() => {
         packageSmokePdfController = null;
         packageSmokePdfOperation = null;
+      });
+    }
+    if (command.options.packageSmokeImage) {
+      packageSmokeImageController = new AbortController();
+      packageSmokeImageOperation = (startedRuntime.runPackageSmokeImage?.(
+        command.options.packageSmokeImage.inputPath,
+        command.options.packageSmokeImage.resultPath,
+        packageSmokeImageController.signal,
+      ) ?? Promise.reject(new Error(
+        "The packaged image retention smoke is unavailable.",
+      ))).catch(() => undefined).finally(() => {
+        packageSmokeImageController = null;
+        packageSmokeImageOperation = null;
       });
     }
   }).catch(async (error: unknown) => {

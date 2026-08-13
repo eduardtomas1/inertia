@@ -193,6 +193,129 @@ describe("composer model chooser route projection", () => {
     )[1]?.providerLabel).toBe("Work Codex");
   });
 
+  it("preserves Fast only across compatible native models and discloses resets", () => {
+    const codex = provider();
+    for (const model of codex.models) {
+      model.fastMode = {
+        providerValue: "priority",
+        label: "Fast",
+        description: "Faster responses with increased usage.",
+        isDefault: false,
+      };
+    }
+    const current = nativeModelSelection({
+      providerId: "codex",
+      modelId: "alpha",
+      providerOptions: { fastMode: "priority" },
+    });
+    const compatible = buildComposerModelRoutes([codex], [], current);
+    expect(compatible.find(({ modelId }) => modelId === "beta"))
+      .toMatchObject({
+        responseSpeed: "Fast",
+        supportsNativeFastModeControl: true,
+        selection: { providerOptions: { fastMode: "priority" } },
+      });
+    expect(buildComposerModelRoutes(
+      [codex],
+      [nativeProfile()],
+      current,
+    ).find(({ modelId }) => modelId === "beta"))
+      .toMatchObject({
+        responseSpeed: "Fast",
+        selection: { providerOptions: { fastMode: "priority" } },
+      });
+
+    codex.models[1]!.fastMode = null;
+    const incompatible = buildComposerModelRoutes([codex], [], current);
+    expect(incompatible.find(({ modelId }) => modelId === "beta"))
+      .toMatchObject({
+        speedChangeNote: "Fast turns off",
+        supportsNativeFastModeControl: false,
+        selection: { providerOptions: {} },
+      });
+    expect(incompatible.find(({ modelId }) => modelId === "beta")?.responseSpeed)
+      .toBeUndefined();
+
+    const crossProvider = buildComposerModelRoutes(
+      [codex, claudeWithoutCatalog()],
+      [],
+      current,
+    ).find(({ providerId }) => providerId === "claude");
+    expect(crossProvider).toMatchObject({
+      speedChangeNote: "Fast turns off",
+      selection: { providerOptions: {} },
+    });
+    expect(crossProvider?.responseSpeed).toBeUndefined();
+  });
+
+  it("keeps Standard selectable when the provider default is Fast", () => {
+    const codex = provider();
+    codex.models[0]!.fastMode = {
+      providerValue: "priority",
+      label: "Fast",
+      description: "Provider-default Fast needs tri-state support.",
+      isDefault: true,
+    };
+    const routes = buildComposerModelRoutes(
+      [codex],
+      [],
+      nativeModelSelection({ providerId: "codex", modelId: "alpha" }),
+    );
+    expect(routes.find(({ modelId }) => modelId === "alpha"))
+      .toMatchObject({
+        selectable: true,
+        unavailableReason: null,
+        responseSpeed: "Standard",
+      });
+    expect(routes.find(({ modelId }) => modelId === "provider-default"))
+      .toMatchObject({
+        selectable: true,
+        unavailableReason: null,
+        responseSpeed: "Standard",
+      });
+
+    for (const providerId of ["cursor", "opencode"] as const) {
+      const unsupported = provider();
+      unsupported.id = providerId;
+      unsupported.models.forEach((model) => {
+        model.fastMode = {
+          providerValue: "priority",
+          label: "Injected Fast",
+          description: "Unsupported metadata must stay hidden.",
+          isDefault: false,
+        };
+      });
+      expect(buildComposerModelRoutes(
+        [unsupported],
+        [],
+        nativeModelSelection({ providerId, modelId: "alpha" }),
+      ).find(({ modelId }) => modelId === "alpha")?.responseSpeed)
+        .toBeUndefined();
+    }
+
+    for (const [providerId, wrongValue] of [
+      ["codex", "fast"],
+      ["claude", "priority"],
+    ] as const) {
+      const malformed = provider();
+      malformed.id = providerId;
+      malformed.models.forEach((model) => {
+        model.fastMode = {
+          providerValue: wrongValue,
+          label: "Wrong Fast",
+          description: "Wrong native value.",
+          isDefault: false,
+        };
+      });
+      expect(buildComposerModelRoutes(
+        [malformed],
+        [],
+        nativeModelSelection({ providerId, modelId: "alpha" }),
+      ).find(({ modelId }) => modelId === "alpha")?.responseSpeed)
+        .toBeUndefined();
+    }
+  });
+
   it("keeps known concrete catalog routes selectable while metadata refreshes", () => {
     const staleProvider = provider();
     staleProvider.metadataState.models.freshness = "stale";
@@ -275,7 +398,7 @@ describe("composer model chooser route projection", () => {
       .toBe(profile.configurationRevision);
     expect(selectedModelSearchRoute([route!], staleSelection)).toMatchObject({
       selectable: false,
-      unavailableReason: "This saved model route is no longer available.",
+      unavailableReason: "Saved model route unavailable.",
     });
   });
 
@@ -311,7 +434,7 @@ describe("composer model chooser route projection", () => {
       backendProfileName: "Removed gateway",
       source: "custom",
       selectable: false,
-      unavailableReason: "This saved model route is no longer available.",
+      unavailableReason: "Saved model route unavailable.",
     });
   });
 });

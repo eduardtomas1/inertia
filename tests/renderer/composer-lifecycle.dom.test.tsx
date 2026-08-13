@@ -25,6 +25,7 @@ import {
   DRAFT_PERSISTENCE_DELAY_MS,
   DRAFT_PERSISTENCE_MAX_WAIT_MS,
 } from "../../src/renderer/src/components/composer/Composer";
+import type { PromptPresetCommandRunner } from "../../src/renderer/src/components/composer/types";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
@@ -511,6 +512,117 @@ describe("composer asynchronous ownership", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Reasoning update rejected",
     );
+  });
+
+  it("shows Fast mode only for advertised models and persists the exact native value", async () => {
+    const current = conversation("composer-fast-mode");
+    current.modelSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-fast",
+    });
+    current.model = "gpt-fast";
+    const fastProvider: ProviderInfo = {
+      ...provider,
+      models: [{
+        id: "gpt-fast",
+        label: "GPT Fast",
+        description: "A model with an advertised service tier",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+        fastMode: {
+          providerValue: "priority",
+          label: "Fast",
+          description: "Faster responses with increased usage.",
+          isDefault: false,
+        },
+      }],
+    };
+    const onUpdateConversation = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      providers: [fastProvider],
+      onUpdateConversation,
+    })} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Choose response speed. Current speed: Standard.",
+    }));
+    expect(await screen.findByRole("menuitemradio", { name: /Standard/u }))
+      .toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Fast/u }));
+
+    await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledWith({
+      modelSelection: {
+        ...current.modelSelection,
+        providerOptions: { fastMode: "priority" },
+      },
+    }));
+  });
+
+  it("hides Fast mode on unsupported routes", () => {
+    const current = conversation("composer-standard-only");
+    current.modelSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-standard",
+    });
+    current.model = "gpt-standard";
+    render(<Composer {...composerProps(current, {
+      providers: [{
+        ...provider,
+        models: [{
+          id: "gpt-standard",
+          label: "GPT Standard",
+          description: "No provider-native Fast option",
+          isDefault: true,
+          inputModalities: ["text"],
+          reasoningOptions: [],
+          defaultReasoningEffort: "",
+          fastMode: null,
+        }],
+      }],
+    })} />);
+
+    expect(screen.queryByRole("button", { name: /Choose response speed/u }))
+      .not.toBeInTheDocument();
+  });
+
+  it("preserves a saved Fast identity when provider metadata becomes unavailable", async () => {
+    const current = conversation("composer-fast-metadata-unavailable");
+    current.modelSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-fast",
+      providerOptions: { fastMode: "priority" },
+    });
+    current.model = "gpt-fast";
+    const onPromptPresetCommand = vi.fn<PromptPresetCommandRunner>(
+      () => Promise.resolve(),
+    );
+    render(<Composer {...composerProps(current, {
+      onPromptPresetCommand,
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "Stash this Fast prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scratch prompts" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Save current prompt/u }));
+    expect(readPromptStash(window.localStorage)[0]?.route.fastMode).toBe(true);
+
+    fireEvent.change(input, { target: { value: "Preset this Fast prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Prompt presets" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("checkbox", {
+      name: /Limit to current model route/u,
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+
+    await waitFor(() => expect(onPromptPresetCommand).toHaveBeenCalledTimes(1));
+    expect(onPromptPresetCommand.mock.calls[0]?.[1]).toMatchObject({
+      type: "prompt-preset.create",
+      payload: {
+        route: { fastMode: true },
+      },
+    });
   });
 
   it("binds new-chat confirmation, transfers text, and supports failure retry", async () => {

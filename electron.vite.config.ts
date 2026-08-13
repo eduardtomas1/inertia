@@ -18,6 +18,9 @@ export default defineConfig({
             "src/server/persistence/database-recovery-import-worker.ts",
           ),
           "secure-file-worker": resolve("src/main/secure-file-worker.ts"),
+          "conversation-attachment-store-worker": resolve(
+            "src/main/conversation-attachment-store-worker.ts",
+          ),
         },
       },
     },

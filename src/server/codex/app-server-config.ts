@@ -135,6 +135,13 @@ export function isUnsupportedFullAccessError(error: unknown): boolean {
   ).test(message);
 }
 
+export function isUnsupportedFastModeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(?:unknown|unsupported|unrecognized|invalid).{0,160}service.?tier|service.?tier.{0,160}(?:unknown|unsupported|unrecognized|invalid)/iu.test(
+    message,
+  );
+}
+
 export function isStaleResumeError(error: unknown): boolean {
   const message = (
     error instanceof Error ? error.message : String(error)

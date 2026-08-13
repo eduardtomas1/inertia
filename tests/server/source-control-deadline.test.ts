@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   mapWithinSourceControlDeadline,
+  settleSourceControlInspections,
   SourceControlDeadline,
 } from "../../src/server/runtime/commands/source-control-deadline";
+import { GitError } from "../../src/server/git/types";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -32,22 +34,212 @@ describe("source-control aggregate deadlines", () => {
     }
   });
 
-  it("aborts sibling work when a bounded phase exits early", async () => {
+  it("removes its abort listener after a synchronous rejection", async () => {
     const deadline = new SourceControlDeadline(Date.now() + 5_000, "read");
-    const observedSignals: AbortSignal[] = [];
+    const removeEventListener = vi.spyOn(
+      deadline.signal,
+      "removeEventListener",
+    );
+    const failure = new Error("Synchronous inspection failure.");
     try {
-      await expect(deadline.run(async (signal) => {
-        observedSignals.push(signal);
-        return await Promise.all([
-          Promise.reject(new Error("Primary Git read failed.")),
-          new Promise<string>(() => undefined),
-        ]);
-      })).rejects.toThrow("Primary Git read failed.");
+      await expect(deadline.run(() => { throw failure; })).rejects.toBe(failure);
+      expect(removeEventListener).toHaveBeenCalledWith(
+        "abort",
+        expect.any(Function),
+      );
     } finally {
       deadline.dispose();
     }
-    expect(observedSignals).toHaveLength(1);
-    expect(observedSignals[0]?.aborted).toBe(true);
+  });
+
+  it("retains deadline ownership until cancelled Git cleanup settles", async () => {
+    const deadline = new SourceControlDeadline(Date.now() + 20, "read");
+    const cleanupStarted = deferred<void>();
+    const releaseCleanup = deferred<void>();
+    let aggregateSettled = false;
+    try {
+      const aggregate = deadline.runToSettlement(
+        async (
+          signal,
+          recordTriggeringFailure,
+        ) => await settleSourceControlInspections(
+          signal,
+          async (inspectionSignal) => {
+            if (!inspectionSignal.aborted) {
+              await new Promise<void>((resolve) => {
+                inspectionSignal.addEventListener("abort", () => resolve(), {
+                  once: true,
+                });
+              });
+            }
+            cleanupStarted.resolve();
+            await releaseCleanup.promise;
+            throw new GitError("timeout", "Git inspection was cancelled.");
+          },
+          async (inspectionSignal) => {
+            if (!inspectionSignal.aborted) {
+              await new Promise<void>((resolve) => {
+                inspectionSignal.addEventListener("abort", () => resolve(), {
+                  once: true,
+                });
+              });
+            }
+            throw new GitError("timeout", "Git inspection was cancelled.");
+          },
+          recordTriggeringFailure,
+        ),
+      );
+      void aggregate.then(
+        () => { aggregateSettled = true; },
+        () => { aggregateSettled = true; },
+      );
+
+      await cleanupStarted.promise;
+      expect(aggregateSettled).toBe(false);
+
+      releaseCleanup.resolve();
+      await expect(aggregate).rejects.toThrow("Git inspection took too long.");
+      expect(aggregateSettled).toBe(true);
+    } finally {
+      releaseCleanup.resolve();
+      deadline.dispose();
+    }
+  });
+
+  it("preserves a triggering failure while sibling cleanup crosses the deadline", async () => {
+    vi.useFakeTimers({ now: 10_000 });
+    const deadline = new SourceControlDeadline(Date.now() + 100, "read");
+    const failInspection = deferred<void>();
+    const cleanupStarted = deferred<void>();
+    const releaseCleanup = deferred<void>();
+    const primaryFailure = new GitError(
+      "operation-failed",
+      "Repository status inspection failed.",
+    );
+    try {
+      const aggregate = deadline.runToSettlement(
+        async (signal, recordTriggeringFailure) =>
+          await settleSourceControlInspections(
+            signal,
+            async () => {
+              await failInspection.promise;
+              throw primaryFailure;
+            },
+            async (inspectionSignal) => {
+              if (!inspectionSignal.aborted) {
+                await new Promise<void>((resolve) => {
+                  inspectionSignal.addEventListener("abort", () => resolve(), {
+                    once: true,
+                  });
+                });
+              }
+              cleanupStarted.resolve();
+              await releaseCleanup.promise;
+              throw new GitError("timeout", "Git inspection was cancelled.");
+            },
+            recordTriggeringFailure,
+          ),
+      );
+
+      await vi.advanceTimersByTimeAsync(99);
+      failInspection.resolve();
+      await cleanupStarted.promise;
+      await vi.advanceTimersByTimeAsync(2);
+      releaseCleanup.resolve();
+
+      await expect(aggregate).rejects.toBe(primaryFailure);
+    } finally {
+      releaseCleanup.resolve();
+      deadline.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves failed process cleanup beyond the outer deadline", async () => {
+    const deadline = new SourceControlDeadline(Date.now() + 20, "read");
+    const cleanupFailure = new GitError(
+      "operation-failed",
+      "Git stopped responding, and its process tree could not be confirmed stopped.",
+    );
+    try {
+      await expect(deadline.runToSettlement(async (signal) => {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        throw cleanupFailure;
+      })).rejects.toBe(cleanupFailure);
+    } finally {
+      deadline.dispose();
+    }
+  });
+
+  it("cancels and settles a sibling inspection before rejecting", async () => {
+    const controller = new AbortController();
+    const firstCancelled = deferred<void>();
+    const releaseFirst = deferred<void>();
+    const primaryFailure = new Error("Repository status failed.");
+    const cancellation = new GitError(
+      "timeout",
+      "Git inspection was cancelled.",
+    );
+    let firstAborted = false;
+    let aggregateSettled = false;
+
+    const aggregate = settleSourceControlInspections(
+      controller.signal,
+      async (signal) => {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        firstAborted = signal.aborted;
+        firstCancelled.resolve();
+        await releaseFirst.promise;
+        throw cancellation;
+      },
+      () => { throw primaryFailure; },
+    );
+    void aggregate.then(
+      () => { aggregateSettled = true; },
+      () => { aggregateSettled = true; },
+    );
+
+    await firstCancelled.promise;
+    expect(firstAborted).toBe(true);
+    expect(aggregateSettled).toBe(false);
+
+    releaseFirst.resolve();
+    await expect(aggregate).rejects.toBe(primaryFailure);
+    expect(aggregateSettled).toBe(true);
+  });
+
+  it("prioritizes failed process cleanup after sibling cancellation", async () => {
+    const controller = new AbortController();
+    const secondStarted = deferred<void>();
+    const cleanupFailure = new GitError(
+      "operation-failed",
+      "Git stopped responding, and its process tree could not be confirmed stopped.",
+    );
+
+    await expect(settleSourceControlInspections(
+      controller.signal,
+      async () => {
+        await secondStarted.promise;
+        throw new Error("Diff inspection failed.");
+      },
+      async (signal) => {
+        secondStarted.resolve();
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        throw cleanupFailure;
+      },
+    )).rejects.toBe(cleanupFailure);
   });
 
   it("aborts and rejects a filesystem operation that does not settle", async () => {

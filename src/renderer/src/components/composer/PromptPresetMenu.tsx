@@ -22,6 +22,7 @@ import {
   type PromptPresetDraft,
   type PromptPresetRoute,
 } from "@shared/prompt-presets";
+import { routeSupportsNativeFastModeIdentity } from "@shared/model-routing";
 import { reorderedPromptPresetIds } from "../../utils/promptPresets";
 import { menuId } from "./config";
 import type {
@@ -43,12 +44,19 @@ function normalizedSearch(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
-function routeIdentityLabel(route: PromptPresetRoute): string {
+function routeIdentityLabel(
+  route: PromptPresetRoute,
+  currentRoute: PromptPresetRoute,
+): string {
   return [
     `Harness ${route.harnessId}`,
     `backend ${route.backendProfileId}`,
     `model ${route.modelId}`,
     `reasoning ${route.reasoningEffort ?? "provider default"}`,
+    ...(!routeSupportsNativeFastModeIdentity(route)
+      || (route.fastMode === undefined && currentRoute.fastMode !== true)
+      ? []
+      : [`speed ${route.fastMode ? "Fast" : "Standard"}`]),
   ].join(" · ");
 }
 
@@ -88,7 +96,10 @@ export function PromptPresetMenu({
     ? `${editor.kind}:${editor.preset?.id ?? "new"}`
     : null;
   const displayedEditorRoute = editor?.route ?? currentRoute;
-  const displayedEditorRouteLabel = routeIdentityLabel(displayedEditorRoute);
+  const displayedEditorRouteLabel = routeIdentityLabel(
+    displayedEditorRoute,
+    currentRoute,
+  );
   const editorRouteDiffers = editor?.route !== null
     && editor?.route !== undefined
     && !promptPresetRouteMatches(currentRoute, editor.route);
@@ -441,7 +452,7 @@ export function PromptPresetMenu({
                     const routeBlocked = preset.route !== null
                       && !promptPresetRouteMatches(currentRoute, preset.route);
                     const blockedReason = routeBlocked
-                      ? `Available on ${routeIdentityLabel(preset.route!)}`
+                      ? `Available on ${routeIdentityLabel(preset.route!, currentRoute)}`
                       : null;
                     return (
                       <div className="prompt-preset-row" key={preset.id}>

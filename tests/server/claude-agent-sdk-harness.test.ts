@@ -27,7 +27,9 @@ import {
   createKimiClaudeModelSelection,
   modelBackendProfileForClaudeProfile,
 } from "../../src/shared/claude-backend-profiles";
-import { continuationIdentityForSelection } from "../../src/shared/model-routing";
+import {
+  continuationIdentityForSelection,
+} from "../../src/shared/model-routing";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
   claudeQuestions,
@@ -526,6 +528,7 @@ describe("Claude Agent SDK harness", () => {
           description: "Balanced model",
           supportsEffort: true,
           supportedEffortLevels: ["low", "high"],
+          supportsFastMode: true,
         }],
         interrupt: async () => undefined,
         close: () => undefined,
@@ -551,6 +554,11 @@ describe("Claude Agent SDK harness", () => {
       inputModalities: ["text", "image"],
       defaultReasoningEffort: "high",
       reasoningOptions: [expect.objectContaining({ value: "low" }), expect.objectContaining({ value: "high" })],
+      fastMode: expect.objectContaining({
+        providerValue: "fast",
+        label: "Fast",
+        isDefault: false,
+      }),
     })]);
   });
 

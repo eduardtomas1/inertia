@@ -13,6 +13,10 @@ import {
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
 } from "../../../shared/continuation-policy";
+import {
+  nativeBackendProfile,
+  routeSupportsNativeFastModeIdentity,
+} from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { ProviderManager } from "../../providers";
@@ -153,6 +157,21 @@ export function createConversationCompactionCommandHandler(
     const exactProvider = providerSnapshots.find(
       ({ id }) => id === route.providerId,
     );
+    const exactModel = selection.modelId === "provider-default"
+      ? exactProvider?.models.find(({ isDefault }) => isDefault)
+        ?? exactProvider?.models[0]
+      : exactProvider?.models.find(({ id }) => id === selection.modelId);
+    const expectedFastMode = route.providerId === "codex"
+      ? "priority"
+      : route.providerId === "claude"
+        ? "fast"
+        : null;
+    const supportedFastMode = exactProvider?.id === route.providerId
+      && route.backendProfile.id === nativeBackendProfile(route.providerId).id
+      && routeSupportsNativeFastModeIdentity(selection)
+      && exactModel?.fastMode?.providerValue === expectedFastMode
+      ? expectedFastMode
+      : null;
     const readiness = await dependencies.backendProfileController.readiness(
       selection,
       exactProvider,
@@ -238,6 +257,7 @@ export function createConversationCompactionCommandHandler(
           interactionMode: currentConversation.interactionMode,
           access: currentConversation.accessMode,
           sessionId: currentConversation.providerSessionId!,
+          ...(supportedFastMode ? { supportedFastMode } : {}),
         }, command.payload.instruction, {
           onUsage: (event) => {
             projectUsage(dependencies, conversation.id, event.usage);

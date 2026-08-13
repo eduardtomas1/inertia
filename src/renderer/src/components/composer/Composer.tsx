@@ -1,22 +1,12 @@
 import {
-  lazy,
-  memo,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+  lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState,
 } from "react";
 import clsx from "clsx";
-import type {
-  ChatAttachment,
-  PromptPreset,
-} from "@shared/contracts";
+import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { MAX_CHAT_ATTACHMENTS } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
-import {
-  legacyProviderIdForHarness,
+import { fastModeProviderValue, legacyProviderIdForHarness,
+  routeSupportsNativeFastModeIdentity, withModelSelectionFastMode,
 } from "../../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
@@ -33,9 +23,7 @@ import {
   composerFollowUpState,
   composerPrimaryActionState,
 } from "../../utils/composerPrimaryAction";
-import {
-  composerHarnessLabel,
-} from "./config";
+import { composerHarnessLabel } from "./config";
 import {
   addPromptStashEntry,
   advanceRecurringPrompt,
@@ -43,6 +31,7 @@ import {
   PROMPT_STASH_CHANGED_EVENT,
   PROMPT_STASH_STORAGE_KEY,
   promptStashRouteMatches,
+  promptStashRestoreBlockedReason,
   readPromptStash,
   removePromptStashEntry,
   setPromptStashRecurrence,
@@ -71,17 +60,15 @@ const ChatResumeControl = lazy(async () => ({
 const ChatGoalControl = lazy(async () => ({
   default: (await import("../ChatGoalControl")).ChatGoalControl,
 }));
-
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // The first non-empty edit is synchronous. During uninterrupted typing, a
 // force-terminated renderer can lose at most this much newer draft history;
 // ordinary lifecycle boundaries still flush the exact pending owner/value.
 export const DRAFT_PERSISTENCE_MAX_WAIT_MS = 1_000;
-
 const ignorePromptPresetMutation = (): Promise<void> => Promise.resolve();
-const unavailableCompaction = (): Promise<never> => Promise.reject(
-  new Error("Context compaction is unavailable for this chat."),
-);
+const unavailableCompaction = (): Promise<never> => Promise.reject(new Error(
+  "Context compaction is unavailable for this chat.",
+));
 
 export const Composer = memo(function Composer({
   conversation,
@@ -768,6 +755,7 @@ export const Composer = memo(function Composer({
   const selectedReasoning = conversation.modelSelection.reasoningEffort
     ?? selectedModel?.defaultReasoningEffort
     ?? "";
+  const selectedFastMode = fastModeProviderValue(conversation.modelSelection) !== null;
   const routeReadiness = routeState.readiness;
   const selectedIdentityLabel = selectedBackendProfile
     ? `${composerHarnessLabel(selectedBackendProfile.harnessId)} · ${selectedBackendProfile.displayName} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
@@ -791,25 +779,15 @@ export const Composer = memo(function Composer({
   });
   const canSend = primaryAction === "send-ready";
   const { compactNotice, clearCompactNotice, compact } = useComposerCompaction({
-    conversationId: conversation.id,
-    message,
-    canSend,
-    running,
+    conversationId: conversation.id, message, canSend, running,
     blocked: attachments.length > 0
       || Boolean(promptContext)
       || previewContextSelected
       || fileReferences.length > 0
       || selectedSkillIds.length > 0,
-    flushDraftPersistence,
+    flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
     editorRevisions: editorRevisionsRef,
-    conversationIdRef,
-    mountedRef,
-    submittingRef,
-    draftValueRef,
-    textareaRef,
-    setMessage,
-    setSubmitting,
-    onCompact,
+    draftValueRef, textareaRef, setMessage, setSubmitting, onCompact,
   });
   const followUpState = composerFollowUpState({
     running,
@@ -896,6 +874,23 @@ export const Composer = memo(function Composer({
       },
     });
   };
+  const updateFastMode = async (enabled: boolean): Promise<void> => {
+    const providerValue = enabled
+      ? selectedModel?.fastMode?.providerValue ?? null
+      : null;
+    if (enabled && !providerValue) {
+      throw new Error("Fast mode is unavailable.");
+    }
+    const modelSelection = withModelSelectionFastMode(
+      conversation.modelSelection,
+      providerValue,
+    );
+    if (
+      JSON.stringify(modelSelection.providerOptions)
+      === JSON.stringify(conversation.modelSelection.providerOptions)
+    ) return;
+    await updateConversation({ modelSelection });
+  };
   const modelRoutes = useMemo(() => buildComposerModelRoutes(
     providers,
     backendProfiles,
@@ -968,12 +963,22 @@ export const Composer = memo(function Composer({
     window.dispatchEvent(new Event(PROMPT_STASH_CHANGED_EVENT));
     return true;
   };
+  const currentPromptStashRoute = {
+    harnessId: conversation.modelSelection.harnessId,
+    backendProfileId: conversation.modelSelection.backendProfileId,
+    modelId: conversation.modelSelection.modelId,
+    reasoningEffort: conversation.modelSelection.reasoningEffort,
+    ...((selectedModel?.fastMode || selectedFastMode)
+      && routeSupportsNativeFastModeIdentity(conversation.modelSelection)
+      ? { fastMode: selectedFastMode }
+      : {}),
+  };
   const stashCurrentPrompt = (): void => {
     if (!message.trim() || attachments.length > 0) return;
     const persisted = updatePromptStash((current) => addPromptStashEntry(
       current,
       message,
-      conversation.modelSelection,
+      currentPromptStashRoute,
     ));
     if (!persisted) return;
     updateMessage("");
@@ -993,7 +998,7 @@ export const Composer = memo(function Composer({
         ? addPromptStashEntry(
             withoutRestored,
             message,
-            conversation.modelSelection,
+            currentPromptStashRoute,
           )
         : withoutRestored;
     });
@@ -1199,14 +1204,10 @@ export const Composer = memo(function Composer({
             if (attachments.length > 0) {
               return "Remove attachments before restoring another prompt";
             }
-            return promptStashRouteMatches(
+            return promptStashRestoreBlockedReason(
               conversation.modelSelection,
               entry.route,
-            )
-              ? null
-              : `Switch to ${entry.route.modelId} with ${
-                  entry.route.reasoningEffort ?? "provider-default reasoning"
-                } before restoring`;
+            );
           }}
           onStashPrompt={stashCurrentPrompt}
           onRestorePrompt={restoreStashedPrompt}
@@ -1222,7 +1223,9 @@ export const Composer = memo(function Composer({
           selectedModel={selectedModel}
           selectedReasoning={selectedReasoning}
           reasoningLabel={reasoningLabel}
+          selectedFastMode={selectedFastMode}
           onUpdateReasoningEffort={updateReasoningEffort}
+          onUpdateFastMode={updateFastMode}
           conversation={conversation}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}

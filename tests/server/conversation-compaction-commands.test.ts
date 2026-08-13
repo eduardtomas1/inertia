@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type WebSocket from "ws";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  Options as ClaudeOptions,
+  SDKMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 
 import type {
   ProviderInfo,
@@ -11,7 +14,10 @@ import type {
   ServerEvent,
   ThreadUsageSnapshot,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import {
+  nativeModelSelection,
+  withModelSelectionFastMode,
+} from "../../src/shared/model-routing";
 import {
   AgentHarnessRegistry,
   ProviderManager,
@@ -54,13 +60,18 @@ function fixture(options: {
   providerDefault?: boolean;
   providerId?: ProviderId;
   accessMode?: "supervised" | "auto-edit" | "full";
+  fastMode?: "standard" | "fast";
 } = {}) {
   const providerId = options.providerId ?? "claude";
-  const selection = nativeModelSelection({
+  const baseSelection = nativeModelSelection({
     providerId,
     modelId: options.providerDefault ? "provider-default" : "claude-test",
     reasoningEffort: null,
   });
+  const fastModeValue = providerId === "codex" ? "priority" : "fast";
+  const selection = options.fastMode === "fast"
+    ? withModelSelectionFastMode(baseSelection, fastModeValue)
+    : baseSelection;
   const route = resolveNativeModelRoute(selection);
   const compact = vi.fn(async () => ({
     providerId,
@@ -154,7 +165,18 @@ function fixture(options: {
       id: providerId,
       canRun: true,
       statusMessage: null,
-      models: [],
+      models: options.fastMode
+        ? [{
+            id: "claude-test",
+            isDefault: true,
+            fastMode: {
+              providerValue: fastModeValue,
+              label: "Fast",
+              description: "Faster responses with increased usage.",
+              isDefault: false,
+            },
+          }]
+        : [],
     } as unknown as ProviderInfo],
     broadcast,
     send,
@@ -216,6 +238,59 @@ describe("conversation compaction command", () => {
       requestId,
     }));
   });
+
+  it.each(["standard", "fast"] as const)(
+    "attests %s speed while compacting a Fast-capable Claude session",
+    async (speed) => {
+      const { dependencies, send } = fixture({ fastMode: speed });
+      let capturedOptions: ClaudeOptions | undefined;
+      dependencies.providers = new ProviderManager(
+        { commands: { claude: "/fake/claude" } },
+        new AgentHarnessRegistry([createClaudeAgentSdkHarness({
+          createQuery: ({ options }) => {
+            capturedOptions = options;
+            return fixtureClaudeQuery(
+              (async function* (): AsyncGenerator<SDKMessage> {
+                yield {
+                  ...claudeSystem("init", {
+                    fast_mode_state: speed === "fast" ? "on" : "off",
+                  }),
+                  session_id: "claude-session",
+                } as SDKMessage;
+                yield {
+                  ...claudeSystem("status", {
+                    status: null,
+                    compact_result: "success",
+                  }),
+                  session_id: "claude-session",
+                } as SDKMessage;
+                yield {
+                  ...claudeSuccessResult("Compacted"),
+                  session_id: "claude-session",
+                } as SDKMessage;
+              })(),
+            );
+          },
+        })]),
+      );
+      const handler = createConversationCompactionCommandHandler(dependencies);
+
+      await expect(handler({} as WebSocket, {
+        type: "conversation.compact",
+        requestId,
+        payload: { conversationId },
+      })).resolves.toBe("handled");
+
+      expect(capturedOptions?.settings).toMatchObject({
+        fastMode: speed === "fast",
+        fastModePerSessionOptIn: true,
+      });
+      expect(send).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ type: "request.result", requestId }),
+      );
+    },
+  );
 
   it.each(["auto-edit", "full"] as const)(
     "cancels an unanswerable Cursor approval from %s access and releases checkout authority",

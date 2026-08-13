@@ -4,6 +4,18 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.33 — 2026-08-13
+
+### Images reach providers in packaged builds
+
+- Pasted and selected images now survive durable retention in production packages even though Electron's `RunAsNode` fuse is disabled. Store operations run through a bounded main-owned utility process instead of attempting to launch the packaged desktop executable as a Node helper.
+- Persist, read, and remove operations remain tied to the exact private attachment root and runtime generation. Malformed results, cancellation, crashes, overlapping work, and unconfirmed helper shutdown fail closed; process and payload concurrency stay bounded.
+- Native package smoke rereads the exact retained image bytes with production fuses enabled, and the Electron Codex scenario verifies that the provider receives the same SHA-256 bytes the user pasted.
+
+### Release confidence
+
+- Architecture and both lint layers, all TypeScript projects, more than 3,300 unit and integration tests, 288 portable provider contracts, exact-byte Electron delivery, package smoke, Electron fuses, and exact-head Linux, macOS, and Windows gates protect this focused repair.
+
 ## 0.0.32 — 2026-08-13
 
 ### Attachments stay owned throughout sending

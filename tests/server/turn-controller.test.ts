@@ -67,6 +67,26 @@ function providerInfo(): ProviderInfo {
       inputModalities: ["text", "image"],
       reasoningOptions: [{ value: "high", label: "High", description: "" }],
       defaultReasoningEffort: "high",
+      fastMode: {
+        providerValue: "priority",
+        label: "Fast",
+        description: "Faster responses",
+        isDefault: false,
+      },
+    }, {
+      id: "gpt-next",
+      label: "GPT Next",
+      description: "Second fake model",
+      isDefault: false,
+      inputModalities: ["text", "image"],
+      reasoningOptions: [{ value: "high", label: "High", description: "" }],
+      defaultReasoningEffort: "high",
+      fastMode: {
+        providerValue: "priority",
+        label: "Fast",
+        description: "Faster responses",
+        isDefault: false,
+      },
     }],
     rateLimits: [],
     metadataState: { models: field, rateLimits: field },
@@ -1769,6 +1789,80 @@ describe("TurnController authoritative lifecycle", () => {
       model: "gpt-next",
     });
     runtime.provider.resolve({ status: "completed", text: "Continued." });
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("resumes the same native session across explicit Fast and Standard transitions", async () => {
+    const standardSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-test",
+      reasoningEffort: "high",
+    });
+    const runtime = await testRuntime({}, { modelSelection: standardSelection });
+    const first = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Establish the Standard provider session.",
+    });
+    runtime.controller.start(first.turn.id);
+    const firstIdentity = identity(runtime);
+    runtime.provider.emit({
+      ...firstIdentity,
+      type: "session",
+      sessionId: "codex-speed-session",
+    });
+    runtime.provider.resolve({
+      status: "completed",
+      sessionId: "codex-speed-session",
+      text: "Established.",
+    });
+    await flushPromises();
+
+    runtime.store.updateConversation(runtime.conversationId, {
+      modelSelection: nativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-test",
+        reasoningEffort: "high",
+        providerOptions: { fastMode: "priority" },
+      }),
+    });
+    const fast = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Continue in Fast mode.",
+    });
+    expect(fast.turn.providerSessionBefore).toBe("codex-speed-session");
+    runtime.controller.start(fast.turn.id);
+    expect(runtime.provider.input).toMatchObject({
+      sessionId: "codex-speed-session",
+      supportedFastMode: "priority",
+      modelSelection: { providerOptions: { fastMode: "priority" } },
+      performanceModeTransition: "to-fast",
+    });
+    runtime.provider.resolve({ status: "completed", text: "Fast." });
+    await flushPromises();
+
+    const nextStandardSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-next",
+      reasoningEffort: "high",
+    });
+    runtime.store.updateConversation(runtime.conversationId, {
+      modelSelection: nextStandardSelection,
+    });
+    const standard = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Return to Standard mode.",
+    });
+    expect(standard.turn.providerSessionBefore).toBe("codex-speed-session");
+    runtime.controller.start(standard.turn.id);
+    expect(runtime.provider.input).toMatchObject({
+      sessionId: "codex-speed-session",
+      supportedFastMode: "priority",
+      model: "gpt-next",
+      modelSelection: { providerOptions: {} },
+      performanceModeTransition: "to-standard",
+    });
+    runtime.provider.resolve({ status: "completed", text: "Standard." });
     await flushPromises();
     runtime.store.close();
   });

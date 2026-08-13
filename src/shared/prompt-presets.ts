@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   harnessIdSchema,
   modelBackendProfileIdSchema,
+  routeSupportsNativeFastModeIdentity,
 } from "./model-routing";
 
 export const MAX_PROMPT_PRESETS = 30;
@@ -28,7 +29,8 @@ const promptPresetBodySchema = z.string()
 
 /**
  * Deliberately narrower than ModelSelection: presets cannot retain endpoints,
- * provider options, capabilities, filesystem context, or continuation state.
+ * general provider options, capabilities, filesystem context, or continuation
+ * state. Fast mode is retained as one explicit non-secret route identity.
  */
 export const promptPresetRouteSchema = z.object({
   harnessId: harnessIdSchema,
@@ -41,7 +43,15 @@ export const promptPresetRouteSchema = z.object({
     (value) => !/[\0\r\n]/u.test(value),
     "Preset reasoning identities cannot contain control lines.",
   ).nullable(),
+  fastMode: z.boolean().optional(),
 }).strict().superRefine((value, context) => {
+  if (value.fastMode !== undefined && !routeSupportsNativeFastModeIdentity(value)) {
+    context.addIssue({
+      code: "custom",
+      path: ["fastMode"],
+      message: "Fast mode belongs only to an exact native provider route.",
+    });
+  }
   // Match SQLite's length(route_json) contract after JSON escaping. Checking
   // the individual fields is insufficient because permitted control
   // characters and lone surrogates expand when serialized.
@@ -76,10 +86,14 @@ export function promptPresetRouteMatches(
   selection: PromptPresetRoute,
   route: PromptPresetRoute,
 ): boolean {
+  if (route.fastMode !== undefined && !routeSupportsNativeFastModeIdentity(route)) {
+    return false;
+  }
   return selection.harnessId === route.harnessId
     && selection.backendProfileId === route.backendProfileId
     && selection.modelId === route.modelId
-    && selection.reasoningEffort === route.reasoningEffort;
+    && selection.reasoningEffort === route.reasoningEffort
+    && (selection.fastMode ?? false) === (route.fastMode ?? false);
 }
 
 export function promptPresetsSerializedBytes(

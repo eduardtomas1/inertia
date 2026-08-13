@@ -10,10 +10,15 @@ import type {
   ModelBackendProfile,
   ModelSelection,
   ProviderId,
+  ProviderInfo,
   TurnRequestContext,
   WorkspaceRun,
 } from "../../../shared/contracts";
-import { modelSelectionSchema } from "../../../shared/model-routing";
+import {
+  legacyProviderIdForHarness,
+  modelSelectionSchema,
+  routeSupportsNativeFastModeIdentity,
+} from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import type {
   OwnedProviderStopResult,
@@ -56,6 +61,8 @@ export interface IsolatedRunRequestContent {
 
 export interface IsolatedRunSelection {
   modelSelection: ModelSelection;
+  /** Authoritative native model metadata captured before the isolated run. */
+  supportedFastMode?: "priority" | "fast";
 }
 
 export interface IsolatedRunResultContext {
@@ -411,6 +418,9 @@ export class IsolatedRunController<Owner extends object> {
         reasoningEffort: modelSelection.reasoningEffort || undefined,
         interactionMode: "plan",
         access: "supervised",
+        ...(request.selection.supportedFastMode
+          ? { supportedFastMode: request.selection.supportedFastMode }
+          : {}),
       };
       const harnessId = this.providers.harnessIdFor(providerInput);
       const outputLimit = boundedInteger(
@@ -708,18 +718,42 @@ export class IsolatedRunController<Owner extends object> {
 export function isolatedRunSelection(
   conversation: Pick<Conversation, "modelSelection">,
   modelOverride?: string | null,
+  provider?: Pick<ProviderInfo, "id" | "models">,
 ): IsolatedRunSelection {
   const modelId = modelOverride || conversation.modelSelection.modelId;
+  const model = modelId === "provider-default"
+    ? provider?.models.find(({ isDefault }) => isDefault) ?? provider?.models[0]
+    : provider?.models.find(({ id }) => id === modelId);
+  const expectedFastMode = provider?.id === "codex"
+    ? "priority"
+    : provider?.id === "claude"
+      ? "fast"
+      : null;
+  const supportedFastMode = expectedFastMode !== null
+    && legacyProviderIdForHarness(conversation.modelSelection.harnessId)
+      === provider?.id
+    && routeSupportsNativeFastModeIdentity(conversation.modelSelection)
+    && model?.fastMode?.providerValue === expectedFastMode
+    ? expectedFastMode
+    : null;
+  const providerOptions = { ...conversation.modelSelection.providerOptions };
+  if (
+    supportedFastMode === null
+    || providerOptions.fastMode !== supportedFastMode
+  ) {
+    delete providerOptions.fastMode;
+  }
   return {
     modelSelection: modelSelectionSchema.parse({
       ...conversation.modelSelection,
       modelId,
       alias: modelOverride ? modelOverride : conversation.modelSelection.alias,
-      providerOptions: { ...conversation.modelSelection.providerOptions },
+      providerOptions,
       capabilities: conversation.modelSelection.capabilities.map((capability) => ({
         ...capability,
       })),
     }),
+    ...(supportedFastMode ? { supportedFastMode } : {}),
   };
 }
 

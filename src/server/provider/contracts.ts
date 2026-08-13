@@ -75,6 +75,14 @@ interface ProviderRunRequest {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
+  /**
+   * Exact native Fast value advertised for the selected model. Presence means
+   * both Fast and Standard can be requested explicitly and must be attested by
+   * the provider. Omitted for older or unsupported routes.
+   */
+  supportedFastMode?: "priority" | "fast";
+  /** Explicit native-session speed change; absent on first sessions. */
+  performanceModeTransition?: "to-fast" | "to-standard";
   imagePaths?: readonly string[];
   skills?: readonly ProviderSkillInput[];
   /**

@@ -1,6 +1,15 @@
 import { GitError } from "../../git";
+import {
+  gitInspectionSettlementValues,
+  isGitProcessTreeTerminationFailure,
+} from "../../git/runner";
 
 export type SourceControlDeadlineKind = "read" | "workspace-discovery";
+
+type SettlementOperation<T> = (
+  signal: AbortSignal,
+  recordTriggeringFailure: (reason: unknown) => void,
+) => Promise<T>;
 
 function deadlineError(kind: SourceControlDeadlineKind): GitError {
   return kind === "workspace-discovery"
@@ -35,9 +44,39 @@ export class SourceControlDeadline {
   }
 
   async run<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    return await this.runOperation(operation, false);
+  }
+
+  /**
+   * Like run(), but retains ownership after the deadline aborts until the
+   * operation settles. Use this only for operations whose cancellation path
+   * is independently bounded, such as owned Git process-tree cleanup. An
+   * operation that delays rejection for cleanup must report its first failure
+   * immediately so crossing the deadline does not hide the original cause.
+   */
+  async runToSettlement<T>(operation: SettlementOperation<T>): Promise<T> {
+    return await this.runOperation(operation, true);
+  }
+
+  private async runOperation<T>(
+    operation: SettlementOperation<T>,
+    retainOwnershipOnAbort: boolean,
+  ): Promise<T> {
     this.requireTime();
     return await new Promise<T>((resolve, reject) => {
       let settled = false;
+      let deadlineReached = false;
+      let triggeringFailure: unknown;
+      let hasTriggeringFailure = false;
+      const recordTriggeringFailure = (reason: unknown): void => {
+        if (
+          hasTriggeringFailure
+          || this.signal.aborted
+          || Date.now() >= this.deadlineAt
+        ) return;
+        triggeringFailure = reason;
+        hasTriggeringFailure = true;
+      };
       const finish = (callback: () => void): void => {
         if (settled) return;
         settled = true;
@@ -45,26 +84,51 @@ export class SourceControlDeadline {
         callback();
       };
       const onAbort = (): void => {
+        deadlineReached = true;
+        if (retainOwnershipOnAbort) return;
         finish(() => reject(deadlineError(this.kind)));
       };
       this.signal.addEventListener("abort", onAbort, { once: true });
-      void operation(this.signal).then(
-        (value) => finish(() => {
-          if (this.signal.aborted || Date.now() >= this.deadlineAt) {
+      const settleOperation = (result: PromiseSettledResult<T>): void => {
+        finish(() => {
+          if (
+            deadlineReached
+            || this.signal.aborted
+            || Date.now() >= this.deadlineAt
+          ) {
             this.controller.abort();
-            reject(deadlineError(this.kind));
+            if (
+              retainOwnershipOnAbort
+              && result.status === "rejected"
+              && isGitProcessTreeTerminationFailure(result.reason)
+            ) {
+              reject(result.reason);
+            } else if (
+              retainOwnershipOnAbort
+              && result.status === "rejected"
+              && hasTriggeringFailure
+            ) {
+              reject(triggeringFailure);
+            } else {
+              reject(deadlineError(this.kind));
+            }
+          } else if (result.status === "rejected") {
+            reject(result.reason);
           } else {
-            resolve(value);
+            resolve(result.value);
           }
-        }),
-        (error: unknown) => finish(() => {
-          if (this.signal.aborted || Date.now() >= this.deadlineAt) {
-            this.controller.abort();
-            reject(deadlineError(this.kind));
-          } else {
-            reject(error);
-          }
-        }),
+        });
+      };
+      let pending: Promise<T>;
+      try {
+        pending = operation(this.signal, recordTriggeringFailure);
+      } catch (error) {
+        settleOperation({ status: "rejected", reason: error });
+        return;
+      }
+      void pending.then(
+        (value) => settleOperation({ status: "fulfilled", value }),
+        (reason: unknown) => settleOperation({ status: "rejected", reason }),
       );
     });
   }
@@ -83,6 +147,58 @@ export class SourceControlDeadline {
   dispose(): void {
     this.controller.abort();
     clearTimeout(this.timer);
+  }
+}
+
+/**
+ * Runs two sibling Git inspections under one cancellation signal. If either
+ * inspection rejects, cancel the other and retain ownership until both have
+ * settled so no child process can outlive the aggregate operation.
+ */
+export async function settleSourceControlInspections<First, Second>(
+  signal: AbortSignal,
+  first: (signal: AbortSignal) => Promise<First>,
+  second: (signal: AbortSignal) => Promise<Second>,
+  recordTriggeringFailure: (reason: unknown) => void = () => undefined,
+): Promise<[First, Second]> {
+  const controller = new AbortController();
+  const cancel = (): void => controller.abort();
+  let firstFailure: 0 | 1 | undefined;
+
+  if (signal.aborted) cancel();
+  else signal.addEventListener("abort", cancel, { once: true });
+
+  const runInspection = async <T>(
+    index: 0 | 1,
+    inspection: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await inspection(controller.signal);
+    } catch (error) {
+      if (firstFailure === undefined) {
+        firstFailure = index;
+        recordTriggeringFailure(error);
+      }
+      cancel();
+      throw error;
+    }
+  };
+
+  try {
+    const [firstResult, secondResult] = await Promise.allSettled([
+      runInspection(0, first),
+      runInspection(1, second),
+    ] as const);
+    if (firstFailure === 1) {
+      const [second, first] = gitInspectionSettlementValues([
+        secondResult,
+        firstResult,
+      ]);
+      return [first, second];
+    }
+    return gitInspectionSettlementValues([firstResult, secondResult]);
+  } finally {
+    signal.removeEventListener("abort", cancel);
   }
 }
 

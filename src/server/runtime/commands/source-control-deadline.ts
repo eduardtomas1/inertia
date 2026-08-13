@@ -6,6 +6,11 @@ import {
 
 export type SourceControlDeadlineKind = "read" | "workspace-discovery";
 
+type SettlementOperation<T> = (
+  signal: AbortSignal,
+  recordTriggeringFailure: (reason: unknown) => void,
+) => Promise<T>;
+
 function deadlineError(kind: SourceControlDeadlineKind): GitError {
   return kind === "workspace-discovery"
     ? new GitError(
@@ -45,22 +50,33 @@ export class SourceControlDeadline {
   /**
    * Like run(), but retains ownership after the deadline aborts until the
    * operation settles. Use this only for operations whose cancellation path
-   * is independently bounded, such as owned Git process-tree cleanup.
+   * is independently bounded, such as owned Git process-tree cleanup. An
+   * operation that delays rejection for cleanup must report its first failure
+   * immediately so crossing the deadline does not hide the original cause.
    */
-  async runToSettlement<T>(
-    operation: (signal: AbortSignal) => Promise<T>,
-  ): Promise<T> {
+  async runToSettlement<T>(operation: SettlementOperation<T>): Promise<T> {
     return await this.runOperation(operation, true);
   }
 
   private async runOperation<T>(
-    operation: (signal: AbortSignal) => Promise<T>,
+    operation: SettlementOperation<T>,
     retainOwnershipOnAbort: boolean,
   ): Promise<T> {
     this.requireTime();
     return await new Promise<T>((resolve, reject) => {
       let settled = false;
       let deadlineReached = false;
+      let triggeringFailure: unknown;
+      let hasTriggeringFailure = false;
+      const recordTriggeringFailure = (reason: unknown): void => {
+        if (
+          hasTriggeringFailure
+          || this.signal.aborted
+          || Date.now() >= this.deadlineAt
+        ) return;
+        triggeringFailure = reason;
+        hasTriggeringFailure = true;
+      };
       const finish = (callback: () => void): void => {
         if (settled) return;
         settled = true;
@@ -87,6 +103,12 @@ export class SourceControlDeadline {
               && isGitProcessTreeTerminationFailure(result.reason)
             ) {
               reject(result.reason);
+            } else if (
+              retainOwnershipOnAbort
+              && result.status === "rejected"
+              && hasTriggeringFailure
+            ) {
+              reject(triggeringFailure);
             } else {
               reject(deadlineError(this.kind));
             }
@@ -99,7 +121,7 @@ export class SourceControlDeadline {
       };
       let pending: Promise<T>;
       try {
-        pending = operation(this.signal);
+        pending = operation(this.signal, recordTriggeringFailure);
       } catch (error) {
         settleOperation({ status: "rejected", reason: error });
         return;
@@ -137,6 +159,7 @@ export async function settleSourceControlInspections<First, Second>(
   signal: AbortSignal,
   first: (signal: AbortSignal) => Promise<First>,
   second: (signal: AbortSignal) => Promise<Second>,
+  recordTriggeringFailure: (reason: unknown) => void = () => undefined,
 ): Promise<[First, Second]> {
   const controller = new AbortController();
   const cancel = (): void => controller.abort();
@@ -152,7 +175,10 @@ export async function settleSourceControlInspections<First, Second>(
     try {
       return await inspection(controller.signal);
     } catch (error) {
-      firstFailure ??= index;
+      if (firstFailure === undefined) {
+        firstFailure = index;
+        recordTriggeringFailure(error);
+      }
       cancel();
       throw error;
     }

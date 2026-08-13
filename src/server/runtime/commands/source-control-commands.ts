@@ -483,7 +483,7 @@ export function createSourceControlCommandHandler(
             }
           } else {
             [diff, status] = await deadline.runToSettlement(
-              async (signal) => await settleSourceControlInspections(
+              (signal, recordTriggeringFailure) => settleSourceControlInspections(
                 signal,
                 async (inspectionSignal) => await getUnifiedDiff(
                   secureRoot.root,
@@ -499,10 +499,10 @@ export function createSourceControlCommandHandler(
                   dependencies.secureFiles,
                   secureRoot,
                 ),
-                async (inspectionSignal) => await getRepositoryStatus(
-                  secureRoot.root,
-                  { deadlineAt, signal: inspectionSignal },
-                ),
+                (inspectionSignal) => getRepositoryStatus(secureRoot.root, {
+                  deadlineAt, signal: inspectionSignal,
+                }),
+                recordTriggeringFailure,
               ),
             );
           }
@@ -731,7 +731,7 @@ export function createSourceControlCommandHandler(
             }
           } else {
             [diff, repositoryStatus] = await deadline.runToSettlement(
-              async (signal) => await settleSourceControlInspections(
+              (signal, recordTriggeringFailure) => settleSourceControlInspections(
                 signal,
                 async (inspectionSignal) => await getUnifiedDiff(
                   secureRoot.root,
@@ -747,10 +747,10 @@ export function createSourceControlCommandHandler(
                   dependencies.secureFiles,
                   secureRoot,
                 ),
-                async (inspectionSignal) => await getRepositoryStatus(
-                  secureRoot.root,
-                  { deadlineAt, signal: inspectionSignal },
-                ),
+                (inspectionSignal) => getRepositoryStatus(secureRoot.root, {
+                  deadlineAt, signal: inspectionSignal,
+                }),
+                recordTriggeringFailure,
               ),
             );
           }

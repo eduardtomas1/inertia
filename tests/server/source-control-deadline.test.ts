@@ -59,7 +59,10 @@ describe("source-control aggregate deadlines", () => {
     let aggregateSettled = false;
     try {
       const aggregate = deadline.runToSettlement(
-        async (signal) => await settleSourceControlInspections(
+        async (
+          signal,
+          recordTriggeringFailure,
+        ) => await settleSourceControlInspections(
           signal,
           async (inspectionSignal) => {
             if (!inspectionSignal.aborted) {
@@ -83,6 +86,7 @@ describe("source-control aggregate deadlines", () => {
             }
             throw new GitError("timeout", "Git inspection was cancelled.");
           },
+          recordTriggeringFailure,
         ),
       );
       void aggregate.then(
@@ -99,6 +103,55 @@ describe("source-control aggregate deadlines", () => {
     } finally {
       releaseCleanup.resolve();
       deadline.dispose();
+    }
+  });
+
+  it("preserves a triggering failure while sibling cleanup crosses the deadline", async () => {
+    vi.useFakeTimers({ now: 10_000 });
+    const deadline = new SourceControlDeadline(Date.now() + 100, "read");
+    const failInspection = deferred<void>();
+    const cleanupStarted = deferred<void>();
+    const releaseCleanup = deferred<void>();
+    const primaryFailure = new GitError(
+      "operation-failed",
+      "Repository status inspection failed.",
+    );
+    try {
+      const aggregate = deadline.runToSettlement(
+        async (signal, recordTriggeringFailure) =>
+          await settleSourceControlInspections(
+            signal,
+            async () => {
+              await failInspection.promise;
+              throw primaryFailure;
+            },
+            async (inspectionSignal) => {
+              if (!inspectionSignal.aborted) {
+                await new Promise<void>((resolve) => {
+                  inspectionSignal.addEventListener("abort", () => resolve(), {
+                    once: true,
+                  });
+                });
+              }
+              cleanupStarted.resolve();
+              await releaseCleanup.promise;
+              throw new GitError("timeout", "Git inspection was cancelled.");
+            },
+            recordTriggeringFailure,
+          ),
+      );
+
+      await vi.advanceTimersByTimeAsync(99);
+      failInspection.resolve();
+      await cleanupStarted.promise;
+      await vi.advanceTimersByTimeAsync(2);
+      releaseCleanup.resolve();
+
+      await expect(aggregate).rejects.toBe(primaryFailure);
+    } finally {
+      releaseCleanup.resolve();
+      deadline.dispose();
+      vi.useRealTimers();
     }
   });
 

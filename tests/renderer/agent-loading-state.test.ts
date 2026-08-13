@@ -91,24 +91,32 @@ describe("truthful active agent presentation", () => {
   });
 
   it("classifies only explicit provider activity as search or code work", () => {
-    expect(activityExecutionCategory(activity("search", "Web search")))
-      .toBe("searching");
-    expect(activityExecutionCategory(activity("browser", "Browse documentation")))
-      .toBe("searching");
-    expect(activityExecutionCategory(activity("claude-web-search", "WebSearch")))
-      .toBe("searching");
-    expect(activityExecutionCategory(activity("claude-web-fetch", "WebFetch")))
-      .toBe("searching");
-    expect(activityExecutionCategory(activity("snake-web-search", "web_search")))
-      .toBe("searching");
-    expect(activityExecutionCategory(activity("snake-web-fetch", "web_fetch")))
-      .toBe("searching");
+    for (const [id, title] of [
+      ["web-search", "Web search"],
+      ["browse", "Browse documentation"],
+      ["search", "Search release documentation"],
+      ["claude-web-search", "WebSearch"],
+      ["claude-web-fetch", "WebFetch"],
+      ["snake-web-search", "web_search"],
+      ["snake-web-fetch", "web_fetch"],
+    ] as const) {
+      expect(activityExecutionCategory(activity(id, title)))
+        .toBe("searching");
+    }
     expect(activityExecutionCategory(activity("code", "Apply patch")))
       .toBe("coding");
     expect(activityExecutionCategory(activity("edit", "Edit response timeline")))
       .toBe("coding");
     expect(activityExecutionCategory(activity("file-change", "File change")))
       .toBe("coding");
+    expect(activityExecutionCategory(activity("overlap", "Edit web config")))
+      .toBe("coding");
+    expect(activityExecutionCategory(activity("ordinary-web", "Build web app")))
+      .toBe("tool");
+    expect(activityExecutionCategory(activity("ordinary-write", "Write to stdin")))
+      .toBe("tool");
+    expect(activityExecutionCategory(activity("ordinary-report", "Write report")))
+      .toBe("tool");
     expect(activityExecutionCategory(activity("read", "Read response timeline")))
       .toBe("tool");
     expect(activityExecutionCategory(activity("command", "Command", {
@@ -117,6 +125,12 @@ describe("truthful active agent presentation", () => {
     expect(activityExecutionCategory(activity("search-command", "Search repository", {
       kind: "command",
     }))).toBe("command");
+    expect(activityExecutionCategory(activity("canonical-command", "WebSearch", {
+      kind: "command",
+    }))).toBe("command");
+    expect(activityExecutionCategory(activity("canonical-file", "WebFetch", {
+      kind: "file",
+    }))).toBe("coding");
     expect(activityExecutionCategory(activity("failed", "Web search failed", {
       status: "failed",
     }))).toBe("attention");

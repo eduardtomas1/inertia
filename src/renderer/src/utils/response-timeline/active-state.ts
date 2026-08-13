@@ -32,13 +32,17 @@ export interface ActiveAgentPresentation {
   animated: boolean;
 }
 
-const SEARCH_ACTIVITY_PATTERN = /\b(?:browse|browser|fetch|find online|lookup|query|search|web)\b/iu;
-const CODING_ACTIVITY_PATTERN = /\b(?:apply patch|code|create file|edit|file change|patch|refactor|rewrite|write)\b/iu;
+const CANONICAL_SEARCH_ACTIVITY_PATTERN = /^web (?:fetch|search)$/iu;
+const SEARCH_ACTIVITY_PHRASE_PATTERN =
+  /^(?:browse|find online|look up|lookup|search)\b/iu;
+const CODING_ACTIVITY_PHRASE_PATTERN =
+  /^(?:apply (?:a )?patch|create (?:a )?file|edit|file change|refactor|write (?:a )?file)\b/iu;
 
 function normalizedActivityTitle(title: string): string {
   return title
     .replace(/([a-z\d])([A-Z])/gu, "$1 $2")
-    .replace(/[_-]+/gu, " ");
+    .replace(/[_-]+/gu, " ")
+    .trim();
 }
 
 function timestamp(value: string): number {
@@ -60,8 +64,11 @@ export function activityExecutionCategory(
   if (activity.kind === "command") return "command";
   if (activity.kind === "file") return "coding";
   const normalizedTitle = normalizedActivityTitle(activity.title);
-  if (SEARCH_ACTIVITY_PATTERN.test(normalizedTitle)) return "searching";
-  if (CODING_ACTIVITY_PATTERN.test(normalizedTitle)) {
+  if (
+    CANONICAL_SEARCH_ACTIVITY_PATTERN.test(normalizedTitle)
+    || SEARCH_ACTIVITY_PHRASE_PATTERN.test(normalizedTitle)
+  ) return "searching";
+  if (CODING_ACTIVITY_PHRASE_PATTERN.test(normalizedTitle)) {
     return "coding";
   }
   return "tool";

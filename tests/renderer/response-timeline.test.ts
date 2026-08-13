@@ -388,6 +388,7 @@ describe("authoritative response timeline", () => {
       conversationId,
       streamingText,
       streamingReasoning: "",
+      streamingChannel: streamingText ? "text" : null,
       approvals: [],
       inputRequests: [],
       showTimestamps: false,
@@ -503,10 +504,12 @@ describe("authoritative response timeline", () => {
     }));
 
     expect(html).toContain("turn-execution-rail is-live");
-    expect(html).toContain("Codex · Codex App Server is working");
-    expect(html.match(/Codex · Codex App Server is working/g)).toHaveLength(1);
+    expect(html).toContain("Codex · Codex App Server is running a command");
+    expect(html.match(/Codex · Codex App Server is running a command/g))
+      .toHaveLength(1);
     expect(html).toContain('data-active-work-region=""');
     expect(html).toContain('data-active-work-state="running"');
+    expect(html).toContain('data-active-agent-phase="command"');
     expect(html).toContain('data-work-identity-source="persisted-model-selection"');
     expect(html).toContain('aria-label="Stop Codex · Codex App Server run"');
     expect(html).toContain(">Stop</span></button>");
@@ -519,7 +522,8 @@ describe("authoritative response timeline", () => {
     expect(html.indexOf("Checking the existing presentation.")).toBeLessThan(html.indexOf("Build failed"));
     expect(html.indexOf("+3 previous tool calls")).toBeLessThan(html.indexOf("Build failed"));
     expect(html.indexOf("Build failed")).toBeLessThan(html.indexOf("Unsupported option skipped"));
-    expect(html.indexOf("Unsupported option skipped")).toBeLessThan(html.indexOf("Run tests"));
+    expect(html.indexOf("Unsupported option skipped"))
+      .toBeLessThan(html.lastIndexOf("Run tests"));
 
     const detailsStart = html.indexOf('class="turn-work-details"');
     const detailsEnd = html.indexOf("</details>", detailsStart);

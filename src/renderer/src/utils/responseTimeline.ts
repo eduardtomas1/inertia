@@ -32,6 +32,14 @@ export {
   workSummaryLabel,
 } from "./response-timeline/timing";
 export {
+  activeAgentPresentation,
+  activityExecutionCategory,
+  type ActiveAgentPhase,
+  type ActiveAgentPresentation,
+  type ActivityExecutionCategory,
+  type StreamingAgentChannel,
+} from "./response-timeline/active-state";
+export {
   buildTimelineMinimapMarkers,
   estimateCompletedTurnSpacing,
   estimateTimelineItemRenderWeight,

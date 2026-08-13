@@ -76,7 +76,8 @@ describe("Minimal Workstream activity lines", () => {
     expect(html).toContain("Full command output");
     expect(html).not.toContain("<pre>");
     expect(html).toContain("Working:");
-    expect(html).toContain("lucide-circle-dot");
+    expect(html).toContain('data-activity-category="command"');
+    expect(html).toContain("lucide-terminal");
   });
 
   it("limits huge output to three preview lines without mounting closed full detail", () => {

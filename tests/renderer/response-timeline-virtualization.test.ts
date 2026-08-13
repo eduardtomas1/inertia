@@ -787,6 +787,10 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       memoInput(active, { ...baseProps, streamingText: "second" }),
     )).toBe(false);
     expect(sameTurnTimelineProps(
+      memoInput(active, { ...baseProps, streamingChannel: "reasoning" }),
+      memoInput(active, { ...baseProps, streamingChannel: null }),
+    )).toBe(false);
+    expect(sameTurnTimelineProps(
       memoInput(settled, baseProps),
       memoInput(settled, { ...baseProps, showTimestamps: true }),
     )).toBe(false);

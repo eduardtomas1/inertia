@@ -502,6 +502,7 @@ export function createWorkspaceSceneModel({
       turnGitArtifacts: projection.turnGitArtifacts,
       streamingText: projection.streamingText,
       streamingReasoning: projection.streamingReasoning,
+      streamingChannel: projection.streamingChannel,
       usage: projection.usage,
       skills: currentWorkflow?.skills ?? [],
       skillsCapability: currentWorkflow?.skillsCapability ?? null,

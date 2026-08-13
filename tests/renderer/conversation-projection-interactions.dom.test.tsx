@@ -545,6 +545,7 @@ describe("useConversationProjection pending interactions", () => {
       text: "Visible before reconnect.",
     });
     hook.rerender({ status: "offline" });
+    expect(hook.result.current.streamingChannel).toBeNull();
     source.emit({
       type: "server.welcome",
       protocolVersion: 1,
@@ -681,6 +682,7 @@ describe("useConversationProjection pending interactions", () => {
         latestSequence: 8,
       },
     });
+    expect(hook.result.current.streamingChannel).toBeNull();
     source.emit({
       type: "agent.text",
       conversationId: primaryId,
@@ -701,6 +703,7 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.streamingReasoning).toHaveLength(500_000);
     expect(hook.result.current.streamingReasoning.endsWith(reasoningDelta))
       .toBe(true);
+    expect(hook.result.current.streamingChannel).toBe("reasoning");
 
     hook.rerender({ status: "online" });
     await waitFor(() => expect(detailLoads).toBe(2));
@@ -711,6 +714,163 @@ describe("useConversationProjection pending interactions", () => {
 
     expect(hook.result.current.streamingText).toBe(textDelta);
     expect(hook.result.current.streamingReasoning).toBe(reasoningDelta);
+    expect(hook.result.current.streamingChannel).toBe("reasoning");
+
+    act(() => source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: "latest text",
+    }));
+    expect(hook.result.current.streamingChannel).toBe("text");
+  });
+
+  it("scopes live phase authority to the current provider segment", async () => {
+    const source = createEventSource();
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : { type: "request.ok", requestId: crypto.randomUUID() });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+    const owner = {
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+    };
+    const emitReasoning = (text: string): void => source.emit({
+      type: "agent.reasoning",
+      ...owner,
+      text,
+    });
+    const emitText = (text: string): void => source.emit({
+      type: "agent.text",
+      ...owner,
+      text,
+    });
+
+    emitReasoning("Reasoning before a tool.");
+    expect(hook.result.current.streamingChannel).toBe("reasoning");
+    source.emit({
+      type: "agent.activity",
+      activity: {
+        id: "segment-activity",
+        ...owner,
+        kind: "tool",
+        title: "Inspect repository",
+        detail: null,
+        status: "running",
+        createdAt: "2026-08-12T12:00:01.000Z",
+      },
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+
+    emitText("Text before a completed activity.");
+    expect(hook.result.current.streamingChannel).toBe("text");
+    source.emit({
+      type: "agent.activity",
+      activity: {
+        id: "segment-activity",
+        ...owner,
+        kind: "tool",
+        title: "Inspect repository",
+        detail: null,
+        status: "completed",
+        createdAt: "2026-08-12T12:00:01.000Z",
+      },
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+
+    emitReasoning("Reasoning before a plan.");
+    source.emit({
+      type: "agent.plan.updated",
+      plan: {
+        ...owner,
+        explanation: "Use the current provider evidence.",
+        steps: [{ step: "Verify segment ownership", status: "inProgress" }],
+      },
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+
+    emitText("Commentary before persistence.");
+    source.emit({
+      type: "agent.commentary.persisted",
+      message: {
+        id: "segment-commentary",
+        conversationId: primaryId,
+        turnId: owner.turnId,
+        role: "assistant",
+        content: "Commentary before persistence.",
+        attachments: [],
+        createdAt: "2026-08-12T12:00:02.000Z",
+      },
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+
+    emitReasoning("Reasoning before approval.");
+    source.emit({ type: "agent.approval.requested", request: approval(primaryId) });
+    expect(hook.result.current.streamingChannel).toBeNull();
+    source.emit({
+      type: "agent.approval.resolved",
+      ...owner,
+      requestId: approval(primaryId).id,
+      decision: "approve",
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+    emitText("Provider resumed after approval.");
+    expect(hook.result.current.streamingChannel).toBe("text");
+
+    source.emit({
+      type: "agent.input.requested",
+      request: inputRequest(primaryId),
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+    source.emit({
+      type: "agent.input.resolved",
+      ...owner,
+      requestId: inputRequest(primaryId).id,
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+    emitReasoning("Provider resumed after input.");
+    expect(hook.result.current.streamingChannel).toBe("reasoning");
+
+    source.emit({ type: "agent.completed", ...owner });
+    expect(hook.result.current.streamingChannel).toBeNull();
   });
 
   it("keeps streaming text when fresh hydration replays the current plan", async () => {
@@ -803,6 +963,7 @@ describe("useConversationProjection pending interactions", () => {
 
     expect(hook.result.current.streamingText)
       .toBe("Visible through plan hydration.");
+    expect(hook.result.current.streamingChannel).toBeNull();
     expect(onOpenPlan).not.toHaveBeenCalled();
 
     hook.rerender({ status: "online" });
@@ -810,6 +971,7 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.detailState?.state).toBe("ready");
     expect(hook.result.current.streamingText)
       .toBe("Visible through plan hydration.");
+    expect(hook.result.current.streamingChannel).toBeNull();
 
     source.emit({
       type: "agent.plan.updated",

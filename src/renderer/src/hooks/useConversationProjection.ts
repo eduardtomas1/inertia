@@ -23,6 +23,7 @@ import {
 import type { ConnectionStatus } from "./useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { markTestStreamingStage } from "../utils/testStreamingTrace";
+import type { StreamingAgentChannel } from "../utils/responseTimeline";
 
 const EMPTY_REASONINGS: AgentReasoning[] = [];
 const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
@@ -34,6 +35,7 @@ interface FreshHydrationBaseline {
   syncCompleted: boolean;
   streamingTextDelta: string | null;
   streamingReasoningDelta: string | null;
+  streamingChannelDelta: StreamingAgentChannel;
   liveMessages: ChatMessage[];
   liveUsage: ThreadUsageSnapshot | null;
   liveActivities: AgentActivity[];
@@ -135,6 +137,8 @@ export function useConversationProjection({
   const [detailRefresh, setDetailRefresh] = useState(0);
   const [streamingText, setStreamingText] = useState("");
   const [streamingReasoning, setStreamingReasoning] = useState("");
+  const [streamingChannel, setStreamingChannel] =
+    useState<StreamingAgentChannel>(null);
   const [liveMessages, setLiveMessages] =
     useState<Record<string, ChatMessage[]>>({});
   const [liveUsage, setLiveUsage] =
@@ -200,12 +204,16 @@ export function useConversationProjection({
     terminalRefreshPendingRef.current = false;
     setStreamingText("");
     setStreamingReasoning("");
+    setStreamingChannel(null);
     setLiveMessages({});
     setLiveUsage({});
     setLiveActivities({});
     setLiveSubagents({});
     setNativePlans({});
   }, [enabled]);
+  useEffect(() => {
+    if (status !== "online") setStreamingChannel(null);
+  }, [status]);
   const detail = useMemo(() => {
     if (
       detailState?.state !== "ready"
@@ -294,6 +302,7 @@ export function useConversationProjection({
         freshHydrationRef.current = null;
         setStreamingText(hydration.streamingTextDelta ?? "");
         setStreamingReasoning(hydration.streamingReasoningDelta ?? "");
+        setStreamingChannel(hydration.streamingChannelDelta);
         setLiveMessages((current) => withoutHydratedBaseline(
           current,
           conversationId,
@@ -335,6 +344,7 @@ export function useConversationProjection({
         terminalRefreshPendingRef.current = false;
         setStreamingText("");
         setStreamingReasoning("");
+        setStreamingChannel(null);
       }
     }).catch((error) => {
       if (generation !== requestGenerationRef.current) return;
@@ -469,11 +479,15 @@ export function useConversationProjection({
         )
       );
       if (remainsMounted && activeConversation) {
+        // A disconnected stream is historical until this runtime generation
+        // replays a new text or reasoning delta for the mounted conversation.
+        setStreamingChannel(null);
         freshHydrationRef.current = {
           conversationId: activeConversation.id,
           syncCompleted: false,
           streamingTextDelta: null,
           streamingReasoningDelta: null,
+          streamingChannelDelta: null,
           liveMessages: liveMessagesRef.current[activeConversation.id] ?? [],
           liveUsage: liveUsageRef.current[activeConversation.id] ?? null,
           liveActivities:
@@ -506,6 +520,7 @@ export function useConversationProjection({
         setDetailState(null);
         setStreamingText("");
         setStreamingReasoning("");
+        setStreamingChannel(null);
         setLiveMessages({});
         setLiveUsage({});
         setLiveActivities({});
@@ -558,8 +573,10 @@ export function useConversationProjection({
       ) {
         if (freshHydrationRef.current) {
           freshHydrationRef.current.streamingTextDelta = "";
+          freshHydrationRef.current.streamingChannelDelta = null;
         }
         setStreamingText("");
+        setStreamingChannel(null);
       }
       return;
     }
@@ -586,8 +603,10 @@ export function useConversationProjection({
       ) {
         if (freshHydrationRef.current) {
           freshHydrationRef.current.streamingTextDelta = "";
+          freshHydrationRef.current.streamingChannelDelta = null;
         }
         setStreamingText("");
+        setStreamingChannel(null);
       }
       return;
     }
@@ -627,8 +646,10 @@ export function useConversationProjection({
       });
       if (freshHydrationRef.current) {
         freshHydrationRef.current.streamingTextDelta = "";
+        freshHydrationRef.current.streamingChannelDelta = null;
       }
       setStreamingText("");
+      setStreamingChannel(null);
       return;
     }
     if (event.type === "agent.plan.updated") {
@@ -645,11 +666,17 @@ export function useConversationProjection({
         [event.plan.conversationId]: event.plan,
       }));
       if (event.plan.conversationId === activeConversation?.id) {
-        if (replayedHydrationPlan) return;
+        if (replayedHydrationPlan) {
+          if (hydration) hydration.streamingChannelDelta = null;
+          setStreamingChannel(null);
+          return;
+        }
         if (hydration) {
           hydration.streamingTextDelta = "";
+          hydration.streamingChannelDelta = null;
         }
         setStreamingText("");
+        setStreamingChannel(null);
         if (autoOpenPlanRef.current) {
           openPlanCallbackRef.current(event.plan.conversationId);
         }
@@ -668,8 +695,10 @@ export function useConversationProjection({
       if (event.activity.conversationId !== activeConversation?.id) return;
       if (freshHydrationRef.current) {
         freshHydrationRef.current.streamingTextDelta = "";
+        freshHydrationRef.current.streamingChannelDelta = null;
       }
       setStreamingText("");
+      setStreamingChannel(null);
       setLiveActivities((current) => {
         const existing = current[event.activity.conversationId] ?? [];
         return {
@@ -708,9 +737,11 @@ export function useConversationProjection({
       if (freshHydrationRef.current) {
         freshHydrationRef.current.streamingTextDelta = "";
         freshHydrationRef.current.streamingReasoningDelta = "";
+        freshHydrationRef.current.streamingChannelDelta = null;
       }
       setStreamingText("");
       setStreamingReasoning("");
+      setStreamingChannel(null);
     }
     if (event.type === "agent.text") {
       const hydration = freshHydrationRef.current;
@@ -721,6 +752,8 @@ export function useConversationProjection({
       }
       setStreamingText((current) =>
         `${current}${event.text}`.slice(-MAX_STREAMING_CHARACTERS));
+      setStreamingChannel("text");
+      if (hydration) hydration.streamingChannelDelta = "text";
       markTestStreamingStage("renderer-projection-updated");
     }
     if (event.type === "agent.reasoning") {
@@ -732,8 +765,14 @@ export function useConversationProjection({
       }
       setStreamingReasoning((current) =>
         `${current}${event.text}`.slice(-MAX_STREAMING_CHARACTERS));
+      setStreamingChannel("reasoning");
+      if (hydration) hydration.streamingChannelDelta = "reasoning";
     }
     if (event.type === "agent.completed" || event.type === "agent.failed") {
+      if (freshHydrationRef.current) {
+        freshHydrationRef.current.streamingChannelDelta = null;
+      }
+      setStreamingChannel(null);
       terminalRefreshPendingRef.current = true;
       terminalCallbackRef.current();
     }
@@ -744,6 +783,7 @@ export function useConversationProjection({
     terminalRefreshPendingRef.current = false;
     setStreamingText("");
     setStreamingReasoning("");
+    setStreamingChannel(null);
     setLiveMessages({});
     setLiveUsage({});
     setLiveActivities({});
@@ -842,6 +882,7 @@ export function useConversationProjection({
     usage,
     streamingText,
     streamingReasoning,
+    streamingChannel,
     pendingApprovals: approvals,
     pendingInputs: inputRequests,
   };

@@ -219,7 +219,7 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(activitySource).toContain("instead of sorting the complete workstream");
     expect(css).toContain('data-document-active="false"');
     expect(css).toContain("animation-play-state: paused");
-    expect(css).toContain("active-work-text-wave");
+    expect(css).toContain("agent-pixel-shimmer");
     expect(css).not.toContain("active-work-tonal-wash");
   });
 

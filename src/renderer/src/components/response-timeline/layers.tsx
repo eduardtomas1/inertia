@@ -15,8 +15,10 @@ import {
   shouldCollapseUserRequest,
 } from "../../utils/userRequestPresentation";
 import {
+  activeAgentPresentation,
   buildTurnExecutionStream,
   shouldConsolidateSettledWorkIntoRunDetails,
+  type ActiveAgentPhase,
   type ResponseTurn,
 } from "../../utils/responseTimeline";
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
@@ -34,6 +36,27 @@ import {
 } from "./changedFiles";
 import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
+
+const AGENT_PIXEL_GRID_CELLS = Array.from({ length: 9 }, (_, index) => index);
+
+function AgentPixelLoader({
+  animated,
+  phase,
+}: {
+  animated: boolean;
+  phase: ActiveAgentPhase;
+}): React.JSX.Element {
+  return (
+    <span
+      className="agent-pixel-loader"
+      aria-hidden="true"
+      data-animated={animated ? "true" : "false"}
+      data-phase={phase}
+    >
+      {AGENT_PIXEL_GRID_CELLS.map((index) => <span key={index} />)}
+    </span>
+  );
+}
 
 export function UserRequestLayer({
   turn,
@@ -120,15 +143,11 @@ export function AgentExecutionLayer({
   onAfterToggle?: () => void;
 }): React.JSX.Element {
   const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
-  const statusLabel = turn.agentTurn.status === "queued"
-    ? `${providerLabel} is queued`
-    : turn.agentTurn.status === "starting"
-      ? `${providerLabel} is starting`
-      : turn.agentTurn.status === "waiting-for-approval"
-        ? `${providerLabel} needs approval`
-        : turn.agentTurn.status === "waiting-for-input"
-          ? `${providerLabel} has a question`
-          : `${providerLabel} is working`;
+  const activePresentation = activeAgentPresentation({
+    turn,
+    providerLabel,
+    streamingChannel: props.streamingChannel ?? null,
+  });
   return (
     <section
       className={clsx(
@@ -143,11 +162,21 @@ export function AgentExecutionLayer({
           className="turn-execution-rail is-live"
           data-active-work-region=""
           data-active-work-state={turn.agentTurn.status}
+          data-active-agent-phase={activePresentation.phase}
           data-work-identity-source="persisted-model-selection"
         >
           <header className="turn-working-state" title={providerLabel}>
             <span className="turn-working-status" role="status" aria-live="polite" aria-atomic="true">
-              <strong>{statusLabel}</strong>
+              <AgentPixelLoader
+                animated={activePresentation.animated}
+                phase={activePresentation.phase}
+              />
+              <span className="turn-working-copy">
+                <strong>{activePresentation.label}</strong>
+                {activePresentation.detail && (
+                  <small aria-hidden="true">{activePresentation.detail}</small>
+                )}
+              </span>
             </span>
             <span className="turn-working-elapsed" aria-live="off">
               <span className="turn-working-separator" aria-hidden="true">·</span>
@@ -166,7 +195,9 @@ export function AgentExecutionLayer({
             turn={turn}
             autoCollapse={props.autoCollapseWorkLog}
             reasoningContent={reasoningContent}
+            reasoningStreaming={props.streamingChannel === "reasoning"}
             liveContent={liveContent}
+            liveContentStreaming={props.streamingChannel === "text"}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}
@@ -183,7 +214,9 @@ export function AgentExecutionLayer({
             turn={turn}
             autoCollapse={props.autoCollapseWorkLog}
             reasoningContent={reasoningContent}
+            reasoningStreaming={false}
             liveContent=""
+            liveContentStreaming={false}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}

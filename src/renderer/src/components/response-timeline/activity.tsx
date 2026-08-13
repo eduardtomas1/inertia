@@ -14,8 +14,12 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDot,
+  Code2,
   ListChecks,
+  Search,
+  Terminal,
   TriangleAlert,
+  Wrench,
 } from "lucide-react";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
 import clsx from "clsx";
@@ -27,6 +31,7 @@ import type {
 import {
   activityAttentionSeverity,
   activityDetailPresentation,
+  activityExecutionCategory,
   activityNeedsAttention,
   buildTurnExecutionStream,
   formatElapsed,
@@ -172,6 +177,7 @@ export const ActivityRow = memo(function ActivityRow({
   const needsAttention = attentionSeverity !== null;
   const severity: ActivityLineSeverity = attentionSeverity ?? "neutral";
   const detailPresentation = activityDetailPresentation(activity);
+  const executionCategory = activityExecutionCategory(activity);
   const showDisclosure = Boolean(
     detailPresentation.full
     && (detailPresentation.expandable || needsAttention),
@@ -189,7 +195,15 @@ export const ActivityRow = memo(function ActivityRow({
     ? TriangleAlert
     : activity.status === "completed"
       ? Check
-      : CircleDot;
+      : executionCategory === "searching"
+        ? Search
+        : executionCategory === "coding"
+          ? Code2
+          : executionCategory === "command"
+            ? Terminal
+            : executionCategory === "tool"
+              ? Wrench
+              : CircleDot;
   const fullLabel = [
     activity.title,
     showPreview ? detailPresentation.preview : null,
@@ -218,6 +232,7 @@ export const ActivityRow = memo(function ActivityRow({
         showDisclosure && "has-technical-detail",
       )}
       data-activity-kind={activity.kind}
+      data-activity-category={executionCategory}
       data-activity-severity={severity}
       data-activity-visibility={visibility}
       title={fullLabel}
@@ -567,7 +582,9 @@ export function WorkLog({
   turn,
   autoCollapse,
   reasoningContent,
+  reasoningStreaming,
   liveContent,
+  liveContentStreaming,
   showThinking,
   projectRoot,
   projectId,
@@ -580,7 +597,9 @@ export function WorkLog({
   turn: ResponseTurn;
   autoCollapse: boolean;
   reasoningContent: string;
+  reasoningStreaming: boolean;
   liveContent: string;
+  liveContentStreaming: boolean;
   showThinking: boolean;
   projectRoot: string;
   projectId: string;
@@ -617,9 +636,11 @@ export function WorkLog({
     }),
     [turn],
   );
-  // Streaming text is always the final visible execution entry. Appending that
+  // Transient text is always the final visible execution entry. Appending that
   // one row keeps settled commentary and activity-group identities stable
-  // instead of sorting the complete workstream for every provider token.
+  // instead of sorting the complete workstream for every provider token. A
+  // reconnect may retain the text while deliberately closing its live channel,
+  // so only the current text channel gets live semantics and animation.
   const stream = useMemo<TurnExecutionStreamEntry[]>(() => {
     if (!turn.isActive || !liveContent) return durableStream;
     return [
@@ -630,12 +651,13 @@ export function WorkLog({
         createdAt: turn.agentTurn.updatedAt,
         message: null,
         content: liveContent,
-        streaming: true,
+        streaming: liveContentStreaming,
       },
     ];
   }, [
     durableStream,
     liveContent,
+    liveContentStreaming,
     turn.agentTurn.updatedAt,
     turn.id,
     turn.isActive,
@@ -643,6 +665,22 @@ export function WorkLog({
   const supplementalCount = supplementalActivities.length
     + turn.plans.length
     + (includesReasoning ? 1 : 0);
+  const planStepCount = turn.plans.reduce(
+    (total, plan) => total + plan.steps.length,
+    0,
+  );
+  const activeReasoning = includesReasoning && reasoningStreaming;
+  const activeTraceLabel = activeReasoning
+    ? "Thinking"
+    : includesReasoning
+      ? "Reasoning"
+      : "Plan";
+  const activeTraceCount = [
+    includesReasoning ? "reasoning summary" : null,
+    planStepCount > 0
+      ? `${planStepCount} ${planStepCount === 1 ? "step" : "steps"}`
+      : null,
+  ].filter(Boolean).join(" · ") || `${supplementalCount} update`;
 
   if (turn.isActive) {
     if (stream.length === 0 && supplementalCount === 0) return null;
@@ -660,6 +698,11 @@ export function WorkLog({
         />
         {supplementalCount > 0 && (
           <details
+            data-agent-trace={activeReasoning
+              ? "thinking"
+              : includesReasoning
+                ? "reasoning"
+                : "plan"}
             open={expanded}
             onToggle={(event) => setExpanded(event.currentTarget.open)}
           >
@@ -668,15 +711,18 @@ export function WorkLog({
               aria-controls={detailsId}
               {...anchorToggleHandlers}
             >
-              <span>More run details</span>
-              <small>{supplementalCount}</small>
+              <span>{activeTraceLabel}</span>
+              <small>{activeTraceCount}</small>
               <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
             </summary>
             <div className="turn-work-details" id={detailsId} hidden={!expanded}>
               {expanded && includesReasoning && (
                 <div className="turn-reasoning-detail">
                   <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
-                  <ReasoningSummary content={reasoningContent} streaming />
+                  <ReasoningSummary
+                    content={reasoningContent}
+                    streaming={activeReasoning}
+                  />
                 </div>
               )}
               {expanded && turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}

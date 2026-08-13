@@ -54,7 +54,10 @@ import type {
 } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import { shouldFollowTimeline } from "../utils/responseTimeline";
+import {
+  shouldFollowTimeline,
+  type StreamingAgentChannel,
+} from "../utils/responseTimeline";
 import { revealAgentInputRequest } from "../utils/agentInputNavigation";
 import {
   initialTranscriptNavigation,
@@ -103,6 +106,7 @@ type ChatWorkspaceProps = {
   turnGitArtifacts: TurnGitArtifact[];
   streamingText: string;
   streamingReasoning: string;
+  streamingChannel?: StreamingAgentChannel;
   usage: ThreadUsageSnapshot | null;
   skills: AgentSkillSummary[];
   skillsCapability: AgentWorkflowSkillsCapability | null;
@@ -196,6 +200,7 @@ export function ChatWorkspace({
   turnGitArtifacts,
   streamingText,
   streamingReasoning,
+  streamingChannel = null,
   usage,
   skills,
   skillsCapability,
@@ -700,6 +705,7 @@ export function ChatWorkspace({
               } : null}
               streamingText={detailLoading ? "" : streamingText}
               streamingReasoning={detailLoading ? "" : streamingReasoning}
+              streamingChannel={detailLoading ? null : streamingChannel}
               approvals={ownedApprovals}
               inputRequests={ownedInputRequests}
               providerIdentityLabels={providerIdentityLabels}

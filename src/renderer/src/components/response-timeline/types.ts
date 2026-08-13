@@ -13,7 +13,10 @@ import type {
   SubagentTrace,
 } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
-import type { TurnGitArtifactSummary } from "../../utils/responseTimeline";
+import type {
+  StreamingAgentChannel,
+  TurnGitArtifactSummary,
+} from "../../utils/responseTimeline";
 
 export interface ResponseTimelineProps {
   turns: AgentTurn[];
@@ -33,6 +36,7 @@ export interface ResponseTimelineProps {
   } | null;
   streamingText: string;
   streamingReasoning: string;
+  streamingChannel?: StreamingAgentChannel;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   providerIdentityLabels?: ProviderIdentityLabels;

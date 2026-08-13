@@ -1,0 +1,198 @@
+import { describe, expect, it } from "vitest";
+
+import type {
+  AgentActivity,
+  AgentReasoning,
+  AgentTurn,
+  AgentTurnStatus,
+} from "../../src/shared/contracts";
+import {
+  activeAgentPresentation,
+  activityExecutionCategory,
+  type ResponseTurn,
+} from "../../src/renderer/src/utils/responseTimeline";
+
+const createdAt = "2026-08-12T12:00:00.000Z";
+
+function activity(
+  id: string,
+  title: string,
+  update: Partial<AgentActivity> = {},
+): AgentActivity {
+  return {
+    id,
+    conversationId: "conversation-loading-state",
+    runId: "run-loading-state",
+    turnId: "turn-loading-state",
+    kind: "tool",
+    title,
+    detail: null,
+    status: "running",
+    createdAt,
+    ...update,
+  };
+}
+
+function reasoning(status: AgentReasoning["status"]): AgentReasoning {
+  return {
+    id: "reasoning-loading-state",
+    conversationId: "conversation-loading-state",
+    runId: "run-loading-state",
+    turnId: "turn-loading-state",
+    content: "Provider-authored summary",
+    status,
+    createdAt,
+  };
+}
+
+function turn(
+  status: AgentTurnStatus,
+  activities: AgentActivity[] = [],
+  currentReasoning: AgentReasoning | null = null,
+): Pick<ResponseTurn, "agentTurn" | "activities" | "reasoning"> {
+  return {
+    agentTurn: { status } as AgentTurn,
+    activities,
+    reasoning: currentReasoning,
+  };
+}
+
+describe("truthful active agent presentation", () => {
+  it("uses authoritative lifecycle states before activity inference", () => {
+    const cases: Array<[
+      AgentTurnStatus,
+      string,
+      string,
+      boolean,
+    ]> = [
+      ["queued", "queued", "Claude · Anthropic is queued", true],
+      ["starting", "starting", "Claude · Anthropic is starting", true],
+      [
+        "waiting-for-approval",
+        "waiting-for-approval",
+        "Claude · Anthropic needs approval",
+        false,
+      ],
+      [
+        "waiting-for-input",
+        "waiting-for-input",
+        "Claude · Anthropic is waiting for input",
+        false,
+      ],
+    ];
+
+    for (const [status, phase, label, animated] of cases) {
+      expect(activeAgentPresentation({
+        turn: turn(status, [activity("ignored", "Web search")]),
+        providerLabel: "Claude · Anthropic",
+        streamingChannel: "text",
+      })).toEqual({ phase, label, detail: null, animated });
+    }
+  });
+
+  it("classifies only explicit provider activity as search or code work", () => {
+    expect(activityExecutionCategory(activity("search", "Web search")))
+      .toBe("searching");
+    expect(activityExecutionCategory(activity("browser", "Browse documentation")))
+      .toBe("searching");
+    expect(activityExecutionCategory(activity("claude-web-search", "WebSearch")))
+      .toBe("searching");
+    expect(activityExecutionCategory(activity("claude-web-fetch", "WebFetch")))
+      .toBe("searching");
+    expect(activityExecutionCategory(activity("snake-web-search", "web_search")))
+      .toBe("searching");
+    expect(activityExecutionCategory(activity("snake-web-fetch", "web_fetch")))
+      .toBe("searching");
+    expect(activityExecutionCategory(activity("code", "Apply patch")))
+      .toBe("coding");
+    expect(activityExecutionCategory(activity("edit", "Edit response timeline")))
+      .toBe("coding");
+    expect(activityExecutionCategory(activity("file-change", "File change")))
+      .toBe("coding");
+    expect(activityExecutionCategory(activity("read", "Read response timeline")))
+      .toBe("tool");
+    expect(activityExecutionCategory(activity("command", "Command", {
+      kind: "command",
+    }))).toBe("command");
+    expect(activityExecutionCategory(activity("search-command", "Search repository", {
+      kind: "command",
+    }))).toBe("command");
+    expect(activityExecutionCategory(activity("failed", "Web search failed", {
+      status: "failed",
+    }))).toBe("attention");
+  });
+
+  it("uses the newest running provider action and preserves its exact label", () => {
+    const presentation = activeAgentPresentation({
+      turn: turn("running", [
+        activity("newer-array-position", "Run tests", {
+          kind: "command",
+          createdAt: "2026-08-12T12:00:05.000Z",
+        }),
+        activity("newest-time", "Search the web", {
+          createdAt: "2026-08-12T12:00:06.000Z",
+        }),
+        activity("completed-last", "Write report", {
+          status: "completed",
+          createdAt: "2026-08-12T12:00:07.000Z",
+        }),
+      ]),
+      providerLabel: "Codex · OpenAI",
+      streamingChannel: "text",
+    });
+
+    expect(presentation).toEqual({
+      phase: "searching",
+      label: "Codex · OpenAI is searching",
+      detail: "Search the web",
+      animated: true,
+    });
+  });
+
+  it("does not treat persisted reasoning as current thinking", () => {
+    expect(activeAgentPresentation({
+      turn: turn("running", [], reasoning("running")),
+      providerLabel: "Cursor",
+      streamingChannel: null,
+    }).phase).toBe("working");
+
+    expect(activeAgentPresentation({
+      turn: turn("running", [], reasoning("running")),
+      providerLabel: "Cursor",
+      streamingChannel: "reasoning",
+    }).phase).toBe("thinking");
+  });
+
+  it("distinguishes provider response output from an eventless running turn", () => {
+    expect(activeAgentPresentation({
+      turn: turn("running"),
+      providerLabel: "OpenCode",
+      streamingChannel: "text",
+    })).toMatchObject({
+      phase: "responding",
+      label: "OpenCode is responding",
+    });
+    expect(activeAgentPresentation({
+      turn: turn("running"),
+      providerLabel: "OpenCode",
+      streamingChannel: null,
+    })).toMatchObject({
+      phase: "working",
+      label: "OpenCode is working",
+    });
+  });
+
+  it("uses the latest real stream channel when reasoning and answer text coexist", () => {
+    const running = turn("running", [], reasoning("running"));
+    expect(activeAgentPresentation({
+      turn: running,
+      providerLabel: "Codex · OpenAI",
+      streamingChannel: "reasoning",
+    }).phase).toBe("thinking");
+    expect(activeAgentPresentation({
+      turn: running,
+      providerLabel: "Codex · OpenAI",
+      streamingChannel: "text",
+    }).phase).toBe("responding");
+  });
+});

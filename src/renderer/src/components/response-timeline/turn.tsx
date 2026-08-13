@@ -198,6 +198,7 @@ export function sameTurnTimelineProps(
     && (!next.turn.isActive || (
       left.streamingText === right.streamingText
       && left.streamingReasoning === right.streamingReasoning
+      && left.streamingChannel === right.streamingChannel
     ));
 }
 

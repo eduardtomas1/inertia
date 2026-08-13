@@ -27,12 +27,12 @@ function cssBlock(source: string, marker: string): string {
   return "";
 }
 
-const activeTextRule = cssBlock(
+const activePixelRule = cssBlock(
   css,
-  '[data-active-work-region][data-active-work-state="running"] .turn-working-status strong',
+  '.agent-pixel-loader[data-animated="true"] > span',
 );
 
-describe("Minimal Workstream active text signal", () => {
+describe("Minimal Workstream active pixel signal", () => {
   it("attaches the active-state hook only inside the active execution branch", () => {
     const activeBranchStart = timelineSource.indexOf("{turn.isActive ? (");
     const settledBranchStart = timelineSource.indexOf(") : (", activeBranchStart);
@@ -46,89 +46,66 @@ describe("Minimal Workstream active text signal", () => {
     expect(activeBranch).toContain(
       "data-active-work-state={turn.agentTurn.status}",
     );
+    expect(activeBranch).toContain(
+      "data-active-agent-phase={activePresentation.phase}",
+    );
+    expect(activeBranch).toContain("<AgentPixelLoader");
     expect(settledBranch).not.toContain("data-active-work-region");
+    expect(settledBranch).not.toContain("<AgentPixelLoader");
   });
 
-  it("animates working text only for queued, starting, and running work", () => {
-    for (const status of ["queued", "starting", "running"]) {
-      expect(css).toContain(
-        `[data-active-work-region][data-active-work-state="${status}"] .turn-working-status strong`,
-      );
-    }
-
-    for (const status of [
-      "waiting-for-approval",
-      "waiting-for-input",
-      "completed",
-      "failed",
-      "cancelled",
-      "interrupted",
-    ]) {
-      expect(css).not.toContain(
-        `[data-active-work-region][data-active-work-state="${status}"] .turn-working-status strong`,
-      );
-    }
-
+  it("keeps animation authority on the derived pixel state, never the label", () => {
+    expect(timelineSource).toContain("animated={activePresentation.animated}");
+    expect(timelineSource).toContain('data-animated={animated ? "true" : "false"}');
+    expect(timelineSource).toContain("Array.from({ length: 9 }");
+    expect(css).toContain('.agent-pixel-loader[data-animated="true"] > span');
+    expect(css).not.toMatch(/\.turn-working-(?:status|copy)[^{]*\{[^}]*animation:/su);
     expect(css).not.toContain(".turn-working-status::before");
     expect(css).not.toContain("active-work-tonal-wash");
   });
 
-  it("moves one restrained semantic highlight through the label", () => {
-    expect(activeTextRule).toContain("var(--active-work-text-rest)");
-    expect(activeTextRule).toContain("var(--active-work-text-highlight)");
-    expect(activeTextRule).toContain("background-clip: text");
-    expect(activeTextRule).toContain("-webkit-text-fill-color: transparent");
-    expect(activeTextRule).toContain("background-size: 180px 100%");
-    expect(activeTextRule).toContain("background-repeat: repeat-x");
-
+  it("moves one restrained shimmer through a fixed nine-pixel grid", () => {
+    expect(activePixelRule).toContain("agent-pixel-shimmer");
     const duration =
       Number(
-        activeTextRule.match(
-          /active-work-text-wave\s+(?<seconds>\d+(?:\.\d+)?)s/u,
+        activePixelRule.match(
+          /agent-pixel-shimmer\s+(?<seconds>\d+(?:\.\d+)?)s/u,
         )?.groups?.seconds,
       ) || 0;
-    const keyframes = cssBlock(css, "@keyframes active-work-text-wave");
+    const keyframes = cssBlock(css, "@keyframes agent-pixel-shimmer");
 
-    expect(duration).toBeGreaterThanOrEqual(2.4);
-    expect(duration).toBeLessThanOrEqual(3.6);
-    expect(activeTextRule).toContain("linear infinite");
-    expect(keyframes).toContain("background-position: 0 50%");
-    expect(keyframes).toContain("background-position: 180px 50%");
-    expect(`${activeTextRule}\n${keyframes}`).not.toMatch(
-      /transform:|scale|width:|opacity:/iu,
-    );
+    expect(duration).toBeGreaterThanOrEqual(1.1);
+    expect(duration).toBeLessThanOrEqual(1.8);
+    expect(activePixelRule).toContain("ease-in-out infinite");
+    expect(keyframes).toContain("opacity: 0.2");
+    expect(keyframes).toContain("opacity: 0.96");
+    expect(`${activePixelRule}\n${keyframes}`).not.toMatch(/transform:|scale:/iu);
   });
 
-  it("uses static readable text when reduced motion is requested", () => {
+  it("uses a static readable grid when reduced motion is requested", () => {
     const reducedMotion = css.slice(
       css.lastIndexOf("@media (prefers-reduced-motion: reduce)"),
     );
-    const reducedTextRule = cssBlock(
+    const reducedPixelRule = cssBlock(
       reducedMotion,
-      '[data-active-work-region][data-active-work-state="running"] .turn-working-status strong',
+      '.agent-pixel-loader[data-animated="true"] > span',
     );
 
-    expect(reducedTextRule).toContain("animation: none");
-    expect(reducedTextRule).toContain("background: none");
-    expect(reducedTextRule).toContain(
-      "-webkit-text-fill-color: currentColor",
-    );
+    expect(reducedPixelRule).toContain("animation: none");
+    expect(reducedPixelRule).toContain("opacity: 0.42");
   });
 
-  it("keeps the working label visible in forced-colors mode", () => {
+  it("keeps the grid visible in forced-colors mode", () => {
     const forcedColors = css.slice(
       css.lastIndexOf("@media (forced-colors: active)"),
     );
-    const forcedColorsTextRule = cssBlock(
+    const forcedColorsPixelRule = cssBlock(
       forcedColors,
-      '[data-active-work-region][data-active-work-state="running"] .turn-working-status strong',
+      ".agent-pixel-loader",
     );
 
-    expect(forcedColorsTextRule).toContain("color: CanvasText");
-    expect(forcedColorsTextRule).toContain("background: none");
-    expect(forcedColorsTextRule).toContain(
-      "-webkit-text-fill-color: currentColor",
-    );
+    expect(forcedColorsPixelRule).toContain("color: CanvasText");
+    expect(forcedColorsPixelRule).toContain("forced-color-adjust: auto");
   });
 
   it("keeps running glyph motion scoped to the authoritative active region", () => {

@@ -10937,6 +10937,34 @@ button.sent-attachment-open:focus-visible {
   flex: 0 1 auto;
 }
 
+.turn-working-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.turn-working-copy strong {
+  flex: 0 1 auto;
+}
+
+.turn-working-copy small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--quiet-muted);
+  font: var(--ui-font-micro)/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-working-copy small::before {
+  margin: 0 6px;
+  color: var(--execution-separator);
+  content: "·";
+}
+
 .turn-working-elapsed {
   flex: 0 0 auto;
   color: var(--quiet-muted);
@@ -10996,44 +11024,54 @@ button.sent-attachment-open:focus-visible {
   box-sizing: border-box;
 }
 
-[data-active-work-region][data-active-work-state="queued"] .turn-working-status strong,
-[data-active-work-region][data-active-work-state="starting"] .turn-working-status strong,
-[data-active-work-region][data-active-work-state="running"] .turn-working-status strong {
-  color: var(--active-work-text-rest);
-  background:
-    linear-gradient(
-      95deg,
-      var(--active-work-text-rest) 0%,
-      var(--active-work-text-rest) 28%,
-      color-mix(
-        in srgb,
-        var(--active-work-text-highlight) 45%,
-        var(--active-work-text-rest)
-      ) 40%,
-      var(--active-work-text-highlight) 50%,
-      color-mix(
-        in srgb,
-        var(--active-work-text-highlight) 45%,
-        var(--active-work-text-rest)
-      ) 60%,
-      var(--active-work-text-rest) 72%,
-      var(--active-work-text-rest) 100%
-    );
-  background-position: 0 50%;
-  background-size: 180px 100%;
-  background-repeat: repeat-x;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: active-work-text-wave 3s linear infinite;
+.agent-pixel-loader {
+  display: inline-grid;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  grid-template-columns: repeat(3, 3px);
+  grid-template-rows: repeat(3, 3px);
+  gap: 1px;
+  color: color-mix(in srgb, var(--active-work-accent) 76%, var(--quiet-secondary));
 }
 
-.app-shell[data-document-active="false"]
-  [data-active-work-region][data-active-work-state="queued"] .turn-working-status strong,
-.app-shell[data-document-active="false"]
-  [data-active-work-region][data-active-work-state="starting"] .turn-working-status strong,
-.app-shell[data-document-active="false"]
-  [data-active-work-region][data-active-work-state="running"] .turn-working-status strong {
+.agent-pixel-loader > span {
+  width: 3px;
+  height: 3px;
+  border-radius: 0.5px;
+  background: currentColor;
+  opacity: 0.24;
+}
+
+.agent-pixel-loader[data-animated="true"] > span {
+  animation: agent-pixel-shimmer 1.35s ease-in-out infinite;
+}
+
+.agent-pixel-loader[data-animated="true"] > span:nth-child(2),
+.agent-pixel-loader[data-animated="true"] > span:nth-child(4) {
+  animation-delay: 75ms;
+}
+
+.agent-pixel-loader[data-animated="true"] > span:nth-child(3),
+.agent-pixel-loader[data-animated="true"] > span:nth-child(5),
+.agent-pixel-loader[data-animated="true"] > span:nth-child(7) {
+  animation-delay: 150ms;
+}
+
+.agent-pixel-loader[data-animated="true"] > span:nth-child(6),
+.agent-pixel-loader[data-animated="true"] > span:nth-child(8) {
+  animation-delay: 225ms;
+}
+
+.agent-pixel-loader[data-animated="true"] > span:nth-child(9) {
+  animation-delay: 300ms;
+}
+
+.agent-pixel-loader[data-animated="false"] > span:nth-child(5) {
+  opacity: 0.72;
+}
+
+.app-shell[data-document-active="false"] .agent-pixel-loader > span {
   animation-play-state: paused;
 }
 
@@ -11055,13 +11093,9 @@ button.sent-attachment-open:focus-visible {
   animation-play-state: paused;
 }
 
-@keyframes active-work-text-wave {
-  from {
-    background-position: 0 50%;
-  }
-  to {
-    background-position: 180px 50%;
-  }
+@keyframes agent-pixel-shimmer {
+  0%, 58%, 100% { opacity: 0.2; }
+  24% { opacity: 0.96; }
 }
 
 .turn-execution-rail.is-settled {
@@ -12797,21 +12831,7 @@ button.sent-attachment-open:focus-visible {
     max-width: 92%;
   }
 
-  .turn-working-state {
-    flex-wrap: wrap;
-  }
-
-  .turn-working-status {
-    flex: 1 1 auto;
-  }
-
-  .turn-working-elapsed {
-    order: 3;
-    width: 100%;
-    padding-left: 0;
-  }
-
-  .turn-working-separator {
+  .turn-working-copy small {
     display: none;
   }
 
@@ -12854,6 +12874,10 @@ button.sent-attachment-open:focus-visible {
     overflow: hidden;
   }
 
+  .turn-working-copy small {
+    display: none;
+  }
+
   .turn-stop-action {
     grid-column: 2;
     grid-row: 1;
@@ -12863,6 +12887,10 @@ button.sent-attachment-open:focus-visible {
     width: auto;
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+
+  .turn-working-separator {
+    display: none;
   }
 
   .turn-activity-group {
@@ -12908,24 +12936,6 @@ button.sent-attachment-open:focus-visible {
     padding-left: 18px;
   }
 
-  .turn-working-state {
-    flex-wrap: wrap;
-  }
-
-  .turn-working-status {
-    flex: 1 1 auto;
-  }
-
-  .turn-working-elapsed {
-    order: 3;
-    width: 100%;
-    padding-left: 0;
-  }
-
-  .turn-working-separator {
-    display: none;
-  }
-
   .response-code-block > header button span,
   .turn-action span {
     display: none;
@@ -12946,12 +12956,13 @@ button.sent-attachment-open:focus-visible {
     transition: none;
   }
 
-  [data-active-work-region][data-active-work-state="queued"] .turn-working-status strong,
-  [data-active-work-region][data-active-work-state="starting"] .turn-working-status strong,
-  [data-active-work-region][data-active-work-state="running"] .turn-working-status strong {
+  .agent-pixel-loader[data-animated="true"] > span {
     animation: none;
-    background: none;
-    -webkit-text-fill-color: currentColor;
+    opacity: 0.42;
+  }
+
+  .agent-pixel-loader[data-animated="true"] > span:nth-child(5) {
+    opacity: 0.82;
   }
 
   [data-active-work-region] .turn-work-log .agent-activity.is-running svg {
@@ -14132,12 +14143,8 @@ button.sent-attachment-open:focus-visible {
     forced-color-adjust: auto;
   }
 
-  [data-active-work-region][data-active-work-state="queued"] .turn-working-status strong,
-  [data-active-work-region][data-active-work-state="starting"] .turn-working-status strong,
-  [data-active-work-region][data-active-work-state="running"] .turn-working-status strong {
+  .agent-pixel-loader {
     color: CanvasText;
-    background: none;
-    -webkit-text-fill-color: currentColor;
     forced-color-adjust: auto;
   }
 }

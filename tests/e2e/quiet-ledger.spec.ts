@@ -9,6 +9,7 @@ import {
   capturePageWebSockets,
   publishCapturedWebSocketEvent,
 } from "./support/browser-websocket-fixture";
+import { verifyAgentExecutionStateSequence } from "./support/agent-execution-states";
 import { createQuietLedgerFixture } from "./support/quiet-ledger-fixture";
 import {
   revealVirtualizedTimelineTurn,
@@ -52,6 +53,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
   const {
     active,
     activeAt,
+    activeRunningActivities,
     approval,
     approvalRequest,
     cancelled,
@@ -111,7 +113,6 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       await page.getByRole("button", { name: "Close workspace tools" }).first().click();
       await expect(workspacePanel).toBeHidden();
     }
-
     const activeTurn = page.locator(`[data-turn-id="${active.turn.id}"]`);
     await revealTurn(activeTurn, 9);
     await expect(activeTurn.locator(".turn-execution-rail.is-live")).toBeVisible();
@@ -121,22 +122,30 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(activeTurn.getByRole("button", { name: "+1 previous tool call" })).toHaveCount(2);
     await expect(activeTurn.getByRole("button", { name: "Stop Codex · OpenAI run" })).toBeVisible();
     await expect(activeTurn.locator(".turn-working-elapsed")).toHaveAttribute("aria-live", "off");
+    await expect(activeTurn.locator('[data-active-agent-phase="command"]')).toBeVisible();
+    await expect(activeTurn.locator(".agent-pixel-loader > span")).toHaveCount(9);
     await captureScenario("active-turn");
-    const workingLabel = activeTurn.locator(".turn-working-status strong");
+    const activePixel = activeTurn.locator(".agent-pixel-loader > span").first();
     expect(await page.evaluate(() =>
       window.matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(false);
-    expect(await workingLabel.evaluate((element) =>
-      getComputedStyle(element).animationName)).toBe("active-work-text-wave");
+    expect(await activePixel.evaluate((element) =>
+      getComputedStyle(element).animationName)).toBe("agent-pixel-shimmer");
     await page.emulateMedia({ reducedMotion: "reduce" });
     expect(await page.evaluate(() =>
       window.matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
-    expect(await workingLabel.evaluate((element) =>
+    expect(await activePixel.evaluate((element) =>
       getComputedStyle(element).animationName)).toBe("none");
     expect(await activeTurn.locator(".agent-activity.is-running svg")
       .evaluate((element) => getComputedStyle(element).animationName))
       .toBe("none");
     await page.emulateMedia({ reducedMotion: "no-preference" });
-
+    await verifyAgentExecutionStateSequence({
+      activeTurn, conversationId: conversation.id,
+      runId: active.turn.runId, turnId: active.turn.id,
+      runningActivities: activeRunningActivities, activeAt,
+      publish: publishFixtureEvent,
+      capture: captureElementScenario,
+    });
     await publishFixtureEvent({
       type: "agent.text",
       conversationId: conversation.id,
@@ -144,6 +153,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       turnId: active.turn.id,
       text: "The live caret stays attached to this final paragraph.",
     });
+    await expect(activeTurn.locator('[data-active-agent-phase="responding"]')).toBeVisible();
     const streamingMarkdown = activeTurn.locator(
       ".turn-commentary-row.is-streaming .response-markdown",
     );
@@ -515,12 +525,15 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(cancelledTurn.locator(".turn-settled-summary"))
       .toContainText("Stopped after 42s · 1 action");
     await expect(cancelledTurn.locator(".turn-settled-summary")).toBeVisible();
-
     const lightSettings = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
     lightSettings.updateSettings({ theme: "light" });
     lightSettings.close();
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    const lightActiveTurn = page.locator(`[data-turn-id="${active.turn.id}"]`);
+    await revealTurn(lightActiveTurn, 9);
+    await expect(lightActiveTurn.locator('[data-active-agent-phase="command"]')).toBeVisible();
+    await captureElementScenario("active-command-light", lightActiveTurn);
     const lightCompletedTurn = page.locator(`[data-turn-id="${completed.turn.id}"]`);
     await revealTurn(lightCompletedTurn, 0);
     await expect(lightCompletedTurn.locator(".turn-settled-summary")).toHaveCount(0);
@@ -533,7 +546,6 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await captureScenario("settled-history-light-1440x920");
     await revealTurn(page.locator(`[data-turn-id="${failed.turn.id}"]`), 4);
     await captureScenario("exception-history-light-1440x920");
-
     const darkSettings = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
     darkSettings.updateSettings({ theme: "dark" });
     darkSettings.close();
@@ -541,7 +553,6 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.locator(`[data-turn-id="${completed.turn.id}"] .turn-settled-summary`))
       .toHaveCount(0);
-
     await resizeWindow(760, 680);
     if (await navigation.isVisible()) {
       await page.getByRole("button", { name: "Toggle project navigation" }).click();
@@ -551,6 +562,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await captureScenario("settled-history-narrow-760x680");
     await revealTurn(activeTurn, 9);
     await expect(activeTurn.getByRole("button", { name: "Stop Codex · OpenAI run" })).toBeVisible();
+    await expect(activeTurn.locator('[data-active-agent-phase="command"]')).toBeVisible();
+    await expect(activeTurn.locator(".agent-pixel-loader > span")).toHaveCount(9);
     await expectNoViewportOverflow();
     const narrowGeometry = await activeTurn.evaluate((element) => {
       const turn = element.getBoundingClientRect();
@@ -569,6 +582,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     expect(narrowGeometry.turnWidth).toBeGreaterThan(0);
     expect(narrowGeometry.requestInside).toBe(true);
     expect(narrowGeometry.executionInside).toBe(true);
+    await captureElementScenario("active-command-narrow", activeTurn);
     await captureScenario("narrow-workspace");
 
     await revealTurn(completedTurn, 0);

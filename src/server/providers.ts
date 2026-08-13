@@ -761,7 +761,19 @@ export class ProviderManager {
     };
     const instructionForwarded = operationInput.providerId === "claude"
       && instruction !== undefined;
-    const providerResult = this.run(operationInput, callbacks);
+    let interactionError: string | undefined;
+    const rejectInteractiveCompaction = (
+      interaction: "approval" | "input",
+    ): void => {
+      if (interactionError) return;
+      interactionError = `Provider compaction requested interactive ${interaction} that a turnless operation cannot answer.`;
+      this.cancel(input.conversationId ?? input.threadId ?? "");
+    };
+    const providerResult = this.run(operationInput, {
+      ...callbacks,
+      onApproval: () => rejectInteractiveCompaction("approval"),
+      onInput: () => rejectInteractiveCompaction("input"),
+    });
     const timer = setTimeout(() => {
       this.cancel(input.conversationId ?? input.threadId ?? "");
     }, PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS);
@@ -771,8 +783,9 @@ export class ProviderManager {
       const sessionError = result.sessionId === requestedSessionId
         ? undefined
         : "The provider did not confirm compaction of the exact selected session.";
-      const status = sessionError ? "failed" as const : result.status;
-      const error = sessionError ?? result.error;
+      const operationError = interactionError ?? sessionError;
+      const status = operationError ? "failed" as const : result.status;
+      const error = operationError ?? result.error;
       const message = status !== "completed"
         ? error ?? "The provider could not compact this chat."
         : instruction && !instructionForwarded

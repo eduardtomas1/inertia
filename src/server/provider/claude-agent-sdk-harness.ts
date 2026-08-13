@@ -625,6 +625,10 @@ function startClaudeRun(
         drainTerminalSubagents = false;
         eventBudget.observe(message);
         const record = message as unknown as Record<string, unknown>;
+        const messageSessionId = stringValue(record.session_id);
+        const provesRequestedCompaction =
+          options.input.operation?.kind === "compact"
+          && messageSessionId === options.input.sessionId;
         if (typeof record.session_id === "string" && record.session_id !== sessionId) {
           sessionId = record.session_id;
           emitter.session(sessionId);
@@ -730,10 +734,14 @@ function startClaudeRun(
           continue;
         }
         if (message.type === "system" && message.subtype === "status") {
-          if (message.compact_result === "success" && !compactFailure) {
+          if (
+            provesRequestedCompaction
+            && message.compact_result === "success"
+            && !compactFailure
+          ) {
             compactSucceeded = true;
           }
-          if (message.compact_result === "failed") {
+          if (provesRequestedCompaction && message.compact_result === "failed") {
             compactSucceeded = false;
             compactFailure = message.compact_error?.trim()
               || "Claude reported that context compaction failed.";
@@ -742,7 +750,7 @@ function startClaudeRun(
         }
         if (message.type === "system" && message.subtype === "compact_boundary") {
           if (
-            options.input.operation?.kind === "compact"
+            provesRequestedCompaction
             && message.compact_metadata.trigger === "manual"
             && !compactFailure
           ) compactSucceeded = true;

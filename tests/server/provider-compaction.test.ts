@@ -273,4 +273,40 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       cleanupConfirmed: true,
     });
   });
+
+  it("does not accept a foreign Claude proof followed by a selected-session result", async () => {
+    const root = portableFixtureRoot("Claude compact foreign proof");
+    roots.push(root);
+    const manager = new ProviderManager(
+      { commands: { claude: "/fake/claude" } },
+      new AgentHarnessRegistry([createClaudeAgentSdkHarness({
+        createQuery: () => fixtureClaudeQuery(
+          (async function* (): AsyncGenerator<SDKMessage> {
+            yield {
+              ...claudeSystem("status", {
+                status: null,
+                compact_result: "success",
+              }),
+              session_id: "foreign-claude-session",
+            } as SDKMessage;
+            yield claudeSuccessResult("Ordinary selected-session result");
+          })(),
+        ),
+      })]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-compact-foreign-proof",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: CLAUDE_PROTOCOL_SESSION_ID,
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("did not confirm"),
+      cleanupConfirmed: true,
+    });
+  });
 });

@@ -1,10 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type WebSocket from "ws";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import type {
   ProviderInfo,
+  ProviderId,
   ServerEvent,
   ThreadUsageSnapshot,
 } from "../../src/shared/contracts";
@@ -18,6 +21,7 @@ import {
   CLAUDE_AGENT_SDK_CAPABILITIES,
   createClaudeAgentSdkHarness,
 } from "../../src/server/provider/claude-agent-sdk-harness";
+import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import { ConversationWorkAuthority } from "../../src/server/runtime/conversation-work-authority";
 import {
@@ -30,6 +34,12 @@ import {
   fixtureClaudeQuery,
 } from "../helpers/claude-agent-sdk-protocol";
 import { resolveNativeModelRoute } from "./model-route-fixture";
+import {
+  portableFixtureRoot,
+  portableNodeExecutable,
+  removePortableFixture,
+  writeNodeSubcommand,
+} from "../helpers/portable-provider-fixture";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const requestId = "22222222-2222-4222-8222-222222222222";
@@ -42,15 +52,17 @@ function fixture(options: {
   duoReserved?: boolean;
   reconfigured?: boolean;
   providerDefault?: boolean;
+  providerId?: ProviderId;
 } = {}) {
+  const providerId = options.providerId ?? "claude";
   const selection = nativeModelSelection({
-    providerId: "claude",
+    providerId,
     modelId: options.providerDefault ? "provider-default" : "claude-test",
     reasoningEffort: null,
   });
   const route = resolveNativeModelRoute(selection);
   const compact = vi.fn(async () => ({
-    providerId: "claude" as const,
+    providerId,
     conversationId,
     status: options.compactStatus ?? "completed",
     instructionForwarded: true,
@@ -64,7 +76,7 @@ function fixture(options: {
   const broadcast = vi.fn();
   const conversation = {
     id: conversationId,
-    providerId: "claude",
+    providerId,
     providerSessionId: options.sessionId === undefined
       ? "claude-session"
       : options.sessionId,
@@ -138,7 +150,7 @@ function fixture(options: {
     },
     enableProviders: true,
     providerInfo: () => [{
-      id: "claude",
+      id: providerId,
       canRun: true,
       statusMessage: null,
       models: [],
@@ -157,6 +169,11 @@ function fixture(options: {
 }
 
 describe("conversation compaction command", () => {
+  const roots: string[] = [];
+  afterEach(async () => await Promise.all(
+    roots.splice(0).map(removePortableFixture),
+  ));
+
   it("launches the real provider compaction boundary without inventing a durable turn", async () => {
     const { dependencies, send } = fixture();
     let launches = 0;
@@ -197,6 +214,72 @@ describe("conversation compaction command", () => {
       type: "request.result",
       requestId,
     }));
+  });
+
+  it("cancels an unanswerable Cursor approval and releases checkout authority", async () => {
+    const root = portableFixtureRoot("Cursor compact approval");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "cursor");
+    writeNodeSubcommand(root, "acp", `
+const fs = require("node:fs");
+const readline = require("node:readline");
+const messages = [];
+let promptId;
+let promptSettled = false;
+const capture = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(messages));
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const finishPrompt = () => {
+  if (promptSettled || promptId === undefined) return;
+  promptSettled = true;
+  send({ jsonrpc: "2.0", id: promptId, result: { stopReason: "cancelled" } });
+};
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  messages.push(message);
+  capture();
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/load") {
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: message.params.sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: [{ name: "summarize", description: "Summarize" }] } } });
+    return send({ jsonrpc: "2.0", id: message.id, result: { modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  }
+  if (message.method === "session/prompt") {
+    promptId = message.id;
+    return send({ jsonrpc: "2.0", id: 900, method: "session/request_permission", params: { sessionId: message.params.sessionId, toolCall: { toolCallId: "compact-tool", title: "Run summarizer", kind: "execute", status: "pending", rawInput: { command: "summarize" } }, options: [{ optionId: "allow", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject once", kind: "reject_once" }] } });
+  }
+  if (message.id === 900 || message.method === "session/cancel") finishPrompt();
+});
+`);
+    const { dependencies, release, send } = fixture({
+      providerId: "cursor",
+      providerDefault: true,
+    });
+    const manager = new ProviderManager(
+      { commands: { cursor: command }, cancelGraceMs: 100 },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    dependencies.providers = manager;
+    dependencies.store.conversationPath = vi.fn(() => root);
+    const handler = createConversationCompactionCommandHandler(dependencies);
+
+    await expect(handler({} as WebSocket, {
+      type: "conversation.compact",
+      requestId,
+      payload: { conversationId },
+    })).rejects.toThrow("interactive approval");
+
+    const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
+      id?: number;
+      method?: string;
+      result?: { outcome?: { outcome?: string } };
+    }>;
+    expect(messages.some(({ method }) => method === "session/prompt")).toBe(true);
+    expect(messages.some(({ id, result }) =>
+      id === 900 && result?.outcome?.outcome === "cancelled"
+    )).toBe(true);
+    expect(manager.isRunning(conversationId)).toBe(false);
+    expect(release).toHaveBeenCalledWith(conversationId);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("rejects a provider that compacts a different resumed session", async () => {

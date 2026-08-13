@@ -193,11 +193,16 @@ describe("response Markdown", () => {
       '```java file="src/hash#part.java"',
       "class Hash {}",
       "```",
+      "",
+      '```java file="Name:Part.java"',
+      "class Colon {}",
+      "```",
     ].join("\n"));
     expect(html).toContain("src/why?.java");
     expect(html).toContain("src/hash#part.java");
     expect(html).toContain('title="src/why?.java"');
     expect(html).toContain('title="src/hash#part.java"');
+    expect(html).toContain('title="Name:Part.java"');
     expect(resolveResponseLink(
       "/work/project",
       "src/why?.java",
@@ -216,6 +221,15 @@ describe("response Markdown", () => {
       relativePath: "src/hash#part.java",
       action: "reveal",
       location: { startLine: 7, endLine: 7 },
+    });
+    expect(resolveResponseLink(
+      "/work/project",
+      "Name:Part.java",
+      "file",
+    )).toEqual({
+      kind: "project",
+      relativePath: "Name:Part.java",
+      action: "reveal",
     });
   });
 });

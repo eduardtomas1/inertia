@@ -179,7 +179,7 @@ export function resolveResponseLink(
   const windowsAbsolute = /^[a-z]:[\\/]/iu.test(href);
   const uncAbsolute = /^(?:\\\\|\/\/)/u.test(href);
   const scheme = /^[a-z][a-z0-9+.-]*:/iu.exec(href)?.[0] ?? null;
-  if (!windowsAbsolute && !uncAbsolute && scheme) {
+  if (syntax === "markdown" && !windowsAbsolute && !uncAbsolute && scheme) {
     if (/^https?:$/iu.test(scheme)) {
       try {
         const url = new URL(href);

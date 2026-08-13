@@ -76,6 +76,10 @@ describe("ResponseMarkdown project files", () => {
           '```java file="src/hash#part.java"',
           "class Hash {}",
           "```",
+          "",
+          '```java file="Name:Part.java"',
+          "class Colon {}",
+          "```",
         ].join("\n")}
         projectRoot="/workspace"
         projectId="11111111-1111-4111-8111-111111111111"
@@ -86,8 +90,10 @@ describe("ResponseMarkdown project files", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "src/why?.java" }));
     fireEvent.click(screen.getByRole("button", { name: "src/hash#part.java" }));
+    fireEvent.click(screen.getByRole("button", { name: "Name:Part.java" }));
     expect(onOpenProjectFile).toHaveBeenNthCalledWith(1, "src/why?.java");
     expect(onOpenProjectFile).toHaveBeenNthCalledWith(2, "src/hash#part.java");
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(3, "Name:Part.java");
   });
 
   it("preserves Windows drive and top-level source links through Markdown", () => {

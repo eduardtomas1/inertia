@@ -221,6 +221,9 @@ describe("agent loading and trace DOM", () => {
 
     const historical = screen.getByLabelText("Agent update");
     expect(historical).not.toHaveClass("is-streaming");
+    expect(historical).not.toHaveAttribute("role", "status");
+    expect(historical).not.toHaveAttribute("aria-live");
+    expect(historical.querySelector("[aria-live]")).toBeNull();
     expect(historical.querySelector(".response-markdown"))
       .not.toHaveClass("is-streaming");
     expect(screen.queryByLabelText("Live agent update")).not

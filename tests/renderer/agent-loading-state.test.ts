@@ -97,8 +97,12 @@ describe("truthful active agent presentation", () => {
       ["search", "Search release documentation"],
       ["claude-web-search", "WebSearch"],
       ["claude-web-fetch", "WebFetch"],
+      ["camel-web-search", "webSearch"],
+      ["camel-web-fetch", "webFetch"],
       ["snake-web-search", "web_search"],
       ["snake-web-fetch", "web_fetch"],
+      ["kebab-web-search", "web-search"],
+      ["kebab-web-fetch", "web-fetch"],
     ] as const) {
       expect(activityExecutionCategory(activity(id, title)))
         .toBe("searching");
@@ -117,6 +121,14 @@ describe("truthful active agent presentation", () => {
         .toBe("coding");
     }
     expect(activityExecutionCategory(activity("ordinary-web", "Build web app")))
+      .toBe("tool");
+    expect(activityExecutionCategory(activity("ordinary-config", "Web config")))
+      .toBe("tool");
+    expect(activityExecutionCategory(activity(
+      "ordinary-results",
+      "WebSearch results",
+    ))).toBe("tool");
+    expect(activityExecutionCategory(activity("ordinary-fetch", "Fetch website")))
       .toBe("tool");
     expect(activityExecutionCategory(activity("ordinary-write", "Write to stdin")))
       .toBe("tool");

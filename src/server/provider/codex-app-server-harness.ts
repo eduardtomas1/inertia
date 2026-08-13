@@ -50,6 +50,18 @@ export const CODEX_APP_SERVER_HARNESS_CAPABILITIES = {
   },
 } as const satisfies CodexAppServerHarnessCapabilities;
 
+function codexServiceTier(
+  input: AgentHarnessStartOptions["input"],
+): "priority" | null | undefined {
+  const fastMode = input.modelSelection.providerOptions.fastMode;
+  if (fastMode !== undefined && fastMode !== "priority") {
+    throw new Error("Codex received an invalid Fast mode service tier.");
+  }
+  return input.supportedFastMode === "priority"
+    ? fastMode === "priority" ? fastMode : null
+    : undefined;
+}
+
 export function createCodexAppServerHarness(): AgentHarness {
   return {
     id: "codex-app-server",
@@ -84,13 +96,7 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
 
   let codexRun: ReturnType<typeof startCodexAppServerRun>;
   try {
-    const fastMode = options.input.modelSelection.providerOptions.fastMode;
-    if (fastMode !== undefined && fastMode !== "priority") {
-      throw new Error("Codex received an invalid Fast mode service tier.");
-    }
-    const serviceTier = options.input.supportedFastMode === "priority"
-      ? fastMode === "priority" ? fastMode : null
-      : undefined;
+    const serviceTier = codexServiceTier(options.input);
     if (
       options.harnessConfiguration
       && options.harnessConfiguration.kind !== "codex-responses"
@@ -281,6 +287,7 @@ function startCodexCompaction(
         environment: options.environment,
         modelProvider: options.harnessConfiguration,
       });
+      const serviceTier = codexServiceTier(options.input);
       let resolveCompaction!: () => void;
       let compactionInitiated = false;
       let compactionInitiatedAtMs: number | null = null;
@@ -352,6 +359,7 @@ function startCodexCompaction(
           ...(options.input.reasoningEffort
             ? { effort: options.input.reasoningEffort }
             : {}),
+          ...(serviceTier !== undefined ? { serviceTier } : {}),
           ...(modelProvider ? {
             modelProvider: modelProvider.providerId,
             config: {
@@ -379,6 +387,18 @@ function startCodexCompaction(
         if (resumedThreadId !== sessionId) {
           throw new Error(
             "Codex did not resume the exact thread selected for compaction.",
+          );
+        }
+        if (
+          serviceTier !== undefined
+          && (
+            serviceTier === null
+              ? resumed.serviceTier !== null
+              : boundedText(resumed.serviceTier, 40) !== serviceTier
+          )
+        ) {
+          throw new Error(
+            "Codex did not confirm the requested response service tier for compaction.",
           );
         }
         emitter.status("running");

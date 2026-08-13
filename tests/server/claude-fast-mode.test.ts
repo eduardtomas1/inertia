@@ -35,17 +35,20 @@ describe.sequential("Claude provider-native Fast mode", () => {
     fastModeState: "on" | "off",
     capture: (options: ClaudeOptions | undefined) => void = () => undefined,
     disabledReason: string | null = null,
+    sessionId?: string,
   ): ProviderManager {
     const harness = createClaudeAgentSdkHarness({
       createQuery: ({ options }) => {
         capture(options);
         return fixtureClaudeQuery(
           (async function* (): AsyncGenerator<SDKMessage> {
-            yield claudeSystem("init", {
+            const init = claudeSystem("init", {
               fast_mode_state: fastModeState,
               fast_mode_disabled_reason: disabledReason,
             });
-            yield claudeSuccessResult("Provider response", "completed");
+            const result = claudeSuccessResult("Provider response", "completed");
+            yield sessionId ? { ...init, session_id: sessionId } as SDKMessage : init;
+            yield sessionId ? { ...result, session_id: sessionId } as SDKMessage : result;
           })(),
         );
       },
@@ -150,7 +153,7 @@ describe.sequential("Claude provider-native Fast mode", () => {
     let capturedOptions: ClaudeOptions | undefined;
     const manager = managerFor("off", (options) => {
       capturedOptions = options;
-    });
+    }, null, "claude-fast-session");
 
     await expect(manager.run({
       ...input(root),
@@ -170,7 +173,7 @@ describe.sequential("Claude provider-native Fast mode", () => {
     let capturedOptions: ClaudeOptions | undefined;
     const manager = managerFor("off", (options) => {
       capturedOptions = options;
-    });
+    }, null, "claude-standard-session");
 
     await expect(manager.run({
       ...input(root),

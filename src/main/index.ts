@@ -1,5 +1,5 @@
 import { constants, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -49,8 +49,10 @@ import {
   type AttachmentStorageReservation,
 } from "./attachment-registry.js";
 import { registerAttachmentLifecycleIpc } from "./attachment-ipc.js";
+import { conversationAttachmentStoreRunner } from "./conversation-attachment-store-desktop-runner.js";
 import {
   closeConversationAttachmentAccess,
+  conversationAttachmentStoreAuthority,
   type ConversationAttachmentAccess,
   openPdfAttachment,
   openConversationAttachments,
@@ -72,6 +74,8 @@ import { stopRuntimeAndPrivateConnect } from "./runtime-shutdown-coordination.js
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
+import { packageSmokeEnvironment } from "./package-smoke-environment.js";
+import { waitForRequestedPackageSmokeResults } from "./package-smoke-results.js";
 import {
   activateThreadNotification,
   waitForThreadNotificationWindowLoad,
@@ -117,7 +121,6 @@ const IPC = {
   clearBackendCredential: "inertia:clear-backend-credential",
   getBackendCredentialState: "inertia:get-backend-credential-state",
 } as const;
-
 const APP_SCHEME = "inertia";
 const APP_HOST = "bundle";
 protocol.registerSchemesAsPrivileged([
@@ -143,29 +146,6 @@ let credentialVault: CredentialVault | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
 let packageSmokeFilePath: string | null = null;
-const PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS = 47_000;
-
-async function waitForPackageSmokePdfResult(path: string): Promise<void> {
-  const deadline = Date.now() + PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (existsSync(path)) {
-      const value = JSON.parse(await readFile(path, "utf8")) as unknown;
-      if (
-        typeof value === "object"
-        && value !== null
-        && "ok" in value
-        && typeof value.ok === "boolean"
-        && (
-          (value.ok && "content" in value && typeof value.content === "string")
-          || (!value.ok && "message" in value && typeof value.message === "string")
-        )
-      ) return;
-      throw new Error("The packaged PDF smoke receipt is invalid.");
-    }
-    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 50));
-  }
-  throw new Error("The packaged PDF smoke receipt was not published before its deadline.");
-}
 const previewBroker = new PreviewBroker({
   getWindow: () => mainWindow,
   openExternal: async (url) => shell.openExternal(url),
@@ -965,7 +945,11 @@ async function bootstrap(): Promise<void> {
   const dataDirectory = runtimeBootstrap.runtimeDataPath(process.env.INERTIA_DATA_DIR, app.getPath("userData"));
   runtimeDataDirectory = dataDirectory;
   const bootstrapSafety = runtimeBootstrap.prepareRuntimeBootstrapSafety(dataDirectory);
-  conversationAttachments = openConversationAttachments(dataDirectory);
+  conversationAttachments = openConversationAttachments(
+    dataDirectory,
+    conversationAttachmentStoreRunner,
+  );
+  const retainedConversationAttachments = conversationAttachments;
   const defaultWorkspacePath = runtimeBootstrap.runtimeWorkspacePath(process.env.INERTIA_WORKSPACE_DIR, app.getPath("home"));
   credentialVault = new CredentialVault(
     new ElectronSafeStorageBackend(safeStorage),
@@ -978,50 +962,34 @@ async function bootstrap(): Promise<void> {
   // Paint the secure renderer while private attachment storage is reconciled.
   // The renderer can show its bounded starting state until the runtime-ready
   // signal arrives; orphan cleanup no longer blocks the first window.
-  const [, , , attachmentStorage] = await Promise.all([
+  const [, , , attachmentStorage, conversationAttachmentStore] = await Promise.all([
     createWindow(),
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
     createAttachmentStorageSession(attachmentStorageRoot(), {
       preserveExisting: bootstrapSafety.preserveAttachments,
     }),
-    conversationAttachments,
+    retainedConversationAttachments,
   ]);
   attachmentStorageDirectory = attachmentStorage.directory;
   const orphanReservation = attachmentStorage.reservation;
   attachmentReservation = orphanReservation;
 
-  packageSmokeFilePath = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_PACKAGE_SMOKE_FILE === "string"
-    && process.env.INERTIA_PACKAGE_SMOKE_FILE.length <= 4096
-    && !process.env.INERTIA_PACKAGE_SMOKE_FILE.includes("\0")
-    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_FILE)
-    ? process.env.INERTIA_PACKAGE_SMOKE_FILE
-    : null;
-  const packageSmokeCodexExecutable = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED === "string"
-    && process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED.length <= 4096
-    && !process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED.includes("\0")
-    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED)
-    ? process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED
-    : null;
-  const packageSmokePdfInput = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT === "string"
-    && process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT.length <= 4096
-    && !process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT.includes("\0")
-    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT)
-    ? process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT
-    : null;
-  const packageSmokePdfResult = process.env.NODE_ENV === "test"
-    && typeof process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT === "string"
-    && process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT.length <= 4096
-    && !process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT.includes("\0")
-    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT)
-    ? process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT
-    : null;
+  const packageSmoke = packageSmokeEnvironment();
+  packageSmokeFilePath = packageSmoke.marker;
+  const {
+    codexExecutable: packageSmokeCodexExecutable,
+    pdfInput: packageSmokePdfInput,
+    pdfResult: packageSmokePdfResult,
+    imageInput: packageSmokeImageInput,
+    imageResult: packageSmokeImageResult,
+  } = packageSmoke;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
     systemBootId: bootstrapSafety.systemBootId,
+    conversationAttachmentStoreRunner,
+    conversationAttachmentStoreAuthority:
+      await conversationAttachmentStoreAuthority(conversationAttachmentStore),
     attachmentBroker: {
       resolve: (attachmentId, handoffId, signal) =>
         attachmentRegistry().resolveForRuntime(
@@ -1061,6 +1029,14 @@ async function bootstrap(): Promise<void> {
             packageSmokePdf: {
               inputPath: packageSmokePdfInput,
               resultPath: packageSmokePdfResult,
+            },
+          }
+        : {}),
+      ...(packageSmokeImageInput && packageSmokeImageResult
+        ? {
+            packageSmokeImage: {
+              inputPath: packageSmokeImageInput,
+              resultPath: packageSmokeImageResult,
             },
           }
         : {}),
@@ -1110,9 +1086,10 @@ async function bootstrap(): Promise<void> {
               resolveWait,
               packageSmokeCodexExecutable ? 10_000 : 100,
             )),
-            packageSmokePdfResult
-              ? waitForPackageSmokePdfResult(packageSmokePdfResult)
-              : Promise.resolve(),
+            waitForRequestedPackageSmokeResults({
+              pdf: packageSmokePdfResult,
+              image: packageSmokeImageResult,
+            }),
           ]);
         }).catch(() => undefined).finally(() => app.quit());
       }

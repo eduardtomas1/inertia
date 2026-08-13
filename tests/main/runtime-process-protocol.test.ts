@@ -28,6 +28,53 @@ const runtimeGenerationId = "33333333-3333-4333-8333-333333333333:1";
 const systemBootId = "test:44444444-4444-4444-8444-444444444444";
 
 describe("runtime process protocol", () => {
+  it("bounds and correlates conversation attachment store messages", () => {
+    const requestId = crypto.randomUUID();
+    const request = {
+      type: "runtime.conversation-attachment-store-request" as const,
+      requestId,
+      encodedOperation: JSON.stringify({ operation: "remove" }),
+    };
+    expect(parseRuntimeWorkerEvent(request)).toEqual(request);
+    expect(parseRuntimeWorkerEvent({
+      ...request,
+      encodedOperation: "x".repeat(16 * 1024 * 1024 + 1),
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.conversation-attachment-store-cancel",
+      requestId,
+    })).toEqual({
+      type: "runtime.conversation-attachment-store-cancel",
+      requestId,
+    });
+
+    const result = {
+      type: "runtime.conversation-attachment-store-result" as const,
+      requestId,
+      ok: true as const,
+      shutdownConfirmed: true as const,
+      encodedReceipt: null,
+    };
+    expect(parseRuntimeWorkerCommand(result)).toEqual(result);
+    expect(parseRuntimeWorkerCommand({
+      ...result,
+      shutdownConfirmed: false,
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.conversation-attachment-store-result",
+      requestId,
+      ok: false,
+      shutdownConfirmed: false,
+      message: "Utility shutdown is unconfirmed.",
+    })).toEqual({
+      type: "runtime.conversation-attachment-store-result",
+      requestId,
+      ok: false,
+      shutdownConfirmed: false,
+      message: "Utility shutdown is unconfirmed.",
+    });
+  });
+
   it("accepts only strict correlated Private Connect requests and responses", () => {
     const requestId = crypto.randomUUID();
     const subject = {

@@ -113,6 +113,53 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
   });
 
+  it.each([
+    ["item whitespace", "compact-proof ", "compact-proof", "compact-turn", "compact-turn"],
+    ["turn whitespace", "compact-proof", "compact-proof", "compact-turn ", "compact-turn"],
+    ["overlength item", "a".repeat(513), "a".repeat(513), "compact-turn", "compact-turn"],
+    ["overlength turn", "compact-proof", "compact-proof", "b".repeat(513), "b".repeat(513)],
+  ])("does not correlate normalized Codex lifecycle IDs (%s)", async (
+    _label,
+    startedItemId,
+    completedItemId,
+    startedTurnId,
+    completedTurnId,
+  ) => {
+    const root = portableFixtureRoot(`Codex compact invalid lifecycle ${_label}`);
+    roots.push(root);
+    const command = portableNodeExecutable(root, "codex");
+    writeNodeSubcommand(root, "app-server", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fixture" } });
+  if (message.method === "initialized") return;
+  if (message.method === "thread/resume") return send({ id: message.id, result: { thread: { id: message.params.threadId } } });
+  if (message.method === "thread/compact/start") {
+    send({ id: message.id, result: {} });
+    send({ method: "item/started", params: { threadId: message.params.threadId, turnId: ${JSON.stringify(startedTurnId)}, startedAtMs: Date.now(), item: { id: ${JSON.stringify(startedItemId)}, type: "contextCompaction" } } });
+    send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: ${JSON.stringify(completedTurnId)}, completedAtMs: Date.now(), item: { id: ${JSON.stringify(completedItemId)}, type: "contextCompaction" } } });
+    return setTimeout(() => process.exit(0), 10);
+  }
+});
+`);
+    const manager = new ProviderManager({ commands: { codex: command } });
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: `codex-compact-invalid-lifecycle-${_label}`,
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-existing",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("early"),
+    });
+  });
+
   it("does not accept a same-thread Codex completion without its post-request start", async () => {
     const root = portableFixtureRoot("Codex compact unstarted item");
     roots.push(root);

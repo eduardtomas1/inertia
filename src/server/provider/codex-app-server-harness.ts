@@ -303,8 +303,8 @@ function startCodexCompaction(
           if (params.threadId !== sessionId) return;
           const item = objectValue(params.item);
           if (item?.type !== "contextCompaction") return;
-          const itemId = boundedText(item.id, 512);
-          const turnId = boundedText(params.turnId, 512);
+          const itemId = exactCodexLifecycleId(item.id);
+          const turnId = exactCodexLifecycleId(params.turnId);
           if (!itemId || !turnId || compactionInitiatedAtMs === null) return;
           if (method === "item/started") {
             const startedAtMs = params.startedAtMs;
@@ -432,6 +432,16 @@ function startCodexCompaction(
     },
     extension: inactiveCodexExtension(),
   };
+}
+
+function exactCodexLifecycleId(value: unknown): string | null {
+  if (
+    typeof value !== "string"
+    || !value.trim()
+    || value.length > 512
+    || value.includes("\0")
+  ) return null;
+  return value;
 }
 
 function inactiveCodexExtension(): AgentHarnessRun["extension"] {

@@ -5,6 +5,7 @@ import {
   PROMPT_STASH_STORAGE_KEY,
   addPromptStashEntry,
   advanceRecurringPrompt,
+  promptStashRestoreBlockedReason,
   promptStashRouteMatches,
   persistPromptStashUpdate,
   readPromptStash,
@@ -13,10 +14,11 @@ import {
   type PromptStashEntry,
   writePromptStash,
 } from "../../src/renderer/src/utils/promptStash";
+import { nativeModelSelection } from "../../src/shared/model-routing";
 
 const route = {
   harnessId: "codex-app-server",
-  backendProfileId: "native:codex:app-server",
+  backendProfileId: "builtin:openai",
   modelId: "gpt-5.6-sol",
   reasoningEffort: "xhigh",
 } as const;
@@ -49,6 +51,81 @@ describe("bounded prompt stash", () => {
       { ...route, reasoningEffort: "high" },
       entries[0]!.route,
     )).toBe(false);
+    expect(promptStashRouteMatches(
+      { ...route, fastMode: true },
+      entries[0]!.route,
+    )).toBe(false);
+  });
+
+  it("preserves Fast mode across stash storage and treats older entries as Standard", () => {
+    const fastSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: route.modelId,
+      reasoningEffort: route.reasoningEffort,
+      providerOptions: { fastMode: "priority" },
+    });
+    const entries = addPromptStashEntry(
+      [],
+      "Keep the fast route.",
+      fastSelection,
+      { id: "fast-stash", now: "2026-07-29T10:00:00.000Z" },
+    );
+    expect(entries[0]?.route.fastMode).toBe(true);
+    expect(promptStashRouteMatches(fastSelection, entries[0]!.route))
+      .toBe(true);
+
+    const oldStorage = memoryStorage(JSON.stringify({
+      version: 1,
+      entries: [{
+        id: "old-standard",
+        content: "Old route",
+        createdAt: "2026-07-29T10:00:00.000Z",
+        route,
+      }],
+    }));
+    expect(readPromptStash(oldStorage)[0]?.route.fastMode).toBeUndefined();
+    expect(promptStashRestoreBlockedReason(
+      fastSelection,
+      { ...route, fastMode: false },
+    )).toBe(
+      "Use gpt-5.6-sol · xhigh · Standard speed to restore",
+    );
+    expect(promptStashRestoreBlockedReason(
+      fastSelection,
+      route,
+    )).toBe(
+      "Use gpt-5.6-sol · xhigh · Standard speed to restore",
+    );
+  });
+
+  it("omits invented speed identity on unsupported routes", () => {
+    const cursorSelection = nativeModelSelection({
+      providerId: "cursor",
+      modelId: "cursor-auto",
+      providerOptions: { fastMode: "priority" },
+    });
+    const entries = addPromptStashEntry(
+      [],
+      "Keep the real route.",
+      cursorSelection,
+      { id: "cursor-stash", now: "2026-07-29T10:00:00.000Z" },
+    );
+    expect(entries[0]?.route.fastMode).toBeUndefined();
+    expect(promptStashRestoreBlockedReason(
+      cursorSelection,
+      entries[0]!.route,
+    )).not.toContain("speed");
+
+    const invalidStorage = memoryStorage(JSON.stringify({
+      version: 1,
+      entries: [{
+        id: "false-fast",
+        content: "Invalid route",
+        createdAt: "2026-07-29T10:00:00.000Z",
+        route: { ...entries[0]!.route, fastMode: true },
+      }],
+    }));
+    expect(readPromptStash(invalidStorage)).toEqual([]);
   });
 
   it("keeps only the newest bounded set and ignores malformed storage", () => {

@@ -21,6 +21,10 @@ import type {
   UsageDisplayMode,
 } from "@shared/contracts";
 import { MAX_CHAT_ATTACHMENTS } from "@shared/attachments";
+import {
+  modelSelectionUsesFastMode,
+  routeSupportsNativeFastModeIdentity,
+} from "../../../../shared/model-routing";
 import type {
   ComposerFollowUpState,
   ComposerPrimaryActionState,
@@ -35,7 +39,6 @@ import { ModelChooser } from "../ModelChooser";
 import { IconButton, LoadingMark } from "../ui";
 import { UsageIndicator } from "../UsageIndicator";
 import { menuId } from "./config";
-import { ComposerMoreMenu } from "./ComposerMoreMenu";
 import {
   ComposerSettings,
   type ComposerSettingsModel,
@@ -52,6 +55,9 @@ const PromptPresetMenu = lazy(async () => ({
 }));
 const ComposerSkillsMenu = lazy(async () => ({
   default: (await import("./ComposerSkillsMenu")).ComposerSkillsMenu,
+}));
+const ComposerMoreMenu = lazy(async () => ({
+  default: (await import("./ComposerMoreMenu")).ComposerMoreMenu,
 }));
 
 export interface ComposerToolbarProps {
@@ -90,7 +96,9 @@ export interface ComposerToolbarProps {
   selectedModel: ComposerSettingsModel | undefined;
   selectedReasoning: string;
   reasoningLabel: string;
+  selectedFastMode: boolean;
   onUpdateReasoningEffort: (reasoningEffort: string) => Promise<void>;
+  onUpdateFastMode: (enabled: boolean) => Promise<void>;
   conversation: Conversation;
   onUpdateConversation: (
     update: Partial<Pick<
@@ -147,7 +155,9 @@ export function ComposerToolbar({
   selectedModel,
   selectedReasoning,
   reasoningLabel,
+  selectedFastMode,
   onUpdateReasoningEffort,
+  onUpdateFastMode,
   conversation,
   onUpdateConversation,
   conversationUpdatePending,
@@ -196,6 +206,16 @@ export function ComposerToolbar({
               backendProfileId: conversation.modelSelection.backendProfileId,
               modelId: conversation.modelSelection.modelId,
               reasoningEffort: conversation.modelSelection.reasoningEffort,
+              ...((selectedModel?.fastMode || selectedFastMode)
+                && routeSupportsNativeFastModeIdentity(
+                  conversation.modelSelection,
+                )
+                ? {
+                    fastMode: modelSelectionUsesFastMode(
+                      conversation.modelSelection,
+                    ),
+                  }
+                : {}),
             }}
             menuController={menuController}
             onApply={onApplyPromptPreset}
@@ -304,28 +324,34 @@ export function ComposerToolbar({
           selectedModel={selectedModel}
           selectedReasoning={selectedReasoning}
           reasoningLabel={reasoningLabel}
+          selectedFastMode={selectedFastMode}
           conversation={conversation}
           disabled={disabled}
           running={running}
           menuController={menuController}
           onUpdateReasoningEffort={onUpdateReasoningEffort}
+          onUpdateFastMode={onUpdateFastMode}
           onUpdateConversation={onUpdateConversation}
           conversationUpdatePending={conversationUpdatePending}
         />
-        <ComposerMoreMenu
-          actions={actions}
-          selectedModel={selectedModel}
-          selectedReasoning={selectedReasoning}
-          reasoningLabel={reasoningLabel}
-          conversation={conversation}
-          disabled={disabled}
-          running={running}
-          menuController={menuController}
-          onRunAction={onRunAction}
-          onUpdateReasoningEffort={onUpdateReasoningEffort}
-          onUpdateConversation={onUpdateConversation}
-          conversationUpdatePending={conversationUpdatePending}
-        />
+        <Suspense fallback={null}>
+          <ComposerMoreMenu
+            actions={actions}
+            selectedModel={selectedModel}
+            selectedReasoning={selectedReasoning}
+            reasoningLabel={reasoningLabel}
+            selectedFastMode={selectedFastMode}
+            conversation={conversation}
+            disabled={disabled}
+            running={running}
+            menuController={menuController}
+            onRunAction={onRunAction}
+            onUpdateReasoningEffort={onUpdateReasoningEffort}
+            onUpdateFastMode={onUpdateFastMode}
+            onUpdateConversation={onUpdateConversation}
+            conversationUpdatePending={conversationUpdatePending}
+          />
+        </Suspense>
         {selectedProvider && (
           <UsageIndicator
             usage={usage}

@@ -131,7 +131,7 @@ export function createIsolatedReviewCommandHandler(
             projectId: conversation.projectId,
             conversationId: conversation.id,
             owner: socket,
-            selection: isolatedRunSelection(conversation),
+            selection: isolatedRunSelection(conversation, null, provider),
             request: {
               visibleContent: assembled.visibleContent,
               executionPrompt: assembled.executionPrompt,
@@ -449,6 +449,7 @@ export function createIsolatedReviewCommandHandler(
             selection: isolatedRunSelection(
               conversation,
               selectedReviewModel,
+              provider,
             ),
             request: {
               visibleContent: null,

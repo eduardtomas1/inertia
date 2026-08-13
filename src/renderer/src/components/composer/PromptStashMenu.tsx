@@ -136,6 +136,9 @@ export function PromptStashMenu({
                             {entry.route.reasoningEffort
                               ? ` · ${entry.route.reasoningEffort}`
                               : ""}
+                            {entry.route.fastMode === undefined
+                              ? ""
+                              : ` · ${entry.route.fastMode ? "Fast" : "Standard"}`}
                             {entry.recurrence
                               ? ` · repeats ${entry.recurrence}${recurrenceDue ? " · due" : ""}`
                               : ""}

@@ -1,6 +1,7 @@
 import {
   Brain,
   ChevronDown,
+  ChevronRight,
   Hammer,
   ListChecks,
   ShieldCheck,
@@ -13,7 +14,9 @@ import type {
 import {
   accessOptions,
   menuId,
+  RESPONSE_SPEED_LABEL,
 } from "./config";
+import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";
 import type { ComposerMenuController } from "./useComposerMenus";
 
 export interface ComposerSettingsModel {
@@ -23,17 +26,25 @@ export interface ComposerSettingsModel {
     description: string;
   }>;
   defaultReasoningEffort: string;
+  fastMode?: {
+    providerValue: string;
+    label: string;
+    description: string;
+    isDefault: boolean;
+  } | null;
 }
 
 export interface ComposerSettingsProps {
   selectedModel: ComposerSettingsModel | undefined;
   selectedReasoning: string;
   reasoningLabel: string;
+  selectedFastMode: boolean;
   conversation: Conversation;
   disabled: boolean;
   running: boolean;
   menuController: ComposerMenuController;
   onUpdateReasoningEffort: (reasoningEffort: string) => Promise<void>;
+  onUpdateFastMode: (enabled: boolean) => Promise<void>;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -47,11 +58,13 @@ export function ComposerSettings({
   selectedModel,
   selectedReasoning,
   reasoningLabel,
+  selectedFastMode,
   conversation,
   disabled,
   running,
   menuController,
   onUpdateReasoningEffort,
+  onUpdateFastMode,
   onUpdateConversation,
   conversationUpdatePending,
 }: ComposerSettingsProps): React.JSX.Element {
@@ -70,6 +83,11 @@ export function ComposerSettings({
   const ModeIcon = conversation.interactionMode === "build"
     ? Hammer
     : ListChecks;
+  const fastMode = selectedModel?.fastMode ?? null;
+  const showResponseSpeed = fastMode !== null || selectedFastMode;
+  const responseSpeedLabel = selectedFastMode
+    ? "Fast"
+    : "Standard";
 
   return (
     <div
@@ -147,6 +165,59 @@ export function ComposerSettings({
                   )}
                 </button>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+      {showResponseSpeed && (
+        <div className="popover-anchor composer-setting-control composer-speed-control">
+          <button
+            ref={(node) => setMenuTrigger("speed", node)}
+            type="button"
+            className={clsx(
+              "composer-pill composer-setting-trigger",
+              menu === "speed" && "is-active",
+            )}
+            aria-label={`Choose response speed. Current speed: ${responseSpeedLabel}.`}
+            aria-haspopup="menu"
+            aria-controls={menuId("speed")}
+            aria-expanded={menu === "speed"}
+            disabled={disabled || running || conversationUpdatePending}
+            data-composer-setting="speed"
+            onClick={() => toggleMenu("speed")}
+            onKeyDown={(event) =>
+              handleComposerMenuTriggerKeyDown("speed", event)}
+          >
+            <ChevronRight
+              className="composer-setting-icon"
+              size={13}
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <span className="composer-setting-value">{responseSpeedLabel}</span>
+            <ChevronDown
+              className="composer-setting-chevron"
+              size={11}
+              aria-hidden="true"
+            />
+          </button>
+          {menu === "speed" && (
+            <div
+              ref={(node) => setMenuPopover("speed", node)}
+              id={menuId("speed")}
+              className="composer-popover composer-setting-popover option-popover response-speed-popover"
+              role="menu"
+              aria-label={RESPONSE_SPEED_LABEL}
+              onKeyDown={handleComposerMenuNavigation}
+            >
+              <div className="popover-title">{RESPONSE_SPEED_LABEL}</div>
+              <ComposerResponseSpeedOptions
+                fastMode={fastMode}
+                selectedFastMode={selectedFastMode}
+                pending={conversationUpdatePending}
+                onUpdate={onUpdateFastMode}
+                onSelected={() => dismissMenu("selection")}
+              />
             </div>
           )}
         </div>

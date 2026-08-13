@@ -21,6 +21,10 @@ export interface ModelSearchRoute {
   routeTerms: readonly string[];
   reasoningEffort?: string | null;
   reasoningOptions?: readonly string[];
+  /** Effective response speed when the route owns that persisted setting. */
+  responseSpeed?: "Standard" | "Fast";
+  /** Explicit disclosure when choosing this route clears a current Fast option. */
+  speedChangeNote?: "Fast turns off";
   selectable: boolean;
   unavailableReason: string | null;
 }

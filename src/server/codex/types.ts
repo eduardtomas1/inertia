@@ -35,6 +35,8 @@ export interface CodexAppServerOptions {
   cwd: string;
   prompt: string;
   model?: string;
+  /** Exact App Server service tier advertised by the selected model. */
+  serviceTier?: "priority" | null;
   modelProvider?: CodexResponsesHarnessConfiguration;
   reasoningEffort?: string;
   sessionId?: string;
@@ -111,7 +113,7 @@ export interface CodexAppServerResult {
   signal: NodeJS.Signals | null;
   diagnostic?: string;
   failure?: ProviderRunFailure;
-  compatibilityError?: "full-access-unsupported";
+  compatibilityError?: "full-access-unsupported" | "fast-mode-unsupported";
   continuationError?: "stale-provider-session";
   cleanupConfirmed: boolean;
 }

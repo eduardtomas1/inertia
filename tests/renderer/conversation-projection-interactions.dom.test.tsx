@@ -1029,6 +1029,7 @@ describe("useConversationProjection pending interactions", () => {
       label: "completion",
       status: "completed" as const,
       exactStatus: "cancelled" as const,
+      exactConversationStatus: "idle" as const,
       exactReason: "The user stopped the turn.",
       event: {
         type: "agent.completed" as const,
@@ -1041,6 +1042,7 @@ describe("useConversationProjection pending interactions", () => {
       label: "failure or interruption",
       status: "failed" as const,
       exactStatus: "interrupted" as const,
+      exactConversationStatus: "failed" as const,
       exactReason: "The agent turn was interrupted.",
       event: {
         type: "agent.failed" as const,
@@ -1054,6 +1056,34 @@ describe("useConversationProjection pending interactions", () => {
     it(`projects terminal ${scenario.label} while its detail refresh fails`, async () => {
       const source = createEventSource();
       const turn = runningTurn();
+      const runningSnapshot: AppSnapshot = {
+        ...snapshot,
+        conversations: snapshot.conversations.map((item) =>
+          item.id === primaryId
+            ? {
+                ...item,
+                status: "running",
+                attentionKind: null,
+                latestTurn: {
+                  id: turn.id,
+                  runId: turn.runId,
+                  status: turn.status,
+                  providerId: turn.providerId,
+                  harnessId: turn.harnessId,
+                  backendProfileId: turn.backendProfileId,
+                  modelSelection: turn.modelSelection,
+                  continuationIdentity: turn.continuationIdentity,
+                  model: turn.model,
+                  reasoningEffort: turn.reasoningEffort,
+                  requestedAt: turn.requestedAt,
+                  startedAt: turn.startedAt,
+                  completedAt: turn.completedAt,
+                  terminalReason: turn.terminalReason,
+                  updatedAt: turn.updatedAt,
+                },
+              }
+            : item),
+      };
       let detailLoads = 0;
       const request = vi.fn(async (
         command: CommandWithoutId,
@@ -1107,7 +1137,7 @@ describe("useConversationProjection pending interactions", () => {
             onOpenPlan: vi.fn(),
             onTerminal,
           }),
-        { initialProps: { currentSnapshot: snapshot } },
+        { initialProps: { currentSnapshot: runningSnapshot } },
       );
       await waitFor(() => expect(hook.result.current.detailState?.state)
         .toBe("ready"));
@@ -1121,6 +1151,15 @@ describe("useConversationProjection pending interactions", () => {
         text: "Provider output before settlement.",
       });
       expect(hook.result.current.streamingChannel).toBe("text");
+      source.emit({
+        ...scenario.event,
+        runId: "stale-terminal-run",
+        turnId: "stale-terminal-turn",
+      });
+      expect(hook.result.current.streamingChannel).toBe("text");
+      expect(hook.result.current.turns[0]?.status).toBe("running");
+      expect(hook.result.current.conversation?.status).toBe("running");
+      expect(onTerminal).not.toHaveBeenCalled();
       source.emit(scenario.event);
 
       expect(hook.result.current.streamingChannel).toBeNull();
@@ -1132,6 +1171,16 @@ describe("useConversationProjection pending interactions", () => {
       expect(hook.result.current.turns[0]?.terminalReason).toBe(
         scenario.event.type === "agent.failed" ? scenario.event.message : null,
       );
+      expect(hook.result.current.conversation).toMatchObject({
+        id: primaryId,
+        status: scenario.status,
+        attentionKind: null,
+        latestTurn: {
+          id: turn.id,
+          runId: turn.runId,
+          status: scenario.status,
+        },
+      });
       expect(onTerminal).toHaveBeenCalledOnce();
 
       source.emit({
@@ -1143,15 +1192,17 @@ describe("useConversationProjection pending interactions", () => {
       expect(hook.result.current.detailState?.state).toBe("ready");
       expect(hook.result.current.turns[0]?.status).toBe(scenario.status);
       expect(hook.result.current.streamingChannel).toBeNull();
+      expect(hook.result.current.conversation?.status).toBe(scenario.status);
 
       const completedAt = "2026-07-28T12:02:00.000Z";
       hook.rerender({
         currentSnapshot: {
-          ...snapshot,
-          conversations: snapshot.conversations.map((item) =>
+          ...runningSnapshot,
+          conversations: runningSnapshot.conversations.map((item) =>
             item.id === primaryId
               ? {
                   ...item,
+                  status: scenario.exactConversationStatus,
                   latestTurn: {
                     id: turn.id,
                     runId: turn.runId,
@@ -1179,6 +1230,8 @@ describe("useConversationProjection pending interactions", () => {
         completedAt,
         terminalReason: scenario.exactReason,
       });
+      expect(hook.result.current.conversation?.status)
+        .toBe(scenario.exactConversationStatus);
     });
   }
 

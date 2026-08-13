@@ -214,11 +214,35 @@ export function useConversationProjection({
   const subscriptionOwner = targetConversationId === undefined
     ? "primary"
     : "secondary";
-  const conversation = useMemo(
+  const persistedConversation = useMemo(
     () => snapshot?.conversations.find(({ id }) =>
       id === conversationId) ?? null,
     [conversationId, snapshot],
   );
+  const conversation = useMemo((): ConversationShell | null => {
+    if (!persistedConversation?.latestTurn) return persistedConversation;
+    const latestTurn = persistedConversation.latestTurn;
+    if (isAgentTurnTerminalStatus(latestTurn.status)) {
+      return persistedConversation;
+    }
+    const projection = terminalTurnProjections[terminalTurnKey({
+      conversationId: persistedConversation.id,
+      turnId: latestTurn.id,
+    })];
+    if (!projection || projection.runId !== latestTurn.runId) {
+      return persistedConversation;
+    }
+    return {
+      ...persistedConversation,
+      status: projection.status === "completed" ? "completed" : "failed",
+      attentionKind: null,
+      latestTurn: {
+        ...latestTurn,
+        status: projection.status,
+        terminalReason: projection.terminalReason,
+      },
+    };
+  }, [persistedConversation, terminalTurnProjections]);
   conversationRef.current = conversation;
   useEffect(() => {
     if (enabled) return;
@@ -481,7 +505,10 @@ export function useConversationProjection({
     }
     setTerminalTurnProjections((current) => {
       let next: Record<string, TerminalTurnProjection> | null = null;
-      for (const turn of detail.agentTurns) {
+      const authoritativeTurns = detailState?.state === "ready"
+        ? detailState.detail.agentTurns
+        : [];
+      for (const turn of authoritativeTurns) {
         if (!isAgentTurnTerminalStatus(turn.status)) continue;
         const key = terminalTurnKey({
           conversationId: turn.conversationId,
@@ -494,7 +521,7 @@ export function useConversationProjection({
       }
       return next ?? current;
     });
-  }, [conversation?.id, detail]);
+  }, [conversation?.id, detail, detailState]);
 
   useEffect(() => subscribe((event) => {
     const activeConversation = conversationRef.current;
@@ -808,6 +835,28 @@ export function useConversationProjection({
       if (hydration) hydration.streamingChannelDelta = "reasoning";
     }
     if (event.type === "agent.completed" || event.type === "agent.failed") {
+      const currentDetail = detailStateRef.current;
+      const activeTurnCandidates = [
+        ...(activeConversation.latestTurn
+          && !isAgentTurnTerminalStatus(activeConversation.latestTurn.status)
+          ? [{
+              id: activeConversation.latestTurn.id,
+              runId: activeConversation.latestTurn.runId,
+            }]
+          : []),
+        ...(currentDetail?.state === "ready"
+          ? currentDetail.detail.agentTurns
+              .filter(({ status }) => !isAgentTurnTerminalStatus(status))
+              .map(({ id, runId }) => ({ id, runId }))
+          : []),
+      ];
+      if (
+        activeTurnCandidates.length > 0
+        && !activeTurnCandidates.some(({ id, runId }) =>
+          id === event.turnId && runId === event.runId)
+      ) {
+        return;
+      }
       if (freshHydrationRef.current) {
         freshHydrationRef.current.streamingChannelDelta = null;
       }

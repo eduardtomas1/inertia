@@ -176,15 +176,9 @@ export function useSidebarWorkIndex({
     updateViewport();
     const navigation = navigationRef.current;
     if (!navigation) return;
-    const observer = typeof ResizeObserver === "undefined"
-      ? null
-      : new ResizeObserver(updateViewport);
-    observer?.observe(navigation);
-    window.addEventListener("resize", updateViewport);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", updateViewport);
-    };
+    const observer = new ResizeObserver(updateViewport);
+    observer.observe(navigation);
+    return () => observer.disconnect();
   }, [compact, items.length, navigationRef, updateViewport, virtualized]);
   let renderedItems: Array<{
     index: number;

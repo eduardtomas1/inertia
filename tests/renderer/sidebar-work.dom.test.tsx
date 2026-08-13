@@ -168,6 +168,7 @@ function renderSidebar(
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   window.localStorage.removeItem(SIDEBAR_WORK_SECTIONS_STORAGE_KEY);
 });
 
@@ -406,6 +407,15 @@ describe("compact Work sidebar", () => {
   it("refreshes a virtualized Work window when its viewport grows", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
+    let notifyResize = (): void => undefined;
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        notifyResize = () => callback([], this as unknown as ResizeObserver);
+      }
+
+      observe(): void {}
+      disconnect(): void {}
+    });
     const entries = Array.from({ length: 80 }, (_, index) => conversation(
       `resize-${index}`,
       `Resizable work ${index}`,
@@ -424,7 +434,7 @@ describe("compact Work sidebar", () => {
       configurable: true,
       value: 2_400,
     });
-    fireEvent(window, new Event("resize"));
+    act(() => notifyResize());
 
     const resizedRows = stream?.querySelectorAll(".activity-thread").length ?? 0;
     expect(resizedRows).toBeGreaterThan(initialRows);

@@ -174,13 +174,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.31
+### Version 0.0.32
 
-This release simplifies the everyday surface without removing execution truth. Work becomes a compact search-first task list with genuine provider marks; Environment opens by default with branch, changes, Git actions, services, usage, attachments, and delegated work; the duplicate Activity/Runs popup is gone; and a dedicated Usage dashboard shows only locally measured token data with explicit coverage and no invented cost.
+This focused release makes image, PDF, and file sending resilient across renderer, main-process, and utility-runtime timing. Each staged attachment is bound to its exact send request before submission, late runtime claims cannot lose a race with renderer cleanup, and ambiguous retries reconcile the complete prior handoff without leaking files or deleting runtime-owned capabilities.
 
-Under that calmer interface, Codex goals now start, continue, stop, resume, and recover durably; sent images and documents remain visible; Claude media events stay byte-bounded; Duo deletion and provider cleanup recover conservatively; and schemas 55–58 add durable provider ownership, sanitized attachment capabilities, and validated Usage indexing.
+The broader Work, Environment, Usage, goal, and durable sent-attachment improvements from 0.0.31 remain unchanged.
 
-Download [Inertia v0.0.31](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.31):
+Download [Inertia v0.0.32](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.32):
 
 | Platform | Download |
 | --- | --- |

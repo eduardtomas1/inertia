@@ -245,6 +245,7 @@ describe("workspace repository-scoped Changes panel", () => {
     expect(html).toContain(
       '<span class="change-file-path">docs</span>',
     );
+    expect(html).toContain('data-language-family="markup"');
   });
 
   it("renders one flat repository scope without flattening repository identity", () => {
@@ -256,6 +257,7 @@ describe("workspace repository-scoped Changes panel", () => {
     expect(html).toContain("modules/org.openbravo.alpha");
     expect(html).toContain("modules/org.openbravo.beta");
     expect(html).toContain("README.md");
+    expect(html).toContain('data-language-family="markup"');
     expect(html).not.toContain("Main.java");
     expect(html).toContain("3 files in 4 repositories");
     expect(html).toContain("aria-label=\"Git repositories and changed files\"");

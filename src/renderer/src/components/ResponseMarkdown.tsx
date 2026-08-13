@@ -24,49 +24,19 @@ import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import hljs from "highlight.js/lib/core";
-import bash from "highlight.js/lib/languages/bash";
-import css from "highlight.js/lib/languages/css";
-import diff from "highlight.js/lib/languages/diff";
-import java from "highlight.js/lib/languages/java";
-import javascript from "highlight.js/lib/languages/javascript";
-import json from "highlight.js/lib/languages/json";
-import markdown from "highlight.js/lib/languages/markdown";
-import python from "highlight.js/lib/languages/python";
-import rust from "highlight.js/lib/languages/rust";
-import sql from "highlight.js/lib/languages/sql";
-import typescript from "highlight.js/lib/languages/typescript";
-import xml from "highlight.js/lib/languages/xml";
-import yaml from "highlight.js/lib/languages/yaml";
 import {
+  sourceLanguageForFile,
+  sourceLanguageFromAlias,
+  type SourceLanguage,
+} from "@shared/source-language";
+import {
+  workspaceFileLocationFromFragment,
+  workspaceFileReference,
   workspaceFileReferenceFallback,
+  type WorkspaceFileLocation,
 } from "../utils/workspaceFileReference";
 import { writeClipboardText } from "../utils/clipboard";
-
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("shell", bash);
-hljs.registerLanguage("sh", bash);
-hljs.registerLanguage("css", css);
-hljs.registerLanguage("diff", diff);
-hljs.registerLanguage("java", java);
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("js", javascript);
-hljs.registerLanguage("jsx", javascript);
-hljs.registerLanguage("json", json);
-hljs.registerLanguage("markdown", markdown);
-hljs.registerLanguage("md", markdown);
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("py", python);
-hljs.registerLanguage("rust", rust);
-hljs.registerLanguage("rs", rust);
-hljs.registerLanguage("sql", sql);
-hljs.registerLanguage("typescript", typescript);
-hljs.registerLanguage("ts", typescript);
-hljs.registerLanguage("tsx", typescript);
-hljs.registerLanguage("html", xml);
-hljs.registerLanguage("xml", xml);
-hljs.registerLanguage("yaml", yaml);
-hljs.registerLanguage("yml", yaml);
+import { highlightedSourceHtml } from "../utils/sourceHighlighting";
 
 export const RESPONSE_MARKDOWN_TAG_NAMES = [
   "a", "blockquote", "br", "code", "dd", "del", "details", "div", "dl", "dt",
@@ -110,9 +80,6 @@ const REMARK_PLUGINS: NonNullable<
 const REHYPE_PLUGINS: NonNullable<
   ComponentProps<typeof ReactMarkdown>["rehypePlugins"]
 > = [rehypeRaw, [rehypeSanitize, sanitizeSchema]];
-const MAX_HIGHLIGHT_CHARS = 50_000;
-const MAX_HIGHLIGHT_LINES = 2_000;
-
 type ResponseMarkdownProps = {
   content: string;
   projectRoot: string;
@@ -120,17 +87,28 @@ type ResponseMarkdownProps = {
   conversationId?: string;
   defaultCodeWrap: boolean;
   streaming?: boolean;
-  onOpenProjectFile?: (path: string) => void;
+  onOpenProjectFile?: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
 };
 
 type ProjectLink =
   | { kind: "external"; url: string }
-  | { kind: "project"; relativePath: string; action: "reveal" }
+  | {
+      kind: "project";
+      relativePath: string;
+      action: "reveal";
+      location?: WorkspaceFileLocation;
+      literalPath?: boolean;
+    }
   | { kind: "anchor"; href: string }
   | { kind: "unsafe" };
 
 type MarkdownAstNode = {
   type?: string;
+  url?: unknown;
   meta?: unknown;
   data?: { hProperties?: Record<string, unknown> };
   children?: MarkdownAstNode[];
@@ -139,6 +117,16 @@ type MarkdownAstNode = {
 function preserveCodeMeta() {
   return (tree: MarkdownAstNode) => {
     const visit = (node: MarkdownAstNode): void => {
+      if (node.type === "link" && typeof node.url === "string") {
+        const fallback = workspaceFileReferenceFallback(node.url);
+        if (
+          /^[a-z]:[\\/]/iu.test(node.url)
+        ) {
+          node.url = node.url.replace(":", "%3A");
+        } else if (fallback !== null && !/[\\/]/u.test(fallback)) {
+          node.url = `./${node.url}`;
+        }
+      }
       if (node.type === "code" && typeof node.meta === "string" && node.meta.trim()) {
         node.data = {
           ...node.data,
@@ -157,8 +145,13 @@ function preserveCodeMeta() {
 function normalizedPath(value: string): string {
   const slash = value.replace(/\\/gu, "/");
   const drive = /^[a-z]:/iu.exec(slash)?.[0] ?? "";
+  const unc = !drive && slash.startsWith("//");
   const absolute = slash.startsWith("/") || Boolean(drive);
-  const rest = drive ? slash.slice(drive.length) : slash;
+  const rest = drive
+    ? slash.slice(drive.length)
+    : unc
+      ? slash.slice(2)
+      : slash;
   const segments: string[] = [];
   for (const segment of rest.split("/")) {
     if (!segment || segment === ".") continue;
@@ -169,17 +162,24 @@ function normalizedPath(value: string): string {
       segments.push(segment);
     }
   }
-  const prefix = drive ? `${drive}/` : absolute ? "/" : "";
+  const prefix = drive ? `${drive}/` : unc ? "//" : absolute ? "/" : "";
   return `${prefix}${segments.join("/")}` || (absolute ? prefix : ".");
 }
 
-export function resolveResponseLink(projectRoot: string, rawHref: string): ProjectLink {
+export function resolveResponseLink(
+  projectRoot: string,
+  rawHref: string,
+  syntax: "markdown" | "file" = "markdown",
+): ProjectLink {
   const href = rawHref.trim();
   if (!href || href.includes("\0")) return { kind: "unsafe" };
-  if (href.startsWith("#")) return { kind: "anchor", href };
+  if (syntax === "markdown" && href.startsWith("#")) {
+    return { kind: "anchor", href };
+  }
   const windowsAbsolute = /^[a-z]:[\\/]/iu.test(href);
+  const uncAbsolute = /^(?:\\\\|\/\/)/u.test(href);
   const scheme = /^[a-z][a-z0-9+.-]*:/iu.exec(href)?.[0] ?? null;
-  if (!windowsAbsolute && scheme) {
+  if (syntax === "markdown" && !windowsAbsolute && !uncAbsolute && scheme) {
     if (/^https?:$/iu.test(scheme)) {
       try {
         const url = new URL(href);
@@ -191,12 +191,44 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
     const fallback = workspaceFileReferenceFallback(href);
     if (
       !fallback
-      || !scheme.includes(".")
+      || /[\\/]/u.test(fallback)
     ) return { kind: "unsafe" };
   }
+  const hashIndex = syntax === "file"
+    ? href.lastIndexOf("#")
+    : href.indexOf("#");
+  const fragmentLocation = hashIndex >= 0
+    ? workspaceFileLocationFromFragment(href.slice(hashIndex))
+    : null;
+  let rawPath = syntax === "file"
+    ? fragmentLocation
+      ? href.slice(0, hashIndex)
+      : href
+    : href.slice(0, hashIndex >= 0 ? hashIndex : undefined).split("?", 1)[0]!;
+  let location = fragmentLocation;
+  const rawSourceReference = location === null
+    ? workspaceFileReference(rawPath)
+    : null;
+  const rawSourcePathHasEncodedDelimiter = rawSourceReference !== null
+    && /%(?:23|3a|3f)/iu.test(rawSourceReference.path);
+  if (rawSourceReference && rawSourcePathHasEncodedDelimiter) {
+    rawPath = rawSourceReference.path;
+    location = rawSourceReference.location;
+  }
+  if (
+    syntax === "markdown"
+    && rawPath.startsWith("./")
+    && /^[a-z]%3a(?:%2f|%5c|[\\/])/iu.test(rawPath.slice(2))
+  ) {
+    rawPath = rawPath.slice(2);
+  }
+  const encodedWindowsAbsolute = /^[a-z]%3a(?:%2f|%5c|[\\/])/iu.test(rawPath);
+  const encodedPathDelimiter = /%(?:23|3a|3f)/iu.test(
+    encodedWindowsAbsolute ? rawPath.slice(4) : rawPath,
+  );
   let decoded: string;
   try {
-    decoded = decodeURIComponent(href.split("#", 1)[0]!.split("?", 1)[0]!);
+    decoded = decodeURIComponent(rawPath);
   } catch {
     return { kind: "unsafe" };
   }
@@ -206,14 +238,30 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
   ) return { kind: "unsafe" };
   const root = normalizedPath(projectRoot).replace(/\/+$/u, "");
   if (!root) return { kind: "unsafe" };
-  const isAbsolute = decoded.startsWith("/") || /^[a-z]:[\\/]/iu.test(decoded);
-  const candidate = normalizedPath(isAbsolute ? decoded : `${root}/${decoded}`);
-  const insensitive = /^[a-z]:\//iu.test(root);
+  const markdownCollapsedUnc = root.startsWith("//")
+    && decoded.startsWith("\\")
+    && !decoded.startsWith("\\\\");
+  const resolvedDecoded = markdownCollapsedUnc ? `\\${decoded}` : decoded;
+  const isAbsolute = resolvedDecoded.startsWith("/")
+    || /^[a-z]:[\\/]/iu.test(decoded)
+    || resolvedDecoded.startsWith("\\\\");
+  const candidate = normalizedPath(
+    isAbsolute ? resolvedDecoded : `${root}/${resolvedDecoded}`,
+  );
+  const insensitive = /^[a-z]:\//iu.test(root) || root.startsWith("//");
   const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
   const comparableCandidate = insensitive ? candidate.toLocaleLowerCase("en-US") : candidate;
   if (comparableCandidate !== comparableRoot && !comparableCandidate.startsWith(`${comparableRoot}/`)) return { kind: "unsafe" };
   const relativePath = candidate === root ? "." : candidate.slice(root.length + 1);
-  return relativePath ? { kind: "project", relativePath, action: "reveal" } : { kind: "unsafe" };
+  return relativePath
+    ? {
+        kind: "project",
+        relativePath,
+        action: "reveal",
+        ...(location ? { location } : {}),
+        ...(encodedPathDelimiter ? { literalPath: true } : {}),
+      }
+    : { kind: "unsafe" };
 }
 
 export function responseLinkHasDirectoryHint(rawHref: string): boolean {
@@ -344,35 +392,38 @@ function MarkdownTable({ children, ...props }: ComponentProps<"table">): React.J
   );
 }
 
-function codeMeta(meta: string | undefined): { label: string; file: string | null } {
-  if (!meta) return { label: "Plain text", file: null };
+function codeMeta(
+  meta: string | undefined,
+  language: string,
+): { label: string; file: string | null } {
+  if (!meta) return { label: language || "Plain text", file: null };
   const fileMatch =
     /(?:^|\s)(?:file|filename|title)=(?:"([^"]+)"|'([^']+)'|([^\s]+))/iu
       .exec(meta);
   return {
-    label: meta.split(/\s+/u)[0] || "Plain text",
+    label: language || meta.split(/\s+/u)[0] || "Plain text",
     file: fileMatch?.[1] ?? fileMatch?.[2] ?? fileMatch?.[3] ?? null,
   };
 }
 
-function HighlightedCode({ code, language, enabled }: { code: string; language: string; enabled: boolean }): React.JSX.Element {
-  const html = useMemo(() => {
-    if (
-      !enabled
-      || !language
-      || code.length > MAX_HIGHLIGHT_CHARS
-      || code.split("\n", MAX_HIGHLIGHT_LINES + 1).length > MAX_HIGHLIGHT_LINES
-      || !hljs.getLanguage(language)
-    ) return null;
-    try {
-      return hljs.highlight(code, { language, ignoreIllegals: true }).value;
-    } catch {
-      return null;
-    }
-  }, [code, enabled, language]);
+function HighlightedCode({
+  code,
+  language,
+  classLanguage,
+  enabled,
+}: {
+  code: string;
+  language: SourceLanguage;
+  classLanguage: string;
+  enabled: boolean;
+}): React.JSX.Element {
+  const html = useMemo(
+    () => highlightedSourceHtml(code, language, enabled),
+    [code, enabled, language],
+  );
   return html
-    ? <code className={`hljs language-${language}`} dangerouslySetInnerHTML={{ __html: html }} />
-    : <code className={language ? `language-${language}` : undefined}>{code}</code>;
+    ? <code className={`hljs language-${classLanguage}`} dangerouslySetInnerHTML={{ __html: html }} />
+    : <code className={classLanguage ? `language-${classLanguage}` : undefined}>{code}</code>;
 }
 
 function CodeBlock({
@@ -386,7 +437,11 @@ function CodeBlock({
   defaultWrap: boolean;
   streaming: boolean;
   projectRoot: string;
-  onOpenProjectFile?: (path: string) => void;
+  onOpenProjectFile?: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
 }): React.JSX.Element {
   const child = Children.toArray(children)[0];
   const element = isValidElement<{
@@ -402,14 +457,34 @@ function CodeBlock({
     ?? element?.props.node?.properties?.["data-code-meta"]
     ?? element?.props.dataCodeMeta
     ?? element?.props["data-code-meta"];
-  const meta = codeMeta(typeof rawMeta === "string" ? rawMeta : language || undefined);
+  const meta = codeMeta(
+    typeof rawMeta === "string" ? rawMeta : undefined,
+    language,
+  );
+  const fileTarget = meta.file
+    ? resolveResponseLink(projectRoot, meta.file, "file")
+    : null;
+  const fileLanguagePath = fileTarget?.kind === "project"
+    ? workspaceFileReferenceFallback(fileTarget.relativePath)
+      ?? fileTarget.relativePath
+    : meta.file ?? "";
+  const declaredLanguage = sourceLanguageFromAlias(language);
+  const fileLanguage = fileTarget?.kind === "project"
+    ? sourceLanguageForFile(fileLanguagePath, code)
+    : null;
+  const recognizedFileLanguage = fileLanguage
+    && fileLanguage.id !== "file"
+    && fileLanguage.id !== "text"
+    ? fileLanguage
+    : null;
+  const sourceLanguage = recognizedFileLanguage
+    ?? declaredLanguage
+    ?? fileLanguage
+    ?? sourceLanguageForFile("", code);
   const [wrap, setWrap] = useState(defaultWrap);
   const clipboard = useCopiedState();
   useEffect(() => setWrap(defaultWrap), [defaultWrap]);
   const HeaderIcon = meta.file ? FileCode2 : Code2;
-  const fileTarget = meta.file
-    ? resolveResponseLink(projectRoot, meta.file)
-    : null;
   const fileLabel = (
     <>
       <HeaderIcon size={13} />
@@ -417,7 +492,10 @@ function CodeBlock({
     </>
   );
   return (
-    <div className="response-code-block">
+    <div
+      className="response-code-block"
+      data-language-family={sourceLanguage.family}
+    >
       <header>
         {fileTarget?.kind === "project" && onOpenProjectFile
           ? (
@@ -425,12 +503,42 @@ function CodeBlock({
                 type="button"
                 className="response-code-file-link"
                 title={`Open ${fileTarget.relativePath} in Files`}
-                onClick={() => onOpenProjectFile(fileTarget.relativePath)}
+                data-language-family={sourceLanguage.family}
+                onClick={() => {
+                  if (fileTarget.literalPath) {
+                    onOpenProjectFile(
+                      fileTarget.relativePath,
+                      fileTarget.location ?? undefined,
+                      true,
+                    );
+                  } else if (fileTarget.location) {
+                    onOpenProjectFile(
+                      fileTarget.relativePath,
+                      fileTarget.location,
+                    );
+                  } else {
+                    onOpenProjectFile(fileTarget.relativePath);
+                  }
+                }}
               >
                 {fileLabel}
               </button>
             )
-          : <span title={meta.file ?? undefined}>{fileLabel}</span>}
+          : (
+              <span
+                title={meta.file ?? undefined}
+                data-language-family={sourceLanguage.family}
+              >
+                {meta.file ? fileLabel : (
+                  <>
+                    <HeaderIcon size={13} />
+                    {sourceLanguage.label === "Text"
+                      ? meta.label
+                      : sourceLanguage.label}
+                  </>
+                )}
+              </span>
+            )}
         <div>
           <button type="button" aria-pressed={wrap} title={wrap ? "Disable code wrapping" : "Wrap long code lines"} onClick={() => setWrap((value) => !value)}><WrapText size={13} /><span>Wrap</span></button>
           <button type="button" title="Copy code" disabled={clipboard.pending} onClick={() => void clipboard.copy(code)}>{clipboard.copied ? <Check size={13} /> : <Copy size={13} />}<span>{clipboard.pending ? "Copying" : clipboard.copied ? "Copied" : "Copy"}</span></button>
@@ -444,7 +552,7 @@ function CodeBlock({
       <span className="visually-hidden" role="status" aria-live="polite">
         {clipboard.copied ? "Code copied to clipboard." : ""}
       </span>
-      <pre className={wrap ? "wraps" : undefined}><HighlightedCode code={code} language={language} enabled={!streaming} /></pre>
+      <pre className={wrap ? "wraps" : undefined}><HighlightedCode code={code} language={sourceLanguage} classLanguage={sourceLanguage === declaredLanguage ? language : sourceLanguage.id} enabled={!streaming} /></pre>
     </div>
   );
 }
@@ -455,7 +563,11 @@ interface MarkdownRenderContextValue {
   conversationId?: string;
   defaultCodeWrap: boolean;
   streaming: boolean;
-  onOpenProjectFile?: (path: string) => void;
+  onOpenProjectFile?: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
 }
 
 const MarkdownRenderContext = createContext<MarkdownRenderContextValue | null>(
@@ -484,10 +596,27 @@ function MarkdownLink({
     return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
   }
   if (target.kind === "project") {
-    return <a {...props} href={href} onClick={(event) => {
+    const language = sourceLanguageForFile(
+      workspaceFileReferenceFallback(target.relativePath)
+        ?? target.relativePath,
+    );
+    const projectLinkClass = [props.className, "response-project-file-link"]
+      .filter(Boolean)
+      .join(" ");
+    return <a {...props} className={projectLinkClass} data-language-family={language.family} href={href} onClick={(event) => {
       event.preventDefault();
       if (onOpenProjectFile && !responseLinkHasDirectoryHint(href)) {
-        onOpenProjectFile(target.relativePath);
+        if (target.literalPath) {
+          onOpenProjectFile(
+            target.relativePath,
+            target.location ?? undefined,
+            true,
+          );
+        } else if (target.location) {
+          onOpenProjectFile(target.relativePath, target.location);
+        } else {
+          onOpenProjectFile(target.relativePath);
+        }
         return;
       }
       void window.inertia.openProjectPath({

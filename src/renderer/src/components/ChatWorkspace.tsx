@@ -52,6 +52,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { shouldFollowTimeline } from "../utils/responseTimeline";
@@ -180,7 +181,11 @@ type ChatWorkspaceProps = {
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
   onOpenTurnDiff: (turnId: string, path?: string) => void;
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
-  onOpenTurnFile: (path: string) => void;
+  onOpenTurnFile: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
   onClearPromptContext?: () => void;
   onLatestContentVisibilityChange?: (visible: boolean) => void;
 };

@@ -1133,7 +1133,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "external.url": (value) => recordWithStrings(value, "url", "label"),
   "git.branches": (value) => arrayOf(value.branches, gitBranch),
   "workspace.entries": (value) => workspaceEntriesPage(value),
-  "workspace.file": (value) => workspaceFile(value.file),
+  "workspace.file": (value) => workspaceFile(value.file) && booleanField(value, "usedFallback"),
   "project.actions": (value) => arrayOf(value.actions, projectAction)
     && uniqueRecordField(value.actions as unknown[], "id"),
   "agent.workflow": (value) => agentWorkflow(value.workflow),

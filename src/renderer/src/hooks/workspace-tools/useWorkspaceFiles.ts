@@ -11,11 +11,8 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
+import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import {
-  workspaceFileReferenceFallback,
-} from "../../utils/workspaceFileReference";
-import {
-  workspaceFileWriteCommand,
   workspaceFileWriteFitsRuntimeFrame,
   type WorkspaceFileWriteIdentity,
 } from "../../utils/workspaceFileWrite";
@@ -36,6 +33,8 @@ interface WorkspaceFilesOptions {
   setActionError: (message: string | null) => void;
 }
 
+const loadWorkspaceFileActions = () => import("./selectWorkspaceFile");
+
 export function useWorkspaceFiles({
   project,
   conversation,
@@ -50,6 +49,8 @@ export function useWorkspaceFiles({
   const [filePreview, setFilePreview] =
     useState<WorkspaceFilePreview | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [selectedFileLocation, setSelectedFileLocation] =
+    useState<WorkspaceFileLocation | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
   const [filePreviewLoading, setFilePreviewLoading] = useState(false);
@@ -59,6 +60,9 @@ export function useWorkspaceFiles({
   const filePreviewRequestGenerationRef = useRef(0);
   const actionsRequestGenerationRef = useRef(0);
   const automaticallyLoadedAuthorityRef = useRef<string | null>(null);
+  const authority = `${enabled}${project?.id}${conversation?.id}`;
+  const authorityRef = useRef(authority);
+  authorityRef.current = authority;
   const mentions = useWorkspaceMentions({
     enabled,
     project,
@@ -143,6 +147,7 @@ export function useWorkspaceFiles({
     setWorkspaceEntries([]);
     setFilePreview(null);
     setSelectedFile(null);
+    setSelectedFileLocation(null);
     setProjectActions([]);
     setFilesError(null);
     setFilePreviewError(null);
@@ -187,62 +192,38 @@ export function useWorkspaceFiles({
     project?.id,
   ]);
 
-  const selectWorkspaceFile = useCallback((path: string) => {
+  const selectWorkspaceFile = useCallback((
+    path: string,
+    requestedLocation?: WorkspaceFileLocation,
+    literalPath = false,
+  ) => {
     if (!project) return;
-    const generation = ++filePreviewRequestGenerationRef.current;
-    setSelectedFile(path);
-    setFilePreview(null);
-    setFilePreviewError(null);
-    setFilePreviewLoading(true);
-    const readFile = async (
-      candidate: string,
-    ): Promise<WorkspaceFilePreview> => {
-      const event = resultEvent(await request({
-        type: "workspace.file.read",
-        payload: {
-          projectId: project.id,
-          conversationId: conversation?.id,
-          path: candidate,
-        },
-      }));
-      if (event.result.kind !== "workspace.file") {
-        throw new Error("Unexpected file response.");
-      }
-      return event.result.file;
-    };
-    const readReference = async (): Promise<WorkspaceFilePreview> => {
-      try {
-        return await readFile(path);
-      } catch (literalError) {
-        const fallback = workspaceFileReferenceFallback(path);
-        if (!fallback) throw literalError;
-        try {
-          return await readFile(fallback);
-        } catch {
-          throw literalError;
-        }
-      }
-    };
-    void readReference().then((file) => {
-      if (
-        filePreviewRequestGenerationRef.current === generation
-      ) {
-        setSelectedFile(file.path);
-        setFilePreview(file);
-      }
-    }).catch((error) => {
-      if (filePreviewRequestGenerationRef.current !== generation) return;
-      const message = error instanceof Error
-        ? error.message
-        : "The file could not be opened.";
-      setFilePreviewError(message);
-      setActionError(message);
-    }).finally(() => {
-      if (filePreviewRequestGenerationRef.current === generation) {
-        setFilePreviewLoading(false);
-      }
-    });
-  }, [conversation?.id, project, request, setActionError]);
+    void loadWorkspaceFileActions().then(
+      ({ selectWorkspaceFile }) => selectWorkspaceFile([
+        path,
+        requestedLocation,
+        literalPath,
+        request,
+        project.id,
+        conversation?.id,
+        authorityRef,
+        authority,
+        filePreviewRequestGenerationRef,
+        setSelectedFile,
+        setSelectedFileLocation,
+        setFilePreview,
+        setFilePreviewError,
+        setFilePreviewLoading,
+        setActionError,
+      ]),
+      () => {
+        if (authorityRef.current !== authority) return;
+        const message = "File open failed.";
+        setFilePreviewError(message);
+        setActionError(message);
+      },
+    );
+  }, [authority, conversation?.id, project, request, setActionError]);
 
   const saveWorkspaceFile = useCallback(async (
     path: string,
@@ -270,21 +251,33 @@ export function useWorkspaceFiles({
       );
     }
     const generation = filePreviewRequestGenerationRef.current;
-    const event = resultEvent(await request(
-      workspaceFileWriteCommand(identity, content),
-    ));
-    if (event.result.kind !== "workspace.file") {
-      throw new Error("The local service returned an unexpected file response.");
-    }
+    const { file: savedFile, location } = await loadWorkspaceFileActions().then(
+      ({ saveWorkspaceFile }) => saveWorkspaceFile(
+      request,
+      identity,
+      content,
+      selectedFileLocation,
+      ),
+    );
     if (
       filePreviewRequestGenerationRef.current === generation
+      && authorityRef.current === authority
       && selectedFile === path
     ) {
-      setFilePreview(event.result.file);
+      setFilePreview(savedFile);
+      setSelectedFileLocation(location);
       setFilePreviewError(null);
     }
-    return event.result.file;
-  }, [conversation?.id, filePreview, project, request, selectedFile]);
+    return savedFile;
+  }, [
+    authority,
+    conversation?.id,
+    filePreview,
+    project,
+    request,
+    selectedFile,
+    selectedFileLocation,
+  ]);
 
   const canSaveWorkspaceFile = useCallback((
     path: string,
@@ -314,6 +307,7 @@ export function useWorkspaceFiles({
     entriesTruncated,
     filePreview,
     selectedFile,
+    selectedFileLocation,
     filesLoading,
     filesError,
     filePreviewLoading,

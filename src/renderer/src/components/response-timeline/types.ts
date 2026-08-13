@@ -12,6 +12,7 @@ import type {
   ConversationLatestTurnSummary,
   SubagentTrace,
 } from "@shared/contracts";
+import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { TurnGitArtifactSummary } from "../../utils/responseTimeline";
 
@@ -61,7 +62,11 @@ export interface ResponseTimelineProps {
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
   onOpenTurnDiff: (turnId: string, path?: string) => void;
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
-  onOpenTurnFile: (path: string) => void;
+  onOpenTurnFile: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
   onStop: () => void;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;

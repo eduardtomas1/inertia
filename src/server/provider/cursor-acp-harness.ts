@@ -134,6 +134,7 @@ function startCursorRun(
   let cancelRequested = false;
   let supportsImages = false;
   let availableCommandNames: Set<string> | null = null;
+  let acceptsCommandAdvertisement = false;
   let resolveCommandAdvertisement!: () => void;
   const commandAdvertisement = new Promise<void>((resolve) => {
     resolveCommandAdvertisement = resolve;
@@ -181,7 +182,10 @@ function startCursorRun(
     })
     .onNotification(acp.methods.client.session.update, ({ params }) => {
       if (!sessionId || params.sessionId !== sessionId) return;
-      if (params.update.sessionUpdate === "available_commands_update") {
+      if (
+        acceptsCommandAdvertisement
+        && params.update.sessionUpdate === "available_commands_update"
+      ) {
         availableCommandNames = new Set(
           params.update.availableCommands.map(({ name }) =>
             name.replace(/^\//u, "").toLowerCase()),
@@ -290,11 +294,17 @@ function startCursorRun(
     let configOptions: SessionConfigOption[] | null | undefined;
     if (options.input.sessionId) {
       if (initialized.agentCapabilities?.loadSession !== true) throw new Error("This Cursor ACP server does not advertise session resume support.");
-      const loaded = await context.request(acp.methods.agent.session.load, {
+      const loadRequest = context.request(acp.methods.agent.session.load, {
         sessionId: options.input.sessionId,
         cwd: options.input.cwd,
         mcpServers: [],
       });
+      // The requested session ID is known before the connection starts, so a
+      // same-session notification received before this request could be stale.
+      // Only advertisements delivered after the resume request is on the wire
+      // can prove the capabilities of the resumed session.
+      acceptsCommandAdvertisement = true;
+      const loaded = await loadRequest;
       modes = loaded?.modes;
       configOptions = loaded?.configOptions;
     } else {

@@ -48,6 +48,7 @@ function compactingCursorAgent(
   capturePath: string,
   advertisedCommands: readonly string[] | null = null,
   advertiseAfterLoadResponse = false,
+  advertiseBeforeLoad = false,
 ): string {
   const command = portableNodeExecutable(root, name);
   writeNodeSubcommand(root, "acp", `
@@ -57,9 +58,13 @@ const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 const sessionId = "cursor-compact-session";
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
-  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "initialize") {
+    ${!advertiseBeforeLoad || advertisedCommands === null ? "" : `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: ${JSON.stringify(advertisedCommands.map((entry) => ({ name: entry, description: entry })))} } } });`}
+    send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "Cursor", version: "test" } } });
+    return;
+  }
   if (message.method === "session/load") {
-    ${advertiseAfterLoadResponse || advertisedCommands === null ? "" : `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: ${JSON.stringify(advertisedCommands.map((entry) => ({ name: entry, description: entry })))} } } });`}
+    ${advertiseBeforeLoad || advertiseAfterLoadResponse || advertisedCommands === null ? "" : `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: ${JSON.stringify(advertisedCommands.map((entry) => ({ name: entry, description: entry })))} } } });`}
     send({ jsonrpc: "2.0", id: message.id, result: { modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
     ${!advertiseAfterLoadResponse || advertisedCommands === null ? "" : `return setTimeout(() => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: ${JSON.stringify(advertisedCommands.map((entry) => ({ name: entry, description: entry })))} } } }), 10);`}
     return;
@@ -233,6 +238,40 @@ describe.sequential("Cursor ACP harness", () => {
       sessionId: "cursor-compact-session",
     }))).resolves.toMatchObject({ status: "completed" });
     expect(readFileSync(capturePath, "utf8")).toContain("/summarize");
+  });
+
+  it("ignores a same-session command advertisement sent before session load", async () => {
+    const root = portableFixtureRoot("cursor ACP stale compact capability");
+    roots.push(root);
+    const capturePath = join(root, "compact-prompt.json");
+    const command = compactingCursorAgent(
+      root,
+      "cursor-compact-stale-capability",
+      capturePath,
+      ["summarize"],
+      false,
+      true,
+    );
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness({
+        commandAdvertisementTimeoutMs: 25,
+      })]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-compact-stale-capability",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "cursor-compact-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("did not advertise"),
+    });
+    expect(() => readFileSync(capturePath, "utf8")).toThrow();
   });
 
   it("rejects compaction when Cursor explicitly omits summarize", async () => {

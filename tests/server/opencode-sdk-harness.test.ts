@@ -26,6 +26,8 @@ type LifecycleScenario =
   | "compact-equal-timestamp"
   | "compact-auto"
   | "compact-wrong-message"
+  | "compact-replacement-start"
+  | "compact-reversed-time"
   | "compact-malformed-timestamp"
   | "compact-missing-message"
   | "cancel"
@@ -124,6 +126,16 @@ const server = http.createServer((req, res) => {
       if (scenario === "compact-wrong-message") setTimeout(() => {
         sendEvent({ id: "compact-wrong-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "requested-summary", reason: "manual" } });
         sendEvent({ id: "compact-wrong-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "different-summary", reason: "manual", text: "Wrong", recent: "" } });
+      }, 10);
+      if (scenario === "compact-replacement-start") setTimeout(() => {
+        sendEvent({ id: "compact-replacement-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "requested-summary", reason: "manual" } });
+        sendEvent({ id: "compact-replacement-2", type: "session.next.compaction.started", properties: { timestamp: Date.now() + 1, sessionID, messageID: "replacement-summary", reason: "manual" } });
+        sendEvent({ id: "compact-replacement-3", type: "session.next.compaction.ended", properties: { timestamp: Date.now() + 2, sessionID, messageID: "replacement-summary", reason: "manual", text: "Replacement", recent: "" } });
+      }, 10);
+      if (scenario === "compact-reversed-time") setTimeout(() => {
+        const timestamp = Date.now();
+        sendEvent({ id: "compact-reversed-1", type: "session.next.compaction.started", properties: { timestamp: timestamp + 2, sessionID, messageID: "reversed-summary", reason: "manual" } });
+        sendEvent({ id: "compact-reversed-2", type: "session.next.compaction.ended", properties: { timestamp: timestamp + 1, sessionID, messageID: "reversed-summary", reason: "manual", text: "Reversed", recent: "" } });
       }, 10);
       if (scenario === "compact-malformed-timestamp") setTimeout(() => {
         sendEvent({ id: "compact-malformed-1", type: "session.next.compaction.started", properties: { timestamp: "later", sessionID, messageID: "malformed-summary", reason: "manual" } });
@@ -698,6 +710,8 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     ["compact-equal-timestamp", "equal-timestamp stale"],
     ["compact-auto", "automatic"],
     ["compact-wrong-message", "wrong-message"],
+    ["compact-replacement-start", "replacement-start"],
+    ["compact-reversed-time", "reversed-time"],
     ["compact-malformed-timestamp", "malformed timestamp"],
     ["compact-missing-message", "missing message ID"],
   ] as const)("does not accept %s events as manual compaction proof (%s)", async (

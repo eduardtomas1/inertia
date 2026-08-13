@@ -111,6 +111,7 @@ interface OpenCodeEventState {
 interface OpenCodeManualCompactionProof {
   initiatedAt: number | null;
   messageId: string | null;
+  startedAt: number | null;
 }
 
 export interface OpenCodeSdkHarnessOptions {
@@ -490,6 +491,7 @@ function startOpenCodeRun(
       const manualCompaction: OpenCodeManualCompactionProof = {
         initiatedAt: null,
         messageId: null,
+        startedAt: null,
       };
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
         onActivity: armEventInactivityDeadline,
@@ -658,10 +660,14 @@ function completesRequestedOpenCodeCompaction(
     || messageId.includes("\0")
   ) return false;
   if (event.type === "session.next.compaction.started") {
+    if (proof.messageId !== null) return false;
     proof.messageId = messageId;
+    proof.startedAt = timestamp;
     return false;
   }
   return proof.messageId !== null
+    && proof.startedAt !== null
+    && timestamp >= proof.startedAt
     && messageId === proof.messageId;
 }
 

@@ -131,6 +131,8 @@ export interface OpenCodeSdkHarnessOptions {
    */
   initializationTimeoutMs?: number;
   terminateProcessTree?: ProcessTreeTerminator;
+  /** Test seam for the local manual-compaction initiation timestamp. */
+  compactionTimestampNow?: () => number;
 }
 
 export interface OpenCodeSdkMetadataOptions {
@@ -158,12 +160,18 @@ export function createOpenCodeSdkHarness(
 ): AgentHarness {
   const deadlines = openCodeRunDeadlines(options);
   const terminateOwnedProcessTree = options.terminateProcessTree ?? terminateProcessTreeAndWait;
+  const compactionTimestampNow = options.compactionTimestampNow ?? Date.now;
   return {
     id: "opencode-sdk",
     providerId: "opencode",
     capabilities: OPENCODE_SDK_CAPABILITIES,
     supports: (input) => input.providerId === "opencode",
-    start: (startOptions) => startOpenCodeRun(startOptions, deadlines, terminateOwnedProcessTree),
+    start: (startOptions) => startOpenCodeRun(
+      startOptions,
+      deadlines,
+      terminateOwnedProcessTree,
+      compactionTimestampNow,
+    ),
   };
 }
 
@@ -237,6 +245,7 @@ function startOpenCodeRun(
   options: AgentHarnessStartOptions,
   deadlines: OpenCodeRunDeadlines,
   terminateOwnedProcessTree: ProcessTreeTerminator,
+  compactionTimestampNow: () => number,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
@@ -505,7 +514,7 @@ function startOpenCodeRun(
       });
       const providerOperation = compacting
         ? (() => {
-            manualCompaction.initiatedAt = Date.now();
+            manualCompaction.initiatedAt = compactionTimestampNow();
             return client!.v2.session.compact(
               { sessionID: sessionId },
               { signal: eventAbort.signal, throwOnError: true },
@@ -636,16 +645,24 @@ function completesRequestedOpenCodeCompaction(
     )
   ) return false;
   const properties = event.properties;
+  const timestamp = properties.timestamp;
+  const messageId = properties.messageID;
   if (
     properties.reason !== "manual"
-    || properties.timestamp < proof.initiatedAt
+    || typeof timestamp !== "number"
+    || !Number.isFinite(timestamp)
+    || timestamp <= proof.initiatedAt
+    || typeof messageId !== "string"
+    || !messageId.trim()
+    || messageId.length > 512
+    || messageId.includes("\0")
   ) return false;
   if (event.type === "session.next.compaction.started") {
-    proof.messageId = properties.messageID;
+    proof.messageId = messageId;
     return false;
   }
   return proof.messageId !== null
-    && properties.messageID === proof.messageId;
+    && messageId === proof.messageId;
 }
 
 async function pumpOpenCodeEvents(

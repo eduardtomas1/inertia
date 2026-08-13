@@ -60,7 +60,11 @@ export function useComposerCompaction(options: {
     }));
   };
   const compact = async (command: CompactComposerCommand): Promise<void> => {
-    if (options.submittingRef.current) return;
+    const ownerId = options.conversationId;
+    if (
+      options.submittingRef.current
+      || activeOperations.current.has(ownerId)
+    ) return;
     if (options.running) {
       setCompactNotice(options.conversationId, {
         kind: "error",
@@ -83,7 +87,6 @@ export function useComposerCompaction(options: {
       return;
     }
     options.flushDraftPersistence();
-    const ownerId = options.conversationId;
     const submittedDraft = options.message;
     const submittedRevision = options.editorRevisions.current.get(ownerId) ?? 0;
     operationSequence.current += 1;

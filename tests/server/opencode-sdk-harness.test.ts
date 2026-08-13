@@ -23,8 +23,11 @@ type LifecycleScenario =
   | "resume"
   | "compact"
   | "compact-stale"
+  | "compact-equal-timestamp"
   | "compact-auto"
   | "compact-wrong-message"
+  | "compact-malformed-timestamp"
+  | "compact-missing-message"
   | "cancel"
   | "stuck-cancel"
   | "oversized"
@@ -110,6 +113,10 @@ const server = http.createServer((req, res) => {
         sendEvent({ id: "compact-stale-1", type: "session.next.compaction.started", properties: { timestamp: Date.now() - 60000, sessionID, messageID: "stale-summary", reason: "manual" } });
         sendEvent({ id: "compact-stale-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now() - 60000, sessionID, messageID: "stale-summary", reason: "manual", text: "Stale", recent: "" } });
       }, 10);
+      if (scenario === "compact-equal-timestamp") setTimeout(() => {
+        sendEvent({ id: "compact-equal-1", type: "session.next.compaction.started", properties: { timestamp: 4242, sessionID, messageID: "equal-summary", reason: "manual" } });
+        sendEvent({ id: "compact-equal-2", type: "session.next.compaction.ended", properties: { timestamp: 4242, sessionID, messageID: "equal-summary", reason: "manual", text: "Equal", recent: "" } });
+      }, 10);
       if (scenario === "compact-auto") setTimeout(() => {
         sendEvent({ id: "compact-auto-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "auto-summary", reason: "auto" } });
         sendEvent({ id: "compact-auto-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "auto-summary", reason: "auto", text: "Automatic", recent: "" } });
@@ -117,6 +124,14 @@ const server = http.createServer((req, res) => {
       if (scenario === "compact-wrong-message") setTimeout(() => {
         sendEvent({ id: "compact-wrong-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "requested-summary", reason: "manual" } });
         sendEvent({ id: "compact-wrong-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "different-summary", reason: "manual", text: "Wrong", recent: "" } });
+      }, 10);
+      if (scenario === "compact-malformed-timestamp") setTimeout(() => {
+        sendEvent({ id: "compact-malformed-1", type: "session.next.compaction.started", properties: { timestamp: "later", sessionID, messageID: "malformed-summary", reason: "manual" } });
+        sendEvent({ id: "compact-malformed-2", type: "session.next.compaction.ended", properties: { timestamp: "later", sessionID, messageID: "malformed-summary", reason: "manual", text: "Malformed", recent: "" } });
+      }, 10);
+      if (scenario === "compact-missing-message") setTimeout(() => {
+        sendEvent({ id: "compact-missing-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, reason: "manual" } });
+        sendEvent({ id: "compact-missing-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, reason: "manual", text: "Missing", recent: "" } });
       }, 10);
       return;
     }
@@ -680,8 +695,11 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
 
   it.each([
     ["compact-stale", "stale pre-request"],
+    ["compact-equal-timestamp", "equal-timestamp stale"],
     ["compact-auto", "automatic"],
     ["compact-wrong-message", "wrong-message"],
+    ["compact-malformed-timestamp", "malformed timestamp"],
+    ["compact-missing-message", "missing message ID"],
   ] as const)("does not accept %s events as manual compaction proof (%s)", async (
     scenario,
     _label,
@@ -699,6 +717,9 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         eventInactivityDeadlineMs: 100,
+        ...(scenario === "compact-equal-timestamp"
+          ? { compactionTimestampNow: () => 4242 }
+          : {}),
       })]),
     );
 

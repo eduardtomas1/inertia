@@ -245,6 +245,40 @@ describe("composer asynchronous ownership", () => {
     expect(screen.getByText("First chat context compacted.")).toBeVisible();
   });
 
+  it("does not start a second compaction after returning to a pending owner", async () => {
+    const first = conversation("57575757-5757-4757-8757-575757575757");
+    const second = conversation("67676767-6767-4767-8767-676767676767");
+    const operation = deferred<{
+      message: string;
+      instructionForwarded: boolean;
+    }>();
+    const onCompact = vi.fn(() => operation.promise);
+    const view = render(<Composer {...composerProps(first, { onCompact })} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "/compact" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "Enter",
+    });
+
+    view.rerender(<Composer {...composerProps(second, { onCompact })} />);
+    view.rerender(<Composer {...composerProps(first, { onCompact })} />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("/compact"));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "Enter",
+    });
+    expect(onCompact).toHaveBeenCalledTimes(1);
+
+    await act(async () => operation.resolve({
+      message: "Original compaction completed.",
+      instructionForwarded: false,
+    }));
+    await waitFor(() => expect(screen.getByText("Original compaction completed."))
+      .toBeVisible());
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
+  });
+
   it("settles a hidden compaction failure only on its owning chat", async () => {
     const first = conversation("37373737-3737-4737-8737-373737373737");
     const second = conversation("47474747-4747-4747-8747-474747474747");

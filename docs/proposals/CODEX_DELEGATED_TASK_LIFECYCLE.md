@@ -272,6 +272,23 @@ synchronously in original arrival order through the same child lifecycle
 projector used for normally ordered traffic. Replay must not reconstruct or
 re-emit discarded raw fields.
 
+An otherwise-valid child ownership announcement whose parent is not yet owned
+is a deferred ownership prerequisite, not an immediate rejection. Keep it in
+the same count, byte, and age bounds, keyed by its missing parent. When that
+parent becomes owned, validate and replay newly unlocked child edges in wire
+order, iterating through descendants under the same root/self, cycle,
+contradictory-parent, and duplicate guards. This allows grandchild ownership
+and lifecycle traffic to arrive before the parent edge without guessing or
+leaving the descendant stranded.
+
+The allowlist includes a bounded normalization of child
+`thread/status/changed` notifications. Preserve only thread identity and the
+documented status kind/waiting flags. Status is weaker authority than explicit
+turn start/terminal evidence: it may describe a live child as active or
+waiting, but a late generic active status cannot create a new episode or
+revive a terminal one. Pre-registration status envelopes follow the same
+bounded replay rules as other lifecycle evidence.
+
 On timeout, contradictory ownership, parent cancellation, transport close, or disposal, discard the pending candidate without persisting raw content.
 
 ### D. Define child thread identity separately from child turn identity
@@ -348,17 +365,28 @@ The implementation should keep this logic in one testable helper rather than spr
 
 ### G. Preserve the bounded parent-completion drain
 
-Parent completion should continue waiting for known live children for a short bounded period.
+Parent completion should continue waiting for known live children and
+non-expired lifecycle-eligible pending candidates for a short bounded period.
 
 Before finalizing the parent:
 
 1. process the parent terminal notification;
-2. replay any now-owned pending child notifications;
-3. wait for known live child terminal signals up to the configured drain timeout;
-4. finalize immediately when no child remains live;
-5. after timeout, mark only genuinely unresolved live traces with the uncertainty fallback.
+2. replay any now-owned pending child notifications and ownership prerequisites;
+3. wait for known live child terminal signals and non-expired pending
+   candidates/prerequisites up to the configured drain timeout;
+4. finalize immediately only when no child remains live and no eligible
+   pending candidate or prerequisite remains;
+5. when ownership arrives during the drain, validate/replay it before
+   re-evaluating completion;
+6. after timeout, discard unresolved orphan candidates and mark only genuinely
+   unresolved owned live traces with the uncertainty fallback.
 
 The timeout must never become unbounded and must not delay cancellation.
+Cancellation clears pending candidates and prerequisites immediately under the
+transport cleanup barrier. In particular, `child turn/completed -> parent
+turn/completed -> ownership activity` must replay the child before parent
+finalization, while a genuinely unrelated orphan candidate expires without
+holding the parent indefinitely.
 
 A child that has already emitted a confirmed successful terminal event must never be changed to `lost` by parent settlement.
 
@@ -471,6 +499,15 @@ The fixture suite should cover:
     `collabToolCall` variant normalize to the same ownership transition;
 17. reasoning, collaboration prompts, commands, paths, and unrelated item
     bodies never enter pending envelopes or persisted/renderer traces.
+18. a child terminal envelope preceding parent completion and a later ownership
+    activity participates in the bounded drain and is persisted before parent
+    finalization;
+19. an unrelated orphan candidate expires without making parent completion
+    unbounded;
+20. grandchild ownership and lifecycle arriving before its parent edge replay
+    in wire order once the parent becomes owned;
+21. child `thread/status/changed` active/waiting evidence replays below turn
+    authority and cannot revive a terminal episode.
 
 ---
 
@@ -482,6 +519,9 @@ Target the smallest relevant layer around `CodexAppServerEvents`:
 
 - ownership registration from both sources;
 - pending child notification replay;
+- pending-candidate participation in parent drain and bounded orphan expiry;
+- deferred nested ownership replay when a prerequisite parent arrives;
+- bounded child `thread/status/changed` active/waiting normalization;
 - cycle and root-self guards;
 - nested ownership;
 - authority precedence;
@@ -527,7 +567,8 @@ Verify that:
 
 ### Renderer tests
 
-Extend `subagent-disclosure.test.ts` and `subagent-disclosure.dom.test.tsx` for:
+Extend `subagent-disclosure.test.ts`, `subagent-disclosure.dom.test.tsx`, and
+`goal-panel.dom.test.tsx` for:
 
 - neutral `Outcome unavailable` copy;
 - confirmed failure remaining visually distinct;
@@ -535,7 +576,17 @@ Extend `subagent-disclosure.test.ts` and `subagent-disclosure.dom.test.tsx` for:
 - uncertain outcomes remaining discoverable;
 - resumed child showing current live state rather than stale completed result;
 - accessible labels containing provider route, current state, and duration;
-- group summary distinguishing completed, working, cancelled, failed, and uncertain counts.
+- Goal Panel rows exposing the same truthful state and duration semantics as
+  the disclosure, including neutral/warning treatment for unavailable outcomes
+  rather than the existing failure/danger styling;
+- group summary distinguishing completed, working, cancelled, interrupted,
+  failed, and uncertain counts without collapsing interruption into failure or
+  uncertainty.
+
+Audit the corresponding `GoalPanel.tsx` and delegated-state CSS selectors as
+part of the implementation. Every delegated-work surface must render `lost` as
+neutral `Outcome unavailable`, preserve interruption as its own outcome, and
+provide route, state, and duration in its accessible name.
 
 ### Full verification
 
@@ -557,6 +608,10 @@ The implementation is complete when all of the following are true:
 - [ ] Parent-side Codex collaboration activity can authoritatively register a child thread.
 - [ ] Explicit child `thread/started` registration remains supported.
 - [ ] Child notifications received shortly before registration are replayed within strict bounds.
+- [ ] Non-expired pending child candidates participate in the bounded parent
+      drain; unrelated orphans expire without blocking completion indefinitely.
+- [ ] Deferred nested ownership replays when its prerequisite parent becomes
+      owned, including grandchild-before-parent ordering.
 - [ ] Buffered child notifications remain ordered before the later activity or
       thread event that registered their ownership.
 - [ ] The root thread cannot appear in its own delegated-agent tree.
@@ -568,8 +623,13 @@ The implementation is complete when all of the following are true:
 - [ ] A Codex child can resume after a completed episode only from explicit newer provider evidence.
 - [ ] Resumption clears stale terminal result text and adopts the new child turn identity.
 - [ ] Stale or weaker events cannot overwrite newer authoritative state.
+- [ ] Child status notifications expose active/waiting truth below turn
+      authority and cannot revive a terminal episode.
 - [ ] Confirmed failure, cancellation, and interruption remain distinct.
 - [ ] `lost` is presented as outcome unavailable, not as confirmed failure.
+- [ ] Subagent Disclosure and Goal Panel both present unavailable,
+      interrupted, failed, cancelled, completed, and working states truthfully
+      with route/state/duration accessibility coverage.
 - [ ] A sanitized real-wire fixture reproduces the original failure before the fix and passes after it.
 - [ ] Generated and documented collaboration-item variants normalize without
       guessing at unknown or hybrid payloads.

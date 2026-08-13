@@ -33,6 +33,7 @@ export interface ActiveAgentPresentation {
 }
 
 const CANONICAL_SEARCH_ACTIVITY_PATTERN = /^web (?:fetch|search)$/iu;
+const CANONICAL_CODING_ACTIVITY_PATTERN = /^(?:edit|notebook edit|write)$/iu;
 const SEARCH_ACTIVITY_PHRASE_PATTERN =
   /^(?:browse|find online|look up|lookup|search)\b/iu;
 const CODING_ACTIVITY_PHRASE_PATTERN =
@@ -68,7 +69,10 @@ export function activityExecutionCategory(
     CANONICAL_SEARCH_ACTIVITY_PATTERN.test(normalizedTitle)
     || SEARCH_ACTIVITY_PHRASE_PATTERN.test(normalizedTitle)
   ) return "searching";
-  if (CODING_ACTIVITY_PHRASE_PATTERN.test(normalizedTitle)) {
+  if (
+    CANONICAL_CODING_ACTIVITY_PATTERN.test(normalizedTitle)
+    || CODING_ACTIVITY_PHRASE_PATTERN.test(normalizedTitle)
+  ) {
     return "coding";
   }
   return "tool";

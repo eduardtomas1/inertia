@@ -103,14 +103,19 @@ describe("truthful active agent presentation", () => {
       expect(activityExecutionCategory(activity(id, title)))
         .toBe("searching");
     }
-    expect(activityExecutionCategory(activity("code", "Apply patch")))
-      .toBe("coding");
-    expect(activityExecutionCategory(activity("edit", "Edit response timeline")))
-      .toBe("coding");
-    expect(activityExecutionCategory(activity("file-change", "File change")))
-      .toBe("coding");
-    expect(activityExecutionCategory(activity("overlap", "Edit web config")))
-      .toBe("coding");
+    for (const [id, title] of [
+      ["claude-edit", "Edit"],
+      ["claude-write", "Write"],
+      ["claude-notebook-edit", "NotebookEdit"],
+      ["snake-notebook-edit", "notebook_edit"],
+      ["code", "Apply patch"],
+      ["edit", "Edit response timeline"],
+      ["file-change", "File change"],
+      ["overlap", "Edit web config"],
+    ] as const) {
+      expect(activityExecutionCategory(activity(id, title)))
+        .toBe("coding");
+    }
     expect(activityExecutionCategory(activity("ordinary-web", "Build web app")))
       .toBe("tool");
     expect(activityExecutionCategory(activity("ordinary-write", "Write to stdin")))

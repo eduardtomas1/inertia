@@ -262,6 +262,23 @@ export function validateProviderModels(value: unknown): ProviderModel[] {
         description: cleanString(option.description, 240) ?? `${optionValue} reasoning`,
       }];
     }).slice(0, 12);
+    const fastModeInput = model.fastMode;
+    const fastMode = fastModeInput
+      && typeof fastModeInput === "object"
+      && !Array.isArray(fastModeInput)
+      ? (() => {
+          const providerValue = cleanString(fastModeInput.providerValue, 40);
+          const fastLabel = cleanString(fastModeInput.label, 80);
+          const fastDescription = cleanString(fastModeInput.description, 240);
+          if (!providerValue || !fastLabel || !fastDescription) return null;
+          return {
+            providerValue,
+            label: fastLabel,
+            description: fastDescription,
+            isDefault: fastModeInput.isDefault === true,
+          };
+        })()
+      : null;
     seen.add(id);
     const validated: ProviderModel = {
       id,
@@ -271,6 +288,7 @@ export function validateProviderModels(value: unknown): ProviderModel[] {
       inputModalities: inputModalities.length > 0 ? inputModalities : ["text"],
       reasoningOptions,
       defaultReasoningEffort: cleanString(model.defaultReasoningEffort, 40) ?? "",
+      fastMode,
     };
     return [validated];
   }).slice(0, MAX_MODELS);

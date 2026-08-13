@@ -125,6 +125,12 @@ function nativeProvider(): ProviderInfo {
         description: "Deep reasoning",
       }],
       defaultReasoningEffort: "high",
+      fastMode: {
+        providerValue: "priority",
+        label: "Fast",
+        description: "Faster responses with increased usage.",
+        isDefault: false,
+      },
     }],
     rateLimits: [],
     metadataState: {
@@ -263,6 +269,59 @@ describe("model backend profile controller", () => {
     controller.profiles([freshWithoutModel]);
     expect(() => controller.validateSelection(concrete))
       .toThrow("no longer offered");
+    runtimeStore.close();
+  });
+
+  it("accepts only the exact Fast mode value advertised by a native model", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    controller.profiles([nativeProvider()]);
+    const fast = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-authoritative",
+      reasoningEffort: "high",
+      providerOptions: { fastMode: "priority" },
+    });
+
+    expect(controller.validateSelection(fast).providerOptions).toEqual({
+      fastMode: "priority",
+    });
+    expect(controller.supportsNativeFastModeControl(fast)).toBe(true);
+    expect(() => controller.validateSelection({
+      ...fast,
+      providerOptions: { fastMode: "fast" },
+    })).toThrow("does not currently advertise Fast mode");
+    expect(() => controller.validateSelection({
+      ...fast,
+      providerOptions: { fastMode: "priority", temperature: 0 },
+    })).toThrow("native provider options are invalid");
+
+    const malformed = nativeProvider();
+    malformed.models[0]!.fastMode!.providerValue = "turbo";
+    controller.profiles([malformed]);
+    expect(() => controller.validateSelection({
+      ...fast,
+      providerOptions: { fastMode: "turbo" },
+    })).toThrow("does not currently advertise Fast mode");
+
+    const defaultFast = nativeProvider();
+    defaultFast.models[0]!.fastMode!.isDefault = true;
+    controller.profiles([defaultFast]);
+    expect(controller.validateSelection(fast).providerOptions).toEqual({
+      fastMode: "priority",
+    });
+    expect(controller.validateSelection({
+      ...fast,
+      providerOptions: {},
+    }).providerOptions).toEqual({});
+
+    const unsupported = nativeProvider();
+    unsupported.models[0]!.fastMode = null;
+    controller.profiles([unsupported]);
+    expect(controller.supportsNativeFastModeControl(fast)).toBe(false);
+    expect(() => controller.validateSelection(fast)).toThrow(
+      "does not currently advertise Fast mode",
+    );
     runtimeStore.close();
   });
 

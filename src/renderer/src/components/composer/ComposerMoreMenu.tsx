@@ -14,8 +14,10 @@ import type {
 import {
   accessOptions,
   menuId,
+  RESPONSE_SPEED_LABEL,
 } from "./config";
 import type { ComposerSettingsModel } from "./ComposerSettings";
+import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";
 import type { MoreSection } from "./types";
 import {
   moreSectionLabel,
@@ -27,12 +29,14 @@ export interface ComposerMoreMenuProps {
   selectedModel: ComposerSettingsModel | undefined;
   selectedReasoning: string;
   reasoningLabel: string;
+  selectedFastMode: boolean;
   conversation: Conversation;
   disabled: boolean;
   running: boolean;
   menuController: ComposerMenuController;
   onRunAction: (action: ProjectAction) => void;
   onUpdateReasoningEffort: (reasoningEffort: string) => Promise<void>;
+  onUpdateFastMode: (enabled: boolean) => Promise<void>;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -47,12 +51,14 @@ export function ComposerMoreMenu({
   selectedModel,
   selectedReasoning,
   reasoningLabel,
+  selectedFastMode,
   conversation,
   disabled,
   running,
   menuController,
   onRunAction,
   onUpdateReasoningEffort,
+  onUpdateFastMode,
   onUpdateConversation,
   conversationUpdatePending,
 }: ComposerMoreMenuProps): React.JSX.Element {
@@ -136,6 +142,19 @@ export function ComposerMoreMenu({
         </button>
       ));
     }
+    if (section === "speed") {
+      const fastMode = selectedModel?.fastMode ?? null;
+      return [
+        <ComposerResponseSpeedOptions
+          key="speed"
+          fastMode={fastMode}
+          selectedFastMode={selectedFastMode}
+          pending={conversationUpdatePending}
+          onUpdate={onUpdateFastMode}
+          onSelected={() => dismissMenu("selection")}
+        />,
+      ];
+    }
     if (section === "mode") {
       return (["build", "plan"] as InteractionMode[]).map((mode) => (
         <button
@@ -209,6 +228,15 @@ export function ComposerMoreMenu({
       value: reasoningLabel,
       disabled: !selectedModel?.reasoningOptions.length,
     },
+    ...((selectedModel?.fastMode ?? null) !== null || selectedFastMode
+      ? [{
+          section: "speed" as const,
+          label: RESPONSE_SPEED_LABEL,
+          value: selectedFastMode
+            ? "Fast"
+            : "Standard",
+        }]
+      : []),
     {
       section: "mode",
       label: "Mode",

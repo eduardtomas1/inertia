@@ -62,6 +62,72 @@ function requirePathInspectionTime(
   }
 }
 
+/**
+ * Bounds native filesystem requests that cannot themselves be cancelled.
+ * Once cancellation wins, the abandoned request may still finish in libuv,
+ * but its result has no continuation that can start Git or mutate authority.
+ */
+async function awaitPathInspection<T>(
+  operation: () => Promise<T>,
+  options: GitPathInspectionOptions,
+): Promise<T> {
+  requirePathInspectionTime(options);
+  return await new Promise<T>((resolveInspection, rejectInspection) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const finish = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const onAbort = (): void => finish(() => rejectInspection(
+      new GitError("timeout", "Git inspection was cancelled."),
+    ));
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) {
+      onAbort();
+      return;
+    }
+    if (options.deadlineAt !== undefined) {
+      timer = setTimeout(
+        () => finish(() => rejectInspection(new GitError(
+          "timeout",
+          "Git took too long to complete the operation.",
+        ))),
+        Math.max(1, options.deadlineAt - Date.now()),
+      );
+      timer.unref();
+    }
+    let pending: Promise<T>;
+    try {
+      pending = operation();
+    } catch (error) {
+      finish(() => rejectInspection(error));
+      return;
+    }
+    void pending.then(
+      (value) => finish(() => {
+        try {
+          requirePathInspectionTime(options);
+          resolveInspection(value);
+        } catch (error) {
+          rejectInspection(error);
+        }
+      }),
+      (error: unknown) => finish(() => {
+        try {
+          requirePathInspectionTime(options);
+          rejectInspection(error);
+        } catch (deadlineFailure) {
+          rejectInspection(deadlineFailure);
+        }
+      }),
+    );
+  });
+}
+
 async function requireDirectory(
   path: string,
   options: GitPathInspectionOptions,
@@ -76,9 +142,15 @@ async function requireDirectory(
   }
   try {
     requirePathInspectionTime(options);
-    const canonical = await realpath(resolve(path));
+    const canonical = await awaitPathInspection(
+      async () => await realpath(resolve(path)),
+      options,
+    );
     requirePathInspectionTime(options);
-    const info = await stat(canonical);
+    const info = await awaitPathInspection(
+      async () => await stat(canonical),
+      options,
+    );
     requirePathInspectionTime(options);
     if (!info.isDirectory()) throw new Error();
     return canonical;
@@ -113,7 +185,10 @@ export async function repositoryRoot(
   }
   try {
     requirePathInspectionTime(options);
-    const canonical = await realpath(reported);
+    const canonical = await awaitPathInspection(
+      async () => await realpath(reported),
+      options,
+    );
     requirePathInspectionTime(options);
     return canonical;
   } catch (error) {
@@ -175,11 +250,17 @@ export async function repositoryMetadataMarkerIdentity(
     }
     try {
       requirePathInspectionTime(options);
-      const metadataPath = await realpath(
-        isAbsolute(reported) ? reported : resolve(root, reported),
+      const metadataPath = await awaitPathInspection(
+        async () => await realpath(
+          isAbsolute(reported) ? reported : resolve(root, reported),
+        ),
+        options,
       );
       requirePathInspectionTime(options);
-      const info = await lstat(metadataPath, { bigint: true });
+      const info = await awaitPathInspection(
+        async () => await lstat(metadataPath, { bigint: true }),
+        options,
+      );
       requirePathInspectionTime(options);
       if (
         !info.isDirectory()
@@ -281,7 +362,10 @@ export async function validatedPaths(
       );
     }
     try {
-      const canonical = await realpath(absolute);
+      const canonical = await awaitPathInspection(
+        async () => await realpath(absolute),
+        options,
+      );
       requirePathInspectionTime(options);
       if (!isContained(root, canonical)) {
         throw new GitError(
@@ -295,7 +379,10 @@ export async function validatedPaths(
       while (ancestor !== root) {
         requirePathInspectionTime(options);
         try {
-          const info = await lstat(ancestor);
+          const info = await awaitPathInspection(
+            async () => await lstat(ancestor),
+            options,
+          );
           requirePathInspectionTime(options);
           if (info.isSymbolicLink()) {
             throw new GitError(

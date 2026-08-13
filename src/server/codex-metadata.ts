@@ -56,6 +56,22 @@ function reasoningOptions(value: unknown): ProviderReasoningOption[] {
   }).slice(0, 12);
 }
 
+function codexFastMode(model: JsonObject): ProviderModel["fastMode"] {
+  if (!Array.isArray(model.serviceTiers)) return null;
+  const tier = model.serviceTiers.find((entry) => {
+    const candidate = objectValue(entry);
+    return stringValue(candidate?.id, 40) === "priority"
+      && stringValue(candidate?.name, 40)?.toLowerCase() === "fast";
+  });
+  if (!tier) return null;
+  return {
+    providerValue: "priority",
+    label: "Fast",
+    description: "Faster responses with increased usage.",
+    isDefault: stringValue(model.defaultServiceTier, 40) === "priority",
+  };
+}
+
 export function parseCodexModels(result: JsonObject): ProviderModel[] {
   if (!Array.isArray(result.data)) return [];
   return result.data.flatMap((entry) => {
@@ -74,6 +90,7 @@ export function parseCodexModels(result: JsonObject): ProviderModel[] {
       inputModalities,
       reasoningOptions: options,
       defaultReasoningEffort: stringValue(model?.defaultReasoningEffort, 40) ?? options[0]?.value ?? "",
+      fastMode: codexFastMode(model ?? {}),
     }];
   }).slice(0, 64);
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
   staleProviderSessionDecision,
@@ -45,6 +46,65 @@ describe("provider continuation policy", () => {
     })).toMatchObject({
       action: "start-session",
       reasonCode: "first-turn",
+    });
+  });
+
+  it("allows only verified native Codex and Claude routes to switch Fast mode in-session", () => {
+    expect(officiallyAllowsFastModeSwitchWithinSession({
+      harnessId: "codex-app-server",
+      state: "verified",
+    })).toBe(true);
+    expect(officiallyAllowsFastModeSwitchWithinSession({
+      harnessId: "claude-agent-sdk",
+      state: "verified",
+    })).toBe(true);
+    expect(officiallyAllowsFastModeSwitchWithinSession({
+      harnessId: "opencode-sdk",
+      state: "verified",
+    })).toBe(false);
+    expect(officiallyAllowsFastModeSwitchWithinSession({
+      harnessId: "codex-app-server",
+      state: "partially-compatible",
+    })).toBe(false);
+  });
+
+  it("preserves a verified provider session across an explicit Fast mode switch", () => {
+    expect(resolveContinuationDecision({
+      previousIdentity: codexIdentity,
+      nextIdentity: {
+        ...codexIdentity,
+        performanceModeIdentity: "fast:priority",
+      },
+      previousModelId: codex.modelId,
+      nextModelId: codex.modelId,
+      hasProviderSession: true,
+      hasTurns: true,
+      allowsModelSwitchWithinSession: true,
+      allowsPerformanceModeSwitchWithinSession: true,
+    })).toMatchObject({
+      action: "resume-session",
+      changeKind: "performance-mode",
+      reasonCode: "supported-performance-mode-switch",
+    });
+  });
+
+  it("requires a new conversation for an unverified Fast mode switch", () => {
+    expect(resolveContinuationDecision({
+      previousIdentity: codexIdentity,
+      nextIdentity: {
+        ...codexIdentity,
+        performanceModeIdentity: "fast:priority",
+      },
+      previousModelId: codex.modelId,
+      nextModelId: codex.modelId,
+      hasProviderSession: true,
+      hasTurns: true,
+      allowsModelSwitchWithinSession: true,
+      allowsPerformanceModeSwitchWithinSession: false,
+    })).toMatchObject({
+      action: "new-conversation-required",
+      changeKind: "performance-mode",
+      reasonCode: "incompatible-performance-mode-changed",
     });
   });
 

@@ -21,6 +21,15 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 
 type LifecycleScenario =
   | "resume"
+  | "compact"
+  | "compact-stale"
+  | "compact-equal-timestamp"
+  | "compact-auto"
+  | "compact-wrong-message"
+  | "compact-replacement-start"
+  | "compact-reversed-time"
+  | "compact-malformed-timestamp"
+  | "compact-missing-message"
   | "cancel"
   | "stuck-cancel"
   | "oversized"
@@ -94,6 +103,48 @@ const server = http.createServer((req, res) => {
       if (scenario === "endless") setInterval(() => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "heartbeat", sessionID, role: "assistant" } } });
       }, 50);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/compact") {
+      json(res, undefined, 204);
+      if (scenario === "compact") setTimeout(() => {
+        sendEvent({ id: "compact-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "summary-1", reason: "manual" } });
+        sendEvent({ id: "compact-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "summary-1", reason: "manual", text: "Summary", recent: "" } });
+      }, 10);
+      if (scenario === "compact-stale") setTimeout(() => {
+        sendEvent({ id: "compact-stale-1", type: "session.next.compaction.started", properties: { timestamp: Date.now() - 60000, sessionID, messageID: "stale-summary", reason: "manual" } });
+        sendEvent({ id: "compact-stale-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now() - 60000, sessionID, messageID: "stale-summary", reason: "manual", text: "Stale", recent: "" } });
+      }, 10);
+      if (scenario === "compact-equal-timestamp") setTimeout(() => {
+        sendEvent({ id: "compact-equal-1", type: "session.next.compaction.started", properties: { timestamp: 4242, sessionID, messageID: "equal-summary", reason: "manual" } });
+        sendEvent({ id: "compact-equal-2", type: "session.next.compaction.ended", properties: { timestamp: 4242, sessionID, messageID: "equal-summary", reason: "manual", text: "Equal", recent: "" } });
+      }, 10);
+      if (scenario === "compact-auto") setTimeout(() => {
+        sendEvent({ id: "compact-auto-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "auto-summary", reason: "auto" } });
+        sendEvent({ id: "compact-auto-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "auto-summary", reason: "auto", text: "Automatic", recent: "" } });
+      }, 10);
+      if (scenario === "compact-wrong-message") setTimeout(() => {
+        sendEvent({ id: "compact-wrong-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "requested-summary", reason: "manual" } });
+        sendEvent({ id: "compact-wrong-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "different-summary", reason: "manual", text: "Wrong", recent: "" } });
+      }, 10);
+      if (scenario === "compact-replacement-start") setTimeout(() => {
+        sendEvent({ id: "compact-replacement-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "requested-summary", reason: "manual" } });
+        sendEvent({ id: "compact-replacement-2", type: "session.next.compaction.started", properties: { timestamp: Date.now() + 1, sessionID, messageID: "replacement-summary", reason: "manual" } });
+        sendEvent({ id: "compact-replacement-3", type: "session.next.compaction.ended", properties: { timestamp: Date.now() + 2, sessionID, messageID: "replacement-summary", reason: "manual", text: "Replacement", recent: "" } });
+      }, 10);
+      if (scenario === "compact-reversed-time") setTimeout(() => {
+        const timestamp = Date.now();
+        sendEvent({ id: "compact-reversed-1", type: "session.next.compaction.started", properties: { timestamp: timestamp + 2, sessionID, messageID: "reversed-summary", reason: "manual" } });
+        sendEvent({ id: "compact-reversed-2", type: "session.next.compaction.ended", properties: { timestamp: timestamp + 1, sessionID, messageID: "reversed-summary", reason: "manual", text: "Reversed", recent: "" } });
+      }, 10);
+      if (scenario === "compact-malformed-timestamp") setTimeout(() => {
+        sendEvent({ id: "compact-malformed-1", type: "session.next.compaction.started", properties: { timestamp: "later", sessionID, messageID: "malformed-summary", reason: "manual" } });
+        sendEvent({ id: "compact-malformed-2", type: "session.next.compaction.ended", properties: { timestamp: "later", sessionID, messageID: "malformed-summary", reason: "manual", text: "Malformed", recent: "" } });
+      }, 10);
+      if (scenario === "compact-missing-message") setTimeout(() => {
+        sendEvent({ id: "compact-missing-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, reason: "manual" } });
+        sendEvent({ id: "compact-missing-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, reason: "manual", text: "Missing", recent: "" } });
+      }, 10);
       return;
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/abort") {
@@ -613,6 +664,91 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(captured.some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);
     expect(captured.some(({ method, path }) => method === "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
     expect(captured.some(({ method, path }) => method !== "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
+  });
+
+  it("uses the native v2 compaction endpoint and waits for its completion event", async () => {
+    const root = portableFixtureRoot("OpenCode compact");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "compact"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-compact",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), "remember retrieval exactly")).resolves.toMatchObject({
+      status: "completed",
+      instructionForwarded: false,
+      message: expect.stringContaining("was not forwarded"),
+    });
+    const capture = readStableCapture<{
+      captured: Array<{ method: string; path: string }>;
+    }>(capturePath);
+    expect(capture.captured.some(({ method, path }) =>
+      method === "POST"
+      && path === "/api/session/opencode-lifecycle-session/compact"
+    )).toBe(true);
+    expect(capture.captured.some(({ path }) => path.endsWith("/prompt_async")))
+      .toBe(false);
+  });
+
+  it.each([
+    ["compact-stale", "stale pre-request"],
+    ["compact-equal-timestamp", "equal-timestamp stale"],
+    ["compact-auto", "automatic"],
+    ["compact-wrong-message", "wrong-message"],
+    ["compact-replacement-start", "replacement-start"],
+    ["compact-reversed-time", "reversed-time"],
+    ["compact-malformed-timestamp", "malformed timestamp"],
+    ["compact-missing-message", "missing message ID"],
+  ] as const)("does not accept %s events as manual compaction proof (%s)", async (
+    scenario,
+    _label,
+  ) => {
+    const root = portableFixtureRoot(`OpenCode ${scenario}`);
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, scenario),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        eventInactivityDeadlineMs: 100,
+        ...(scenario === "compact-equal-timestamp"
+          ? { compactionTimestampNow: () => 4242 }
+          : {}),
+      })]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: `opencode-${scenario}`,
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("event stream became inactive"),
+    });
   });
 
   it("does not emit completion when owned-server cleanup is unconfirmed", async () => {

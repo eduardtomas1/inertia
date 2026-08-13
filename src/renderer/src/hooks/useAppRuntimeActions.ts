@@ -8,6 +8,7 @@ import {
 import type {
   ChatAttachment,
   Conversation,
+  ConversationCompactionResult,
   MessageSendAcceptance,
   ServerEvent,
   TurnRequestContext,
@@ -33,6 +34,10 @@ export interface AppRuntimeActions {
     skillIds?: readonly string[],
     activate?: boolean,
   ) => Promise<MessageSendAcceptance | null>;
+  compactConversation: (
+    conversationId: string,
+    instruction?: string,
+  ) => Promise<ConversationCompactionResult>;
   updateConversationById: (
     conversationId: string,
     update: Partial<Pick<
@@ -183,12 +188,37 @@ export function useAppRuntimeActions(options: {
       },
     });
   }, [run]);
+  const compactConversation = useCallback(async (
+    targetConversationId: string,
+    instruction?: string,
+  ): Promise<ConversationCompactionResult> => {
+    // The composer owns this operation's pending and error state by
+    // conversation. Do not promote a hidden owner's failure into the global
+    // action toast for whichever conversation is currently visible.
+    const event = await sendCommand(withRequestId({
+      type: "conversation.compact",
+      payload: {
+        conversationId: targetConversationId,
+        ...(instruction ? { instruction } : {}),
+      },
+    }));
+    if (
+      event.type !== "request.result"
+      || event.result.kind !== "conversation.compacted"
+    ) {
+      throw new Error(
+        "The local service returned an unexpected compaction response.",
+      );
+    }
+    return event.result;
+  }, [sendCommand]);
 
   return {
     sendingConversationIds,
     run,
     openProjectPath,
     sendMessageToConversation,
+    compactConversation,
     updateConversationById,
   };
 }

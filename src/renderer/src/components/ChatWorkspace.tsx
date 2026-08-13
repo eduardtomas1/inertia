@@ -142,6 +142,10 @@ type ChatWorkspaceProps = {
     context?: TurnRequestContext,
     skillIds?: readonly string[],
   ) => Promise<TranscriptMessageSendAcceptance | null>;
+  onCompactConversation?: (instruction?: string) => Promise<{
+    message: string;
+    instructionForwarded: boolean;
+  }>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onToggleSkill: (skill: AgentSkillSummary) => void;
   onClearSelectedSkills: () => void;
@@ -234,6 +238,7 @@ export function ChatWorkspace({
   onAddProject,
   onCreateConversation,
   onSendMessage,
+  onCompactConversation,
   onListSkills,
   onToggleSkill,
   onClearSelectedSkills,
@@ -802,6 +807,7 @@ export function ChatWorkspace({
           latestTurn={ownedTurns.at(-1) ?? null}
           latestTurnSummary={latestTurnSummary}
           onSend={sendMessage}
+          {...(onCompactConversation ? { onCompact: onCompactConversation } : {})}
           onListSkills={onListSkills}
           onToggleSkill={onToggleSkill}
           onClearSelectedSkills={onClearSelectedSkills}

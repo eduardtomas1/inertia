@@ -5,6 +5,7 @@ import type {
   ModelSelection,
 } from "@shared/contracts";
 import {
+  officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
   type ContinuationChangeKind,
@@ -39,6 +40,8 @@ export interface ModelRouteTransitionCandidate {
   selection: ModelSelection;
   continuationIdentity: ContinuationIdentity;
   compatibility: TransitionCompatibility;
+  /** Current exact-model evidence that both Fast and Standard are forceable. */
+  supportsNativeFastModeControl?: boolean;
 }
 
 interface ModelRouteTransitionBase {
@@ -83,6 +86,11 @@ export function resolveModelRouteTransition(
     allowsModelSwitchWithinSession: officiallyAllowsModelSwitchWithinSession(
       candidate.compatibility,
     ),
+    allowsPerformanceModeSwitchWithinSession:
+      officiallyAllowsFastModeSwitchWithinSession({
+        ...candidate.compatibility,
+        harnessId: candidate.selection.harnessId,
+      }) && candidate.supportsNativeFastModeControl === true,
   });
   const base: ModelRouteTransitionBase = {
     projectId: context.projectId,

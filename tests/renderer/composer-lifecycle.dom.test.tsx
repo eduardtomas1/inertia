@@ -25,6 +25,7 @@ import {
   DRAFT_PERSISTENCE_DELAY_MS,
   DRAFT_PERSISTENCE_MAX_WAIT_MS,
 } from "../../src/renderer/src/components/composer/Composer";
+import type { PromptPresetCommandRunner } from "../../src/renderer/src/components/composer/types";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
@@ -175,6 +176,219 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("compacts with optional focus text without sending a chat turn", async () => {
+    const current = conversation("07070707-0707-4707-8707-070707070707");
+    const operation = deferred<{
+      message: string;
+      instructionForwarded: boolean;
+    }>();
+    const onCompact = vi.fn(() => operation.promise);
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, { onCompact, onSend })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, {
+      target: { value: "/compact remember exactly how retrieval works" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onCompact).toHaveBeenCalledWith(
+      "remember exactly how retrieval works",
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("Compacting…")).toBeVisible();
+    expect(input).toHaveAttribute("readonly");
+
+    operation.resolve({
+      message: "Context compacted with the focus instruction.",
+      instructionForwarded: true,
+    });
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(screen.getByText("Context compacted with the focus instruction."))
+      .toBeVisible();
+  });
+
+  it("settles the hidden compaction owner without touching the active draft", async () => {
+    const first = conversation("17171717-1717-4717-8717-171717171717");
+    const second = conversation("27272727-2727-4727-8727-272727272727");
+    const operation = deferred<{
+      message: string;
+      instructionForwarded: boolean;
+    }>();
+    const onCompact = vi.fn(() => operation.promise);
+    const view = render(<Composer {...composerProps(first, { onCompact })} />);
+    const firstInput = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(firstInput, { target: { value: "/compact" } });
+    fireEvent.keyDown(firstInput, { key: "Enter" });
+    expect(screen.getByText("Compacting…")).toBeVisible();
+
+    window.localStorage.setItem(
+      `inertia:draft:${second.id}`,
+      "Second chat draft",
+    );
+    view.rerender(<Composer {...composerProps(second, { onCompact })} />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Second chat draft"));
+
+    await act(async () => operation.resolve({
+      message: "First chat context compacted.",
+      instructionForwarded: false,
+    }));
+    expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Second chat draft");
+    expect(screen.queryByText("First chat context compacted."))
+      .not.toBeInTheDocument();
+
+    view.rerender(<Composer {...composerProps(first, { onCompact })} />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue(""));
+    expect(screen.queryByText("Compacting…"))
+      .not.toBeInTheDocument();
+    expect(screen.getByText("First chat context compacted.")).toBeVisible();
+  });
+
+  it("does not start a second compaction after returning to a pending owner", async () => {
+    const first = conversation("57575757-5757-4757-8757-575757575757");
+    const second = conversation("67676767-6767-4767-8767-676767676767");
+    const operation = deferred<{
+      message: string;
+      instructionForwarded: boolean;
+    }>();
+    const onCompact = vi.fn(() => operation.promise);
+    const view = render(<Composer {...composerProps(first, { onCompact })} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "/compact" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "Enter",
+    });
+
+    view.rerender(<Composer {...composerProps(second, { onCompact })} />);
+    view.rerender(<Composer {...composerProps(first, { onCompact })} />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("/compact"));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "Enter",
+    });
+    expect(onCompact).toHaveBeenCalledTimes(1);
+
+    await act(async () => operation.resolve({
+      message: "Original compaction completed.",
+      instructionForwarded: false,
+    }));
+    await waitFor(() => expect(screen.getByText("Original compaction completed."))
+      .toBeVisible());
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
+  });
+
+  it("settles a hidden compaction failure only on its owning chat", async () => {
+    const first = conversation("37373737-3737-4737-8737-373737373737");
+    const second = conversation("47474747-4747-4747-8747-474747474747");
+    const operation = deferred<ServerEvent>();
+    const setActionError = vi.fn();
+    const RuntimeComposer = ({ owner }: { owner: Conversation }) => {
+      const actions = useAppRuntimeActions({
+        sendCommand: () => operation.promise,
+        refreshDetail: vi.fn(),
+        setBusyAction: vi.fn(),
+        setActionError,
+      });
+      return <Composer {...composerProps(owner, {
+        onCompact: async (instruction) =>
+          await actions.compactConversation(owner.id, instruction),
+      })} />;
+    };
+    const view = render(<RuntimeComposer owner={first} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "/compact" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "Enter",
+    });
+
+    view.rerender(<RuntimeComposer owner={second} />);
+    await act(async () => operation.reject(new Error("First chat failed")));
+    expect(screen.queryByText("First chat failed")).not.toBeInTheDocument();
+    expect(setActionError).not.toHaveBeenCalled();
+
+    view.rerender(<RuntimeComposer owner={first} />);
+    expect(screen.queryByText("Compacting…"))
+      .not.toBeInTheDocument();
+    expect(screen.getByText("First chat failed")).toBeVisible();
+  });
+
+  it("runs the uniquely matched partial compact command without sending it", async () => {
+    const current = conversation("08080808-0808-4808-8808-080808080808");
+    const onCompact = vi.fn(async () => ({
+      message: "Context compacted.",
+      instructionForwarded: false,
+    }));
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, { onCompact, onSend })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "/comp" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(onCompact).toHaveBeenCalledWith(undefined));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps the compact command when attached context makes it unsafe", async () => {
+    const current = conversation("06060606-0606-4606-8606-060606060606");
+    const onCompact = vi.fn(async () => ({
+      message: "Context compacted.",
+      instructionForwarded: false,
+    }));
+    render(<Composer {...composerProps(current, {
+      onCompact,
+      promptContext: "Selected diff context",
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "/compact" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onCompact).not.toHaveBeenCalled();
+    expect(input).toHaveValue("/compact");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Remove attachments or context",
+    );
+  });
+
+  it("never turns a compact command into an active-run follow-up", async () => {
+    const current = conversation("05050505-0505-4505-8505-050505050505");
+    const onCompact = vi.fn(async () => ({
+      message: "Context compacted.",
+      instructionForwarded: false,
+    }));
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      running: true,
+      latestTurn: {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        harnessId: "codex-app-server",
+      },
+      onCompact,
+      onSend,
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, {
+      target: { value: "/compact preserve the retrieval implementation" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onCompact).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue(
+      "/compact preserve the retrieval implementation",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Wait for the current provider turn",
+    );
+  });
+
   it("opens goal and folder resume flows directly from slash commands", async () => {
     const current = conversation("08080808-0808-4808-8808-080808080808");
     const onOpenResume = vi.fn();
@@ -196,6 +410,8 @@ describe("composer asynchronous ownership", () => {
     fireEvent.change(input, { target: { value: "/" } });
     expect(screen.getByRole("listbox", { name: "Composer commands" }))
       .toHaveTextContent("/goal");
+    expect(screen.getByRole("listbox", { name: "Composer commands" }))
+      .toHaveTextContent("/compact");
     expect(screen.getByRole("listbox", { name: "Composer commands" }))
       .toHaveTextContent("/resume");
     expect(screen.getByRole("option", { name: /\/plan/u })).toBeDisabled();
@@ -296,6 +512,117 @@ describe("composer asynchronous ownership", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Reasoning update rejected",
     );
+  });
+
+  it("shows Fast mode only for advertised models and persists the exact native value", async () => {
+    const current = conversation("composer-fast-mode");
+    current.modelSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-fast",
+    });
+    current.model = "gpt-fast";
+    const fastProvider: ProviderInfo = {
+      ...provider,
+      models: [{
+        id: "gpt-fast",
+        label: "GPT Fast",
+        description: "A model with an advertised service tier",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+        fastMode: {
+          providerValue: "priority",
+          label: "Fast",
+          description: "Faster responses with increased usage.",
+          isDefault: false,
+        },
+      }],
+    };
+    const onUpdateConversation = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      providers: [fastProvider],
+      onUpdateConversation,
+    })} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Choose response speed. Current speed: Standard.",
+    }));
+    expect(await screen.findByRole("menuitemradio", { name: /Standard/u }))
+      .toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Fast/u }));
+
+    await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledWith({
+      modelSelection: {
+        ...current.modelSelection,
+        providerOptions: { fastMode: "priority" },
+      },
+    }));
+  });
+
+  it("hides Fast mode on unsupported routes", () => {
+    const current = conversation("composer-standard-only");
+    current.modelSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-standard",
+    });
+    current.model = "gpt-standard";
+    render(<Composer {...composerProps(current, {
+      providers: [{
+        ...provider,
+        models: [{
+          id: "gpt-standard",
+          label: "GPT Standard",
+          description: "No provider-native Fast option",
+          isDefault: true,
+          inputModalities: ["text"],
+          reasoningOptions: [],
+          defaultReasoningEffort: "",
+          fastMode: null,
+        }],
+      }],
+    })} />);
+
+    expect(screen.queryByRole("button", { name: /Choose response speed/u }))
+      .not.toBeInTheDocument();
+  });
+
+  it("preserves a saved Fast identity when provider metadata becomes unavailable", async () => {
+    const current = conversation("composer-fast-metadata-unavailable");
+    current.modelSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-fast",
+      providerOptions: { fastMode: "priority" },
+    });
+    current.model = "gpt-fast";
+    const onPromptPresetCommand = vi.fn<PromptPresetCommandRunner>(
+      () => Promise.resolve(),
+    );
+    render(<Composer {...composerProps(current, {
+      onPromptPresetCommand,
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "Stash this Fast prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scratch prompts" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Save current prompt/u }));
+    expect(readPromptStash(window.localStorage)[0]?.route.fastMode).toBe(true);
+
+    fireEvent.change(input, { target: { value: "Preset this Fast prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Prompt presets" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("checkbox", {
+      name: /Limit to current model route/u,
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+
+    await waitFor(() => expect(onPromptPresetCommand).toHaveBeenCalledTimes(1));
+    expect(onPromptPresetCommand.mock.calls[0]?.[1]).toMatchObject({
+      type: "prompt-preset.create",
+      payload: {
+        route: { fastMode: true },
+      },
+    });
   });
 
   it("binds new-chat confirmation, transfers text, and supports failure retry", async () => {
@@ -488,6 +815,28 @@ describe("composer asynchronous ownership", () => {
 
     await rejection;
     expect(setActionError).toHaveBeenCalledWith("Runtime rejected access");
+  });
+
+  it("leaves compaction failures with the conversation-owned composer notice", async () => {
+    const request = deferred<ServerEvent>();
+    const setActionError = vi.fn();
+    const setBusyAction = vi.fn();
+    const hook = renderHook(() => useAppRuntimeActions({
+      sendCommand: () => request.promise,
+      refreshDetail: vi.fn(),
+      setBusyAction,
+      setActionError,
+    }));
+
+    const compaction = hook.result.current.compactConversation(
+      "49494949-4949-4949-8949-494949494949",
+    );
+    const rejection = expect(compaction).rejects.toThrow("Compaction failed");
+    await act(async () => request.reject(new Error("Compaction failed")));
+
+    await rejection;
+    expect(setActionError).not.toHaveBeenCalled();
+    expect(setBusyAction).not.toHaveBeenCalled();
   });
 
   it("prepares and settles the exact attachment handoff around message send", async () => {

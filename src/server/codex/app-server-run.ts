@@ -10,6 +10,7 @@ import {
   codexAccessPolicy,
   codexProtocolLimits,
   isStaleResumeError,
+  isUnsupportedFastModeError,
   isUnsupportedFullAccessError,
   validateCodexModelProvider,
   type CodexRunPhase,
@@ -568,6 +569,9 @@ export function startCodexAppServerRun(
       setContinuationError: (error) => {
         continuationError = error;
       },
+      setCompatibilityError: (error) => {
+        compatibilityError = error;
+      },
       setPhase: (nextPhase) => {
         phase = nextPhase;
       },
@@ -583,6 +587,12 @@ export function startCodexAppServerRun(
         && isUnsupportedFullAccessError(error)
       ) {
         compatibilityError = "full-access-unsupported";
+      }
+      if (
+        options.serviceTier !== undefined
+        && isUnsupportedFastModeError(error)
+      ) {
+        compatibilityError = "fast-mode-unsupported";
       }
       lastError = error instanceof Error
         ? error.message
@@ -718,6 +728,9 @@ interface OpenCodexTurnOptions {
   setContinuationError: (
     error: CodexAppServerResult["continuationError"],
   ) => void;
+  setCompatibilityError?: (
+    error: CodexAppServerResult["compatibilityError"],
+  ) => void;
   setPhase: (phase: CodexRunPhase) => void;
   isSettled: () => boolean;
   isCancelRequested: () => boolean;
@@ -744,6 +757,7 @@ export async function openCodexTurn({
   awaitInitialGoalTurn,
   projectGoalResponse,
   setContinuationError,
+  setCompatibilityError,
   setPhase,
   isSettled,
   isCancelRequested,
@@ -771,6 +785,9 @@ export async function openCodexTurn({
     ...(options.model ? { model: options.model } : {}),
     ...(options.reasoningEffort
       ? { effort: options.reasoningEffort }
+      : {}),
+    ...(options.serviceTier !== undefined
+      ? { serviceTier: options.serviceTier }
       : {}),
     ...(modelProvider ? {
       modelProvider: modelProvider.providerId,
@@ -808,6 +825,19 @@ export async function openCodexTurn({
   const openedThreadId = boundedText(thread?.id, 512);
   if (!openedThreadId) {
     throw new Error("Codex did not return a thread identifier.");
+  }
+  if (
+    options.serviceTier !== undefined
+    && (
+      options.serviceTier === null
+        ? opened.serviceTier !== null
+        : boundedText(opened.serviceTier, 40) !== options.serviceTier
+    )
+  ) {
+    setCompatibilityError?.("fast-mode-unsupported");
+    throw new Error(
+      "Codex did not confirm the requested response service tier.",
+    );
   }
   setProviderThreadId(openedThreadId);
   options.onSession?.(openedThreadId);
@@ -901,6 +931,9 @@ export async function openCodexTurn({
     ...(options.model ? { model: options.model } : {}),
     ...(options.reasoningEffort
       ? { effort: options.reasoningEffort }
+      : {}),
+    ...(options.serviceTier !== undefined
+      ? { serviceTier: options.serviceTier }
       : {}),
     summary: "auto",
     ...(options.planMode ? {

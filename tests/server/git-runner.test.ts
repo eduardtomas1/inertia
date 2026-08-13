@@ -15,6 +15,7 @@ import { GitError } from "../../src/server/git/types";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   portableNodeExecutable,
+  removePortableFixture,
   waitFor,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
@@ -31,8 +32,7 @@ afterEach(async () => {
     }
   }
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { force: true, recursive: true })),
+    temporaryDirectories.splice(0).map(removePortableFixture),
   );
 });
 

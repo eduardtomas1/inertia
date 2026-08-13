@@ -186,6 +186,45 @@ export interface ContinuationIdentity {
   backendConfigurationRevision: number;
   modelIdentity: string | null;
   endpointIdentity: string | null;
+  /** Missing historical values are equivalent to Standard provider speed. */
+  performanceModeIdentity?: string | null;
+}
+
+export function fastModeProviderValue(
+  selection: Pick<ModelSelection, "providerOptions">,
+): string | null {
+  const value = selection.providerOptions.fastMode;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+export function modelSelectionUsesFastMode(
+  selection: Pick<ModelSelection, "providerOptions">,
+): boolean {
+  return fastModeProviderValue(selection) !== null;
+}
+
+export function routeSupportsNativeFastModeIdentity(
+  route: Pick<ModelSelection, "harnessId" | "backendProfileId">,
+): boolean {
+  return (
+    route.harnessId === "codex-app-server"
+    && route.backendProfileId === "builtin:openai"
+  ) || (
+    route.harnessId === "claude-agent-sdk"
+    && route.backendProfileId === "builtin:anthropic"
+  );
+}
+
+export function withModelSelectionFastMode(
+  selection: ModelSelection,
+  providerValue: string | null,
+): ModelSelection {
+  const providerOptions = { ...selection.providerOptions };
+  delete providerOptions.fastMode;
+  if (providerValue !== null) {
+    providerOptions.fastMode = providerValue;
+  }
+  return modelSelectionSchema.parse({ ...selection, providerOptions });
 }
 
 const boundedIdentitySchema = z.string()
@@ -280,6 +319,9 @@ export const continuationIdentitySchema = z.object({
   backendConfigurationRevision: z.number().int().nonnegative(),
   modelIdentity: boundedModelSchema.nullable(),
   endpointIdentity: opaqueIdentitySchema.nullable(),
+  performanceModeIdentity: z.enum(["fast:priority", "fast:fast"])
+    .nullable()
+    .optional(),
 }).strict();
 
 const NATIVE_HARNESS: Readonly<Record<ProviderId, KnownHarnessId>> = {
@@ -559,12 +601,14 @@ export function continuationIdentityForSelection(
   endpointIdentity: string | null = null,
   modelIdentityRequired = true,
 ): ContinuationIdentity {
+  const fastMode = fastModeProviderValue(selection);
   return continuationIdentitySchema.parse({
     harnessId: selection.harnessId,
     backendProfileId: selection.backendProfileId,
     backendConfigurationRevision: selection.backendConfigurationRevision,
     modelIdentity: modelIdentityRequired ? selection.modelId : null,
     endpointIdentity,
+    ...(fastMode ? { performanceModeIdentity: `fast:${fastMode}` } : {}),
   });
 }
 
@@ -578,5 +622,7 @@ export function sameContinuationIdentity(
     && left.backendProfileId === right.backendProfileId
     && left.backendConfigurationRevision === right.backendConfigurationRevision
     && left.modelIdentity === right.modelIdentity
-    && left.endpointIdentity === right.endpointIdentity;
+    && left.endpointIdentity === right.endpointIdentity
+    && (left.performanceModeIdentity ?? null)
+      === (right.performanceModeIdentity ?? null);
 }

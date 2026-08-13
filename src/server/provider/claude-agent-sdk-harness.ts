@@ -169,8 +169,34 @@ function claudeModels(models: Awaited<ReturnType<Query["supportedModels"]>>): Pr
         description: `${effort === "xhigh" ? "Extra-high" : effort} reasoning effort`,
       })),
       defaultReasoningEffort: efforts.includes("high") ? "high" : efforts[0] ?? "",
+      fastMode: model.supportsFastMode === true
+        ? {
+            providerValue: "fast",
+            label: "Fast",
+            description: "Faster output with premium usage.",
+            isDefault: false,
+          }
+        : null,
     };
   });
+}
+
+function claudeFastModeFailure(record: Record<string, unknown>): string {
+  const reason = stringValue(record.fast_mode_disabled_reason);
+  const detail = reason === "model_not_allowed"
+    ? "The selected Claude model does not allow Fast mode."
+    : reason === "sdk_opt_in_required"
+      ? "This Claude Agent SDK version did not accept the Fast mode opt-in."
+      : reason === "extra_usage_disabled"
+        ? "Fast mode requires extra usage to be enabled for this Claude account."
+        : reason === "not_first_party"
+          ? "Fast mode is unavailable through this Claude backend."
+          : reason === "disabled_by_env"
+            ? "Fast mode is disabled by the Claude environment."
+            : reason === "free"
+              ? "Fast mode is unavailable on this Claude account tier."
+              : "Claude did not activate Fast mode for this session.";
+  return `${detail} Choose Standard, refresh models, or update Claude Code.`;
 }
 
 export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {
@@ -376,6 +402,17 @@ function startClaudeRun(
     typeof stageClaudeSkillPlugin
   >> = null;
   let selectedSkillsVerified = false;
+  let compactSucceeded = false;
+  let compactFailure: string | undefined;
+  const requestedFastMode = options.input.modelSelection.providerOptions.fastMode;
+  if (requestedFastMode !== undefined && requestedFastMode !== "fast") {
+    throw new Error("Claude received an invalid Fast mode option.");
+  }
+  const supportsFastMode = options.input.supportedFastMode === "fast";
+  const requestedFastModeState = supportsFastMode
+    ? requestedFastMode === "fast" ? "on" : "off"
+    : null;
+  let fastModeVerified = requestedFastModeState === null;
   const ownedProcess = createClaudeOwnedQueryProcess(
     "Claude Code process tree",
     lifecycleDependencies,
@@ -524,7 +561,11 @@ function startClaudeRun(
       );
   const providerResult = (async (): Promise<ProviderRunResult> => {
     try {
-      const prompt = await claudePrompt(options.input.prompt, options.input.imagePaths ?? []);
+      const compactInstruction = options.input.operation?.instruction;
+      const promptText = options.input.operation?.kind === "compact"
+        ? `/compact${compactInstruction ? ` ${compactInstruction}` : ""}`
+        : options.input.prompt;
+      const prompt = await claudePrompt(promptText, options.input.imagePaths ?? []);
       if (!promptChannel.push(prompt)) {
         return finishResult("cancelled");
       }
@@ -565,6 +606,14 @@ function startClaudeRun(
           // or allow rules that execute before canUseTool can ask the user.
           settingSources: [],
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
+          ...(supportsFastMode
+            ? {
+                settings: {
+                  fastMode: requestedFastMode === "fast",
+                  fastModePerSessionOptIn: true,
+                },
+              }
+            : {}),
           permissionMode: options.input.interactionMode === "plan"
             ? "plan"
             : options.input.access === "full"
@@ -605,6 +654,25 @@ function startClaudeRun(
         );
         if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
         const message = next.value;
+        drainTerminalSubagents = false;
+        eventBudget.observe(message);
+        const record = message as unknown as Record<string, unknown>;
+        const messageSessionId = stringValue(record.session_id);
+        const initAttestsRequestedSession = messageSessionId !== undefined
+          && (options.input.sessionId === undefined
+            || messageSessionId === options.input.sessionId);
+        if (message.type === "system" && message.subtype === "init"
+          && initAttestsRequestedSession) {
+          if (requestedFastModeState === "on"
+            && record.fast_mode_state !== requestedFastModeState) {
+            throw new Error(claudeFastModeFailure(record));
+          }
+          if (requestedFastModeState === "off"
+            && record.fast_mode_state !== requestedFastModeState) {
+            throw new Error("Claude did not confirm Standard speed for this session. Start a new chat or update Claude Code.");
+          }
+          if (requestedFastModeState !== null) fastModeVerified = true;
+        }
         if (
           stagedSkillPlugin
           && message.type === "system"
@@ -615,9 +683,8 @@ function startClaudeRun(
           }
           selectedSkillsVerified = true;
         }
-        drainTerminalSubagents = false;
-        eventBudget.observe(message);
-        const record = message as unknown as Record<string, unknown>;
+        const provesRequestedCompaction = options.input.operation?.kind === "compact"
+          && messageSessionId === options.input.sessionId;
         if (typeof record.session_id === "string" && record.session_id !== sessionId) {
           sessionId = record.session_id;
           emitter.session(sessionId);
@@ -722,7 +789,24 @@ function startClaudeRun(
           }
           continue;
         }
+        if (message.type === "system" && message.subtype === "status") {
+          if (provesRequestedCompaction
+            && message.compact_result === "success" && !compactFailure) {
+            compactSucceeded = true;
+          }
+          if (provesRequestedCompaction && message.compact_result === "failed") {
+            compactSucceeded = false;
+            compactFailure = message.compact_error?.trim()
+              || "Claude reported that context compaction failed.";
+          }
+          continue;
+        }
         if (message.type === "system" && message.subtype === "compact_boundary") {
+          if (
+            provesRequestedCompaction
+            && message.compact_metadata.trigger === "manual"
+            && !compactFailure
+          ) compactSucceeded = true;
           refreshContextUsage();
           continue;
         }
@@ -745,6 +829,23 @@ function startClaudeRun(
         throw new Error("Claude did not confirm the selected isolated skills.");
       }
       if (cancelRequested) return finishResult("cancelled");
+      if (options.input.operation?.kind === "compact"
+        && (compactFailure || !compactSucceeded)) {
+        return finishResult(
+          "failed",
+          routeFailure(
+            compactFailure
+              ?? "Claude did not confirm that context compaction completed.",
+          ),
+        );
+      }
+      if (!fastModeVerified) {
+        throw new Error(
+          requestedFastMode === "fast"
+            ? "Claude did not confirm Fast mode for this session. Choose Standard, refresh models, or update Claude Code."
+            : "Claude did not confirm Standard speed for this session. Start a new chat or update Claude Code.",
+        );
+      }
       const completion = delegateLifecycle.complete();
       if (completion.kind === "incomplete") {
         return finishResult(

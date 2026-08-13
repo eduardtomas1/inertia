@@ -79,6 +79,7 @@ describe("shared contracts boundary", () => {
       "conversation.unsettle",
       "conversation.delete",
       "message.send",
+      "conversation.compact",
       "agent.workflow.load",
       "agent.workflow.saved.load",
       "agent.goal.set",

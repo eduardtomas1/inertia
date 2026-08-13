@@ -9,6 +9,8 @@ import type { AccessMode } from "@shared/contracts";
 import type { ComposerRouteRepair } from "../../utils/composerReadiness";
 import type { ComposerMenu } from "./types";
 
+export const RESPONSE_SPEED_LABEL = "Response speed";
+
 export const MAX_SELECTED_SKILLS = 8;
 
 export const accessOptions: Array<{

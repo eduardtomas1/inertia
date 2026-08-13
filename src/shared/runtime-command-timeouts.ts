@@ -7,6 +7,10 @@ export const MESSAGE_SEND_REQUEST_TIMEOUT_MS =
 
 export const CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS = 60_000;
 
+export const PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS = 10 * 60_000;
+export const CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS =
+  PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS + 60_000;
+
 // A single read can invoke several individually bounded Git subprocesses.
 // Give the server one aggregate deadline, then leave transport/cleanup
 // headroom so its authoritative response reaches the renderer first.

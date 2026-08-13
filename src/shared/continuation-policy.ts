@@ -20,6 +20,21 @@ export function officiallyAllowsModelSwitchWithinSession(
     && compatibility.allowsModelSwitchWithinSession === true;
 }
 
+type FastModeSwitchCompatibility = Pick<
+  HarnessBackendCompatibility,
+  "harnessId" | "state"
+>;
+
+export function officiallyAllowsFastModeSwitchWithinSession(
+  compatibility: FastModeSwitchCompatibility,
+): boolean {
+  return compatibility.state === "verified"
+    && (
+      compatibility.harnessId === "codex-app-server"
+      || compatibility.harnessId === "claude-agent-sdk"
+    );
+}
+
 export const CONTINUATION_CHANGE_KINDS = [
   "none",
   "missing-identity",
@@ -28,6 +43,7 @@ export const CONTINUATION_CHANGE_KINDS = [
   "backend-configuration",
   "endpoint",
   "model",
+  "performance-mode",
 ] as const;
 
 export type ContinuationChangeKind = (typeof CONTINUATION_CHANGE_KINDS)[number];
@@ -45,12 +61,14 @@ export const CONTINUATION_REASON_CODES = [
   "same-continuation",
   "same-route-without-session",
   "supported-model-switch",
+  "supported-performance-mode-switch",
   "missing-continuation-identity",
   "harness-changed",
   "backend-profile-changed",
   "backend-configuration-changed",
   "backend-endpoint-changed",
   "incompatible-model-changed",
+  "incompatible-performance-mode-changed",
   "stale-provider-session",
 ] as const;
 
@@ -71,6 +89,7 @@ export interface ContinuationDecisionInput {
   hasProviderSession: boolean;
   hasTurns: boolean;
   allowsModelSwitchWithinSession: boolean;
+  allowsPerformanceModeSwitchWithinSession?: boolean;
 }
 
 export function staleProviderSessionDecision(): ContinuationDecision {
@@ -129,6 +148,11 @@ function newConversationReason(
       return {
         reasonCode: "incompatible-model-changed",
         reason: "This agent cannot change models inside an existing session. Start a new chat to use the selected model.",
+      };
+    case "performance-mode":
+      return {
+        reasonCode: "incompatible-performance-mode-changed",
+        reason: "Start a new chat to change response speed.",
       };
   }
 }
@@ -203,6 +227,9 @@ export function resolveContinuationDecision(
 
   const modelChanged = input.previousModelId !== null
     && input.previousModelId !== input.nextModelId;
+  const performanceModeChanged = (
+    input.previousIdentity.performanceModeIdentity ?? null
+  ) !== (input.nextIdentity.performanceModeIdentity ?? null);
   const modelIdentityRequiresBoundary = input.nextIdentity.modelIdentity !== null;
   if (
     modelChanged
@@ -227,6 +254,26 @@ export function resolveContinuationDecision(
     };
   }
 
+  if (
+    performanceModeChanged
+    && !input.allowsPerformanceModeSwitchWithinSession
+  ) {
+    if (!establishedConversation) {
+      return {
+        action: "start-session",
+        changeKind: "performance-mode",
+        reasonCode: "first-turn",
+        reason: "The first turn starts a new provider session.",
+      };
+    }
+    const changed = newConversationReason("performance-mode");
+    return {
+      action: "new-conversation-required",
+      changeKind: "performance-mode",
+      ...changed,
+    };
+  }
+
   if (input.hasProviderSession) {
     return modelChanged
       ? {
@@ -235,6 +282,13 @@ export function resolveContinuationDecision(
           reasonCode: "supported-model-switch",
           reason: "This provider supports changing models while preserving the current session.",
         }
+      : performanceModeChanged
+        ? {
+            action: "resume-session",
+            changeKind: "performance-mode",
+            reasonCode: "supported-performance-mode-switch",
+            reason: "Response speed can change in this session.",
+          }
       : {
           action: "resume-session",
           changeKind: "none",
@@ -245,7 +299,11 @@ export function resolveContinuationDecision(
 
   return {
     action: "start-session",
-    changeKind: modelChanged ? "model" : "none",
+    changeKind: modelChanged
+      ? "model"
+      : performanceModeChanged
+        ? "performance-mode"
+        : "none",
     reasonCode: "same-route-without-session",
     reason: "No provider session is available, so this turn starts one on the same agent route.",
   };

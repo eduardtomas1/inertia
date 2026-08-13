@@ -21,7 +21,11 @@ import type {
   ProviderMaintenanceUpdateAvailability,
   ProviderMaintenanceVersionStatus,
 } from "../provider-maintenance";
-import { legacyProviderIdForHarness, type ModelSelection } from "../model-routing";
+import {
+  legacyProviderIdForHarness,
+  nativeBackendProfile,
+  type ModelSelection,
+} from "../model-routing";
 import {
   MAX_PROMPT_PRESETS,
   MAX_PROMPT_PRESETS_SERIALIZED_BYTES,
@@ -250,7 +254,10 @@ export function pullRequestCapabilityStateCoherent(
   return branch !== null && branch.length > 0 && hasRemote === (reason !== "no-remotes");
 }
 
-export function modelRouteIdentityCoherent(value: IdentityRecord): boolean {
+export function modelRouteIdentityCoherent(
+  value: IdentityRecord,
+  allowPendingPerformanceMode = false,
+): boolean {
   const selection = value.modelSelection as ModelSelection;
   const projectedProvider = legacyProviderIdForHarness(selection.harnessId);
   if (projectedProvider !== null && projectedProvider !== value.providerId) return false;
@@ -258,10 +265,34 @@ export function modelRouteIdentityCoherent(value: IdentityRecord): boolean {
   if (value.backendProfileId !== undefined
     && value.backendProfileId !== selection.backendProfileId) return false;
   const identity = value.continuationIdentity as IdentityRecord | null | undefined;
+  const fastMode = selection.providerOptions.fastMode;
+  const expectedFastMode = projectedProvider === "codex"
+    && selection.harnessId === "codex-app-server"
+    && selection.backendProfileId === nativeBackendProfile("codex").id
+    ? "priority"
+    : projectedProvider === "claude"
+      && selection.harnessId === "claude-agent-sdk"
+      && selection.backendProfileId === nativeBackendProfile("claude").id
+      ? "fast"
+      : null;
+  if (fastMode !== undefined && fastMode !== expectedFastMode) return false;
+  const performanceModeIdentity = fastMode === expectedFastMode
+    && expectedFastMode !== null
+    ? `fast:${expectedFastMode}`
+    : null;
+  const persistedPerformanceMode = identity?.performanceModeIdentity ?? null;
+  if (
+    persistedPerformanceMode !== null
+    && persistedPerformanceMode !== (expectedFastMode === null
+      ? null
+      : `fast:${expectedFastMode}`)
+  ) return false;
   if (identity != null && !(identity.harnessId === selection.harnessId
       && identity.backendProfileId === selection.backendProfileId
       && identity.backendConfigurationRevision === selection.backendConfigurationRevision
-      && (identity.modelIdentity === null || identity.modelIdentity === selection.modelId))) return false;
+      && (identity.modelIdentity === null || identity.modelIdentity === selection.modelId)
+      && (allowPendingPerformanceMode
+        || (identity.performanceModeIdentity ?? null) === performanceModeIdentity))) return false;
   if (value.model !== undefined
     && value.model !== selection.modelId
     && !(selection.modelId === "provider-default" && value.model === "")) return false;

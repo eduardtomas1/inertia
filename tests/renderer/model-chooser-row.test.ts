@@ -95,6 +95,15 @@ describe("ModelChooserRow", () => {
     }))).toContain('aria-pressed="true"');
   });
 
+  it("includes effective response speed in native route identity", () => {
+    expect(render(row({ responseSpeed: "Fast" })))
+      .toContain("Codex · OpenAI · Provider default reasoning · Fast speed");
+    expect(render(row({ responseSpeed: "Standard" })))
+      .toContain("Codex · OpenAI · Provider default reasoning · Standard speed");
+    expect(render(row({ speedChangeNote: "Fast turns off" })))
+      .toContain("Codex · OpenAI · Provider default reasoning · Fast turns off");
+  });
+
   it("renders independent result and favorite buttons in one semantic row", () => {
     const html = render(row());
     const resultAction = html.match(

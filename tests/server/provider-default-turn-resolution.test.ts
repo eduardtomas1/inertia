@@ -23,7 +23,16 @@ import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const directories: string[] = [];
 
-function provider(modelId: string, label: string): ProviderInfo {
+function provider(
+  modelId: string,
+  label: string,
+  fastMode: ProviderInfo["models"][number]["fastMode"] = {
+    providerValue: "priority",
+    label: "Fast",
+    description: "Faster responses with increased usage.",
+    isDefault: false,
+  },
+): ProviderInfo {
   const metadata = {
     freshness: "fresh" as const,
     provenance: "provider" as const,
@@ -50,6 +59,7 @@ function provider(modelId: string, label: string): ProviderInfo {
       inputModalities: ["text"],
       reasoningOptions: [{ value: "high", label: "High", description: "" }],
       defaultReasoningEffort: "high",
+      fastMode,
     }],
     rateLimits: [],
     metadataState: { models: metadata, rateLimits: metadata },
@@ -75,6 +85,7 @@ describe("provider-default turn resolution", () => {
       modelSelection: nativeModelSelection({
         providerId: "codex",
         modelId: "provider-default",
+        providerOptions: { fastMode: "priority" },
       }),
     });
     let providerInfo = provider("gpt-first", "GPT First");
@@ -105,12 +116,17 @@ describe("provider-default turn resolution", () => {
       model: "gpt-first",
       modelAlias: "GPT First",
       reasoningEffort: "high",
+      modelSelection: { providerOptions: { fastMode: "priority" } },
     });
     const firstQueued = store.beginAgentTurn(first.input);
     expect(first.adopt(firstQueued).active.providerInput)
       .toMatchObject({
         model: undefined,
-        modelSelection: { modelId: "provider-default" },
+        supportedFastMode: "priority",
+        modelSelection: {
+          modelId: "provider-default",
+          providerOptions: { fastMode: "priority" },
+        },
       });
 
     providerInfo = provider("gpt-next", "GPT Next");
@@ -125,10 +141,151 @@ describe("provider-default turn resolution", () => {
     });
     expect(second.adopt(firstQueued).active.providerInput).toMatchObject({
       model: undefined,
-      modelSelection: { modelId: "provider-default" },
+      supportedFastMode: "priority",
+      modelSelection: {
+        modelId: "provider-default",
+        providerOptions: { fastMode: "priority" },
+      },
     });
     expect(store.conversation(conversation.id).modelSelection.modelId)
       .toBe("provider-default");
+    store.close();
+  });
+
+  it("marks provider-default Fast routes so Standard is forced after restart", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-provider-default-fast-"));
+    directories.push(directory);
+    const workspace = join(directory, "workspace");
+    await mkdir(workspace);
+    const databasePath = join(directory, "runtime.sqlite");
+    const createStore = () => new RuntimeStore(databasePath, workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const initial = createStore();
+    const project = initial.createProject("Provider default Fast", workspace);
+    const conversation = initial.createConversation(project.id, "Standard route", {
+      modelSelection: nativeModelSelection({
+        providerId: "codex",
+        modelId: "provider-default",
+      }),
+    });
+    initial.close();
+
+    const restarted = createStore();
+    const providers = {
+      resolveModelRoute: resolveNativeModelRoute,
+      harnessIdFor: (input: ProviderRunInput) => input.harnessId,
+    } as unknown as TurnProviderRuntime;
+    const resolved = resolveTurnRequest({
+      store: restarted,
+      providers,
+      hooks: {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [provider("gpt-fast-default", "GPT Fast Default", {
+          providerValue: "priority",
+          label: "Fast",
+          description: "Provider global default is Fast.",
+          isDefault: true,
+        })],
+      },
+      id: () => "restart-standard-turn",
+      now: () => "2030-01-01T00:00:00.000Z",
+      clock: () => new Date("2030-01-01T00:00:00.000Z"),
+    }, {
+      conversationId: conversation.id,
+      content: "Keep this restarted route on Standard.",
+    });
+    const queued = restarted.beginAgentTurn(resolved.input);
+    expect(resolved.adopt(queued).active.providerInput).toMatchObject({
+      supportedFastMode: "priority",
+      modelSelection: { providerOptions: {} },
+    });
+    restarted.close();
+  });
+
+  it("does not request speed controls on an unsupported provider route", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-provider-no-fast-"));
+    directories.push(directory);
+    const workspace = join(directory, "workspace");
+    await mkdir(workspace);
+    const store = new RuntimeStore(join(directory, "runtime.sqlite"), workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("No Fast support", workspace);
+    const conversation = store.createConversation(project.id, "Standard route", {
+      modelSelection: nativeModelSelection({ providerId: "codex" }),
+    });
+    const providers = {
+      resolveModelRoute: resolveNativeModelRoute,
+      harnessIdFor: (input: ProviderRunInput) => input.harnessId,
+    } as unknown as TurnProviderRuntime;
+    const resolved = resolveTurnRequest({
+      store,
+      providers,
+      hooks: {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [provider("gpt-old", "GPT Old", null)],
+      },
+      id: () => "unsupported-standard-turn",
+      now: () => "2030-01-01T00:00:00.000Z",
+      clock: () => new Date("2030-01-01T00:00:00.000Z"),
+    }, {
+      conversationId: conversation.id,
+      content: "Use the old route without new fields.",
+    });
+    const queued = store.beginAgentTurn(resolved.input);
+    expect(resolved.adopt(queued).active.providerInput)
+      .not.toHaveProperty("supportedFastMode");
+    store.close();
+  });
+
+  it("does not resume a Fast session when Standard is no longer forceable", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-provider-lost-fast-"));
+    directories.push(directory);
+    const workspace = join(directory, "workspace");
+    await mkdir(workspace);
+    const store = new RuntimeStore(join(directory, "runtime.sqlite"), workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Lost Fast support", workspace);
+    const conversation = store.createConversation(project.id, "Fast route", {
+      modelSelection: nativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-old",
+        providerOptions: { fastMode: "priority" },
+      }),
+    });
+    store.updateConversation(conversation.id, {
+      providerSessionId: "fast-session",
+    });
+    store.updateConversation(conversation.id, {
+      modelSelection: nativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-old",
+      }),
+    });
+    const providers = {
+      resolveModelRoute: resolveNativeModelRoute,
+      harnessIdFor: (input: ProviderRunInput) => input.harnessId,
+    } as unknown as TurnProviderRuntime;
+
+    expect(() => resolveTurnRequest({
+      store,
+      providers,
+      hooks: {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [provider("gpt-old", "GPT Old", null)],
+      },
+      id: () => "lost-fast-turn",
+      now: () => "2030-01-01T00:00:00.000Z",
+      clock: () => new Date("2030-01-01T00:00:00.000Z"),
+    }, {
+      conversationId: conversation.id,
+      content: "Do not silently inherit Fast.",
+    })).toThrow("Start a new chat to change response speed");
     store.close();
   });
 

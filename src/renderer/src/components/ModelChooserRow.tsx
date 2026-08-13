@@ -32,6 +32,8 @@ interface ModelChooserRowBase {
   displayName: string;
   modelId: string;
   reasoningEffort: string | null;
+  responseSpeed?: "Standard" | "Fast";
+  speedChangeNote?: "Fast turns off";
   harnessLabel: string;
   backendProfileName: string;
   source: "built-in" | "custom";
@@ -92,6 +94,8 @@ export function modelChooserRowFromRoute(
     displayName: route.displayName,
     modelId: route.modelId,
     reasoningEffort: route.reasoningEffort ?? null,
+    ...(route.responseSpeed ? { responseSpeed: route.responseSpeed } : {}),
+    ...(route.speedChangeNote ? { speedChangeNote: route.speedChangeNote } : {}),
     harnessLabel: route.harnessLabel,
     backendProfileName: route.backendProfileName,
     source: route.source,
@@ -108,7 +112,11 @@ export function modelChooserRowFromRoute(
 export function modelChooserSecondaryIdentity(
   row: Pick<
     ModelChooserRowData,
-    "harnessLabel" | "backendProfileName" | "reasoningEffort"
+    | "harnessLabel"
+    | "backendProfileName"
+    | "reasoningEffort"
+    | "responseSpeed"
+    | "speedChangeNote"
   >,
 ): string {
   return [
@@ -117,6 +125,8 @@ export function modelChooserSecondaryIdentity(
     row.reasoningEffort
       ? `${row.reasoningEffort} reasoning`
       : "Provider default reasoning",
+    ...(row.responseSpeed ? [`${row.responseSpeed} speed`] : []),
+    ...(row.speedChangeNote ? [row.speedChangeNote] : []),
   ].join(" · ");
 }
 

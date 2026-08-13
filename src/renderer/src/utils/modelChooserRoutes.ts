@@ -10,7 +10,9 @@ import type {
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import {
   continuationIdentityForSelection,
+  fastModeProviderValue,
   legacyProviderIdForHarness,
+  modelSelectionUsesFastMode,
   modelSelectionSchema,
   nativeBackendProfile,
   nativeHarnessId,
@@ -35,6 +37,7 @@ export interface ComposerModelRoute extends ModelSearchRoute {
   providerId: ProviderId | null;
   reasoningEffort: string | null;
   reasoningOptions: readonly string[];
+  supportsNativeFastModeControl?: boolean;
 }
 
 const harnessLabels: Readonly<Record<ProviderId, string>> = {
@@ -43,6 +46,8 @@ const harnessLabels: Readonly<Record<ProviderId, string>> = {
   cursor: "Cursor",
   opencode: "OpenCode",
 };
+
+const refreshModelsReason = "Refresh models to select this route.";
 
 export function modelChooserHarnessLabel(harnessId: string): string {
   const providerId = legacyProviderIdForHarness(harnessId);
@@ -71,6 +76,17 @@ function sameRoute(
     && left.backendConfigurationRevision
       === right.backendConfigurationRevision
     && left.modelId === right.modelId;
+}
+
+function speedChangeNote(
+  currentSelection: ModelSelection,
+  selection: ModelSelection,
+): "Fast turns off" | undefined {
+  return fastModeProviderValue(currentSelection)
+    && !modelSelectionUsesFastMode(selection)
+    && !sameRoute(currentSelection, selection)
+    ? "Fast turns off"
+    : undefined;
 }
 
 function compatibilityForRow(
@@ -118,6 +134,44 @@ function selectionForProfileModel(
   });
 }
 
+function verifiedNativeFastModeValue(
+  provider: ProviderInfo | undefined,
+  modelId: string,
+): string | null {
+  if (!provider) return null;
+  const model = modelId === "provider-default"
+    ? provider.models.find(({ isDefault }) => isDefault) ?? provider.models[0]
+    : provider.models.find(({ id }) => id === modelId);
+  const expectedValue = provider.id === "codex"
+    ? "priority"
+    : provider.id === "claude"
+      ? "fast"
+      : null;
+  return expectedValue !== null
+    && model?.fastMode !== null
+    && model?.fastMode !== undefined
+    && model.fastMode.providerValue === expectedValue
+    ? model.fastMode.providerValue
+    : null;
+}
+
+function compatibleNativeFastModeOptions(
+  provider: ProviderInfo | undefined,
+  modelId: string,
+  currentSelection: ModelSelection,
+): ModelSelection["providerOptions"] {
+  if (
+    !provider
+    || legacyProviderIdForHarness(currentSelection.harnessId) !== provider.id
+    || currentSelection.backendProfileId !== nativeBackendProfile(provider.id).id
+  ) return {};
+  const fastMode = fastModeProviderValue(currentSelection);
+  return fastMode
+    && verifiedNativeFastModeValue(provider, modelId) === fastMode
+    ? { fastMode }
+    : {};
+}
+
 function profileRoute(
   profile: ModelBackendProfileView,
   modelId: string,
@@ -126,12 +180,24 @@ function profileRoute(
 ): ComposerModelRoute {
   const model = profile.models.find((candidate) => candidate.id === modelId);
   if (!model) throw new Error("The selected backend model is unavailable.");
-  const generatedSelection = selectionForProfileModel(profile, model.id);
+  const providerId = legacyProviderIdForHarness(profile.harnessId);
+  const provider = providers.find(({ id }) => id === providerId);
+  const baseSelection = selectionForProfileModel(profile, model.id);
+  const generatedSelection = profile.preset === "native"
+    ? modelSelectionSchema.parse({
+        ...baseSelection,
+        providerOptions: compatibleNativeFastModeOptions(
+          provider,
+          model.id,
+          currentSelection,
+        ),
+      })
+    : baseSelection;
   const selection = sameRoute(generatedSelection, currentSelection)
     ? currentSelection
     : generatedSelection;
-  const providerId = legacyProviderIdForHarness(profile.harnessId);
-  const provider = providers.find(({ id }) => id === providerId);
+  const supportsNativeFastModeControl = profile.preset === "native"
+    && verifiedNativeFastModeValue(provider, model.id) !== null;
   const nativeCatalogCurrent = profile.preset !== "native"
     || model.id === "provider-default"
     || (
@@ -165,11 +231,18 @@ function profileRoute(
       ...(selection.reasoningEffort ? [selection.reasoningEffort] : []),
       ...model.reasoningOptions.map(({ value }) => value),
     ])),
+    supportsNativeFastModeControl,
+    ...(supportsNativeFastModeControl
+      ? { responseSpeed: modelSelectionUsesFastMode(selection) ? "Fast" as const : "Standard" as const }
+      : {}),
+    ...(speedChangeNote(currentSelection, selection)
+      ? { speedChangeNote: "Fast turns off" as const }
+      : {}),
     selectable,
     unavailableReason: selectable
       ? null
       : !nativeCatalogCurrent
-        ? "Refresh provider models before selecting this exact route."
+        ? refreshModelsReason
         : profile.compatibility.reason,
     selection,
     continuationIdentity: continuationIdentityForSelection(
@@ -210,10 +283,17 @@ function fallbackNativeRoutes(
         reasoningEffort: model.id === "provider-default"
           ? null
           : model.defaultReasoningEffort || null,
+        providerOptions: compatibleNativeFastModeOptions(
+          provider,
+          model.id,
+          currentSelection,
+        ),
       });
       const selection = sameRoute(generatedSelection, currentSelection)
         ? currentSelection
         : generatedSelection;
+      const supportsNativeFastModeControl =
+        verifiedNativeFastModeValue(provider, model.id) !== null;
       const selectable = model.id === "provider-default"
         || provider.metadataState.models.freshness !== "unavailable";
       return {
@@ -235,10 +315,17 @@ function fallbackNativeRoutes(
           ...(selection.reasoningEffort ? [selection.reasoningEffort] : []),
           ...model.reasoningOptions.map(({ value }) => value),
         ])),
+        supportsNativeFastModeControl,
+        ...(supportsNativeFastModeControl
+          ? { responseSpeed: modelSelectionUsesFastMode(selection) ? "Fast" as const : "Standard" as const }
+          : {}),
+        ...(speedChangeNote(currentSelection, selection)
+          ? { speedChangeNote: "Fast turns off" as const }
+          : {}),
         selectable,
         unavailableReason: selectable
           ? null
-          : "Refresh provider models before selecting this exact route.",
+          : refreshModelsReason,
         selection,
         continuationIdentity: continuationIdentityForSelection(
           selection,
@@ -352,6 +439,6 @@ export function selectedModelSearchRoute(
     reasoningEffort: selection.reasoningEffort,
     reasoningOptions: [],
     selectable: false,
-    unavailableReason: "This saved model route is no longer available.",
+    unavailableReason: "Saved model route unavailable.",
   };
 }

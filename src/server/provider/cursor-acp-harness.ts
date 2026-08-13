@@ -51,6 +51,7 @@ const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 20;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
+const COMMAND_ADVERTISEMENT_TIMEOUT_MS = 2_000;
 
 export function cursorAcpProcessInvocation(
   executable: string,
@@ -90,6 +91,8 @@ interface CursorContextUsage { usedTokens: number | null; maxTokens: number | nu
 export interface CursorAcpHarnessOptions {
   /** Test seam for the owned ACP process-tree lifecycle. */
   terminateProcessTree?: ProcessTreeTerminator;
+  /** Test seam for the bounded post-load command advertisement wait. */
+  commandAdvertisementTimeoutMs?: number;
 }
 
 export function createCursorAcpHarness(
@@ -101,13 +104,18 @@ export function createCursorAcpHarness(
     capabilities: CURSOR_ACP_CAPABILITIES,
     supports: (input) => input.providerId === "cursor",
     start: (startOptions) =>
-      startCursorRun(startOptions, options.terminateProcessTree),
+      startCursorRun(
+        startOptions,
+        options.terminateProcessTree,
+        options.commandAdvertisementTimeoutMs,
+      ),
   };
 }
 
 function startCursorRun(
   options: AgentHarnessStartOptions,
   terminateProcessTree?: ProcessTreeTerminator,
+  commandAdvertisementTimeoutMs = COMMAND_ADVERTISEMENT_TIMEOUT_MS,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
@@ -125,6 +133,12 @@ function startCursorRun(
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
   let supportsImages = false;
+  let availableCommandNames: Set<string> | null = null;
+  let acceptsCommandAdvertisement = false;
+  let resolveCommandAdvertisement!: () => void;
+  const commandAdvertisement = new Promise<void>((resolve) => {
+    resolveCommandAdvertisement = resolve;
+  });
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
   const toolActivities = new Map<
     string,
@@ -168,6 +182,16 @@ function startCursorRun(
     })
     .onNotification(acp.methods.client.session.update, ({ params }) => {
       if (!sessionId || params.sessionId !== sessionId) return;
+      if (
+        acceptsCommandAdvertisement
+        && params.update.sessionUpdate === "available_commands_update"
+      ) {
+        availableCommandNames = new Set(
+          params.update.availableCommands.map(({ name }) =>
+            name.replace(/^\//u, "").toLowerCase()),
+        );
+        resolveCommandAdvertisement();
+      }
       handleCursorUpdate(
         params,
         resultText,
@@ -270,11 +294,17 @@ function startCursorRun(
     let configOptions: SessionConfigOption[] | null | undefined;
     if (options.input.sessionId) {
       if (initialized.agentCapabilities?.loadSession !== true) throw new Error("This Cursor ACP server does not advertise session resume support.");
-      const loaded = await context.request(acp.methods.agent.session.load, {
+      const loadRequest = context.request(acp.methods.agent.session.load, {
         sessionId: options.input.sessionId,
         cwd: options.input.cwd,
         mcpServers: [],
       });
+      // The requested session ID is known before the connection starts, so a
+      // same-session notification received before this request could be stale.
+      // Only advertisements delivered after the resume request is on the wire
+      // can prove the capabilities of the resumed session.
+      acceptsCommandAdvertisement = true;
+      const loaded = await loadRequest;
       modes = loaded?.modes;
       configOptions = loaded?.configOptions;
     } else {
@@ -295,8 +325,32 @@ function startCursorRun(
       options.input.reasoningEffort,
     );
     emitCursorMetadata(configuredOptions, supportsImages, emitter.rich);
-    const prompt = await cursorPrompt(options.input.prompt, options.input.imagePaths ?? [], initialized);
+    if (options.input.operation?.kind === "compact") {
+      await waitForCursorCommandAdvertisement(
+        commandAdvertisement,
+        commandAdvertisementTimeoutMs,
+      );
+      if (availableCommandNames === null) {
+        throw new Error(
+          "This Cursor ACP session did not advertise its available commands.",
+        );
+      }
+    }
+    if (options.input.operation?.kind === "compact"
+      && !availableCommandNames?.has("summarize")) {
+      throw new Error(
+        "This Cursor ACP session does not advertise its summarize command.",
+      );
+    }
+    const providerPrompt = options.input.operation?.kind === "compact"
+      ? "/summarize"
+      : options.input.prompt;
+    const prompt = await cursorPrompt(providerPrompt, options.input.imagePaths ?? [], initialized);
     emitter.status("running");
+    // ACP v1 has no separate compaction event. For Cursor, the bounded native
+    // authority is the exact session/prompt response for `/summarize`, after
+    // that same resumed session authoritatively advertised the command above.
+    // Only end_turn is accepted below; every other stop reason fails closed.
     const response = await context.request(acp.methods.agent.session.prompt, { sessionId, prompt });
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter.rich);
     const outcome = cancelRequested || response.stopReason === "cancelled"
@@ -378,6 +432,24 @@ function startCursorRun(
     cancel,
     extension: { kind: "cursor-acp", respondToApproval: settleApproval, respondToInput: settleInput },
   };
+}
+
+async function waitForCursorCommandAdvertisement(
+  advertisement: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      advertisement,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, Math.max(0, timeoutMs));
+        timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function cursorPermission(

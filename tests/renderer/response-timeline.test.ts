@@ -656,7 +656,7 @@ describe("authoritative response timeline", () => {
         { ...firstFile, status: "modified", insertions: 64, deletions: 9 },
         {
           ...firstFile,
-          path: "src/new-file.ts",
+          path: "src/OrderService.java",
           status: "added",
           insertions: 20,
           deletions: 12,
@@ -704,6 +704,7 @@ describe("authoritative response timeline", () => {
     expect(html).toContain('class="turn-changed-files-list"');
     expect(html).toContain("modified · +64 −9");
     expect(html).toContain("added · +20 −12");
+    expect(html).toContain('data-language-family="java"');
     expect(html).toContain("Open exact turn diff");
     expect(html).toContain('aria-label="Open src/history.ts"');
     expect(html).toContain("The complete file summary is retained, but the stored patch reached its size limit.");

@@ -3,6 +3,7 @@ import {
   AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
   BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
   CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
+  CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS,
   DUO_CANCEL_REQUEST_TIMEOUT_MS,
   DUO_DISPATCH_REQUEST_TIMEOUT_MS,
   GIT_MUTATION_REQUEST_TIMEOUT_MS,
@@ -105,6 +106,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "backend.profile.update": shortMutation,
   "checkpoint.revert": longMutation,
   "conversation.archive": shortMutation,
+  "conversation.compact": {
+    timeoutMs: CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS,
+    timeoutDelivery: "ambiguous",
+  },
   "conversation.create": gitMutation,
   "conversation.delete": gitMutation,
   "conversation.detail.load": {

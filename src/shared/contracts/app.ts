@@ -63,6 +63,14 @@ export interface ProviderReasoningOption {
   description: string;
 }
 
+export interface ProviderFastMode {
+  /** Exact provider-native value persisted in ModelSelection.providerOptions. */
+  providerValue: string;
+  label: string;
+  description: string;
+  isDefault: boolean;
+}
+
 export interface ProviderModel {
   id: string;
   label: string;
@@ -71,6 +79,8 @@ export interface ProviderModel {
   inputModalities: Array<"text" | "image">;
   reasoningOptions: ProviderReasoningOption[];
   defaultReasoningEffort: string;
+  /** Missing is accepted only for metadata cached before Fast mode shipped. */
+  fastMode?: ProviderFastMode | null;
 }
 
 export interface ProviderRateLimit {

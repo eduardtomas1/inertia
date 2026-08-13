@@ -30,7 +30,7 @@
     "test:duo:server": "node scripts/run-electron-vitest.mjs run tests/server/duo",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:portable": "vitest run --maxWorkers=1 tests/main/runtime-process-protocol.test.ts tests/main/runtime-supervisor.test.ts tests/server/process-lifecycle.test.ts tests/server/providers.test.ts tests/server/provider-metadata.test.ts tests/server/provider-io.test.ts tests/server/agent-harness.test.ts tests/server/codex-app-server.test.ts tests/server/claude-agent-sdk-harness.test.ts tests/server/claude-large-event.test.ts tests/server/cursor-acp-harness.test.ts tests/server/opencode-sdk-harness.test.ts tests/server/opencode-boundary.test.ts",
+    "test:portable": "vitest run --maxWorkers=1 tests/main/runtime-process-protocol.test.ts tests/main/runtime-supervisor.test.ts tests/server/process-lifecycle.test.ts tests/server/providers.test.ts tests/server/provider-metadata.test.ts tests/server/provider-io.test.ts tests/server/agent-harness.test.ts tests/server/provider-compaction.test.ts tests/server/codex-app-server.test.ts tests/server/codex-fast-mode.test.ts tests/server/claude-agent-sdk-harness.test.ts tests/server/claude-fast-mode.test.ts tests/server/claude-large-event.test.ts tests/server/cursor-acp-harness.test.ts tests/server/opencode-sdk-harness.test.ts tests/server/opencode-boundary.test.ts",
     "test:windows-codex": "vitest run tests/server/windows-codex-core.test.ts tests/server/windows-codex-discovery.test.ts",
     "test:linux-package": "vitest run tests/main/linux-packaging.test.ts tests/main/runtime-assets.test.ts",
     "check:private-connect": "npm run typecheck:private-connect && node scripts/build-private-connect.mjs",

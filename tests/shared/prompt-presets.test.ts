@@ -45,6 +45,16 @@ describe("prompt preset boundary contracts", () => {
       },
     }).success).toBe(false);
     expect(promptPresetDraftSchema.safeParse({
+      name: "False Fast route",
+      body: "Do work",
+      route: {
+        ...route,
+        harnessId: "cursor-acp",
+        backendProfileId: "builtin:cursor",
+        fastMode: true,
+      },
+    }).success).toBe(false);
+    expect(promptPresetDraftSchema.safeParse({
       name: "Attachment",
       body: "Do work",
       route: null,
@@ -167,5 +177,14 @@ describe("prompt preset boundary contracts", () => {
       ...route,
       reasoningEffort: "high",
     })).toBe(false);
+    expect(promptPresetRouteMatches(route, {
+      ...route,
+      fastMode: true,
+    })).toBe(false);
+    expect(promptPresetDraftSchema.safeParse({
+      name: "Fast review",
+      body: "Review quickly.",
+      route: { ...route, fastMode: true },
+    }).success).toBe(true);
   });
 });

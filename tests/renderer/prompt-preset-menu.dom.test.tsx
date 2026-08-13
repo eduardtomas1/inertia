@@ -57,6 +57,7 @@ function Harness({
   onDuplicate = vi.fn(() => Promise.resolve()),
   onDelete = vi.fn(() => Promise.resolve()),
   onReorder = vi.fn(() => Promise.resolve()),
+  currentRoute = route,
 }: {
   entries?: PromptPreset[];
   currentMessage?: string;
@@ -66,13 +67,14 @@ function Harness({
   onDuplicate?: (preset: PromptPreset) => Promise<void>;
   onDelete?: (preset: PromptPreset) => Promise<void>;
   onReorder?: (presetIds: readonly string[]) => Promise<void>;
+  currentRoute?: typeof route & { fastMode?: boolean };
 }): React.JSX.Element {
   const controller = useComposerMenus();
   return (
     <PromptPresetMenu
       presets={entries}
       currentMessage={currentMessage}
-      currentRoute={route}
+      currentRoute={currentRoute}
       menuController={controller}
       onApply={onApply}
       onCommand={(_key, command) => {
@@ -104,6 +106,22 @@ function Harness({
 }
 
 describe("PromptPresetMenu", () => {
+  it("names Standard when a legacy route blocks an otherwise matching Fast route", async () => {
+    const legacyPreset: PromptPreset = {
+      ...presets[1]!,
+      route: { ...route, reasoningEffort: "xhigh" },
+    };
+    render(<Harness
+      entries={[legacyPreset]}
+      currentRoute={{ ...route, fastMode: true }}
+    />);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Prompt presets, 1 saved",
+    }));
+    expect(await screen.findByTitle(/speed Standard/u))
+      .toHaveAttribute("aria-disabled", "true");
+  });
+
   it("opens from the keyboard, applies matching text, and explains route blocks", async () => {
     const onApply = vi.fn(() => Promise.resolve(true));
     render(<Harness onApply={onApply} />);

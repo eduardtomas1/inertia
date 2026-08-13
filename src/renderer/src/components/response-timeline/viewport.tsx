@@ -21,6 +21,7 @@ import {
   TIMELINE_FOCUS_EVENT,
 } from "../../utils/timelineFocus";
 import { isTranscriptReaderNavigationKey } from "../../utils/transcriptNavigation";
+import { applyTerminalTurnProjections } from "../../utils/terminalTurnProjection";
 import {
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
@@ -364,6 +365,11 @@ export function TimelineMinimap({
 }
 
 function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
+  const projectedTurns = useMemo(() => applyTerminalTurnProjections(
+    props.turns,
+    props.terminalProjections ?? {},
+    props.latestTurnSummary?.turn ?? null,
+  ), [props.latestTurnSummary?.turn, props.terminalProjections, props.turns]);
   const previousTimeline = useRef<ResponseTimelineItem[]>([]);
   const previousBuild = useRef<{
     input: BuildResponseTimelineInput;
@@ -389,7 +395,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   }, []);
   const builtTimeline = useMemo(() => {
     const input: BuildResponseTimelineInput = {
-      turns: props.turns,
+      turns: projectedTurns,
       messages: props.messages,
       activities: props.activities,
       reasonings: props.reasonings,
@@ -428,7 +434,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     props.messages,
     props.plans,
     props.reasonings,
-    props.turns,
+    projectedTurns,
   ]);
   const timeline = useMemo(() => {
     const next = stabilizeResponseTimeline(builtTimeline, previousTimeline.current);

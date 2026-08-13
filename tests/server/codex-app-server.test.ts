@@ -174,7 +174,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return send({ id: message.id, result: { userAgent: "fake" } });
   }
   if (message.method === "initialized") return;
-  if (message.method === "model/list") return send({ id: message.id, result: { data: [{ id: "model-a", model: "model-a", displayName: "Model A", description: "A test model", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Quick" }, { reasoningEffort: "high", description: "Careful" }], defaultReasoningEffort: "low", inputModalities: ["text", "image"], isDefault: true }], nextCursor: null } });
+  if (message.method === "model/list") return send({ id: message.id, result: { data: [{ id: "model-a", model: "model-a", displayName: "Model A", description: "A test model", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Quick" }, { reasoningEffort: "high", description: "Careful" }], defaultReasoningEffort: "low", inputModalities: ["text", "image"], serviceTiers: [{ id: "priority", name: "Fast", description: "Faster responses" }], defaultServiceTier: null, isDefault: true }], nextCursor: null } });
   if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: { limitId: "codex", limitName: null, primary: { usedPercent: 37, windowDurationMins: 10080, resetsAt: 1893456000 }, secondary: null }, rateLimitsByLimitId: null } });
   if (message.method === "thread/start" || message.method === "thread/resume") {
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "incompatible-full-access" && message.params.approvalPolicy === "never") {
@@ -184,10 +184,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       return send({ id: message.id, error: { code: -32001, message: "thread not found" } });
     }
     threadId = message.params.threadId || "thread-new";
-    send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fake" } });
+    send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fake", serviceTier: message.params.serviceTier ?? null } });
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-completion") {
       send({ method: "turn/completed", params: { threadId, turn: { id: "stale-turn", status: "completed", items: [], error: null } } });
     }
+    return;
+  }
+  if (message.method === "thread/compact/start") {
+    send({ id: message.id, result: {} });
+    send({ method: "item/started", params: { threadId, turnId: "compact-turn-1", startedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
+    send({ method: "item/completed", params: { threadId, turnId: "compact-turn-1", completedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
     return;
   }
   if (message.method === "thread/goal/set") {
@@ -1600,7 +1606,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(cancelled).toBe(true);
     const messages = captured(fake.capturePath);
     expect(messages.find(({ method }) => method === "turn/start")).toMatchObject({
-      params: { approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } },
+      params: {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" },
+      },
     });
     expect(messages.find(({ method }) => method === "turn/interrupt")).toMatchObject({
       params: { threadId: "thread-new", turnId: "turn-1" },
@@ -2470,7 +2479,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(manager.activeConversationIds()).toEqual([]);
     await manager.disposeAll();
   });
-
   it("settles a missing App Server executable without leaving an active run", async () => {
     const root = portableFixtureRoot("missing app server");
     roots.push(root);

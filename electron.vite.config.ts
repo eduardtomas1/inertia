@@ -56,6 +56,15 @@ export default defineConfig({
       chunkSizeWarningLimit: 850,
       rollupOptions: {
         input: resolve("src/renderer/index.html"),
+        output: {
+          onlyExplicitManualChunks: true,
+          manualChunks(id) {
+            const normalizedId = id.replaceAll("\\", "/");
+            if (normalizedId.endsWith(
+              "/src/renderer/src/utils/terminalTurnProjection.ts",
+            )) return "terminal-turn-projection";
+          },
+        },
       },
     },
   },

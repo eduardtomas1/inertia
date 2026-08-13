@@ -23,6 +23,7 @@ import type {
   WorkspaceGitSnapshot,
   ServerEvent,
 } from "@shared/contracts";
+import { sourceLanguageForFile } from "@shared/source-language";
 import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { headerGitActions } from "../utils/headerGitActions";
@@ -782,6 +783,7 @@ export function WorkspaceChangesPanel({
               ? [<li className="workspace-change-section-heading" key={`heading:${group.label}`}>{group.label}<span>{group.files.length}</span></li>]
               : []),
             ...group.files.map((file) => {
+              const language = sourceLanguageForFile(file.path);
               const identity = {
                 repositoryPath: activeRepository.repositoryPath,
                 filePath: file.path,
@@ -797,10 +799,11 @@ export function WorkspaceChangesPanel({
                   <button
                     type="button"
                     className={clsx("workspace-repository-file", isSelected && "is-selected")}
+                    data-language-family={language.family}
                     aria-current={isSelected ? "true" : undefined}
                     onClick={() => setSelected(identity)}
                   >
-                    <span className="change-file-leading"><FileCode2 size={14} /><span className="change-file-status">{fileStatus(file)}</span></span>
+                    <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status">{fileStatus(file)}</span></span>
                     <span className="workspace-repository-file-copy"><strong title={file.path}>{file.path.split("/").at(-1)}</strong>{parent && <small>{parent}</small>}</span>
                     <span className="workspace-repository-file-stats"><small>{fileWorkingState(file)}</small><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
                   </button>

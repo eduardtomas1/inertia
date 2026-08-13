@@ -12,11 +12,13 @@ import type {
   ConversationLatestTurnSummary,
   SubagentTrace,
 } from "@shared/contracts";
+import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type {
   StreamingAgentChannel,
   TurnGitArtifactSummary,
 } from "../../utils/responseTimeline";
+import type { TerminalTurnProjections } from "../../utils/terminalTurnProjection";
 
 export interface ResponseTimelineProps {
   turns: AgentTurn[];
@@ -37,6 +39,7 @@ export interface ResponseTimelineProps {
   streamingText: string;
   streamingReasoning: string;
   streamingChannel?: StreamingAgentChannel;
+  terminalProjections?: TerminalTurnProjections;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   providerIdentityLabels?: ProviderIdentityLabels;
@@ -65,7 +68,11 @@ export interface ResponseTimelineProps {
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
   onOpenTurnDiff: (turnId: string, path?: string) => void;
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
-  onOpenTurnFile: (path: string) => void;
+  onOpenTurnFile: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
   onStop: () => void;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;

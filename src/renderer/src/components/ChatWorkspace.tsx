@@ -52,12 +52,14 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
   shouldFollowTimeline,
   type StreamingAgentChannel,
 } from "../utils/responseTimeline";
+import type { TerminalTurnProjections } from "../utils/terminalTurnProjection";
 import { revealAgentInputRequest } from "../utils/agentInputNavigation";
 import {
   initialTranscriptNavigation,
@@ -107,6 +109,7 @@ type ChatWorkspaceProps = {
   streamingText: string;
   streamingReasoning: string;
   streamingChannel?: StreamingAgentChannel;
+  terminalProjections?: TerminalTurnProjections;
   usage: ThreadUsageSnapshot | null;
   skills: AgentSkillSummary[];
   skillsCapability: AgentWorkflowSkillsCapability | null;
@@ -145,6 +148,10 @@ type ChatWorkspaceProps = {
     context?: TurnRequestContext,
     skillIds?: readonly string[],
   ) => Promise<TranscriptMessageSendAcceptance | null>;
+  onCompactConversation?: (instruction?: string) => Promise<{
+    message: string;
+    instructionForwarded: boolean;
+  }>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onToggleSkill: (skill: AgentSkillSummary) => void;
   onClearSelectedSkills: () => void;
@@ -180,7 +187,11 @@ type ChatWorkspaceProps = {
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
   onOpenTurnDiff: (turnId: string, path?: string) => void;
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
-  onOpenTurnFile: (path: string) => void;
+  onOpenTurnFile: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
   onClearPromptContext?: () => void;
   onLatestContentVisibilityChange?: (visible: boolean) => void;
 };
@@ -201,6 +212,7 @@ export function ChatWorkspace({
   streamingText,
   streamingReasoning,
   streamingChannel = null,
+  terminalProjections,
   usage,
   skills,
   skillsCapability,
@@ -234,6 +246,7 @@ export function ChatWorkspace({
   onAddProject,
   onCreateConversation,
   onSendMessage,
+  onCompactConversation,
   onListSkills,
   onToggleSkill,
   onClearSelectedSkills,
@@ -706,6 +719,9 @@ export function ChatWorkspace({
               streamingText={detailLoading ? "" : streamingText}
               streamingReasoning={detailLoading ? "" : streamingReasoning}
               streamingChannel={detailLoading ? null : streamingChannel}
+              terminalProjections={detailLoading
+                ? undefined
+                : terminalProjections}
               approvals={ownedApprovals}
               inputRequests={ownedInputRequests}
               providerIdentityLabels={providerIdentityLabels}
@@ -723,12 +739,8 @@ export function ChatWorkspace({
               onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
               scrollElementRef={scrollRef}
               timelineElementRef={timelineRef}
-              checkpointRestoreDisabled={ownedTurns.some(({ status }) =>
-                status === "queued"
-                || status === "starting"
-                || status === "running"
-                || status === "waiting-for-approval"
-                || status === "waiting-for-input")}
+              checkpointRestoreDisabled={conversation.status === "running"
+                || conversation.status === "needs-input"}
               onRespondToApproval={onRespondToApproval}
               onRespondToInput={onRespondToInput}
               onRevertCheckpoint={onRevertCheckpoint}
@@ -803,6 +815,7 @@ export function ChatWorkspace({
           latestTurn={ownedTurns.at(-1) ?? null}
           latestTurnSummary={latestTurnSummary}
           onSend={sendMessage}
+          {...(onCompactConversation ? { onCompact: onCompactConversation } : {})}
           onListSkills={onListSkills}
           onToggleSkill={onToggleSkill}
           onClearSelectedSkills={onClearSelectedSkills}

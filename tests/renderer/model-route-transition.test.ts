@@ -7,6 +7,7 @@ import {
   nativeBackendProfile,
   nativeModelSelection,
   resolveHarnessBackendCompatibility,
+  withModelSelectionFastMode,
   type HarnessBackendCompatibility,
   type ModelBackendProfile,
   type ModelSelection,
@@ -141,6 +142,34 @@ describe("model route transition policy", () => {
       reasonCode: "supported-model-switch",
       providerSessionDisposition: "retain-current-conversation",
       continuationAction: "resume-session",
+    });
+  });
+
+  it("requires current speed-control evidence to leave a Fast session", () => {
+    const standard = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-a",
+    });
+    const fast = withModelSelectionFastMode(standard, "priority");
+    const currentCandidate = nativeCandidate(fast);
+    const unsupportedStandard = nativeCandidate(standard);
+
+    expect(resolveModelRouteTransition(
+      context(fast, currentCandidate),
+      unsupportedStandard,
+    )).toMatchObject({
+      kind: "create-new-conversation",
+      changeKind: "performance-mode",
+      reasonCode: "incompatible-performance-mode-changed",
+    });
+
+    expect(resolveModelRouteTransition(
+      context(fast, currentCandidate),
+      { ...unsupportedStandard, supportsNativeFastModeControl: true },
+    )).toMatchObject({
+      kind: "update-current-conversation",
+      changeKind: "performance-mode",
+      reasonCode: "supported-performance-mode-switch",
     });
   });
 

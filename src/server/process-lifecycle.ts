@@ -40,11 +40,27 @@ export type OwnedProcessTreeTermination = (
 
 export type OwnedPidProcessTreeTermination = () => Promise<boolean>;
 
+interface ProcessTreeTerminationErrorOptions extends ErrorOptions {
+  priorError?: unknown;
+}
+
 export class ProcessTreeTerminationError extends Error {
   readonly code = "process-tree-termination-unconfirmed";
 
-  constructor(subject: string, options?: ErrorOptions) {
-    super(`${subject} could not be confirmed stopped.`, options);
+  constructor(
+    subject: string,
+    options?: ProcessTreeTerminationErrorOptions,
+  ) {
+    const cleanupMessage = `${subject} could not be confirmed stopped.`;
+    const priorMessage = options?.priorError instanceof Error
+      ? options.priorError.message.trim()
+      : "";
+    super(
+      priorMessage
+        ? `${priorMessage} Cleanup also failed: ${cleanupMessage}`
+        : cleanupMessage,
+      options,
+    );
     this.name = "ProcessTreeTerminationError";
   }
 }

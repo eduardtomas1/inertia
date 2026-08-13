@@ -75,6 +75,14 @@ interface ProviderRunRequest {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
+  /**
+   * Exact native Fast value advertised for the selected model. Presence means
+   * both Fast and Standard can be requested explicitly and must be attested by
+   * the provider. Omitted for older or unsupported routes.
+   */
+  supportedFastMode?: "priority" | "fast";
+  /** Explicit native-session speed change; absent on first sessions. */
+  performanceModeTransition?: "to-fast" | "to-standard";
   imagePaths?: readonly string[];
   skills?: readonly ProviderSkillInput[];
   /**
@@ -89,6 +97,11 @@ interface ProviderRunRequest {
   /** Saved evidence used only to keep a resumed Codex run alive long enough
    * for an active goal's provider-authored continuation to start. */
   goalContinuationExpected?: boolean;
+  /** Provider-owned control operation that must never become a durable turn. */
+  operation?: {
+    kind: "compact";
+    instruction?: string;
+  };
 }
 
 export type ProviderRunInput = ProviderRunRequest &
@@ -135,7 +148,7 @@ export interface ProviderEventBase {
   conversationId: string;
   /** Always present on callbacks; legacy direct runs fall back to conversationId. */
   runId: string;
-  /** Null only for legacy direct runs that do not own a durable turn. */
+  /** Null for legacy direct runs and owned control operations without a durable turn. */
   turnId: string | null;
 }
 
@@ -321,6 +334,16 @@ export interface ProviderRunResult {
   error?: string;
   failure?: ProviderRunFailure;
   /** True only after authoritative complete process-tree cleanup. */
+  cleanupConfirmed: boolean;
+}
+
+export interface ProviderCompactionResult {
+  providerId: ProviderId;
+  conversationId: string;
+  status: "completed" | "failed" | "cancelled";
+  instructionForwarded: boolean;
+  message: string;
+  error?: string;
   cleanupConfirmed: boolean;
 }
 

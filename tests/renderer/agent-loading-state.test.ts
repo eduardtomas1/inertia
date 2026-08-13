@@ -11,6 +11,11 @@ import {
   activityExecutionCategory,
   type ResponseTurn,
 } from "../../src/renderer/src/utils/responseTimeline";
+import {
+  applyTerminalTurnProjections,
+  reconcileTerminalTurnProjections,
+  withTerminalTurnProjection,
+} from "../../src/renderer/src/utils/terminalTurnProjection";
 
 const createdAt = "2026-08-12T12:00:00.000Z";
 
@@ -225,5 +230,44 @@ describe("truthful active agent presentation", () => {
       providerLabel: "Codex · OpenAI",
       streamingChannel: "text",
     }).phase).toBe("responding");
+  });
+});
+
+describe("terminal turn projection", () => {
+  it("retains independent settlements across repeated failed refreshes", () => {
+    const first = {
+      id: "turn-first",
+      runId: "run-first",
+      status: "running",
+    } as AgentTurn;
+    const second = {
+      id: "turn-second",
+      runId: "run-second",
+      status: "running",
+    } as AgentTurn;
+    const firstOwner = `${first.runId}\0${first.id}`;
+    const secondOwner = `${second.runId}\0${second.id}`;
+    const projections = withTerminalTurnProjection(
+      withTerminalTurnProjection({}, {
+        owner: firstOwner,
+        status: "completed",
+        terminalReason: null,
+      }),
+      {
+        owner: secondOwner,
+        status: "failed",
+        terminalReason: "Provider failed.",
+      },
+    );
+
+    expect(applyTerminalTurnProjections(
+      [first, second],
+      projections,
+      null,
+    ).map(({ status }) => status)).toEqual(["completed", "failed"]);
+    expect(reconcileTerminalTurnProjections(projections, [{
+      ...first,
+      status: "completed",
+    }])).toEqual({ [secondOwner]: projections[secondOwner] });
   });
 });

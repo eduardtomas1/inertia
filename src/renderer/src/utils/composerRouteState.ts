@@ -6,6 +6,7 @@ import type {
   ProviderModel,
 } from "@shared/contracts";
 import {
+  fastModeProviderValue,
   legacyProviderIdForHarness,
   nativeBackendProfile,
 } from "../../../shared/model-routing";
@@ -22,6 +23,7 @@ export interface ComposerResolvedModel {
   inputModalities: readonly ["text"] | ProviderModel["inputModalities"];
   reasoningOptions: ProviderModel["reasoningOptions"];
   defaultReasoningEffort: string;
+  fastMode: ProviderModel["fastMode"];
 }
 
 export interface ComposerRouteState {
@@ -57,6 +59,7 @@ function providerModel(
     ...model,
     inputModalities: [...model.inputModalities],
     reasoningOptions: model.reasoningOptions.map((option) => ({ ...option })),
+    fastMode: model.fastMode ?? null,
   };
 }
 
@@ -77,6 +80,7 @@ function providerDefaultModel(
       ...option,
     })) ?? [],
     defaultReasoningEffort: model?.defaultReasoningEffort ?? "",
+    fastMode: model?.fastMode ?? null,
   };
 }
 
@@ -94,6 +98,7 @@ function backendModel(
     inputModalities: ["text"],
     reasoningOptions: model.reasoningOptions.map((option) => ({ ...option })),
     defaultReasoningEffort: model.reasoningOptions[0]?.value ?? "",
+    fastMode: null,
   };
 }
 
@@ -285,6 +290,18 @@ export function resolveComposerRouteState(input: {
     }
   }
 
+  const expectedFastModeValue = providerId === "codex"
+    ? "priority"
+    : providerId === "claude"
+      ? "fast"
+      : null;
+  if (
+    model.fastMode?.providerValue !== expectedFastModeValue
+    || !nativeRoute
+  ) {
+    model = { ...model, fastMode: null };
+  }
+
   if (
     input.selection.reasoningEffort !== null
     && !model.reasoningOptions.some(({ value }) =>
@@ -300,6 +317,50 @@ export function resolveComposerRouteState(input: {
         "Saved reasoning level is not supported",
         "Choose a supported reasoning level or another exact model route.",
         null,
+      ),
+      true,
+      true,
+    );
+  }
+
+  const providerOptionKeys = Object.keys(input.selection.providerOptions);
+  const fastMode = fastModeProviderValue(input.selection);
+  if (
+    providerOptionKeys.length > (fastMode ? 1 : 0)
+    || (providerOptionKeys.length === 1 && !fastMode)
+  ) {
+    return resolved(
+      providerId,
+      provider,
+      profile,
+      model,
+      unavailable(
+        "Route option invalid",
+        "Unsupported option",
+        "Reselect the route.",
+        null,
+      ),
+      true,
+      true,
+    );
+  }
+  if (
+    fastMode
+    && (
+      !nativeRoute
+      || model.fastMode?.providerValue !== fastMode
+    )
+  ) {
+    return resolved(
+      providerId,
+      provider,
+      profile,
+      model,
+      unavailable(
+        "Fast unavailable",
+        "Fast is unavailable",
+        "Use Standard or refresh.",
+        nativeRoute ? "refresh" : null,
       ),
       true,
       true,

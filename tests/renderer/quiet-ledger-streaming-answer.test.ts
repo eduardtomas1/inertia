@@ -401,10 +401,10 @@ describe("Quiet Ledger streaming answer handoff", () => {
     );
     expect(projectionSource).toContain('id: `live-commentary:${turn.id}`');
     expect(projectionHookSource).toMatch(
-      /event\.type === "agent\.activity"[\s\S]*?setStreamingText\(""\);[\s\S]*?event\.type === "agent\.text"/u,
+      /event\.type === "agent\.activity"[\s\S]*?closeTextStream\(\);[\s\S]*?event\.type === "agent\.text"/u,
     );
     expect(projectionHookSource).toMatch(
-      /event\.type === "agent\.completed" \|\| event\.type === "agent\.failed"[\s\S]*?setStreamingChannel\(null\)[\s\S]*?setTerminalTurnProjections/u,
+      /event\.type === "agent\.completed" \|\| event\.type === "agent\.failed"[\s\S]*?setStreaming\(closeStreamingChannelState\)[\s\S]*?setTerminalProjections/u,
     );
   });
 });

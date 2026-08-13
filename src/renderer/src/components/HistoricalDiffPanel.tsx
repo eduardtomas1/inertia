@@ -1,10 +1,11 @@
-import { ExternalLink, GitCompareArrows, RotateCcw } from "lucide-react";
+import { ExternalLink, FileCode2, GitCompareArrows, RotateCcw } from "lucide-react";
 import clsx from "clsx";
 
 import type {
   DiffFile,
   TurnGitDiffSnapshot,
 } from "@shared/contracts";
+import { sourceLanguageForFile } from "@shared/source-language";
 import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 
 export interface HistoricalDiffPanelProps {
@@ -115,24 +116,33 @@ export function HistoricalDiffPanel({
             </select>
           </div>
           <nav className="changes-file-list" aria-label="Files changed by this turn">
-            {diff.files.map((file) => (
-              <button
-                type="button"
-                className={clsx("change-file-button", file.path === selectedFile?.path && "is-selected")}
-                aria-pressed={file.path === selectedFile?.path}
-                onClick={() => onSelectFile(file.path)}
-                key={file.path}
-              >
-                <span className="change-file-copy">
-                  <span className="change-file-name">{fileName(file.path)}</span>
-                  <span className="change-file-path">{file.path}</span>
-                </span>
-                <span className="change-file-stats">
-                  <span>{file.status}</span>
-                  <span><span className="file-insertions">+{file.insertions}</span> <span className="file-deletions">−{file.deletions}</span></span>
-                </span>
-              </button>
-            ))}
+            {diff.files.map((file) => {
+              const language = sourceLanguageForFile(file.path);
+              return (
+                <button
+                  type="button"
+                  className={clsx("change-file-button", file.path === selectedFile?.path && "is-selected")}
+                  data-language-family={language.family}
+                  aria-pressed={file.path === selectedFile?.path}
+                  onClick={() => onSelectFile(file.path)}
+                  key={file.path}
+                >
+                  <FileCode2
+                    className="file-language-icon"
+                    size={14}
+                    aria-hidden="true"
+                  />
+                  <span className="change-file-copy">
+                    <span className="change-file-name">{fileName(file.path)}</span>
+                    <span className="change-file-path">{file.path}</span>
+                  </span>
+                  <span className="change-file-stats">
+                    <span>{file.status}</span>
+                    <span><span className="file-insertions">+{file.insertions}</span> <span className="file-deletions">−{file.deletions}</span></span>
+                  </span>
+                </button>
+              );
+            })}
           </nav>
           <div className="diff-review">
             {selectedFile ? (

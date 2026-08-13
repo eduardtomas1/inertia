@@ -2,6 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import { INERTIA_VERSION } from "../../shared/version";
 import {
+  isProcessTreeTerminationUnconfirmed,
+  ProcessTreeTerminationError,
   requireProcessTreeTermination,
   terminateProcessTreeAndWait,
   type ProcessTreeTerminator,
@@ -10,6 +12,7 @@ import { providerProcessInvocation } from "../provider/process";
 import {
   JsonLineDecoder,
   objectValue,
+  rpcId,
   type JsonLineDecoderFailure,
   type JsonObject,
 } from "./protocol";
@@ -36,6 +39,8 @@ export interface CodexControlClientOptions {
   terminateProcessTree?: ProcessTreeTerminator;
   processLabel?: string;
   spawnProcess?: typeof spawn;
+  signal?: AbortSignal;
+  onNotification?: (method: string, params: JsonObject) => void;
 }
 
 function boundedErrorMessage(value: unknown): string | undefined {
@@ -54,6 +59,9 @@ export async function withCodexControlClient<T>(
   options: CodexControlClientOptions,
   runWithClient: (client: CodexControlClient) => Promise<T>,
 ): Promise<T> {
+  if (options.signal?.aborted) {
+    throw new Error("Codex control request was cancelled.");
+  }
   const timeoutMs = Math.max(500, Math.min(options.timeoutMs ?? 6_000, 30_000));
   const terminateProcessTree = options.terminateProcessTree
     ?? terminateProcessTreeAndWait;
@@ -112,6 +120,10 @@ export async function withCodexControlClient<T>(
     rejectConnection(error);
     void stopProcessTree().catch(() => undefined);
   };
+  const abortConnection = (): void => {
+    failConnection(new Error("Codex control request was cancelled."));
+  };
+  options.signal?.addEventListener("abort", abortConnection, { once: true });
   child.stdin.on("error", () => {
     failConnection(new Error("Codex control input stream failed."));
   });
@@ -172,8 +184,33 @@ export async function withCodexControlClient<T>(
       return;
     }
     const message = objectValue(parsed);
-    const id = typeof message?.id === "number" ? message.id : undefined;
-    if (id === undefined) return;
+    const messageId = rpcId(message?.id);
+    const id = typeof messageId === "number" ? messageId : undefined;
+    const method = typeof message?.method === "string"
+      ? message.method
+      : undefined;
+    if (messageId !== undefined && method !== undefined) {
+      // This one-shot control client has no UI/durable-turn route for server
+      // requests such as approvals or elicitation. Never confuse a colliding
+      // server request ID with the response to one of our pending requests.
+      failConnection(new Error(
+        `Codex control received unexpected server request '${method}'.`,
+      ));
+      return;
+    }
+    if (id === undefined) {
+      if (method) {
+        try {
+          options.onNotification?.(
+            method,
+            objectValue(message?.params) ?? {},
+          );
+        } catch {
+          // Control observers cannot interrupt the owned protocol lifecycle.
+        }
+      }
+      return;
+    }
     const active = pending.get(id);
     if (!active) return;
     pending.delete(id);
@@ -209,6 +246,9 @@ export async function withCodexControlClient<T>(
     failConnection(new Error("Codex control process exited early."));
   });
 
+  let operationFailed = false;
+  let operationError: unknown;
+  let operationResult!: T;
   try {
     await Promise.race([
       request("initialize", {
@@ -225,11 +265,35 @@ export async function withCodexControlClient<T>(
       connectionFailure,
     ]);
     notify("initialized");
-    return await Promise.race([
+    operationResult = await Promise.race([
       runWithClient({ request }),
       connectionFailure,
     ]);
-  } finally {
-    await close();
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
   }
+  options.signal?.removeEventListener("abort", abortConnection);
+  try {
+    await close();
+  } catch (cleanupError) {
+    if (
+      !operationFailed
+      || !isProcessTreeTerminationUnconfirmed(cleanupError)
+    ) {
+      throw cleanupError;
+    }
+    throw new ProcessTreeTerminationError(
+      options.processLabel ?? "Codex control process tree",
+      {
+        priorError: operationError,
+        cause: new AggregateError(
+          [operationError, cleanupError],
+          "Codex control operation and cleanup both failed.",
+        ),
+      },
+    );
+  }
+  if (operationFailed) throw operationError;
+  return operationResult;
 }

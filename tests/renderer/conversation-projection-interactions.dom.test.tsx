@@ -18,6 +18,7 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { useConversationProjection } from "../../src/renderer/src/hooks/useConversationProjection";
+import { applyTerminalTurnProjections } from "../../src/renderer/src/utils/terminalTurnProjection";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 
 const primaryId = "11111111-1111-4111-8111-111111111111";
@@ -1175,6 +1176,11 @@ describe("useConversationProjection pending interactions", () => {
       );
       await waitFor(() => expect(hook.result.current.detailState?.state)
         .toBe("ready"));
+      const visibleTurns = (): AgentTurn[] => applyTerminalTurnProjections(
+        hook.result.current.turns,
+        hook.result.current.terminalProjections,
+        hook.result.current.latestTurnSummary,
+      );
       expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
         .toBe("running");
 
@@ -1214,13 +1220,13 @@ describe("useConversationProjection pending interactions", () => {
       source.emit(scenario.event);
 
       expect(hook.result.current.streamingChannel).toBeNull();
-      expect(hook.result.current.turns.find(({ id }) => id === turn.id))
+      expect(visibleTurns().find(({ id }) => id === turn.id))
         .toMatchObject({
         id: turn.id,
         runId: turn.runId,
         status: scenario.status,
       });
-      expect(hook.result.current.turns.find(({ id }) => id === turn.id)
+      expect(visibleTurns().find(({ id }) => id === turn.id)
         ?.terminalReason).toBe(
         scenario.event.type === "agent.failed" ? scenario.event.message : null,
       );
@@ -1247,7 +1253,7 @@ describe("useConversationProjection pending interactions", () => {
       await waitFor(() => expect(detailLoads).toBe(2));
 
       expect(hook.result.current.detailState?.state).toBe("ready");
-      expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
+      expect(visibleTurns().find(({ id }) => id === turn.id)?.status)
         .toBe(scenario.status);
       expect(hook.result.current.streamingChannel).toBeNull();
       expect(hook.result.current.conversation?.status).toBe(scenario.status);
@@ -1282,7 +1288,7 @@ describe("useConversationProjection pending interactions", () => {
               : item),
         },
       });
-      expect(hook.result.current.turns.find(({ id }) => id === turn.id))
+      expect(visibleTurns().find(({ id }) => id === turn.id))
         .toMatchObject({
         id: turn.id,
         status: scenario.exactStatus,

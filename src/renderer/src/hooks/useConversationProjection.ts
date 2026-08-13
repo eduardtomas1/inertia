@@ -6,7 +6,6 @@ import type {
   AgentInputRequest,
   AgentPlan,
   AgentReasoning,
-  AgentTurn,
   AppSnapshot,
   ChatMessage,
   CheckpointSummary,
@@ -18,10 +17,6 @@ import type {
   TurnGitArtifact,
 } from "@shared/contracts";
 import {
-  isAgentTurnTerminalStatus,
-  type AgentTurnTerminalStatus,
-} from "@shared/turn-lifecycle";
-import {
   mergeConversationShell,
   resolveConversationDetail,
 } from "../utils/conversationDetail";
@@ -29,6 +24,29 @@ import type { ConnectionStatus } from "./useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { markTestStreamingStage } from "../utils/testStreamingTrace";
 import type { StreamingAgentChannel } from "../utils/responseTimeline";
+import {
+  appendStreamingReasoning,
+  appendStreamingText,
+  closeStreamingChannelState,
+  closeTextStreamState,
+  compareCreatedRecords,
+  compareSubagentTraces,
+  EMPTY_STREAMING_AGENT_STATE,
+  interactionKey,
+  mergeProjectionPlans,
+  mergeProjectionRecords,
+  projectConversationTerminal,
+  projectionUsage,
+  reconcileTerminalTurnProjections,
+  recordsForConversation,
+  sameAgentPlan,
+  terminalEventMatchesCurrentTurn,
+  turnEventOwner,
+  withoutHydratedBaseline,
+  withTerminalTurnProjection,
+  type StreamingAgentState,
+  type TerminalTurnProjections,
+} from "../utils/terminalTurnProjection";
 
 const EMPTY_REASONINGS: AgentReasoning[] = [];
 const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
@@ -38,9 +56,9 @@ const MAX_STREAMING_CHARACTERS = 500_000;
 interface FreshHydrationBaseline {
   conversationId: string;
   syncCompleted: boolean;
-  streamingTextDelta: string | null;
-  streamingReasoningDelta: string | null;
-  streamingChannelDelta: StreamingAgentChannel;
+  text: string | null;
+  reasoning: string | null;
+  channel: StreamingAgentChannel;
   liveMessages: ChatMessage[];
   liveUsage: ThreadUsageSnapshot | null;
   liveActivities: AgentActivity[];
@@ -51,83 +69,6 @@ interface FreshHydrationBaseline {
   inputs: Map<string, AgentInputRequest>;
   hydratedApprovals: Set<string>;
   hydratedInputs: Set<string>;
-}
-
-interface TerminalTurnProjection {
-  conversationId: string;
-  runId: string;
-  turnId: string;
-  status: Extract<AgentTurnTerminalStatus, "completed" | "failed">;
-  terminalReason: string | null;
-}
-
-interface TurnEventOwner {
-  conversationId: string;
-  runId: string;
-  turnId: string;
-}
-
-function terminalTurnKey(value: {
-  conversationId: string;
-  turnId: string;
-}): string {
-  return `${value.conversationId}\0${value.turnId}`;
-}
-
-function sameAgentPlan(
-  left: AgentPlan | null,
-  right: AgentPlan,
-): boolean {
-  return left !== null
-    && left.conversationId === right.conversationId
-    && left.runId === right.runId
-    && left.turnId === right.turnId
-    && left.explanation === right.explanation
-    && JSON.stringify(left.steps) === JSON.stringify(right.steps);
-}
-
-function interactionKey(value: {
-  conversationId: string;
-  id: string;
-}): string {
-  return `${value.conversationId}\0${value.id}`;
-}
-
-function withoutHydratedBaseline<T extends { id: string }>(
-  current: Record<string, T[]>,
-  conversationId: string,
-  baseline: readonly T[],
-): Record<string, T[]> {
-  const existing = current[conversationId];
-  if (!existing || baseline.length === 0) return current;
-  const baselineRecords = new Map(baseline.map((value) => [value.id, value]));
-  const remaining = existing.filter((value) =>
-    baselineRecords.get(value.id) !== value);
-  if (remaining.length === existing.length) return current;
-  const next = { ...current };
-  if (remaining.length > 0) next[conversationId] = remaining;
-  else delete next[conversationId];
-  return next;
-}
-
-function compareCreatedRecords(
-  left: { createdAt: string; id: string },
-  right: { createdAt: string; id: string },
-): number {
-  if (left.createdAt < right.createdAt) return -1;
-  if (left.createdAt > right.createdAt) return 1;
-  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
-}
-
-function compareCreatedAt(
-  left: { createdAt: string },
-  right: { createdAt: string },
-): number {
-  return left.createdAt < right.createdAt
-    ? -1
-    : left.createdAt > right.createdAt
-      ? 1
-      : 0;
 }
 
 export interface ConversationProjectionOptions {
@@ -161,10 +102,8 @@ export function useConversationProjection({
   const [detailState, setDetailState] =
     useState<ConversationDetailViewState | null>(null);
   const [detailRefresh, setDetailRefresh] = useState(0);
-  const [streamingText, setStreamingText] = useState("");
-  const [streamingReasoning, setStreamingReasoning] = useState("");
-  const [streamingChannel, setStreamingChannel] =
-    useState<StreamingAgentChannel>(null);
+  const [[streamingText, streamingReasoning, streamingChannel], setStreaming] =
+    useState<StreamingAgentState>(EMPTY_STREAMING_AGENT_STATE);
   const [liveMessages, setLiveMessages] =
     useState<Record<string, ChatMessage[]>>({});
   const [liveUsage, setLiveUsage] =
@@ -179,11 +118,11 @@ export function useConversationProjection({
     useState<AgentInputRequest[]>([]);
   const [nativePlans, setNativePlans] =
     useState<Record<string, AgentPlan>>({});
-  const [terminalTurnProjections, setTerminalTurnProjections] =
-    useState<Record<string, TerminalTurnProjection>>({});
+  const [terminalProjections, setTerminalProjections] =
+    useState<TerminalTurnProjections>({});
   const requestGenerationRef = useRef(0);
   const terminalRefreshPendingRef = useRef(false);
-  const liveTurnOwnerRef = useRef<TurnEventOwner | null>(null);
+  const liveTurnOwnerRef = useRef<string | null>(null);
   const freshHydrationRef = useRef<FreshHydrationBaseline | null>(null);
   const snapshotRef = useRef(snapshot);
   const conversationRef = useRef<ConversationShell | null>(null);
@@ -212,6 +151,26 @@ export function useConversationProjection({
   autoOpenPlanRef.current = autoOpenPlan;
   terminalCallbackRef.current = onTerminal;
   openPlanCallbackRef.current = onOpenPlan;
+  const resetLiveProjection = useCallback((): void => {
+    freshHydrationRef.current = null;
+    terminalRefreshPendingRef.current = false;
+    liveTurnOwnerRef.current = null;
+    setStreaming(EMPTY_STREAMING_AGENT_STATE);
+    setLiveMessages({});
+    setLiveUsage({});
+    setLiveActivities({});
+    setLiveSubagents({});
+    setNativePlans({});
+    setTerminalProjections({});
+  }, []);
+  const closeTextStream = useCallback((): void => {
+    const hydration = freshHydrationRef.current;
+    if (hydration) {
+      hydration.text = "";
+      hydration.channel = null;
+    }
+    setStreaming(closeTextStreamState);
+  }, []);
 
   const conversationId = enabled
     ? targetConversationId === undefined
@@ -226,50 +185,19 @@ export function useConversationProjection({
       id === conversationId) ?? null,
     [conversationId, snapshot],
   );
-  const conversation = useMemo((): ConversationShell | null => {
-    if (!persistedConversation?.latestTurn) return persistedConversation;
-    const latestTurn = persistedConversation.latestTurn;
-    if (isAgentTurnTerminalStatus(latestTurn.status)) {
-      return persistedConversation;
-    }
-    const projection = terminalTurnProjections[terminalTurnKey({
-      conversationId: persistedConversation.id,
-      turnId: latestTurn.id,
-    })];
-    if (!projection || projection.runId !== latestTurn.runId) {
-      return persistedConversation;
-    }
-    return {
-      ...persistedConversation,
-      status: projection.status === "completed" ? "completed" : "failed",
-      attentionKind: null,
-      latestTurn: {
-        ...latestTurn,
-        status: projection.status,
-        terminalReason: projection.terminalReason,
-      },
-    };
-  }, [persistedConversation, terminalTurnProjections]);
+  const conversation = useMemo(() => projectConversationTerminal(
+    persistedConversation,
+    terminalProjections,
+  ), [persistedConversation, terminalProjections]);
   conversationRef.current = conversation;
   useEffect(() => {
     if (enabled) return;
-    freshHydrationRef.current = null;
-    terminalRefreshPendingRef.current = false;
-    liveTurnOwnerRef.current = null;
-    setStreamingText("");
-    setStreamingReasoning("");
-    setStreamingChannel(null);
-    setLiveMessages({});
-    setLiveUsage({});
-    setLiveActivities({});
-    setLiveSubagents({});
-    setNativePlans({});
-    setTerminalTurnProjections({});
-  }, [enabled]);
+    resetLiveProjection();
+  }, [enabled, resetLiveProjection]);
   useEffect(() => {
     if (status !== "online") {
       liveTurnOwnerRef.current = null;
-      setStreamingChannel(null);
+      setStreaming(closeStreamingChannelState);
     }
   }, [status]);
   const detail = useMemo(() => {
@@ -358,9 +286,11 @@ export function useConversationProjection({
         && hydration?.conversationId === conversationId
       ) {
         freshHydrationRef.current = null;
-        setStreamingText(hydration.streamingTextDelta ?? "");
-        setStreamingReasoning(hydration.streamingReasoningDelta ?? "");
-        setStreamingChannel(hydration.streamingChannelDelta);
+        setStreaming([
+          hydration.text ?? "",
+          hydration.reasoning ?? "",
+          hydration.channel,
+        ]);
         setLiveMessages((current) => withoutHydratedBaseline(
           current,
           conversationId,
@@ -400,9 +330,7 @@ export function useConversationProjection({
         && terminalRefreshPendingRef.current
       ) {
         terminalRefreshPendingRef.current = false;
-        setStreamingText("");
-        setStreamingReasoning("");
-        setStreamingChannel(null);
+        setStreaming(EMPTY_STREAMING_AGENT_STATE);
       }
     }).catch((error) => {
       if (generation !== requestGenerationRef.current) return;
@@ -514,24 +442,13 @@ export function useConversationProjection({
         return next;
       });
     }
-    setTerminalTurnProjections((current) => {
-      let next: Record<string, TerminalTurnProjection> | null = null;
-      const authoritativeTurns = detailState?.state === "ready"
-        ? detailState.detail.agentTurns
-        : [];
-      for (const turn of authoritativeTurns) {
-        if (!isAgentTurnTerminalStatus(turn.status)) continue;
-        const key = terminalTurnKey({
-          conversationId: turn.conversationId,
-          turnId: turn.id,
-        });
-        const projection = current[key];
-        if (!projection || projection.runId !== turn.runId) continue;
-        next ??= { ...current };
-        delete next[key];
-      }
-      return next ?? current;
-    });
+    if (detailState?.state === "ready") {
+      setTerminalProjections((current) =>
+        reconcileTerminalTurnProjections(
+          current,
+          detailState.detail.agentTurns,
+        ));
+    }
   }, [conversation?.id, detail, detailState]);
 
   useEffect(() => subscribe((event) => {
@@ -558,13 +475,13 @@ export function useConversationProjection({
       if (remainsMounted && activeConversation) {
         // A disconnected stream is historical until this runtime generation
         // replays a new text or reasoning delta for the mounted conversation.
-        setStreamingChannel(null);
+        setStreaming(closeStreamingChannelState);
         freshHydrationRef.current = {
           conversationId: activeConversation.id,
           syncCompleted: false,
-          streamingTextDelta: null,
-          streamingReasoningDelta: null,
-          streamingChannelDelta: null,
+          text: null,
+          reasoning: null,
+          channel: null,
           liveMessages: liveMessagesRef.current[activeConversation.id] ?? [],
           liveUsage: liveUsageRef.current[activeConversation.id] ?? null,
           liveActivities:
@@ -593,19 +510,10 @@ export function useConversationProjection({
           hydratedInputs: new Set(),
         };
       } else {
-        freshHydrationRef.current = null;
+        resetLiveProjection();
         setDetailState(null);
-        setStreamingText("");
-        setStreamingReasoning("");
-        setStreamingChannel(null);
-        setLiveMessages({});
-        setLiveUsage({});
-        setLiveActivities({});
-        setLiveSubagents({});
         setPendingApprovals([]);
         setPendingInputs([]);
-        setNativePlans({});
-        setTerminalTurnProjections({});
       }
       return;
     }
@@ -649,13 +557,8 @@ export function useConversationProjection({
         projectionEnabled
         && event.request.conversationId === activeConversation?.id
       ) {
-        liveTurnOwnerRef.current = event.request;
-        if (freshHydrationRef.current) {
-          freshHydrationRef.current.streamingTextDelta = "";
-          freshHydrationRef.current.streamingChannelDelta = null;
-        }
-        setStreamingText("");
-        setStreamingChannel(null);
+        liveTurnOwnerRef.current = turnEventOwner(event.request);
+        closeTextStream();
       }
       return;
     }
@@ -680,13 +583,8 @@ export function useConversationProjection({
         projectionEnabled
         && event.request.conversationId === activeConversation?.id
       ) {
-        liveTurnOwnerRef.current = event.request;
-        if (freshHydrationRef.current) {
-          freshHydrationRef.current.streamingTextDelta = "";
-          freshHydrationRef.current.streamingChannelDelta = null;
-        }
-        setStreamingText("");
-        setStreamingChannel(null);
+        liveTurnOwnerRef.current = turnEventOwner(event.request);
+        closeTextStream();
       }
       return;
     }
@@ -724,21 +622,15 @@ export function useConversationProjection({
           ],
         };
       });
-      if (freshHydrationRef.current) {
-        freshHydrationRef.current.streamingTextDelta = "";
-        freshHydrationRef.current.streamingChannelDelta = null;
-      }
-      setStreamingText("");
-      setStreamingChannel(null);
+      closeTextStream();
       return;
     }
     if (event.type === "agent.plan.updated") {
       if (event.plan.conversationId !== activeConversation?.id) return;
-      if (event.plan.turnId) liveTurnOwnerRef.current = {
-        conversationId: event.plan.conversationId,
+      if (event.plan.turnId) liveTurnOwnerRef.current = turnEventOwner({
         runId: event.plan.runId,
         turnId: event.plan.turnId,
-      };
+      });
       const hydration = freshHydrationRef.current;
       const replayedHydrationPlan = Boolean(
         hydration
@@ -752,16 +644,11 @@ export function useConversationProjection({
       }));
       if (event.plan.conversationId === activeConversation?.id) {
         if (replayedHydrationPlan) {
-          if (hydration) hydration.streamingChannelDelta = null;
-          setStreamingChannel(null);
+          if (hydration) hydration.channel = null;
+          setStreaming(closeStreamingChannelState);
           return;
         }
-        if (hydration) {
-          hydration.streamingTextDelta = "";
-          hydration.streamingChannelDelta = null;
-        }
-        setStreamingText("");
-        setStreamingChannel(null);
+        closeTextStream();
         if (autoOpenPlanRef.current) {
           openPlanCallbackRef.current(event.plan.conversationId);
         }
@@ -778,17 +665,11 @@ export function useConversationProjection({
     }
     if (event.type === "agent.activity") {
       if (event.activity.conversationId !== activeConversation?.id) return;
-      if (event.activity.turnId) liveTurnOwnerRef.current = {
-        conversationId: event.activity.conversationId,
+      if (event.activity.turnId) liveTurnOwnerRef.current = turnEventOwner({
         runId: event.activity.runId,
         turnId: event.activity.turnId,
-      };
-      if (freshHydrationRef.current) {
-        freshHydrationRef.current.streamingTextDelta = "";
-        freshHydrationRef.current.streamingChannelDelta = null;
-      }
-      setStreamingText("");
-      setStreamingChannel(null);
+      });
+      closeTextStream();
       setLiveActivities((current) => {
         const existing = current[event.activity.conversationId] ?? [];
         return {
@@ -824,214 +705,126 @@ export function useConversationProjection({
     }
     if (event.type === "agent.started") {
       terminalRefreshPendingRef.current = false;
-      liveTurnOwnerRef.current = event;
+      liveTurnOwnerRef.current = turnEventOwner(event);
       if (freshHydrationRef.current) {
-        freshHydrationRef.current.streamingTextDelta = "";
-        freshHydrationRef.current.streamingReasoningDelta = "";
-        freshHydrationRef.current.streamingChannelDelta = null;
+        freshHydrationRef.current.text = "";
+        freshHydrationRef.current.reasoning = "";
+        freshHydrationRef.current.channel = null;
       }
-      setStreamingText("");
-      setStreamingReasoning("");
-      setStreamingChannel(null);
+      setStreaming(EMPTY_STREAMING_AGENT_STATE);
     }
     if (event.type === "agent.text") {
-      liveTurnOwnerRef.current = event;
+      liveTurnOwnerRef.current = turnEventOwner(event);
       const hydration = freshHydrationRef.current;
       if (hydration) {
-        hydration.streamingTextDelta = `${
-          hydration.streamingTextDelta ?? ""
+        hydration.text = `${
+          hydration.text ?? ""
         }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
       }
-      setStreamingText((current) =>
-        `${current}${event.text}`.slice(-MAX_STREAMING_CHARACTERS));
-      setStreamingChannel("text");
-      if (hydration) hydration.streamingChannelDelta = "text";
+      setStreaming((current) => appendStreamingText(
+        current,
+        event.text,
+        MAX_STREAMING_CHARACTERS,
+      ));
+      if (hydration) hydration.channel = "text";
       markTestStreamingStage("renderer-projection-updated");
     }
     if (event.type === "agent.reasoning") {
-      liveTurnOwnerRef.current = event;
+      liveTurnOwnerRef.current = turnEventOwner(event);
       const hydration = freshHydrationRef.current;
       if (hydration) {
-        hydration.streamingReasoningDelta = `${
-          hydration.streamingReasoningDelta ?? ""
+        hydration.reasoning = `${
+          hydration.reasoning ?? ""
         }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
       }
-      setStreamingReasoning((current) =>
-        `${current}${event.text}`.slice(-MAX_STREAMING_CHARACTERS));
-      setStreamingChannel("reasoning");
-      if (hydration) hydration.streamingChannelDelta = "reasoning";
+      setStreaming((current) => appendStreamingReasoning(
+        current,
+        event.text,
+        MAX_STREAMING_CHARACTERS,
+      ));
+      if (hydration) hydration.channel = "reasoning";
     }
     if (event.type === "agent.completed" || event.type === "agent.failed") {
-      const currentDetail = detailStateRef.current;
-      const latestShellTurn = activeConversation.latestTurn;
       const liveTurnOwner = liveTurnOwnerRef.current;
-      const shellOwnsActiveTurn = latestShellTurn
-        && !isAgentTurnTerminalStatus(latestShellTurn.status);
-      const terminalMatchesShell = shellOwnsActiveTurn
-        && latestShellTurn.id === event.turnId
-        && latestShellTurn.runId === event.runId;
-      const terminalMatchesDetail = currentDetail?.state === "ready"
-        && currentDetail.detail.agentTurns.some(({ id, runId, status }) =>
-          !isAgentTurnTerminalStatus(status)
-          && id === event.turnId
-          && runId === event.runId);
-      const terminalMatchesLiveOwner = liveTurnOwner
-        && liveTurnOwner.conversationId === event.conversationId
-        && liveTurnOwner.turnId === event.turnId
-        && liveTurnOwner.runId === event.runId;
-      if (
-        shellOwnsActiveTurn
-          ? !terminalMatchesShell
-          : liveTurnOwner
-            ? !terminalMatchesLiveOwner
-            : latestShellTurn
-              ? true
-              : currentDetail?.state === "ready"
-                && currentDetail.detail.agentTurns.some(({ status }) =>
-                  !isAgentTurnTerminalStatus(status))
-                && !terminalMatchesDetail
-      ) return;
+      const eventOwner = turnEventOwner(event);
+      if (!terminalEventMatchesCurrentTurn({
+        conversation: activeConversation,
+        detailState: detailStateRef.current,
+        eventOwner,
+        liveOwner: liveTurnOwner,
+      })) return;
       liveTurnOwnerRef.current = null;
       if (freshHydrationRef.current) {
-        freshHydrationRef.current.streamingChannelDelta = null;
+        freshHydrationRef.current.channel = null;
       }
-      setStreamingChannel(null);
-      setPendingApprovals((current) => current.filter((request) =>
-        request.conversationId !== event.conversationId
-        || request.runId !== event.runId
-        || request.turnId !== event.turnId));
-      setPendingInputs((current) => current.filter((request) =>
-        request.conversationId !== event.conversationId
-        || request.runId !== event.runId
-        || request.turnId !== event.turnId));
-      const projection: TerminalTurnProjection = {
-        conversationId: event.conversationId,
-        runId: event.runId,
-        turnId: event.turnId,
-        status: event.type === "agent.completed" ? "completed" : "failed",
-        terminalReason: event.type === "agent.failed" ? event.message : null,
-      };
-      setTerminalTurnProjections((current) => ({
-        ...current,
-        [terminalTurnKey(projection)]: projection,
-      }));
+      setStreaming(closeStreamingChannelState);
+      const retainOtherTurn = (request: {
+        conversationId: string;
+        runId: string;
+        turnId: string;
+      }): boolean => request.conversationId !== event.conversationId
+        || turnEventOwner(request) !== eventOwner;
+      setPendingApprovals((current) => current.filter(retainOtherTurn));
+      setPendingInputs((current) => current.filter(retainOtherTurn));
+      setTerminalProjections((current) => withTerminalTurnProjection(
+        current,
+        {
+          owner: eventOwner,
+          status: event.type === "agent.completed" ? "completed" : "failed",
+          terminalReason: event.type === "agent.failed" ? event.message : null,
+        },
+      ));
       terminalRefreshPendingRef.current = true;
       terminalCallbackRef.current();
     }
-  }), [subscribe, subscriptionOwner]);
+  }), [
+    closeTextStream,
+    resetLiveProjection,
+    subscribe,
+    subscriptionOwner,
+  ]);
 
   useEffect(() => {
-    freshHydrationRef.current = null;
-    terminalRefreshPendingRef.current = false;
-    liveTurnOwnerRef.current = null;
-    setStreamingText("");
-    setStreamingReasoning("");
-    setStreamingChannel(null);
-    setLiveMessages({});
-    setLiveUsage({});
-    setLiveActivities({});
-    setLiveSubagents({});
-    setNativePlans({});
-    setTerminalTurnProjections({});
-  }, [conversation?.id]);
+    resetLiveProjection();
+  }, [conversation?.id, resetLiveProjection]);
 
   const activeConversationId = conversation?.id ?? null;
-  const turns = useMemo(() => (detail?.agentTurns ?? []).map((turn): AgentTurn => {
-    const projection = terminalTurnProjections[terminalTurnKey({
-      conversationId: turn.conversationId,
-      turnId: turn.id,
-    })];
-    if (
-      !projection
-      || projection.runId !== turn.runId
-      || isAgentTurnTerminalStatus(turn.status)
-    ) return turn;
-    const shellTurn = conversation?.latestTurn;
-    const exactShellSettlement = shellTurn
-      && shellTurn.id === turn.id
-      && shellTurn.runId === turn.runId
-      && isAgentTurnTerminalStatus(shellTurn.status)
-      ? shellTurn
-      : null;
-    return {
-      ...turn,
-      completedAt: exactShellSettlement
-        ? exactShellSettlement.completedAt
-        : turn.completedAt,
-      status: exactShellSettlement?.status ?? projection.status,
-      terminalReason: exactShellSettlement
-        ? exactShellSettlement.terminalReason
-        : projection.terminalReason,
-      updatedAt: exactShellSettlement
-        ? exactShellSettlement.updatedAt
-        : turn.updatedAt,
-    };
-  }), [conversation?.latestTurn, detail?.agentTurns, terminalTurnProjections]);
+  const turns = useMemo(() => detail?.agentTurns ?? [], [detail?.agentTurns]);
   const messages = useMemo(
-    () => {
-      const merged = new Map<string, ChatMessage>();
-      for (const message of detail?.messages ?? []) merged.set(message.id, message);
-      if (activeConversationId) {
-        for (const message of liveMessages[activeConversationId] ?? []) {
-          merged.set(message.id, message);
-        }
-      }
-      return [...merged.values()].sort(compareCreatedRecords);
-    },
+    () => mergeProjectionRecords(
+      detail?.messages ?? [],
+      activeConversationId ? liveMessages[activeConversationId] ?? [] : [],
+      compareCreatedRecords,
+    ),
     [activeConversationId, detail?.messages, liveMessages],
   );
-  const activities = useMemo(() => {
-    if (!activeConversationId) return [];
-    const merged = new Map<string, AgentActivity>();
-    for (const activity of detail?.activities ?? []) {
-      merged.set(activity.id, activity);
-    }
-    for (const activity of liveActivities[activeConversationId] ?? []) {
-      merged.set(activity.id, activity);
-    }
-    return [...merged.values()].sort(compareCreatedRecords);
-  }, [activeConversationId, detail?.activities, liveActivities]);
-  const subagents = useMemo(() => {
-    if (!activeConversationId) return [];
-    const merged = new Map<string, SubagentTrace>();
-    for (const trace of detail?.subagents ?? []) merged.set(trace.id, trace);
-    for (const trace of liveSubagents[activeConversationId] ?? []) {
-      merged.set(trace.id, trace);
-    }
-    return [...merged.values()].sort((a, b) =>
-      compareCreatedAt(a, b)
-      || a.sequence - b.sequence
-      || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  }, [activeConversationId, detail?.subagents, liveSubagents]);
-  const usage = useMemo(() => {
-    if (!activeConversationId) return null;
-    return liveUsage[activeConversationId]
-      ?? detail?.usage.find(({ conversationId }) =>
-        conversationId === activeConversationId)
-      ?? null;
-  }, [activeConversationId, detail?.usage, liveUsage]);
-  const plans = useMemo(() => {
-    if (!activeConversationId) return [];
-    const merged = new Map<string, AgentPlan>();
-    for (const plan of detail?.plans ?? []) {
-      merged.set(`${plan.runId}:${plan.turnId ?? "legacy"}`, plan);
-    }
-    const live = nativePlans[activeConversationId];
-    if (live) {
-      merged.set(`${live.runId}:${live.turnId ?? "legacy"}`, live);
-    }
-    return [...merged.values()];
-  }, [activeConversationId, detail?.plans, nativePlans]);
+  const activities = useMemo(() => mergeProjectionRecords(
+    detail?.activities ?? [],
+    activeConversationId ? liveActivities[activeConversationId] ?? [] : [],
+    compareCreatedRecords,
+  ), [activeConversationId, detail?.activities, liveActivities]);
+  const subagents = useMemo(() => mergeProjectionRecords(
+    detail?.subagents ?? [],
+    activeConversationId ? liveSubagents[activeConversationId] ?? [] : [],
+    compareSubagentTraces,
+  ), [activeConversationId, detail?.subagents, liveSubagents]);
+  const usage = useMemo(() => projectionUsage(
+    activeConversationId,
+    liveUsage,
+    detail?.usage ?? [],
+  ), [activeConversationId, detail?.usage, liveUsage]);
+  const plans = useMemo(() => activeConversationId
+    ? mergeProjectionPlans(
+        detail?.plans ?? [],
+        nativePlans[activeConversationId],
+      )
+    : [], [activeConversationId, detail?.plans, nativePlans]);
   const approvals = useMemo(
-    () => pendingApprovals.filter(
-      (request) => request.conversationId === conversation?.id,
-    ),
+    () => recordsForConversation(pendingApprovals, conversation?.id),
     [conversation?.id, pendingApprovals],
   );
   const inputRequests = useMemo(
-    () => pendingInputs.filter(
-      (request) => request.conversationId === conversation?.id,
-    ),
+    () => recordsForConversation(pendingInputs, conversation?.id),
     [conversation?.id, pendingInputs],
   );
   const refreshDetail = useCallback(
@@ -1057,6 +850,7 @@ export function useConversationProjection({
     streamingText,
     streamingReasoning,
     streamingChannel,
+    terminalProjections,
     pendingApprovals: approvals,
     pendingInputs: inputRequests,
   };

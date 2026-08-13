@@ -18,6 +18,7 @@ import type {
   AgentInputRequest,
   AgentPlan,
   ChatMessage,
+  ConversationCompactionResult,
   MessageSendAcceptance,
   SubagentTrace,
   ThreadUsageSnapshot,
@@ -147,11 +148,16 @@ export type ServerEvent =
         | { kind: "review.summary"; summary: DiffReviewSummary }
         | { kind: "git.branches"; branches: GitBranchInfo[] }
         | ({ kind: "workspace.entries" } & WorkspaceEntriesPage)
-        | { kind: "workspace.file"; file: WorkspaceFilePreview }
+        | {
+            kind: "workspace.file";
+            file: WorkspaceFilePreview;
+            usedFallback: boolean;
+          }
         | { kind: "project.actions"; actions: ProjectAction[] }
         | { kind: "project.created"; projectId: string }
         | { kind: "conversation.created"; conversationId: string }
         | MessageSendAcceptance
+        | ConversationCompactionResult
         | DuoPreparedResult
         | DuoPendingResult
         | DuoStatusResult

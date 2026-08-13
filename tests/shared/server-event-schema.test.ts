@@ -372,6 +372,7 @@ describe("server event request-result trust boundary", () => {
     },
     {
       kind: "workspace.file",
+      usedFallback: false,
       file: {
         path: "src/example.ts",
         content: "export {};",
@@ -588,6 +589,18 @@ describe("server event request-result trust boundary", () => {
     },
     { kind: "workspace.entries", directory: "", entries: [{ path: "x" }], truncated: false },
     { kind: "workspace.file", file: { path: "x", content: 7 } },
+    {
+      kind: "workspace.file",
+      usedFallback: "yes",
+      file: {
+        path: "x",
+        content: "x",
+        truncated: false,
+        language: "text",
+        contentDigest: "sha256:abc",
+        modifiedAt: "2030-01-01T00:00:00.000Z",
+      },
+    },
     { kind: "git.branches", branches: [{ name: "main", current: "yes" }] },
     { kind: "project.actions", actions: [{ id: "test", label: "Test", command: "x", preview: "no" }] },
     { kind: "duo.pending", launchIds: [7], hasMore: false },
@@ -863,6 +876,83 @@ describe("server event conversation discriminant boundary", () => {
       result: { kind: "conversation.detail", state: "ready" },
     });
   });
+  it("validates response-speed identity while allowing pending conversation transitions", () => {
+    expect(() => parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      latestTurn: {
+        ...conversationShell.latestTurn,
+        continuationIdentity: {
+          ...conversationShell.latestTurn.continuationIdentity,
+          performanceModeIdentity: "fast:turbo",
+        },
+      },
+    }))).toThrow("Malformed server event");
+
+    const fastSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-test",
+      reasoningEffort: "high",
+      providerOptions: { fastMode: "priority" },
+    });
+    expect(parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      modelSelection: fastSelection,
+      continuationIdentity: continuationIdentityForSelection(selection),
+    }))).toMatchObject({ type: "conversation.shell.updated" });
+    expect(parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      continuationIdentity: continuationIdentityForSelection(fastSelection),
+    }))).toMatchObject({ type: "conversation.shell.updated" });
+    expect(() => parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      latestTurn: {
+        ...conversationShell.latestTurn,
+        modelSelection: fastSelection,
+        continuationIdentity: continuationIdentityForSelection(selection),
+      },
+    }))).toThrow("Malformed server event");
+
+    const cursorSelection = nativeModelSelection({
+      providerId: "cursor",
+      modelId: "cursor-test",
+    });
+    expect(() => parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      providerId: "cursor",
+      modelSelection: cursorSelection,
+      continuationIdentity: {
+        ...continuationIdentityForSelection(cursorSelection),
+        performanceModeIdentity: "fast:priority",
+      },
+      model: cursorSelection.modelId,
+      latestTurn: null,
+    }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      continuationIdentity: {
+        ...continuationIdentityForSelection(selection),
+        performanceModeIdentity: "fast:fast",
+      },
+    }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      latestTurn: {
+        ...conversationShell.latestTurn,
+        modelSelection: {
+          ...cursorSelection,
+          providerOptions: { fastMode: "priority" },
+        },
+        continuationIdentity: {
+          ...continuationIdentityForSelection(cursorSelection),
+          performanceModeIdentity: "fast:priority",
+        },
+        providerId: "cursor",
+        harnessId: cursorSelection.harnessId,
+        backendProfileId: cursorSelection.backendProfileId,
+        model: cursorSelection.modelId,
+      },
+    }))).toThrow("Malformed server event");
+  });
   it.each([
     ["providerId", "gemini"],
     ["modelSelection", claudeSelection],
@@ -956,7 +1046,7 @@ describe("server event provider identity boundary", () => {
     authState: "authenticated",
     canRun: true,
     statusMessage: null,
-    models: [{ id: "gpt-test", label: "GPT Test", description: "Test model", isDefault: true, inputModalities: ["text"], reasoningOptions: [], defaultReasoningEffort: "high" }],
+    models: [{ id: "gpt-test", label: "GPT Test", description: "Test model", isDefault: true, inputModalities: ["text"], reasoningOptions: [], defaultReasoningEffort: "high", fastMode: { providerValue: "priority", label: "Fast", description: "Faster responses", isDefault: false } }],
     rateLimits: [{ id: "five-hour", label: "Five hour", usedPercent: 20, remainingPercent: 80, windowMinutes: 300, resetsAt: checkedAt }],
     metadataState: {
       models: {
@@ -990,13 +1080,28 @@ describe("server event provider identity boundary", () => {
   it.each(["codex", "claude", "cursor", "opencode"])(
     "accepts the canonical %s provider identity",
     (id) => {
-      expect(parseServerEvent(snapshotEvent({ ...provider, id }))).toMatchObject({
+      const expectedFastMode = id === "codex"
+        ? provider.models[0].fastMode
+        : id === "claude"
+          ? { ...provider.models[0].fastMode, providerValue: "fast" }
+          : null;
+      expect(parseServerEvent(snapshotEvent({
+        ...provider,
+        id,
+        models: [{ ...provider.models[0], fastMode: expectedFastMode }],
+      }))).toMatchObject({
         type: "snapshot.updated",
       });
     },
   );
   it.each([
     ["provider identity", { ...provider, id: "gemini" }], ["model IDs", { ...provider, models: [provider.models[0], { ...provider.models[0] }] }],
+    ["Fast mode metadata", { ...provider, models: [{ ...provider.models[0], fastMode: { providerValue: 1, label: "Fast", description: "Broken", isDefault: false } }] }],
+    ["cross-provider Fast mode", { ...provider, id: "cursor" }],
+    ["wrong native Fast value", { ...provider, models: [{ ...provider.models[0], fastMode: { ...provider.models[0].fastMode, providerValue: "fast" } }] }],
+    ["empty Fast label", { ...provider, models: [{ ...provider.models[0], fastMode: { ...provider.models[0].fastMode, label: "" } }] }],
+    ["oversized Fast description", { ...provider, models: [{ ...provider.models[0], fastMode: { ...provider.models[0].fastMode, description: "x".repeat(501) } }] }],
+    ["undeclared Fast metadata", { ...provider, models: [{ ...provider.models[0], fastMode: { ...provider.models[0].fastMode, apiKey: "never-cross-ipc" } }] }],
     ["rate-limit IDs", { ...provider, rateLimits: [provider.rateLimits[0], { ...provider.rateLimits[0] }] }],
   ])("rejects duplicate or malformed %s", (_label, malformed) => {
     expect(() => parseServerEvent(snapshotEvent(malformed))).toThrow("Malformed server event");

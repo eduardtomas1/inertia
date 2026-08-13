@@ -180,6 +180,10 @@ export class ConversationRepository {
               ? null
               : current.modelSelection.reasoningEffort
           ),
+          providerOptions: update.providerId
+            && update.providerId !== current.providerId
+            ? {}
+            : current.modelSelection.providerOptions,
         })
         : current.modelSelection;
     const selectedProviderId = legacyProviderIdForHarness(modelSelection.harnessId);

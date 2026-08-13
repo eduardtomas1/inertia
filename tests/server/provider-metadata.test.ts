@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderModel, ProviderRateLimit } from "../../src/shared/contracts";
 import { ProviderManager } from "../../src/server/providers";
+import { parseCodexModels } from "../../src/server/codex-metadata";
 import { ProcessTreeTerminationError } from "../../src/server/process-lifecycle";
 import {
   ProviderMetadataCache,
@@ -48,6 +49,56 @@ function rateLimit(id: string, usedPercent = 25): ProviderRateLimit {
 }
 
 describe("provider metadata cache", () => {
+  it("accepts only structured provider-native Fast mode metadata", () => {
+    expect(parseCodexModels({
+      data: [{
+        model: "gpt-fast",
+        displayName: "GPT Fast",
+        serviceTiers: [{
+          id: "priority",
+          name: "Fast",
+          description: "Faster responses",
+        }],
+        defaultServiceTier: null,
+      }, {
+        model: "default-fast",
+        displayName: "Default Fast",
+        serviceTiers: [{ id: "priority", name: "Fast" }],
+        defaultServiceTier: "priority",
+      }, {
+        model: "name-only",
+        displayName: "Name Only Fast",
+        additionalSpeedTiers: ["fast"],
+      }, {
+        model: "malformed",
+        serviceTiers: [{ id: "priority", name: "Turbo" }],
+      }],
+    })).toEqual([
+      expect.objectContaining({
+        id: "gpt-fast",
+        fastMode: expect.objectContaining({
+          providerValue: "priority",
+          label: "Fast",
+          isDefault: false,
+        }),
+      }),
+      expect.objectContaining({
+        id: "default-fast",
+        fastMode: expect.objectContaining({
+          providerValue: "priority",
+          isDefault: true,
+        }),
+      }),
+      expect.objectContaining({ id: "name-only", fastMode: null }),
+      expect.objectContaining({ id: "malformed", fastMode: null }),
+    ]);
+
+    expect(validateProviderModels([{
+      ...model("malformed-fast"),
+      fastMode: { providerValue: "", label: "Fast", description: "x" },
+    }])[0]?.fastMode).toBeNull();
+  });
+
   it("single-flights cold reads, reuses warm process and restart caches, and refreshes expired fields", async () => {
     let now = Date.parse("2026-07-22T10:00:00.000Z");
     let reads = 0;
@@ -241,10 +292,23 @@ describe("provider metadata cache", () => {
     };
     const cache = new ProviderMetadataCache({ persistence });
     cache.correlate("codex", { executable: codexExecutable, version: "1.0.0", authState: "authenticated" });
-    cache.learn("codex", codexExecutable, { models: [model("model-a")] }, "provider");
+    cache.learn("codex", codexExecutable, {
+      models: [{
+        ...model("model-a"),
+        fastMode: {
+          providerValue: "priority",
+          label: "Fast",
+          description: "Faster responses with increased usage.",
+          isDefault: false,
+        },
+      }],
+    }, "provider");
 
     const restarted = new ProviderMetadataCache({ persistence });
     expect(restarted.current("codex").metadataState.models.freshness).toBe("fresh");
+    expect(restarted.current("codex").models[0]?.fastMode).toMatchObject({
+      providerValue: "priority",
+    });
     restarted.correlate("codex", { executable: codexExecutable, version: "2.0.0", authState: "unauthenticated" });
     expect(restarted.current("codex")).toMatchObject({
       models: [expect.objectContaining({ id: "model-a" })],

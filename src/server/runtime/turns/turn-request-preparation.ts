@@ -1,5 +1,6 @@
 import type { AgentActivity } from "../../../shared/contracts";
 import {
+  officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
 } from "../../../shared/continuation-policy";
@@ -7,6 +8,7 @@ import {
   nativeBackendProfile,
   nativeModelSelection,
   modelSelectionSchema,
+  routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
@@ -107,9 +109,21 @@ export function resolveTurnRequest(
         reasoningEffort: routeSelection.reasoningEffort
           ?? selectedModel.defaultReasoningEffort
           ?? null,
+        providerOptions: routeSelection.providerOptions,
       })
     : routeSelection;
   const route = dependencies.providers.resolveModelRoute(routeSelection);
+  const expectedFastMode = route.providerId === "codex"
+    ? "priority"
+    : route.providerId === "claude"
+      ? "fast"
+      : null;
+  const supportedFastMode = selectedProvider?.id === route.providerId
+    && route.backendProfile.id === nativeBackendProfile(route.providerId).id
+    && routeSupportsNativeFastModeIdentity(routeSelection)
+    && selectedModel?.fastMode?.providerValue === expectedFastMode
+    ? expectedFastMode
+    : null;
   if ((request.generatedAttachmentPaths?.length ?? 0) > 0) {
     const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
     const exactModel = routeSelection.modelId === "provider-default"
@@ -135,10 +149,11 @@ export function resolveTurnRequest(
   const latestTurn = dependencies.store.latestAgentTurnForConversation(
     conversation.id,
   );
+  const previousContinuationIdentity = latestTurn?.continuationIdentity
+    ?? conversation.continuationIdentity
+    ?? null;
   const continuation = resolveContinuationDecision({
-    previousIdentity: latestTurn?.continuationIdentity
-      ?? conversation.continuationIdentity
-      ?? null,
+    previousIdentity: previousContinuationIdentity,
     nextIdentity: route.continuationIdentity,
     previousModelId: routeSelection.modelId === "provider-default"
       ? "provider-default"
@@ -151,6 +166,9 @@ export function resolveTurnRequest(
     hasTurns: latestTurn !== null,
     allowsModelSwitchWithinSession:
       officiallyAllowsModelSwitchWithinSession(route.compatibility),
+    allowsPerformanceModeSwitchWithinSession:
+      officiallyAllowsFastModeSwitchWithinSession(route.compatibility)
+      && supportedFastMode !== null,
   });
   if (continuation.action === "new-conversation-required") {
     throw new Error(continuation.reason);
@@ -180,6 +198,17 @@ export function resolveTurnRequest(
     interactionMode: conversation.interactionMode,
     access: conversation.accessMode,
     sessionId: canResume ? conversation.providerSessionId! : undefined,
+    ...(supportedFastMode ? { supportedFastMode } : {}),
+    ...(canResume
+      && previousContinuationIdentity
+      && (previousContinuationIdentity.performanceModeIdentity ?? null)
+        !== (route.continuationIdentity.performanceModeIdentity ?? null)
+      ? {
+          performanceModeTransition: modelSelection.providerOptions.fastMode
+            ? "to-fast" as const
+            : "to-standard" as const,
+        }
+      : {}),
     imagePaths: assembled.imagePaths,
     skills: request.skills,
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),

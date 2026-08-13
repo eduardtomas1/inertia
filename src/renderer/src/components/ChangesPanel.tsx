@@ -11,6 +11,7 @@ import clsx from "clsx";
 import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Sparkles, Square, StickyNote, Trash2, WandSparkles, X } from "lucide-react";
 import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
 import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, selectedLineFingerprint } from "@shared/diff-review";
+import { sourceLanguageForFile } from "@shared/source-language";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 import { IconButton, LoadingMark } from "./ui";
@@ -450,8 +451,9 @@ export function ChangesPanel({
             {files.filter((file) => visibleFiles.some((visible) => visible.path === file.path)).map((file) => {
               const parts = pathParts(file.path);
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
-              return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} aria-pressed={file.path === selectedPath} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
-                <span className="change-file-leading"><FileCode2 size={15} /><span className="change-file-status" title={statusLabel(file)}>{statusCode(file)}</span></span>
+              const language = sourceLanguageForFile(file.path);
+              return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} data-language-family={language.family} aria-pressed={file.path === selectedPath} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
+                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={15} /><span className="change-file-status" title={statusLabel(file)}>{statusCode(file)}</span></span>
                 <span className="change-file-copy"><span className="change-file-name">{parts.name}</span>{parts.parent && <span className="change-file-path">{parts.parent}</span>}</span>
                 <span className="change-file-stats">
                   <span>{file.staged ? "staged" : ""}{file.staged && file.unstaged ? " + " : ""}{file.unstaged ? "unstaged" : ""}</span>

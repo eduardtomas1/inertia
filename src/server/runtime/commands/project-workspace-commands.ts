@@ -2,6 +2,7 @@ import WebSocket from "ws";
 
 import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
 import type { ServerEvent } from "../../../shared/contracts";
+import { sourceLanguageForFile } from "../../../shared/source-language";
 import {
   hasNativeProviderTerminalSession,
   isProviderTerminalSessionId,
@@ -20,6 +21,7 @@ import {
   listWorkspaceEntries,
   readWorkspaceTextFile,
   searchWorkspaceEntries,
+  WorkspaceError,
   writeWorkspaceTextFile,
 } from "../../workspace";
 import type { WorkspaceRunController } from "../workspace-run-controller";
@@ -255,14 +257,30 @@ export function createProjectWorkspaceCommandHandler(
         const secureRoot = await dependencies.secureFiles.authorizeRoot(
           workspacePath,
         );
-        const file = await readWorkspaceTextFile(
+        const readFile = (path: string) => readWorkspaceTextFile(
           workspacePath,
-          command.payload.path,
+          path,
           {
             secureFiles: dependencies.secureFiles,
             secureRoot,
           },
         );
+        let file;
+        let usedFallback = false;
+        try {
+          file = await readFile(command.payload.path);
+        } catch (error) {
+          const fallbackPath = command.payload.fallbackPath;
+          const canUseFallback = fallbackPath
+            && error instanceof WorkspaceError
+            && (
+              error.code === "not-found"
+              || (process.platform === "win32" && error.code === "invalid-input")
+            );
+          if (!canUseFallback) throw error;
+          file = await readFile(fallbackPath);
+          usedFallback = true;
+        }
         const authorityRef = await dependencies.secureFileAuthorities.issue(
           socket,
           "workspace-save",
@@ -275,17 +293,18 @@ export function createProjectWorkspaceCommandHandler(
           ],
           secureRoot,
         );
-        const extension = file.path.split(".").pop()?.toLowerCase() ?? "text";
+        const language = sourceLanguageForFile(file.path, file.content);
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
           result: {
             kind: "workspace.file",
+            usedFallback,
             file: {
               path: file.path,
               content: file.content,
               truncated: false,
-              language: extension,
+              language: language.id,
               contentDigest: file.contentDigest,
               modifiedAt: file.modifiedAt,
               authorityRef,
@@ -334,17 +353,18 @@ export function createProjectWorkspaceCommandHandler(
           ],
           secureRoot,
         );
-        const extension = file.path.split(".").pop()?.toLowerCase() ?? "text";
+        const language = sourceLanguageForFile(file.path, file.content);
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
           result: {
             kind: "workspace.file",
+            usedFallback: false,
             file: {
               path: file.path,
               content: file.content,
               truncated: false,
-              language: extension,
+              language: language.id,
               contentDigest: file.contentDigest,
               modifiedAt: file.modifiedAt,
               authorityRef,

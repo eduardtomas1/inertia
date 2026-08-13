@@ -463,6 +463,63 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
   if (!continuationIdentitySchema.safeParse(input.continuationIdentity).success) {
     throw new ProviderRuntimeError("invalid_input", "The continuation identity is invalid.");
   }
+  const providerOptionKeys = Object.keys(input.modelSelection.providerOptions);
+  const fastMode = input.modelSelection.providerOptions.fastMode;
+  const expectedFastMode = input.providerId === "codex"
+    ? "priority"
+    : input.providerId === "claude"
+      ? "fast"
+      : null;
+  const nativeFastModeRoute = expectedFastMode !== null
+    && input.backendProfile.id === nativeBackendProfile(input.providerId).id
+    && input.harnessId === (input.providerId === "codex"
+      ? "codex-app-server"
+      : "claude-agent-sdk");
+  if (
+    providerOptionKeys.length > 1
+    || (providerOptionKeys.length === 1 && providerOptionKeys[0] !== "fastMode")
+    || (providerOptionKeys.length === 1 && typeof fastMode !== "string")
+    || (
+      fastMode !== undefined
+      && (
+        fastMode !== expectedFastMode
+        || !nativeFastModeRoute
+      )
+    )
+    || (
+      input.supportedFastMode !== undefined
+      && (
+        input.supportedFastMode !== expectedFastMode
+        || !nativeFastModeRoute
+      )
+    )
+    || (fastMode !== undefined && input.supportedFastMode !== expectedFastMode)
+    || (input.continuationIdentity.performanceModeIdentity ?? null)
+      !== (fastMode === undefined ? null : `fast:${fastMode}`)
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The provider-native Fast mode route is invalid.",
+    );
+  }
+  if (
+    input.performanceModeTransition !== undefined
+    && (
+      !input.sessionId
+      || !nativeFastModeRoute
+      || input.supportedFastMode !== expectedFastMode
+      || (input.performanceModeTransition === "to-fast"
+        ? fastMode === undefined
+        : input.performanceModeTransition === "to-standard"
+          ? fastMode !== undefined
+          : true)
+    )
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The response speed continuation transition is invalid.",
+    );
+  }
   const conversationId = (input.conversationId ?? input.threadId)?.trim();
   if (!conversationId || conversationId.length > 512 || conversationId.includes("\0")) {
     throw new ProviderRuntimeError("invalid_input", "A valid conversation identifier is required.");
@@ -523,12 +580,41 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       );
     }
   }
+  if (input.operation) {
+    const instruction = input.operation.instruction?.trim();
+    if (
+      input.operation.kind !== "compact"
+      || !input.sessionId
+      || input.turnId !== undefined
+      || input.performanceModeTransition !== undefined
+      || input.goalStart !== undefined
+      || input.goalContinuationExpected !== undefined
+      || (input.imagePaths?.length ?? 0) > 0
+      || (input.skills?.length ?? 0) > 0
+      || (input.operation.instruction !== undefined && (
+        !instruction
+        || instruction.length > 4_000
+        || instruction.includes("\0")
+      ))
+    ) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        "The provider compaction request is invalid.",
+      );
+    }
+  }
   for (const value of [input.runId, input.turnId, input.model, input.sessionId]) {
     if (value !== undefined && (!value.trim() || value.length > 512 || value.includes("\0"))) {
       throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");
     }
   }
-  if ((input.runId === undefined) !== (input.turnId === undefined)) {
+  const ownsTurnlessControlOperation = input.operation !== undefined
+    && input.runId !== undefined
+    && input.turnId === undefined;
+  if (
+    (input.runId === undefined) !== (input.turnId === undefined)
+    && !ownsTurnlessControlOperation
+  ) {
     throw new ProviderRuntimeError("invalid_input", "Run and turn identities must be provided together.");
   }
   const imagePaths = input.imagePaths ?? [];

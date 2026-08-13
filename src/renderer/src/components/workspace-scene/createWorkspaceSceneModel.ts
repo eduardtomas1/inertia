@@ -123,6 +123,10 @@ export interface WorkspaceSceneActions {
     context?: TurnRequestContext,
     skillIds?: readonly string[],
   ) => Promise<TranscriptMessageSendAcceptance | null>;
+  compactConversation: (instruction?: string) => Promise<{
+    message: string;
+    instructionForwarded: boolean;
+  }>;
   listSkills: (forceReload?: boolean) => Promise<void>;
   toggleSkill: (skill: AgentSkillSummary) => void;
   clearSelectedSkills: () => void;
@@ -259,9 +263,13 @@ export function createWorkspaceSceneModel({
     : null;
   const goalMutationSafetyLocked = workflow.error
     ?.includes("recovery safety mode") === true;
+  const conversationIsRunning = conversation?.status === "running"
+    || conversation?.status === "needs-input";
   const currentGoalExecution = goalMutationSafetyLocked
     ? "idle"
-    : goalExecutionStatus(projection.turns);
+    : conversationIsRunning
+      ? goalExecutionStatus(projection.turns)
+      : "idle";
   const currentGoalControlsBusy = goalControlsBusy({
     connectionStatus: connection.status,
     workflowLoading: workflow.loading,
@@ -390,7 +398,8 @@ export function createWorkspaceSceneModel({
       ? visibleDetailState
       : null;
   const canGuideParent = (trace: SubagentTrace): boolean =>
-    canFollowUpSubagentTrace(trace, projection.turns);
+    Boolean(conversationIsRunning
+      && canFollowUpSubagentTrace(trace, projection.turns));
   const setGoal = async (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -503,6 +512,7 @@ export function createWorkspaceSceneModel({
       streamingText: projection.streamingText,
       streamingReasoning: projection.streamingReasoning,
       streamingChannel: projection.streamingChannel,
+      terminalProjections: projection.terminalProjections,
       usage: projection.usage,
       skills: currentWorkflow?.skills ?? [],
       skillsCapability: currentWorkflow?.skillsCapability ?? null,
@@ -546,6 +556,7 @@ export function createWorkspaceSceneModel({
       onAddProject: () => void actions.importProject(),
       onCreateConversation: () => actions.createConversation(),
       onSendMessage: actions.sendMessage,
+      onCompactConversation: actions.compactConversation,
       onListSkills: actions.listSkills,
       onToggleSkill: actions.toggleSkill,
       onClearSelectedSkills: actions.clearSelectedSkills,
@@ -746,6 +757,7 @@ export function createWorkspaceSceneModel({
         entries: workspaceTools.workspaceEntries,
         preview: workspaceTools.filePreview,
         selectedPath: workspaceTools.selectedFile,
+        selectedLocation: workspaceTools.selectedFileLocation,
         loading: workspaceTools.filesLoading,
         previewLoading: workspaceTools.filePreviewLoading,
         error: workspaceTools.filesError,
@@ -818,7 +830,8 @@ export function createWorkspaceSceneModel({
           });
         },
         canStopSubagent: (trace) =>
-          canStopSubagentTrace(trace, projection.turns),
+          Boolean(conversationIsRunning
+            && canStopSubagentTrace(trace, projection.turns)),
         onStopSubagent: async (trace) => {
           try {
             await actions.stopSubagent(trace);

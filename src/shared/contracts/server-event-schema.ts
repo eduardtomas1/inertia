@@ -9,7 +9,7 @@ import {
   APP_SHORTCUT_KEYS,
   DEFAULT_APP_KEYBINDINGS,
 } from "../keybindings";
-import { modelSelectionSchema } from "../model-routing";
+import { continuationIdentitySchema, modelSelectionSchema } from "../model-routing";
 import {
   modelBackendDefaultSchema,
   modelBackendProfileDetailSchema,
@@ -25,9 +25,8 @@ import {
 } from "./duo";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { usageDashboardSchema } from "./usage-dashboard-schema";
-
+import { providerFastModeField } from "./provider-fast-mode-schema";
 type UnknownRecord = Record<string, unknown>;
-
 function record(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -97,10 +96,7 @@ function modelSelection(value: unknown): boolean {
 }
 
 function continuationIdentity(value: unknown): boolean {
-  return recordWithStrings(value, "harnessId", "backendProfileId")
-    && integerField(value, "backendConfigurationRevision")
-    && nullableStringField(value, "modelIdentity")
-    && nullableStringField(value, "endpointIdentity");
+  return continuationIdentitySchema.safeParse(value).success;
 }
 
 function backendProfile(value: unknown, detail = false): boolean {
@@ -240,7 +236,7 @@ function conversation(value: unknown): value is UnknownRecord {
     && modelSelection(value.modelSelection)
     && (value.continuationIdentity === null
       || continuationIdentity(value.continuationIdentity))
-    && modelRouteIdentityCoherent(value)
+    && modelRouteIdentityCoherent(value, true)
     && (value.attentionKind === null || oneOf(value, "attentionKind", ["approval", "input"]))
     && nullableStringField(value, "branch")
     && nullableStringField(value, "worktreePath")
@@ -292,7 +288,7 @@ function providerMetadataField(value: unknown): boolean {
     && booleanField(value, "refreshing");
 }
 
-function providerModel(value: unknown): boolean {
+function providerModel(value: unknown, expectedFastMode: "priority" | "fast" | null): boolean {
   return recordWithStrings(
     value,
     "id",
@@ -303,7 +299,8 @@ function providerModel(value: unknown): boolean {
     && booleanField(value, "isDefault")
     && arrayOf(value.inputModalities, (entry) => entry === "text" || entry === "image")
     && arrayOf(value.reasoningOptions, (entry) =>
-      recordWithStrings(entry, "value", "label", "description"));
+      recordWithStrings(entry, "value", "label", "description"))
+    && providerFastModeField(value.fastMode, expectedFastMode);
 }
 
 function providerRateLimit(value: unknown): boolean {
@@ -315,6 +312,9 @@ function providerRateLimit(value: unknown): boolean {
 }
 
 function providerInfo(value: unknown): boolean {
+  if (!record(value)) return false;
+  const expectedFastMode = value.id === "codex" ? "priority"
+    : value.id === "claude" ? "fast" : null;
   return recordWithStrings(
     value,
     "id",
@@ -331,7 +331,7 @@ function providerInfo(value: unknown): boolean {
     && (value.executable === undefined || nullableStringField(value, "executable"))
     && booleanField(value, "canRun")
     && nullableStringField(value, "statusMessage")
-    && arrayOf(value.models, providerModel)
+    && arrayOf(value.models, (model) => providerModel(model, expectedFastMode))
     && arrayOf(value.rateLimits, providerRateLimit)
     && uniqueRecordField(value.models as unknown[], "id")
     && uniqueRecordField(value.rateLimits as unknown[], "id")
@@ -1112,13 +1112,13 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return false;
   }
 }
-
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
     && oneOf(value, "disposition", ["new-turn", "follow-up"]),
+  "conversation.compacted": (value) => recordWithStrings(value, "conversationId", "providerId", "message") && oneOf(value, "providerId", ["codex", "claude", "cursor", "opencode"]) && booleanField(value, "instructionForwarded"),
   "backend.profile": (value) => backendProfile(value.profile, true),
   "backend.profile.probe": (value) => backendProfile(value.profile, true),
   "backend.default": (value) => value.value === null || backendDefault(value.value),
@@ -1133,7 +1133,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "external.url": (value) => recordWithStrings(value, "url", "label"),
   "git.branches": (value) => arrayOf(value.branches, gitBranch),
   "workspace.entries": (value) => workspaceEntriesPage(value),
-  "workspace.file": (value) => workspaceFile(value.file),
+  "workspace.file": (value) => workspaceFile(value.file) && booleanField(value, "usedFallback"),
   "project.actions": (value) => arrayOf(value.actions, projectAction)
     && uniqueRecordField(value.actions as unknown[], "id"),
   "agent.workflow": (value) => agentWorkflow(value.workflow),

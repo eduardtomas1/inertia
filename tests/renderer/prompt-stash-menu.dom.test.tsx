@@ -20,6 +20,7 @@ const entry: PromptStashEntry = {
     backendProfileId: "native:codex:app-server",
     modelId: "gpt-5.6",
     reasoningEffort: "xhigh",
+    fastMode: true,
   },
 };
 
@@ -136,5 +137,6 @@ describe("PromptStashMenu", () => {
     expect(
       restore.querySelector(".prompt-stash-entry-preview"),
     ).toHaveTextContent(longEntry.content);
+    expect(restore).toHaveTextContent("gpt-5.6 · xhigh · Fast");
   });
 });

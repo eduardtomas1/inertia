@@ -49,6 +49,10 @@ export interface ComposerProps {
     context?: TurnRequestContext,
     skillIds?: readonly string[],
   ) => Promise<void>;
+  onCompact?: (instruction?: string) => Promise<{
+    message: string;
+    instructionForwarded: boolean;
+  }>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onToggleSkill: (skill: AgentSkillSummary) => void;
   onClearSelectedSkills: () => void;
@@ -98,6 +102,7 @@ export type PromptPresetCommandRunner = (
 
 export type ComposerMenu =
   | "reasoning"
+  | "speed"
   | "mode"
   | "access"
   | "action"
@@ -105,7 +110,7 @@ export type ComposerMenu =
   | "presets"
   | "stash"
   | "more";
-export type MoreSection = "actions" | "reasoning" | "mode" | "access";
+export type MoreSection = "actions" | "reasoning" | "speed" | "mode" | "access";
 
 export interface PendingModelRoute {
   selection: ModelSelection;

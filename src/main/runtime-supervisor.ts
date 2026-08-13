@@ -771,6 +771,7 @@ export class RuntimeSupervisor {
 
   private handleExit(record: RuntimeProcessRecord, code: number): void {
     if (this.current !== record) return;
+    record.acceptingReady = false;
     if (this.testRecycle.owns(record) && (!record.cleanupConfirmed || !record.ready)) {
       this.rejectTestRecycle(record, "The recycled runtime exited before clean readiness was confirmed.", !record.cleanupConfirmed);
     }

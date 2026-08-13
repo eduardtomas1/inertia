@@ -1531,9 +1531,17 @@ describe("RuntimeSupervisor", () => {
       });
       return { result, stopped, ready: Promise.resolve(false) };
     });
+    const secureFileBroker: RuntimeSecureFileBroker = {
+      perform: vi.fn<RuntimeSecureFileBroker["perform"]>(async () => ({
+        ok: false,
+        code: "unavailable",
+        message: "unused",
+      })),
+    };
     const { children, supervisor } = createHarness({
       conversationAttachmentStoreRunner: runner as never,
       conversationAttachmentStoreAuthority,
+      secureFileBroker,
     });
     supervisor.start();
     children[0].spawn();
@@ -1553,6 +1561,28 @@ describe("RuntimeSupervisor", () => {
     expect(runner).toHaveBeenCalledOnce();
 
     children[0].exit(9);
+    const lateSecureFileRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.secure-file-request",
+      requestId: lateSecureFileRequestId,
+      operation: "read",
+      root: workspaceDirectory,
+      rootIdentity: { dev: "1", ino: "2" },
+      parentIdentities: [],
+      targetIdentity: { dev: "1", ino: "3" },
+      path: "README.md",
+      maxBytes: 1024,
+    });
+    expect(secureFileBroker.perform).not.toHaveBeenCalled();
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.secure-file-result",
+      requestId: lateSecureFileRequestId,
+      result: {
+        ok: false,
+        code: "unavailable",
+        message: "The secure file service is unavailable.",
+      },
+    });
     await vi.advanceTimersByTimeAsync(runtimeRestartDelayMs(0));
     expect(observedSignal?.aborted).toBe(true);
     expect(children).toHaveLength(1);

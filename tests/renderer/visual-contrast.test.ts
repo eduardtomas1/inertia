@@ -148,6 +148,31 @@ describe("visual contrast system", () => {
   );
 
   it.each(["light", "dark"] as const)(
+    "keeps the restrained %s file-language accents distinguishable",
+    (theme) => {
+      const tokens = themeTokens(theme);
+      for (const foregroundName of [
+        "language-amber",
+        "language-blue",
+        "language-cyan",
+        "language-green",
+        "language-neutral",
+        "language-red",
+        "language-violet",
+      ]) {
+        const foreground = tokens.get(foregroundName);
+        expect(foreground, `missing --${foregroundName}`).toBeDefined();
+        for (const backgroundName of ["surface", "surface-strong", "surface-muted"]) {
+          expect(
+            contrast(foreground!, tokens.get(backgroundName)!),
+            `${theme} --${foregroundName} on --${backgroundName}`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+      }
+    },
+  );
+
+  it.each(["light", "dark"] as const)(
     "keeps the %s working-text wave readable and visibly distinct",
     (theme) => {
       const tokens = themeTokens(theme);

@@ -11,6 +11,7 @@ import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import type { composerRouteReadiness } from "../../utils/composerReadiness";
 import { promptContextDetail } from "../../utils/requestContext";
 import { shouldSubmitComposerKey } from "../../utils/composerKeyboard";
+import { fileLanguageFromPath } from "../../utils/fileLanguage";
 import { ComposerAttachmentList } from "../ComposerAttachmentList";
 import {
   RouteRepairIcon,
@@ -291,26 +292,33 @@ export function ComposerInputZone({
           aria-label="Project files"
         >
           <div className="popover-title">Reference a file</div>
-          {mentionResults.slice(0, 8).map((entry) => (
-            <button
-              type="button"
-              role="option"
-              aria-selected="false"
-              key={entry.path}
-              onClick={() => {
-                onMessageChange(message.replace(
-                  /@[^\s@]*$/u,
-                  `@${entry.path}${entry.kind === "directory" ? "/" : " "}`,
-                ));
-                if (entry.kind === "file") {
-                  onAddFileReference(entry.path);
-                }
-              }}
-            >
-              <span>{entry.path}</span>
-              <small>{entry.kind}</small>
-            </button>
-          ))}
+          {mentionResults.slice(0, 8).map((entry) => {
+            const language = entry.kind === "file"
+              ? fileLanguageFromPath(entry.path)
+              : null;
+            return (
+              <button
+                type="button"
+                role="option"
+                aria-selected="false"
+                data-language={language?.id}
+                data-language-accent={language?.accent}
+                key={entry.path}
+                onClick={() => {
+                  onMessageChange(message.replace(
+                    /@[^\s@]*$/u,
+                    `@${entry.path}${entry.kind === "directory" ? "/" : " "}`,
+                  ));
+                  if (entry.kind === "file") {
+                    onAddFileReference(entry.path);
+                  }
+                }}
+              >
+                <span>{entry.path}</span>
+                <small>{language?.recognized ? language.label : entry.kind}</small>
+              </button>
+            );
+          })}
         </div>
       )}
       {slashMatch && (

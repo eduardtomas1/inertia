@@ -1,0 +1,80 @@
+.file-preview-code {
+  display: grid;
+  align-content: start;
+  grid-template-columns: max-content minmax(max-content, 1fr);
+}
+
+.file-preview-line-numbers {
+  position: sticky;
+  z-index: 2;
+  left: 0;
+  display: grid;
+  grid-column: 1;
+  color: var(--text-muted);
+  background: var(--surface);
+  text-align: right;
+  user-select: none;
+}
+
+.file-preview-line-numbers > span {
+  min-width: 34px;
+  padding-right: 8px;
+}
+
+.file-preview-line-numbers > .is-source-target {
+  color: var(--accent-strong);
+  background: var(--file-source-surface);
+  font-weight: 700;
+}
+
+.file-preview-code > code {
+  display: block;
+  min-width: max-content;
+  min-height: 100%;
+  grid-column: 2;
+  padding: 0 10px;
+  line-height: inherit;
+  white-space: pre;
+}
+
+.file-preview-code > code.has-source-location {
+  background: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent var(--file-source-start),
+    var(--file-source-surface) var(--file-source-start),
+    var(--file-source-surface) var(--file-source-end),
+    transparent var(--file-source-end)
+  );
+  box-shadow: inset 2px 0 var(--file-language-accent, var(--accent));
+}
+
+.file-entry[data-language-accent] > svg:not(.file-tree-chevron) {
+  color: var(--file-language-accent);
+}
+
+.file-language {
+  flex: 0 0 auto;
+  padding: 3px 5px;
+  border: 1px solid color-mix(in srgb, var(--file-language-accent) 34%, var(--border));
+  border-radius: 5px;
+  color: var(--file-language-accent) !important;
+  background: color-mix(in srgb, var(--file-language-accent) 7%, var(--surface-muted));
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+@media (forced-colors: active) {
+  .file-preview-line-numbers > .is-source-target {
+    border-left: 2px solid Highlight;
+    color: HighlightText;
+    background: Highlight;
+    forced-color-adjust: none;
+  }
+
+  .file-preview-code > code.has-source-location {
+    background: none;
+    box-shadow: inset 2px 0 Highlight;
+  }
+}

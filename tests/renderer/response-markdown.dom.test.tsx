@@ -4,6 +4,76 @@ import { describe, expect, it, vi } from "vitest";
 import { ResponseMarkdown } from "../../src/renderer/src/components/ResponseMarkdown";
 
 describe("ResponseMarkdown project files", () => {
+  it("keeps a project source range on the real Files navigation callback", () => {
+    const onOpenProjectFile = vi.fn();
+    render(
+      <ResponseMarkdown
+        content="Open [the Java service](src/main/java/Service.java#L12-L15)."
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+        onOpenProjectFile={onOpenProjectFile}
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: "the Java service" });
+    expect(link).toHaveAttribute("data-language", "java");
+    expect(link).toHaveAttribute("data-language-accent", "amber");
+    fireEvent.click(link);
+    expect(onOpenProjectFile).toHaveBeenCalledWith(
+      "src/main/java/Service.java#L12-L15",
+    );
+  });
+
+  it("keeps a code header source range while displaying a relative file label", () => {
+    const onOpenProjectFile = vi.fn();
+    render(
+      <ResponseMarkdown
+        content={[
+          "```java file=/workspace/src/main/java/Service.java#L12-L15",
+          "public final class Service {}",
+          "```",
+        ].join("\n")}
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+        onOpenProjectFile={onOpenProjectFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "src/main/java/Service.java",
+    }));
+    expect(onOpenProjectFile).toHaveBeenCalledWith(
+      "src/main/java/Service.java#L12-L15",
+    );
+    expect(document.body).not.toHaveTextContent("/workspace");
+  });
+
+  it("opens extensionless locations and encoded delimiters as exact files", () => {
+    const onOpenProjectFile = vi.fn();
+    render(
+      <ResponseMarkdown
+        content={[
+          "Open [the image](Dockerfile:42).",
+          "Open [the literal hash](src/Service%23L12).",
+          "Open [the literal colon](src/Service.java%3A42).",
+        ].join("\n\n")}
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+        onOpenProjectFile={onOpenProjectFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "the image" }));
+    fireEvent.click(screen.getByRole("link", { name: "the literal hash" }));
+    fireEvent.click(screen.getByRole("link", { name: "the literal colon" }));
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(1, "Dockerfile:42");
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(2, "src/Service#L12");
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(3, "src/Service.java:42");
+  });
+
   it("routes prose links and code-file metadata into Inertia's file viewer", () => {
     const onOpenProjectFile = vi.fn();
     const openProjectPath = vi.fn(async () => undefined);

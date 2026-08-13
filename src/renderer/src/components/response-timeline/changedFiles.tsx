@@ -11,6 +11,7 @@ import {
   shouldShowTurnGitArtifactSummary,
   type TurnGitArtifactSummary,
 } from "../../utils/responseTimeline";
+import { fileLanguageFromPath } from "../../utils/fileLanguage";
 import { useAnchoredDetailsToggle } from "./activity";
 import type { ResponseTimelineProps } from "./types";
 
@@ -103,28 +104,37 @@ export function ChangedFilesSummary({
           </p>
         )}
         <div className="turn-changed-files-list" role="list">
-          {artifact.files.slice(0, 12).map((file) => (
-            <span key={file.path} title={file.path} role="listitem">
-              <button
-                type="button"
-                disabled={!patchAvailable}
-                title={patchAvailable ? `Open this turn's diff for ${file.path}` : "The stored patch is unavailable"}
-                onClick={() => props.onOpenTurnDiff(artifact.turnId, file.path)}
+          {artifact.files.slice(0, 12).map((file) => {
+            const language = fileLanguageFromPath(file.path);
+            return (
+              <span
+                key={file.path}
+                title={file.path}
+                role="listitem"
+                data-language={language.id}
+                data-language-accent={language.accent}
               >
-                <FileCode2 size={13} aria-hidden="true" />
-                <code>{file.path}</code>
-                <small>{file.status} · +{file.insertions} −{file.deletions}</small>
-              </button>
-              <button
-                type="button"
-                title={`Open ${file.path}`}
-                aria-label={`Open ${file.path}`}
-                onClick={() => props.onOpenTurnFile(file.path)}
-              >
-                <ExternalLink size={12} aria-hidden="true" />
-              </button>
-            </span>
-          ))}
+                <button
+                  type="button"
+                  disabled={!patchAvailable}
+                  title={patchAvailable ? `Open this turn's diff for ${file.path}` : "The stored patch is unavailable"}
+                  onClick={() => props.onOpenTurnDiff(artifact.turnId, file.path)}
+                >
+                  <FileCode2 size={13} aria-hidden="true" />
+                  <code>{file.path}</code>
+                  <small>{file.status} · +{file.insertions} −{file.deletions}</small>
+                </button>
+                <button
+                  type="button"
+                  title={`Open ${file.path}`}
+                  aria-label={`Open ${file.path}`}
+                  onClick={() => props.onOpenTurnFile(file.path)}
+                >
+                  <ExternalLink size={12} aria-hidden="true" />
+                </button>
+              </span>
+            );
+          })}
         </div>
         {artifact.files.length > 12 && <p className="turn-changed-files-overflow">And {artifact.files.length - 12} more files.</p>}
         <div className="turn-changed-files-actions">

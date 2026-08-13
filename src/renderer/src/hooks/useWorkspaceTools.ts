@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type {
   Conversation,
   ConversationDetail,
@@ -37,20 +37,30 @@ export async function openWorkspaceEntry(
     inspectDirectory: (path: string) => Promise<unknown>;
     openDirectory: (path: string) => Promise<unknown>;
     openFile: (path: string) => void;
+    isCurrent?: () => boolean;
   },
-): Promise<"directory" | "file"> {
+): Promise<"directory" | "file" | "stale"> {
   try {
     await actions.inspectDirectory(path);
   } catch {
+    if (actions.isCurrent && !actions.isCurrent()) return "stale";
     actions.openFile(path);
     return "file";
   }
+  if (actions.isCurrent && !actions.isCurrent()) return "stale";
   await actions.openDirectory(path);
   return "directory";
 }
 
 export function useWorkspaceTools(options: WorkspaceToolsOptions) {
   const enabled = options.enabled ?? true;
+  const workspaceAuthority = [
+    enabled ? "enabled" : "disabled",
+    options.project?.id ?? "",
+    options.conversation?.id ?? "",
+  ].join("\0");
+  const workspaceAuthorityRef = useRef(workspaceAuthority);
+  workspaceAuthorityRef.current = workspaceAuthority;
   const git = useWorkspaceGit({
     project: options.project,
     conversation: options.conversation,
@@ -92,6 +102,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     const projectId = options.project?.id;
     if (!projectId) return;
     void openWorkspaceEntry(path, {
+      isCurrent: () => workspaceAuthorityRef.current === workspaceAuthority,
       inspectDirectory: async (directory) =>
         await requestWorkspaceEntries({ directory }),
       openDirectory: async (directory) =>
@@ -114,6 +125,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     requestWorkspaceEntries,
     selectWorkspaceFile,
     setActiveTool,
+    workspaceAuthority,
   ]);
   const artifacts = useTurnArtifacts({
     project: options.project,

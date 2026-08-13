@@ -745,6 +745,7 @@ export function createWorkspaceSceneModel({
         entries: workspaceTools.workspaceEntries,
         preview: workspaceTools.filePreview,
         selectedPath: workspaceTools.selectedFile,
+        selectedLocation: workspaceTools.selectedFileLocation,
         loading: workspaceTools.filesLoading,
         previewLoading: workspaceTools.filePreviewLoading,
         error: workspaceTools.filesError,

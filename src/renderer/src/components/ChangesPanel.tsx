@@ -13,6 +13,7 @@ import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, Dif
 import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, selectedLineFingerprint } from "@shared/diff-review";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
+import { fileLanguageFromPath } from "../utils/fileLanguage";
 import { IconButton, LoadingMark } from "./ui";
 import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
 
@@ -450,7 +451,8 @@ export function ChangesPanel({
             {files.filter((file) => visibleFiles.some((visible) => visible.path === file.path)).map((file) => {
               const parts = pathParts(file.path);
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
-              return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} aria-pressed={file.path === selectedPath} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
+              const language = fileLanguageFromPath(file.path);
+              return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} aria-pressed={file.path === selectedPath} data-language={language.id} data-language-accent={language.accent} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
                 <span className="change-file-leading"><FileCode2 size={15} /><span className="change-file-status" title={statusLabel(file)}>{statusCode(file)}</span></span>
                 <span className="change-file-copy"><span className="change-file-name">{parts.name}</span>{parts.parent && <span className="change-file-path">{parts.parent}</span>}</span>
                 <span className="change-file-stats">

@@ -450,6 +450,64 @@ describe("workspace pane authority", () => {
     expect(openFile).toHaveBeenCalledWith("README");
   });
 
+  it("does not finish opening an entry after its workspace owner changes", async () => {
+    let rejectInspection: ((reason?: unknown) => void) | undefined;
+    let current = true;
+    const openDirectory = vi.fn(async () => undefined);
+    const openFile = vi.fn();
+    const pending = openWorkspaceEntry("src/secret.ts:12", {
+      inspectDirectory: () => new Promise((_resolve, reject) => {
+        rejectInspection = reject;
+      }),
+      openDirectory,
+      openFile,
+      isCurrent: () => current,
+    });
+
+    current = false;
+    rejectInspection?.(new Error("not a directory"));
+
+    await expect(pending).resolves.toBe("stale");
+    expect(openDirectory).not.toHaveBeenCalled();
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("ignores a file-selection callback captured by an old owner", async () => {
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "project.actions") {
+        return Promise.resolve(result({
+          kind: "project.actions",
+          actions: [],
+        }));
+      }
+      return Promise.reject(new Error("An old owner tried to read a file."));
+    });
+    const hook = renderHook((owner: {
+      project: Project;
+      conversation: Conversation;
+    }) => useWorkspaceFiles({
+      ...owner,
+      enabled: true,
+      loadOnMount: false,
+      online: true,
+      request,
+      setActionError: vi.fn(),
+    }), {
+      initialProps: { project: alpha, conversation: alphaChat },
+    });
+    const staleSelection = hook.result.current.selectWorkspaceFile;
+
+    hook.rerender({ project: beta, conversation: betaChat });
+    act(() => staleSelection("src/private.ts:12"));
+    await act(async () => await Promise.resolve());
+
+    expect(request.mock.calls.some(
+      ([command]) => command.type === "workspace.file.read",
+    )).toBe(false);
+    expect(hook.result.current.selectedFile).toBeNull();
+    expect(hook.result.current.filePreview).toBeNull();
+  });
+
   it("opens literal colon filenames before retrying a Codex source location", async () => {
     const requests: string[] = [];
     let literalExists = true;
@@ -477,7 +535,10 @@ describe("workspace pane authority", () => {
         kind: "workspace.file",
         file: {
           path,
-          content: "export const value = 1;\n",
+          content: Array.from(
+            { length: 50 },
+            (_, index) => `line ${index + 1}`,
+          ).join("\n"),
           truncated: false,
           language: "ts",
           contentDigest: "a".repeat(64),
@@ -502,6 +563,7 @@ describe("workspace pane authority", () => {
         .toBe("src/example.ts:42:7");
     });
     expect(requests).toEqual(["src/example.ts:42:7"]);
+    expect(hook.result.current.selectedFileLocation).toBeNull();
 
     literalExists = false;
     requests.length = 0;
@@ -515,6 +577,11 @@ describe("workspace pane authority", () => {
       "src/example.ts",
     ]);
     expect(hook.result.current.selectedFile).toBe("src/example.ts");
+    expect(hook.result.current.selectedFileLocation).toEqual({
+      startLine: 42,
+      endLine: 42,
+      startColumn: 7,
+    });
   });
 
   it("does not let delayed project actions replace the new owner's actions", async () => {

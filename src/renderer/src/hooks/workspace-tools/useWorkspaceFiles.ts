@@ -12,7 +12,10 @@ import {
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
 import {
+  parseWorkspaceFileReference,
+  validatedWorkspaceSourceLocation,
   workspaceFileReferenceFallback,
+  type WorkspaceSourceLocation,
 } from "../../utils/workspaceFileReference";
 import {
   workspaceFileWriteCommand,
@@ -50,6 +53,8 @@ export function useWorkspaceFiles({
   const [filePreview, setFilePreview] =
     useState<WorkspaceFilePreview | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [selectedFileLocation, setSelectedFileLocation] =
+    useState<WorkspaceSourceLocation | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
   const [filePreviewLoading, setFilePreviewLoading] = useState(false);
@@ -59,6 +64,13 @@ export function useWorkspaceFiles({
   const filePreviewRequestGenerationRef = useRef(0);
   const actionsRequestGenerationRef = useRef(0);
   const automaticallyLoadedAuthorityRef = useRef<string | null>(null);
+  const authority = [
+    enabled ? "enabled" : "disabled",
+    project?.id ?? "",
+    conversation?.id ?? "",
+  ].join("\0");
+  const authorityRef = useRef(authority);
+  authorityRef.current = authority;
   const mentions = useWorkspaceMentions({
     enabled,
     project,
@@ -143,6 +155,7 @@ export function useWorkspaceFiles({
     setWorkspaceEntries([]);
     setFilePreview(null);
     setSelectedFile(null);
+    setSelectedFileLocation(null);
     setProjectActions([]);
     setFilesError(null);
     setFilePreviewError(null);
@@ -188,9 +201,10 @@ export function useWorkspaceFiles({
   ]);
 
   const selectWorkspaceFile = useCallback((path: string) => {
-    if (!project) return;
+    if (!project || authorityRef.current !== authority) return;
     const generation = ++filePreviewRequestGenerationRef.current;
     setSelectedFile(path);
+    setSelectedFileLocation(null);
     setFilePreview(null);
     setFilePreviewError(null);
     setFilePreviewLoading(true);
@@ -210,39 +224,57 @@ export function useWorkspaceFiles({
       }
       return event.result.file;
     };
-    const readReference = async (): Promise<WorkspaceFilePreview> => {
+    const readReference = async (): Promise<{
+      file: WorkspaceFilePreview;
+      location: WorkspaceSourceLocation | null;
+    }> => {
       try {
-        return await readFile(path);
+        return { file: await readFile(path), location: null };
       } catch (literalError) {
         const fallback = workspaceFileReferenceFallback(path);
         if (!fallback) throw literalError;
         try {
-          return await readFile(fallback);
+          const file = await readFile(fallback);
+          return {
+            file,
+            location: validatedWorkspaceSourceLocation(
+              parseWorkspaceFileReference(path).location,
+              file.content,
+            ),
+          };
         } catch {
           throw literalError;
         }
       }
     };
-    void readReference().then((file) => {
+    void readReference().then(({ file, location }) => {
       if (
         filePreviewRequestGenerationRef.current === generation
+        && authorityRef.current === authority
       ) {
         setSelectedFile(file.path);
+        setSelectedFileLocation(location);
         setFilePreview(file);
       }
     }).catch((error) => {
-      if (filePreviewRequestGenerationRef.current !== generation) return;
+      if (
+        filePreviewRequestGenerationRef.current !== generation
+        || authorityRef.current !== authority
+      ) return;
       const message = error instanceof Error
         ? error.message
         : "The file could not be opened.";
       setFilePreviewError(message);
       setActionError(message);
     }).finally(() => {
-      if (filePreviewRequestGenerationRef.current === generation) {
+      if (
+        filePreviewRequestGenerationRef.current === generation
+        && authorityRef.current === authority
+      ) {
         setFilePreviewLoading(false);
       }
     });
-  }, [conversation?.id, project, request, setActionError]);
+  }, [authority, conversation?.id, project, request, setActionError]);
 
   const saveWorkspaceFile = useCallback(async (
     path: string,
@@ -276,14 +308,17 @@ export function useWorkspaceFiles({
     if (event.result.kind !== "workspace.file") {
       throw new Error("The local service returned an unexpected file response.");
     }
+    const savedFile = event.result.file;
     if (
       filePreviewRequestGenerationRef.current === generation
       && selectedFile === path
     ) {
-      setFilePreview(event.result.file);
+      setFilePreview(savedFile);
+      setSelectedFileLocation((current) =>
+        validatedWorkspaceSourceLocation(current, savedFile.content));
       setFilePreviewError(null);
     }
-    return event.result.file;
+    return savedFile;
   }, [conversation?.id, filePreview, project, request, selectedFile]);
 
   const canSaveWorkspaceFile = useCallback((
@@ -314,6 +349,7 @@ export function useWorkspaceFiles({
     entriesTruncated,
     filePreview,
     selectedFile,
+    selectedFileLocation,
     filesLoading,
     filesError,
     filePreviewLoading,

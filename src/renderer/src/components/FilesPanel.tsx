@@ -23,6 +23,8 @@ import type {
   WorkspaceEntry,
   WorkspaceFilePreview,
 } from "@shared/contracts";
+import { fileLanguageFromPath } from "../utils/fileLanguage";
+import type { WorkspaceSourceLocation } from "../utils/workspaceFileReference";
 import {
   flattenWorkspaceTree,
   isSafeWorkspaceEntryPath,
@@ -34,6 +36,8 @@ import {
 } from "../utils/workspaceTree";
 import { IconButton, LoadingMark } from "./ui";
 import { FileEditorDialog } from "./FileEditorDialog";
+import { HighlightedCode } from "./HighlightedCode";
+import "./FilesPanel.language.css";
 
 export interface WorkspaceEntriesPage {
   directory: string;
@@ -45,6 +49,7 @@ export type FilesPanelProps = {
   entries: WorkspaceEntry[];
   preview: WorkspaceFilePreview | null;
   selectedPath: string | null;
+  selectedLocation?: WorkspaceSourceLocation | null;
   loading?: boolean;
   previewLoading?: boolean;
   error?: string | null;
@@ -116,6 +121,7 @@ export function FilesPanel({
   entries,
   preview,
   selectedPath,
+  selectedLocation = null,
   loading = false,
   previewLoading = false,
   error = null,
@@ -145,6 +151,7 @@ export function FilesPanel({
     useState<WorkspaceFilePreview | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const previewCodeRef = useRef<HTMLPreElement>(null);
   const searchGeneration = useRef(0);
   const mounted = useRef(true);
   const previewEditable = preview !== null
@@ -154,6 +161,50 @@ export function FilesPanel({
       preview.content,
       preview.contentDigest,
     ) === true;
+  const previewLanguage = preview
+    ? fileLanguageFromPath(preview.path)
+    : null;
+
+  useEffect(() => {
+    if (!preview || !selectedLocation) return;
+    const code = previewCodeRef.current;
+    if (!code) return;
+    const centerSourceLocation = (): void => {
+      const lineHeight = Number.parseFloat(getComputedStyle(code).lineHeight);
+      if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
+      const rangeHeight = (
+        selectedLocation.endLine - selectedLocation.startLine + 1
+      ) * lineHeight;
+      code.scrollTop = Math.max(
+        0,
+        (selectedLocation.startLine - 1) * lineHeight
+          - (code.clientHeight - rangeHeight) / 2,
+      );
+    };
+    const frame = window.requestAnimationFrame(() => {
+      code.focus({ preventScroll: true });
+      centerSourceLocation();
+    });
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(centerSourceLocation);
+    const stopRecentering = (): void => observer?.disconnect();
+    observer?.observe(code);
+    code.addEventListener("keydown", stopRecentering, { once: true });
+    code.addEventListener("pointerdown", stopRecentering, { once: true });
+    code.addEventListener("touchstart", stopRecentering, { once: true });
+    code.addEventListener("wheel", stopRecentering, { once: true });
+    const observerTimeout = window.setTimeout(stopRecentering, 1_000);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(observerTimeout);
+      stopRecentering();
+      code.removeEventListener("keydown", stopRecentering);
+      code.removeEventListener("pointerdown", stopRecentering);
+      code.removeEventListener("touchstart", stopRecentering);
+      code.removeEventListener("wheel", stopRecentering);
+    };
+  }, [preview, selectedLocation]);
 
   useEffect(() => {
     mounted.current = true;
@@ -450,6 +501,9 @@ export function FilesPanel({
           ) : rows.map((row) => {
             const { entry } = row;
             const name = workspacePathName(entry.path);
+            const language = entry.kind === "file"
+              ? fileLanguageFromPath(entry.path)
+              : null;
             const parent = searchActive ? parentLabel(entry.path) : "";
             const directoryPage = entry.kind === "directory"
               ? directoryPages.get(entry.path)
@@ -479,6 +533,8 @@ export function FilesPanel({
                   aria-expanded={entry.kind === "directory" && !searchActive ? row.expanded : undefined}
                   aria-selected={entry.kind === "file" && selectedPath === entry.path}
                   aria-current={entry.kind === "file" && selectedPath === entry.path ? "true" : undefined}
+                  data-language={language?.id}
+                  data-language-accent={language?.accent}
                   onClick={() => activateRow(row)}
                   onKeyDown={(event) => onTreeKeyDown(event, row)}
                   ref={(node) => {
@@ -562,7 +618,13 @@ export function FilesPanel({
                   <strong>{workspacePathName(preview.path)}</strong>
                   <span>{preview.path}</span>
                 </div>
-                <span className="file-language">{preview.language || "text"}</span>
+                <span
+                  className="file-language"
+                  data-language={previewLanguage?.id}
+                  data-language-accent={previewLanguage?.accent}
+                >
+                  {previewLanguage?.label ?? "Text"}
+                </span>
                 {onSaveFile && (
                   <IconButton
                     label={previewEditable
@@ -583,16 +645,49 @@ export function FilesPanel({
                   </IconButton>
                 )}
               </header>
-              <pre className="file-preview-code" tabIndex={0} aria-label={`Contents of ${preview.path}`}>
-                <code>
-                  {preview.content.split("\n").map((line, index) => (
-                    <span className="file-preview-line" key={index}>
-                      <span className="file-preview-line-number" aria-hidden="true">{index + 1}</span>
-                      <span>{line || " "}</span>
-                    </span>
-                  ))}
-                </code>
+              <pre
+                ref={previewCodeRef}
+                className="file-preview-code"
+                tabIndex={0}
+                aria-label={`Contents of ${preview.path}${selectedLocation ? `, ${selectedLocation.startLine === selectedLocation.endLine ? `line ${selectedLocation.startLine}` : `lines ${selectedLocation.startLine} to ${selectedLocation.endLine}`}` : ""}`}
+                data-source-start-line={selectedLocation?.startLine}
+                data-source-end-line={selectedLocation?.endLine}
+                style={selectedLocation ? {
+                  "--file-source-start": `${(selectedLocation.startLine - 1) * 1.55}em`,
+                  "--file-source-end": `${selectedLocation.endLine * 1.55}em`,
+                } as React.CSSProperties : undefined}
+              >
+                <span className="file-preview-line-numbers" aria-hidden="true">
+                  {preview.content.split("\n").map((_, index) => {
+                    const line = index + 1;
+                    const targeted = selectedLocation
+                      && line >= selectedLocation.startLine
+                      && line <= selectedLocation.endLine;
+                    return (
+                      <span
+                        className={targeted ? "is-source-target" : undefined}
+                        data-file-line-number={line}
+                        key={line}
+                      >
+                        {line}
+                      </span>
+                    );
+                  })}
+                </span>
+                <HighlightedCode
+                  className={selectedLocation ? "has-source-location" : undefined}
+                  code={preview.content}
+                  language={previewLanguage?.highlightLanguage ?? ""}
+                  enabled
+                />
               </pre>
+              {selectedLocation && (
+                <p className="visually-hidden" role="status" aria-live="polite">
+                  Opened {preview.path} at {selectedLocation.startLine === selectedLocation.endLine
+                    ? `line ${selectedLocation.startLine}`
+                    : `lines ${selectedLocation.startLine} to ${selectedLocation.endLine}`}.
+                </p>
+              )}
               {preview.truncated && (
                 <p className="panel-notice file-preview-truncated">
                   This preview shows only the beginning of the file.

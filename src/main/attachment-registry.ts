@@ -83,8 +83,6 @@ export interface AttachmentRegistryLimits {
   readonly maxBytes?: number;
   readonly reservedRecords?: number;
   readonly reservedBytes?: number;
-  /** Test-only bound for deterministic handoff expiry coverage. */
-  readonly handoffTimeoutMs?: number;
 }
 
 export interface AttachmentStorageReservation {
@@ -375,14 +373,6 @@ function boundedLimit(value: number | undefined, maximum: number): number {
     : maximum;
 }
 
-function boundedHandoffTimeout(value: number | undefined): number {
-  return process.env.NODE_ENV === "test"
-    && typeof value === "number"
-    && Number.isFinite(value)
-    ? Math.max(1, Math.min(Math.trunc(value), ATTACHMENT_HANDOFF_TIMEOUT_MS))
-    : ATTACHMENT_HANDOFF_TIMEOUT_MS;
-}
-
 function errorCode(error: unknown): string | null {
   return typeof error === "object"
     && error !== null
@@ -439,7 +429,6 @@ export class AttachmentRegistry {
   private readonly maxBytes: number;
   private readonly reservedRecords: number;
   private readonly reservedBytes: number;
-  private readonly handoffTimeoutMs: number;
   private importTail: Promise<void> = Promise.resolve();
   private disposed = false;
   private disposal: Promise<void> | null = null;
@@ -467,7 +456,6 @@ export class AttachmentRegistry {
       0,
       Math.min(Math.trunc(limits.reservedBytes ?? 0), this.maxBytes),
     );
-    this.handoffTimeoutMs = boundedHandoffTimeout(limits.handoffTimeoutMs);
   }
 
   usage(): AttachmentStorageReservation {
@@ -483,6 +471,7 @@ export class AttachmentRegistry {
   async prepareHandoff(
     handoffId: string,
     attachmentIds: readonly string[],
+    runtimeOwnsAttachment: (attachmentId: string) => boolean,
   ): Promise<void> {
     if (
       this.disposed
@@ -498,19 +487,40 @@ export class AttachmentRegistry {
     if (this.disposed || this.handoffs.has(handoffId)) {
       throw new Error("Attachment handoff is unavailable.");
     }
+    // This check and the supersession below intentionally remain synchronous
+    // after import serialization. Runtime claims are recorded synchronously in
+    // the main-process coordinator, so the event loop orders an old claim
+    // either before this check (and rejects the retry) or after supersession
+    // (and the old token can no longer resolve).
     for (const id of attachmentIds) {
       if (
         !this.records.has(id)
         || this.revokedAttachmentIds.has(id)
         || this.releases.has(id)
-        || (this.attachmentHandoffs.get(id)?.size ?? 0) > 0
+        || runtimeOwnsAttachment(id)
       ) {
         throw new Error("Attachment handoff is unavailable.");
       }
     }
+    const supersededHandoffIds = new Set(attachmentIds.flatMap((id) =>
+      [...this.attachmentHandoffs.get(id) ?? []]));
+    for (const oldHandoffId of supersededHandoffIds) {
+      const oldHandoff = this.handoffs.get(oldHandoffId);
+      if ([...(oldHandoff?.attachmentIds ?? [])].some(runtimeOwnsAttachment)) {
+        throw new Error("Attachment handoff is unavailable.");
+      }
+    }
+    // A retry after ambiguous transport delivery is the renderer's explicit
+    // reconciliation signal. Once no part of an intersecting old handoff is
+    // runtime-owned, invalidate its entire token before installing the new
+    // one; a late old resolve will then fail closed.
+    this.retireAttachmentHandoffs(attachmentIds);
     const handoff: PendingAttachmentHandoff = {
       attachmentIds: new Set(attachmentIds),
-      timer: setTimeout(() => this.finishHandoff(handoffId), this.handoffTimeoutMs),
+      timer: setTimeout(
+        () => this.finishHandoff(handoffId),
+        ATTACHMENT_HANDOFF_TIMEOUT_MS,
+      ),
     };
     handoff.timer.unref();
     this.handoffs.set(handoffId, handoff);
@@ -817,6 +827,23 @@ export class AttachmentRegistry {
     const handoffs = this.attachmentHandoffs.get(attachmentId);
     handoffs?.delete(handoffId);
     if (handoffs?.size === 0) this.attachmentHandoffs.delete(attachmentId);
+  }
+
+  private retireAttachmentHandoffs(attachmentIds: readonly string[]): void {
+    const handoffIds = new Set(attachmentIds.flatMap((attachmentId) =>
+      [...this.attachmentHandoffs.get(attachmentId) ?? []]));
+    for (const handoffId of handoffIds) {
+      const handoff = this.handoffs.get(handoffId);
+      if (!handoff) continue;
+      this.handoffs.delete(handoffId);
+      clearTimeout(handoff.timer);
+      for (const attachmentId of handoff.attachmentIds) {
+        this.detachHandoffAttachment(handoffId, attachmentId);
+        if (!this.attachmentHandoffs.has(attachmentId)) {
+          this.releases.get(attachmentId)?.begin();
+        }
+      }
+    }
   }
 
   private dropAttachmentHandoffs(attachmentId: string): void {

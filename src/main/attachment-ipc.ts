@@ -29,6 +29,8 @@ export function registerAttachmentLifecycleIpc(
     await options.registry().prepareHandoff(
       request.requestId,
       request.attachmentIds,
+      (attachmentId) =>
+        options.supervisor()?.ownsAttachment(attachmentId) === true,
     );
   });
 

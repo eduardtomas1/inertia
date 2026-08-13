@@ -16,5 +16,9 @@ export async function releaseRendererAttachment(
   // A handoff can consume and cancel the registry-side deletion after the
   // first ownership check. Transfer that already-issued renderer intent to
   // the now-live runtime claim so relinquish/failure still deletes the copy.
-  if (!released) runtime?.deferAttachmentRelease(id);
+  if (released || runtime?.deferAttachmentRelease(id)) return;
+  // The crossing claim may already have relinquished before the second
+  // ownership check. With its handoff consumed, retrying the registry release
+  // now starts deletion instead of losing the renderer's cleanup intent.
+  await registry.releaseFromRenderer(id);
 }

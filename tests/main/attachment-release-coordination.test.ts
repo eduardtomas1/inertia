@@ -34,4 +34,20 @@ describe("renderer attachment release coordination", () => {
     expect(releaseFromRenderer).not.toHaveBeenCalled();
     expect(deferAttachmentRelease).toHaveBeenCalledExactlyOnceWith(attachmentId);
   });
+
+  it("deletes after a crossing runtime claim already relinquished", async () => {
+    const releaseFromRenderer = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const deferAttachmentRelease = vi.fn(() => false);
+
+    await releaseRendererAttachment(
+      attachmentId,
+      { releaseFromRenderer },
+      { deferAttachmentRelease },
+    );
+
+    expect(releaseFromRenderer).toHaveBeenCalledTimes(2);
+    expect(deferAttachmentRelease).toHaveBeenCalledTimes(2);
+  });
 });

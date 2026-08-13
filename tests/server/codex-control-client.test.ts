@@ -156,6 +156,35 @@ describe("Codex control client", () => {
     );
   });
 
+  it("fails closed on a server request even when its ID collides", async () => {
+    const fixture = fakeChild((text) => {
+      const message = JSON.parse(text) as {
+        id?: number;
+        method: string;
+      };
+      if (message.id === undefined) return;
+      if (message.method === "initialize") {
+        fixture.stdout.write(`${JSON.stringify({
+          id: message.id,
+          result: {},
+        })}\n`);
+        return;
+      }
+      fixture.stdout.write(`${JSON.stringify({
+        id: message.id,
+        method: "item/commandExecution/requestApproval",
+        params: { threadId: "thread-1" },
+      })}\n`);
+    });
+
+    await expect(withCodexControlClient(
+      options(fixture.child),
+      async ({ request }) => await request("thread/compact/start", {
+        threadId: "thread-1",
+      }),
+    )).rejects.toThrow("unexpected server request");
+  });
+
   it("bounds an unanswered request and still terminates exactly once", async () => {
     vi.useFakeTimers();
     try {

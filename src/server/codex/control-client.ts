@@ -184,10 +184,19 @@ export async function withCodexControlClient<T>(
     }
     const message = objectValue(parsed);
     const id = typeof message?.id === "number" ? message.id : undefined;
+    const method = typeof message?.method === "string"
+      ? message.method
+      : undefined;
+    if (id !== undefined && method !== undefined) {
+      // This one-shot control client has no UI/durable-turn route for server
+      // requests such as approvals or elicitation. Never confuse a colliding
+      // server request ID with the response to one of our pending requests.
+      failConnection(new Error(
+        `Codex control received unexpected server request '${method}'.`,
+      ));
+      return;
+    }
     if (id === undefined) {
-      const method = typeof message?.method === "string"
-        ? message.method
-        : undefined;
       if (method) {
         try {
           options.onNotification?.(

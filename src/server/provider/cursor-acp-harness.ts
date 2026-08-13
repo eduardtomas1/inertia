@@ -337,6 +337,10 @@ function startCursorRun(
       : options.input.prompt;
     const prompt = await cursorPrompt(providerPrompt, options.input.imagePaths ?? [], initialized);
     emitter.status("running");
+    // ACP v1 has no separate compaction event. For Cursor, the bounded native
+    // authority is the exact session/prompt response for `/summarize`, after
+    // that same resumed session authoritatively advertised the command above.
+    // Only end_turn is accepted below; every other stop reason fails closed.
     const response = await context.request(acp.methods.agent.session.prompt, { sessionId, prompt });
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter.rich);
     const outcome = cancelRequested || response.stopReason === "cancelled"

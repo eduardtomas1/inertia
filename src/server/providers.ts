@@ -754,6 +754,11 @@ export class ProviderManager {
     const operationInput: ProviderRunInput = {
       ...input,
       prompt: "/compact",
+      // Context compaction is a turnless control operation, never a user turn
+      // with authority to execute tools. Force interactive policy even when
+      // the conversation normally runs with elevated access so every provider
+      // approval/input reaches the fail-closed callbacks below.
+      access: "supervised",
       operation: {
         kind: "compact",
         ...(instruction ? { instruction } : {}),

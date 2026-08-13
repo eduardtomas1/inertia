@@ -53,6 +53,7 @@ function fixture(options: {
   reconfigured?: boolean;
   providerDefault?: boolean;
   providerId?: ProviderId;
+  accessMode?: "supervised" | "auto-edit" | "full";
 } = {}) {
   const providerId = options.providerId ?? "claude";
   const selection = nativeModelSelection({
@@ -83,7 +84,7 @@ function fixture(options: {
     modelSelection: selection,
     continuationIdentity: route.continuationIdentity,
     interactionMode: "build",
-    accessMode: "supervised",
+    accessMode: options.accessMode ?? "supervised",
   };
   const conversationLookup = vi.fn(() => options.reconfigured
     ? conversationLookup.mock.calls.length === 1
@@ -216,8 +217,10 @@ describe("conversation compaction command", () => {
     }));
   });
 
-  it("cancels an unanswerable Cursor approval and releases checkout authority", async () => {
-    const root = portableFixtureRoot("Cursor compact approval");
+  it.each(["auto-edit", "full"] as const)(
+    "cancels an unanswerable Cursor approval from %s access and releases checkout authority",
+    async (accessMode) => {
+    const root = portableFixtureRoot(`Cursor compact ${accessMode} approval`);
     roots.push(root);
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "cursor");
@@ -245,7 +248,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method === "session/prompt") {
     promptId = message.id;
-    return send({ jsonrpc: "2.0", id: 900, method: "session/request_permission", params: { sessionId: message.params.sessionId, toolCall: { toolCallId: "compact-tool", title: "Run summarizer", kind: "execute", status: "pending", rawInput: { command: "summarize" } }, options: [{ optionId: "allow", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject once", kind: "reject_once" }] } });
+    return send({ jsonrpc: "2.0", id: 900, method: "session/request_permission", params: { sessionId: message.params.sessionId, toolCall: { toolCallId: "compact-tool", title: "Write summary", kind: "edit", status: "pending", rawInput: { path: "summary.md" } }, options: [{ optionId: "allow", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject once", kind: "reject_once" }] } });
   }
   if (message.id === 900 || message.method === "session/cancel") finishPrompt();
 });
@@ -253,6 +256,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const { dependencies, release, send } = fixture({
       providerId: "cursor",
       providerDefault: true,
+      accessMode,
     });
     const manager = new ProviderManager(
       { commands: { cursor: command }, cancelGraceMs: 100 },

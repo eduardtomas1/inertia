@@ -273,6 +273,7 @@ function startCodexCompaction(
       });
       let resolveCompaction!: () => void;
       let compactionInitiated = false;
+      let compactionItemId: string | null = null;
       const compacted = new Promise<void>((resolve, reject) => {
         resolveCompaction = resolve;
         completionTimer = setTimeout(
@@ -295,10 +296,17 @@ function startCodexCompaction(
           // after local request initiation and before the operation timeout.
           // A buffered completion observed while resuming proves nothing.
           if (!compactionInitiated) return;
-          if (method !== "item/completed") return;
+          if (method !== "item/started" && method !== "item/completed") return;
           if (params.threadId !== sessionId) return;
           const item = objectValue(params.item);
-          if (item?.type === "contextCompaction") resolveCompaction();
+          if (item?.type !== "contextCompaction") return;
+          const itemId = boundedText(item.id, 512);
+          if (!itemId) return;
+          if (method === "item/started") {
+            compactionItemId ??= itemId;
+            return;
+          }
+          if (itemId === compactionItemId) resolveCompaction();
         },
       }, async (client) => {
         const accessPolicy = codexAccessPolicy({

@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
+import { lstat } from "node:fs/promises";
 
 import { shell } from "electron";
 
 import { ConversationAttachmentStore } from "../node/conversation-attachment-store.js";
+import type {
+  ConversationAttachmentStoreAnyOperationRunner,
+  ConversationAttachmentStoreAuthority,
+} from "../node/conversation-attachment-store-child.js";
 import { chatAttachmentKind } from "../shared/attachments.js";
 import type { ValidatedAttachmentPreview } from "./attachment-registry.js";
 import { AttachmentRegistry } from "./attachment-registry.js";
@@ -59,10 +64,26 @@ async function serializeRetainedPdfOpen<T>(
 
 export function openConversationAttachments(
   dataDirectory: string,
+  operationRunner?: ConversationAttachmentStoreAnyOperationRunner,
 ): ConversationAttachmentAccess {
   return ConversationAttachmentStore.open(dataDirectory, {
     validate: validateAttachmentImport,
+    ...(operationRunner
+      ? { operationRunner, readOperationRunner: operationRunner }
+      : {}),
   });
+}
+
+export async function conversationAttachmentStoreAuthority(
+  store: ConversationAttachmentStore,
+): Promise<ConversationAttachmentStoreAuthority> {
+  const entry = await lstat(store.directory, { bigint: true });
+  return {
+    root: store.directory,
+    dev: String(entry.dev),
+    ino: String(entry.ino),
+    uid: process.platform === "win32" ? null : String(entry.uid),
+  };
 }
 
 export async function closeConversationAttachmentAccess(

@@ -270,6 +270,16 @@ async function createPdfFixture(root) {
   return { inputPath, resultPath, text };
 }
 
+async function createImageFixture(root) {
+  const inputPath = join(root, "package-smoke.png");
+  const resultPath = join(root, "package-smoke-image-result.json");
+  const bytes = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]);
+  await writeFile(inputPath, bytes);
+  return { inputPath, resultPath };
+}
+
 async function requirePackagedCodex(websocketUrl, expectedExecutable) {
   const canonicalExpectedExecutable = await realpath(expectedExecutable);
   await new Promise((resolveCodex, rejectCodex) => {
@@ -389,6 +399,7 @@ try {
   }
   const packagedCodex = await createWindowsCodexFixture(temporaryRoot, workspaceDirectory);
   const packagedPdf = await createPdfFixture(temporaryRoot);
+  const packagedImage = await createImageFixture(temporaryRoot);
   // This smoke does not exercise credential persistence. Keep macOS package
   // and shutdown checks independent from the automation host's Keychain.
   const launchArguments = [
@@ -407,6 +418,8 @@ try {
       INERTIA_PACKAGE_SMOKE_FILE: markerPath,
       INERTIA_PACKAGE_SMOKE_PDF_INPUT: packagedPdf.inputPath,
       INERTIA_PACKAGE_SMOKE_PDF_RESULT: packagedPdf.resultPath,
+      INERTIA_PACKAGE_SMOKE_IMAGE_INPUT: packagedImage.inputPath,
+      INERTIA_PACKAGE_SMOKE_IMAGE_RESULT: packagedImage.resultPath,
       ...(packagedCodex ? {
         INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: packagedCodex.command,
         APPDATA: packagedCodex.profile,
@@ -463,6 +476,14 @@ try {
   ) {
     throw new Error(`The packaged PDF stack failed: ${pdfResult.message || "invalid smoke result"}.`);
   }
+  const imageResult = await waitUntil(
+    () => readJsonIfPresent(packagedImage.resultPath),
+    STARTUP_TIMEOUT_MS,
+    "packaged durable image retention result",
+  );
+  if (imageResult.ok !== true) {
+    throw new Error(`The packaged image retention path failed: ${imageResult.message || "invalid smoke result"}.`);
+  }
   if (packagedCodex) await requirePackagedCodex(readiness.websocketUrl, packagedCodex.command);
 
   // Provider discovery deliberately keeps the packaged app alive before
@@ -517,7 +538,7 @@ try {
       mode: 0o600,
     });
   }
-  console.log(`Packaged smoke passed (${process.platform}/${process.arch}); main=${readiness.mainPid}, runtime=${readiness.runtimePid}, generation=${readiness.generation}, runtimeObserved=${runtimeWasObserved}, pdfExtraction=true, launchToReadyMs=${benchmark.launchToRuntimeReadyMs}, shutdownMs=${benchmark.shutdownToProcessExitMs}, exit=${exit.code ?? exit.signal ?? "unknown"}.`);
+  console.log(`Packaged smoke passed (${process.platform}/${process.arch}); main=${readiness.mainPid}, runtime=${readiness.runtimePid}, generation=${readiness.generation}, runtimeObserved=${runtimeWasObserved}, pdfExtraction=true, imageRetention=true, launchToReadyMs=${benchmark.launchToRuntimeReadyMs}, shutdownMs=${benchmark.shutdownToProcessExitMs}, exit=${exit.code ?? exit.signal ?? "unknown"}.`);
 } catch (error) {
   const detail = error instanceof Error ? error.message : String(error);
   if (stdout.trim()) console.error(`Packaged app stdout:\n${stdout.trim()}`);

@@ -12,7 +12,8 @@ const MAX_METADATA_BYTES = 4 * 1024;
 const MAX_MUTATION_CHILD_OUTPUT_BYTES = 4_096;
 const MAX_READ_CHILD_OUTPUT_BYTES = Math.ceil(MAX_CHAT_ATTACHMENT_BYTES / 3)
   * 4 + MAX_METADATA_BYTES * 2 + 1_024;
-const MAX_STORE_CHILD_INPUT_BYTES = 16 * 1024 * 1024;
+export const MAX_CONVERSATION_ATTACHMENT_STORE_OPERATION_BYTES =
+  16 * 1024 * 1024;
 const METADATA_FILE = "metadata.json";
 const ATTACHMENT_STORAGE_EXTENSIONS = [...new Set(
   CHAT_ATTACHMENT_MIME_TYPES.map(chatAttachmentStorageExtension),
@@ -39,7 +40,7 @@ export type ConversationAttachmentStoreOperation = {
   readonly name: string;
 };
 
-interface ConversationAttachmentStoreReadOperation {
+export interface ConversationAttachmentStoreReadOperation {
   readonly operation: "read";
   readonly root: string;
   readonly rootDev: string;
@@ -49,7 +50,7 @@ interface ConversationAttachmentStoreReadOperation {
   readonly stallBeforeRecordRevalidateMs: number;
 }
 
-type ConversationAttachmentStoreReadReceipt = {
+export type ConversationAttachmentStoreReadReceipt = {
   readonly missing: true;
 } | {
   readonly missing: false;
@@ -57,35 +58,49 @@ type ConversationAttachmentStoreReadReceipt = {
   readonly bytes: Uint8Array;
 };
 
-export type ConversationAttachmentStoreOperationRunner = (
-  operation: ConversationAttachmentStoreOperation,
-  signal?: AbortSignal,
-) => { readonly result: Promise<void>; readonly stopped: Promise<void> };
+export interface ConversationAttachmentStoreOperationRunner {
+  (
+    operation: ConversationAttachmentStoreOperation,
+    signal?: AbortSignal,
+  ): {
+    readonly result: Promise<void>;
+    readonly stopped: Promise<void>;
+    readonly ready?: Promise<boolean>;
+  };
+}
 
-const STORE_CHILD_SOURCE = `
-  const { constants, writeSync } = require("node:fs");
+export interface ConversationAttachmentStoreReadOperationRunner {
+  (
+    operation: ConversationAttachmentStoreReadOperation,
+    signal?: AbortSignal,
+  ): {
+    readonly result: Promise<ConversationAttachmentStoreReadReceipt>;
+    readonly stopped: Promise<void>;
+    readonly ready?: Promise<boolean>;
+  };
+}
+
+export type ConversationAttachmentStoreAnyOperationRunner =
+  ConversationAttachmentStoreOperationRunner
+  & ConversationAttachmentStoreReadOperationRunner;
+
+export interface ConversationAttachmentStoreAuthority {
+  readonly root: string;
+  readonly dev: string;
+  readonly ino: string;
+  readonly uid: string | null;
+}
+
+export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
+  const { constants } = require("node:fs");
   const { chmod, lstat, mkdir, open, realpath, rename, rm } = require("node:fs/promises");
   const { join } = require("node:path");
 
-  const MAX_INPUT_BYTES = ${MAX_STORE_CHILD_INPUT_BYTES};
+  const MAX_INPUT_BYTES = ${MAX_CONVERSATION_ATTACHMENT_STORE_OPERATION_BYTES};
   const MAX_ATTACHMENT_BYTES = ${MAX_CHAT_ATTACHMENT_BYTES};
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
   const PENDING = /^\\.pending-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/iu;
   const EXTENSIONS = new Set(${JSON.stringify(ATTACHMENT_STORAGE_EXTENSIONS)});
-
-  async function readInput() {
-    process.stdin.setEncoding("utf8");
-    const chunks = [];
-    let bytes = 0;
-    for await (const chunk of process.stdin) {
-      chunks.push(chunk);
-      bytes += Buffer.byteLength(chunk, "utf8");
-      if (bytes > MAX_INPUT_BYTES) {
-        throw new Error("Input exceeded the attachment-operation bound.");
-      }
-    }
-    return JSON.parse(chunks.join(""));
-  }
 
   async function syncDirectory(path) {
     if (process.platform === "win32") return;
@@ -216,7 +231,7 @@ const STORE_CHILD_SOURCE = `
     ) throw new Error("The attachment file name changed.");
   }
 
-  async function readRecord(input) {
+  async function readRecord(input, onReadReady) {
     if (
       !input
       || typeof input !== "object"
@@ -285,7 +300,7 @@ const STORE_CHILD_SOURCE = `
       throw new Error("The attachment content changed.");
     }
     if (input.stallBeforeRecordRevalidateMs > 0) {
-      writeSync(3, ${JSON.stringify("read-ready\n")});
+      onReadReady();
       await new Promise((resolve) => {
         setTimeout(resolve, input.stallBeforeRecordRevalidateMs);
       });
@@ -417,13 +432,44 @@ const STORE_CHILD_SOURCE = `
     await syncDirectory(".");
   }
 
-  void readInput().then((input) => (
+  async function performConversationAttachmentStoreOperation(
+    input,
+    onReadReady = () => undefined,
+  ) {
+    return (
     input && input.operation === "remove"
       ? removeEntry(input)
       : input && input.operation === "read"
-        ? readRecord(input)
+        ? readRecord(input, onReadReady)
         : persist(input)
-  )).then(
+    );
+  }
+`;
+
+const STORE_CHILD_SOURCE = `
+  const { writeSync } = require("node:fs");
+  ${CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE}
+
+  async function readInput() {
+    process.stdin.setEncoding("utf8");
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of process.stdin) {
+      chunks.push(chunk);
+      bytes += Buffer.byteLength(chunk, "utf8");
+      if (bytes > MAX_INPUT_BYTES) {
+        throw new Error("Input exceeded the attachment-operation bound.");
+      }
+    }
+    return JSON.parse(chunks.join(""));
+  }
+
+  void readInput().then((input) =>
+    performConversationAttachmentStoreOperation(
+      input,
+      () => writeSync(3, ${JSON.stringify("read-ready\n")}),
+    )
+  ).then(
     (receipt) => process.stdout.write(JSON.stringify({
       ok: true,
       ...(receipt || {}),
@@ -436,6 +482,61 @@ function cancellationError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
     ? signal.reason
     : new Error("Conversation attachment retention was cancelled.");
+}
+
+export function encodeConversationAttachmentStoreOperation(
+  input: ConversationAttachmentStoreOperation
+    | ConversationAttachmentStoreReadOperation,
+): string {
+  return JSON.stringify(input.operation === "persist"
+    ? {
+        ...input,
+        bytes: undefined,
+        bytesBase64: Buffer.from(input.bytes).toString("base64"),
+      }
+    : input);
+}
+
+export function decodeConversationAttachmentStoreOperation(
+  encoded: string,
+): ConversationAttachmentStoreOperation
+  | ConversationAttachmentStoreReadOperation
+  | null {
+  if (
+    Buffer.byteLength(encoded, "utf8")
+      > MAX_CONVERSATION_ATTACHMENT_STORE_OPERATION_BYTES
+  ) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(encoded);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const operation = value as Record<string, unknown>;
+  if (
+    operation.operation !== "persist"
+    && operation.operation !== "read"
+    && operation.operation !== "remove"
+  ) return null;
+  if (operation.operation !== "persist") {
+    return operation as unknown as ConversationAttachmentStoreReadOperation
+      | ConversationAttachmentStoreOperation;
+  }
+  if (typeof operation.bytesBase64 !== "string") return null;
+  const bytes = Buffer.from(operation.bytesBase64, "base64");
+  if (
+    bytes.length < 1
+    || bytes.length > MAX_CHAT_ATTACHMENT_BYTES
+    || bytes.toString("base64") !== operation.bytesBase64
+  ) return null;
+  const { bytesBase64: _bytesBase64, ...rest } = operation;
+  return {
+    ...rest,
+    bytes,
+  } as unknown as ConversationAttachmentStoreOperation;
 }
 
 function storeChildEnvironment(): NodeJS.ProcessEnv {
@@ -490,14 +591,11 @@ export function runConversationAttachmentStoreChild(
       ready,
     };
   }
-  const encodedInput = JSON.stringify(input.operation === "persist"
-    ? {
-        ...input,
-        bytes: undefined,
-        bytesBase64: Buffer.from(input.bytes).toString("base64"),
-      }
-    : input);
-  if (Buffer.byteLength(encodedInput, "utf8") > MAX_STORE_CHILD_INPUT_BYTES) {
+  const encodedInput = encodeConversationAttachmentStoreOperation(input);
+  if (
+    Buffer.byteLength(encodedInput, "utf8")
+      > MAX_CONVERSATION_ATTACHMENT_STORE_OPERATION_BYTES
+  ) {
     stopReceipt();
     readyReceipt(false);
     return {

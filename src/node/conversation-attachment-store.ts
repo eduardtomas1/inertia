@@ -30,6 +30,7 @@ import {
 import type { ChatAttachment } from "../shared/contracts.js";
 import {
   runConversationAttachmentStoreChild as runStoreChild,
+  type ConversationAttachmentStoreReadOperationRunner,
   type ConversationAttachmentStoreOperationRunner,
 } from "./conversation-attachment-store-child.js";
 
@@ -101,6 +102,7 @@ export interface ConversationAttachmentStoreOptions {
   readonly reconciliationBatchTimeoutMs?: number;
   /** Deterministic store-operation seam for unit tests; production uses the bounded child. */
   readonly operationRunner?: ConversationAttachmentStoreOperationRunner;
+  readonly readOperationRunner?: ConversationAttachmentStoreReadOperationRunner;
 }
 
 interface StoreDirectoryAuthority {
@@ -294,6 +296,7 @@ export class ConversationAttachmentStore {
   private readonly reconciliationBatchEntries: number;
   private readonly reconciliationBatchTimeoutMs: number;
   private readonly operationRunner: ConversationAttachmentStoreOperationRunner;
+  private readonly readOperationRunner: ConversationAttachmentStoreReadOperationRunner;
   private readonly authoritativeRecords = new Set<string>();
   private readonly retentionRecords = new Map<string, Set<string>>();
   private readonly recordRetentions = new Map<string, Set<string>>();
@@ -335,9 +338,8 @@ export class ConversationAttachmentStore {
           RECONCILIATION_BATCH_TIMEOUT_MS,
         )
       : RECONCILIATION_BATCH_TIMEOUT_MS;
-    this.operationRunner = process.env.NODE_ENV === "test"
-      ? options.operationRunner ?? runStoreChild
-      : runStoreChild;
+    this.operationRunner = options.operationRunner ?? runStoreChild;
+    this.readOperationRunner = options.readOperationRunner ?? runStoreChild;
   }
 
   static async open(
@@ -851,7 +853,7 @@ export class ConversationAttachmentStore {
       && this.readFault?.attachmentId === id
       ? this.readFault.stallBeforeRecordRevalidateMs
       : 0;
-    const reading = this.trackOperation(runStoreChild({
+    const reading = this.trackOperation(this.readOperationRunner({
       operation: "read",
       root: this.directory,
       rootDev: this.directoryAuthority.dev,
@@ -869,7 +871,7 @@ export class ConversationAttachmentStore {
       && this.readFault?.onReady
     ) {
       const onReady = this.readFault.onReady;
-      void reading.ready.then((observed) => {
+      void reading.ready?.then((observed) => {
         if (observed) onReady();
       }, () => undefined);
     }
@@ -939,7 +941,11 @@ export class ConversationAttachmentStore {
       && this.persistenceFault?.attachmentId === metadata.id
       ? this.persistenceFault.stallBeforePublishMs
       : 0;
-    let persistence: ReturnType<ConversationAttachmentStoreOperationRunner>;
+    let persistence: {
+      readonly result: Promise<void>;
+      readonly stopped: Promise<void>;
+      readonly ready?: Promise<boolean>;
+    };
     try {
       persistence = this.trackOperation(this.operationRunner({
         operation: "persist",

@@ -11,6 +11,10 @@ import type {
 } from "../node/runtime-process-protocol.js";
 import type { SecureFileRequest, SecureFileResult } from "../node/secure-file-protocol.js";
 import type { RuntimeAttachmentBroker } from "./runtime-attachment-broker.js";
+import type {
+  ConversationAttachmentStoreAnyOperationRunner,
+  ConversationAttachmentStoreAuthority,
+} from "../node/conversation-attachment-store-child.js";
 
 export type RuntimeSupervisorTimer = ReturnType<typeof setTimeout>;
 
@@ -123,6 +127,8 @@ export interface RuntimeSupervisorOptions {
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;
+  conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
+  conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
   attachmentBroker?: RuntimeAttachmentBroker;
   attachmentRequestTimeoutMs?: number;
   databaseRecoveryRequestTimeoutMs?: number;

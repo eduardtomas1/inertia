@@ -36,20 +36,26 @@ function never(): Promise<never> {
 
 describe("project identity deadline", () => {
   it("rejects when inspection outlives its deadline", async () => {
-    vi.useFakeTimers();
-    try {
-      const pending = inspectProjectIdentityWithDeadline(
-        "/never/resolves",
-        50,
-      );
-      const assertion = expect(pending).rejects.toBeInstanceOf(
-        ProjectIdentityTimeout,
-      );
-      await vi.advanceTimersByTimeAsync(60);
-      await assertion;
-    } finally {
-      vi.useRealTimers();
-    }
+    let expire!: () => void;
+    const setDeadline = ((callback: () => void) => {
+      expire = callback;
+      return {} as NodeJS.Timeout;
+    }) as typeof setTimeout;
+    const clearDeadline = vi.fn() as unknown as typeof clearTimeout;
+    const pending = inspectProjectIdentityWithDeadline(
+      "/definitely/missing/inertia-timeout-test",
+      50,
+      setDeadline,
+      clearDeadline,
+    );
+    const assertion = expect(pending).rejects.toBeInstanceOf(
+      ProjectIdentityTimeout,
+    );
+
+    expire();
+
+    await assertion;
+    expect(clearDeadline).toHaveBeenCalledOnce();
   });
 
   it("surfaces pre-Git filesystem failures instead of hanging", async () => {

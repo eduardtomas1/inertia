@@ -58,28 +58,34 @@ test("switches between Projects and Work and manages chat history", async () => 
     name: newChatAccessibleName,
   });
   await expect(threadCard).toBeVisible();
-  const relativeTime = activityCard.locator(".activity-thread-topline time");
-  await expect(relativeTime).toHaveCSS("opacity", "1");
+  const trailing = activityCard.locator(".activity-thread-trailing");
+  await expect(trailing.locator("time")).toBeVisible();
+  await expect(trailing).toHaveCSS("opacity", "1");
   await activityCard.hover();
-  await expect(relativeTime).toHaveCSS("opacity", "1");
+  await expect(trailing).toHaveCSS("opacity", "0");
+  const threadActions = activityCard.getByRole("button", {
+    name: "Thread actions for New chat",
+  });
+  await expect(threadActions).toHaveCSS("opacity", "1");
 
   const firstNavigationItem = sidebar.locator("[data-sidebar-nav]").first();
   await firstNavigationItem.focus();
   await firstNavigationItem.press("ArrowDown");
   expect(await firstNavigationItem.evaluate((item) => document.activeElement !== item)).toBe(true);
 
-  await activityCard.getByRole("button", { name: "Thread actions for New chat" }).click();
+  await expect(threadActions).toHaveCSS("opacity", "1");
+  await threadActions.click();
   await sidebar.getByRole("menuitem", { name: "Done" }).click();
   const doneToggle = sidebar.getByRole("button", { name: "Done 1" });
   await expect(doneToggle).toHaveAttribute("aria-expanded", "false");
   await doneToggle.click();
-  const doneCard = sidebar.locator(".work-thread-section.is-done .activity-thread.is-active");
+  const doneCard = sidebar.locator('.activity-thread[data-work-section="done"].is-active');
   await expect(doneCard.getByRole("button", {
     name: newChatAccessibleName,
   })).toBeVisible();
   await doneCard.getByRole("button", { name: "Thread actions for New chat" }).click();
   await sidebar.getByRole("menuitem", { name: "Reopen" }).click();
-  await expect(sidebar.locator(".work-thread-section.is-recent .activity-thread.is-active").getByRole("button", {
+  await expect(sidebar.locator('.activity-thread[data-work-section="recent"].is-active').getByRole("button", {
     name: newChatAccessibleName,
   })).toBeVisible();
 

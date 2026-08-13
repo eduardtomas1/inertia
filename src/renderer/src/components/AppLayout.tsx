@@ -418,6 +418,7 @@ export function AppLayout({
           view={view}
           open={sidebarOpen}
           busy={busyAction === "project.create"}
+          layoutWidth={sidebarLayout.value}
           onClose={sidebarActions.close}
           onViewChange={sidebarActions.viewChange}
           onImportProject={sidebarActions.importProject}

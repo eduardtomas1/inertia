@@ -23,6 +23,7 @@ const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;
 let dataDirectory: string;
 const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
 const attachmentId = "33333333-3333-4333-8333-333333333333";
+const attachmentHandoffId = "44444444-4444-4444-8444-444444444444";
 const trustedAttachment = {
   id: attachmentId,
   name: "preview.png",
@@ -799,11 +800,13 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId,
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(attachmentBroker.resolve).toHaveBeenCalledWith(
       attachmentId,
+      attachmentHandoffId,
       expect.any(AbortSignal),
     );
     await vi.advanceTimersByTimeAsync(25);
@@ -839,6 +842,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId,
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     await vi.advanceTimersByTimeAsync(0);
 
@@ -884,6 +888,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId: retryRequestId,
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     await vi.advanceTimersByTimeAsync(0);
     expect(children[0].messages.at(-1)).toEqual({
@@ -947,6 +952,7 @@ describe("RuntimeSupervisor", () => {
         type: "runtime.attachment-request",
         requestId,
         attachmentId,
+        handoffId: attachmentHandoffId,
       });
     }
     await vi.advanceTimersByTimeAsync(0);
@@ -1038,6 +1044,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId,
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     await vi.advanceTimersByTimeAsync(0);
     expect(supervisor.deferAttachmentRelease(attachmentId)).toBe(true);
@@ -1069,6 +1076,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId: crypto.randomUUID(),
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     await vi.advanceTimersByTimeAsync(0);
     expect(attachmentBroker.release).not.toHaveBeenCalled();
@@ -1100,6 +1108,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId: crypto.randomUUID(),
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     await vi.advanceTimersByTimeAsync(0);
     expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
@@ -1136,6 +1145,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId: crypto.randomUUID(),
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     await vi.advanceTimersByTimeAsync(0);
 
@@ -1174,6 +1184,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId: crypto.randomUUID(),
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     await vi.advanceTimersByTimeAsync(0);
     expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
@@ -1731,6 +1742,7 @@ describe("RuntimeSupervisor", () => {
         type: "runtime.attachment-request",
         requestId: crypto.randomUUID(),
         attachmentId,
+        handoffId: attachmentHandoffId,
       });
       await vi.advanceTimersByTimeAsync(0);
 
@@ -1785,6 +1797,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId: crypto.randomUUID(),
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     await vi.advanceTimersByTimeAsync(0);
 
@@ -2066,6 +2079,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.attachment-request",
       requestId: crypto.randomUUID(),
       attachmentId,
+      handoffId: attachmentHandoffId,
     });
     await vi.advanceTimersByTimeAsync(0);
     expect(supervisor.ownsAttachment(attachmentId)).toBe(true);

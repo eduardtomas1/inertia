@@ -140,11 +140,14 @@ describe("cross-platform packaged behavior contract", () => {
     expect(closedStart).toBeGreaterThanOrEqual(0);
     expect(closedHandler).not.toContain("disposeImportedAttachments");
 
-    const releaseStart = main.indexOf("ipcMain.handle(IPC.releaseAttachment");
-    const releaseEnd = main.indexOf("\n  });", releaseStart);
-    const releaseHandler = main.slice(releaseStart, releaseEnd);
-    expect(releaseHandler.indexOf("deferAttachmentRelease")).toBeLessThan(
-      releaseHandler.indexOf("attachmentRegistry().release"),
+    const releaseCoordination = await source(
+      "src/main/attachment-release-coordination.ts",
+    );
+    const releaseFunction = releaseCoordination.slice(
+      releaseCoordination.indexOf("export async function releaseRendererAttachment"),
+    );
+    expect(releaseFunction.indexOf("deferAttachmentRelease")).toBeLessThan(
+      releaseFunction.indexOf("releaseFromRenderer"),
     );
 
     const quitStart = main.indexOf('app.on("before-quit"');

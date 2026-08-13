@@ -145,6 +145,7 @@ export function createTurnInteractionCommandHandler(
           resolvedAttachments = await awaitMessageSendPreparation(
             resolver.resolvePayloads(
               command.payload.attachments,
+              command.requestId,
               resolutionAbort.signal,
             ),
             preparationDeadlineAt,

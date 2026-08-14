@@ -1249,26 +1249,6 @@ textarea {
   padding: 1px 0 8px;
 }
 
-.activity-thread-stream.is-virtualized {
-  display: block;
-  min-height: 1px;
-  contain: layout style;
-}
-
-.work-index-static-item,
-.work-index-virtual-item {
-  min-width: 0;
-}
-
-.work-index-virtual-item {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  padding-bottom: 2px;
-  will-change: transform;
-}
-
 .work-thread-section {
   display: grid;
   gap: 1px;
@@ -1318,11 +1298,6 @@ textarea {
 .work-thread-section-toggle:focus-visible {
   color: var(--text-soft);
   background: color-mix(in srgb, var(--surface-hover) 60%, transparent);
-}
-
-.work-thread-section-toggle:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
 }
 
 .activity-thread {
@@ -1377,31 +1352,6 @@ textarea {
   place-items: center;
   align-self: start;
   color: var(--text-soft);
-}
-
-.activity-thread-state-mark {
-  position: absolute;
-  right: -2px;
-  bottom: 1px;
-  display: grid;
-  width: 11px;
-  height: 11px;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--text-muted);
-  background: var(--sidebar-bg);
-  box-shadow: 0 0 0 1.5px var(--sidebar-bg);
-}
-
-.activity-thread-state-mark > svg { flex: 0 0 auto; stroke-width: 2.25; }
-.activity-thread.status-working .activity-thread-state-mark { color: var(--status-working); }
-.activity-thread.status-approval .activity-thread-state-mark { color: var(--status-approval); }
-.activity-thread.status-input .activity-thread-state-mark { color: var(--status-input); }
-.activity-thread.status-failed .activity-thread-state-mark { color: var(--status-failed); }
-.activity-thread.status-completed .activity-thread-state-mark { color: var(--status-completed); }
-
-.activity-thread.status-working .activity-thread-state-mark {
-  animation: breathe-ring 1.8s ease-in-out infinite;
 }
 
 .activity-thread-copy {
@@ -1475,41 +1425,6 @@ textarea {
   flex: 1 1 72px;
 }
 
-.activity-thread-trailing {
-  display: grid;
-  min-width: 38px;
-  justify-items: end;
-  gap: 1px;
-  pointer-events: none;
-  color: var(--text-muted);
-  font-size: 8px;
-  line-height: 1.05;
-  transition:
-    opacity var(--motion-fast) var(--motion-ease),
-    transform var(--motion-fast) var(--motion-ease);
-}
-
-.activity-thread-trailing time {
-  color: var(--text-muted);
-  font-size: 8px;
-}
-
-.activity-thread-status-label {
-  max-width: 58px;
-  overflow: hidden;
-  color: var(--status-idle);
-  font-size: 8px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.activity-thread.status-working .activity-thread-status-label { color: var(--status-working); }
-.activity-thread.status-approval .activity-thread-status-label { color: var(--status-approval); }
-.activity-thread.status-input .activity-thread-status-label { color: var(--status-input); }
-.activity-thread.status-failed .activity-thread-status-label { color: var(--status-failed); }
-.activity-thread.status-completed .activity-thread-status-label { color: var(--status-completed); }
-
 .activity-thread-menu-button {
   position: absolute;
   z-index: 2;
@@ -1530,12 +1445,6 @@ textarea {
 .activity-thread:focus-within .activity-thread-menu-button,
 .activity-thread-menu-button:focus-visible {
   opacity: 1;
-}
-
-.activity-thread:hover .activity-thread-trailing,
-.activity-thread:focus-within .activity-thread-trailing {
-  opacity: 0;
-  transform: translateX(-3px);
 }
 
 .activity-thread .conversation-menu {
@@ -1576,45 +1485,10 @@ textarea {
   display: none;
 }
 
-.sidebar.is-narrow .activity-thread-select {
-  gap: 7px;
-  grid-template-columns: 18px minmax(0, 1fr) 33px;
-}
-
-.sidebar.is-narrow .activity-thread-provider-label,
-.sidebar.is-narrow .activity-thread-repository-meta,
-.sidebar.is-narrow .activity-thread-branch-meta {
-  display: none;
-}
-
-.sidebar.is-narrow .activity-thread-status-label {
-  max-width: 34px;
-}
-
-.sidebar.is-wide .activity-thread-select {
-  padding-right: 9px;
-  padding-left: 9px;
-  grid-template-columns: 19px minmax(0, 1fr) minmax(46px, auto);
-}
-
-.sidebar.is-wide .activity-thread-provider {
-  width: 19px;
-}
-
-.sidebar.is-wide .activity-thread-title {
-  font-size: 11.5px;
-}
-
-.sidebar.is-wide .work-thread-meta {
-  font-size: 8.5px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .activity-thread,
   .activity-thread-menu-button,
-  .activity-thread-trailing,
   .sidebar-mode-switch button,
-  .activity-thread.status-working .activity-thread-state-mark,
   .thread-status-dot.is-working {
     animation: none;
     transition: none;
@@ -11222,7 +11096,6 @@ button.sent-attachment-open:focus-visible {
   .response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after,
 .app-shell[data-document-active="false"]
   .response-turn.is-active .agent-activity.is-running svg,
-.app-shell[data-document-active="false"] .activity-thread.status-working .activity-thread-state-mark,
 .app-shell[data-document-active="false"] .thread-status-dot.is-working {
   animation-play-state: paused;
 }
@@ -14329,42 +14202,6 @@ button.sent-attachment-open:focus-visible {
     outline: 2px solid Highlight;
     outline-offset: -2px;
     background: Canvas;
-    forced-color-adjust: auto;
-  }
-
-  .activity-thread {
-    border-color: transparent;
-    forced-color-adjust: auto;
-  }
-
-  .activity-thread.is-active {
-    border-color: Highlight;
-    color: HighlightText;
-    background: Highlight;
-    box-shadow: none;
-  }
-
-  .activity-thread.is-active .activity-thread-select,
-  .activity-thread.is-active .work-thread-meta,
-  .activity-thread.is-active .activity-thread-trailing,
-  .activity-thread.is-active .activity-thread-status-label,
-  .activity-thread.is-active .conversation-pin,
-  .activity-thread.is-active .conversation-split-mark,
-  .activity-thread.is-active .thread-unread-mark {
-    color: HighlightText;
-  }
-
-  .activity-thread-select:focus-visible,
-  .work-thread-section-toggle:focus-visible {
-    outline-color: Highlight;
-  }
-
-  .activity-thread-state-mark,
-  .thread-status-dot,
-  .conversation-unread {
-    border: 1px solid CanvasText;
-    background: Canvas;
-    box-shadow: none;
     forced-color-adjust: auto;
   }
 

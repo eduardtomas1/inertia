@@ -13,6 +13,7 @@ import type {
   SidebarWorkSectionId,
 } from "../utils/sidebarModel";
 import { useSidebarIndexMotion } from "./useSidebarIndexMotion";
+import "../sidebar-work-index.css";
 
 const WORK_INDEX_VIRTUALIZATION_THRESHOLD = 60;
 const WORK_INDEX_INITIAL_HEIGHT = 720;

@@ -16,6 +16,7 @@ export const loadProviderAuthDialog = createSurfaceLoader(() => import("./Provid
 export const loadSettingsView = createSurfaceLoader(async () => ({
   default: (await import("./SettingsView")).SettingsView,
 }));
+export const loadSidebar = createSurfaceLoader(() => import("./Sidebar"));
 export const loadUsageView = createSurfaceLoader(() => import("./UsageView"));
 export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPanel"));
 export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));

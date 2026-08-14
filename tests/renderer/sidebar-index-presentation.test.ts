@@ -2,10 +2,13 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(
-  new URL("../../src/renderer/src/styles.css", import.meta.url),
-  "utf8",
-).replace(/\r\n?/gu, "\n");
+const css = ["styles.css", "sidebar-work-index.css"]
+  .map((fileName) => readFileSync(
+    new URL(`../../src/renderer/src/${fileName}`, import.meta.url),
+    "utf8",
+  ))
+  .join("\n")
+  .replace(/\r\n?/gu, "\n");
 
 describe("sidebar index presentation contracts", () => {
   it("keeps selected, hover, and keyboard focus treatments distinct", () => {
@@ -26,7 +29,7 @@ describe("sidebar index presentation contracts", () => {
   });
 
   it("stops decorative motion for reduced motion and inactive documents", () => {
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.activity-thread\.status-working \.activity-thread-state-mark,[\s\S]*?animation:\s*none;/u);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.activity-thread\.status-working \.activity-thread-state-mark\s*\{[\s\S]*?animation:\s*none;/u);
     expect(css).toContain(
       '.app-shell[data-document-active="false"] .activity-thread.status-working .activity-thread-state-mark',
     );

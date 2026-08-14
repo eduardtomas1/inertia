@@ -4,6 +4,17 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.35 — 2026-08-14
+
+### Standard Codex requests remain standard
+
+- Current Codex App Server versions report the normal processing tier as `default`. Inertia now accepts that canonical Standard attestation, as well as the legacy empty value, for new and resumed conversations and native compaction.
+- Fast remains fail closed: a Fast request still requires the exact priority-tier attestation. Claude retains its separate exact on/off verification, while Cursor and OpenCode continue to expose no native response-speed control.
+
+### Release confidence
+
+- Focused Codex and cross-provider contracts, the 335-test portable protocol suite, architecture and lint layers, all TypeScript projects, more than 3,500 unit and integration tests, renderer bundle budgets, Electron scenarios, native package smoke, fuses, and exact-head Linux, macOS, and Windows gates protect the release.
+
 ## 0.0.34 — 2026-08-14
 
 ### Live work stays truthful and easy to navigate

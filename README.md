@@ -174,13 +174,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.34
+### Version 0.0.35
 
-This release makes live agent work truthful and large histories easier to navigate. The transcript, composer, goals, delegated controls, and workspace now follow the newest real provider event and settle immediately, while the compact animated Work index virtualizes large conversation lists without losing keyboard access, focus, or exact provider identity.
+This focused release keeps Standard Codex requests working with current Codex App Server versions, which identify normal processing with the canonical `default` service-tier attestation. New conversations, continuations, and native compaction accept that truthful Standard response without weakening provider verification.
 
-Inertia also adds native `/compact`, capability-backed Standard and Fast controls, and language-aware source references that open validated line ranges across chat and Files. Provider session identity, project containment, bounded highlighting and preview rendering, keyboard-owned action menus, and Git process cleanup remain explicit and fail closed.
+Fast mode still requires the exact priority-tier attestation. Claude keeps its separate exact on/off verification, and providers without native response-speed controls do not invent them.
 
-Download [Inertia v0.0.34](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.34):
+Download [Inertia v0.0.35](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.35):
 
 | Platform | Download |
 | --- | --- |

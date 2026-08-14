@@ -812,7 +812,11 @@ describe("reviewed commit transaction recovery", () => {
     expect(existsSync(journalPath)).toBe(true);
   });
 
-  it("retains recovery state when Windows cannot unlink the reservation", async () => {
+  it("retains recovery state when Windows cannot unlink the reservation", {
+    // This fixture performs two full reviewed-commit transactions. Git and
+    // antivirus process startup can exceed the default budget on hosted Windows.
+    timeout: process.platform === "win32" ? 30_000 : 15_000,
+  }, async () => {
     const root = repository();
     writeFileSync(join(root, "selected.txt"), "reviewed unlink failure\n");
     const review = await captureGitCommitReview(root);

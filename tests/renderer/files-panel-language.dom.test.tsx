@@ -117,4 +117,32 @@ describe("FilesPanel language presentation", () => {
       .toHaveTextContent("Text");
     expect(container.querySelector(".file-preview-code .hljs")).toBeNull();
   });
+
+  it("bounds a newline-dense preview while keeping its requested line visible", () => {
+    const { container } = render(
+      <FilesPanel
+        entries={[{ path: "dense.txt", kind: "file" }]}
+        preview={{
+          path: "dense.txt",
+          content: "\n".repeat(1_048_576),
+          truncated: false,
+          language: "text",
+          contentDigest: "a".repeat(64),
+          modifiedAt: "2026-08-14T10:00:00.000Z",
+        }}
+        selectedPath="dense.txt"
+        selectedLocation={{ startLine: 900_000, endLine: 900_000 }}
+        onSelectFile={vi.fn()}
+        onLoadEntries={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll(".file-preview-line")).toHaveLength(2_000);
+    expect(container.querySelector('[data-source-line="900000"]'))
+      .toHaveClass("is-referenced");
+    expect(container.querySelector('[data-source-line="1"]')).toBeNull();
+    expect(screen.getByText(
+      "Showing lines 899000–900999 of 1048577 to keep this preview responsive.",
+    )).toBeInTheDocument();
+  });
 });

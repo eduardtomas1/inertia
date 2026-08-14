@@ -104,6 +104,64 @@ const EMPTY_SEARCH: SearchState = {
   error: null,
 };
 
+const MAX_RENDERED_PREVIEW_LINES = 2_000;
+
+interface FilePreviewLine {
+  lineNumber: number;
+  text: string;
+}
+
+interface FilePreviewWindow {
+  lines: FilePreviewLine[];
+  totalLines: number;
+}
+
+function filePreviewWindow(
+  content: string,
+  selectedLocation: WorkspaceFileLocation | null,
+): FilePreviewWindow {
+  const boundedLines = content.split("\n", MAX_RENDERED_PREVIEW_LINES + 1);
+  if (boundedLines.length <= MAX_RENDERED_PREVIEW_LINES) {
+    return {
+      lines: boundedLines.map((text, index) => ({
+        lineNumber: index + 1,
+        text,
+      })),
+      totalLines: boundedLines.length,
+    };
+  }
+
+  const firstRenderedLine = selectedLocation
+    ? Math.max(
+        1,
+        selectedLocation.startLine
+          - Math.floor(MAX_RENDERED_PREVIEW_LINES / 2),
+      )
+    : 1;
+  const lastRenderedLine = firstRenderedLine
+    + MAX_RENDERED_PREVIEW_LINES - 1;
+  const lines: FilePreviewLine[] = [];
+  let lineNumber = 1;
+  let lineStart = 0;
+  while (true) {
+    const newline = content.indexOf("\n", lineStart);
+    const lineEnd = newline === -1 ? content.length : newline;
+    if (
+      lineNumber >= firstRenderedLine
+      && lineNumber <= lastRenderedLine
+    ) {
+      lines.push({
+        lineNumber,
+        text: content.slice(lineStart, lineEnd),
+      });
+    }
+    if (newline === -1) break;
+    lineNumber += 1;
+    lineStart = newline + 1;
+  }
+  return { lines, totalLines: lineNumber };
+}
+
 function safeError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim()
     ? error.message
@@ -170,9 +228,9 @@ export function FilesPanel({
       : null,
     [preview],
   );
-  const previewLines = useMemo(
-    () => preview?.content.split("\n") ?? [],
-    [preview],
+  const previewWindow = useMemo(
+    () => filePreviewWindow(preview?.content ?? "", selectedLocation),
+    [preview, selectedLocation],
   );
   const highlightedPreviewLines = useMemo(
     () => preview && previewLanguage
@@ -682,13 +740,12 @@ export function FilesPanel({
               </header>
               <pre ref={previewCodeRef} className="file-preview-code" tabIndex={0} aria-label={`Contents of ${preview.path}`}>
                 <code className={highlightedPreviewLines ? "hljs" : undefined}>
-                  {previewLines.map((line, index) => {
-                    const lineNumber = index + 1;
+                  {previewWindow.lines.map(({ lineNumber, text }) => {
                     const referenced = selectedLocation !== null
                       && lineNumber >= selectedLocation.startLine
                       && lineNumber <= selectedLocation.endLine;
                     const referenceStart = selectedLocation?.startLine === lineNumber;
-                    const highlightedLine = highlightedPreviewLines?.[index];
+                    const highlightedLine = highlightedPreviewLines?.[lineNumber - 1];
                     return (
                       <span
                         className={clsx(
@@ -696,7 +753,7 @@ export function FilesPanel({
                           referenced && "is-referenced",
                         )}
                         data-source-line={lineNumber}
-                        key={index}
+                        key={lineNumber}
                         ref={(node) => {
                           if (node) previewLineRefs.current.set(lineNumber, node);
                           else previewLineRefs.current.delete(lineNumber);
@@ -706,7 +763,7 @@ export function FilesPanel({
                           ? `${workspaceFileLocationLabel(selectedLocation)} in ${preview.path}`
                           : undefined}
                       >
-                        <span className="file-preview-line-number" aria-hidden="true">{index + 1}</span>
+                        <span className="file-preview-line-number" aria-hidden="true">{lineNumber}</span>
                         {highlightedLine !== undefined
                           ? (
                               <span
@@ -715,12 +772,17 @@ export function FilesPanel({
                                 }}
                               />
                             )
-                          : <span>{line || " "}</span>}
+                          : <span>{text || " "}</span>}
                       </span>
                     );
                   })}
                 </code>
               </pre>
+              {previewWindow.lines.length < previewWindow.totalLines && (
+                <p className="panel-notice file-preview-truncated">
+                  Showing lines {previewWindow.lines[0]?.lineNumber ?? 1}–{previewWindow.lines.at(-1)?.lineNumber ?? 1} of {previewWindow.totalLines} to keep this preview responsive.
+                </p>
+              )}
               {preview.truncated && (
                 <p className="panel-notice file-preview-truncated">
                   This preview shows only the beginning of the file.

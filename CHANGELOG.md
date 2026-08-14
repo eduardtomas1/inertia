@@ -4,6 +4,24 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.34 — 2026-08-14
+
+### Live work stays truthful and easy to navigate
+
+- Agent status now follows the newest real provider or runtime event instead of retained text or reasoning. Starting, thinking, searching, coding, commands, tools, responses, approvals, and input waits settle immediately through the transcript, composer, goals, delegated controls, and workspace when a turn completes, fails, or is interrupted.
+- The Work index uses compact, accessible conversation rows with restrained motion and bounded virtualization. Large histories preserve keyboard navigation, fully managed action-menu focus and dismissal, rename state, provider identity, split-workspace cues, and collapsed Earlier, Done, and Snoozed preferences without mounting every row.
+- Project-file references recognize Java and common source languages, share bounded syntax highlighting across chat, Files, changes, and diffs, and open validated line or range citations at the exact source while preserving literal filenames and project containment. Newline-dense previews render a bounded window around the requested line instead of creating an unbounded renderer DOM.
+
+### Provider controls are native and explicit
+
+- `/compact` now compacts the selected native provider session for Codex, Claude, Cursor, or OpenCode, reports whether an optional focus instruction was forwarded, refreshes usage, and refuses unsupported, stale, interactive, or ambiguously completed operations. OpenCode accepts a genuine lifecycle emitted in the request millisecond while retaining exact session, reason, and message pairing.
+- Standard and Fast controls appear only when the selected native provider advertises an authoritative capability. Codex uses its priority service tier and Claude uses SDK Fast mode; the exact choice survives continuation, restart, split chats, prompt stashes, and bound presets without inventing support for other routes.
+- Read-only Git refreshes now cancel and settle their sibling status or diff process before returning an error, preserving the triggering failure while preventing Windows repository handles from escaping cleanup.
+
+### Release confidence
+
+- Architecture and both lint layers, all TypeScript projects, more than 3,500 unit and integration tests, 334 portable provider contracts, focused Electron scenarios, renderer bundle budgets, package smoke, Electron fuses, and exact-head Linux, macOS, and Windows gates protect the release.
+
 ## 0.0.33 — 2026-08-13
 
 ### Images reach providers in packaged builds

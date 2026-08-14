@@ -10,8 +10,6 @@ import {
 import {
   Activity,
   BarChart3,
-  Archive,
-  ArchiveRestore,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -22,7 +20,6 @@ import {
   FolderOpen,
   FolderPlus,
   GitBranch,
-  History,
   Layers3,
   ListTree,
   MessageCircleQuestion,
@@ -41,11 +38,11 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import type { AppSnapshot, Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
-import { workspaceRunAttentionView } from "../../../shared/attention";
 import { formatRelativeTime } from "../lib/format";
 import { agentRequestProviderName } from "../utils/agentInput";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useSnoozeClock } from "../hooks/useSnoozeClock";
 import {
@@ -65,6 +62,7 @@ import {
   type SidebarWorkSectionId,
 } from "../utils/sidebarModel";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { ConversationActionsMenu } from "./ConversationActionsMenu";
 import { IconButton, LoadingMark } from "./ui";
 import { loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
@@ -192,7 +190,13 @@ function SidebarView({
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [conversationMenu, setConversationMenu] = useState<string | null>(null);
+  const {
+    menu: conversationMenu,
+    toggleMenu: toggleConversationMenu,
+    dismissMenu: dismissConversationMenu,
+    setMenuTrigger: setConversationMenuTrigger,
+    setMenuPopover: setConversationMenuPopover,
+  } = useDismissibleMenu<string>();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [projectMenu, setProjectMenu] = useState<{ projectId: string; anchor: string } | null>(null);
@@ -248,10 +252,10 @@ function SidebarView({
 
   useLayoutEffect(() => {
     setQuery("");
-    setConversationMenu(null);
+    dismissConversationMenu("context-change");
     setRenaming(null);
     setRenameDraft("");
-  }, [sidebarMode]);
+  }, [dismissConversationMenu, sidebarMode]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -406,17 +410,23 @@ function SidebarView({
   useLayoutEffect(() => {
     if (sidebarMode !== "activity") return;
     if (conversationMenu && !visibleWorkConversationIds.has(conversationMenu)) {
-      setConversationMenu(null);
+      dismissConversationMenu("context-change");
     }
     if (renaming && !visibleWorkConversationIds.has(renaming)) {
       setRenaming(null);
       setRenameDraft("");
     }
-  }, [conversationMenu, renaming, sidebarMode, visibleWorkConversationIds]);
+  }, [
+    conversationMenu,
+    dismissConversationMenu,
+    renaming,
+    sidebarMode,
+    visibleWorkConversationIds,
+  ]);
   useLayoutEffect(() => {
     if (sidebarMode !== "activity" || !virtualizedWorkIndex) return;
     if (conversationMenu && !renderedWorkConversationIds.has(conversationMenu)) {
-      setConversationMenu(null);
+      dismissConversationMenu("context-change");
     }
     if (renaming && !renderedWorkConversationIds.has(renaming)) {
       setRenaming(null);
@@ -424,6 +434,7 @@ function SidebarView({
     }
   }, [
     conversationMenu,
+    dismissConversationMenu,
     renaming,
     renderedWorkConversationIds,
     sidebarMode,
@@ -654,81 +665,33 @@ function SidebarView({
   );
 
   const conversationActions = (conversation: Conversation) => {
-    const settled = conversation.settledAt !== null;
-    const hasActiveWork = snapshot?.runs.some((run) => (
-      run.conversationId === conversation.id && (run.status === "running" || run.status === "waiting")
-    )) ?? false;
-    const canSettle = !hasActiveWork && conversation.status !== "running" && conversation.status !== "needs-input";
     const thread = threadViewsById.get(conversation.id)
       ?? sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
-    const runAttention = thread.run ? workspaceRunAttentionView(thread.run) : null;
-    const isSplitConversation = splitConversationId === conversation.id;
-    const canOpenInSplit = Boolean(
-      snapshot?.activeConversationId
-      && snapshot.activeConversationId !== conversation.id
-    );
     return (
-      <div
-        className="conversation-menu"
-        role="menu"
-        data-work-focus-owner={sidebarMode === "activity"
-          ? `thread-actions:${conversation.id}`
-          : undefined}
-      >
-        <button type="button" role="menuitem" onClick={() => { setRenameDraft(conversation.title); setRenaming(conversation.id); setConversationMenu(null); }}><Pencil size={13} />Rename</button>
-        <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onPinConversation(conversation, !conversation.pinnedAt); }}>
-          <MessageSquare size={13} />{conversation.pinnedAt ? "Unpin" : "Pin"}
-        </button>
-        {conversation.snoozedUntil && Date.parse(conversation.snoozedUntil) > Date.now() ? (
-          <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSnoozeConversation(conversation, null); }}>
-            <History size={13} />Unsnooze
-          </button>
-        ) : (
-          <>
-            <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSnoozeConversation(conversation, new Date(Date.now() + 60 * 60 * 1_000).toISOString()); }}>
-              <History size={13} />Snooze for 1 hour
-            </button>
-            <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSnoozeConversation(conversation, new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()); }}>
-              <History size={13} />Snooze for 1 day
-            </button>
-          </>
-        )}
-        {isSplitConversation ? (
-          <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onCloseConversationSplit(); }}>
-            <Columns2 size={13} />Remove from split view
-          </button>
-        ) : (
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canOpenInSplit}
-            title={canOpenInSplit
-              ? undefined
-              : "Choose another chat first."}
-            onClick={() => {
-              setConversationMenu(null);
-              onOpenConversationInSplit(conversation);
-            }}
-          >
-            <Columns2 size={13} />Add this chat to split view
-          </button>
-        )}
-        {thread.run && thread.needsAttention && runAttention?.canAcknowledge && (
-          <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onAcknowledgeRun(thread.run!); }}>
-            <CheckCircle2 size={13} />Acknowledge
-          </button>
-        )}
-        {sidebarMode === "activity" && thread.run && runAttention?.canDismiss && (
-          <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onDismissRun(thread.run!); }}>
-            <X size={13} />Dismiss from Work
-          </button>
-        )}
-        {settled
-          ? <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onRestoreConversation(conversation); }}><ArchiveRestore size={13} />Reopen</button>
-          : canSettle && <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSettleConversation(conversation); }}><CheckCircle2 size={13} />Done</button>}
-        <button type="button" role="menuitem" disabled={hasActiveWork} onClick={() => { setConversationMenu(null); onArchiveConversation(conversation); }}><Archive size={13} />Archive</button>
-        <button type="button" role="menuitem" className="is-danger" disabled={hasActiveWork} onClick={() => { setConversationMenu(null); onDeleteConversation(conversation); }}><Trash2 size={13} />Delete</button>
-      </div>
+      <ConversationActionsMenu
+        activeConversationId={snapshot?.activeConversationId ?? null}
+        activity={sidebarMode === "activity"}
+        conversation={conversation}
+        runs={snapshot?.runs ?? []}
+        splitConversationId={splitConversationId}
+        thread={thread}
+        onAcknowledgeRun={onAcknowledgeRun}
+        onArchiveConversation={onArchiveConversation}
+        onCloseConversationSplit={onCloseConversationSplit}
+        onDeleteConversation={onDeleteConversation}
+        onDismiss={dismissConversationMenu}
+        onDismissRun={onDismissRun}
+        onOpenConversationInSplit={onOpenConversationInSplit}
+        onPinConversation={onPinConversation}
+        onRestoreConversation={onRestoreConversation}
+        onSetPopover={(node) => setConversationMenuPopover(conversation.id, node)}
+        onSettleConversation={onSettleConversation}
+        onSnoozeConversation={onSnoozeConversation}
+        onStartRename={() => {
+          setRenameDraft(conversation.title);
+          setRenaming(conversation.id);
+        }}
+      />
     );
   };
 
@@ -867,12 +830,18 @@ function SidebarView({
           </button>
         )}
         <IconButton
+          ref={(node) => setConversationMenuTrigger(conversation.id, node)}
           label={`Thread actions for ${conversation.title}`}
           className="activity-thread-menu-button"
           data-work-focus-id={`thread-actions:${conversation.id}`}
+          aria-haspopup="menu"
+          aria-expanded={conversationMenu === conversation.id}
+          aria-controls={conversationMenu === conversation.id
+            ? `conversation-actions-${conversation.id}`
+            : undefined}
           onClick={() => {
             setProjectMenu(null);
-            setConversationMenu(conversationMenu === conversation.id ? null : conversation.id);
+            toggleConversationMenu(conversation.id);
           }}
         >
           <MoreHorizontal size={13} />
@@ -914,7 +883,7 @@ function SidebarView({
               data-work-focus-id={`section:${section.id}`}
               aria-expanded={expanded}
               onClick={() => {
-                setConversationMenu(null);
+                dismissConversationMenu("context-change");
                 setExpandedWorkSections((current) => {
                   const next = new Set(current);
                   if (next.has(section.id)) next.delete(section.id);
@@ -1109,7 +1078,7 @@ function SidebarView({
                           disabled={connectionStatus !== "online"}
                           onClick={(event) => {
                             event.stopPropagation();
-                            setConversationMenu(null);
+                            dismissConversationMenu("context-change");
                             setProjectMenu(null);
                             onCreateConversation(project);
                           }}
@@ -1177,7 +1146,25 @@ function SidebarView({
                                   {!compact && <span className="conversation-time">{formatRelativeTime(conversation.updatedAt)}</span>}
                                 </button>
                               )}
-                              <IconButton label={`Thread actions for ${conversation.title}`} className="conversation-menu-button" onClick={() => setConversationMenu(conversationMenu === conversation.id ? null : conversation.id)}><MoreHorizontal size={13} /></IconButton>
+                              <IconButton
+                                ref={(node) => setConversationMenuTrigger(
+                                  conversation.id,
+                                  node,
+                                )}
+                                label={`Thread actions for ${conversation.title}`}
+                                className="conversation-menu-button"
+                                aria-haspopup="menu"
+                                aria-expanded={conversationMenu === conversation.id}
+                                aria-controls={conversationMenu === conversation.id
+                                  ? `conversation-actions-${conversation.id}`
+                                  : undefined}
+                                onClick={() => {
+                                  setProjectMenu(null);
+                                  toggleConversationMenu(conversation.id);
+                                }}
+                              >
+                                <MoreHorizontal size={13} />
+                              </IconButton>
                               {conversationMenu === conversation.id && conversationActions(conversation)}
                             </div>
                           );

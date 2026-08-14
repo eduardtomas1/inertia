@@ -259,6 +259,57 @@ describe("compact Work sidebar", () => {
     expect(view.onSelectConversation).toHaveBeenCalledWith(recent);
   });
 
+  it("keeps Work row action focus inside its menu and dismisses it predictably", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    renderSidebar([
+      conversation("menu-focus", "Keyboard menu work", new Date(2026, 7, 11, 9)),
+    ]);
+
+    const trigger = screen.getByRole("button", {
+      name: "Thread actions for Keyboard menu work",
+    });
+    fireEvent.click(trigger);
+
+    const menu = screen.getByRole("menu", {
+      name: "Thread actions for Keyboard menu work",
+    });
+    const rename = within(menu).getByRole("menuitem", { name: "Rename" });
+    const pin = within(menu).getByRole("menuitem", { name: "Pin" });
+    const remove = within(menu).getByRole("menuitem", { name: "Delete" });
+    expect(rename).toHaveFocus();
+    expect(rename).toHaveAttribute("tabindex", "-1");
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.keyDown(rename, { key: "ArrowDown" });
+    expect(pin).toHaveFocus();
+    fireEvent.keyDown(pin, { key: "End" });
+    expect(remove).toHaveFocus();
+    fireEvent.keyDown(remove, { key: "Home" });
+    expect(rename).toHaveFocus();
+
+    fireEvent.keyDown(rename, { key: "Escape" });
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(screen.queryByRole("menu", {
+      name: "Thread actions for Keyboard menu work",
+    })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    expect(within(screen.getByRole("menu", {
+      name: "Thread actions for Keyboard menu work",
+    })).getByRole("menuitem", { name: "Rename" })).toHaveFocus();
+    fireEvent.pointerDown(screen.getByRole("searchbox", {
+      name: "Search projects and conversations",
+    }));
+    expect(screen.queryByRole("menu", {
+      name: "Thread actions for Keyboard menu work",
+    })).not.toBeInTheDocument();
+  });
+
   it("uses the lone search field across title and visible metadata and expands matches", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

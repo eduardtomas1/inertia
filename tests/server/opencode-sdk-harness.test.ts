@@ -707,7 +707,6 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
 
   it.each([
     ["compact-stale", "stale pre-request"],
-    ["compact-equal-timestamp", "equal-timestamp stale"],
     ["compact-auto", "automatic"],
     ["compact-wrong-message", "wrong-message"],
     ["compact-replacement-start", "replacement-start"],
@@ -731,9 +730,6 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         eventInactivityDeadlineMs: 100,
-        ...(scenario === "compact-equal-timestamp"
-          ? { compactionTimestampNow: () => 4242 }
-          : {}),
       })]),
     );
 
@@ -749,6 +745,35 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       status: "failed",
       message: expect.stringContaining("event stream became inactive"),
     });
+  });
+
+  it("accepts a manual compaction lifecycle from the request millisecond", async () => {
+    const root = portableFixtureRoot("OpenCode compact equal timestamp");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "compact-equal-timestamp"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        eventInactivityDeadlineMs: 100,
+        compactionTimestampNow: () => 4242,
+      })]),
+    );
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-compact-equal-timestamp",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({ status: "completed" });
   });
 
   it("does not emit completion when owned-server cleanup is unconfirmed", async () => {

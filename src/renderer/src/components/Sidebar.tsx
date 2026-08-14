@@ -398,6 +398,7 @@ function SidebarView({
     activeConversationId: snapshot?.activeConversationId ?? null,
     compact,
     doneVisible,
+    enabled: sidebarMode === "activity",
     expandedSections: expandedWorkSections,
     motionEnabled: sidebarMode === "activity" && !reducedMotion,
     navigationRef,

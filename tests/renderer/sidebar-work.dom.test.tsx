@@ -114,6 +114,7 @@ function renderSidebar(
   runs: WorkspaceRun[] = [],
   options: {
     projects?: Project[];
+    sidebarMode?: AppSnapshot["settings"]["sidebarMode"];
     splitConversationId?: string | null;
   } = {},
 ) {
@@ -150,9 +151,16 @@ function renderSidebar(
     onSidebarModeChange: vi.fn(),
     onRemoveProject: vi.fn(),
   };
+  const initialSnapshot = snapshot(conversations, runs, options.projects);
   const view = render(
     <Sidebar
-      snapshot={snapshot(conversations, runs, options.projects)}
+      snapshot={{
+        ...initialSnapshot,
+        settings: {
+          ...initialSnapshot.settings,
+          sidebarMode: options.sidebarMode ?? initialSnapshot.settings.sidebarMode,
+        },
+      }}
       {...sidebarProps}
     />,
   );
@@ -438,6 +446,40 @@ describe("compact Work sidebar", () => {
 
     const resizedRows = stream?.querySelectorAll(".activity-thread").length ?? 0;
     expect(resizedRows).toBeGreaterThan(initialRows);
+  });
+
+  it("measures a large Work index when switching from Projects", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      observe = observe;
+      disconnect = disconnect;
+    });
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `mode-viewport-${index}`,
+      `Mode viewport work ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    const view = renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
+    const navigation = view.container.querySelector<HTMLElement>(".project-list");
+    expect(navigation).not.toBeNull();
+    expect(observe).not.toHaveBeenCalled();
+    Object.defineProperty(navigation, "clientHeight", {
+      configurable: true,
+      value: 2_400,
+    });
+
+    view.rerenderSnapshot(snapshot(entries));
+
+    const stream = view.container.querySelector<HTMLElement>(
+      ".activity-thread-stream",
+    );
+    expect(stream).toHaveAttribute("data-work-index-virtualized", "true");
+    expect(stream?.querySelectorAll(".activity-thread").length).toBeGreaterThan(40);
+    expect(observe).toHaveBeenCalledWith(navigation);
+    expect(disconnect).not.toHaveBeenCalled();
   });
 
   it("keeps Home and End keyboard navigation working across virtual windows", () => {

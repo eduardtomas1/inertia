@@ -50,6 +50,7 @@ interface SidebarWorkIndexOptions {
   activeConversationId: string | null;
   compact: boolean;
   doneVisible: number;
+  enabled: boolean;
   expandedSections: ReadonlySet<SidebarWorkSectionId>;
   motionEnabled: boolean;
   navigationRef: RefObject<HTMLDivElement | null>;
@@ -61,6 +62,7 @@ export function useSidebarWorkIndex({
   activeConversationId,
   compact,
   doneVisible,
+  enabled,
   expandedSections,
   motionEnabled,
   navigationRef,
@@ -173,14 +175,14 @@ export function useSidebarWorkIndex({
     ));
   }, [navigationRef]);
   useLayoutEffect(() => {
-    if (!virtualized) return;
+    if (!enabled || !virtualized) return;
     updateViewport();
     const navigation = navigationRef.current;
     if (!navigation) return;
     const observer = new ResizeObserver(updateViewport);
     observer.observe(navigation);
     return () => observer.disconnect();
-  }, [compact, items.length, navigationRef, updateViewport, virtualized]);
+  }, [compact, enabled, items.length, navigationRef, updateViewport, virtualized]);
   let renderedItems: Array<{
     index: number;
     item: WorkIndexItem;

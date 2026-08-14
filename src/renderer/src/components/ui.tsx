@@ -1,14 +1,16 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ComponentPropsWithRef, ReactNode } from "react";
 import clsx from "clsx";
 
 export function IconButton({
   label,
   children,
   className,
+  ref,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; children: ReactNode }): React.JSX.Element {
+}: ComponentPropsWithRef<"button"> & { label: string; children: ReactNode }): React.JSX.Element {
   return (
     <button
+      ref={ref}
       type="button"
       aria-label={label}
       title={label}

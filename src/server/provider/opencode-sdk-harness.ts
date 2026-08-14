@@ -653,7 +653,7 @@ function completesRequestedOpenCodeCompaction(
     properties.reason !== "manual"
     || typeof timestamp !== "number"
     || !Number.isFinite(timestamp)
-    || timestamp <= proof.initiatedAt
+    || timestamp < proof.initiatedAt
     || typeof messageId !== "string"
     || !messageId.trim()
     || messageId.length > 512

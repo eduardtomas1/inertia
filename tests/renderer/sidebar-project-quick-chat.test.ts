@@ -20,7 +20,7 @@ describe("project-row quick New chat action", () => {
     expect(quickAction).toContain('className="project-new-chat-button"');
     expect(quickAction).toContain('disabled={connectionStatus !== "online"}');
     expect(quickAction).toContain("event.stopPropagation()");
-    expect(quickAction).toContain("setConversationMenu(null)");
+    expect(quickAction).toContain('dismissConversationMenu("context-change")');
     expect(quickAction).toContain("setProjectMenu(null)");
     expect(quickAction).toContain("onCreateConversation(project)");
     expect(quickAction).not.toContain("onSelectProject");

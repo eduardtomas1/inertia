@@ -66,8 +66,9 @@ describe.sequential("provider compaction adapters", () => {
 
   it("uses Codex App Server compaction and waits for its completion item", {
     // The first copied node.exe fixture can incur a cold antivirus scan on
-    // hosted Windows before its owned process tree is confirmed stopped.
-    timeout: 30_000,
+    // hosted Windows before its owned process tree is confirmed stopped. Keep
+    // other platforms on the ordinary bounded test budget.
+    timeout: process.platform === "win32" ? 60_000 : 15_000,
   }, async () => {
     const root = portableFixtureRoot("Codex compact");
     roots.push(root);

@@ -49,6 +49,11 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useSnoozeClock } from "../hooks/useSnoozeClock";
 import {
+  COLLAPSIBLE_WORK_SECTIONS,
+  useSidebarWorkIndex,
+  type WorkIndexItem,
+} from "../hooks/useSidebarWorkIndex";
+import {
   buildLogicalProjectGroups,
   classicSidebarSearch,
   groupWorkThreads,
@@ -65,19 +70,15 @@ import { loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySur
 import type { AppView } from "../appView";
 
 const WORK_DONE_PAGE_SIZE = 10;
+const WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
-const COLLAPSIBLE_WORK_SECTIONS: ReadonlySet<SidebarWorkSectionId> = new Set([
-  "earlier",
-  "done",
-  "snoozed",
-]);
-
 type SidebarProps = {
   snapshot: AppSnapshot | null;
   connectionStatus: ConnectionStatus;
   view: AppView;
   open: boolean;
   busy: boolean;
+  layoutWidth: number;
   onClose: () => void;
   onViewChange: (view: AppView) => void;
   onImportProject: () => void;
@@ -162,6 +163,7 @@ function SidebarView({
   view,
   open,
   busy,
+  layoutWidth,
   onClose,
   onViewChange,
   onImportProject,
@@ -197,9 +199,15 @@ function SidebarView({
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [doneVisible, setDoneVisible] = useState(WORK_DONE_PAGE_SIZE);
-  const [expandedWorkSections, setExpandedWorkSections] = useState<Set<SidebarWorkSectionId>>(
-    new Set(),
-  );
+  const [expandedWorkSections, setExpandedWorkSections] = useState<Set<SidebarWorkSectionId>>(() => {
+    try {
+      const stored = (window.localStorage.getItem(WORK_SECTIONS_STORAGE_KEY) ?? "")
+        .split(",");
+      return new Set([...COLLAPSIBLE_WORK_SECTIONS].filter((section) => (
+        stored.includes(section)
+      )));
+    } catch { return new Set(); }
+  });
   const conversations = snapshot?.conversations ?? EMPTY_CONVERSATIONS;
   const snoozeNow = useSnoozeClock(conversations);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -209,6 +217,7 @@ function SidebarView({
   const workFocusConversationIdsRef = useRef<readonly string[]>([]);
   const onCloseRef = useRef(onClose);
   const mobile = useMediaQuery("(max-width: 760px)");
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   useNativePreviewSuspension(Boolean(
     conversationMenu
       || projectMenu
@@ -227,8 +236,15 @@ function SidebarView({
       return next;
     });
   }, [snapshot?.activeProjectId]);
-
   useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query, sidebarMode]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        WORK_SECTIONS_STORAGE_KEY,
+        [...expandedWorkSections].join(","),
+      );
+    } catch { /* Storage can be unavailable in hardened renderer sessions. */ }
+  }, [expandedWorkSections]);
 
   useLayoutEffect(() => {
     setQuery("");
@@ -364,20 +380,29 @@ function SidebarView({
     [activityThreads, snoozeNow],
   );
   const workSearchActive = Boolean(query.trim());
-  const visibleWorkConversationIds = useMemo(() => {
-    const visibleIds = new Set<string>();
-    for (const section of workSections) {
-      const expanded = !COLLAPSIBLE_WORK_SECTIONS.has(section.id)
-        || workSearchActive
-        || expandedWorkSections.has(section.id);
-      if (!expanded) continue;
-      const visibleThreads = section.id === "done"
-        ? section.threads.slice(0, doneVisible)
-        : section.threads;
-      for (const { conversation } of visibleThreads) visibleIds.add(conversation.id);
-    }
-    return visibleIds;
-  }, [doneVisible, expandedWorkSections, workSearchActive, workSections]);
+  const [
+    focusWorkIdentity,
+    workFocusOrder,
+    workIndexByIdentity,
+    workNavigationOrder,
+    renderedWorkConversationIds,
+    renderedWorkItems,
+    workStreamRef,
+    workIndexTotalSize,
+    updateWorkViewport,
+    virtualizedWorkIndex,
+    visibleWorkConversationIds,
+  ] = useSidebarWorkIndex({
+    activeConversationId: snapshot?.activeConversationId ?? null,
+    compact,
+    doneVisible,
+    enabled: sidebarMode === "activity",
+    expandedSections: expandedWorkSections,
+    motionEnabled: sidebarMode === "activity" && !reducedMotion,
+    navigationRef,
+    searchActive: workSearchActive,
+    sections: workSections,
+  });
   useLayoutEffect(() => {
     if (sidebarMode !== "activity") return;
     if (conversationMenu && !visibleWorkConversationIds.has(conversationMenu)) {
@@ -388,6 +413,22 @@ function SidebarView({
       setRenameDraft("");
     }
   }, [conversationMenu, renaming, sidebarMode, visibleWorkConversationIds]);
+  useLayoutEffect(() => {
+    if (sidebarMode !== "activity" || !virtualizedWorkIndex) return;
+    if (conversationMenu && !renderedWorkConversationIds.has(conversationMenu)) {
+      setConversationMenu(null);
+    }
+    if (renaming && !renderedWorkConversationIds.has(renaming)) {
+      setRenaming(null);
+      setRenameDraft("");
+    }
+  }, [
+    conversationMenu,
+    renaming,
+    renderedWorkConversationIds,
+    sidebarMode,
+    virtualizedWorkIndex,
+  ]);
   useLayoutEffect(() => {
     if (sidebarMode !== "activity") {
       workFocusIdentityRef.current = null;
@@ -408,14 +449,15 @@ function SidebarView({
         ({ conversation }) => conversation.id,
       );
     }
-    const focusableWorkItems = [...(
-      navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
-    )];
-    const currentIdentityIndex = focusableWorkItems.findIndex(
-      (item) => item.dataset.workFocusId === identity,
-    );
+    const currentIdentityIndex = workFocusOrder.indexOf(identity);
     if (currentIdentityIndex >= 0) workFocusIndexRef.current = currentIdentityIndex;
     const activeElement = document.activeElement;
+    if (
+      identity.startsWith("thread-actions:")
+      && activeElement instanceof HTMLElement
+      && activeElement.closest(".conversation-menu")
+      && focusWorkIdentity(identity)
+    ) return;
     if (
       activeElement instanceof HTMLElement
       && activeElement !== document.body
@@ -426,11 +468,10 @@ function SidebarView({
     const focusedConversationIds = focusedConversationId
       ? [focusedConversationId]
       : workFocusConversationIdsRef.current;
-    const destinationThread = focusedConversationIds
-      .map((conversationId) => focusableWorkItems.find(
-        (item) => item.dataset.workFocusId === `thread:${conversationId}`,
-      ))
-      .find((item) => item !== undefined);
+    const wantsThreadAction = identity.startsWith("thread-actions:");
+    const destinationThreadIdentity = focusedConversationIds
+      .map((conversationId) => `thread:${conversationId}` as const)
+      .find((candidate) => workIndexByIdentity.has(candidate));
     const destinationSection = focusedConversationIds
       .map((conversationId) => workSections.find((section) => (
         section.threads.some(({ conversation }) => conversation.id === conversationId)
@@ -442,26 +483,41 @@ function SidebarView({
       && !expandedWorkSections.has(destinationSection.id)
       ? destinationSection
       : undefined;
-    const target = focusableWorkItems.find((item) => item.dataset.workFocusId === identity)
-      ?? destinationThread
-      ?? (collapsedDestinationSection
-        ? focusableWorkItems.find(
-          (item) => item.dataset.workFocusId === `section:${collapsedDestinationSection.id}`,
-        )
-        : undefined)
-      ?? (previousIndex === null
-        ? undefined
-        : focusableWorkItems[Math.min(previousIndex, focusableWorkItems.length - 1)])
-      ?? sidebarRef.current?.querySelector<HTMLInputElement>('input[type="search"]');
-    target?.focus({ preventScroll: true });
-    workFocusIdentityRef.current = target?.dataset.workFocusId ?? null;
-    const targetIndex = target ? focusableWorkItems.indexOf(target) : -1;
-    workFocusIndexRef.current = targetIndex >= 0 ? targetIndex : null;
+    const currentItemIdentity = wantsThreadAction
+      ? `thread:${identity.slice("thread-actions:".length)}`
+      : identity;
+    const fallbackIdentity = previousIndex === null
+      ? undefined
+      : workFocusOrder[Math.min(previousIndex, workFocusOrder.length - 1)];
+    const targetIdentity = workIndexByIdentity.has(currentItemIdentity)
+      ? identity
+      : destinationThreadIdentity
+        ? wantsThreadAction
+          ? `thread-actions:${destinationThreadIdentity.slice("thread:".length)}`
+          : destinationThreadIdentity
+        : collapsedDestinationSection
+          ? `section:${collapsedDestinationSection.id}`
+          : fallbackIdentity;
+    if (targetIdentity && focusWorkIdentity(targetIdentity)) {
+      workFocusIdentityRef.current = targetIdentity;
+      const targetIndex = workFocusOrder.indexOf(targetIdentity);
+      workFocusIndexRef.current = targetIndex >= 0 ? targetIndex : null;
+      return;
+    }
+    sidebarRef.current
+      ?.querySelector<HTMLInputElement>('input[type="search"]')
+      ?.focus({ preventScroll: true });
+    workFocusIdentityRef.current = null;
+    workFocusIndexRef.current = null;
   }, [
     doneVisible,
     expandedWorkSections,
+    focusWorkIdentity,
     sidebarMode,
     snoozeNow,
+    workIndexByIdentity,
+    workFocusOrder,
+    workNavigationOrder,
     workSearchActive,
     workSections,
   ]);
@@ -493,6 +549,33 @@ function SidebarView({
 
   const handleNavigationKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const eventTarget = event.target instanceof HTMLElement ? event.target : null;
+    if (
+      eventTarget?.matches("input, textarea, select")
+      || eventTarget?.isContentEditable
+    ) return;
+    if (sidebarMode === "activity") {
+      const focusOwner = eventTarget?.closest<HTMLElement>("[data-work-focus-id]");
+      const rawIdentity = focusOwner?.dataset.workFocusId;
+      const identity = rawIdentity?.startsWith("thread-actions:")
+        ? `thread:${rawIdentity.slice("thread-actions:".length)}`
+        : rawIdentity;
+      const currentIndex = identity
+        ? workNavigationOrder.indexOf(identity)
+        : -1;
+      const nextIndex = nextSidebarNavigationIndex(
+        currentIndex,
+        event.key as "ArrowDown" | "ArrowUp" | "Home" | "End",
+        workNavigationOrder.length,
+      );
+      const nextIdentity = workNavigationOrder[nextIndex];
+      if (!nextIdentity) return;
+      event.preventDefault();
+      focusWorkIdentity(nextIdentity);
+      workFocusIdentityRef.current = nextIdentity;
+      workFocusIndexRef.current = nextIndex;
+      return;
+    }
     const items = [...(navigationRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-nav]") ?? [])]
       .filter((item) => !item.hasAttribute("disabled"));
     if (items.length === 0) return;
@@ -673,7 +756,11 @@ function SidebarView({
     </form>
   );
 
-  const activityRow = (conversation: Conversation) => {
+  const activityRow = (
+    conversation: Conversation,
+    position: number,
+    sectionId: SidebarWorkSectionId,
+  ) => {
     const model = threadViewsById.get(conversation.id)
       ?? sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
     const project = projectById.get(conversation.projectId);
@@ -694,6 +781,7 @@ function SidebarView({
         ? "Snoozed"
         : null,
       conversation.pinnedAt ? "Pinned" : null,
+      splitConversationId === conversation.id ? "Open in split view" : null,
       model.unread ? "New completion" : null,
     ].filter((value): value is string => Boolean(value)).join(", ");
     return (
@@ -705,7 +793,11 @@ function SidebarView({
           splitConversationId === conversation.id && "is-split",
           model.unread && "is-unread",
         )}
-        key={conversation.id}
+        role="listitem"
+        aria-posinset={position}
+        aria-setsize={visibleWorkConversationIds.size}
+        data-sidebar-motion-id={`thread:${conversation.id}`}
+        data-work-section={sectionId}
       >
         {renaming === conversation.id ? renameForm(conversation) : (
           <button
@@ -719,18 +811,15 @@ function SidebarView({
           >
             <span
               className="activity-thread-provider"
-              title={`${providerLabel} provider`}
               aria-hidden="true"
             >
               <ProviderBrandIcon
                 providerId={conversation.providerId}
                 size={15}
-                decorative
               />
               <span
                 className="activity-thread-state-mark"
                 data-work-status={model.status}
-                aria-hidden="true"
               >
                 <WorkStatusIcon size={8} />
               </span>
@@ -739,27 +828,41 @@ function SidebarView({
               <span className="activity-thread-topline">
                 <span className="activity-thread-title">{conversation.title}</span>
                 {conversation.pinnedAt && <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />}
+                {splitConversationId === conversation.id && (
+                  <Columns2
+                    className="conversation-split-mark"
+                    size={11}
+                    aria-label="Open in split view"
+                  />
+                )}
                 {model.unread && <span className="thread-unread-mark">New</span>}
-                <time dateTime={conversation.updatedAt}>{formatRelativeTime(conversation.updatedAt)}</time>
               </span>
               <span className="work-thread-meta">
                 <span className="activity-thread-provider-label">{providerLabel}</span>
-                <span className="activity-thread-project-meta" title={project?.path}>
+                <span className="activity-thread-project-meta">
                   <Folder size={10} aria-hidden="true" />
                   {projectLabel}
                 </span>
                 {repositoryLabel && (
-                  <span className="activity-thread-repository-meta" title={project?.repositoryRoot ?? undefined}>
+                  <span className="activity-thread-repository-meta">
                     {repositoryLabel}
                   </span>
                 )}
                 {conversation.branch && (
-                  <span className="activity-thread-branch-meta" title={`Branch ${conversation.branch}`}>
+                  <span className="activity-thread-branch-meta">
                     <GitBranch size={10} aria-hidden="true" />
                     {conversation.branch}
                   </span>
                 )}
               </span>
+            </span>
+            <span className="activity-thread-trailing" aria-hidden="true">
+              <span className="activity-thread-status-label">
+                {statusLabels[model.status]}
+              </span>
+              <time dateTime={conversation.updatedAt}>
+                {formatRelativeTime(conversation.updatedAt)}
+              </time>
             </span>
           </button>
         )}
@@ -779,6 +882,63 @@ function SidebarView({
     );
   };
 
+  const renderWorkIndexItem = (item: WorkIndexItem): React.JSX.Element => {
+    if (item.kind === "thread") {
+      return activityRow(item.conversation, item.position, item.sectionId);
+    }
+    if (item.kind === "show-more") {
+      return (
+        <button
+          type="button"
+          className="activity-show-more"
+          data-sidebar-nav
+          data-work-focus-id="show-more:done"
+          onClick={() => setDoneVisible((count) => count + WORK_DONE_PAGE_SIZE)}
+        >
+          Show more <span>{item.remaining} older</span>
+        </button>
+      );
+    }
+    const { disclosure, expanded, section } = item;
+    return (
+      <div
+        className={`work-thread-section is-${section.id}`}
+        role="presentation"
+      >
+        {disclosure ? (
+          <h2 id={`work-section-${section.id}`}>
+            <button
+              type="button"
+              className="work-thread-section-toggle"
+              data-sidebar-nav
+              data-work-focus-id={`section:${section.id}`}
+              aria-expanded={expanded}
+              onClick={() => {
+                setConversationMenu(null);
+                setExpandedWorkSections((current) => {
+                  const next = new Set(current);
+                  if (next.has(section.id)) next.delete(section.id);
+                  else next.add(section.id);
+                  return next;
+                });
+              }}
+            >
+              {expanded
+                ? <ChevronDown size={12} />
+                : <ChevronRight size={12} />}
+              <span>{section.label}</span>
+              <span>{section.threads.length}</span>
+            </button>
+          </h2>
+        ) : (
+          <h2 id={`work-section-${section.id}`}>
+            <span>{section.label}</span><span>{section.threads.length}</span>
+          </h2>
+        )}
+      </div>
+    );
+  };
+
   return (
     <>
       <button
@@ -791,7 +951,11 @@ function SidebarView({
       />
       <aside
         ref={sidebarRef}
-        className={clsx("sidebar", open && "is-open", compact && "is-compact", `sidebar-mode-${sidebarMode}`)}
+        className={clsx(
+          "sidebar", open && "is-open", compact && "is-compact",
+          layoutWidth <= 255 && "is-narrow", layoutWidth >= 335 && "is-wide",
+          `sidebar-mode-${sidebarMode}`,
+        )}
         aria-label="Project navigation"
         aria-hidden={mobile && !open ? true : undefined}
         inert={mobile && !open ? true : undefined}
@@ -817,12 +981,7 @@ function SidebarView({
             ? [focusedConversationId]
             : workSections.find((section) => section.id === focusedSectionId)
               ?.threads.map(({ conversation }) => conversation.id) ?? [];
-          const focusableWorkItems = [...(
-            navigationRef.current?.querySelectorAll<HTMLElement>("[data-work-focus-id]") ?? []
-          )];
-          const identityIndex = focusableWorkItems.findIndex(
-            (item) => item.dataset.workFocusId === identity,
-          );
+          const identityIndex = workFocusOrder.indexOf(identity);
           workFocusIndexRef.current = identityIndex >= 0 ? identityIndex : null;
         }}
       >
@@ -903,7 +1062,7 @@ function SidebarView({
           </div>
         )}
 
-        <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} role="list" aria-label={sidebarMode === "activity" ? "Work" : "Projects"}>
+        <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} onScroll={updateWorkViewport} role="list" aria-label={sidebarMode === "activity" ? "Work" : "Projects"}>
           {!snapshot && <div className="sidebar-loading"><LoadingMark label="Loading projects" /><span>Opening your workspace…</span></div>}
           {snapshot && sidebarMode === "classic" && visibleProjects.length === 0 && (
             <div className="sidebar-empty"><Folder size={19} /><span>{query ? "No matching projects" : "No projects yet"}</span></div>
@@ -1032,62 +1191,41 @@ function SidebarView({
           ))}
 
           {sidebarMode === "activity" && snapshot && (
-            <div className="activity-thread-stream">
+            <div
+              ref={workStreamRef}
+              className={clsx(
+                "activity-thread-stream",
+                virtualizedWorkIndex && "is-virtualized",
+              )}
+              data-work-index-virtualized={virtualizedWorkIndex ? "true" : "false"}
+              style={virtualizedWorkIndex ? {
+                height: `${workIndexTotalSize}px`,
+              } : undefined}
+            >
               {visibleWorkCount === 0 && (
                 <div className="sidebar-empty">
                   <Activity size={19} />
                   <span>{query ? "No matching work" : snapshot.projects.length === 0 ? "No projects yet" : "No work yet"}</span>
                 </div>
               )}
-              {workSections.map((section) => {
-                if (section.threads.length === 0) return null;
-                const collapsible = COLLAPSIBLE_WORK_SECTIONS.has(section.id);
-                const disclosure = collapsible && !workSearchActive;
-                const expanded = !collapsible || workSearchActive || expandedWorkSections.has(section.id);
-                const visibleThreads = section.id === "done"
-                  ? section.threads.slice(0, doneVisible)
-                  : section.threads;
+              {renderedWorkItems.map((rendered) => {
+                if (!virtualizedWorkIndex) {
+                  return (
+                    <div className="work-index-static-item" key={rendered.item.id}>
+                      {renderWorkIndexItem(rendered.item)}
+                    </div>
+                  );
+                }
+                const start = rendered.start
+                  ?? rendered.index * (compact ? 42 : 48);
                 return (
-                  <section className={`work-thread-section is-${section.id}`} aria-labelledby={`work-section-${section.id}`} key={section.id}>
-                    {disclosure ? (
-                      <h2 id={`work-section-${section.id}`}>
-                        <button
-                          type="button"
-                          className="work-thread-section-toggle"
-                          data-sidebar-nav
-                          data-work-focus-id={`section:${section.id}`}
-                          aria-expanded={expanded}
-                          onClick={() => {
-                            setConversationMenu(null);
-                            setExpandedWorkSections((current) => {
-                              const next = new Set(current);
-                              if (next.has(section.id)) next.delete(section.id);
-                              else next.add(section.id);
-                              return next;
-                            });
-                          }}
-                        >
-                          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          <span>{section.label}</span>
-                          <span>{section.threads.length}</span>
-                        </button>
-                      </h2>
-                    ) : (
-                      <h2 id={`work-section-${section.id}`}><span>{section.label}</span><span>{section.threads.length}</span></h2>
-                    )}
-                    {expanded && visibleThreads.map(({ conversation }) => activityRow(conversation))}
-                    {expanded && section.id === "done" && visibleThreads.length < section.threads.length && (
-                      <button
-                        type="button"
-                        className="activity-show-more"
-                        data-sidebar-nav
-                        data-work-focus-id="show-more:done"
-                        onClick={() => setDoneVisible((count) => count + WORK_DONE_PAGE_SIZE)}
-                      >
-                        Show more <span>{section.threads.length - visibleThreads.length} older</span>
-                      </button>
-                    )}
-                  </section>
+                  <div
+                    className="work-index-virtual-item"
+                    key={rendered.item.id}
+                    style={{ transform: `translateY(${start}px)` }}
+                  >
+                    {renderWorkIndexItem(rendered.item)}
+                  </div>
                 );
               })}
             </div>

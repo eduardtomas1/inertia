@@ -11,6 +11,8 @@ import type {
 import { defaultSettings } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 
+const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
+
 const project: Project = {
   id: "project-studio",
   name: "Studio",
@@ -68,9 +70,10 @@ function conversation(
 function snapshot(
   conversations: ConversationShell[],
   runs: WorkspaceRun[] = [],
+  projects: Project[] = [project],
 ): AppSnapshot {
   return {
-    projects: [project],
+    projects,
     conversations,
     runs,
     providers: [],
@@ -109,6 +112,11 @@ function renderSidebar(
   conversations: ConversationShell[],
   onSelectConversation = vi.fn(),
   runs: WorkspaceRun[] = [],
+  options: {
+    projects?: Project[];
+    sidebarMode?: AppSnapshot["settings"]["sidebarMode"];
+    splitConversationId?: string | null;
+  } = {},
 ) {
   const onSnoozeConversation = vi.fn();
   const sidebarProps = {
@@ -116,12 +124,13 @@ function renderSidebar(
     view: "workspace" as const,
     open: true,
     busy: false,
+    layoutWidth: 276,
     onClose: vi.fn(),
     onViewChange: vi.fn(),
     onImportProject: vi.fn(),
     onSelectProject: vi.fn(),
     onSelectConversation,
-    splitConversationId: null,
+    splitConversationId: options.splitConversationId ?? null,
     onOpenConversationInSplit: vi.fn(),
     onCloseConversationSplit: vi.fn(),
     onCreateConversation: vi.fn(),
@@ -142,8 +151,18 @@ function renderSidebar(
     onSidebarModeChange: vi.fn(),
     onRemoveProject: vi.fn(),
   };
+  const initialSnapshot = snapshot(conversations, runs, options.projects);
   const view = render(
-    <Sidebar snapshot={snapshot(conversations, runs)} {...sidebarProps} />,
+    <Sidebar
+      snapshot={{
+        ...initialSnapshot,
+        settings: {
+          ...initialSnapshot.settings,
+          sidebarMode: options.sidebarMode ?? initialSnapshot.settings.sidebarMode,
+        },
+      }}
+      {...sidebarProps}
+    />,
   );
   return {
     onSelectConversation,
@@ -157,6 +176,8 @@ function renderSidebar(
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  window.localStorage.removeItem(SIDEBAR_WORK_SECTIONS_STORAGE_KEY);
 });
 
 describe("compact Work sidebar", () => {
@@ -310,17 +331,246 @@ describe("compact Work sidebar", () => {
     const view = renderSidebar(entries);
 
     fireEvent.click(screen.getByRole("button", { name: "Done 11" }));
-    const done = view.container.querySelector(".work-thread-section.is-done");
-    expect(done).not.toBeNull();
-    expect(done?.querySelectorAll(".activity-thread")).toHaveLength(10);
+    const work = view.container.querySelector(".activity-thread-stream");
+    expect(work).not.toBeNull();
+    expect(work?.querySelectorAll(".activity-thread")).toHaveLength(10);
 
-    const showMore = within(done as HTMLElement).getByRole("button", {
+    const showMore = within(work as HTMLElement).getByRole("button", {
       name: "Show more 1 older",
     });
     showMore.focus();
     fireEvent.click(showMore);
-    expect(done?.querySelectorAll(".activity-thread")).toHaveLength(11);
+    expect(work?.querySelectorAll(".activity-thread")).toHaveLength(11);
     expect(screen.getByRole("button", { name: /^Completed task 10,/ })).toHaveFocus();
+  });
+
+  it("persists expanded secondary sections across sidebar remounts", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const earlier = conversation(
+      "persisted-earlier",
+      "Keep earlier work open",
+      new Date(2026, 7, 6, 9),
+    );
+    const firstView = renderSidebar([earlier]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Earlier 1" }));
+    expect(screen.getByText("Keep earlier work open")).toBeInTheDocument();
+    firstView.unmount();
+
+    renderSidebar([earlier]);
+    expect(screen.getByRole("button", { name: "Earlier 1" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Keep earlier work open")).toBeInTheDocument();
+  });
+
+  it("ignores corrupt and unknown persisted section identifiers", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const earlier = conversation(
+      "safe-persistence",
+      "Recover safe section state",
+      new Date(2026, 7, 6, 9),
+    );
+    window.localStorage.setItem(SIDEBAR_WORK_SECTIONS_STORAGE_KEY, "not-json");
+    const corruptView = renderSidebar([earlier]);
+    expect(screen.getByRole("button", { name: "Earlier 1" }))
+      .toHaveAttribute("aria-expanded", "false");
+    corruptView.unmount();
+
+    window.localStorage.setItem(
+      SIDEBAR_WORK_SECTIONS_STORAGE_KEY,
+      "recent,unknown,earlier",
+    );
+    renderSidebar([earlier]);
+    expect(screen.getByRole("button", { name: "Earlier 1" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(window.localStorage.getItem(SIDEBAR_WORK_SECTIONS_STORAGE_KEY))
+      .toBe("earlier");
+  });
+
+  it("virtualizes large Work indexes while retaining list position metadata", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `virtual-${index}`,
+      `Virtual work ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    const view = renderSidebar(entries);
+
+    const stream = view.container.querySelector<HTMLElement>(
+      ".activity-thread-stream",
+    );
+    expect(stream).toHaveAttribute("data-work-index-virtualized", "true");
+    const mountedRows = stream?.querySelectorAll(".activity-thread") ?? [];
+    expect(mountedRows.length).toBeGreaterThan(0);
+    expect(mountedRows.length).toBeLessThan(entries.length);
+    expect(mountedRows[0]).toHaveAttribute("aria-posinset");
+    expect(mountedRows[0]).toHaveAttribute("aria-setsize", "80");
+    expect(screen.getByRole("button", { name: /^Virtual work 0,/ }))
+      .toHaveAttribute("aria-current", "page");
+  });
+
+  it("refreshes a virtualized Work window when its viewport grows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    let notifyResize = (): void => undefined;
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        notifyResize = () => callback([], this as unknown as ResizeObserver);
+      }
+
+      observe(): void {}
+      disconnect(): void {}
+    });
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `resize-${index}`,
+      `Resizable work ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    const view = renderSidebar(entries);
+    const navigation = view.container.querySelector<HTMLElement>(".project-list");
+    const stream = view.container.querySelector<HTMLElement>(
+      ".activity-thread-stream",
+    );
+    expect(navigation).not.toBeNull();
+    expect(stream).not.toBeNull();
+    const initialRows = stream?.querySelectorAll(".activity-thread").length ?? 0;
+
+    Object.defineProperty(navigation, "clientHeight", {
+      configurable: true,
+      value: 2_400,
+    });
+    act(() => notifyResize());
+
+    const resizedRows = stream?.querySelectorAll(".activity-thread").length ?? 0;
+    expect(resizedRows).toBeGreaterThan(initialRows);
+  });
+
+  it("measures a large Work index when switching from Projects", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      observe = observe;
+      disconnect = disconnect;
+    });
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `mode-viewport-${index}`,
+      `Mode viewport work ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    const view = renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
+    const navigation = view.container.querySelector<HTMLElement>(".project-list");
+    expect(navigation).not.toBeNull();
+    expect(observe).not.toHaveBeenCalled();
+    Object.defineProperty(navigation, "clientHeight", {
+      configurable: true,
+      value: 2_400,
+    });
+
+    view.rerenderSnapshot(snapshot(entries));
+
+    const stream = view.container.querySelector<HTMLElement>(
+      ".activity-thread-stream",
+    );
+    expect(stream).toHaveAttribute("data-work-index-virtualized", "true");
+    expect(stream?.querySelectorAll(".activity-thread").length).toBeGreaterThan(40);
+    expect(observe).toHaveBeenCalledWith(navigation);
+    expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it("keeps classic row actions outside the virtual Work window usable", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `classic-actions-${index}`,
+      `Classic actions ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Thread actions for Classic actions 79",
+    }));
+    const rename = screen.getByRole("menuitem", { name: "Rename" });
+    expect(rename).toBeInTheDocument();
+    fireEvent.click(rename);
+
+    expect(screen.getByRole("textbox", { name: "Rename Classic actions 79" }))
+      .toHaveFocus();
+  });
+
+  it("keeps Home and End keyboard navigation working across virtual windows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `keyboard-${index}`,
+      `Keyboard work ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    renderSidebar(entries);
+
+    const first = screen.getByRole("button", { name: /^Keyboard work 0,/ });
+    first.focus();
+    fireEvent.keyDown(first, { key: "End" });
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    const last = screen.getByRole("button", { name: /^Keyboard work 79,/ });
+    expect(last).toHaveFocus();
+
+    fireEvent.keyDown(last, { key: "Home" });
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(screen.getByRole("button", { name: /^Keyboard work 0,/ }))
+      .toHaveFocus();
+  });
+
+  it("keeps project and split-workspace identity explicit in compact rows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const docsProject: Project = {
+      ...project,
+      id: "project-docs",
+      name: "Docs",
+      path: "/workspace/acme-monorepo/apps/docs",
+      normalizedPath: "/workspace/acme-monorepo/apps/docs",
+      repositoryRelativePath: "apps/docs",
+      color: "#288064",
+    };
+    const studioThread = conversation(
+      "studio-thread",
+      "Polish Studio",
+      new Date(2026, 7, 11, 11),
+    );
+    const docsThread = conversation(
+      "docs-thread",
+      "Polish Docs",
+      new Date(2026, 7, 11, 10),
+      { projectId: docsProject.id },
+    );
+    const view = renderSidebar(
+      [studioThread, docsThread],
+      vi.fn(),
+      [],
+      { projects: [project, docsProject], splitConversationId: docsThread.id },
+    );
+
+    expect(screen.getByRole("button", {
+      name: "Polish Studio, OpenAI, Studio, Repository acme-monorepo/apps/studio, Idle",
+    })).toBeInTheDocument();
+    const docsRow = screen.getByRole("button", {
+      name: "Polish Docs, OpenAI, Docs, Repository acme-monorepo/apps/docs, Idle, Open in split view",
+    });
+    expect(docsRow).toHaveTextContent("Docs");
+    expect(docsRow.closest(".activity-thread")).toHaveClass("is-split");
+    expect(within(docsRow).getByLabelText("Open in split view"))
+      .toBeInTheDocument();
+    expect(view.container.querySelectorAll(".activity-thread")).toHaveLength(2);
   });
 
   it("does not reopen a row menu after its Work section is collapsed", () => {

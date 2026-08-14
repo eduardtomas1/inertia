@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 
-test("keeps compact Work sidebar geometry", async () => {
+test("keeps compact Work sidebar geometry", async ({
+  browserName: _browserName,
+}, testInfo) => {
   const app = await createAppFixture({
     name: "work-sidebar-visual",
     initialState: "conversation",
@@ -88,8 +90,8 @@ test("keeps compact Work sidebar geometry", async () => {
     const statusCue = row.locator('[data-work-status="idle"]');
     await expect(statusCue.locator("svg.lucide-minus")).toBeVisible();
     const statusBox = await statusCue.boundingBox();
-    expect(statusBox?.width).toBe(10);
-    expect(statusBox?.height).toBe(10);
+    expect(statusBox?.width).toBe(11);
+    expect(statusBox?.height).toBe(11);
     for (const providerId of ["codex", "claude", "cursor", "opencode"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
@@ -111,6 +113,54 @@ test("keeps compact Work sidebar geometry", async () => {
       '.provider-brand-icon[data-provider-id="claude"]',
     ).first()).toHaveCSS("background-color", "rgb(255, 255, 255)");
 
+    const defaultLightScreenshot = testInfo.outputPath(
+      "chat-index-default-light-1100x760.png",
+    );
+    await app.page.screenshot({
+      animations: "disabled",
+      path: defaultLightScreenshot,
+    });
+    await testInfo.attach("chat-index-default-light-1100x760", {
+      path: defaultLightScreenshot,
+      contentType: "image/png",
+    });
+
+    const sidebarHandle = app.page.getByRole("separator", {
+      name: "Resize project navigation",
+    });
+    await sidebarHandle.focus();
+    await sidebarHandle.press("Home");
+    await expect(sidebarHandle).toHaveAttribute("aria-valuenow", "220");
+    const narrowState = await row.locator(".activity-thread-branch-meta")
+      .evaluate((branch) => {
+        const sidebarElement = branch.closest(".sidebar");
+        return {
+          branchDisplay: getComputedStyle(branch).display,
+          sidebarWidth: sidebarElement?.getBoundingClientRect().width,
+        };
+      });
+    expect(narrowState).toMatchObject({
+      branchDisplay: "none",
+      sidebarWidth: 220,
+    });
+    await expect(row.locator(".activity-thread-branch-meta")).toBeHidden();
+    const narrowLightScreenshot = testInfo.outputPath(
+      "chat-index-narrow-light-220px.png",
+    );
+    await app.page.screenshot({
+      animations: "disabled",
+      path: narrowLightScreenshot,
+    });
+    await testInfo.attach("chat-index-narrow-light-220px", {
+      path: narrowLightScreenshot,
+      contentType: "image/png",
+    });
+
+    await app.resizeWindow(1440, 900);
+    await sidebarHandle.press("End");
+    await expect(sidebarHandle).toHaveAttribute("aria-valuenow", "420");
+    await expect(row.locator(".activity-thread-branch-meta")).toBeVisible();
+
     await app.page.evaluate(() => {
       document.documentElement.dataset.theme = "dark";
       document.documentElement.style.colorScheme = "dark";
@@ -130,6 +180,17 @@ test("keeps compact Work sidebar geometry", async () => {
       await expect(icon.locator(".provider-brand-icon-source.is-dark"))
         .toBeVisible();
     }
+    const wideDarkScreenshot = testInfo.outputPath(
+      "chat-index-wide-dark-420px.png",
+    );
+    await app.page.screenshot({
+      animations: "disabled",
+      path: wideDarkScreenshot,
+    });
+    await testInfo.attach("chat-index-wide-dark-420px", {
+      path: wideDarkScreenshot,
+      contentType: "image/png",
+    });
     await expect(sidebar.getByRole("group", { name: "Filter conversations" }))
       .toHaveCount(0);
     await expect(sidebar.getByRole("button", { name: "Earlier 1" }))

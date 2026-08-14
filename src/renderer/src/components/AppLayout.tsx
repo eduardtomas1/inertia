@@ -30,7 +30,6 @@ import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
-import { Sidebar } from "./Sidebar";
 import { LoadingMark } from "./ui";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
@@ -58,6 +57,9 @@ const MultiSpawnDialog = lazy(async () => ({
 const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
 const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
+}));
+const Sidebar = lazy(async () => ({
+  default: (await import("./Sidebar")).Sidebar,
 }));
 const UsageView = lazy(async () => ({
   default: (await loadUsageView()).UsageView,
@@ -412,40 +414,53 @@ export function AppLayout({
         />
       </Suspense>
       {(mobileNavigation || !sidebarCollapsed) && (
-        <Sidebar
-          snapshot={connection.snapshot}
-          connectionStatus={connection.status}
-          view={view}
-          open={sidebarOpen}
-          busy={busyAction === "project.create"}
-          onClose={sidebarActions.close}
-          onViewChange={sidebarActions.viewChange}
-          onImportProject={sidebarActions.importProject}
-          onSelectProject={sidebarActions.selectProject}
-          onSelectConversation={sidebarActions.selectConversation}
-          splitConversationId={splitConversationId}
-          onOpenConversationInSplit={sidebarActions.openConversationInSplit}
-          onCloseConversationSplit={sidebarActions.closeConversationSplit}
-          onCreateConversation={sidebarActions.createConversation}
-          onOpenMultiSpawn={sidebarActions.openMultiSpawn}
-          onRenameConversation={sidebarActions.renameConversation}
-          onPinConversation={sidebarActions.pinConversation}
-          onSnoozeConversation={sidebarActions.snoozeConversation}
-          onArchiveConversation={sidebarActions.archiveConversation}
-          onSettleConversation={sidebarActions.settleConversation}
-          onRestoreConversation={sidebarActions.restoreConversation}
-          onDeleteConversation={sidebarActions.deleteConversation}
-          onAcknowledgeRun={sidebarActions.acknowledgeRun}
-          onDismissRun={sidebarActions.dismissRun}
-          onOpenProject={sidebarActions.openProject}
-          onRenameProject={sidebarActions.renameProject}
-          onSetProjectGrouping={sidebarActions.setProjectGrouping}
-          onSetProjectGitRepositoryLimit={
-            sidebarActions.setProjectGitRepositoryLimit
-          }
-          onSidebarModeChange={sidebarActions.sidebarModeChange}
-          onRemoveProject={sidebarActions.removeProject}
-        />
+        <Suspense
+          fallback={(
+            <aside
+              className={`sidebar${sidebarOpen ? " is-open" : ""}`}
+              aria-label="Project navigation"
+              aria-busy="true"
+              aria-hidden={mobileNavigation && !sidebarOpen ? true : undefined}
+              inert={mobileNavigation && !sidebarOpen ? true : undefined}
+            />
+          )}
+        >
+          <Sidebar
+            snapshot={connection.snapshot}
+            connectionStatus={connection.status}
+            view={view}
+            open={sidebarOpen}
+            busy={busyAction === "project.create"}
+            layoutWidth={sidebarLayout.value}
+            onClose={sidebarActions.close}
+            onViewChange={sidebarActions.viewChange}
+            onImportProject={sidebarActions.importProject}
+            onSelectProject={sidebarActions.selectProject}
+            onSelectConversation={sidebarActions.selectConversation}
+            splitConversationId={splitConversationId}
+            onOpenConversationInSplit={sidebarActions.openConversationInSplit}
+            onCloseConversationSplit={sidebarActions.closeConversationSplit}
+            onCreateConversation={sidebarActions.createConversation}
+            onOpenMultiSpawn={sidebarActions.openMultiSpawn}
+            onRenameConversation={sidebarActions.renameConversation}
+            onPinConversation={sidebarActions.pinConversation}
+            onSnoozeConversation={sidebarActions.snoozeConversation}
+            onArchiveConversation={sidebarActions.archiveConversation}
+            onSettleConversation={sidebarActions.settleConversation}
+            onRestoreConversation={sidebarActions.restoreConversation}
+            onDeleteConversation={sidebarActions.deleteConversation}
+            onAcknowledgeRun={sidebarActions.acknowledgeRun}
+            onDismissRun={sidebarActions.dismissRun}
+            onOpenProject={sidebarActions.openProject}
+            onRenameProject={sidebarActions.renameProject}
+            onSetProjectGrouping={sidebarActions.setProjectGrouping}
+            onSetProjectGitRepositoryLimit={
+              sidebarActions.setProjectGitRepositoryLimit
+            }
+            onSidebarModeChange={sidebarActions.sidebarModeChange}
+            onRemoveProject={sidebarActions.removeProject}
+          />
+        </Suspense>
       )}
 
       {!mobileNavigation && !sidebarCollapsed && (

@@ -416,7 +416,7 @@ function SidebarView({
     }
   }, [conversationMenu, renaming, sidebarMode, visibleWorkConversationIds]);
   useLayoutEffect(() => {
-    if (!virtualizedWorkIndex) return;
+    if (sidebarMode !== "activity" || !virtualizedWorkIndex) return;
     if (conversationMenu && !renderedWorkConversationIds.has(conversationMenu)) {
       setConversationMenu(null);
     }
@@ -428,6 +428,7 @@ function SidebarView({
     conversationMenu,
     renaming,
     renderedWorkConversationIds,
+    sidebarMode,
     virtualizedWorkIndex,
   ]);
   useLayoutEffect(() => {

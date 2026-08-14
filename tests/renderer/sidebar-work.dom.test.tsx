@@ -482,6 +482,27 @@ describe("compact Work sidebar", () => {
     expect(disconnect).not.toHaveBeenCalled();
   });
 
+  it("keeps classic row actions outside the virtual Work window usable", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `classic-actions-${index}`,
+      `Classic actions ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Thread actions for Classic actions 79",
+    }));
+    const rename = screen.getByRole("menuitem", { name: "Rename" });
+    expect(rename).toBeInTheDocument();
+    fireEvent.click(rename);
+
+    expect(screen.getByRole("textbox", { name: "Rename Classic actions 79" }))
+      .toHaveFocus();
+  });
+
   it("keeps Home and End keyboard navigation working across virtual windows", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

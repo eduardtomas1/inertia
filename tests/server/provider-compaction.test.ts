@@ -64,7 +64,11 @@ describe.sequential("provider compaction adapters", () => {
     roots.splice(0).map(removePortableFixture),
   ));
 
-  it("uses Codex App Server compaction and waits for its completion item", async () => {
+  it("uses Codex App Server compaction and waits for its completion item", {
+    // The first copied node.exe fixture can incur a cold antivirus scan on
+    // hosted Windows before its owned process tree is confirmed stopped.
+    timeout: 30_000,
+  }, async () => {
     const root = portableFixtureRoot("Codex compact");
     roots.push(root);
     const capturePath = join(root, "capture.jsonl");

@@ -2,6 +2,7 @@ import { startCodexAppServerRun } from "../codex-app-server";
 import { withCodexControlClient } from "../codex/control-client";
 import {
   codexAccessPolicy,
+  codexServiceTierMatches,
   validateCodexModelProvider,
 } from "../codex/app-server-config";
 import {
@@ -391,11 +392,7 @@ function startCodexCompaction(
         }
         if (
           serviceTier !== undefined
-          && (
-            serviceTier === null
-              ? resumed.serviceTier !== null
-              : boundedText(resumed.serviceTier, 40) !== serviceTier
-          )
+          && !codexServiceTierMatches(serviceTier, resumed.serviceTier)
         ) {
           throw new Error(
             "Codex did not confirm the requested response service tier for compaction.",

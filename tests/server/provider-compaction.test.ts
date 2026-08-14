@@ -34,7 +34,7 @@ function codexCompactionTierAgent(
   root: string,
   name: string,
   capturePath: string,
-  attestedTier: "echo" | "priority" | null,
+  attestedTier: "echo" | "priority" | "default" | null,
 ): string {
   const command = portableNodeExecutable(root, name);
   writeNodeSubcommand(root, "app-server", `
@@ -115,11 +115,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   });
 
   it.each([
-    ["Fast", "priority"],
-    ["Standard", null],
+    ["Fast", "priority", "echo"],
+    ["Standard", null, "default"],
   ] as const)("forwards and attests %s mode during Codex compaction", async (
     _label,
     requestedTier,
+    attestedTier,
   ) => {
     const root = portableFixtureRoot(`Codex compact ${_label} tier`);
     roots.push(root);
@@ -128,7 +129,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       root,
       `codex-compact-${_label.toLowerCase()}-tier`,
       capturePath,
-      "echo",
+      attestedTier,
     );
     const manager = new ProviderManager({ commands: { codex: command } });
     const base = nativeProviderRunInput({

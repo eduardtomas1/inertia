@@ -9,6 +9,7 @@ import {
   MAX_CODEX_TEXT_CHARS,
   codexAccessPolicy,
   codexProtocolLimits,
+  codexServiceTierMatches,
   isStaleResumeError,
   isUnsupportedFastModeError,
   isUnsupportedFullAccessError,
@@ -828,11 +829,7 @@ export async function openCodexTurn({
   }
   if (
     options.serviceTier !== undefined
-    && (
-      options.serviceTier === null
-        ? opened.serviceTier !== null
-        : boundedText(opened.serviceTier, 40) !== options.serviceTier
-    )
+    && !codexServiceTierMatches(options.serviceTier, opened.serviceTier)
   ) {
     setCompatibilityError?.("fast-mode-unsupported");
     throw new Error(

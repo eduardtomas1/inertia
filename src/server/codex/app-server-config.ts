@@ -142,6 +142,19 @@ export function isUnsupportedFastModeError(error: unknown): boolean {
   );
 }
 
+export function codexServiceTierMatches(
+  requested: "priority" | null,
+  attested: unknown,
+): boolean {
+  // App Server versions originally echoed explicit Standard as null. Current
+  // versions normalize the same request to the provider-native "default"
+  // value. Both attest Standard; missing or any other value still fails
+  // closed, while Fast must continue to match its exact advertised value.
+  return requested === null
+    ? attested === null || boundedText(attested, 40) === "default"
+    : boundedText(attested, 40) === requested;
+}
+
 export function isStaleResumeError(error: unknown): boolean {
   const message = (
     error instanceof Error ? error.message : String(error)

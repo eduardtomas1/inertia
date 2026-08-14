@@ -25,9 +25,9 @@ describe.sequential("Codex provider-native Fast mode", () => {
   });
 
   function fixture(
-    attest: boolean,
+    attestFast: boolean,
     waitForInterrupt = false,
-    standardMismatch = false,
+    standardAttestation: "default" | "legacy-null" | "priority" = "default",
   ): {
     root: string;
     capturePath: string;
@@ -37,6 +37,9 @@ describe.sequential("Codex provider-native Fast mode", () => {
     roots.push(root);
     const command = portableNodeExecutable(root, "codex");
     const capturePath = join(root, "capture.jsonl");
+    const standardAttestationValue = standardAttestation === "legacy-null"
+      ? null
+      : standardAttestation;
     writeNodeSubcommand(root, "app-server", `
 const fs = require("node:fs");
 const readline = require("node:readline");
@@ -56,7 +59,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       thread: { id: threadId },
       cwd: process.cwd(),
       model: "model-a",
-      serviceTier: ${standardMismatch ? '"priority"' : attest ? "message.params.serviceTier ?? null" : "null"},
+      serviceTier: message.params.serviceTier === null
+        ? ${JSON.stringify(standardAttestationValue)}
+        : ${attestFast ? "message.params.serviceTier ?? null" : "null"},
     } });
   }
   if (message.method === "turn/start") {
@@ -163,7 +168,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     )).toBe(false);
   });
 
-  it("forces and attests Standard when the advertised provider default is Fast", async () => {
+  it("accepts App Server's default attestation for explicit Standard", async () => {
     const fake = fixture(true);
     await expect(fake.manager.run({
       ...input(fake.root),
@@ -177,8 +182,22 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       .toMatchObject({ params: { serviceTier: null } });
   });
 
+  it("continues accepting legacy null attestation for explicit Standard", async () => {
+    const fake = fixture(true, false, "legacy-null");
+    await expect(fake.manager.run({
+      ...input(fake.root),
+      supportedFastMode: "priority",
+    })).resolves.toMatchObject({ status: "completed" });
+
+    const captured = messages(fake.capturePath);
+    expect(captured.find(({ method }) => method === "thread/start"))
+      .toMatchObject({ params: { serviceTier: null } });
+    expect(captured.find(({ method }) => method === "turn/start"))
+      .toMatchObject({ params: { serviceTier: null } });
+  });
+
   it("fails closed when Codex keeps a Standard request on provider-default Fast", async () => {
-    const fake = fixture(true, false, true);
+    const fake = fixture(true, false, "priority");
     await expect(fake.manager.run({
       ...input(fake.root),
       supportedFastMode: "priority",

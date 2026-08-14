@@ -262,9 +262,12 @@ describe("compact Work sidebar", () => {
   it("keeps Work row action focus inside its menu and dismisses it predictably", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
-    renderSidebar([
-      conversation("menu-focus", "Keyboard menu work", new Date(2026, 7, 11, 9)),
-    ]);
+    const menuConversation = conversation(
+      "menu-focus",
+      "Keyboard menu work",
+      new Date(2026, 7, 11, 9),
+    );
+    const view = renderSidebar([menuConversation]);
 
     const trigger = screen.getByRole("button", {
       name: "Thread actions for Keyboard menu work",
@@ -279,6 +282,13 @@ describe("compact Work sidebar", () => {
     const remove = within(menu).getByRole("menuitem", { name: "Delete" });
     expect(rename).toHaveFocus();
     expect(rename).toHaveAttribute("tabindex", "-1");
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    view.rerenderSnapshot(snapshot([{ ...menuConversation }]));
+    expect(screen.getByRole("menu", {
+      name: "Thread actions for Keyboard menu work",
+    })).toBeInTheDocument();
+    expect(rename).toHaveFocus();
     expect(trigger).toHaveAttribute("aria-expanded", "true");
 
     fireEvent.keyDown(rename, { key: "ArrowDown" });
@@ -980,7 +990,7 @@ describe("compact Work sidebar", () => {
     })).not.toHaveFocus();
   });
 
-  it("retains the row action focus identity while its Work menu is open", () => {
+  it("retains row action menu focus while its Work owner regroups", () => {
     vi.useFakeTimers();
     const start = new Date(2026, 7, 11, 12);
     vi.setSystemTime(start);
@@ -992,17 +1002,18 @@ describe("compact Work sidebar", () => {
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Snoozed 1" }));
-    fireEvent.click(screen.getByRole("button", {
+    const trigger = screen.getByRole("button", {
       name: "Thread actions for Menu snooze expires",
-    }));
-    screen.getByRole("menuitem", { name: "Rename" }).focus();
+    });
+    fireEvent.click(trigger);
+    const rename = screen.getByRole("menuitem", { name: "Rename" });
+    rename.focus();
     act(() => {
       vi.advanceTimersByTime(101);
     });
 
-    expect(screen.getByRole("button", {
-      name: "Thread actions for Menu snooze expires",
-    })).toHaveFocus();
+    expect(rename).toHaveFocus();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
   });
 
   it("moves focus to search when an expired dismissed snooze leaves Work", () => {

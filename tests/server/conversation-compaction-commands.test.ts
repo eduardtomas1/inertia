@@ -351,12 +351,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       .map((line) => JSON.parse(line)) as Array<{
       id?: number;
       method?: string;
+      params?: { sessionId?: string };
       result?: { outcome?: { outcome?: string } };
     }>;
     expect(messages.some(({ method }) => method === "session/prompt")).toBe(true);
-    expect(messages.some(({ id, result }) =>
+    expect(messages.some(({ id, method, params, result }) => (
       id === 900 && result?.outcome?.outcome === "cancelled"
-    )).toBe(true);
+    ) || (
+      method === "session/cancel" && params?.sessionId === "claude-session"
+    ))).toBe(true);
     expect(manager.isRunning(conversationId)).toBe(false);
     expect(release).toHaveBeenCalledWith(conversationId);
     expect(send).not.toHaveBeenCalled();

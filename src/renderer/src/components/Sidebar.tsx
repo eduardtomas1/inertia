@@ -467,7 +467,6 @@ function SidebarView({
       identity.startsWith("thread-actions:")
       && activeElement instanceof HTMLElement
       && activeElement.closest(".conversation-menu")
-      && focusWorkIdentity(identity)
     ) return;
     if (
       activeElement instanceof HTMLElement

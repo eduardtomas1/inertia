@@ -236,9 +236,7 @@ function SidebarView({
       return next;
     });
   }, [snapshot?.activeProjectId]);
-
   useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query, sidebarMode]);
-
   useEffect(() => {
     try {
       window.localStorage.setItem(

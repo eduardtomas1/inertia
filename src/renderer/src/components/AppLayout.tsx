@@ -44,7 +44,6 @@ import type { UsageViewProps } from "./UsageView";
 import {
   loadCommitDialog,
   loadMultiSpawnDialog,
-  loadSidebar,
   scheduleFrequentSurfacePrefetch,
   loadUsageView,
 } from "./lazySurfaceLoaders";
@@ -60,7 +59,7 @@ const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
 }));
 const Sidebar = lazy(async () => ({
-  default: (await loadSidebar()).Sidebar,
+  default: (await import("./Sidebar")).Sidebar,
 }));
 const UsageView = lazy(async () => ({
   default: (await loadUsageView()).UsageView,

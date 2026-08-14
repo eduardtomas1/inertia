@@ -297,15 +297,14 @@ describe("conversation compaction command", () => {
     async (accessMode) => {
     const root = portableFixtureRoot(`Cursor compact ${accessMode} approval`);
     roots.push(root);
-    const capturePath = join(root, "capture.json");
+    const capturePath = join(root, "capture.jsonl");
     const command = portableNodeExecutable(root, "cursor");
     writeNodeSubcommand(root, "acp", `
 const fs = require("node:fs");
 const readline = require("node:readline");
-const messages = [];
 let promptId;
 let promptSettled = false;
-const capture = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(messages));
+const capture = (message) => fs.appendFileSync(${JSON.stringify(capturePath)}, JSON.stringify(message) + "\\n");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 const finishPrompt = () => {
   if (promptSettled || promptId === undefined) return;
@@ -314,8 +313,7 @@ const finishPrompt = () => {
 };
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
-  messages.push(message);
-  capture();
+  capture(message);
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "Cursor", version: "test" } } });
   if (message.method === "session/load") {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: message.params.sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: [{ name: "summarize", description: "Summarize" }] } } });
@@ -347,7 +345,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       payload: { conversationId },
     })).rejects.toThrow("interactive approval");
 
-    const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
+    const messages = readFileSync(capturePath, "utf8")
+      .trim()
+      .split(/\r?\n/u)
+      .map((line) => JSON.parse(line)) as Array<{
       id?: number;
       method?: string;
       result?: { outcome?: { outcome?: string } };

@@ -39,8 +39,8 @@ describe("reasoning summary rendering", () => {
       "utf8",
     );
     expect(source).toContain("<ReasoningSummary content={reasoningContent} />");
-    expect(source).toContain(
-      "<ReasoningSummary content={reasoningContent} streaming />",
+    expect(source).toMatch(
+      /<ReasoningSummary\s+content=\{reasoningContent\}\s+streaming=\{activeReasoning\}\s*\/>/u,
     );
     expect(source).not.toMatch(/<p>\{reasoningContent\}/u);
   });

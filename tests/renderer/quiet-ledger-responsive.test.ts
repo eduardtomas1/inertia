@@ -71,22 +71,16 @@ describe("Quiet Ledger responsive transcript", () => {
     expect(narrow).toContain(".agent-run-flow > .agent-request-card");
   });
 
-  it("keeps Stop visible while the execution header wraps at compact widths", () => {
+  it("keeps the execution header on one line at medium transcript widths", () => {
     const compact = cssBlock(
       css,
       "@container response-transcript (max-width: 620px)",
     );
-    const header = cssBlock(compact, ".turn-working-state");
-    const status = cssBlock(compact, ".turn-working-status");
-    const elapsed = cssBlock(compact, ".turn-working-elapsed");
+    const detail = cssBlock(compact, ".turn-working-copy small");
     const stop = cssBlock(compact, ".turn-stop-action");
 
     expect(compact).toContain("--user-request-max-width: 92%");
-    expect(header).toContain("flex-wrap: wrap");
-    expect(status).toContain("flex: 1 1 auto");
-    expect(elapsed).toContain("order: 3");
-    expect(elapsed).toContain("width: 100%");
-    expect(compact).toMatch(/\.turn-working-separator\s*\{[^}]*display:\s*none;/su);
+    expect(detail).toContain("display: none");
     expect(stop).toContain("flex: 0 0 auto");
   });
 
@@ -96,6 +90,7 @@ describe("Quiet Ledger responsive transcript", () => {
       "@container response-transcript (max-width: 440px)",
     );
     const details = cssBlock(compact, ".turn-run-details > div");
+    const elapsed = cssBlock(compact, ".turn-working-elapsed");
     const activity = cssBlock(
       css,
       ".turn-work-log .agent-activity-target,",
@@ -103,6 +98,8 @@ describe("Quiet Ledger responsive transcript", () => {
     const requestCard = cssBlock(css, "@container (max-width: 420px)");
 
     expect(compact).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(elapsed).toContain("grid-row: 2");
+    expect(compact).toMatch(/\.turn-working-separator\s*\{[^}]*display:\s*none;/su);
     expect(details).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(activity).toContain("text-overflow: ellipsis");
     expect(activity).toContain("white-space: nowrap");

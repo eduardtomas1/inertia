@@ -195,9 +195,11 @@ export function sameTurnTimelineProps(
     && left.onStop === right.onStop
     && left.onFollowUpSubagent === right.onFollowUpSubagent
     && left.onStopSubagent === right.onStopSubagent
+    && left.turns === right.turns
     && (!next.turn.isActive || (
       left.streamingText === right.streamingText
       && left.streamingReasoning === right.streamingReasoning
+      && left.streamingChannel === right.streamingChannel
     ));
 }
 

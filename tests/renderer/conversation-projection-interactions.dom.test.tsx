@@ -7,6 +7,7 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AgentPlan,
+  type AgentTurn,
   type AppSnapshot,
   type ChatMessage,
   type ConversationShell,
@@ -69,6 +70,45 @@ const snapshot: AppSnapshot = {
   activeConversationId: primaryId,
   settings: { ...defaultSettings },
 };
+
+function runningTurn(conversationId = primaryId): AgentTurn {
+  const modelSelection = nativeModelSelection({
+    providerId: "codex",
+    modelId: "default",
+    reasoningEffort: "medium",
+  });
+  return {
+    id: `${conversationId}-turn`,
+    conversationId,
+    runId: `${conversationId}-run`,
+    userMessageId: `${conversationId}-user`,
+    terminalAssistantMessageId: null,
+    providerId: "codex",
+    modelSelection,
+    continuationIdentity: continuationIdentityForSelection(modelSelection),
+    harnessId: modelSelection.harnessId,
+    backendProfileId: modelSelection.backendProfileId,
+    model: modelSelection.modelId,
+    modelAlias: modelSelection.alias,
+    reasoningEffort: modelSelection.reasoningEffort ?? "medium",
+    interactionMode: "build",
+    accessMode: "supervised",
+    providerSessionBefore: null,
+    providerSessionAfter: null,
+    requestedAt: "2026-07-28T12:00:30.000Z",
+    startedAt: "2026-07-28T12:00:31.000Z",
+    completedAt: null,
+    status: "running",
+    terminalReason: null,
+    checkpointId: null,
+    usageAtStart: null,
+    usageAtCompletion: null,
+    configurationRevision: modelSelection.backendConfigurationRevision,
+    association: "authoritative",
+    createdAt: "2026-07-28T12:00:30.000Z",
+    updatedAt: "2026-07-28T12:00:31.000Z",
+  };
+}
 
 function approval(
   conversationId: string,
@@ -545,6 +585,7 @@ describe("useConversationProjection pending interactions", () => {
       text: "Visible before reconnect.",
     });
     hook.rerender({ status: "offline" });
+    expect(hook.result.current.streamingChannel).toBeNull();
     source.emit({
       type: "server.welcome",
       protocolVersion: 1,
@@ -681,6 +722,7 @@ describe("useConversationProjection pending interactions", () => {
         latestSequence: 8,
       },
     });
+    expect(hook.result.current.streamingChannel).toBeNull();
     source.emit({
       type: "agent.text",
       conversationId: primaryId,
@@ -701,6 +743,7 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.streamingReasoning).toHaveLength(500_000);
     expect(hook.result.current.streamingReasoning.endsWith(reasoningDelta))
       .toBe(true);
+    expect(hook.result.current.streamingChannel).toBe("reasoning");
 
     hook.rerender({ status: "online" });
     await waitFor(() => expect(detailLoads).toBe(2));
@@ -711,6 +754,163 @@ describe("useConversationProjection pending interactions", () => {
 
     expect(hook.result.current.streamingText).toBe(textDelta);
     expect(hook.result.current.streamingReasoning).toBe(reasoningDelta);
+    expect(hook.result.current.streamingChannel).toBe("reasoning");
+
+    act(() => source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: "latest text",
+    }));
+    expect(hook.result.current.streamingChannel).toBe("text");
+  });
+
+  it("scopes live phase authority to the current provider segment", async () => {
+    const source = createEventSource();
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : { type: "request.ok", requestId: crypto.randomUUID() });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+    const owner = {
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+    };
+    const emitReasoning = (text: string): void => source.emit({
+      type: "agent.reasoning",
+      ...owner,
+      text,
+    });
+    const emitText = (text: string): void => source.emit({
+      type: "agent.text",
+      ...owner,
+      text,
+    });
+
+    emitReasoning("Reasoning before a tool.");
+    expect(hook.result.current.streamingChannel).toBe("reasoning");
+    source.emit({
+      type: "agent.activity",
+      activity: {
+        id: "segment-activity",
+        ...owner,
+        kind: "tool",
+        title: "Inspect repository",
+        detail: null,
+        status: "running",
+        createdAt: "2026-08-12T12:00:01.000Z",
+      },
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+
+    emitText("Text before a completed activity.");
+    expect(hook.result.current.streamingChannel).toBe("text");
+    source.emit({
+      type: "agent.activity",
+      activity: {
+        id: "segment-activity",
+        ...owner,
+        kind: "tool",
+        title: "Inspect repository",
+        detail: null,
+        status: "completed",
+        createdAt: "2026-08-12T12:00:01.000Z",
+      },
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+
+    emitReasoning("Reasoning before a plan.");
+    source.emit({
+      type: "agent.plan.updated",
+      plan: {
+        ...owner,
+        explanation: "Use the current provider evidence.",
+        steps: [{ step: "Verify segment ownership", status: "inProgress" }],
+      },
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+
+    emitText("Commentary before persistence.");
+    source.emit({
+      type: "agent.commentary.persisted",
+      message: {
+        id: "segment-commentary",
+        conversationId: primaryId,
+        turnId: owner.turnId,
+        role: "assistant",
+        content: "Commentary before persistence.",
+        attachments: [],
+        createdAt: "2026-08-12T12:00:02.000Z",
+      },
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+
+    emitReasoning("Reasoning before approval.");
+    source.emit({ type: "agent.approval.requested", request: approval(primaryId) });
+    expect(hook.result.current.streamingChannel).toBeNull();
+    source.emit({
+      type: "agent.approval.resolved",
+      ...owner,
+      requestId: approval(primaryId).id,
+      decision: "approve",
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+    emitText("Provider resumed after approval.");
+    expect(hook.result.current.streamingChannel).toBe("text");
+
+    source.emit({
+      type: "agent.input.requested",
+      request: inputRequest(primaryId),
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+    source.emit({
+      type: "agent.input.resolved",
+      ...owner,
+      requestId: inputRequest(primaryId).id,
+    });
+    expect(hook.result.current.streamingChannel).toBeNull();
+    emitReasoning("Provider resumed after input.");
+    expect(hook.result.current.streamingChannel).toBe("reasoning");
+
+    source.emit({ type: "agent.completed", ...owner });
+    expect(hook.result.current.streamingChannel).toBeNull();
   });
 
   it("keeps streaming text when fresh hydration replays the current plan", async () => {
@@ -803,6 +1003,7 @@ describe("useConversationProjection pending interactions", () => {
 
     expect(hook.result.current.streamingText)
       .toBe("Visible through plan hydration.");
+    expect(hook.result.current.streamingChannel).toBeNull();
     expect(onOpenPlan).not.toHaveBeenCalled();
 
     hook.rerender({ status: "online" });
@@ -810,6 +1011,7 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.detailState?.state).toBe("ready");
     expect(hook.result.current.streamingText)
       .toBe("Visible through plan hydration.");
+    expect(hook.result.current.streamingChannel).toBeNull();
 
     source.emit({
       type: "agent.plan.updated",
@@ -821,6 +1023,276 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.streamingText).toBe("");
     expect(onOpenPlan).toHaveBeenCalledWith(primaryId);
   });
+
+  for (const scenario of [
+    {
+      label: "completion",
+      status: "completed" as const,
+      exactStatus: "cancelled" as const,
+      exactConversationStatus: "idle" as const,
+      exactReason: "The user stopped the turn.",
+      event: {
+        type: "agent.completed" as const,
+        conversationId: primaryId,
+        runId: `${primaryId}-run-current`,
+        turnId: `${primaryId}-turn-current`,
+      },
+    },
+    {
+      label: "failure or interruption",
+      status: "failed" as const,
+      exactStatus: "interrupted" as const,
+      exactConversationStatus: "failed" as const,
+      exactReason: "The agent turn was interrupted.",
+      event: {
+        type: "agent.failed" as const,
+        conversationId: primaryId,
+        runId: `${primaryId}-run-current`,
+        turnId: `${primaryId}-turn-current`,
+        message: "The agent turn was interrupted.",
+      },
+    },
+  ]) {
+    it(`projects terminal ${scenario.label} while its detail refresh fails`, async () => {
+      const source = createEventSource();
+      const staleTurn = runningTurn();
+      const turn: AgentTurn = {
+        ...runningTurn(),
+        id: `${primaryId}-turn-current`,
+        runId: `${primaryId}-run-current`,
+        userMessageId: `${primaryId}-user-current`,
+        createdAt: "2026-07-28T12:01:30.000Z",
+        requestedAt: "2026-07-28T12:01:30.000Z",
+        startedAt: "2026-07-28T12:01:31.000Z",
+        updatedAt: "2026-07-28T12:01:31.000Z",
+      };
+      const staleApproval = {
+        ...approval(primaryId, "stale-turn-approval"),
+        runId: staleTurn.runId,
+        turnId: staleTurn.id,
+      };
+      const currentApproval = {
+        ...approval(primaryId, "current-turn-approval"),
+        runId: turn.runId,
+        turnId: turn.id,
+      };
+      const staleInput = {
+        ...inputRequest(primaryId),
+        id: "stale-turn-input",
+        runId: staleTurn.runId,
+        turnId: staleTurn.id,
+      };
+      const currentInput = {
+        ...inputRequest(primaryId),
+        id: "current-turn-input",
+        runId: turn.runId,
+        turnId: turn.id,
+      };
+      const runningSnapshot: AppSnapshot = {
+        ...snapshot,
+        conversations: snapshot.conversations.map((item) =>
+          item.id === primaryId
+            ? {
+                ...item,
+                status: "running",
+                attentionKind: null,
+                latestTurn: {
+                  id: turn.id,
+                  runId: turn.runId,
+                  status: turn.status,
+                  providerId: turn.providerId,
+                  harnessId: turn.harnessId,
+                  backendProfileId: turn.backendProfileId,
+                  modelSelection: turn.modelSelection,
+                  continuationIdentity: turn.continuationIdentity,
+                  model: turn.model,
+                  reasoningEffort: turn.reasoningEffort,
+                  requestedAt: turn.requestedAt,
+                  startedAt: turn.startedAt,
+                  completedAt: turn.completedAt,
+                  terminalReason: turn.terminalReason,
+                  updatedAt: turn.updatedAt,
+                },
+              }
+            : item),
+      };
+      let detailLoads = 0;
+      const request = vi.fn(async (
+        command: CommandWithoutId,
+      ): Promise<ServerEvent> => {
+        if (command.type !== "conversation.detail.load") {
+          return {
+            type: "request.ok",
+            requestId: crypto.randomUUID(),
+          };
+        }
+        detailLoads += 1;
+        if (detailLoads > 1) {
+          throw new Error("The request took too long to complete.");
+        }
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              // A failed earlier refresh can retain stale active turn A while
+              // the shell authoritatively names newer active turn B.
+              agentTurns: [staleTurn, turn],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        };
+      });
+      const onTerminal = vi.fn();
+      const hook = renderHook(
+        ({ currentSnapshot }: { currentSnapshot: AppSnapshot }) =>
+          useConversationProjection({
+            snapshot: currentSnapshot,
+            status: "online",
+            request,
+            subscribe: source.subscribe,
+            enabled: true,
+            autoOpenPlan: false,
+            onOpenPlan: vi.fn(),
+            onTerminal,
+          }),
+        { initialProps: { currentSnapshot: runningSnapshot } },
+      );
+      await waitFor(() => expect(hook.result.current.detailState?.state)
+        .toBe("ready"));
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
+        .toBe("running");
+
+      source.emit({ type: "agent.approval.requested", request: staleApproval });
+      source.emit({ type: "agent.approval.requested", request: currentApproval });
+      source.emit({ type: "agent.input.requested", request: staleInput });
+      source.emit({ type: "agent.input.requested", request: currentInput });
+      expect(hook.result.current.pendingApprovals.map(({ id }) => id).sort())
+        .toEqual(["current-turn-approval", "stale-turn-approval"]);
+      expect(hook.result.current.pendingInputs.map(({ id }) => id).sort())
+        .toEqual(["current-turn-input", "stale-turn-input"]);
+
+      source.emit({
+        type: "agent.text",
+        conversationId: primaryId,
+        runId: turn.runId,
+        turnId: turn.id,
+        text: "Provider output before settlement.",
+      });
+      expect(hook.result.current.streamingChannel).toBe("text");
+      source.emit({
+        ...scenario.event,
+        runId: staleTurn.runId,
+        turnId: staleTurn.id,
+      });
+      expect(hook.result.current.streamingChannel).toBe("text");
+      expect(hook.result.current.turns.find(({ id }) => id === staleTurn.id)?.status)
+        .toBe("running");
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
+        .toBe("running");
+      expect(hook.result.current.conversation?.status).toBe("running");
+      expect(hook.result.current.pendingApprovals.map(({ id }) => id).sort())
+        .toEqual(["current-turn-approval", "stale-turn-approval"]);
+      expect(hook.result.current.pendingInputs.map(({ id }) => id).sort())
+        .toEqual(["current-turn-input", "stale-turn-input"]);
+      expect(onTerminal).not.toHaveBeenCalled();
+      source.emit(scenario.event);
+
+      expect(hook.result.current.streamingChannel).toBeNull();
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id))
+        .toMatchObject({
+        id: turn.id,
+        runId: turn.runId,
+        status: scenario.status,
+      });
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id)
+        ?.terminalReason).toBe(
+        scenario.event.type === "agent.failed" ? scenario.event.message : null,
+      );
+      expect(hook.result.current.pendingApprovals.map(({ id }) => id))
+        .toEqual(["stale-turn-approval"]);
+      expect(hook.result.current.pendingInputs.map(({ id }) => id))
+        .toEqual(["stale-turn-input"]);
+      expect(hook.result.current.conversation).toMatchObject({
+        id: primaryId,
+        status: scenario.status,
+        attentionKind: null,
+        latestTurn: {
+          id: turn.id,
+          runId: turn.runId,
+          status: scenario.status,
+        },
+      });
+      expect(onTerminal).toHaveBeenCalledOnce();
+
+      source.emit({
+        type: "conversation.detail.invalidated",
+        conversationId: primaryId,
+      });
+      await waitFor(() => expect(detailLoads).toBe(2));
+
+      expect(hook.result.current.detailState?.state).toBe("ready");
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
+        .toBe(scenario.status);
+      expect(hook.result.current.streamingChannel).toBeNull();
+      expect(hook.result.current.conversation?.status).toBe(scenario.status);
+
+      const completedAt = "2026-07-28T12:02:00.000Z";
+      hook.rerender({
+        currentSnapshot: {
+          ...runningSnapshot,
+          conversations: runningSnapshot.conversations.map((item) =>
+            item.id === primaryId
+              ? {
+                  ...item,
+                  status: scenario.exactConversationStatus,
+                  latestTurn: {
+                    id: turn.id,
+                    runId: turn.runId,
+                    status: scenario.exactStatus,
+                    providerId: turn.providerId,
+                    harnessId: turn.harnessId,
+                    backendProfileId: turn.backendProfileId,
+                    modelSelection: turn.modelSelection,
+                    continuationIdentity: turn.continuationIdentity,
+                    model: turn.model,
+                    reasoningEffort: turn.reasoningEffort,
+                    requestedAt: turn.requestedAt,
+                    startedAt: turn.startedAt,
+                    completedAt,
+                    terminalReason: scenario.exactReason,
+                    updatedAt: completedAt,
+                  },
+                }
+              : item),
+        },
+      });
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id))
+        .toMatchObject({
+        id: turn.id,
+        status: scenario.exactStatus,
+        completedAt,
+        terminalReason: scenario.exactReason,
+      });
+      expect(hook.result.current.conversation?.status)
+        .toBe(scenario.exactConversationStatus);
+    });
+  }
 
   it("keeps the last ready thread visible when a refresh request times out", async () => {
     const source = createEventSource();

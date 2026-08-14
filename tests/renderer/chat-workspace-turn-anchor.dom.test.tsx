@@ -37,17 +37,24 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
   return {
     Composer: memo(function MockComposer({
       onSend,
+      running,
     }: {
       onSend(content: string, attachments: []): Promise<void>;
+      running: boolean;
     }): React.JSX.Element {
       composerRenderCount.value += 1;
       return (
-        <button
-          type="button"
-          onClick={() => void onSend("Materialize this draft", [])}
-        >
-          Send materialized draft
-        </button>
+        <>
+          <span data-testid="composer-running-state">
+            {running ? "running" : "settled"}
+          </span>
+          <button
+            type="button"
+            onClick={() => void onSend("Materialize this draft", [])}
+          >
+            Send materialized draft
+          </button>
+        </>
       );
     }),
   };
@@ -365,6 +372,35 @@ describe("draft turn anchoring", () => {
     expect(screen.getByTestId("timeline-turn-projection"))
       .toHaveTextContent(`${activeConversation.id}:${settledTurn.id}:completed`);
     expect(timelineLifecycle).toEqual({ mounts: 1, unmounts: 0 });
+  });
+
+  it("removes the composer running state with a projected terminal shell", () => {
+    const activeConversation = {
+      ...conversation("conversation-terminal-projection"),
+      status: "running" as const,
+    };
+    const settledConversation = {
+      ...activeConversation,
+      status: "completed" as const,
+    };
+    const view = render(
+      <ChatWorkspace
+        {...workspaceProps(activeConversation, async () => null)}
+        turns={[agentTurn(activeConversation, "running")]}
+      />,
+    );
+
+    expect(screen.getByTestId("composer-running-state"))
+      .toHaveTextContent("running");
+    view.rerender(
+      <ChatWorkspace
+        {...workspaceProps(settledConversation, async () => null)}
+        turns={[agentTurn(settledConversation, "completed")]}
+      />,
+    );
+
+    expect(screen.getByTestId("composer-running-state"))
+      .toHaveTextContent("settled");
   });
 
   it("ignores a completed-answer callback owned by the previous conversation", async () => {

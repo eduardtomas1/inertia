@@ -55,7 +55,11 @@ import type {
 import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import { shouldFollowTimeline } from "../utils/responseTimeline";
+import {
+  shouldFollowTimeline,
+  type StreamingAgentChannel,
+} from "../utils/responseTimeline";
+import type { TerminalTurnProjections } from "../utils/terminalTurnProjection";
 import { revealAgentInputRequest } from "../utils/agentInputNavigation";
 import {
   initialTranscriptNavigation,
@@ -104,6 +108,8 @@ type ChatWorkspaceProps = {
   turnGitArtifacts: TurnGitArtifact[];
   streamingText: string;
   streamingReasoning: string;
+  streamingChannel?: StreamingAgentChannel;
+  terminalProjections?: TerminalTurnProjections;
   usage: ThreadUsageSnapshot | null;
   skills: AgentSkillSummary[];
   skillsCapability: AgentWorkflowSkillsCapability | null;
@@ -205,6 +211,8 @@ export function ChatWorkspace({
   turnGitArtifacts,
   streamingText,
   streamingReasoning,
+  streamingChannel = null,
+  terminalProjections,
   usage,
   skills,
   skillsCapability,
@@ -710,6 +718,10 @@ export function ChatWorkspace({
               } : null}
               streamingText={detailLoading ? "" : streamingText}
               streamingReasoning={detailLoading ? "" : streamingReasoning}
+              streamingChannel={detailLoading ? null : streamingChannel}
+              terminalProjections={detailLoading
+                ? undefined
+                : terminalProjections}
               approvals={ownedApprovals}
               inputRequests={ownedInputRequests}
               providerIdentityLabels={providerIdentityLabels}
@@ -727,12 +739,8 @@ export function ChatWorkspace({
               onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
               scrollElementRef={scrollRef}
               timelineElementRef={timelineRef}
-              checkpointRestoreDisabled={ownedTurns.some(({ status }) =>
-                status === "queued"
-                || status === "starting"
-                || status === "running"
-                || status === "waiting-for-approval"
-                || status === "waiting-for-input")}
+              checkpointRestoreDisabled={conversation.status === "running"
+                || conversation.status === "needs-input"}
               onRespondToApproval={onRespondToApproval}
               onRespondToInput={onRespondToInput}
               onRevertCheckpoint={onRevertCheckpoint}

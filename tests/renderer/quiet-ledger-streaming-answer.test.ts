@@ -115,6 +115,7 @@ function renderTimeline(
   messages: ChatMessage[],
   streamingText: string,
   activities: AgentActivity[] = [],
+  streamingChannel: "text" | null = null,
 ): string {
   return renderToStaticMarkup(createElement(ResponseTimeline, {
     turns: [turn],
@@ -128,6 +129,7 @@ function renderTimeline(
     conversationId,
     streamingText,
     streamingReasoning: "",
+    streamingChannel,
     approvals: [],
     inputRequests: [],
     showTimestamps: false,
@@ -189,6 +191,8 @@ describe("Quiet Ledger streaming answer handoff", () => {
       agentTurn("running", null),
       [userMessage],
       "Live answer\n\n```futurelang\nsome <unsafe> code",
+      [],
+      "text",
     );
 
     const terminalMessage = message(
@@ -275,6 +279,7 @@ describe("Quiet Ledger streaming answer handoff", () => {
       messages,
       "I’m writing the final response.",
       activities,
+      "text",
     );
     const before = html.indexOf("I’m checking the implementation.");
     const work = html.indexOf("Read source");
@@ -363,6 +368,8 @@ describe("Quiet Ledger streaming answer handoff", () => {
         "Stream quietly.",
       )],
       "Token-by-token prose",
+      [],
+      "text",
     );
     const commentaryStart = html.indexOf('aria-label="Live agent update"');
     const commentaryEnd = html.indexOf("</article>", commentaryStart);
@@ -394,10 +401,10 @@ describe("Quiet Ledger streaming answer handoff", () => {
     );
     expect(projectionSource).toContain('id: `live-commentary:${turn.id}`');
     expect(projectionHookSource).toMatch(
-      /event\.type === "agent\.activity"[\s\S]*?setStreamingText\(""\);[\s\S]*?event\.type === "agent\.text"/u,
+      /event\.type === "agent\.activity"[\s\S]*?closeTextStream\(\);[\s\S]*?event\.type === "agent\.text"/u,
     );
     expect(projectionHookSource).toMatch(
-      /event\.type === "agent\.completed" \|\| event\.type === "agent\.failed"[\s\S]*?setStreamingText\(""\)/u,
+      /event\.type === "agent\.completed" \|\| event\.type === "agent\.failed"[\s\S]*?setStreaming\(closeStreamingChannelState\)[\s\S]*?setTerminalProjections/u,
     );
   });
 });

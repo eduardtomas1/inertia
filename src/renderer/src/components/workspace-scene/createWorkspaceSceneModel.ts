@@ -263,9 +263,13 @@ export function createWorkspaceSceneModel({
     : null;
   const goalMutationSafetyLocked = workflow.error
     ?.includes("recovery safety mode") === true;
+  const conversationIsRunning = conversation?.status === "running"
+    || conversation?.status === "needs-input";
   const currentGoalExecution = goalMutationSafetyLocked
     ? "idle"
-    : goalExecutionStatus(projection.turns);
+    : conversationIsRunning
+      ? goalExecutionStatus(projection.turns)
+      : "idle";
   const currentGoalControlsBusy = goalControlsBusy({
     connectionStatus: connection.status,
     workflowLoading: workflow.loading,
@@ -394,7 +398,8 @@ export function createWorkspaceSceneModel({
       ? visibleDetailState
       : null;
   const canGuideParent = (trace: SubagentTrace): boolean =>
-    canFollowUpSubagentTrace(trace, projection.turns);
+    Boolean(conversationIsRunning
+      && canFollowUpSubagentTrace(trace, projection.turns));
   const setGoal = async (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -506,6 +511,8 @@ export function createWorkspaceSceneModel({
       turnGitArtifacts: projection.turnGitArtifacts,
       streamingText: projection.streamingText,
       streamingReasoning: projection.streamingReasoning,
+      streamingChannel: projection.streamingChannel,
+      terminalProjections: projection.terminalProjections,
       usage: projection.usage,
       skills: currentWorkflow?.skills ?? [],
       skillsCapability: currentWorkflow?.skillsCapability ?? null,
@@ -823,7 +830,8 @@ export function createWorkspaceSceneModel({
           });
         },
         canStopSubagent: (trace) =>
-          canStopSubagentTrace(trace, projection.turns),
+          Boolean(conversationIsRunning
+            && canStopSubagentTrace(trace, projection.turns)),
         onStopSubagent: async (trace) => {
           try {
             await actions.stopSubagent(trace);

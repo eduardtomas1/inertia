@@ -14,7 +14,11 @@ import type {
 } from "@shared/contracts";
 import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
-import type { TurnGitArtifactSummary } from "../../utils/responseTimeline";
+import type {
+  StreamingAgentChannel,
+  TurnGitArtifactSummary,
+} from "../../utils/responseTimeline";
+import type { TerminalTurnProjections } from "../../utils/terminalTurnProjection";
 
 export interface ResponseTimelineProps {
   turns: AgentTurn[];
@@ -34,6 +38,8 @@ export interface ResponseTimelineProps {
   } | null;
   streamingText: string;
   streamingReasoning: string;
+  streamingChannel?: StreamingAgentChannel;
+  terminalProjections?: TerminalTurnProjections;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   providerIdentityLabels?: ProviderIdentityLabels;

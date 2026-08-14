@@ -469,10 +469,10 @@ export const createQuietLedgerFixture = ({
     active.turn.id,
     activeAt(10),
   );
-  for (const [seconds, kind, title, status] of [
-    [12, "file", "Editing backend adapter", "running"],
-    [14, "command", "Running focused tests", "running"],
-  ] as const) {
+  const activeRunningActivities = ([
+    [12, "file", "Editing backend adapter"],
+    [14, "command", "Running focused tests"],
+  ] as const).map(([seconds, kind, title]) =>
     store.addActivity({
       conversationId: conversation.id,
       runId: active.turn.runId,
@@ -480,15 +480,15 @@ export const createQuietLedgerFixture = ({
       kind,
       title,
       detail: null,
-      status,
+      status: "running",
       createdAt: activeAt(seconds),
-    });
-  }
+    }));
   store.close();
 
   return {
     active,
     activeAt,
+    activeRunningActivities,
     approval,
     approvalRequest,
     cancelled,

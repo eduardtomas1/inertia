@@ -75,10 +75,11 @@ describe("active transcript attention visibility", () => {
     )).toBe(false);
   });
 
-  it("treats the multi-spawn dialog as a completion obstruction", () => {
+  it("treats dashboard and multi-spawn dialogs as completion obstructions", () => {
     const unobstructed = {
       paletteOpen: false,
       commitDialogOpen: false,
+      dailyWorkOpen: false,
       authProviderOpen: false,
       multiSpawnOpen: false,
       mobileSidebarOpen: false,
@@ -87,6 +88,10 @@ describe("active transcript attention visibility", () => {
     expect(workspaceAttentionObstructed({
       ...unobstructed,
       multiSpawnOpen: true,
+    })).toBe(true);
+    expect(workspaceAttentionObstructed({
+      ...unobstructed,
+      dailyWorkOpen: true,
     })).toBe(true);
     expect(shouldMarkWorkspaceRunSeen(
       run(),

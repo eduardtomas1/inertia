@@ -47,6 +47,52 @@ function provider(id: "codex" | "claude", label: string): ProviderInfo {
   };
 }
 
+function codexWithModels(): ProviderInfo {
+  const codex = provider("codex", "Codex");
+  return {
+    ...codex,
+    models: [{
+      id: "gpt-5.6-sol",
+      label: "GPT-5.6-Sol",
+      description: "Default Codex model",
+      isDefault: true,
+      inputModalities: ["text"],
+      reasoningOptions: [{
+        value: "low",
+        label: "Low",
+        description: "Quick reasoning",
+      }, {
+        value: "xhigh",
+        label: "Xhigh",
+        description: "Deep reasoning",
+      }],
+      defaultReasoningEffort: "low",
+    }, {
+      id: "gpt-5.6-terra",
+      label: "GPT-5.6-Terra",
+      description: "Balanced Codex model",
+      isDefault: false,
+      inputModalities: ["text"],
+      reasoningOptions: [{
+        value: "medium",
+        label: "Medium",
+        description: "Balanced reasoning",
+      }],
+      defaultReasoningEffort: "medium",
+    }],
+    metadataState: {
+      ...codex.metadataState,
+      models: {
+        freshness: "fresh",
+        provenance: "provider",
+        updatedAt: "2026-08-17T10:00:00.000Z",
+        lastAttemptedAt: "2026-08-17T10:00:00.000Z",
+        refreshing: false,
+      },
+    },
+  };
+}
+
 function settingsProps(
   onUpdate: ComponentProps<typeof SettingsView>["onUpdate"],
 ): ComponentProps<typeof SettingsView> {
@@ -126,6 +172,48 @@ describe("Settings composite updates", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download" }));
     expect(await screen.findByText("The update download could not be started."))
       .toHaveAttribute("role", "status");
+  });
+
+  it("shows persisted default sentinels and saves the concrete provider default", () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    const onUpdate = vi.fn(async () => undefined);
+    const props = {
+      ...settingsProps(onUpdate),
+      providers: [codexWithModels()],
+    };
+    const view = render(<SettingsView {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+
+    const model = screen.getByLabelText("Model");
+    const reasoning = screen.getByLabelText("Reasoning");
+    expect(model).toHaveValue("");
+    expect(model).toHaveDisplayValue(
+      "Provider default — GPT-5.6-Sol",
+    );
+    expect(reasoning).toHaveValue("");
+    expect(reasoning).toHaveDisplayValue("Model default — Low");
+
+    fireEvent.change(model, { target: { value: "gpt-5.6-sol" } });
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      defaultModel: "gpt-5.6-sol",
+      defaultReasoningEffort: "low",
+    });
+
+    view.rerender(<SettingsView
+      {...props}
+      settings={{
+        ...defaultSettings,
+        defaultModel: "gpt-5.6-sol",
+        defaultReasoningEffort: "xhigh",
+      }}
+    />);
+    expect(model).toHaveValue("gpt-5.6-sol");
+    expect(model).toHaveDisplayValue("GPT-5.6-Sol — Default");
+    expect(reasoning).toHaveValue("xhigh");
+    expect(reasoning).toHaveDisplayValue("Xhigh");
   });
 
   it("preserves a dirty alias through an equivalent snapshot refresh", () => {

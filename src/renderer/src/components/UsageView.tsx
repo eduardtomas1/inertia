@@ -15,6 +15,7 @@ import type {
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
+import { formatCompact, formatCount, formatDuration } from "../lib/usageFormat";
 import { ProviderMark } from "./ProviderMark";
 import {
   DailyProviderChart,
@@ -35,13 +36,6 @@ export interface UsageViewProps {
 }
 
 const RANGE_OPTIONS = [7, 30, 90] as const;
-const countFormatter = new Intl.NumberFormat("en", {
-  maximumFractionDigits: 0,
-});
-const compactFormatter = new Intl.NumberFormat("en", {
-  notation: "compact",
-  maximumFractionDigits: 2,
-});
 const percentFormatter = new Intl.NumberFormat("en", {
   style: "percent",
   maximumFractionDigits: 1,
@@ -87,25 +81,6 @@ export function usageDashboardCommand(
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     },
   };
-}
-
-function formatCount(value: number): string {
-  return countFormatter.format(value);
-}
-
-function formatCompact(value: number): string {
-  return compactFormatter.format(value);
-}
-
-function formatDuration(milliseconds: number): string {
-  const seconds = Math.round(milliseconds / 1_000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = minutes / 60;
-  if (hours < 24) return `${hours.toFixed(hours < 10 ? 1 : 0)}h`;
-  const days = hours / 24;
-  return `${days.toFixed(days < 10 ? 1 : 0)}d`;
 }
 
 function displayDate(value: string, includeYear = false): string {

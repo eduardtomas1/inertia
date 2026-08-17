@@ -10553,22 +10553,21 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .timeline-minimap {
   position: absolute;
   left: var(--timeline-minimap-left);
-  width: 24px;
+  width: 36px;
   max-height: min(320px, calc(100cqh - 24px));
   pointer-events: auto;
   transform: translateY(-50%);
 }
 
-/* Preserve 24px targets in short stacked panes; the rail scrolls instead. */
+/* Match Codex's compact prompt rail while preserving a stable pointer target. */
 .timeline-minimap-track {
   position: relative;
   z-index: 1;
   display: flex;
   max-height: inherit;
   flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 5px 0;
+  align-items: flex-start;
+  padding: 4px 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -10579,82 +10578,57 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   display: none;
 }
 
-.timeline-minimap::before {
-  position: absolute;
-  z-index: 0;
-  inset: -4px -8px;
-  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-strong) 84%, transparent);
-  box-shadow: var(--shadow-soft);
-  content: "";
-  opacity: 0;
-  transition: opacity var(--motion-fast) var(--motion-ease);
-}
-
-.timeline-minimap:hover::before,
-.timeline-minimap:focus-within::before {
-  opacity: 1;
-}
-
 .timeline-minimap button {
+  --timeline-marker-progress: 0;
   position: relative;
   z-index: 1;
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
-  min-height: 24px;
+  display: flex;
+  width: 36px;
+  min-width: 36px;
+  height: 10px;
+  min-height: 10px;
+  align-items: center;
   padding: 0;
   border: 0;
-  border-radius: 999px;
   background: transparent;
 }
 
 .timeline-minimap button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -4px;
+  outline: none;
 }
 
 .timeline-minimap button::before {
   position: absolute;
   top: 50%;
-  left: 50%;
+  left: 0;
   z-index: 0;
-  width: 8px;
+  width: calc(6px + 20px * var(--timeline-marker-progress));
   height: 2px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text-muted) 52%, transparent);
+  background: var(--text-muted);
   content: "";
-  translate: -50% -50%;
-  transition:
-    width var(--motion-fast) var(--motion-ease),
-    height var(--motion-fast) var(--motion-ease),
-    background var(--motion-fast) var(--motion-ease),
-    box-shadow var(--motion-fast) var(--motion-ease);
-}
-
-.timeline-minimap:hover button::before,
-.timeline-minimap:focus-within button::before {
-  background: color-mix(in srgb, var(--text-muted) 82%, transparent);
+  opacity: 0.4;
+  transform: translateY(-50%);
+  transition: width 160ms linear(0, 0.398 10%, 0.682 20%, 0.843 30%, 0.925 40%, 0.972 50%, 1.004 60%, 1.008 70%, 1.003 80%, 1);
 }
 
 .timeline-minimap-preview {
   position: absolute;
   top: 50%;
-  left: 30px;
+  left: 36px;
   z-index: 2;
   display: block;
   width: max-content;
-  max-width: min(300px, 42vw);
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  background: var(--surface-strong);
-  box-shadow: var(--shadow-soft);
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-strong) 95%, transparent);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
   color: var(--text);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 1.4;
+  line-height: 20px;
   overflow-wrap: anywhere;
   pointer-events: none;
   text-align: left;
@@ -10663,47 +10637,56 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .timeline-minimap button[aria-current="true"]::before {
-  width: 14px;
-  background: var(--accent);
-  box-shadow: 0 0 8px -2px color-mix(in srgb, var(--accent) 72%, transparent);
+  background: var(--text-soft);
+  opacity: 0.6;
 }
 
-/*
- * Dock-style magnification. The pointed-at marker grows most and the swell
- * falls off across its two nearest neighbours on each side, so the rail reads
- * as one continuous curve instead of a single marker popping out of a flat
- * column. `data-emphasized` already tracks hover and keyboard focus together,
- * so the same falloff serves both. `:has()` supplies the preceding-sibling
- * direction that sibling combinators cannot express, and the levels are
- * ordered far-to-near so the nearer rule wins on equal specificity.
- */
-.timeline-minimap button[data-emphasized="true"] + button + button::before,
-.timeline-minimap button:has(+ button + button[data-emphasized="true"])::before {
-  width: 11px;
-  height: 3px;
+/* Let the hovered or keyboard-focused prompt lead a restrained line swell. */
+.timeline-minimap:has(button[data-emphasized="true"])
+  button[aria-current="true"]:not([data-emphasized="true"])::before {
+  background: var(--text-muted);
+  opacity: 0.4;
 }
 
-.timeline-minimap button[data-emphasized="true"] + button::before,
-.timeline-minimap button:has(+ button[data-emphasized="true"])::before {
-  width: 15px;
-  height: 4px;
+.timeline-minimap button[data-emphasized="true"] + button + button + button,
+.timeline-minimap button:has(+ button + button + button[data-emphasized="true"]) {
+  --timeline-marker-progress: 0.2;
+}
+
+.timeline-minimap button[data-emphasized="true"] + button + button,
+.timeline-minimap button:has(+ button + button[data-emphasized="true"]) {
+  --timeline-marker-progress: 0.4;
+}
+
+.timeline-minimap button[data-emphasized="true"] + button,
+.timeline-minimap button:has(+ button[data-emphasized="true"]) {
+  --timeline-marker-progress: 0.7;
+}
+
+.timeline-minimap button[data-emphasized="true"] {
+  --timeline-marker-progress: 1;
 }
 
 .timeline-minimap button[data-emphasized="true"]::before {
-  width: 22px;
-  height: 5px;
   background: var(--text-soft);
-}
-
-.timeline-minimap button[aria-current="true"][data-emphasized="true"]::before {
-  background: var(--accent-strong);
-  box-shadow: 0 0 10px -2px color-mix(in srgb, var(--accent) 82%, transparent);
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .timeline-minimap::before,
   .timeline-minimap button::before {
     transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .timeline-minimap button:focus-visible {
+    outline: 1px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .timeline-minimap button::before {
+    background: CanvasText;
+    forced-color-adjust: none;
   }
 }
 

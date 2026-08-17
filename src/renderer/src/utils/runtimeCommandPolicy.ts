@@ -122,6 +122,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "conversation.unarchive": shortMutation,
   "conversation.unsettle": shortMutation,
   "conversation.update": shortMutation,
+  "daily.work.get": shortRetrySafe,
   "duo.acknowledge": duoCancellation,
   "duo.comparison.cancel": duoCancellation,
   "duo.comparison.retry": shortMutation,

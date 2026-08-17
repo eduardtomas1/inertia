@@ -50,6 +50,7 @@ describe("shared contracts boundary", () => {
 
     expect(commandTypes).toEqual([
       "app.refresh",
+      "daily.work.get",
       "usage.dashboard.get",
       "provider.refresh",
       "provider.auth.start",

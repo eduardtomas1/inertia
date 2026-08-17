@@ -21,21 +21,17 @@ export function SubagentTraceDetails({
   turns,
 }: SubagentTraceDetailsProps): React.JSX.Element {
   const details = [
-    { label: "Route", value: subagentRouteLabel(trace, turns) },
-    {
-      label: "Relationship",
-      value: subagentRelationshipLabel(trace, traces),
-    },
-    { label: "Task", value: trace.description },
-    { label: "Recent activity", value: trace.progress },
-    { label: "Outcome", value: trace.result },
-    { label: "Provider state", value: trace.providerStatus },
-  ].filter((detail): detail is { label: string; value: string } =>
-    Boolean(detail.value));
+    ["Route", subagentRouteLabel(trace, turns)],
+    ["Relationship", subagentRelationshipLabel(trace, traces)],
+    ["Task", trace.description],
+    ["Recent activity", trace.progress],
+    ["Outcome", trace.result],
+    ["Provider state", trace.providerStatus],
+  ];
 
   return (
     <dl id={id} className="subagent-trace-details">
-      {details.map(({ label, value }) => (
+      {details.map(([label, value]) => value && (
         <div key={label}>
           <dt>{label}</dt>
           <dd>{value}</dd>

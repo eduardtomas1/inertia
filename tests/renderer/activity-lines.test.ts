@@ -211,10 +211,15 @@ describe("Minimal Workstream activity lines", () => {
     );
     expect(activitySource).toContain('className="turn-activity-group"');
     expect(activitySource).toContain("data-activity-group={entry.id}");
+    expect(activitySource).toContain("data-activity-group-expanded={expanded");
     expect(activitySource).toContain("aria-expanded={expanded}");
     expect(activitySource).toContain("previous tool");
     expect(reducedMotion).toContain(
       ".turn-work-log .agent-activity.is-running svg",
+    );
+    expect(css).toContain("@keyframes activity-row-reveal");
+    expect(reducedMotion).toContain(
+      '> .agent-activity:not(:last-of-type)',
     );
     expect(reducedMotion).toContain("animation: none");
     expect(requestCardSource).toContain('className="agent-request-command"');
@@ -222,7 +227,7 @@ describe("Minimal Workstream activity lines", () => {
       'request.detail && <p className="agent-request-detail">{request.detail}</p>',
     );
     expect(requestCardSource).toContain(
-      "request.cwd && <><dt>Location</dt><dd>{request.cwd}</dd></>",
+      '["Location", request.cwd]',
     );
   });
 });

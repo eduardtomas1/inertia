@@ -11127,28 +11127,22 @@ button.sent-attachment-open:focus-visible {
   opacity: 0.24;
 }
 
+.agent-pixel-loader:is([data-phase="queued"], [data-phase="starting"]) > span {
+  border-radius: 50%;
+}
+
 .agent-pixel-loader[data-animated="true"] > span {
   animation: agent-pixel-shimmer 1.35s ease-in-out infinite;
+  animation-delay: var(--pixel-drive-delay);
 }
 
-.agent-pixel-loader[data-animated="true"] > span:nth-child(2),
-.agent-pixel-loader[data-animated="true"] > span:nth-child(4) {
-  animation-delay: 75ms;
+.agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span {
+  animation-delay: var(--pixel-orbit-delay);
 }
 
-.agent-pixel-loader[data-animated="true"] > span:nth-child(3),
-.agent-pixel-loader[data-animated="true"] > span:nth-child(5),
-.agent-pixel-loader[data-animated="true"] > span:nth-child(7) {
-  animation-delay: 150ms;
-}
-
-.agent-pixel-loader[data-animated="true"] > span:nth-child(6),
-.agent-pixel-loader[data-animated="true"] > span:nth-child(8) {
-  animation-delay: 225ms;
-}
-
-.agent-pixel-loader[data-animated="true"] > span:nth-child(9) {
-  animation-delay: 300ms;
+.agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span:nth-child(5) {
+  animation: none;
+  opacity: 0.1;
 }
 
 .agent-pixel-loader[data-animated="false"] > span:nth-child(5) {
@@ -11356,6 +11350,24 @@ button.sent-attachment-open:focus-visible {
   margin: 2px 0 6px 5px;
   padding: 1px 0 1px 11px;
   border-left: 1px solid color-mix(in srgb, var(--execution-rail-border) 62%, transparent);
+}
+
+.turn-activity-group[data-activity-group-expanded="true"]
+  > .agent-activity:not(:last-of-type) {
+  animation: activity-row-reveal var(--motion-slow) var(--motion-ease) both;
+  animation-delay: calc(var(--activity-reveal-index, 0) * 32ms);
+}
+
+@keyframes activity-row-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .turn-activity-group-toggle {
@@ -13060,8 +13072,16 @@ button.sent-attachment-open:focus-visible {
     opacity: 0.42;
   }
 
-  .agent-pixel-loader[data-animated="true"] > span:nth-child(5) {
+  .agent-pixel-loader[data-animated="true"] > span:nth-child(5),
+  .agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span:nth-child(5) {
     opacity: 0.82;
+  }
+
+  .turn-activity-group[data-activity-group-expanded="true"]
+    > .agent-activity:not(:last-of-type) {
+    animation: none;
+    opacity: 1;
+    transform: none;
   }
 
   [data-active-work-region] .turn-work-log .agent-activity.is-running svg {

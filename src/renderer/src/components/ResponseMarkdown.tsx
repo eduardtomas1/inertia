@@ -641,6 +641,17 @@ function MarkdownLink({
   return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;
 }
 
+function MarkdownParagraph(props: ComponentProps<"p">): React.JSX.Element {
+  const { streaming } = useMarkdownRenderContext();
+  return <p {...props}>{streaming
+    ? Children.map(props.children, (child) => typeof child === "string"
+      ? child.split(/(\s+)/u).map((word, index) => /\S/u.test(word)
+        ? <span className="response-stream-word" key={index}>{word}</span>
+        : word)
+      : child)
+    : props.children}</p>;
+}
+
 function MarkdownCodeBlock({ children }: ComponentProps<"pre">): React.JSX.Element {
   const {
     defaultCodeWrap,
@@ -671,6 +682,7 @@ const RESPONSE_MARKDOWN_COMPONENTS: NonNullable<
   ComponentProps<typeof ReactMarkdown>["components"]
 > = {
   a: MarkdownLink,
+  p: MarkdownParagraph,
   pre: MarkdownCodeBlock,
   table: MarkdownTable,
   details: MarkdownDetails,

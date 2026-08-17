@@ -78,7 +78,6 @@ function pathParts(path: string): { name: string; parent: string } {
   const parts = path.split("/");
   return { name: parts.at(-1) ?? path, parent: parts.slice(0, -1).join("/") };
 }
-
 function statusLabel(file: ChangedFile): string {
   const status = file.status.trim().toLowerCase();
   if (file.untracked || status === "??" || status === "untracked") return "Untracked";
@@ -432,11 +431,17 @@ export function ChangesPanel({
         <div className="diff-review-toolbar">
           <span><strong>{reviewedHunks}/{totalHunks}</strong> hunks reviewed</span>
           <progress aria-label={`${reviewedHunks} of ${totalHunks} hunks reviewed`} max={totalHunks} value={reviewedHunks} />
-          <select aria-label="Filter review state" value={reviewFilter} onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)}>
-            <option value="all">All changes</option>
-            <option value="unreviewed">Unreviewed</option>
-            <option value="reviewed">Reviewed</option>
-          </select>
+          <div className="diff-review-filter" role="group" aria-label="Filter review state">
+            {([
+              ["all", totalHunks],
+              ["unreviewed", totalHunks - reviewedHunks],
+              ["reviewed", reviewedHunks],
+            ] as const).map(([value, count]) => (
+              <button type="button" aria-pressed={reviewFilter === value} onClick={() => setReviewFilter(value)} key={value}>
+                {value}<span>{count}</span>
+              </button>
+            ))}
+          </div>
           <IconButton label="Previous review hunk (P)" onClick={() => navigateHunk(-1)}><ChevronUp size={14} /></IconButton>
           <IconButton label="Next review hunk (N)" onClick={() => navigateHunk(1)}><ChevronDown size={14} /></IconButton>
         </div>
@@ -494,7 +499,8 @@ export function ChangesPanel({
                   </div>
                 ))}
                 <p className="diff-selection-help">Select a line, then Shift-click another to review a range.</p>
-                {selectedFile.hunks.filter((hunk) => hunkMatchesFilter(selectedFile, hunk)).map((hunk) => {
+                {selectedFile.hunks.map((hunk) => {
+                  const shown = hunkMatchesFilter(selectedFile, hunk);
                   const statusFile = files.find((candidate) => candidate.path === selectedFile.path);
                   const hunkSummary = fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.summary;
                   const selected = reviewSelection(selectedFile, hunk);
@@ -508,7 +514,7 @@ export function ChangesPanel({
                     && selectionAnswer.hunkId === hunk.id
                     ? selectionAnswer
                     : null;
-                  return <section className="diff-hunk" id={`review-${hunk.id}`} key={hunk.id}>
+                  return <div className="diff-filter-row" inert={!shown} key={hunk.id}><div><section className="diff-hunk" id={`review-${hunk.id}`}>
                     <div className="diff-hunk-header">
                       <code>{hunk.header}</code>{hunkSummary && <span><Sparkles size={12} />{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
                       <span className="diff-hunk-actions">
@@ -585,7 +591,7 @@ export function ChangesPanel({
                         </div>
                       )}
                     </div>)}
-                  </section>;
+                  </section></div></div>;
                 })}
                 {selectionError && <p className="panel-notice diff-selection-error" role="alert">{selectionError}</p>}
               </div>

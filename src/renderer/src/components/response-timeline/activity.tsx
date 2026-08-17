@@ -71,7 +71,6 @@ export function ReasoningSummary({
             "turn-reasoning-step",
             streaming && index === segments.length - 1 && "is-active",
           )}
-          style={{ "--reasoning-step-index": index } as React.CSSProperties}
         >
           {segment.title && (
             <span className="turn-reasoning-step-title">{segment.title}</span>
@@ -101,7 +100,7 @@ export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Ele
       stopTimer();
       setNow(Date.now());
       if (document.visibilityState !== "visible" || !document.hasFocus()) return;
-      timer = window.setInterval(() => setNow(Date.now()), 1_000);
+      timer = window.setInterval(() => setNow(Date.now()), 100);
     };
     synchronize();
     document.addEventListener("visibilitychange", synchronize);
@@ -114,7 +113,7 @@ export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Ele
       window.removeEventListener("blur", synchronize);
     };
   }, []);
-  return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)))}</span>;
+  return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)), true)}</span>;
 }
 
 type ActivityLineSeverity = "neutral" | ActivityAttentionSeverity;
@@ -429,6 +428,7 @@ export const ActivityGroup = memo(function ActivityGroup({
     <div
       className="turn-activity-group"
       data-activity-group={entry.id}
+      data-activity-group-expanded={expanded}
       data-activity-group-mode={containsAttention ? "attention" : "calls"}
     >
       {visibleActivities.map((activity) => (

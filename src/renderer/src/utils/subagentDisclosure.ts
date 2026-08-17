@@ -23,12 +23,8 @@ export function isLiveSubagentTrace(trace: SubagentTrace): boolean {
 }
 
 export function subagentNeedsReview(trace: SubagentTrace): boolean {
-  return !trace.isLive && (
-    trace.status === "failed"
-    || trace.status === "interrupted"
-    || trace.status === "lost"
-    || trace.status === "unknown"
-  );
+  return !trace.isLive
+    && ["failed", "interrupted", "lost", "unknown"].includes(trace.status);
 }
 
 export function canStopSubagentTrace(
@@ -38,12 +34,7 @@ export function canStopSubagentTrace(
   const turn = turns.find(({ id }) => id === trace.turnId);
   return Boolean(
     turn
-    && ![
-      "completed",
-      "failed",
-      "cancelled",
-      "interrupted",
-    ].includes(turn.status)
+    && !/^(?:completed|failed|cancelled|interrupted)$/u.test(turn.status)
     && turn.harnessId === "claude-agent-sdk"
     && trace.providerId === "claude"
     && trace.providerTaskId
@@ -68,22 +59,21 @@ export function canFollowUpSubagentTrace(
   );
 }
 
+const PROVIDER_LABELS: Partial<Record<SubagentTrace["providerId"], string>> = {
+  codex: "Codex",
+  claude: "Claude",
+  cursor: "Cursor",
+};
+
 export function subagentProviderLabel(trace: SubagentTrace): string {
-  if (trace.providerId === "codex") return "Codex";
-  if (trace.providerId === "claude") return "Claude";
-  if (trace.providerId === "cursor") return "Cursor";
-  return "OpenCode";
+  return PROVIDER_LABELS[trace.providerId] ?? "OpenCode";
 }
 
 const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "codex-app-server": "App Server",
-  "codex-cli": "CLI",
   "claude-agent-sdk": "Agent SDK",
-  "claude-cli": "CLI",
   "cursor-acp": "ACP",
-  "cursor-cli": "CLI",
   "opencode-sdk": "SDK",
-  "opencode-cli": "CLI",
 };
 
 export function subagentHarnessLabel(
@@ -92,6 +82,7 @@ export function subagentHarnessLabel(
 ): string {
   const harnessId = turns.find(({ id }) => id === trace.turnId)?.harnessId;
   if (!harnessId) return "historical harness unavailable";
+  if (harnessId.endsWith("-cli")) return "CLI";
   return HARNESS_LABELS[harnessId] ?? harnessId;
 }
 
@@ -108,39 +99,38 @@ export function subagentTraceLabel(trace: SubagentTrace): string {
     ?? `${subagentProviderLabel(trace)} delegated task`;
 }
 
-const LIVE_PROVIDER_STATUSES = new Set([
-  "pending",
-  "pendinginit",
-  "queued",
-  "spawned",
-  "running",
-  "inprogress",
-  "paused",
-  "waiting",
-  "started",
-  "interacted",
-  "asynclaunched",
-]);
-
 const EQUIVALENT_PROVIDER_STATUSES: Readonly<
-  Record<SubagentTrace["status"], ReadonlySet<string>>
+  Record<SubagentTrace["status"], readonly string[]>
 > = {
-  queued: new Set(["pending", "pendinginit", "queued"]),
-  spawned: new Set(["spawned", "starting"]),
-  running: new Set([
+  queued: ["pending", "pendinginit", "queued"],
+  spawned: ["spawned", "starting"],
+  running: [
     "running",
     "inprogress",
     "started",
     "interacted",
     "asynclaunched",
-  ]),
-  waiting: new Set(["paused", "waiting"]),
-  completed: new Set(["completed", "success", "succeeded"]),
-  failed: new Set(["error", "failed"]),
-  cancelled: new Set(["canceled", "cancelled", "killed", "shutdown", "stopped"]),
-  interrupted: new Set(["interrupted"]),
-  lost: new Set(["lost"]),
-  unknown: new Set(),
+  ],
+  waiting: ["paused", "waiting"],
+  completed: ["completed", "success", "succeeded"],
+  failed: ["error", "failed"],
+  cancelled: ["canceled", "cancelled", "killed", "shutdown", "stopped"],
+  interrupted: ["interrupted"],
+  lost: ["lost"],
+  unknown: [],
+};
+
+const STATUS_LABELS: Record<SubagentTrace["status"], string> = {
+  queued: "Queued",
+  spawned: "Starting",
+  running: "Running",
+  waiting: "Waiting",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  interrupted: "Interrupted",
+  lost: "Lost",
+  unknown: "Unknown",
 };
 
 function normalizedProviderStatus(status: string): string {
@@ -148,34 +138,18 @@ function normalizedProviderStatus(status: string): string {
 }
 
 export function subagentStatusLabel(trace: SubagentTrace): string {
-  const normalized = trace.status === "queued"
-    ? "Queued"
-    : trace.status === "spawned"
-      ? "Starting"
-      : trace.status === "running"
-        ? "Running"
-        : trace.status === "waiting"
-          ? "Waiting"
-          : trace.status === "completed"
-            ? "Completed"
-            : trace.status === "failed"
-              ? "Failed"
-              : trace.status === "cancelled"
-                ? "Cancelled"
-                : trace.status === "interrupted"
-                  ? "Interrupted"
-                  : trace.status === "lost"
-                    ? "Lost"
-                    : "Unknown";
+  const normalized = STATUS_LABELS[trace.status];
   const providerStatus = trace.providerStatus?.trim();
   const providerStatusKey = providerStatus
     ? normalizedProviderStatus(providerStatus)
     : null;
   const contradictsTerminalState = !trace.isLive
     && providerStatusKey
-    && LIVE_PROVIDER_STATUSES.has(providerStatusKey);
+    && providerStatusKey !== "starting"
+    && (["queued", "spawned", "running", "waiting"] as const)
+      .some((status) => EQUIVALENT_PROVIDER_STATUSES[status].includes(providerStatusKey));
   const repeatsNormalizedState = providerStatusKey
-    ? EQUIVALENT_PROVIDER_STATUSES[trace.status].has(providerStatusKey)
+    ? EQUIVALENT_PROVIDER_STATUSES[trace.status].includes(providerStatusKey)
     : false;
   return providerStatus
     && !repeatsNormalizedState
@@ -202,15 +176,9 @@ export function subagentRelationshipLabel(
   trace: SubagentTrace,
   traces: readonly SubagentTrace[],
 ): string {
-  const parent = trace.parentTraceId
-    ? traces.find(({ id }) => id === trace.parentTraceId)
-    : undefined;
+  const parent = traces.find(({ id }) => id === trace.parentTraceId);
   if (parent) return `Child of ${subagentTraceLabel(parent)}`;
-  if (
-    trace.parentTraceId
-    || trace.parentProviderAgentId
-    || trace.parentProviderToolUseId
-  ) {
+  if (subagentHasNestedParent(trace)) {
     return "Nested delegated task · parent unavailable";
   }
   return "Delegated by parent agent";

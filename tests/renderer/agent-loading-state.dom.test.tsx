@@ -188,6 +188,7 @@ describe("agent loading and trace DOM", () => {
       .toHaveTextContent("Web search");
     expect(grid).toHaveAttribute("aria-hidden", "true");
     expect(grid).toHaveAttribute("data-animated", "true");
+    expect(grid).toHaveAttribute("data-phase", "searching");
     expect(grid?.querySelectorAll(":scope > span")).toHaveLength(9);
     expect(container.querySelector(".turn-working-elapsed"))
       .toHaveAttribute("aria-live", "off");
@@ -198,6 +199,29 @@ describe("agent loading and trace DOM", () => {
       name: "Stop Codex · Codex App Server run",
     }));
     expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("marks only user-revealed tool history for bounded stagger motion", () => {
+    const activities = [
+      { ...activity("Read package metadata"), id: "activity-history-1" },
+      { ...activity("Inspect response timeline"), id: "activity-history-2" },
+      { ...activity("Run focused checks"), id: "activity-history-3" },
+    ];
+    const { container } = renderState({ activities });
+    const group = container.querySelector(".turn-activity-group");
+
+    expect(group).toHaveAttribute("data-activity-group-expanded", "false");
+    expect(group?.querySelectorAll(":scope > .agent-activity")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "+2 previous tool calls",
+    }));
+
+    expect(group).toHaveAttribute("data-activity-group-expanded", "true");
+    const revealed = group?.querySelectorAll<HTMLElement>(":scope > .agent-activity:not(:last-of-type)");
+    expect(revealed).toHaveLength(2);
+    expect(revealed?.[0]?.getAttribute("style")).toBeNull();
+    expect(revealed?.[1]?.getAttribute("style")).toBeNull();
   });
 
   it("keeps historical reasoning collapsed without claiming current thought", () => {
@@ -230,6 +254,9 @@ describe("agent loading and trace DOM", () => {
 
     expect(container.querySelector("[data-active-agent-phase=thinking]"))
       .toBeInTheDocument();
+    expect(container.querySelector(".agent-pixel-loader"))
+      .toHaveAttribute("data-phase", "thinking");
+    expect(container.querySelectorAll(".agent-pixel-loader > span")).toHaveLength(9);
     expect(container.querySelector("[data-agent-trace=thinking] > summary"))
       .toHaveTextContent("Thinkingreasoning summary");
   });
@@ -453,6 +480,7 @@ describe("agent loading and trace DOM", () => {
     expect(container.querySelector(".turn-working-status"))
       .toHaveTextContent("Codex · Codex App Server needs approval");
     expect(grid).toHaveAttribute("data-animated", "false");
+    expect(grid).toHaveAttribute("data-phase", "waiting-for-approval");
     expect(container.querySelector(".turn-working-elapsed"))
       .toHaveAttribute("aria-live", "off");
   });

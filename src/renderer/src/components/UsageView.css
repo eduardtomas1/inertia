@@ -254,7 +254,7 @@
   letter-spacing: -0.01em;
 }
 
-.usage-daily-heading > div { gap: 14px; }
+.usage-daily-heading > div:last-child { gap: 14px; }
 .usage-provider-legend { gap: 13px; }
 .usage-provider-legend > span {
   display: inline-flex;
@@ -601,11 +601,94 @@
 .usage-skeleton-chart > i { display: block; width: 100%; height: 1px; background: var(--border); }
 .usage-skeleton .usage-metric-strip > span { min-height: 79px; background: var(--conversation-canvas-surface); }
 
+
+/* Beautiful UI Insight Cards motion and data-surface treatment. */
+.usage-range-segment button,
+.usage-mini-segment button {
+  transition: color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.usage-range-segment button:active:not(:disabled),
+.usage-mini-segment button:active:not(:disabled):not([aria-disabled="true"]) {
+  transform: scale(0.96);
+}
+
+.usage-provider-summary article {
+  gap: 5px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--conversation-canvas-surface) 86%, var(--surface-subtle));
+}
+
+.usage-provider-meter > i {
+  transition: width 500ms cubic-bezier(0.23, 1, 0.32, 1), opacity 500ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.usage-daily-panel {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--conversation-canvas-surface) 92%, var(--surface-subtle));
+  animation: usage-insight-content-in 250ms ease both;
+}
+
+@keyframes usage-insight-content-in {
+  from { opacity: 0; filter: blur(4px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
+.usage-daily-heading > h2 {
+  display: grid;
+  gap: 2px;
+}
+
+.usage-daily-heading > h2::before {
+  content: "Insight";
+  color: var(--accent-strong);
+  font-size: 7px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.usage-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.usage-breakdown-table {
+  animation: usage-insight-content-in 250ms ease both;
+}
+
+.usage-breakdown-table thead {
+  background: var(--surface-subtle);
+}
+
+.usage-breakdown-table tbody tr {
+  transition: background 100ms ease;
+}
+
+.usage-breakdown-table tbody tr:hover {
+  background: color-mix(in srgb, var(--surface-hover) 72%, transparent);
+}
+
+.usage-breakdown-table th:first-child,
+.usage-breakdown-table td:first-child {
+  padding-left: 10px;
+}
+
+.usage-breakdown-table th:last-child,
+.usage-breakdown-table td:last-child {
+  padding-right: 10px;
+}
+
 @media (max-width: 1020px) {
   .usage-overview-grid { grid-template-columns: minmax(210px, 250px) minmax(0, 1fr); gap: 28px; }
   .usage-provider-legend { max-width: 190px; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; }
   .usage-daily-heading { align-items: flex-start; }
-  .usage-daily-heading > div { align-items: flex-end; flex-direction: column; gap: 5px; }
+  .usage-daily-heading > div:last-child { align-items: flex-end; flex-direction: column; gap: 5px; }
   .usage-metric-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .usage-metric:nth-child(4), .usage-metric:nth-child(5) { border-top: 1px solid var(--border); }
   .usage-metric:nth-child(4) { padding-left: 0; }
@@ -620,7 +703,7 @@
   .usage-summary-column { gap: 16px; }
   .usage-provider-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; }
   .usage-daily-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
-  .usage-daily-heading > div { width: 100%; align-items: center; flex-direction: row; justify-content: space-between; }
+  .usage-daily-heading > div:last-child { width: 100%; align-items: center; flex-direction: row; justify-content: space-between; }
   .usage-provider-legend { max-width: none; }
   .usage-chart-axis, .usage-chart-plot, .usage-provider-chart { height: 218px; }
   .usage-chart-tooltip { min-width: 145px; }
@@ -645,6 +728,11 @@
   .usage-range-segment button,
   .usage-mini-segment button,
   .usage-provider-meter > i { transition: none; }
+  .usage-daily-panel,
+  .usage-breakdown-table {
+    animation: none;
+    filter: none;
+  }
 }
 
 @media (forced-colors: active) {

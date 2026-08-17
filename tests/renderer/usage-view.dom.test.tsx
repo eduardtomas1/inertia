@@ -152,6 +152,7 @@ describe("UsageView", () => {
     const view = render(<UsageView status="online" request={request} />);
 
     expect(await screen.findByRole("heading", { name: "Daily processed tokens" })).toBeVisible();
+    expect(view.container.querySelector(".usage-daily-panel")).toBeVisible();
     const totals = screen.getByRole("region", { name: "Usage totals" });
     expect(within(totals).getByText("6", { exact: true })).toBeVisible();
     expect(within(totals).getByText(/1 interrupted/u)).toBeVisible();
@@ -180,6 +181,7 @@ describe("UsageView", () => {
       "tabindex",
       "0",
     );
+    expect(screen.getByRole("region", { name: "Model usage table" })).toHaveClass("usage-table-wrap");
 
     const cost = screen.getByRole("button", { name: "Cost" });
     expect(cost).toHaveAttribute("aria-disabled", "true");

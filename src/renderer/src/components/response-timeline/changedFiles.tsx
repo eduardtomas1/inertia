@@ -104,7 +104,7 @@ export function ChangedFilesSummary({
           </p>
         )}
         <div className="turn-changed-files-list" role="list">
-          {artifact.files.slice(0, 12).map((file) => {
+          {artifact.files.slice(0, 12).map((file, fileIndex) => {
             const language = sourceLanguageForFile(file.path);
             return (
               <span
@@ -112,6 +112,7 @@ export function ChangedFilesSummary({
                 title={`${file.path} · ${language.label}`}
                 role="listitem"
                 data-language-family={language.family}
+                style={{ "--changed-file-index": fileIndex } as React.CSSProperties}
               >
                 <button
                   type="button"

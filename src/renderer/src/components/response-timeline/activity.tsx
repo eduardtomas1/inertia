@@ -34,7 +34,6 @@ import {
   activityExecutionCategory,
   activityNeedsAttention,
   buildTurnExecutionStream,
-  formatElapsed,
   isInterruptedActivity,
   resolveActivityGroupPresentation,
   turnStatusLabel,
@@ -101,7 +100,7 @@ export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Ele
       stopTimer();
       setNow(Date.now());
       if (document.visibilityState !== "visible" || !document.hasFocus()) return;
-      timer = window.setInterval(() => setNow(Date.now()), 1_000);
+      timer = window.setInterval(() => setNow(Date.now()), 100);
     };
     synchronize();
     document.addEventListener("visibilitychange", synchronize);
@@ -114,7 +113,11 @@ export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Ele
       window.removeEventListener("blur", synchronize);
     };
   }, []);
-  return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)))}</span>;
+  const elapsed = Math.max(0, now - Date.parse(startedAt));
+  const totalTenths = Math.floor(elapsed / 100);
+  const minutes = Math.floor(totalTenths / 600);
+  const seconds = ((totalTenths % 600) / 10).toFixed(1);
+  return <span>{minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`}</span>;
 }
 
 type ActivityLineSeverity = "neutral" | ActivityAttentionSeverity;
@@ -796,7 +799,7 @@ export function WorkLog({
             <small>{expanded ? "Hide details" : "Details"}</small>
             <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
           </summary>
-          <div id={detailsId} hidden={!expanded}>
+          <div className="turn-work-details-shell" id={detailsId} hidden={!expanded}>
             {expanded && (
               <SettledWorkDetails
                 entries={stream}

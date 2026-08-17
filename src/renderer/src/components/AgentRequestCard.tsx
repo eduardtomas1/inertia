@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FilePenLine, MessageCircleQuestion, ShieldAlert, TerminalSquare } from "lucide-react";
+import { ChevronLeft, ChevronRight, FilePenLine, MessageCircleQuestion, ShieldAlert, TerminalSquare } from "lucide-react";
 import type { AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest } from "@shared/contracts";
 import { agentRequestProviderName, buildAgentInputAnswers, inputRequestTitle } from "../utils/agentInput";
 
@@ -79,14 +79,26 @@ type InputRequestCardProps = {
 
 export function InputRequestCard({ request, onRespond }: InputRequestCardProps): React.JSX.Element {
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const descriptionId = `input-${request.id}-description`;
 
-  useEffect(() => setAnswers({}), [request.id]);
+  useEffect(() => {
+    setAnswers({});
+    setActiveQuestionIndex(0);
+  }, [request.id]);
+  useEffect(() => {
+    setActiveQuestionIndex((current) => Math.min(current, Math.max(0, request.questions.length - 1)));
+  }, [request.questions.length]);
   const complete = useMemo(
     () => request.questions.every(({ id }) => (answers[id] ?? []).some((value) => Boolean(value.trim()))),
     [answers, request.questions],
   );
+  const activeQuestion = request.questions[activeQuestionIndex] ?? null;
+  const activeQuestionComplete = activeQuestion
+    ? (answers[activeQuestion.id] ?? []).some((value) => Boolean(value.trim()))
+    : false;
+  const isLastQuestion = activeQuestionIndex === request.questions.length - 1;
 
   const submit = async () => {
     if (!complete || busy) return;
@@ -121,7 +133,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
         </span>
       </div>
       <div className="agent-input-questions">
-        {request.questions.map((question) => {
+        {request.questions.map((question, questionIndex) => {
           const optionIds = new Set(question.options.map(({ id }) => id));
           const selected = answers[question.id] ?? [];
           const otherValue = selected.find((value) => !optionIds.has(value)) ?? "";
@@ -150,7 +162,13 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
             });
           };
           return (
-            <fieldset className="agent-input-question" key={question.id} disabled={busy}>
+            <fieldset
+              className="agent-input-question"
+              key={question.id}
+              disabled={busy}
+              hidden={questionIndex !== activeQuestionIndex}
+              data-agent-question-index={questionIndex}
+            >
               <legend><span>{question.header}</span>{question.question}</legend>
               {question.options.length > 0 && (
                 <div className="agent-input-options">
@@ -187,9 +205,52 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
         })}
       </div>
       {request.autoResolutionMs !== null && <p className="agent-request-note">This question may resolve automatically if left unanswered.</p>}
-      <div className="agent-request-actions">
-        <button type="button" className="primary-button" aria-label="Submit answers and continue" disabled={!complete || busy} onClick={() => void submit()}>Continue</button>
-      </div>
+      {request.questions.length > 0 && (
+        <div className="agent-input-footer">
+          <div className="agent-input-pager" aria-label="Question navigation">
+            <button
+              type="button"
+              className="agent-input-page-arrow"
+              aria-label="Previous question"
+              disabled={busy || activeQuestionIndex === 0}
+              onClick={() => setActiveQuestionIndex((current) => Math.max(0, current - 1))}
+            >
+              <ChevronLeft size={13} aria-hidden="true" />
+            </button>
+            <span className="agent-input-page-dots">
+              {request.questions.map((question, questionIndex) => (
+                <button
+                  type="button"
+                  aria-label={`Go to question ${questionIndex + 1}`}
+                  aria-current={questionIndex === activeQuestionIndex ? "step" : undefined}
+                  data-answered={(answers[question.id] ?? []).some((value) => Boolean(value.trim()))}
+                  disabled={busy}
+                  onClick={() => setActiveQuestionIndex(questionIndex)}
+                  key={question.id}
+                />
+              ))}
+            </span>
+            <span className="agent-input-page-count">
+              {activeQuestionIndex + 1} of {request.questions.length}
+            </span>
+          </div>
+          <div className="agent-request-actions">
+            {isLastQuestion ? (
+              <button type="button" className="primary-button" aria-label="Submit answers and continue" disabled={!complete || busy} onClick={() => void submit()}>Continue</button>
+            ) : (
+              <button
+                type="button"
+                className="primary-button"
+                aria-label="Next question"
+                disabled={!activeQuestionComplete || busy}
+                onClick={() => setActiveQuestionIndex((current) => Math.min(request.questions.length - 1, current + 1))}
+              >
+                Next <ChevronRight size={13} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

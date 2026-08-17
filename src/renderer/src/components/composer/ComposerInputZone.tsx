@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { MessageSquarePlus, RefreshCw, X } from "lucide-react";
+import { File, Folder, ListTree, MessageSquarePlus, RefreshCw, X } from "lucide-react";
 import clsx from "clsx";
 import type {
   ChatAttachment,
@@ -330,8 +330,13 @@ export function ComposerInputZone({
                 }
               }}
             >
-              <span>{entry.path}</span>
-              <small>{entry.kind}</small>
+              <span className="composer-suggestion-glyph" aria-hidden="true">
+                {entry.kind === "directory" ? <Folder size={14} /> : <File size={14} />}
+              </span>
+              <span className="composer-suggestion-copy">
+                <strong>{entry.path}</strong>
+                <small>{entry.kind === "directory" ? "Project folder" : "Project file"}</small>
+              </span>
             </button>
           ))}
         </div>
@@ -342,6 +347,7 @@ export function ComposerInputZone({
           role="listbox"
           aria-label="Composer commands"
         >
+          <div className="popover-title">Run a command</div>
           {matchingSlashCommands.map((item) => (
             <button
               type="button"
@@ -351,8 +357,13 @@ export function ComposerInputZone({
               key={item.id}
               onClick={() => activateSlashCommand(item)}
             >
-              <span>/{item.id}</span>
-              <small>{item.label}</small>
+              <span className="composer-suggestion-glyph" aria-hidden="true">
+                <ListTree size={14} />
+              </span>
+              <span className="composer-suggestion-copy">
+                <strong>/{item.id}</strong>
+                <small>{item.label}</small>
+              </span>
             </button>
           ))}
         </div>

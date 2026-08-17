@@ -2,10 +2,15 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(
+const baseCss = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
+const exactMotionCssSource = readFileSync(
+  new URL("../../src/renderer/src/components/BeautifulUiMotion.css", import.meta.url),
+  "utf8",
+);
+const css = `${baseCss}\n${exactMotionCssSource}`;
 const timelineSource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
   "utf8",
@@ -27,10 +32,13 @@ function cssBlock(source: string, marker: string): string {
   return "";
 }
 
-const activePixelRule = cssBlock(
-  css,
-  '.agent-pixel-loader[data-animated="true"] > span',
+const activePixelMarker = '.agent-pixel-loader[data-animated="true"] > span';
+const finalReducedMotionIndex = css.lastIndexOf("@media (prefers-reduced-motion: reduce)");
+const exactMotionCss = css.slice(
+  css.lastIndexOf(activePixelMarker, finalReducedMotionIndex - 1),
+  finalReducedMotionIndex,
 );
+const activePixelRule = cssBlock(exactMotionCss, activePixelMarker);
 
 describe("Minimal Workstream active pixel signal", () => {
   it("attaches the active-state hook only inside the active execution branch", () => {
@@ -57,39 +65,35 @@ describe("Minimal Workstream active pixel signal", () => {
     expect(settledBranch).not.toContain("<AgentPixelLoader");
   });
 
-  it("keeps animation authority on the derived pixel state, never the label", () => {
+  it("keeps pixel motion on the derived state and mirrors the reference label shimmer", () => {
     expect(timelineSource).toContain("animated={activePresentation.animated}");
     expect(timelineSource).toContain('data-animated={animated ? "true" : "false"}');
     expect(timelineSource).toContain("AGENT_PIXEL_GRID_CELLS = [");
     expect(timelineSource).toContain("--pixel-drive-delay");
     expect(timelineSource).toContain("--pixel-orbit-delay");
     expect(css).toContain('.agent-pixel-loader[data-animated="true"] > span');
-    expect(css).not.toMatch(/\.turn-working-(?:status|copy)[^{]*\{[^}]*animation:/su);
+    expect(css).toContain("animation: beautiful-shimmer-text 1.4s linear infinite");
     expect(css).not.toContain(".turn-working-status::before");
     expect(css).not.toContain("active-work-tonal-wash");
   });
 
   it("moves one restrained shimmer through a fixed nine-pixel grid", () => {
     expect(activePixelRule).toContain("agent-pixel-shimmer");
-    const duration =
-      Number(
-        activePixelRule.match(
-          /agent-pixel-shimmer\s+(?<seconds>\d+(?:\.\d+)?)s/u,
-        )?.groups?.seconds,
-      ) || 0;
-    const keyframes = cssBlock(css, "@keyframes agent-pixel-shimmer");
+    const keyframes = cssBlock(
+      css.slice(css.lastIndexOf("@keyframes agent-pixel-shimmer")),
+      "@keyframes agent-pixel-shimmer",
+    );
 
-    expect(duration).toBeGreaterThanOrEqual(1.1);
-    expect(duration).toBeLessThanOrEqual(1.8);
+    expect(activePixelRule).toContain("agent-pixel-shimmer 650ms");
     expect(activePixelRule).toContain("ease-in-out infinite");
-    expect(keyframes).toContain("opacity: 0.2");
-    expect(keyframes).toContain("opacity: 0.96");
+    expect(keyframes).toContain("opacity: .15");
+    expect(keyframes).toContain("opacity: 1");
     expect(`${activePixelRule}\n${keyframes}`).not.toMatch(/transform:|scale:/iu);
   });
 
   it("keeps Dots, Drive, and Orbit inside the same bounded pixel grid", () => {
     const orbitCenterRule = cssBlock(
-      css,
+      exactMotionCss,
       '.agent-pixel-loader[data-animated="true"][data-motion="orbit"] > span:nth-child(5)',
     );
     const dotsRule = cssBlock(
@@ -99,8 +103,8 @@ describe("Minimal Workstream active pixel signal", () => {
 
     expect(dotsRule).toContain("border-radius: 50%");
     expect(orbitCenterRule).toContain("animation: none");
-    expect(orbitCenterRule).toContain("opacity: 0.1");
-    expect(timelineSource).toContain("orbitDelay: 840");
+    expect(orbitCenterRule).toContain("opacity: .07");
+    expect(timelineSource).toContain("orbitDelay: 770");
     expect(css).not.toMatch(/agent-pixel-loader[^}]*url\(/su);
   });
 
@@ -114,7 +118,9 @@ describe("Minimal Workstream active pixel signal", () => {
     );
 
     expect(reducedPixelRule).toContain("animation: none");
-    expect(reducedPixelRule).toContain("opacity: 0.42");
+    expect(reducedPixelRule).toContain("opacity: .15");
+    expect(reducedMotion).toContain(".turn-working-status .turn-working-copy strong");
+    expect(reducedMotion).toContain("background: none");
     expect(reducedMotion).toContain(
       '.agent-pixel-loader[data-animated="true"][data-motion="orbit"] > span:nth-child(5)',
     );

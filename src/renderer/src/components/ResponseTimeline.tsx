@@ -1,3 +1,5 @@
+import "./BeautifulUiMotion.css";
+
 export {
   ActivityGroup,
   ActivityRow,

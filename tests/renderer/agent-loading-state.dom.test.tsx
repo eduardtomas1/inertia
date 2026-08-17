@@ -262,7 +262,7 @@ describe("agent loading and trace DOM", () => {
       .toHaveAttribute("data-motion", "orbit");
     expect(container.querySelector<HTMLElement>(
       ".agent-pixel-loader > span:nth-child(4)",
-    )?.style.getPropertyValue("--pixel-orbit-delay")).toBe("840ms");
+    )?.style.getPropertyValue("--pixel-orbit-delay")).toBe("770ms");
     expect(container.querySelector("[data-agent-trace=thinking] > summary"))
       .toHaveTextContent("Thinkingreasoning summary");
   });

@@ -39,15 +39,15 @@ import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 
 const AGENT_PIXEL_GRID_CELLS = [
-  { driveDelay: 0, orbitDelay: 0 },
-  { driveDelay: 75, orbitDelay: 120 },
-  { driveDelay: 150, orbitDelay: 240 },
-  { driveDelay: 75, orbitDelay: 840 },
-  { driveDelay: 150, orbitDelay: 0 },
-  { driveDelay: 225, orbitDelay: 360 },
-  { driveDelay: 150, orbitDelay: 720 },
-  { driveDelay: 225, orbitDelay: 600 },
-  { driveDelay: 300, orbitDelay: 480 },
+  { driveDelay: 90, orbitDelay: 0 },
+  { driveDelay: 180, orbitDelay: 110 },
+  { driveDelay: 270, orbitDelay: 220 },
+  { driveDelay: 0, orbitDelay: 770 },
+  { driveDelay: 90, orbitDelay: 0 },
+  { driveDelay: 180, orbitDelay: 330 },
+  { driveDelay: 90, orbitDelay: 660 },
+  { driveDelay: 180, orbitDelay: 550 },
+  { driveDelay: 270, orbitDelay: 440 },
 ] as const;
 
 function AgentPixelLoader({

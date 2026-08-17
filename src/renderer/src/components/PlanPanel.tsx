@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { AlertCircle, Check, Circle, CircleDot, ListChecks, Play, RotateCcw } from "lucide-react";
+import { AlertCircle, Check, Circle, ListChecks, LoaderCircle, Play, RotateCcw } from "lucide-react";
 
 export type PlanStepStatus = "pending" | "in-progress" | "completed" | "blocked";
 
@@ -22,7 +22,7 @@ export type PlanPanelProps = {
 
 function StepIcon({ status }: { status: PlanStepStatus }): React.JSX.Element {
   if (status === "completed") return <Check size={14} aria-hidden="true" />;
-  if (status === "in-progress") return <CircleDot size={15} aria-hidden="true" />;
+  if (status === "in-progress") return <LoaderCircle size={15} aria-hidden="true" />;
   if (status === "blocked") return <AlertCircle size={15} aria-hidden="true" />;
   return <Circle size={14} aria-hidden="true" />;
 }
@@ -85,7 +85,12 @@ export function PlanPanel({
               </>
             );
             return (
-              <li className={clsx("plan-step", `is-${step.status}`, activeStepId === step.id && "is-active")} key={step.id}>
+              <li
+                className={clsx("plan-step", `is-${step.status}`, activeStepId === step.id && "is-active")}
+                data-plan-step-status={step.status}
+                style={{ "--plan-step-index": index } as React.CSSProperties}
+                key={step.id}
+              >
                 {onSelectStep ? (
                   <button
                     type="button"

@@ -14,7 +14,6 @@ import {
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import {
   portableFixtureRoot,
-  portableNodeExecutable,
   removePortableFixture,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
@@ -32,11 +31,10 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 
 function codexCompactionTierAgent(
   root: string,
-  name: string,
   capturePath: string,
   attestedTier: "echo" | "priority" | "default" | null,
 ): string {
-  const command = portableNodeExecutable(root, name);
+  const command = process.execPath;
   writeNodeSubcommand(root, "app-server", `
 const fs = require("node:fs");
 const readline = require("node:readline");
@@ -60,20 +58,23 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
 describe.sequential("provider compaction adapters", () => {
   const roots: string[] = [];
-  afterEach(async () => await Promise.all(
-    roots.splice(0).map(removePortableFixture),
-  ));
+  const managers: ProviderManager[] = [];
+  const trackManager = (manager: ProviderManager): ProviderManager => {
+    managers.push(manager);
+    return manager;
+  };
+  afterEach(async () => {
+    await Promise.all(managers.splice(0).map((manager) => manager.disposeAll()));
+    await Promise.all(roots.splice(0).map(removePortableFixture));
+  });
 
   it("uses Codex App Server compaction and waits for its completion item", {
-    // The first copied node.exe fixture can incur a cold antivirus scan on
-    // hosted Windows before its owned process tree is confirmed stopped. Keep
-    // other platforms on the ordinary bounded test budget.
-    timeout: process.platform === "win32" ? 60_000 : 15_000,
+    timeout: 15_000,
   }, async () => {
     const root = portableFixtureRoot("Codex compact");
     roots.push(root);
     const capturePath = join(root, "capture.jsonl");
-    const command = portableNodeExecutable(root, "codex");
+    const command = process.execPath;
     writeNodeSubcommand(root, "app-server", `
 const fs = require("node:fs");
 const readline = require("node:readline");
@@ -92,7 +93,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager({ commands: { codex: command } });
+    const manager = trackManager(
+      new ProviderManager({ commands: { codex: command } }),
+    );
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "codex",
@@ -127,11 +130,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const capturePath = join(root, "capture.jsonl");
     const command = codexCompactionTierAgent(
       root,
-      `codex-compact-${_label.toLowerCase()}-tier`,
       capturePath,
       attestedTier,
     );
-    const manager = new ProviderManager({ commands: { codex: command } });
+    const manager = trackManager(
+      new ProviderManager({ commands: { codex: command } }),
+    );
     const base = nativeProviderRunInput({
       providerId: "codex",
       conversationId: `codex-compact-${_label.toLowerCase()}-tier`,
@@ -171,11 +175,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     roots.push(root);
     const command = codexCompactionTierAgent(
       root,
-      "codex-compact-tier-mismatch",
       join(root, "capture.jsonl"),
       null,
     );
-    const manager = new ProviderManager({ commands: { codex: command } });
+    const manager = trackManager(
+      new ProviderManager({ commands: { codex: command } }),
+    );
     const base = nativeProviderRunInput({
       providerId: "codex",
       conversationId: "codex-compact-tier-mismatch",
@@ -209,7 +214,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("does not accept a stale timestamped Codex lifecycle after requesting compaction", async () => {
     const root = portableFixtureRoot("Codex compact stale lifecycle");
     roots.push(root);
-    const command = portableNodeExecutable(root, "codex");
+    const command = process.execPath;
     writeNodeSubcommand(root, "app-server", `
 const readline = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
@@ -226,7 +231,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager({ commands: { codex: command } });
+    const manager = trackManager(
+      new ProviderManager({ commands: { codex: command } }),
+    );
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "codex",
@@ -256,7 +263,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   ) => {
     const root = portableFixtureRoot(`Codex compact invalid lifecycle ${_label}`);
     roots.push(root);
-    const command = portableNodeExecutable(root, "codex");
+    const command = process.execPath;
     writeNodeSubcommand(root, "app-server", `
 const readline = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
@@ -273,7 +280,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager({ commands: { codex: command } });
+    const manager = trackManager(
+      new ProviderManager({ commands: { codex: command } }),
+    );
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "codex",
@@ -292,7 +301,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("does not accept a same-thread Codex completion without its post-request start", async () => {
     const root = portableFixtureRoot("Codex compact unstarted item");
     roots.push(root);
-    const command = portableNodeExecutable(root, "codex");
+    const command = process.execPath;
     writeNodeSubcommand(root, "app-server", `
 const readline = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
@@ -308,7 +317,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager({ commands: { codex: command } });
+    const manager = trackManager(
+      new ProviderManager({ commands: { codex: command } }),
+    );
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "codex",
@@ -327,7 +338,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("does not accept a Codex compaction item from another thread", async () => {
     const root = portableFixtureRoot("Codex compact wrong thread");
     roots.push(root);
-    const command = portableNodeExecutable(root, "codex");
+    const command = process.execPath;
     writeNodeSubcommand(root, "app-server", `
 const readline = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
@@ -343,7 +354,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager({ commands: { codex: command } });
+    const manager = trackManager(
+      new ProviderManager({ commands: { codex: command } }),
+    );
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "codex",
@@ -362,7 +375,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("does not accept a stale same-thread Codex item before requesting compaction", async () => {
     const root = portableFixtureRoot("Codex compact stale item");
     roots.push(root);
-    const command = portableNodeExecutable(root, "codex");
+    const command = process.execPath;
     writeNodeSubcommand(root, "app-server", `
 const readline = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
@@ -380,7 +393,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager({ commands: { codex: command } });
+    const manager = trackManager(
+      new ProviderManager({ commands: { codex: command } }),
+    );
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "codex",
@@ -410,10 +425,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = trackManager(new ProviderManager(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([harness]),
-    );
+    ));
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "claude",
@@ -431,7 +446,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       "/compact remember retrieval exactly",
     );
 
-    const unprovenManager = new ProviderManager(
+    const unprovenManager = trackManager(new ProviderManager(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
@@ -440,7 +455,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           })(),
         ),
       })]),
-    );
+    ));
     await expect(unprovenManager.compact(nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-compact-unproven",
@@ -454,7 +469,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       message: expect.stringContaining("did not confirm"),
     });
 
-    const contradictoryManager = new ProviderManager(
+    const contradictoryManager = trackManager(new ProviderManager(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
@@ -474,7 +489,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           })(),
         ),
       })]),
-    );
+    ));
     await expect(contradictoryManager.compact(nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-compact-contradictory",
@@ -492,7 +507,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("rejects a successful provider result for a different session", async () => {
     const root = portableFixtureRoot("Claude compact wrong session");
     roots.push(root);
-    const manager = new ProviderManager(
+    const manager = trackManager(new ProviderManager(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
@@ -505,7 +520,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           })(),
         ),
       })]),
-    );
+    ));
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "claude",
@@ -525,7 +540,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("does not accept a foreign Claude proof followed by a selected-session result", async () => {
     const root = portableFixtureRoot("Claude compact foreign proof");
     roots.push(root);
-    const manager = new ProviderManager(
+    const manager = trackManager(new ProviderManager(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
@@ -541,7 +556,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           })(),
         ),
       })]),
-    );
+    ));
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "claude",
@@ -561,7 +576,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("does not accept Fast attestation from a foreign Claude session", async () => {
     const root = portableFixtureRoot("Claude compact foreign Fast init");
     roots.push(root);
-    const manager = new ProviderManager(
+    const manager = trackManager(new ProviderManager(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
@@ -578,7 +593,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           })(),
         ),
       })]),
-    );
+    ));
     const base = nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-compact-foreign-fast-init",

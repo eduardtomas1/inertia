@@ -41,15 +41,8 @@ export function ComposerAttachmentList({
 
   return (
     <>
-      <section className="composer-context-cards" aria-label="Attached context">
-        <header>
-          <span>Context</span>
-          <small>
-            {attachments.length} {attachments.length === 1 ? "item" : "items"}
-          </small>
-        </header>
-        <ul className="composer-attachments" aria-label="Attachments">
-        {attachments.map((attachment, attachmentIndex) => {
+      <ul className="composer-attachments" aria-label="Attachments">
+        {attachments.map((attachment) => {
           const kind = chatAttachmentKind(attachment.mimeType);
           const previewKind = attachmentPreviewKind(attachment);
           const previewUrl = attachmentPreviewUrl(attachment);
@@ -79,7 +72,6 @@ export function ComposerAttachmentList({
             <li
               className="composer-attachment"
               data-attachment-kind={kind}
-              style={{ "--context-card-index": attachmentIndex } as React.CSSProperties}
               key={attachment.id}
             >
               {previewKind
@@ -111,8 +103,7 @@ export function ComposerAttachmentList({
             </li>
           );
         })}
-        </ul>
-      </section>
+      </ul>
       {previewAttachment && (
         <AttachmentPreviewDialog
           attachment={previewAttachment}

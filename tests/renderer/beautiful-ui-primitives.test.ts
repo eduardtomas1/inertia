@@ -60,12 +60,9 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(styles).toContain("grid-template-rows 300ms cubic-bezier(0.23, 1, 0.32, 1)");
   });
 
-  it("presents project references and slash commands as descriptive prompt actions", () => {
-    expect(composerSource).toContain('className="composer-suggestion-glyph"');
-    expect(composerSource).toContain('className="composer-suggestion-copy"');
+  it("animates project references and slash commands as prompt actions", () => {
     expect(composerSource).toContain('aria-label="Project files"');
     expect(composerSource).toContain('aria-label="Composer commands"');
-    expect(composerSource).toContain("Run a command");
     expect(styles).toContain("animation: beautiful-pop-in 180ms cubic-bezier(0.23, 1, 0.32, 1)");
   });
 
@@ -78,15 +75,15 @@ describe("Beautiful UI primitive adaptations", () => {
 
     expect(responseSource).toContain('className="response-stream-word"');
     expect(styles).toContain("beautiful-stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1)");
-    expect(styles).toContain("beautiful-pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1)");
+    expect(styles).toContain(".response-markdown.is-streaming a { animation: beautiful-pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1)");
 
     expect(styles).toContain("reasoning-step-enter 320ms cubic-bezier(0.23, 1, 0.32, 1)");
-    expect(styles).toContain("var(--reasoning-step-index, 0) * 120ms");
+    expect(styles).toContain("var(--motion-index, 0) * 120ms");
     expect(styles).toContain("beautiful-spin 700ms linear infinite");
     expect(styles).toContain("beautiful-fade-up 350ms cubic-bezier(0.23, 1, 0.32, 1)");
-    expect(styles).toContain("var(--activity-reveal-index, 0) * 80ms");
-    expect(styles).toContain("var(--context-card-index, 0) * 100ms");
-    expect(styles).toContain("700ms + var(--context-card-index, 0) * 80ms");
+    expect(styles).toContain("var(--motion-index, 0) * 80ms");
+    expect(styles).toContain("var(--motion-index, 0) * 100ms");
+    expect(styles).toContain("700ms + var(--motion-index, 0) * 80ms");
 
     expect(usageStyles).toContain("width 500ms cubic-bezier(0.23, 1, 0.32, 1)");
     expect(usageStyles).toContain("usage-insight-content-in 250ms ease both");

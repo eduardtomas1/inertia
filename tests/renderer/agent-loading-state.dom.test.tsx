@@ -222,10 +222,8 @@ describe("agent loading and trace DOM", () => {
       '[data-activity-reveal="expanded-history"]',
     );
     expect(revealed).toHaveLength(2);
-    expect(revealed?.[0]?.style.getPropertyValue("--activity-reveal-index"))
-      .toBe("0");
-    expect(revealed?.[1]?.style.getPropertyValue("--activity-reveal-index"))
-      .toBe("1");
+    expect(revealed?.[0]?.getAttribute("style")).toBeNull();
+    expect(revealed?.[1]?.getAttribute("style")).toBeNull();
   });
 
   it("keeps historical reasoning collapsed without claiming current thought", () => {

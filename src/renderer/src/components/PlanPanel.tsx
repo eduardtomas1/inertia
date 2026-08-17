@@ -88,7 +88,6 @@ export function PlanPanel({
               <li
                 className={clsx("plan-step", `is-${step.status}`, activeStepId === step.id && "is-active")}
                 data-plan-step-status={step.status}
-                style={{ "--plan-step-index": index } as React.CSSProperties}
                 key={step.id}
               >
                 {onSelectStep ? (

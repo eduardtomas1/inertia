@@ -597,23 +597,18 @@ function MarkdownLink({
     projectRoot,
     projectId,
     conversationId,
-    streaming,
     onOpenProjectFile,
   } = useMarkdownRenderContext();
-  const streamingClassName = [
-    props.className,
-    streaming ? "response-stream-citation" : "",
-  ].filter(Boolean).join(" ");
   const target = resolveResponseLink(projectRoot, href);
   if (target.kind === "external") {
-    return <a {...props} className={streamingClassName} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
+    return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
   }
   if (target.kind === "project") {
     const language = sourceLanguageForFile(
       workspaceFileReferenceFallback(target.relativePath)
         ?? target.relativePath,
     );
-    const projectLinkClass = [streamingClassName, "response-project-file-link"]
+    const projectLinkClass = [props.className, "response-project-file-link"]
       .filter(Boolean)
       .join(" ");
     return <a {...props} className={projectLinkClass} data-language-family={language.family} href={href} onClick={(event) => {
@@ -641,7 +636,7 @@ function MarkdownLink({
     }}>{children}</a>;
   }
   if (target.kind === "anchor") {
-    return <a {...props} className={streamingClassName} href={target.href}>{children}</a>;
+    return <a {...props} href={target.href}>{children}</a>;
   }
   return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;
 }
@@ -651,26 +646,14 @@ function MarkdownParagraph({
   ...props
 }: ComponentProps<"p">): React.JSX.Element {
   const { streaming } = useMarkdownRenderContext();
-  if (!streaming) return <p {...props}>{children}</p>;
-  return (
-    <p {...props}>
-      {Children.map(children, (child, childIndex) => {
-        if (typeof child !== "string") return child;
-        return child.split(/(\s+)/u).map((token, tokenIndex) => (
-          token === "" || /^\s+$/u.test(token)
-            ? token
-            : (
-                <span
-                  className="response-stream-word"
-                  key={`${childIndex}-${tokenIndex}`}
-                >
-                  {token}
-                </span>
-              )
-        ));
-      })}
-    </p>
-  );
+  const content = streaming
+    ? Children.map(children, (child) => typeof child === "string"
+      ? child.split(/(\s+)/u).map((word, index) => /\S/u.test(word)
+        ? <span className="response-stream-word" key={index}>{word}</span>
+        : word)
+      : child)
+    : children;
+  return <p {...props}>{content}</p>;
 }
 
 function MarkdownCodeBlock({ children }: ComponentProps<"pre">): React.JSX.Element {

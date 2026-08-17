@@ -190,7 +190,7 @@ describe("agent input answers", () => {
     expect(html).toContain('spellCheck="false"');
     expect(html).toContain('aria-label="Enter the secret token"');
     expect(html).toContain('aria-label="Question navigation"');
-    expect(html).toContain('aria-label="Next question"');
+    expect(html).toContain("Next →");
     expect(html).toContain('aria-label="Go to question 2"');
     expect(html).toContain('hidden=""');
     expect(html).toContain('disabled=""');

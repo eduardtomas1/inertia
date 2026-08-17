@@ -148,11 +148,10 @@ describe("response Markdown", () => {
   it("mounts streamed words and inline citations on the exact motion hooks", () => {
     const streaming = render("Pistachio is [growing](https://example.com/source) quickly.", true);
     expect(streaming.match(/class="response-stream-word"/gu)).toHaveLength(3);
-    expect(streaming).toContain('class="response-stream-citation"');
+    expect(streaming).toContain('href="https://example.com/source"');
 
     const settled = render("Pistachio is growing quickly.");
     expect(settled).not.toContain("response-stream-word");
-    expect(settled).not.toContain("response-stream-citation");
   });
 
   it("copies tables as valid Markdown or CSV", () => {

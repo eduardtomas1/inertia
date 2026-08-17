@@ -70,7 +70,6 @@ export function ReasoningSummary({
             "turn-reasoning-step",
             streaming && index === segments.length - 1 && "is-active",
           )}
-          style={{ "--reasoning-step-index": index } as React.CSSProperties}
         >
           {segment.title && (
             <span className="turn-reasoning-step-title">{segment.title}</span>
@@ -241,11 +240,6 @@ export const ActivityRow = memo(function ActivityRow({
       data-activity-severity={severity}
       data-activity-visibility={visibility}
       data-activity-reveal={revealIndex === undefined ? undefined : "expanded-history"}
-      style={revealIndex === undefined
-        ? undefined
-        : {
-            "--activity-reveal-index": Math.min(revealIndex, 5),
-          } as React.CSSProperties}
       title={fullLabel}
     >
       <Icon size={12} aria-hidden="true" />

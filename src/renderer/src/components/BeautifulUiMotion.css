@@ -4,7 +4,7 @@
   animation: beautiful-stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1) both;
   will-change: filter, opacity;
 }
-.response-stream-citation { animation: beautiful-pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+.response-markdown.is-streaming a { animation: beautiful-pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1) both; }
 @keyframes beautiful-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes beautiful-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes beautiful-stream-in { from { opacity: 0; filter: blur(4px); } to { opacity: 1; filter: blur(0); } }
@@ -67,33 +67,16 @@
 
 .composer-suggestion-menu { transform-origin: bottom center; animation: beautiful-pop-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
 .composer-suggestion-menu button {
-  display: grid; width: 100%; min-height: 42px; grid-template-columns: 26px minmax(0, 1fr);
-  align-items: center; gap: 8px; padding: 5px 8px; text-align: left;
   transition: background 100ms ease, color 100ms ease, transform 100ms ease;
 }
 .composer-suggestion-menu button:active { transform: scale(.94); }
-.composer-suggestion-glyph { display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid var(--border); border-radius: 7px; color: var(--accent-strong); background: var(--surface-subtle); }
-.composer-suggestion-copy { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
-.composer-suggestion-copy strong,
-.composer-suggestion-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.composer-suggestion-copy strong { color: var(--text); font-size: 8.5px; font-weight: 620; }
-.composer-suggestion-copy small { color: var(--text-muted); font-size: 7.5px; }
-
-.composer-context-cards { display: grid; gap: 5px; }
-.composer-context-cards > header {
-  display: flex; align-items: center; justify-content: space-between;
-  color: var(--text-muted); font-size: var(--ui-font-micro);
-  animation: beautiful-fade-in 400ms ease-out both;
-}
-.composer-context-cards > header > span { color: var(--text-soft); font-weight: 650; }
-.composer-context-cards > header > small { padding: 2px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-subtle); }
 .composer-attachment {
   animation: beautiful-fade-up 400ms cubic-bezier(0.23, 1, 0.32, 1) both;
-  animation-delay: calc(var(--context-card-index, 0) * 100ms);
+  animation-delay: calc(var(--motion-index, 0) * 100ms);
 }
 .composer-attachment-copy small {
   animation: context-source-pop 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
-  animation-delay: calc(700ms + var(--context-card-index, 0) * 80ms);
+  animation-delay: calc(700ms + var(--motion-index, 0) * 80ms);
 }
 @keyframes context-source-pop { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
 
@@ -125,7 +108,7 @@
 .plan-step {
   position: relative; border-radius: var(--radius-medium);
   animation: beautiful-fade-up 450ms cubic-bezier(0.23, 1, 0.32, 1) both;
-  animation-delay: calc(var(--plan-step-index, 0) * 80ms);
+  animation-delay: calc(var(--motion-index, 0) * 80ms);
   transition: border-radius 300ms cubic-bezier(0.23, 1, 0.32, 1), background 300ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .plan-step:not(:last-child)::after {
@@ -166,7 +149,7 @@
 
 .turn-activity-group[data-activity-group-expanded="true"] .agent-activity[data-activity-reveal="expanded-history"] {
   animation: activity-row-reveal 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
-  animation-delay: calc(var(--activity-reveal-index, 0) * 80ms);
+  animation-delay: calc(var(--motion-index, 0) * 80ms);
 }
 @keyframes activity-row-reveal { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .turn-work-chevron { transition: transform 300ms cubic-bezier(0.23, 1, 0.32, 1); }
@@ -175,7 +158,7 @@
 .turn-reasoning-step {
   opacity: 0; transform: translateY(8px);
   animation: reasoning-step-enter 320ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
-  animation-delay: calc(var(--reasoning-step-index, 0) * 120ms);
+  animation-delay: calc(var(--motion-index, 0) * 120ms);
 }
 .turn-reasoning-step:not(:last-child)::after {
   transform-origin: top;
@@ -194,8 +177,15 @@
 .turn-changed-files-body { animation: beautiful-fade-up 300ms cubic-bezier(0.23, 1, 0.32, 1) both; }
 .turn-changed-files-list > span {
   animation: beautiful-pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1) both;
-  animation-delay: calc(var(--changed-file-index, 0) * 80ms);
+  animation-delay: calc(var(--motion-index, 0) * 80ms);
 }
+
+:is(.composer-attachment, .plan-step, .turn-reasoning-step, .turn-changed-files-list > span, .agent-activity[data-activity-reveal="expanded-history"]):nth-child(2) { --motion-index: 1; }
+:is(.composer-attachment, .plan-step, .turn-reasoning-step, .turn-changed-files-list > span, .agent-activity[data-activity-reveal="expanded-history"]):nth-child(3) { --motion-index: 2; }
+:is(.composer-attachment, .plan-step, .turn-reasoning-step, .turn-changed-files-list > span, .agent-activity[data-activity-reveal="expanded-history"]):nth-child(4) { --motion-index: 3; }
+:is(.composer-attachment, .plan-step, .turn-reasoning-step, .turn-changed-files-list > span, .agent-activity[data-activity-reveal="expanded-history"]):nth-child(5) { --motion-index: 4; }
+:is(.composer-attachment, .plan-step, .turn-reasoning-step, .turn-changed-files-list > span, .agent-activity[data-activity-reveal="expanded-history"]):nth-child(6) { --motion-index: 5; }
+:is(.composer-attachment, .plan-step, .turn-reasoning-step, .turn-changed-files-list > span, .agent-activity[data-activity-reveal="expanded-history"]):nth-child(n + 7) { --motion-index: 6; }
 
 @container (max-width: 420px) {
   .agent-input-footer { align-items: stretch; flex-direction: column; }
@@ -204,13 +194,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .response-stream-word, .response-stream-citation, .streaming-caret,
+  .response-stream-word, .response-markdown.is-streaming a, .streaming-caret,
   .response-markdown.is-streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
   .response-markdown.is-streaming > :is(ul, ol):last-child > li:last-child::after,
   .response-markdown.is-streaming > blockquote:last-child > :last-child::after,
   .response-markdown.is-streaming > .response-code-block:last-child pre code::after,
   .response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after,
-  .agent-input-question, .composer-suggestion-menu, .composer-context-cards > header,
+  .agent-input-question, .composer-suggestion-menu,
   .composer-attachment, .composer-attachment-copy small, .diff-selection-popover,
   .turn-changed-files-body, .turn-changed-files-list > span,
   .turn-work-log details[open] > .turn-work-details,

@@ -54,22 +54,22 @@ describe("InputRequestCard question pager", () => {
     const navigation = screen.getByLabelText("Question navigation");
     expect(within(navigation).getByText("1 of 2")).toBeVisible();
     expect(screen.getByRole("group", { name: /Choose the implementation scope/u })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Next question" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Next/u })).toBeDisabled();
 
     await user.click(screen.getByRole("radio", { name: /Broad/u }));
     expect(screen.getByRole("button", { name: "Go to question 1" })).toHaveAttribute("data-answered", "true");
-    await user.click(screen.getByRole("button", { name: "Next question" }));
+    await user.click(screen.getByRole("button", { name: /Next/u }));
 
     expect(within(navigation).getByText("2 of 2")).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Add a handoff note" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Submit answers and continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
     await user.type(screen.getByRole("textbox", { name: "Add a handoff note" }), "Keep reduced motion truthful");
 
     await user.click(screen.getByRole("button", { name: "Go to question 1" }));
     expect(screen.getByRole("radio", { name: /Broad/u })).toBeChecked();
     await user.click(screen.getByRole("button", { name: "Go to question 2" }));
     expect(screen.getByRole("textbox", { name: "Add a handoff note" })).toHaveValue("Keep reduced motion truthful");
-    await user.click(screen.getByRole("button", { name: "Submit answers and continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(onRespond).toHaveBeenCalledWith(request, {
       scope: ["broad"],

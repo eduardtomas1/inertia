@@ -1,0 +1,152 @@
+import type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "../node/runtime-process-protocol.js";
+import type { AppUpdateInstallBlocker, AppUpdateStatus } from "../shared/desktop.js";
+
+interface UpdateService {
+  current(): AppUpdateStatus;
+  beginInstall(): AppUpdateStatus;
+  blockInstall(blocker: AppUpdateInstallBlocker): AppUpdateStatus;
+  failInstall(): AppUpdateStatus;
+  quitAndInstall(onHandoff: () => void): Promise<boolean>;
+}
+
+interface RuntimeUpdateGate {
+  prepareForUpdate(): Promise<RuntimeUpdatePreparationResult>;
+  releaseUpdatePreparation(): Promise<boolean>;
+}
+
+interface PrivateConnectUpdateGate {
+  prepareForUpdate(): Promise<boolean>;
+  releaseUpdatePreparation(): Promise<void>;
+}
+
+export interface AppUpdateInstallCoordinatorOptions {
+  service: UpdateService;
+  runtime(): RuntimeUpdateGate | null;
+  privateConnect(): PrivateConnectUpdateGate | null;
+  cleanup(): Promise<boolean>;
+  finishNormalShutdown(): void;
+  reportError(error: unknown): void;
+}
+
+type InstallMode = "running" | "update-preparing" | "normal-cleanup" | "update-handoff";
+
+export function appUpdateInstallBlocker(
+  blocker: RuntimeUpdatePreparationBlocker,
+): AppUpdateInstallBlocker {
+  if (blocker === "agent-work") return "active-work";
+  if (blocker === "terminal") return "terminal";
+  if (blocker === "database-recovery") return "database-recovery";
+  if (blocker === "provider-maintenance") return "maintenance";
+  return "local-operation";
+}
+
+/** Serializes normal quit and updater handoff around one privileged cleanup. */
+export class AppUpdateInstallCoordinator {
+  private mode: InstallMode = "running";
+  private installPromise: Promise<AppUpdateStatus> | null = null;
+  private normalShutdown: Promise<void> | null = null;
+  private cleanupStarted = false;
+
+  constructor(private readonly options: AppUpdateInstallCoordinatorOptions) {}
+
+  install(): Promise<AppUpdateStatus> {
+    if (this.installPromise) return this.installPromise;
+    if (this.mode !== "running") return Promise.resolve(this.options.service.current());
+    this.options.service.beginInstall();
+    this.mode = "update-preparing";
+    const installing = this.prepareAndInstall().finally(() => {
+      if (this.installPromise === installing) this.installPromise = null;
+    });
+    this.installPromise = installing;
+    return installing;
+  }
+
+  /** Returns true only for the updater-generated quit after complete cleanup. */
+  allowBeforeQuit(): boolean {
+    if (this.mode === "update-handoff") return true;
+    this.beginNormalShutdown();
+    return false;
+  }
+
+  private beginNormalShutdown(): void {
+    if (this.normalShutdown) return;
+    this.mode = "normal-cleanup";
+    const stopping = this.releasePreparation()
+      .then(() => this.options.cleanup())
+      .then(() => undefined)
+      .catch((error: unknown) => this.options.reportError(error))
+      .finally(() => this.options.finishNormalShutdown());
+    this.normalShutdown = stopping;
+  }
+
+  private async prepareAndInstall(): Promise<AppUpdateStatus> {
+    const { service } = this.options;
+    try {
+      const runtime = this.options.runtime();
+      if (!runtime) return this.block("runtime-transition");
+      const prepared = await runtime.prepareForUpdate();
+      if (this.mode !== "update-preparing") {
+        await runtime.releaseUpdatePreparation().catch(() => false);
+        return service.current();
+      }
+      if (!prepared.ready) return this.block(appUpdateInstallBlocker(prepared.blocker));
+
+      const privateConnect = this.options.privateConnect();
+      const privateConnectReady = await privateConnect?.prepareForUpdate() ?? true;
+      if (this.mode !== "update-preparing") {
+        await this.releasePreparation();
+        return service.current();
+      }
+      if (!privateConnectReady) {
+        await runtime.releaseUpdatePreparation();
+        return this.block("private-connect");
+      }
+
+      this.cleanupStarted = true;
+      const cleanupConfirmed = await this.options.cleanup();
+      if (this.mode !== "update-preparing") return service.current();
+      if (!cleanupConfirmed) return this.failClosed();
+
+      const handedOff = await service.quitAndInstall(() => {
+        if (this.mode === "update-preparing") this.mode = "update-handoff";
+      });
+      if (this.currentMode() === "normal-cleanup") return service.current();
+      if (!handedOff) return this.failClosed();
+      if (this.currentMode() !== "update-handoff") return this.failClosed();
+      return service.current();
+    } catch (error) {
+      this.options.reportError(error);
+      if (this.mode === "normal-cleanup") return service.current();
+      // cleanup() is idempotent. Calling it again here distinguishes a held
+      // preparation failure from an irreversible, partially stopped runtime.
+      if (this.cleanupStarted) return this.failClosed();
+      await this.releasePreparation();
+      return this.block("runtime-transition");
+    }
+  }
+
+  private block(blocker: AppUpdateInstallBlocker): AppUpdateStatus {
+    if (this.mode === "update-preparing") this.mode = "running";
+    return this.options.service.blockInstall(blocker);
+  }
+
+  private currentMode(): InstallMode {
+    return this.mode;
+  }
+
+  private failClosed(): AppUpdateStatus {
+    const status = this.options.service.failInstall();
+    this.mode = "normal-cleanup";
+    this.options.finishNormalShutdown();
+    return status;
+  }
+
+  private async releasePreparation(): Promise<void> {
+    const runtime = this.options.runtime();
+    const privateConnect = this.options.privateConnect();
+    await Promise.all([
+      runtime?.releaseUpdatePreparation().catch(() => false),
+      privateConnect?.releaseUpdatePreparation().catch(() => undefined),
+    ]);
+  }
+}

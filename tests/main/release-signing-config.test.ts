@@ -55,6 +55,12 @@ describe("release signing configuration", () => {
     expect(JSON.parse(result.stdout)).toMatchObject({
       config: {
         forceCodeSigning: false,
+        extraMetadata: {
+          inertiaUpdateCapability: {
+            delivery: "manual",
+            reason: "macos-signing-unavailable",
+          },
+        },
         mac: {
           identity: "-",
           notarize: false,
@@ -69,6 +75,16 @@ describe("release signing configuration", () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       forceCodeSigning: false,
+      publish: [{
+        provider: "generic",
+        url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
+      }],
+      extraMetadata: {
+        inertiaUpdateCapability: {
+          delivery: "manual",
+          reason: "macos-signing-unavailable",
+        },
+      },
       mac: {
         identity: "-",
         hardenedRuntime: true,
@@ -93,12 +109,16 @@ describe("release signing configuration", () => {
     expect(complete.status).toBe(0);
     const config = JSON.parse(complete.stdout) as {
       forceCodeSigning: boolean;
+      extraMetadata: Record<string, unknown>;
       mac: { identity?: string; hardenedRuntime: boolean; notarize: boolean };
     };
     expect(config.forceCodeSigning).toBe(true);
     expect(config.mac.identity).toBeUndefined();
     expect(config.mac.hardenedRuntime).toBe(true);
     expect(config.mac.notarize).toBe(true);
+    expect(config.extraMetadata).toEqual({
+      inertiaUpdateCapability: { delivery: "in-app", platform: "darwin" },
+    });
     expect(complete.stdout).not.toContain("certificate");
     expect(complete.stdout).not.toContain("password");
   });
@@ -115,8 +135,26 @@ describe("release signing configuration", () => {
     expect(complete.status).toBe(0);
     expect(JSON.parse(complete.stdout)).toMatchObject({
       forceCodeSigning: true,
+      extraMetadata: {
+        inertiaUpdateCapability: { delivery: "in-app", platform: "win32" },
+      },
     });
     expect(complete.stdout).not.toContain("certificate");
     expect(complete.stdout).not.toContain("password");
+  });
+
+  it("marks only the release AppImage configuration as Linux in-app capable", () => {
+    const result = loadConfig("linux-x64");
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      forceCodeSigning: false,
+      publish: [{
+        provider: "generic",
+        url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
+      }],
+      extraMetadata: {
+        inertiaUpdateCapability: { delivery: "in-app", platform: "linux" },
+      },
+    });
   });
 });

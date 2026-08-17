@@ -98,6 +98,9 @@ export type SettingsViewProps = {
   appUpdateStatus: AppUpdateStatus | null;
   checkingAppUpdate: boolean;
   onCheckAppUpdate: () => Promise<void>;
+  onDownloadAppUpdate: () => Promise<void>;
+  onCancelAppUpdateDownload: () => Promise<void>;
+  onInstallAppUpdate: () => Promise<void>;
   onOpenAppRelease: () => Promise<void>;
   onUnarchive: (conversation: Conversation) => void;
   onLoadBackendProfile: (profileId: string) => Promise<ModelBackendProfileDetail>;
@@ -203,6 +206,9 @@ export function SettingsView({
   appUpdateStatus,
   checkingAppUpdate,
   onCheckAppUpdate,
+  onDownloadAppUpdate,
+  onCancelAppUpdateDownload,
+  onInstallAppUpdate,
   onOpenAppRelease,
   onUnarchive,
   onLoadBackendProfile,
@@ -378,6 +384,17 @@ export function SettingsView({
       setCheckingUpdate(false);
     }
   };
+  const runAppUpdateAction = async (
+    operation: () => Promise<void>,
+    failureMessage: string,
+  ): Promise<void> => {
+    setUpdateCheckStatus(null);
+    try {
+      await operation();
+    } catch {
+      setUpdateCheckStatus(failureMessage);
+    }
+  };
   const exportRecoveryData = async (): Promise<void> => {
     if (recoveryOperation) return;
     setRecoveryOperation("export");
@@ -517,11 +534,11 @@ export function SettingsView({
             </section>
 
             <section className="settings-card" aria-labelledby="application-update-heading">
-              <div className="settings-card-heading"><div><Download size={18} /></div><span><h3 id="application-update-heading">Application updates</h3><p>Check the official Inertia release without downloading or installing anything automatically.</p></span></div>
+              <div className="settings-card-heading"><div><Download size={18} /></div><span><h3 id="application-update-heading">Application updates</h3><p>Check, download, and restart on your schedule. Inertia never installs while work is active.</p></span></div>
               <div className="codex-binary-path application-update-setting">
                 <span>
                   <strong>Inertia v{INERTIA_VERSION}</strong>
-                  <small>
+                  <small role="status" aria-live="polite" aria-atomic="true">
                     {updateCheckStatus
                       ?? appUpdateStatus?.message
                       ?? "Inertia checks quietly after launch. You stay in control of every download and install."}
@@ -529,9 +546,18 @@ export function SettingsView({
                 </span>
                 <div>
                   {appUpdateStatus?.state === "available" && (
-                    <button type="button" className="secondary-button" onClick={() => { void onOpenAppRelease(); }}><Download size={14} />View release</button>
+                    <button type="button" className="secondary-button" onClick={() => { void runAppUpdateAction(onOpenAppRelease, "The release page could not be opened."); }}><Download size={14} />View release</button>
                   )}
-                  <button type="button" className="secondary-button" disabled={checkingUpdate || checkingAppUpdate} onClick={() => { void checkAppUpdate(); }}><RefreshCw size={14} />{checkingUpdate || checkingAppUpdate ? "Checking…" : "Check now"}</button>
+                  {appUpdateStatus?.delivery === "in-app" && ["available", "cancelled", "failed"].includes(appUpdateStatus.state) && (
+                    <button type="button" className="secondary-button" onClick={() => { void runAppUpdateAction(onDownloadAppUpdate, "The update download could not be started."); }}><Download size={14} />{appUpdateStatus.state === "available" ? "Download" : "Retry download"}</button>
+                  )}
+                  {appUpdateStatus?.state === "downloading" && (
+                    <button type="button" className="secondary-button" onClick={() => { void runAppUpdateAction(onCancelAppUpdateDownload, "The update download could not be cancelled."); }}>Cancel download</button>
+                  )}
+                  {appUpdateStatus?.state === "downloaded" && (
+                    <button type="button" className="secondary-button" onClick={() => { void runAppUpdateAction(onInstallAppUpdate, "The update restart could not be started safely."); }}>Restart to update</button>
+                  )}
+                  <button type="button" className="secondary-button" disabled={checkingUpdate || checkingAppUpdate || ["downloading", "downloaded", "installing"].includes(appUpdateStatus?.state ?? "")} onClick={() => { void checkAppUpdate(); }}><RefreshCw size={14} />{checkingUpdate || checkingAppUpdate ? "Checking…" : "Check now"}</button>
                 </div>
               </div>
             </section>

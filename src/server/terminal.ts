@@ -97,6 +97,7 @@ export class TerminalManager {
   private readonly replacementReservations = new Map<string, TerminalSession>();
   private readonly closingSessions = new Set<Promise<void>>();
   private disposingAll = false;
+  private updatePreparationHeld = false;
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
   private readonly outputFlushMs: number;
@@ -228,7 +229,7 @@ export class TerminalManager {
     owner: WebSocket,
     replaced: TerminalSession | null,
   ): void {
-    if (this.disposingAll) {
+    if (this.disposingAll || this.updatePreparationHeld) {
       throw new TerminalError("The terminal service is stopping.");
     }
     const reservedOnly = [...this.replacementReservations.values()].filter(
@@ -249,6 +250,21 @@ export class TerminalManager {
         "This window already has the maximum number of terminals.",
       );
     }
+  }
+
+  holdForUpdatePreparation(): void {
+    this.updatePreparationHeld = true;
+  }
+
+  releaseUpdatePreparation(): void {
+    if (!this.disposingAll) this.updatePreparationHeld = false;
+  }
+
+  hasUpdateBlockingActivity(): boolean {
+    return this.sessions.size > 0
+      || this.replacementReservations.size > 0
+      || this.closingSessions.size > 0
+      || this.closingFailures.size > 0;
   }
 
   private createProcessReplacing(

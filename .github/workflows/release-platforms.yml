@@ -224,6 +224,7 @@ jobs:
       - name: Stage exact release assets and checksums
         env:
           INERTIA_RELEASE_STAGE_DIR: ${{ runner.temp }}/inertia-release-stage
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           RELEASE_PLATFORM: ${{ matrix.platform }}
         run: node scripts/release-assets.mjs stage "$RELEASE_PLATFORM"
 
@@ -248,7 +249,7 @@ jobs:
     name: Publish exact-tag release
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: write
       attestations: write
@@ -275,6 +276,16 @@ jobs:
           event_sha="${PUSH_EVENT_SHA:-$(git rev-parse "$release_ref")}"
           RELEASE_REF="$release_ref" RELEASE_EVENT_SHA="$event_sha" node scripts/validate-release.mjs
 
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked release-validation dependencies
+        run: npm ci --ignore-scripts
+
       - name: Download macOS release artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -296,6 +307,7 @@ jobs:
       - name: Verify and consolidate release assets
         env:
           INERTIA_RELEASE_DOWNLOAD_DIR: ${{ runner.temp }}/inertia-release-assets
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: node scripts/release-assets.mjs finalize
 
       - name: Attest release build provenance
@@ -311,23 +323,122 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -d '' -t assets < <(find "$ASSET_DIRECTORY" -maxdepth 1 -type f -print0 | sort -z)
-          if [[ "${#assets[@]}" -ne 5 ]]; then
-            echo "Expected four desktop assets and SHA256SUMS.txt; found ${#assets[@]}." >&2
+          checksum_file="$ASSET_DIRECTORY/SHA256SUMS.txt"
+          if [[ ! -f "$checksum_file" ]]; then
+            echo "The consolidated checksum manifest is missing." >&2
             exit 1
           fi
+          checksum_entries="$(wc -l < "$checksum_file" | tr -d '[:space:]')"
+          if [[ "${#assets[@]}" -ne "$((checksum_entries + 1))" ]]; then
+            echo "The consolidated asset set does not match SHA256SUMS.txt." >&2
+            exit 1
+          fi
+          (cd "$ASSET_DIRECTORY" && sha256sum --check --strict SHA256SUMS.txt)
 
-          created_release=false
-          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          release_json="$RUNNER_TEMP/inertia-release.json"
+          release_error="$RUNNER_TEMP/inertia-release-error.txt"
+          if ! gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$release_json" 2> "$release_error"; then
+            if ! grep -q 'HTTP 404' "$release_error"; then
+              cat "$release_error" >&2
+              exit 1
+            fi
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --draft \
               --title "Inertia $RELEASE_TAG" \
               --generate-notes
-            created_release=true
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$release_json"
           fi
 
-          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY"
-          if [[ "$created_release" == true ]]; then
-            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          if [[ "$(jq -r '.tag_name' "$release_json")" != "$RELEASE_TAG" ]]; then
+            echo "GitHub returned a release for an unexpected tag." >&2
+            exit 1
           fi
+          if [[ "$(jq -r '.draft' "$release_json")" != true ]]; then
+            echo "Refusing to replace or modify the published release $RELEASE_TAG." >&2
+            exit 1
+          fi
+
+          declare -A local_assets=()
+          for path in "${assets[@]}"; do
+            name="$(basename "$path")"
+            if [[ ! "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "Unsafe local release asset name." >&2
+              exit 1
+            fi
+            if [[ -n "${local_assets[$name]+present}" ]]; then
+              echo "Duplicate local release asset name: $name" >&2
+              exit 1
+            fi
+            local_assets["$name"]="$path"
+          done
+
+          verify_directory="$(mktemp -d "$RUNNER_TEMP/inertia-existing-release.XXXXXX")"
+          declare -A remote_assets=()
+          if ! jq -e 'all(.assets[]; .name | test("^[A-Za-z0-9._-]+$"))' "$release_json" >/dev/null; then
+            echo "Draft release contains an unsafe asset name." >&2
+            exit 1
+          fi
+          while IFS=$'\t' read -r name size; do
+            [[ -n "$name" ]] || continue
+            if [[ -z "${local_assets[$name]+present}" ]]; then
+              echo "Draft release contains unexpected asset: $name" >&2
+              exit 1
+            fi
+            if [[ -n "${remote_assets[$name]+present}" ]]; then
+              echo "Draft release contains a duplicate asset name: $name" >&2
+              exit 1
+            fi
+            local_path="${local_assets[$name]}"
+            if [[ "$(stat -c '%s' "$local_path")" != "$size" ]]; then
+              echo "Draft release asset size differs from the local build: $name" >&2
+              exit 1
+            fi
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$verify_directory"
+            if [[ "$(sha256sum "$verify_directory/$name" | cut -d ' ' -f 1)" != "$(sha256sum "$local_path" | cut -d ' ' -f 1)" ]]; then
+              echo "Draft release asset digest differs from the local build: $name" >&2
+              exit 1
+            fi
+            remote_assets["$name"]=present
+          done < <(jq -r '.assets[] | [.name, .size] | @tsv' "$release_json")
+
+          for path in "${assets[@]}"; do
+            name="$(basename "$path")"
+            if [[ -z "${remote_assets[$name]+present}" ]]; then
+              gh release upload "$RELEASE_TAG" "$path" --repo "$GITHUB_REPOSITORY"
+            fi
+          done
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$release_json"
+          if [[ "$(jq -r '.draft' "$release_json")" != true ]]; then
+            echo "The release stopped being a draft before final verification." >&2
+            exit 1
+          fi
+          if ! jq -e 'all(.assets[]; .name | test("^[A-Za-z0-9._-]+$"))' "$release_json" >/dev/null; then
+            echo "The final draft contains an unsafe asset name." >&2
+            exit 1
+          fi
+          mapfile -t final_remote_names < <(jq -r '.assets[].name' "$release_json" | sort)
+          mapfile -t final_local_names < <(printf '%s\n' "${!local_assets[@]}" | sort)
+          if [[ "${#final_remote_names[@]}" -ne "${#final_local_names[@]}" ]] \
+            || [[ "$(printf '%s\n' "${final_remote_names[@]}")" != "$(printf '%s\n' "${final_local_names[@]}")" ]]; then
+            echo "The final draft release asset set is not exact." >&2
+            exit 1
+          fi
+
+          final_verify_directory="$(mktemp -d "$RUNNER_TEMP/inertia-final-release.XXXXXX")"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$final_verify_directory"
+          mapfile -d '' -t downloaded < <(find "$final_verify_directory" -maxdepth 1 -type f -print0 | sort -z)
+          if [[ "${#downloaded[@]}" -ne "${#assets[@]}" ]]; then
+            echo "The final draft download did not contain the exact asset count." >&2
+            exit 1
+          fi
+          for name in "${final_local_names[@]}"; do
+            if [[ "$(sha256sum "$final_verify_directory/$name" | cut -d ' ' -f 1)" != "$(sha256sum "${local_assets[$name]}" | cut -d ' ' -f 1)" ]]; then
+              echo "Final draft release verification failed for $name." >&2
+              exit 1
+            fi
+          done
+
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

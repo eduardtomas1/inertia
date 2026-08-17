@@ -59,6 +59,9 @@ import {
   resolveAttachmentPreviewResponse,
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
+import { resolveAppUpdateCapability } from "./app-update-capability.js";
+import { AppUpdateInstallCoordinator } from "./app-update-install.js";
+import { loadElectronAppUpdater } from "./electron-app-updater.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
   CredentialVault,
@@ -70,7 +73,10 @@ import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagn
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
-import { stopRuntimeAndPrivateConnect } from "./runtime-shutdown-coordination.js";
+import {
+  cleanupPrivilegedOwners,
+  finishPrivilegedExit,
+} from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
@@ -99,6 +105,10 @@ const IPC = {
   copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
   copyText: "inertia:copy-text",
   checkAppUpdate: "inertia:check-app-update",
+  downloadAppUpdate: "inertia:download-app-update",
+  cancelAppUpdateDownload: "inertia:cancel-app-update-download",
+  installAppUpdate: "inertia:install-app-update",
+  appUpdateStatus: "inertia:app-update-status",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
@@ -142,9 +152,10 @@ let runtimeSupervisor: RuntimeSupervisor | null = null;
 let privateConnectHost: PrivateConnectHost | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
 let appUpdateService: AppUpdateService | null = null;
+let appUpdateInstallCoordinator: AppUpdateInstallCoordinator | null = null;
 let credentialVault: CredentialVault | null = null;
 let trustedRendererUrl = "";
-let stoppingRuntime = false;
+let privilegedCleanup: Promise<boolean> | null = null;
 let packageSmokeFilePath: string | null = null;
 const previewBroker = new PreviewBroker({
   getWindow: () => mainWindow,
@@ -518,6 +529,26 @@ function registerIpcHandlers(): void {
     }
     if (!appUpdateService) throw new Error("Update checks are unavailable.");
     return await appUpdateService.check(force);
+  });
+
+  ipcMain.handle(IPC.downloadAppUpdate, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    if (!appUpdateService) throw new Error("Application updates are unavailable.");
+    return await appUpdateService.download();
+  });
+
+  ipcMain.handle(IPC.cancelAppUpdateDownload, (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    if (!appUpdateService) throw new Error("Application updates are unavailable.");
+    return appUpdateService.cancelDownload();
+  });
+
+  ipcMain.handle(IPC.installAppUpdate, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    if (!appUpdateInstallCoordinator) {
+      throw new Error("Application updates are unavailable.");
+    }
+    return await appUpdateInstallCoordinator.install();
   });
 
   ipcMain.handle(IPC.selectAttachments, async (event, ...args) => {
@@ -907,34 +938,70 @@ function focusMainWindow(): void {
 }
 
 function finishQuitAfterCleanup(): void {
-  const windowToClose = mainWindow;
-  mainWindow = null;
-  if (windowToClose && !windowToClose.isDestroyed()) {
-    // Stop renderer polling and release Chromium's final native window before
-    // forcing the already-clean main process to exit. Leaving the window alive
-    // can keep a packaged process resident after every privileged owner has
-    // settled, especially when the runtime-ready bridge is already offline.
-    windowToClose.destroy();
-  }
-  recordPackageSmokeStage("app-exit");
-  // The first quit pass already saved window state, closed native previews,
-  // stopped the utility runtime, disposed owned attachments, and destroyed the
-  // renderer window. Exit directly because Electron's native app-exit path can
-  // still block after every privileged resource has already been released.
-  process.exit(0);
+  finishPrivilegedExit({
+    takeWindow: () => { const window = mainWindow; mainWindow = null; return window; },
+    recordExit: () => recordPackageSmokeStage("app-exit"), exit: () => process.exit(0),
+  });
 }
-
+function runPrivilegedCleanup(): Promise<boolean> {
+  if (privilegedCleanup) return privilegedCleanup;
+  if (mainWindow) saveWindowState(mainWindow);
+  previewBroker.close();
+  runtimeDiagnostics?.record("app.stop");
+  const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost;
+  privateConnectHost = null;
+  const cleanup = cleanupPrivilegedOwners({
+    runtime: supervisorToStop,
+    privateConnect: privateConnectHostToStop,
+    onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
+    onRuntimeError: (error) => {
+      runtimeDiagnostics?.record("runtime.failure", {
+        phase: "stopping", message: error instanceof Error
+          ? error.message : "The local runtime could not stop cleanly.",
+      });
+      console.error("Failed to stop the local runtime", error);
+    },
+    onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
+    disposeTemporaryAttachments: disposeImportedAttachments,
+    onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
+    onUnconfirmedRuntimeExit: () => console.warn(
+      "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
+    ),
+    closeDurableAttachments: async () => {
+      const retainedAttachments = conversationAttachments; conversationAttachments = null;
+      await closeConversationAttachmentAccess(retainedAttachments);
+    },
+  });
+  privilegedCleanup = cleanup;
+  return cleanup;
+}
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
   setImmediate(() => runtimeDiagnostics?.record("app.start"));
   const testUpdateVersion = runtimeBootstrap.runtimeUpdateVersion(app.getVersion());
+  const appUpdateCapability = process.env.NODE_ENV === "test"
+    ? { delivery: "manual" as const, reason: "development-build" as const }
+    : resolveAppUpdateCapability({ isPackaged: app.isPackaged,
+        platform: process.platform, appPath: app.getAppPath(), appImagePath: process.env.APPIMAGE });
   appUpdateService = new AppUpdateService({
     currentVersion: app.getVersion(),
+    capability: appUpdateCapability,
+    loadUpdater: loadElectronAppUpdater,
     fetch: process.env.NODE_ENV === "test"
       ? async () => new Response(JSON.stringify({
           tag_name: `v${testUpdateVersion.replace(/^v/u, "")}`,
         }))
       : net.fetch as typeof globalThis.fetch,
+  });
+  appUpdateService.subscribe((status) => {
+    const window = mainWindow;
+    if (window && !window.isDestroyed()) window.webContents.send(IPC.appUpdateStatus, status);
+  });
+  appUpdateInstallCoordinator = new AppUpdateInstallCoordinator({
+    service: appUpdateService, runtime: () => runtimeSupervisor,
+    privateConnect: () => privateConnectHost, cleanup: runPrivilegedCleanup,
+    finishNormalShutdown: finishQuitAfterCleanup,
+    reportError: (error) => console.error("Failed to prepare the application update", error),
   });
   nativeTheme.on("updated", () => {
     if (windowThemePreference !== "system") return;
@@ -1141,57 +1208,14 @@ if (!hasSingleInstanceLock) {
     }
   });
   app.on("before-quit", (event) => {
-    if (stoppingRuntime) return;
-
+    if (appUpdateInstallCoordinator?.allowBeforeQuit()) return;
     event.preventDefault();
-    stoppingRuntime = true;
     recordPackageSmokeStage("before-quit");
-    if (mainWindow) saveWindowState(mainWindow);
-    // Native preview WebContentsViews can keep Electron's first quit pass
-    // alive even after the supervised runtime has stopped. Destroy them
-    // before asynchronous cleanup, rather than waiting for BrowserWindow's
-    // `closed` event that this quit sequence itself is trying to reach.
-    previewBroker.close();
-    const supervisorToStop = runtimeSupervisor;
-    runtimeDiagnostics?.record("app.stop");
-
-    void (async () => {
-      const privateConnectHostToStop = privateConnectHost;
-      privateConnectHost = null;
-      const runtimeExitConfirmed = await stopRuntimeAndPrivateConnect(
-        async () => {
-          if (!supervisorToStop) return true;
-          const confirmed = await supervisorToStop.stop().catch((error: unknown) => {
-            runtimeDiagnostics?.record("runtime.failure", {
-              phase: "stopping",
-              message: error instanceof Error ? error.message : "The local runtime could not stop cleanly.",
-            });
-            console.error("Failed to stop the local runtime", error);
-            return false;
-          });
-          if (confirmed && runtimeSupervisor === supervisorToStop) {
-            runtimeSupervisor = null;
-          }
-          return confirmed;
-        },
-        async () => {
-          await privateConnectHostToStop?.shutdown().catch(() => undefined);
-        },
-      );
-      if (runtimeExitConfirmed) {
-        await disposeImportedAttachments().catch((error: unknown) => {
-          console.error("Failed to remove temporary attachments", error);
-        });
-      } else {
-        console.warn(
-          "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
-        );
-      }
-      const retainedAttachments = conversationAttachments;
-      conversationAttachments = null;
-      await closeConversationAttachmentAccess(retainedAttachments);
-    })().then(finishQuitAfterCleanup, (error: unknown) => {
-      console.error("Failed to finish privileged shutdown", error); });
+    if (!appUpdateInstallCoordinator) {
+      void runPrivilegedCleanup().then(finishQuitAfterCleanup, (error: unknown) => {
+        console.error("Failed to finish privileged shutdown", error);
+      });
+    }
   });
 
   void app

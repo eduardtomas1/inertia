@@ -42,6 +42,89 @@ afterEach(async () => {
 });
 
 describe("runtime shutdown authority", () => {
+  it("holds update admission while draining an admitted command and supports exact rollback", async () => {
+    const paths = await workspace();
+    const commandGate = deferred();
+    const beforeCommand = vi.fn(() => commandGate.promise);
+    const runtime = await startTestRuntime({
+      dataDirectory: paths.data,
+      defaultWorkspacePath: paths.workspace,
+      enableProviders: false,
+      testOnlyBeforeRuntimeCommand: beforeCommand,
+      ...runtimeIdentity,
+    });
+    runtimes.push(runtime);
+    const client = await connectRuntime(runtime.websocketUrl);
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    client.socket.send(JSON.stringify({
+      type: "settings.update",
+      requestId: randomUUID(),
+      payload: { theme: "dark" },
+    }));
+    await vi.waitFor(() => expect(beforeCommand).toHaveBeenCalledOnce());
+
+    const operationId = randomUUID();
+    let settled = false;
+    const preparing = runtime.prepareForUpdate(operationId).then((result) => {
+      settled = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    const rejectedRequestId = randomUUID();
+    client.socket.send(JSON.stringify({
+      type: "settings.update",
+      requestId: rejectedRequestId,
+      payload: { theme: "light" },
+    }));
+    const rejected = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+        event.type === "request.error" && event.requestId === rejectedRequestId,
+    );
+    expect(rejected.message).toContain("application update");
+
+    commandGate.resolve();
+    await expect(preparing).resolves.toEqual({ ready: true });
+    expect(runtime.releaseUpdatePreparation(randomUUID())).toBe(false);
+    expect(runtime.releaseUpdatePreparation(operationId)).toBe(true);
+
+    const acceptedRequestId = randomUUID();
+    client.socket.send(JSON.stringify({
+      type: "settings.update",
+      requestId: acceptedRequestId,
+      payload: { theme: "system" },
+    }));
+    await expect(client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === acceptedRequestId,
+    )).resolves.toMatchObject({ requestId: acceptedRequestId });
+  });
+
+  it("reports provider refresh as a sanitized update blocker and releases admission", async () => {
+    const paths = await workspace();
+    const refreshGate = deferred();
+    const beforeRefresh = vi.fn(() => refreshGate.promise);
+    const runtime = await startTestRuntime({
+      dataDirectory: paths.data,
+      defaultWorkspacePath: paths.workspace,
+      enableProviders: true,
+      testOnlyProviderRefresh: beforeRefresh,
+      ...runtimeIdentity,
+    });
+    runtimes.push(runtime);
+    await vi.waitFor(() => expect(beforeRefresh).toHaveBeenCalledOnce());
+
+    await expect(runtime.prepareForUpdate(randomUUID())).resolves.toEqual({
+      ready: false,
+      blocker: "provider-refresh",
+    });
+    refreshGate.resolve();
+  });
+
   it("does not close while an admitted command is still inside its owned barrier", async () => {
     const paths = await workspace();
     const commandGate = deferred();

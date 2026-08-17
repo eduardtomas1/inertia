@@ -28,6 +28,75 @@ const runtimeGenerationId = "33333333-3333-4333-8333-333333333333:1";
 const systemBootId = "test:44444444-4444-4444-8444-444444444444";
 
 describe("runtime process protocol", () => {
+  it("strictly binds update preparation and release messages", () => {
+    const operationId = crypto.randomUUID();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.prepare-update",
+      operationId,
+      generation: 3,
+    })).toEqual({
+      type: "runtime.prepare-update",
+      operationId,
+      generation: 3,
+    });
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.prepare-update",
+      operationId,
+      generation: 0,
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.release-update-preparation",
+      operationId,
+      generation: 3,
+    })).toEqual({
+      type: "runtime.release-update-preparation",
+      operationId,
+      generation: 3,
+    });
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.prepare-update-result",
+      operationId,
+      generation: 3,
+      ready: true,
+    })).toEqual({
+      type: "runtime.prepare-update-result",
+      operationId,
+      generation: 3,
+      ready: true,
+    });
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.prepare-update-result",
+      operationId,
+      generation: 3,
+      ready: false,
+      blocker: "provider-refresh",
+    })).toEqual({
+      type: "runtime.prepare-update-result",
+      operationId,
+      generation: 3,
+      ready: false,
+      blocker: "provider-refresh",
+    });
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.prepare-update-result",
+      operationId,
+      generation: 3,
+      ready: false,
+      blocker: "/private/user/path",
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.release-update-preparation-result",
+      operationId,
+      generation: 3,
+      released: true,
+    })).toEqual({
+      type: "runtime.release-update-preparation-result",
+      operationId,
+      generation: 3,
+      released: true,
+    });
+  });
+
   it("bounds and correlates conversation attachment store messages", () => {
     const requestId = crypto.randomUUID();
     const request = {

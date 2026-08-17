@@ -31,6 +31,7 @@ describe("database recovery operation serialization", () => {
 
   it("does not overlap imports/exports and continues after a failed operation", async () => {
     const queue = new DatabaseRecoveryOperationQueue();
+    expect(queue.hasActiveOperations()).toBe(false);
     const events: string[] = [];
     let releaseFirst!: () => void;
     const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
@@ -46,10 +47,12 @@ describe("database recovery operation serialization", () => {
       return "complete";
     });
     await Promise.resolve();
+    expect(queue.hasActiveOperations()).toBe(true);
     expect(events).toEqual(["first:start"]);
     releaseFirst();
     await expect(first).rejects.toThrow("injected failure");
     await expect(second).resolves.toBe("complete");
+    expect(queue.hasActiveOperations()).toBe(false);
     expect(events).toEqual([
       "first:start",
       "first:end",

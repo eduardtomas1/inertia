@@ -131,6 +131,72 @@ async function createServiceWith(
 async function createService(): Promise<PrivateConnectService> { return await createServiceWith(); }
 
 describe("Private Connect service lifecycle", () => {
+  it("holds update admission atomically and rolls it back when pairing is active", async () => {
+    const service = await createService();
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const started = await service.pairStart({
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId,
+      deviceLabel: "Browser",
+    }, "example");
+
+    await expect(service.prepareForUpdate()).resolves.toBe(false);
+    await service.denyPairing(started.requestId);
+    await expect(service.prepareForUpdate()).resolves.toBe(true);
+    await expect(service.createInvitation()).rejects.toThrow("not ready");
+
+    await service.releaseUpdatePreparation();
+    await expect(service.createInvitation()).resolves.toMatchObject({
+      url: expect.stringContaining("#"),
+    });
+  });
+
+  it("blocks update preparation around durable local authority changes", async () => {
+    const memory = testStore();
+    let blockSaves = false;
+    let releaseSave!: () => void;
+    let markSaveStarted!: () => void;
+    const saveStarted = new Promise<void>((resolve) => { markSaveStarted = resolve; });
+    const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const store = {
+      available: () => memory.store.available(),
+      load: async () => await memory.store.load(),
+      save: async (next: PersistedPrivateConnect) => {
+        if (blockSaves) {
+          markSaveStarted();
+          await saveGate;
+        }
+        await memory.store.save(next);
+      },
+    } as unknown as PrivateConnectStore;
+    const service = await createServiceWith({ ...memory, store });
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const started = await service.pairStart({
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId,
+      deviceLabel: "Browser",
+    }, "example");
+    await service.approvePairing(started.requestId, "monitor", [projectId]);
+
+    blockSaves = true;
+    const revoking = service.revokeDevice(deviceId);
+    await saveStarted;
+    await expect(service.prepareForUpdate()).resolves.toBe(false);
+    releaseSave();
+    await revoking;
+
+    await expect(service.prepareForUpdate()).resolves.toBe(true);
+    await expect(service.updateDevice(
+      deviceId,
+      "monitor",
+      [projectId],
+      "2030-01-15T00:00:00.000Z",
+    )).rejects.toThrow("prepares to restart");
+    await service.releaseUpdatePreparation();
+  });
+
   it("rejoins a pending pairing when the browser retries the same invitation", async () => {
     const service = await createService();
     await service.setEnabled(true);

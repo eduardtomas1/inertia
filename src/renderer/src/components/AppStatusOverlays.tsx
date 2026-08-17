@@ -42,7 +42,12 @@ export function AppStatusOverlays({
   // dialog itself remains lazy, so waiting for its chunk would briefly leave
   // native preview content above the trusted authentication flow.
   useNativePreviewSuspension(Boolean(
-    providerAuth.provider || databaseRecoveryNotice,
+    providerAuth.provider
+      || databaseRecoveryNotice
+      || appUpdate.visible
+      || appUpdate.error
+      || providerQuotaNotices.notices.length > 0
+      || error,
   ));
   return (
     <>
@@ -59,29 +64,49 @@ export function AppStatusOverlays({
           onCopyReport={onCopyRecoveryReport}
         />
       )}
-      {appUpdate.visible && appUpdate.status && (
-        <AppUpdateNotice
-          status={appUpdate.status}
-          onDismiss={appUpdate.dismiss}
-          onOpenRelease={() => {
-            void appUpdate.openRelease().catch(() => undefined);
-          }}
-        />
-      )}
-      <ProviderQuotaNotices
-        notices={providerQuotaNotices.notices}
-        bottomOffset={20
-          + (appUpdate.visible && appUpdate.status ? 64 : 0)
-          + (error ? 58 : 0)}
-        onDismiss={providerQuotaNotices.dismiss}
-      />
-      {error && (
-        <div className="error-toast" role="alert">
-          <AlertCircle size={17} />
-          <span>{error}</span>
-          <IconButton label="Dismiss error" onClick={onDismissError}>
-            <X size={15} />
-          </IconButton>
+      {(appUpdate.visible || appUpdate.error || providerQuotaNotices.notices.length > 0 || error) && (
+        <div className="status-overlay-stack">
+          {appUpdate.visible && appUpdate.status && (
+            <AppUpdateNotice
+              status={appUpdate.status}
+              onDismiss={appUpdate.dismiss}
+              onOpenRelease={() => {
+                void appUpdate.openRelease().catch(() => undefined);
+              }}
+              onDownload={() => {
+                void appUpdate.download().catch(() => undefined);
+              }}
+              onCancelDownload={() => {
+                void appUpdate.cancelDownload().catch(() => undefined);
+              }}
+              onInstall={() => {
+                void appUpdate.install().catch(() => undefined);
+              }}
+            />
+          )}
+          <ProviderQuotaNotices
+            notices={providerQuotaNotices.notices}
+            stacked
+            onDismiss={providerQuotaNotices.dismiss}
+          />
+          {appUpdate.error && (
+            <div className="error-toast" role="alert">
+              <AlertCircle size={17} />
+              <span>{appUpdate.error}</span>
+              <IconButton label="Dismiss update error" onClick={appUpdate.dismissError}>
+                <X size={15} />
+              </IconButton>
+            </div>
+          )}
+          {error && (
+            <div className="error-toast" role="alert">
+              <AlertCircle size={17} />
+              <span>{error}</span>
+              <IconButton label="Dismiss error" onClick={onDismissError}>
+                <X size={15} />
+              </IconButton>
+            </div>
+          )}
         </div>
       )}
     </>

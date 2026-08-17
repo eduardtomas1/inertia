@@ -1,10 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, copyFile, mkdtemp, mkdir, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, lstat, mkdtemp, mkdir, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
+import { parseDocument } from "yaml";
 
 const STARTUP_TIMEOUT_MS = 30_000;
 // This begins only after runtime readiness. It covers the product's bounded
@@ -14,6 +16,21 @@ const EXIT_TIMEOUT_MS = 15_000;
 const CLEANUP_TIMEOUT_MS = 5_000;
 const POLL_INTERVAL_MS = 50;
 const MAX_OUTPUT_LENGTH = 64 * 1024;
+const MAX_PACKAGED_MANIFEST_BYTES = 256 * 1024;
+const MAX_UPDATE_CONFIG_BYTES = 64 * 1024;
+const MAX_MAIN_BUNDLE_BYTES = 16 * 1024 * 1024;
+const UPDATE_PROVIDER_URL =
+  "https://github.com/eduardtomas1/inertia/releases/latest/download";
+const STABLE_VERSION_PATTERN =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
+const MANUAL_UPDATE_REASONS = new Set([
+  "development-build",
+  "capability-missing",
+  "capability-invalid",
+  "platform-mismatch",
+  "macos-signing-unavailable",
+  "windows-signing-unavailable",
+]);
 
 function sleep(milliseconds) {
   return new Promise((settle) => setTimeout(settle, milliseconds));
@@ -44,20 +61,30 @@ async function isExecutableFile(path) {
   }
 }
 
-async function readAsarFileTree(archive) {
+async function readAsarArchive(archive) {
   const handle = await open(archive, "r");
   try {
     const prefix = Buffer.alloc(16);
     const { bytesRead } = await handle.read(prefix, 0, 16, 0);
     if (bytesRead !== 16) throw new Error("The packaged archive has no asar header.");
+    const headerSize = prefix.readUInt32LE(4);
     const jsonLength = prefix.readUInt32LE(12);
-    if (jsonLength <= 0 || jsonLength > 64 * 1024 * 1024) {
+    if (
+      headerSize < jsonLength + 8
+      || headerSize > 64 * 1024 * 1024
+      || jsonLength <= 0
+      || jsonLength > 64 * 1024 * 1024
+    ) {
       throw new Error("The packaged archive reported an unreasonable asar header size.");
     }
     const json = Buffer.alloc(jsonLength);
     const header = await handle.read(json, 0, jsonLength, 16);
     if (header.bytesRead !== jsonLength) throw new Error("The packaged asar header was truncated.");
-    return JSON.parse(json.toString("utf8"));
+    return {
+      archive,
+      headerSize,
+      tree: JSON.parse(json.toString("utf8")),
+    };
   } finally {
     await handle.close();
   }
@@ -72,20 +99,155 @@ function asarEntry(tree, segments) {
   return node;
 }
 
-async function requirePackagedPrivateConnectAssets(executable) {
+async function readPackedAsarFile(asar, segments, maximumBytes) {
+  const entry = asarEntry(asar.tree, segments);
+  if (
+    !entry
+    || entry.files
+    || entry.link
+    || entry.unpacked
+    || !Number.isSafeInteger(entry.size)
+    || entry.size < 0
+    || entry.size > maximumBytes
+    || typeof entry.offset !== "string"
+    || !/^(?:0|[1-9]\d*)$/u.test(entry.offset)
+  ) {
+    throw new Error(`The packaged app has no bounded packed ${segments.join("/")} file.`);
+  }
+  const offset = Number(entry.offset);
+  const position = 8 + asar.headerSize + offset;
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(position)) {
+    throw new Error(`The packaged ${segments.join("/")} file offset is invalid.`);
+  }
+  const content = Buffer.alloc(entry.size);
+  const handle = await open(asar.archive, "r");
+  try {
+    const result = await handle.read(content, 0, entry.size, position);
+    if (result.bytesRead !== entry.size) {
+      throw new Error(`The packaged ${segments.join("/")} file was truncated.`);
+    }
+  } finally {
+    await handle.close();
+  }
+  return content;
+}
+
+function plainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(value, expected) {
+  return plainObject(value)
+    && Object.keys(value).sort().join("\0") === [...expected].sort().join("\0");
+}
+
+function packagedUpdateCapability(manifest) {
+  if (!Object.hasOwn(manifest, "inertiaUpdateCapability")) {
+    return { delivery: "manual", reason: "capability-missing" };
+  }
+  const marker = manifest.inertiaUpdateCapability;
+  if (exactKeys(marker, ["delivery", "reason"]) && marker.delivery === "manual") {
+    if (typeof marker.reason === "string" && MANUAL_UPDATE_REASONS.has(marker.reason)) {
+      return { delivery: "manual", reason: marker.reason };
+    }
+    throw new Error("The packaged app has an invalid manual update capability reason.");
+  }
+  if (
+    exactKeys(marker, ["delivery", "platform"])
+    && marker.delivery === "in-app"
+    && ["darwin", "win32", "linux"].includes(marker.platform)
+  ) {
+    if (marker.platform !== process.platform) {
+      throw new Error("The packaged app update capability targets a different platform.");
+    }
+    return { delivery: "in-app", platform: marker.platform };
+  }
+  throw new Error("The packaged app has an invalid update capability marker.");
+}
+
+async function boundedRegularFile(path, maximumBytes) {
+  let metadata;
+  try {
+    metadata = await lstat(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+  if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.size > maximumBytes) {
+    throw new Error(`The packaged ${path.split(/[\\/]/u).pop()} is invalid.`);
+  }
+  return readFile(path, "utf8");
+}
+
+function validPublisherName(value) {
+  const names = typeof value === "string" ? [value] : value;
+  return Array.isArray(names)
+    && names.length > 0
+    && names.length <= 8
+    && names.every((name) => typeof name === "string"
+      && name === name.trim()
+      && Buffer.byteLength(name, "utf8") >= 1
+      && Buffer.byteLength(name, "utf8") <= 512
+      && !/[\u0000-\u001f\u007f]/u.test(name));
+}
+
+function validateUpdateConfiguration(source, capability) {
+  const document = parseDocument(source, {
+    prettyErrors: false,
+    uniqueKeys: true,
+  });
+  if (document.errors.length > 0) {
+    throw new Error("The packaged app-update.yml is invalid.");
+  }
+  const configuration = document.toJS({ maxAliasCount: 0 });
+  if (
+    !plainObject(configuration)
+    || configuration.provider !== "generic"
+    || configuration.url !== UPDATE_PROVIDER_URL
+  ) {
+    throw new Error("The packaged app-update.yml does not use the exact Inertia generic update provider.");
+  }
+  const allowedKeys = new Set([
+    "provider",
+    "url",
+    "updaterCacheDirName",
+    "channel",
+    "useMultipleRangeRequest",
+    "publisherName",
+  ]);
+  if (Object.keys(configuration).some((key) => !allowedKeys.has(key))) {
+    throw new Error("The packaged app-update.yml contains an unsupported field.");
+  }
+  const signedWindows = capability.delivery === "in-app"
+    && capability.platform === "win32";
+  if (
+    signedWindows
+      ? !validPublisherName(configuration.publisherName)
+      : configuration.publisherName !== undefined
+  ) {
+    throw new Error("The packaged app-update.yml has an invalid publisher identity.");
+  }
+}
+
+async function requirePackagedAssets(executable) {
   const executableDirectory = dirname(executable);
-  const candidates = [
-    resolve(executableDirectory, "resources", "app.asar"),
-    resolve(executableDirectory, "..", "Resources", "app.asar"),
+  const resourceCandidates = [
+    resolve(executableDirectory, "resources"),
+    resolve(executableDirectory, "..", "Resources"),
   ];
-  const archives = [];
-  for (const candidate of candidates) {
-    if (await stat(candidate).then((value) => value.isFile(), () => false)) archives.push(candidate);
+  const resources = [];
+  for (const candidate of resourceCandidates) {
+    const archive = join(candidate, "app.asar");
+    if (await stat(archive).then((value) => value.isFile(), () => false)) {
+      resources.push({ directory: candidate, archive });
+    }
   }
-  if (archives.length !== 1) {
-    throw new Error(`Expected exactly one packaged app.asar next to ${executable}; found ${archives.length}.`);
+  if (resources.length !== 1) {
+    throw new Error(`Expected exactly one packaged app.asar next to ${executable}; found ${resources.length}.`);
   }
-  const tree = await readAsarFileTree(archives[0]);
+  const [{ directory: resourcesDirectory, archive }] = resources;
+  const asar = await readAsarArchive(archive);
+  const tree = asar.tree;
   const client = asarEntry(tree, ["out", "private-connect"]);
   if (!client?.files) throw new Error("The packaged app.asar does not contain the Private Connect web client.");
   const names = Object.keys(client.files);
@@ -107,6 +269,109 @@ async function requirePackagedPrivateConnectAssets(executable) {
     throw new Error(`The packaged app still ships retired remote artifacts: ${retired.join(", ")}.`);
   }
   console.log(`Packaged Private Connect assets verified (${names.length} entries, ${assets.length} hashed assets, ${icons.length} icons).`);
+
+  const manifestBytes = await readPackedAsarFile(
+    asar,
+    ["package.json"],
+    MAX_PACKAGED_MANIFEST_BYTES,
+  );
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
+  } catch {
+    throw new Error("The packaged package.json is invalid.");
+  }
+  if (!plainObject(manifest) || !plainObject(manifest.dependencies)) {
+    throw new Error("The packaged package.json has no production dependency map.");
+  }
+  const declaredUpdaterVersion = manifest.dependencies["electron-updater"];
+  if (
+    typeof declaredUpdaterVersion !== "string"
+    || !STABLE_VERSION_PATTERN.test(declaredUpdaterVersion)
+  ) {
+    throw new Error("The packaged app does not pin electron-updater to a stable production version.");
+  }
+  const updaterManifestBytes = await readPackedAsarFile(
+    asar,
+    ["node_modules", "electron-updater", "package.json"],
+    MAX_PACKAGED_MANIFEST_BYTES,
+  );
+  let updaterManifest;
+  try {
+    updaterManifest = JSON.parse(updaterManifestBytes.toString("utf8"));
+  } catch {
+    throw new Error("The packaged electron-updater manifest is invalid.");
+  }
+  if (
+    !plainObject(updaterManifest)
+    || updaterManifest.name !== "electron-updater"
+    || updaterManifest.version !== declaredUpdaterVersion
+    || updaterManifest.main !== "out/main.js"
+    || !asarEntry(tree, ["node_modules", "electron-updater", "out", "main.js"])
+  ) {
+    throw new Error("The externalized electron-updater production package is incomplete.");
+  }
+  const mainBundle = await readPackedAsarFile(
+    asar,
+    ["out", "main", "index.js"],
+    MAX_MAIN_BUNDLE_BYTES,
+  );
+  if (!mainBundle.includes(Buffer.from("electron-updater", "utf8"))) {
+    throw new Error("The packaged main process does not retain the external electron-updater boundary.");
+  }
+
+  const capability = packagedUpdateCapability(manifest);
+  const updateConfiguration = await boundedRegularFile(
+    join(resourcesDirectory, "app-update.yml"),
+    MAX_UPDATE_CONFIG_BYTES,
+  );
+  if (capability.delivery === "in-app") {
+    if (updateConfiguration === null) {
+      throw new Error("An in-app update-capable package is missing resources/app-update.yml.");
+    }
+    validateUpdateConfiguration(updateConfiguration, capability);
+  }
+  console.log(
+    capability.delivery === "in-app"
+      ? `Packaged in-app updater verified (${declaredUpdaterVersion}, ${capability.platform}).`
+      : `Packaged manual updater fallback verified (${declaredUpdaterVersion}, ${capability.reason}).`,
+  );
+}
+
+async function createUpdateNetworkTrap() {
+  let attempts = 0;
+  const server = createServer((_request, response) => {
+    attempts += 1;
+    response.writeHead(502, { "Content-Type": "text/plain" });
+    response.end("Package smoke blocks external network access.\n");
+  });
+  server.on("connect", (_request, socket) => {
+    attempts += 1;
+    socket.end();
+  });
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", rejectListen);
+      resolveListen();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("The package-smoke network trap did not receive a local port.");
+  }
+  return {
+    proxy: `http://127.0.0.1:${address.port}`,
+    assertUnused() {
+      if (attempts !== 0) {
+        throw new Error(`The packaged test app attempted ${attempts} external network request${attempts === 1 ? "" : "s"}.`);
+      }
+    },
+    close: () => new Promise((resolveClose, rejectClose) => {
+      server.close((error) => error ? rejectClose(error) : resolveClose());
+    }),
+  };
 }
 
 async function locatePackagedExecutable() {
@@ -371,7 +636,7 @@ function appendOutput(current, chunk) {
 }
 
 const executable = await locatePackagedExecutable();
-await requirePackagedPrivateConnectAssets(executable);
+await requirePackagedAssets(executable);
 const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-package-smoke-"));
 const markerPath = join(temporaryRoot, "ready.json");
 const dataDirectory = join(temporaryRoot, "data");
@@ -382,6 +647,7 @@ let readiness = null;
 let stdout = "";
 let stderr = "";
 let launchedAt = 0;
+const updateNetworkTrap = await createUpdateNetworkTrap();
 
 try {
   await Promise.all([
@@ -404,6 +670,7 @@ try {
   // and shutdown checks independent from the automation host's Keychain.
   const launchArguments = [
     `--user-data-dir=${profileDirectory}`,
+    `--proxy-server=${updateNetworkTrap.proxy}`,
     ...(process.platform === "darwin" ? ["--use-mock-keychain"] : []),
     ...(process.platform === "linux" && process.env.INERTIA_PACKAGE_SMOKE_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
   ];
@@ -514,6 +781,7 @@ try {
     await waitUntil(() => !processGroupExists(readiness.mainPid), CLEANUP_TIMEOUT_MS, "packaged app process-group cleanup");
   }
   const cleanupCompletedAt = Date.now();
+  updateNetworkTrap.assertUnused();
   const benchmark = {
     schemaVersion: 1,
     collectedAt: new Date().toISOString(),
@@ -577,6 +845,7 @@ try {
       "forced packaged process cleanup",
     );
   }
+  await updateNetworkTrap.close();
   await rm(temporaryRoot, {
     recursive: true,
     force: true,

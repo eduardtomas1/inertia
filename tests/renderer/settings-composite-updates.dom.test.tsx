@@ -77,6 +77,9 @@ function settingsProps(
     appUpdateStatus: null,
     checkingAppUpdate: false,
     onCheckAppUpdate: vi.fn(async () => undefined),
+    onDownloadAppUpdate: vi.fn(async () => undefined),
+    onCancelAppUpdateDownload: vi.fn(async () => undefined),
+    onInstallAppUpdate: vi.fn(async () => undefined),
     onOpenAppRelease: vi.fn(async () => undefined),
     onUnarchive: vi.fn(),
     onLoadBackendProfile: vi.fn(),
@@ -92,6 +95,39 @@ function settingsProps(
 }
 
 describe("Settings composite updates", () => {
+  it("announces a sanitized application-update action failure", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    const props = settingsProps(vi.fn(async () => undefined));
+    render(<SettingsView
+      {...props}
+      appUpdateStatus={{
+        revision: 1,
+        state: "available",
+        freshness: "fresh",
+        delivery: "in-app",
+        deliveryReason: null,
+        installBlocker: null,
+        progress: null,
+        currentVersion: "0.0.35",
+        latestVersion: "0.0.36",
+        releaseUrl: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.36",
+        checkedAt: "2030-01-01T00:00:00.000Z",
+        lastAttemptedAt: "2030-01-01T00:00:00.000Z",
+        message: "Inertia 0.0.36 is available.",
+      }}
+      onDownloadAppUpdate={vi.fn(async () => {
+        throw new Error("private transport detail");
+      })}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(await screen.findByText("The update download could not be started."))
+      .toHaveAttribute("role", "status");
+  });
+
   it("preserves a dirty alias through an equivalent snapshot refresh", () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,

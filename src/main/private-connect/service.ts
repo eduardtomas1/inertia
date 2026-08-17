@@ -102,6 +102,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     response: Promise<PrivateConnectResponse>;
   }>();
   private readonly activeMutations = new Set<Promise<unknown>>();
+  private readonly activeLocalMutations = new Set<Promise<unknown>>();
   private invitation: PrivateConnectInvitation | null = null;
   private status: PrivateConnectStateView["status"] = "off";
   private statusMessage: string | null = null;
@@ -122,6 +123,8 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     setupUrl: null,
   };
   private stopped = false;
+  private updatePreparation = false;
+  private shutdownOperation: Promise<void> | null = null;
 
   private constructor(private readonly options: PrivateConnectServiceOptions, data: PersistedPrivateConnect | null) {
     this.data = data;
@@ -174,11 +177,13 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   async setEnabled(enabled: boolean): Promise<PrivateConnectStateView> {
-    return await this.enqueueLifecycle(async () => {
-      if (enabled) await this.enable();
-      else await this.disable();
-      this.emit();
-      return this.state();
+    return await this.runLocalMutation(async () => {
+      return await this.enqueueLifecycle(async () => {
+        if (enabled) await this.enable();
+        else await this.disable();
+        this.emit();
+        return this.state();
+      });
     });
   }
 
@@ -329,6 +334,17 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     grantDays = 30,
     grants?: PrivateConnectConversationGrant[],
   ): Promise<void> {
+    await this.runLocalMutation(() =>
+      this.approvePairingAdmitted(requestId, preset, projectIds, grantDays, grants));
+  }
+
+  private async approvePairingAdmitted(
+    requestId: string,
+    preset: PrivateConnectPreset,
+    projectIds: string[],
+    grantDays: number,
+    grants?: PrivateConnectConversationGrant[],
+  ): Promise<void> {
     const pending = this.pending.get(requestId);
     if (!pending || pending.status !== "pending") throw new Error("That pairing request is no longer pending.");
     if (Date.parse(pending.expiresAt) <= this.now().getTime()) {
@@ -397,6 +413,10 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   async denyPairing(requestId: string): Promise<void> {
+    await this.runLocalMutation(() => this.denyPairingAdmitted(requestId));
+  }
+
+  private async denyPairingAdmitted(requestId: string): Promise<void> {
     const pending = this.pending.get(requestId);
     if (!pending) return;
     pending.status = "denied";
@@ -406,6 +426,10 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   async revokeDevice(deviceId: string): Promise<void> {
+    await this.runLocalMutation(() => this.revokeDeviceAdmitted(deviceId));
+  }
+
+  private async revokeDeviceAdmitted(deviceId: string): Promise<void> {
     const device = this.requireDevice(deviceId);
     if (device.revokedAt) return;
     const authorityReduction = await this.beginAuthorityReduction();
@@ -424,6 +448,11 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   async updateDevice(deviceId: string, preset: PrivateConnectPreset, projectIds: string[], expiresAt: string, grants?: PrivateConnectConversationGrant[]): Promise<void> {
+    await this.runLocalMutation(() =>
+      this.updateDeviceAdmitted(deviceId, preset, projectIds, expiresAt, grants));
+  }
+
+  private async updateDeviceAdmitted(deviceId: string, preset: PrivateConnectPreset, projectIds: string[], expiresAt: string, grants?: PrivateConnectConversationGrant[]): Promise<void> {
     const device = this.requireDevice(deviceId);
     const expiry = Date.parse(expiresAt);
     const maximum = this.now().getTime() + (preset === "collaborate" ? 30 : 90) * 24 * 60 * 60 * 1_000;
@@ -595,12 +624,15 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   async logout(session: PrivateConnectSession): Promise<void> {
-    this.sessions.delete(session.id);
-    this.gateway.closeSession(session.id);
-    if (this.data) {
-      this.data.sessions = this.data.sessions.filter((candidate) => candidate.id !== session.id);
-      await this.persist();
-    }
+    await this.trackMutation(async () => {
+      this.requireCurrentSession(session);
+      this.sessions.delete(session.id);
+      this.gateway.closeSession(session.id);
+      if (this.data) {
+        this.data.sessions = this.data.sessions.filter((candidate) => candidate.id !== session.id);
+        await this.persist();
+      }
+    });
   }
 
   async openSession(session: PrivateConnectSession): Promise<void> {
@@ -617,15 +649,55 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   async shutdown(): Promise<void> {
+    if (this.shutdownOperation) return await this.shutdownOperation;
+    this.stopped = true;
+    this.updatePreparation = true;
+    this.enableOperation += 1;
+    const operation = (async () => {
+      try {
+        await withDeadline(
+          Promise.allSettled([
+            ...this.activeLocalMutations,
+            ...this.activeMutations,
+          ]),
+          AUTHORITY_REDUCTION_DRAIN_TIMEOUT_MS,
+        );
+      } finally {
+        await this.enqueueLifecycle(async () => {
+          this.pending.clear();
+          this.tickets.clear();
+          this.externalUrl = null;
+          this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null };
+          await this.gateway.stop().catch(() => undefined);
+        });
+      }
+    })();
+    this.shutdownOperation = operation;
+    await operation;
+  }
+
+  async prepareForUpdate(): Promise<boolean> {
+    if (this.stopped) return true;
+    // Close all local and browser admission in the same JavaScript turn as the
+    // caller's request, before waiting behind an already-admitted lifecycle task.
+    this.updatePreparation = true;
+    return await this.enqueueLifecycle(async () => {
+      if (this.stopped) return true;
+      const busy = this.gateway.activeSessionCount() > 0
+        || [...this.pending.values()].some((pending) => pending.status === "pending")
+        || this.activeMutations.size > 0
+        || this.activeLocalMutations.size > 0
+        || this.inFlightDeliveries.size > 0
+        || Boolean(this.data?.pendingAuthorityReduction)
+        || this.status === "starting";
+      if (busy) this.updatePreparation = false;
+      return !busy;
+    });
+  }
+
+  async releaseUpdatePreparation(): Promise<void> {
     await this.enqueueLifecycle(async () => {
-      if (this.stopped) return;
-      this.stopped = true;
-      this.enableOperation += 1;
-      this.pending.clear();
-      this.tickets.clear();
-      this.externalUrl = null;
-      this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null };
-      await this.gateway.stop().catch(() => undefined);
+      if (!this.stopped) this.updatePreparation = false;
     });
   }
 
@@ -879,12 +951,13 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   private requireCurrentSession(session: PrivateConnectSession): void {
-    if (this.privacyLocked || this.data?.pendingAuthorityReduction || this.sessions.get(session.id) !== session || !this.data?.enabled) throw new Error("The Private Connect session is no longer active.");
+    if (this.updatePreparation || this.privacyLocked || this.data?.pendingAuthorityReduction || this.sessions.get(session.id) !== session || !this.data?.enabled) throw new Error("The Private Connect session is no longer active.");
     const device = this.requireDevice(session.deviceId);
     if (!this.deviceCurrent(device)) throw new Error("The device grant has expired or was revoked.");
   }
 
   private requireReady(): void {
+    if (this.updatePreparation) throw new Error("Private Connect is not ready while Inertia prepares to restart.");
     if (this.stopped || this.privacyLocked || this.data?.pendingAuthorityReduction || !this.data?.enabled || this.status !== "ready") throw new Error(this.statusMessage ?? "Private Connect is not ready.");
   }
 
@@ -955,6 +1028,20 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       return await pending;
     } finally {
       this.activeMutations.delete(pending);
+    }
+  }
+
+  private async runLocalMutation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.updatePreparation) {
+      throw new Error("Private Connect is not ready while Inertia prepares to restart.");
+    }
+    if (this.stopped) throw new Error("Private Connect is shutting down.");
+    const pending = operation();
+    this.activeLocalMutations.add(pending);
+    try {
+      return await pending;
+    } finally {
+      this.activeLocalMutations.delete(pending);
     }
   }
 

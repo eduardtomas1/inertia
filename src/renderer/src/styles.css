@@ -9661,13 +9661,22 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   opacity: 0.55;
 }
 
-.app-update-notice {
+.status-overlay-stack {
   position: fixed;
   right: 22px;
   bottom: 20px;
-  z-index: 99;
+  z-index: 100;
+  display: flex;
+  width: min(440px, calc(100vw - 44px));
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.app-update-notice {
+  position: relative;
   display: grid;
-  width: min(420px, calc(100vw - 44px));
+  width: 100%;
   min-height: 52px;
   align-items: center;
   gap: 9px;
@@ -9686,7 +9695,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   color: var(--accent-strong);
 }
 
-.app-update-notice > span {
+.app-update-copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -9698,7 +9707,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   font-weight: 670;
 }
 
-.app-update-notice small {
+.app-update-copy small {
   overflow: hidden;
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
@@ -9706,7 +9715,14 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   white-space: nowrap;
 }
 
-.app-update-notice > button:not(.icon-button) {
+.app-update-actions {
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.app-update-actions > button {
   min-height: 28px;
   padding: 0 9px;
   border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
@@ -9717,12 +9733,39 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   font-weight: 650;
 }
 
-.app-update-notice > button:not(.icon-button):hover {
+.app-update-actions > button:hover {
   background: color-mix(in srgb, var(--accent-soft) 76%, var(--surface-hover));
 }
 
-.app-update-notice ~ .error-toast {
-  bottom: 84px;
+.app-update-actions > .app-update-secondary {
+  border-color: var(--border);
+  color: var(--text-muted);
+  background: var(--surface-hover);
+}
+
+.app-update-progress {
+  overflow: hidden;
+  width: 100%;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+}
+
+.app-update-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-strong);
+  transition: width var(--motion-base) var(--motion-ease);
+}
+
+.app-update-spin {
+  animation: app-update-spin 1s linear infinite;
+}
+
+@keyframes app-update-spin {
+  to { transform: rotate(360deg); }
 }
 
 .provider-quota-notices {
@@ -9734,6 +9777,12 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   flex-direction: column;
   gap: 7px;
   transition: bottom var(--motion-base) var(--motion-ease);
+}
+
+.provider-quota-notices.is-stacked {
+  position: relative;
+  right: auto;
+  width: 100%;
 }
 
 .provider-quota-notice {
@@ -9819,6 +9868,13 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   backdrop-filter: var(--glass-filter);
   box-shadow: var(--shadow), var(--glass-inset);
   font-size: 10px;
+}
+
+.status-overlay-stack > .error-toast {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  width: 100%;
 }
 
 /* High-frequency controls stay opaque so opening them does not trigger a
@@ -10212,10 +10268,13 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     grid-column: 2;
   }
 
-  .app-update-notice {
+  .status-overlay-stack {
     right: 12px;
     bottom: 12px;
     width: calc(100vw - 24px);
+  }
+
+  .app-update-notice {
     grid-template-columns: 17px minmax(0, 1fr) auto 28px;
   }
 
@@ -10223,11 +10282,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     display: none;
   }
 
-  .app-update-notice ~ .error-toast {
-    bottom: 76px;
-  }
-
-  .provider-quota-notices {
+  .provider-quota-notices:not(.is-stacked) {
     right: 12px;
     width: calc(100vw - 24px);
   }
@@ -14197,6 +14252,14 @@ button.sent-attachment-open:focus-visible {
 }
 
 @media (forced-colors: active) {
+  .app-update-progress {
+    border: 1px solid CanvasText;
+  }
+
+  .app-update-progress > span {
+    background: Highlight;
+  }
+
   [data-language-family] {
     --file-language-accent: CanvasText;
   }

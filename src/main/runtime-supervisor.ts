@@ -18,6 +18,7 @@ import {
   type RuntimeDatabaseStartupRecoveryReport,
   type RuntimePrivateConnectForgetScope,
   type RuntimePrivateConnectPromptPreparation,
+  type RuntimeUpdatePreparationResult,
   type RuntimeWorkerCommand,
 } from "../node/runtime-process-protocol.js";
 import { RuntimeAttachmentBrokerCoordinator } from "./runtime-attachment-broker.js";
@@ -37,9 +38,10 @@ import { runtimeConnection } from "./runtime-supervisor-connection.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
+import { RuntimeUpdatePreparationCoordinator } from "./runtime-update-preparation-coordinator.js";
+import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
 import type {
   PendingCredentialRequest,
-  PendingDatabaseRecoveryRequest,
   PendingPrivateConnectRuntimeRequest,
   PendingProjectPath,
   RuntimeCredentialBroker,
@@ -71,8 +73,6 @@ export class RuntimeSupervisor {
   private readonly credentialBroker?: RuntimeCredentialBroker;
   private readonly credentialRequestTimeoutMs: number;
   private readonly attachmentRequests: RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
-  private readonly databaseRecoveryRequestTimeoutMs: number;
-  private readonly databaseRecoveryCancelTimeoutMs: number;
   private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private readonly quarantined = new Set<RuntimeProcessRecord>();
@@ -96,8 +96,8 @@ export class RuntimeSupervisor {
   private shutdownDeadlineTimer: RuntimeSupervisorTimer | null = null;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
   private readonly pendingPrivateConnectRuntimeRequests = new Map<string, PendingPrivateConnectRuntimeRequest>();
-  private readonly pendingDatabaseRecoveryRequests = new Map<string,
-    PendingDatabaseRecoveryRequest>();
+  private readonly databaseRecoveryRequests: RuntimeDatabaseRecoveryCoordinator;
+  private readonly updatePreparation: RuntimeUpdatePreparationCoordinator;
   private readonly privateConnectPrompts: RuntimePrivateConnectPromptCoordinator<
     RuntimeProcessRecord>;
   private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
@@ -161,14 +161,32 @@ export class RuntimeSupervisor {
       accepts: (record) => this.acceptsBrokerRequests(record),
       post: (record, result) => this.post(record.child, result),
     });
-    this.databaseRecoveryRequestTimeoutMs = boundedDuration(
-      options.databaseRecoveryRequestTimeoutMs,
-      runtimeSupervisorDefaults.databaseRecoveryTimeoutMs,
-    );
-    this.databaseRecoveryCancelTimeoutMs = boundedDuration(
-      options.databaseRecoveryCancelTimeoutMs,
-      runtimeSupervisorDefaults.databaseRecoveryCancelTimeoutMs,
-    );
+    this.databaseRecoveryRequests = new RuntimeDatabaseRecoveryCoordinator({
+      requestTimeoutMs: boundedDuration(
+        options.databaseRecoveryRequestTimeoutMs,
+        runtimeSupervisorDefaults.databaseRecoveryTimeoutMs,
+      ),
+      cancelTimeoutMs: boundedDuration(
+        options.databaseRecoveryCancelTimeoutMs,
+        runtimeSupervisorDefaults.databaseRecoveryCancelTimeoutMs,
+      ),
+      setTimer: this.setTimer,
+      clearTimer: this.clearTimer,
+      post: (record, command) => this.post(record.child, command),
+      cancellationUnconfirmed: (record) => {
+        this.lastError = "The runtime did not confirm database recovery cancellation.";
+        this.forceTerminate(record.child);
+        this.emitState();
+      },
+    });
+    this.updatePreparation = new RuntimeUpdatePreparationCoordinator({
+      timeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
+      setTimer: this.setTimer,
+      clearTimer: this.clearTimer,
+      current: () => this.current,
+      post: (record, command) => this.post(record.child, command),
+      forceTerminate: (record) => this.forceTerminate(record.child),
+    });
     this.onStateChange = options.onStateChange;
   }
 
@@ -211,6 +229,22 @@ export class RuntimeSupervisor {
     });
   }
 
+  prepareForUpdate(): Promise<RuntimeUpdatePreparationResult> {
+    const record = this.current;
+    if (this.phase !== "ready" || !record?.ready) {
+      return Promise.reject(new Error("The local service is not ready for update preparation."));
+    }
+    return this.updatePreparation.prepare(record);
+  }
+
+  /**
+   * Reopens admission for the supervisor-owned preparation token. This is
+   * idempotent once no gate is held and never releases a different generation.
+   */
+  releaseUpdatePreparation(): Promise<boolean> {
+    return this.updatePreparation.release();
+  }
+
   databaseRecovery(
     operation: RuntimeDatabaseRecoveryOperation,
     path: string,
@@ -227,49 +261,12 @@ export class RuntimeSupervisor {
         ? `The local service is restarting. ${this.lastError}`
         : "The local service is starting. Try again in a moment."));
     }
-    if (this.pendingDatabaseRecoveryRequests.size > 0) {
-      return Promise.reject(new Error(
-        "A database recovery operation is already in progress.",
-      ));
-    }
-    const operationId = randomUUID();
-    return new Promise((resolve, reject) => {
-      const pending: PendingDatabaseRecoveryRequest = {
-        record,
-        operation,
-        timer: undefined as unknown as RuntimeSupervisorTimer,
-        timedOut: false,
-        resolve,
-        reject,
-      };
-      pending.timer = this.setTimer(() => {
-        if (this.pendingDatabaseRecoveryRequests.get(operationId) !== pending) return;
-        pending.timedOut = true;
-        this.post(record.child, {
-          type: "runtime.database-recovery-cancel",
-          operationId,
-          generation: record.generation,
-          operation,
-        });
-        pending.timer = this.setTimer(() => {
-          if (this.pendingDatabaseRecoveryRequests.get(operationId) !== pending) return;
-          this.lastError = "The runtime did not confirm database recovery cancellation.";
-          this.forceTerminate(record.child);
-          this.emitState();
-        }, this.databaseRecoveryCancelTimeoutMs);
-      }, this.databaseRecoveryRequestTimeoutMs);
-      this.pendingDatabaseRecoveryRequests.set(operationId, pending);
-      this.post(record.child, {
-        type: "runtime.database-recovery",
-        operationId,
-        generation: record.generation,
-        operation,
-        path,
-        ...(operation === "import" && targetDirectory
-          ? { targetDirectory }
-          : {}),
-      });
-    });
+    return this.databaseRecoveryRequests.request(
+      record,
+      operation,
+      path,
+      targetDirectory,
+    );
   }
 
   privateConnectRequest(
@@ -391,7 +388,7 @@ export class RuntimeSupervisor {
     this.phase = "restarting";
     this.websocketUrl = null;
     this.rejectProjectPaths(record, "The local service is recycling.");
-    this.rejectDatabaseRecoveryRequests(record, "The local service is recycling.");
+    this.databaseRecoveryRequests.reject(record, "The local service is recycling.");
     this.rejectPrivateConnectRuntimeRequests(record, "The local service is recycling.");
     this.clearCredentialRequests(record);
     this.secureFiles.clear(record);
@@ -417,8 +414,13 @@ export class RuntimeSupervisor {
     this.clearTimerValue("stableTimer");
     this.websocketUrl = null;
     this.databaseRecoveryReport = null;
+    this.updatePreparation.clear(
+      this.current,
+      "The local service is stopping.",
+      true,
+    );
     this.rejectProjectPaths(this.current, "The local service is stopping.");
-    this.rejectDatabaseRecoveryRequests(
+    this.databaseRecoveryRequests.reject(
       this.current,
       "The local service is stopping.",
     );
@@ -644,6 +646,13 @@ export class RuntimeSupervisor {
       this.attachmentRequests.handle(record, event);
       return;
     }
+    if (
+      event.type === "runtime.prepare-update-result"
+      || event.type === "runtime.release-update-preparation-result"
+    ) {
+      this.updatePreparation.handle(record, event);
+      return;
+    }
     if (event.type === "runtime.project-path-resolved" || event.type === "runtime.project-path-rejected") {
       const pending = this.pendingProjectPaths.get(event.requestId);
       if (!pending || pending.record !== record) return;
@@ -662,21 +671,7 @@ export class RuntimeSupervisor {
       return;
     }
     if (event.type === "runtime.database-recovery-result") {
-      const pending = this.pendingDatabaseRecoveryRequests.get(event.operationId);
-      if (
-        !pending
-        || pending.record !== record
-        || event.generation !== record.generation
-        || pending.operation !== event.operation
-      ) return;
-      this.pendingDatabaseRecoveryRequests.delete(event.operationId);
-      this.clearTimer(pending.timer);
-      if (event.ok) pending.resolve(event.summary);
-      else if (pending.timedOut && event.cancelled) {
-        pending.reject(new Error("The database recovery request timed out and was cancelled."));
-      } else {
-        pending.reject(new Error(event.message));
-      }
+      this.databaseRecoveryRequests.handle(record, event);
       return;
     }
     if (event.type === "runtime.private-connect-prompt-result") {
@@ -778,6 +773,11 @@ export class RuntimeSupervisor {
     this.websocketUrl = null;
     this.databaseRecoveryReport = null;
     this.databaseRecoveryNoticePending = false;
+    this.updatePreparation.clear(
+      record,
+      "The local service stopped during update preparation.",
+      false,
+    );
     this.phase = this.desiredRunning ? "restarting" : "stopping";
     this.emitState();
     if (exitedBeforeCleanRecycleReadiness) {
@@ -786,7 +786,10 @@ export class RuntimeSupervisor {
     this.clearTimerValue("startupTimer");
     this.clearTimerValue("stableTimer");
     this.rejectProjectPaths(record, "The local service stopped before the project path was resolved.");
-    this.rejectDatabaseRecoveryRequests(record, "The local service stopped before the database recovery request completed.");
+    this.databaseRecoveryRequests.reject(
+      record,
+      "The local service stopped before the database recovery request completed.",
+    );
     this.rejectPrivateConnectRuntimeRequests(record, "The local service stopped before the Private Connect request completed.");
     this.clearCredentialRequests(record);
     this.secureFiles.clear(record);
@@ -1029,23 +1032,6 @@ export class RuntimeSupervisor {
       pending.reject(new Error(message));
     }
     this.privateConnectPrompts.reject(record, message);
-  }
-
-  private rejectDatabaseRecoveryRequests(
-    record: RuntimeProcessRecord | null,
-    message: string,
-  ): void {
-    if (!record) return;
-    for (const [requestId, pending] of this.pendingDatabaseRecoveryRequests) {
-      if (pending.record !== record) continue;
-      this.pendingDatabaseRecoveryRequests.delete(requestId);
-      this.clearTimer(pending.timer);
-      pending.reject(new Error(
-        pending.timedOut
-          ? "The database recovery request timed out and the runtime stopped before cancellation was confirmed."
-          : message,
-      ));
-    }
   }
 
   private handleCredentialRequest(

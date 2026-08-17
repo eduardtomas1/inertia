@@ -287,6 +287,10 @@ export class IsolatedRunController<Owner extends object> {
     return this.activeByConversation.has(conversationId);
   }
 
+  activeCount(): number {
+    return this.activeByConversation.size;
+  }
+
   ownsWorkspaceRun(workspaceRunId: string): boolean {
     return this.activeByWorkspaceRun.has(workspaceRunId);
   }

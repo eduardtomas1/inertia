@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  AppUpdateStatus,
   DesktopBridge,
   PreviewStateUpdate,
   RuntimeConnection,
@@ -18,6 +19,10 @@ const IPC = {
   copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
   copyText: "inertia:copy-text",
   checkAppUpdate: "inertia:check-app-update",
+  downloadAppUpdate: "inertia:download-app-update",
+  cancelAppUpdateDownload: "inertia:cancel-app-update-download",
+  installAppUpdate: "inertia:install-app-update",
+  appUpdateStatus: "inertia:app-update-status",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
@@ -82,6 +87,25 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.checkAppUpdate, force === true) as ReturnType<
       DesktopBridge["checkAppUpdate"]
     >,
+  downloadAppUpdate: () =>
+    ipcRenderer.invoke(IPC.downloadAppUpdate) as ReturnType<
+      DesktopBridge["downloadAppUpdate"]
+    >,
+  cancelAppUpdateDownload: () =>
+    ipcRenderer.invoke(IPC.cancelAppUpdateDownload) as ReturnType<
+      DesktopBridge["cancelAppUpdateDownload"]
+    >,
+  installAppUpdate: () =>
+    ipcRenderer.invoke(IPC.installAppUpdate) as ReturnType<
+      DesktopBridge["installAppUpdate"]
+    >,
+  onAppUpdateStatus: (listener: (status: AppUpdateStatus) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: AppUpdateStatus) => {
+      listener(status);
+    };
+    ipcRenderer.on(IPC.appUpdateStatus, handler);
+    return () => ipcRenderer.removeListener(IPC.appUpdateStatus, handler);
+  },
   selectAttachments: () => ipcRenderer.invoke(IPC.selectAttachments) as ReturnType<DesktopBridge["selectAttachments"]>,
   importAttachments: (files: Parameters<DesktopBridge["importAttachments"]>[0]) => ipcRenderer.invoke(IPC.importAttachments, files) as ReturnType<DesktopBridge["importAttachments"]>,
   prepareAttachmentHandoff: (request: Parameters<DesktopBridge["prepareAttachmentHandoff"]>[0]) =>

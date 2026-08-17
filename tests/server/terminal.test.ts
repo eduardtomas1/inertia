@@ -79,6 +79,43 @@ function fakeTerminal(pid = 42): {
 }
 
 describe("TerminalManager", () => {
+  it("atomically blocks PTY creation during update preparation", () => {
+    const terminal = fakeTerminal();
+    const owner = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const spawnTerminal = vi.fn(() => terminal.pty);
+    const manager = new TerminalManager({ spawnTerminal });
+
+    manager.holdForUpdatePreparation();
+    expect(manager.hasUpdateBlockingActivity()).toBe(false);
+    expect(() => manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+    )).toThrow("terminal service is stopping");
+    expect(spawnTerminal).not.toHaveBeenCalled();
+
+    manager.releaseUpdatePreparation();
+    manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+    );
+    expect(manager.hasUpdateBlockingActivity()).toBe(true);
+    expect(spawnTerminal).toHaveBeenCalledOnce();
+  });
+
   it("coalesces rapid PTY output without reordering it", async () => {
     vi.useFakeTimers();
     try {

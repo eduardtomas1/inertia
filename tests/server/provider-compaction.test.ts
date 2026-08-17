@@ -68,9 +68,7 @@ describe.sequential("provider compaction adapters", () => {
     await Promise.all(roots.splice(0).map(removePortableFixture));
   });
 
-  it("uses Codex App Server compaction and waits for its completion item", {
-    timeout: 15_000,
-  }, async () => {
+  it("uses Codex App Server compaction and waits for its completion item", async () => {
     const root = portableFixtureRoot("Codex compact");
     roots.push(root);
     const capturePath = join(root, "capture.jsonl");

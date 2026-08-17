@@ -263,7 +263,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     const markerBoundsBeforeHover = await firstMinimapMarker.boundingBox();
     const markerWidthBeforeHover = await firstMinimapMarker.evaluate((element) =>
       Number.parseFloat(getComputedStyle(element, "::before").width));
-    expect(markerWidthBeforeHover).toBeGreaterThan(0);
+    expect(markerWidthBeforeHover).toBeCloseTo(6, 1);
     await firstMinimapMarker.hover();
     await expect(firstMinimapMarker).toHaveAttribute(
       "data-emphasized",
@@ -276,14 +276,38 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     );
     await expect(minimapPreview).toHaveAttribute("aria-hidden", "true");
     await expect(firstMinimapMarker).not.toHaveAttribute("aria-describedby");
-    // Hover has to enlarge the marker itself without shifting the 24px pointer
+    // Hover has to enlarge the marker itself without shifting the 36px pointer
     // target that keeps twelve markers reachable.
-    await expect.poll(() => firstMinimapMarker.evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element, "::before").width)))
-      .toBeGreaterThan(markerWidthBeforeHover);
+    await expect.poll(() => minimap.getByRole("button").evaluateAll((buttons) =>
+      buttons.slice(0, 5).map((button) => Number.parseFloat(
+        getComputedStyle(button, "::before").width,
+      )))).toEqual([26, 20, 14, 10, 6]);
     expect(await firstMinimapMarker.boundingBox()).toEqual(
       markerBoundsBeforeHover,
     );
+    const initialVisualTheme = await page.locator("html").evaluate((element) => ({
+      colorScheme: element.style.colorScheme,
+      theme: element.dataset.theme ?? null,
+    }));
+    for (const theme of ["light", "dark"] as const) {
+      await page.locator("html").evaluate((element, nextTheme) => {
+        element.dataset.theme = nextTheme;
+        element.style.colorScheme = nextTheme;
+      }, theme);
+      const screenshotPath = test.info().outputPath(
+        `prompt-index-${theme}-hover.png`,
+      );
+      await page.screenshot({ animations: "disabled", path: screenshotPath });
+      await test.info().attach(`prompt-index-${theme}-hover`, {
+        path: screenshotPath,
+        contentType: "image/png",
+      });
+    }
+    await page.locator("html").evaluate((element, previous) => {
+      if (previous.theme === null) delete element.dataset.theme;
+      else element.dataset.theme = previous.theme;
+      element.style.colorScheme = previous.colorScheme;
+    }, initialVisualTheme);
     await transcript.hover({ position: { x: 160, y: 160 } });
     await expect(minimapPreview).toHaveCount(0);
     await firstMinimapMarker.focus();

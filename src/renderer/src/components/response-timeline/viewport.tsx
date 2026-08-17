@@ -229,7 +229,9 @@ interface TimelineGutter {
 }
 
 const EMPTY_TIMELINE_GUTTER: TimelineGutter = { available: 0, minimapLeft: 0 };
-const TIMELINE_MINIMAP_WIDTH = 12;
+// Centers the visible Codex-style rail while keeping its wider pointer target
+// inside the transcript gutter.
+const TIMELINE_MINIMAP_WIDTH = 24;
 
 function useTimelineGutter(
   scrollElementRef: RefObject<HTMLDivElement | null> | undefined,

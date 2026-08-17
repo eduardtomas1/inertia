@@ -43,6 +43,7 @@ import type { AppView } from "../appView";
 import type { UsageViewProps } from "./UsageView";
 import {
   loadCommitDialog,
+  loadDailyWorkDialog,
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
   loadUsageView,
@@ -50,6 +51,9 @@ import {
 
 const RootCommitDialog = lazy(async () => ({
   default: (await loadCommitDialog()).RootCommitDialog,
+}));
+const DailyWorkDialog = lazy(async () => ({
+  default: (await loadDailyWorkDialog()).DailyWorkDialog,
 }));
 const MultiSpawnDialog = lazy(async () => ({
   default: (await loadMultiSpawnDialog()).MultiSpawnDialog,
@@ -129,6 +133,8 @@ interface AppLayoutProps {
   setActionError: Dispatch<SetStateAction<string | null>>;
   commitDialogOpen: boolean;
   setCommitDialogOpen: Dispatch<SetStateAction<boolean>>;
+  dailyWorkOpen: boolean;
+  setDailyWorkOpen: Dispatch<SetStateAction<boolean>>;
   paletteOpen: boolean;
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
   project: Project | null;
@@ -180,6 +186,7 @@ export function formatAppShortcutLabel(
 export function activeConversationIsVisible(input: {
   view: AppView;
   commitDialogOpen: boolean;
+  dailyWorkOpen?: boolean;
   pullRequestDialogOpen: boolean;
   multiSpawnOpen: boolean;
   paletteOpen: boolean;
@@ -188,6 +195,7 @@ export function activeConversationIsVisible(input: {
 }): boolean {
   return input.view === "workspace"
     && !input.commitDialogOpen
+    && !input.dailyWorkOpen
     && !input.pullRequestDialogOpen
     && !input.multiSpawnOpen
     && !input.paletteOpen
@@ -210,6 +218,8 @@ export function AppLayout({
   setActionError,
   commitDialogOpen,
   setCommitDialogOpen,
+  dailyWorkOpen,
+  setDailyWorkOpen,
   paletteOpen,
   setPaletteOpen,
   project,
@@ -257,6 +267,7 @@ export function AppLayout({
       || providerQuotaNotices.notices.length > 0
       || Boolean(appUpdate.visible && appUpdate.status)
       || commitDialogOpen
+      || dailyWorkOpen
       || pullRequestDialogOpen
       || multiSpawn.open,
   );
@@ -270,6 +281,7 @@ export function AppLayout({
     closeConversationSplit: actions.closeConversationSplit,
     createConversation: actions.createConversation,
     openMultiSpawn: multiSpawn.openDialog,
+    openDailyWork: () => setDailyWorkOpen(true),
     renameConversation: (thread: Conversation, title: string) => {
       void actions.run("conversation.update", {
         type: "conversation.update",
@@ -364,9 +376,9 @@ export function AppLayout({
     },
   });
   const notificationActions = useStableActions({
-    activate: (thread: Conversation) => activateNotificationConversation(
-      thread,
-      {
+    activate: (thread: Conversation) => {
+      setDailyWorkOpen(false);
+      activateNotificationConversation(thread, {
         selectConversation: actions.selectConversation,
         showWorkspace: () => setView("workspace"),
         closeSidebar: () => setSidebarOpen(false),
@@ -374,8 +386,8 @@ export function AppLayout({
         closeCommitDialog: () => setCommitDialogOpen(false),
         closePullRequestDialog: () => setPullRequestDialogOpen(false),
         closeProviderAuth: providerAuth.onClose,
-      },
-    ),
+      });
+    },
   });
   useEffect(() => {
     if (connection.status !== "online") return;
@@ -384,6 +396,7 @@ export function AppLayout({
   const activeConversationVisible = activeConversationIsVisible({
     view,
     commitDialogOpen,
+    dailyWorkOpen,
     pullRequestDialogOpen,
     multiSpawnOpen: multiSpawn.open,
     paletteOpen,
@@ -442,6 +455,7 @@ export function AppLayout({
             onCloseConversationSplit={sidebarActions.closeConversationSplit}
             onCreateConversation={sidebarActions.createConversation}
             onOpenMultiSpawn={sidebarActions.openMultiSpawn}
+            onOpenDailyWork={sidebarActions.openDailyWork}
             onRenameConversation={sidebarActions.renameConversation}
             onPinConversation={sidebarActions.pinConversation}
             onSnoozeConversation={sidebarActions.snoozeConversation}
@@ -619,6 +633,25 @@ export function AppLayout({
             onClose={() => setCommitDialogOpen(false)}
             onError={setActionError}
             onCommit={actions.commit}
+          />
+        </Suspense>
+      )}
+      {dailyWorkOpen && (
+        <Suspense fallback={null}>
+          <DailyWorkDialog
+            status={usage.status}
+            request={usage.request}
+            onClose={() => setDailyWorkOpen(false)}
+            onOpenConversation={(conversationId) => {
+              const selected = connection.snapshot?.conversations.find(
+                (candidate) => candidate.id === conversationId,
+              );
+              if (!selected) return;
+              setDailyWorkOpen(false);
+              actions.selectConversation(selected);
+              setView("workspace");
+              setSidebarOpen(false);
+            }}
           />
         </Suspense>
       )}

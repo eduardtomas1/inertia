@@ -1,14 +1,14 @@
-type UnknownRecord = Record<string, unknown>;
+export type UnknownRecord = Record<string, unknown>;
 
-function record(value: unknown): value is UnknownRecord {
+export function record(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function stringField(value: UnknownRecord, key: string): boolean {
+export function stringField(value: UnknownRecord, key: string): boolean {
   return typeof value[key] === "string";
 }
 
-function integerField(value: UnknownRecord, key: string): boolean {
+export function integerField(value: UnknownRecord, key: string): boolean {
   return Number.isSafeInteger(value[key]);
 }
 
@@ -17,25 +17,31 @@ function nullableNonNegativeInteger(value: UnknownRecord, key: string): boolean 
     || (integerField(value, key) && Number(value[key]) >= 0);
 }
 
-function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownRecord {
+export function recordWithStrings(
+  value: unknown,
+  ...keys: string[]
+): value is UnknownRecord {
   return record(value) && keys.every((key) => stringField(value, key));
 }
 
-function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean {
+export function arrayOf(
+  value: unknown,
+  validate: (entry: unknown) => boolean,
+): boolean {
   return Array.isArray(value) && value.every(validate);
 }
 
-function uniqueRecordField(values: unknown[], key: string): boolean {
+export function uniqueRecordField(values: unknown[], key: string): boolean {
   return new Set(values.map((entry) => record(entry) ? entry[key] : undefined)).size
     === values.length;
 }
 
-function sumRecordField(values: unknown[], key: string): number {
+export function sumRecordField(values: unknown[], key: string): number {
   return values.reduce<number>((sum, entry) =>
     sum + (record(entry) ? Number(entry[key]) : 0), 0);
 }
 
-function measuredValue(value: unknown): boolean {
+export function measuredValue(value: unknown): boolean {
   if (!record(value)) return false;
   if (!(nullableNonNegativeInteger(value, "value")
     && integerField(value, "measuredRequests")

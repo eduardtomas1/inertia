@@ -60,6 +60,8 @@ describe("thread notifications", () => {
       .toBe(false);
     expect(activeConversationIsVisible({ ...visible, commitDialogOpen: true }))
       .toBe(false);
+    expect(activeConversationIsVisible({ ...visible, dailyWorkOpen: true }))
+      .toBe(false);
     expect(activeConversationIsVisible({ ...visible, paletteOpen: true }))
       .toBe(false);
   });

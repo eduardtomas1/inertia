@@ -119,13 +119,15 @@ function renderSidebar(
   } = {},
 ) {
   const onSnoozeConversation = vi.fn();
+  const onOpenDailyWork = vi.fn();
+  const onClose = vi.fn();
   const sidebarProps = {
     connectionStatus: "online" as const,
     view: "workspace" as const,
     open: true,
     busy: false,
     layoutWidth: 276,
-    onClose: vi.fn(),
+    onClose,
     onViewChange: vi.fn(),
     onImportProject: vi.fn(),
     onSelectProject: vi.fn(),
@@ -135,6 +137,7 @@ function renderSidebar(
     onCloseConversationSplit: vi.fn(),
     onCreateConversation: vi.fn(),
     onOpenMultiSpawn: vi.fn(),
+    onOpenDailyWork,
     onRenameConversation: vi.fn(),
     onPinConversation: vi.fn(),
     onSnoozeConversation,
@@ -167,6 +170,8 @@ function renderSidebar(
   return {
     onSelectConversation,
     onSnoozeConversation,
+    onOpenDailyWork,
+    onClose,
     rerenderSnapshot(nextSnapshot: AppSnapshot) {
       view.rerender(<Sidebar snapshot={nextSnapshot} {...sidebarProps} />);
     },
@@ -181,6 +186,21 @@ afterEach(() => {
 });
 
 describe("compact Work sidebar", () => {
+  it("opens Daily work from the footer above Usage and Settings", () => {
+    const view = renderSidebar([]);
+    const footerButtons = within(view.container.querySelector(".sidebar-footer")!)
+      .getAllByRole("button");
+
+    expect(footerButtons.map((button) => button.textContent)).toEqual([
+      "Daily work",
+      "Usage",
+      "Settings",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Daily work" }));
+    expect(view.onOpenDailyWork).toHaveBeenCalledTimes(1);
+    expect(view.onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("shows chronological rows with provider, project, repository, and branch metadata", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

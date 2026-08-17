@@ -64,7 +64,7 @@ import {
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { ConversationActionsMenu } from "./ConversationActionsMenu";
 import { IconButton, LoadingMark } from "./ui";
-import { loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
+import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
 
 const WORK_DONE_PAGE_SIZE = 10;
@@ -87,6 +87,7 @@ type SidebarProps = {
   onCloseConversationSplit: () => void;
   onCreateConversation: (project: Project) => void;
   onOpenMultiSpawn: () => void;
+  onOpenDailyWork: () => void;
   onRenameConversation: (conversation: Conversation, title: string) => void;
   onPinConversation: (conversation: Conversation, pinned: boolean) => void;
   onSnoozeConversation: (conversation: Conversation, until: string | null) => void;
@@ -172,6 +173,7 @@ function SidebarView({
   onCloseConversationSplit,
   onCreateConversation,
   onOpenMultiSpawn,
+  onOpenDailyWork,
   onRenameConversation,
   onPinConversation,
   onSnoozeConversation,
@@ -1219,6 +1221,9 @@ function SidebarView({
         </div>
 
         <div className="sidebar-footer">
+          <button type="button" className="sidebar-destination" onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
+            <Activity size={16} /><span>Daily work</span>
+          </button>
           <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
             <BarChart3 size={16} /><span>Usage</span>
           </button>

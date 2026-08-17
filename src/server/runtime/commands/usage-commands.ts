@@ -16,8 +16,19 @@ export function createUsageCommandHandler(
   dependencies: UsageCommandDependencies,
 ): RuntimeCommandHandler {
   return defineRuntimeCommandHandler(
-    ["usage.dashboard.get"],
+    ["usage.dashboard.get", "daily.work.get"],
     async (socket, command) => {
+      if (command.type === "daily.work.get") {
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "daily.work",
+            dashboard: dependencies.store.dailyWork(command.payload),
+          },
+        });
+        return "handled";
+      }
       if (command.type !== "usage.dashboard.get") return "not-handled";
       dependencies.send(socket, {
         type: "request.result",

@@ -37,6 +37,16 @@ import {
   type RuntimeConversationAttachmentStoreEvent,
   type RuntimeConversationAttachmentStoreResult,
 } from "./conversation-attachment-store-protocol";
+import {
+  parseRuntimeUpdateWorkerCommand,
+  parseRuntimeUpdateWorkerEvent,
+  type RuntimeUpdateWorkerCommand,
+  type RuntimeUpdateWorkerEvent,
+} from "./runtime-update-process-protocol";
+import { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
+export { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
+
+export type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "./runtime-update-process-protocol";
 
 export type { RuntimeConversationAttachmentStoreResult }
   from "./conversation-attachment-store-protocol";
@@ -104,6 +114,7 @@ export interface RuntimeDatabaseStartupRecoveryReport {
 export type RuntimeWorkerCommand =
   | { type: "runtime.start"; options: RuntimeWorkerOptions }
   | { type: "runtime.shutdown" }
+  | RuntimeUpdateWorkerCommand
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
   | {
       type: "runtime.private-connect-request";
@@ -242,6 +253,7 @@ export type RuntimeWorkerEvent =
   | { type: "runtime.startup-failed"; message: string }
   | { type: "runtime.shutdown-unconfirmed" }
   | { type: "runtime.stopped" }
+  | RuntimeUpdateWorkerEvent
   | {
       type: "runtime.cleanup-receipt-consumed";
       receiptRuntimeGenerationId: string;
@@ -313,22 +325,6 @@ export type RuntimeWorkerEvent =
     } & SecureFileRequest);
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-export function validRuntimeGenerationId(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  const parts = value.split(":");
-  return parts.length === 2
-    && UUID_PATTERN.test(parts[0] ?? "")
-    && /^[1-9][0-9]{0,9}$/u.test(parts[1] ?? "");
-}
-
-export function validSystemBootId(value: unknown): value is string {
-  return typeof value === "string" && (
-    /^(?:linux|darwin):[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)
-    || /^win32:[0-9a-f]{8}$/u.test(value)
-    || /^test:[0-9a-f-]{36}$/u.test(value)
-    || value === "unavailable"
-  );
-}
 
 function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -341,6 +337,8 @@ function runtimePath(value: unknown): value is string {
 export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.shutdown" && Object.keys(value).length === 1) return { type: "runtime.shutdown" };
+  const updateCommand = parseRuntimeUpdateWorkerCommand(value);
+  if (updateCommand) return updateCommand;
   if (value.type === "runtime.attachment-result") {
     return parseRuntimeAttachmentResult(value);
   }
@@ -652,6 +650,8 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
 export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
+  const updateEvent = parseRuntimeUpdateWorkerEvent(value);
+  if (updateEvent) return updateEvent;
   if (
     value.type === "runtime.cleanup-receipt-consumed"
     && Object.keys(value).length === 3

@@ -116,6 +116,7 @@ import {
 import { runRecoveryImportWorker } from "./persistence/database-recovery-import-worker-client";
 import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-smoke-image";
 import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
+import { RuntimeUpdatePreparationGate } from "./runtime-update-preparation";
 
 export type {
   RunningRuntime,
@@ -178,22 +179,32 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let closed = false;
   let databaseRecoveryImportActive = false;
   let activeRuntimeCommands = 0;
-  const activeRuntimeOperations = new Set<Promise<unknown>>();
-  const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> => {
-    if (closed) return Promise.reject(new Error("The runtime is shutting down."));
-    const active = Promise.resolve().then(operation);
-    activeRuntimeOperations.add(active);
-    void active.then(
-      () => activeRuntimeOperations.delete(active),
-      () => activeRuntimeOperations.delete(active),
-    );
-    return active;
-  };
-  const drainRuntimeOperations = async (): Promise<void> => {
-    while (activeRuntimeOperations.size > 0) {
-      await Promise.allSettled(activeRuntimeOperations);
-    }
-  };
+  const updatePreparation = new RuntimeUpdatePreparationGate({
+    isClosed: () => closed,
+    activeRuntimeCommands: () => activeRuntimeCommands,
+    databaseRecoveryActive: () => databaseRecoveryImportActive,
+    agentWorkActive: () => {
+      const snapshot = currentSnapshot();
+      return turns.activeConversationIds().length > 0
+        || isolatedRuns.activeCount() > 0
+        || snapshot.runs.some(
+          ({ status }) => status === "running" || status === "waiting",
+        );
+    },
+    terminalActivity: () => terminals.hasUpdateBlockingActivity(),
+    providerMaintenanceActive: () =>
+      providerMaintenance.activeOperations().length > 0,
+    providerRefreshActive: () => activeProviderRefreshes > 0,
+    artifactReconciliationActive: () => artifactReconciliationActive,
+    holdTerminalAdmission: () => terminals.holdForUpdatePreparation(),
+    releaseTerminalAdmission: () => terminals.releaseUpdatePreparation(),
+    drainAdditionalOperations: async () => {
+      await projectIdentities.drain();
+      await artifactReconciliation;
+    },
+  });
+  const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> =>
+    updatePreparation.track(operation);
   const streamingTrace = createTestStreamingTrace(dataDirectory);
   const send = (
     socket: WebSocket,
@@ -377,6 +388,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const websocketPath = `/runtime/${token}`;
   const runtimeCommandDrainWaiters = new Set<() => void>();
   let artifactReconciliation: Promise<void> | null = null;
+  let artifactReconciliationActive = false;
 
   const server = createServer((_request, response) => {
     response.writeHead(404, {
@@ -827,6 +839,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
       return;
     }
+    if (updatePreparation.isAdmissionClosed()) {
+      send(socket, {
+        type: "request.error",
+        requestId: command.requestId,
+        message: "The runtime is preparing for an application update.",
+      });
+      return;
+    }
     if (runtimeSafetyLock && !runtimeSafetyAllowsCommand(command.type)) {
       send(socket, {
         type: "request.error",
@@ -847,11 +867,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     try {
       await trackRuntimeOperation(async () => {
         await testOnlyBeforeRuntimeCommand?.();
-        if (closed) {
+        if (closed || updatePreparation.isAdmissionClosed()) {
           send(socket, {
             type: "request.error",
             requestId: command.requestId,
-            message: "The runtime is shutting down.",
+            message: closed
+              ? "The runtime is shutting down."
+              : "The runtime is preparing for an application update.",
           });
           return;
         }
@@ -895,11 +917,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   // already-terminal turn snapshot. Restart recovery must not hold the app
   // startup screen behind Git work.
   if (!runtimeSafetyLock) {
+    artifactReconciliationActive = true;
     artifactReconciliation = turnGitArtifacts.reconcile()
       .then((changed) => {
         if (changed && !closed) broadcastSnapshot();
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        artifactReconciliationActive = false;
+      });
   }
 
   if (enableProviders) {
@@ -996,6 +1022,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       ),
     websocketUrl: `ws://127.0.0.1:${address.port}${websocketPath}`,
     databaseRecovery: store.databaseRecoveryReport(),
+    prepareForUpdate: (operationId) => updatePreparation.prepare(operationId),
+    releaseUpdatePreparation: (operationId) =>
+      updatePreparation.release(operationId),
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
@@ -1006,7 +1035,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         projectIdentityAuthority,
       )).absolute;
     }),
-    privateConnectRequest: (subject, request) => runtimeSafetyLock
+    privateConnectRequest: (subject, request) =>
+      updatePreparation.isAdmissionClosed()
+      ? Promise.resolve({
+          type: "response",
+          requestId: request.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "The runtime is preparing for an application update.",
+        })
+      : runtimeSafetyLock
       ? Promise.resolve({
           type: "response",
           requestId: request.requestId,
@@ -1023,7 +1061,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           message: "Database recovery is in progress.",
         })
       : trackRuntimeOperation(() => privateConnectGateway.request(subject, request)),
-    preparePrivateConnectPrompt: (subject, request) => runtimeSafetyLock
+    preparePrivateConnectPrompt: (subject, request) =>
+      updatePreparation.isAdmissionClosed()
+      ? Promise.resolve({
+          type: "response",
+          requestId: request.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "The runtime is preparing for an application update.",
+        })
+      : runtimeSafetyLock
       ? Promise.resolve({
           type: "response",
           requestId: request.requestId,
@@ -1041,7 +1088,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         })
       : trackRuntimeOperation(() => privateConnectGateway.preparePrompt(subject, request)),
     commitPrivateConnectPrompt: (subject, request, preparationId) =>
-      runtimeSafetyLock
+      updatePreparation.isAdmissionClosed()
+        ? {
+            type: "response",
+            requestId: request.requestId,
+            ok: false,
+            code: "unavailable",
+            message: "The runtime is preparing for an application update.",
+          }
+        : runtimeSafetyLock
         ? {
             type: "response",
             requestId: request.requestId,
@@ -1059,84 +1114,87 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           }
         : privateConnectGateway.commitPrompt(subject, request, preparationId),
     forgetPrivateConnectTranscripts: (scope) => {
+      if (updatePreparation.isAdmissionClosed()) return;
       if (scope.kind === "all") privateConnectGateway.reset();
       else privateConnectGateway.forgetConversation(scope.conversationId);
     },
-    exportRecoveryData: (path, signal) => trackRuntimeOperation(async () => {
-      if (runtimeSafetyLock) {
-        throw new Error(runtimeSafetyError("Database export is unavailable in recovery safety mode."));
-      }
-      await writeDatabaseRecoveryExportFile(
-        path,
-        store.exportRecoveryData(),
-        { signal },
-      );
-    }),
-    importRecoveryData: (path, targetDirectory, signal, operationId) => trackRuntimeOperation(async () => {
-      if (runtimeSafetyLock) {
-        throw new Error(runtimeSafetyError("Database import is unavailable in recovery safety mode."));
-      }
-      if (databaseRecoveryImportActive) {
-        throw new Error("A database recovery import is already active.");
-      }
-      if (!operationId) {
-        throw new Error("The database recovery import identity is required.");
-      }
-      databaseRecoveryImportActive = true;
-      try {
-        if (activeRuntimeCommands > 0) {
-          await new Promise<void>((resolveDrain) => {
-            runtimeCommandDrainWaiters.add(resolveDrain);
-          });
+    exportRecoveryData: (path, signal) =>
+      updatePreparation.runDatabaseRecovery(async () => {
+        if (runtimeSafetyLock) {
+          throw new Error(runtimeSafetyError("Database export is unavailable in recovery safety mode."));
         }
-        await projectIdentityRefresh;
-        await artifactReconciliation;
-        const backgroundRunActive = currentSnapshot().runs.some(
-          ({ status }) => status === "running" || status === "waiting",
+        await writeDatabaseRecoveryExportFile(
+          path,
+          store.exportRecoveryData(),
+          { signal },
         );
-        if (
-          turns.activeConversationIds().length > 0
-          || backgroundRunActive
-          || providerMaintenance.activeOperations().length > 0
-          || activeProviderRefreshes > 0
-        ) {
-          throw new Error(
-            "Database recovery cannot start while runtime work is active.",
-          );
+      }),
+    importRecoveryData: (path, targetDirectory, signal, operationId) =>
+      updatePreparation.runDatabaseRecovery(async () => {
+        if (runtimeSafetyLock) {
+          throw new Error(runtimeSafetyError("Database import is unavailable in recovery safety mode."));
         }
-        // With command admission closed and active turns ruled out, no new
-        // terminal task can appear after this final store-writer drain.
-        await turns.drainSettlementTasks(signal);
-        const result = await runRecoveryImportWorker({
-          databasePath,
-          defaultWorkspacePath: options.defaultWorkspacePath,
-          recoveryPath: path,
-          targetDirectory,
-          operationId,
-          signal,
-          ...(recoveryImportFault
-            ? {
-                fault: {
-                  phase: recoveryImportFault.phase,
-                  markerPath: recoveryImportFault.markerPath,
-                  stallMs: recoveryImportFault.stallMs,
-                },
-              }
-            : {}),
-        });
-        broadcastSnapshot();
-        return result;
-      } catch (error) {
-        // Worker termination is confirmed before rejection. Reconcile its
-        // durable filesystem journal only after SQLite has rolled back and
-        // released the independent connection.
-        store.reconcileRecoveryImport();
-        broadcastSnapshot();
-        throw error;
-      } finally {
-        databaseRecoveryImportActive = false;
-      }
-    }),
+        if (databaseRecoveryImportActive) {
+          throw new Error("A database recovery import is already active.");
+        }
+        if (!operationId) {
+          throw new Error("The database recovery import identity is required.");
+        }
+        databaseRecoveryImportActive = true;
+        try {
+          if (activeRuntimeCommands > 0) {
+            await new Promise<void>((resolveDrain) => {
+              runtimeCommandDrainWaiters.add(resolveDrain);
+            });
+          }
+          await projectIdentityRefresh;
+          await artifactReconciliation;
+          const backgroundRunActive = currentSnapshot().runs.some(
+            ({ status }) => status === "running" || status === "waiting",
+          );
+          if (
+            turns.activeConversationIds().length > 0
+            || backgroundRunActive
+            || providerMaintenance.activeOperations().length > 0
+            || activeProviderRefreshes > 0
+          ) {
+            throw new Error(
+              "Database recovery cannot start while runtime work is active.",
+            );
+          }
+          // With command admission closed and active turns ruled out, no new
+          // terminal task can appear after this final store-writer drain.
+          await turns.drainSettlementTasks(signal);
+          const result = await runRecoveryImportWorker({
+            databasePath,
+            defaultWorkspacePath: options.defaultWorkspacePath,
+            recoveryPath: path,
+            targetDirectory,
+            operationId,
+            signal,
+            ...(recoveryImportFault
+              ? {
+                  fault: {
+                    phase: recoveryImportFault.phase,
+                    markerPath: recoveryImportFault.markerPath,
+                    stallMs: recoveryImportFault.stallMs,
+                  },
+                }
+              : {}),
+          });
+          broadcastSnapshot();
+          return result;
+        } catch (error) {
+          // Worker termination is confirmed before rejection. Reconcile its
+          // durable filesystem journal only after SQLite has rolled back and
+          // released the independent connection.
+          store.reconcileRecoveryImport();
+          broadcastSnapshot();
+          throw error;
+        } finally {
+          databaseRecoveryImportActive = false;
+        }
+      }),
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;
@@ -1146,7 +1204,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       secureFileAuthorities.clear();
       await runRuntimeShutdownPhases({
         quiesceRuntimeWork: async () => {
-          await drainRuntimeOperations();
+          await updatePreparation.drainTracked();
           await projectIdentities.drain();
         },
         independentDrains: [

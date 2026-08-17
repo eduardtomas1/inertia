@@ -235,8 +235,13 @@ describe("trusted overlay native preview suspension", () => {
       status: null,
       checking: false,
       visible: false,
+      error: null,
       check: vi.fn(async () => undefined),
+      download: vi.fn(async () => undefined),
+      cancelDownload: vi.fn(async () => undefined),
+      install: vi.fn(async () => undefined),
       dismiss: vi.fn(),
+      dismissError: vi.fn(),
       openRelease: vi.fn(async () => undefined),
     };
     const providerQuotaNotices = {
@@ -259,6 +264,35 @@ describe("trusted overlay native preview suspension", () => {
 
     expect(nativePreviewSuspended()).toBe(true);
 
+    view.rerender(
+      <AppStatusOverlays
+        providerAuth={{ ...providerAuth, provider: null }}
+        appUpdate={appUpdate}
+        providerQuotaNotices={providerQuotaNotices}
+        error={null}
+        onDismissError={vi.fn()}
+        databaseRecoveryNotice={null}
+        onDismissDatabaseRecoveryNotice={vi.fn()}
+        onImportRecovery={vi.fn(async () => undefined)}
+        onCopyRecoveryReport={vi.fn(async () => undefined)}
+      />,
+    );
+    await expectRestored();
+
+    view.rerender(
+      <AppStatusOverlays
+        providerAuth={{ ...providerAuth, provider: null }}
+        appUpdate={{ ...appUpdate, visible: true }}
+        providerQuotaNotices={providerQuotaNotices}
+        error={null}
+        onDismissError={vi.fn()}
+        databaseRecoveryNotice={null}
+        onDismissDatabaseRecoveryNotice={vi.fn()}
+        onImportRecovery={vi.fn(async () => undefined)}
+        onCopyRecoveryReport={vi.fn(async () => undefined)}
+      />,
+    );
+    await expectSuspended();
     view.rerender(
       <AppStatusOverlays
         providerAuth={{ ...providerAuth, provider: null }}

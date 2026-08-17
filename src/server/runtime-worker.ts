@@ -29,6 +29,13 @@ const activeDatabaseRecoveryOperations = new Map<
 >();
 let starting = false;
 let stopping = false;
+let runtimeGeneration: number | null = null;
+let updatePreparation: {
+  operationId: string;
+  generation: number;
+  ready: boolean;
+} | null = null;
+let lastReleasedUpdatePreparation: { operationId: string; generation: number } | null = null;
 let shutdownExitCode = 0;
 let packageSmokePdfController: AbortController | null = null;
 let packageSmokePdfOperation: Promise<void> | null = null;
@@ -135,8 +142,133 @@ parentPort.on("message", (messageEvent) => {
     void shutdown();
     return;
   }
+  if (command.type === "runtime.release-update-preparation") {
+    const matchesCurrent = updatePreparation?.operationId === command.operationId
+      && updatePreparation.generation === command.generation;
+    const matchesReleased = lastReleasedUpdatePreparation?.operationId === command.operationId
+      && lastReleasedUpdatePreparation.generation === command.generation;
+    const released = matchesReleased || Boolean(
+      matchesCurrent
+      && runtime
+      && !stopping
+      && runtime.releaseUpdatePreparation(command.operationId),
+    );
+    if (released && matchesCurrent) {
+      lastReleasedUpdatePreparation = updatePreparation;
+      updatePreparation = null;
+    }
+    post({
+      type: "runtime.release-update-preparation-result",
+      operationId: command.operationId,
+      generation: command.generation,
+      released,
+    });
+    return;
+  }
+  if (command.type === "runtime.prepare-update") {
+    if (
+      !runtime
+      || stopping
+      || runtimeGeneration !== command.generation
+      || (
+        updatePreparation
+        && (
+          updatePreparation.operationId !== command.operationId
+          || updatePreparation.generation !== command.generation
+        )
+      )
+    ) {
+      post({
+        type: "runtime.prepare-update-result",
+        operationId: command.operationId,
+        generation: command.generation,
+        ready: false,
+        blocker: "runtime-operation",
+      });
+      return;
+    }
+    if (updatePreparation) {
+      if (updatePreparation.ready) {
+        post({
+          type: "runtime.prepare-update-result",
+          operationId: command.operationId,
+          generation: command.generation,
+          ready: true,
+        });
+      }
+      return;
+    }
+    if (
+      databaseRecoveryOperations.hasActiveOperations()
+      || activeDatabaseRecoveryOperations.size > 0
+    ) {
+      post({
+        type: "runtime.prepare-update-result",
+        operationId: command.operationId,
+        generation: command.generation,
+        ready: false,
+        blocker: "database-recovery",
+      });
+      return;
+    }
+    if (packageSmokePdfOperation || packageSmokeImageOperation) {
+      post({
+        type: "runtime.prepare-update-result",
+        operationId: command.operationId,
+        generation: command.generation,
+        ready: false,
+        blocker: "runtime-operation",
+      });
+      return;
+    }
+    const activeRuntime = runtime;
+    updatePreparation = {
+      operationId: command.operationId,
+      generation: command.generation,
+      ready: false,
+    };
+    void activeRuntime.prepareForUpdate(command.operationId).then(
+      (result) => {
+        if (
+          runtime !== activeRuntime
+          || updatePreparation?.operationId !== command.operationId
+          || updatePreparation.generation !== command.generation
+        ) return;
+        if (result.ready) {
+          updatePreparation.ready = true;
+        } else {
+          lastReleasedUpdatePreparation = updatePreparation;
+          updatePreparation = null;
+        }
+        post({
+          type: "runtime.prepare-update-result",
+          operationId: command.operationId,
+          generation: command.generation,
+          ...result,
+        });
+      },
+      () => {
+        if (
+          runtime !== activeRuntime
+          || updatePreparation?.operationId !== command.operationId
+          || updatePreparation.generation !== command.generation
+        ) return;
+        activeRuntime.releaseUpdatePreparation(command.operationId);
+        lastReleasedUpdatePreparation = updatePreparation;
+        updatePreparation = null;
+        post({
+          type: "runtime.prepare-update-result",
+          operationId: command.operationId,
+          generation: command.generation,
+          ready: false,
+          blocker: "runtime-operation",
+        });
+      },
+    );
+    return;
+  }
   if (command.type === "runtime.resolve-project-path") {
-    if (!runtime || stopping) {
+    if (!runtime || stopping || updatePreparation) {
       post({
         type: "runtime.project-path-rejected",
         requestId: command.requestId,
@@ -221,7 +353,7 @@ parentPort.on("message", (messageEvent) => {
       }
       return;
     }
-    if (!runtime || stopping) {
+    if (!runtime || stopping || updatePreparation) {
       postDatabaseRecoveryResult({
         type: "runtime.database-recovery-result",
         operationId: command.operationId,
@@ -284,11 +416,11 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   if (command.type === "runtime.private-connect-forget") {
-    runtime?.forgetPrivateConnectTranscripts(command.scope);
+    if (!updatePreparation) runtime?.forgetPrivateConnectTranscripts(command.scope);
     return;
   }
   if (command.type === "runtime.private-connect-request") {
-    if (!runtime || stopping) {
+    if (!runtime || stopping || updatePreparation) {
       post({
         type: "runtime.private-connect-response",
         requestId: command.requestId,
@@ -323,7 +455,7 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   if (command.type === "runtime.private-connect-prompt-prepare") {
-    if (!runtime || stopping) {
+    if (!runtime || stopping || updatePreparation) {
       post({
         type: "runtime.private-connect-prompt-result",
         operationId: command.operationId,
@@ -378,7 +510,7 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   if (command.type === "runtime.private-connect-prompt-commit") {
-    const response = runtime && !stopping
+    const response = runtime && !stopping && !updatePreparation
       ? runtime.commitPrivateConnectPrompt(
           command.subject,
           command.request,
@@ -407,6 +539,9 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   starting = true;
+  runtimeGeneration = Number(command.options.runtimeGenerationId.split(":")[1]);
+  updatePreparation = null;
+  lastReleasedUpdatePreparation = null;
   void startRuntime({
     ...command.options,
     onCleanupReceiptConsumed: (

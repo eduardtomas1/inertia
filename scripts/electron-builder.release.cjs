@@ -46,10 +46,35 @@ const windowsSigning = platform === "windows-x64" && credentialSet(
   ["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD"],
 );
 const signingRequired = macSigning || windowsSigning;
+const updateCapability = platform === "linux-x64"
+  ? { delivery: "in-app", platform: "linux" }
+  : platform === "macos-arm64" && macSigning
+    ? { delivery: "in-app", platform: "darwin" }
+    : platform === "windows-x64" && windowsSigning
+      ? { delivery: "in-app", platform: "win32" }
+      : {
+          delivery: "manual",
+          reason: platform === "macos-arm64"
+            ? "macos-signing-unavailable"
+            : "windows-signing-unavailable",
+        };
 
 module.exports = {
   ...packageJson.build,
   forceCodeSigning: signingRequired,
+  // electron-builder still writes the update metadata and packaged
+  // app-update.yml with --publish never. GitHub Actions remains the sole
+  // publisher and uploads the validated union only after all builds pass.
+  publish: [
+    {
+      provider: "generic",
+      url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
+    },
+  ],
+  extraMetadata: {
+    ...packageJson.build.extraMetadata,
+    inertiaUpdateCapability: updateCapability,
+  },
   mac: {
     ...packageJson.build.mac,
     // Pull requests and community builds retain the explicit, testable ad-hoc

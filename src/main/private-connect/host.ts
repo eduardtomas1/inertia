@@ -83,6 +83,16 @@ export class PrivateConnectHost {
     this.service = null;
   }
 
+  async prepareForUpdate(): Promise<boolean> {
+    await this.initialization;
+    return await this.service?.prepareForUpdate() ?? true;
+  }
+
+  async releaseUpdatePreparation(): Promise<void> {
+    await this.initialization;
+    await this.service?.releaseUpdatePreparation();
+  }
+
   private async initialize(): Promise<void> {
     if (this.initialization) return this.initialization;
     this.initialization = (async () => {
@@ -124,6 +134,7 @@ export class PrivateConnectHost {
   }
 
   private requireService(): PrivateConnectService {
+    if (this.stopped) throw new Error("Private Connect is shutting down.");
     if (!this.service) throw new Error(this.initializationError ?? "Private Connect is unavailable.");
     return this.service;
   }

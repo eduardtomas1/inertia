@@ -18,6 +18,8 @@ function runtimeWithClose(
       invalidBackupsSkipped: 0,
       unsupportedBackupsSkipped: 0,
     },
+    prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+    releaseUpdatePreparation: vi.fn(() => true),
     resolveProjectPath: vi.fn(),
     privateConnectRequest: vi.fn(async () => {
       throw new Error("unused");

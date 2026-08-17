@@ -46,6 +46,10 @@ export class DatabaseRecoveryOperationQueue {
   private active: QueuedRecoveryOperation | null = null;
   private accepting = true;
 
+  hasActiveOperations(): boolean {
+    return this.jobs.size > 0;
+  }
+
   enqueue<T>(
     id: string,
     operation: (signal: AbortSignal) => Promise<T>,

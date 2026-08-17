@@ -10,6 +10,7 @@ import type {
 import type {
   RuntimePrivateConnectForgetScope,
   RuntimePrivateConnectPromptPreparation,
+  RuntimeUpdatePreparationResult,
 } from "../node/runtime-process-protocol.js";
 import type {
   ConversationAttachmentStoreAnyOperationRunner,
@@ -68,6 +69,15 @@ export interface RunningRuntime {
   ) => Promise<void>;
   websocketUrl: string;
   databaseRecovery: ReturnType<RuntimeStore["databaseRecoveryReport"]>;
+  /**
+   * Atomically closes runtime work admission and reports whether shutdown for
+   * an application update can begin. A ready result deliberately keeps the
+   * gate held until close() stops this runtime generation or the owning
+   * operation explicitly rolls back through releaseUpdatePreparation().
+   */
+  prepareForUpdate: (operationId: string) => Promise<RuntimeUpdatePreparationResult>;
+  /** Reopens admission only when operationId owns the held update gate. */
+  releaseUpdatePreparation: (operationId: string) => boolean;
   resolveProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
   privateConnectRequest: (
     subject: PrivateConnectRuntimeAuthorization,

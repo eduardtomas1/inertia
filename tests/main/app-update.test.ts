@@ -4,6 +4,11 @@ import {
   AppUpdateService,
   compareAppVersions,
 } from "../../src/main/app-update";
+import type {
+  AppUpdaterAdapter,
+  AppUpdaterDownload,
+  AppUpdaterDownloadProgress,
+} from "../../src/main/electron-app-updater";
 
 function release(tagName: string, headers?: HeadersInit): Response {
   return new Response(JSON.stringify({
@@ -52,8 +57,13 @@ describe("app update checks", () => {
     });
 
     await expect(service.check()).resolves.toEqual({
+      revision: 2,
       state: "available",
       freshness: "fresh",
+      delivery: "manual",
+      deliveryReason: "development-build",
+      installBlocker: null,
+      progress: null,
       currentVersion: "0.0.10",
       latestVersion: "0.0.11",
       releaseUrl:
@@ -63,6 +73,156 @@ describe("app update checks", () => {
       message: "Inertia 0.0.11 is available.",
     });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads explicitly, publishes bounded progress, and blocks installation safely", async () => {
+    let finishDownload!: () => void;
+    let progress!: (value: AppUpdaterDownloadProgress) => void;
+    const quitAndInstall = vi.fn(async () => true);
+    const updater: AppUpdaterAdapter = {
+      check: vi.fn(async () => ({ available: true, version: "0.0.11" })),
+      download: vi.fn((callbacks): AppUpdaterDownload => {
+        progress = callbacks.onProgress;
+        return {
+          promise: new Promise<void>((resolve) => {
+            finishDownload = resolve;
+          }),
+          cancel: vi.fn(),
+        };
+      }),
+      quitAndInstall,
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const statuses: Array<ReturnType<AppUpdateService["current"]>> = [];
+    const service = new AppUpdateService({
+      currentVersion: "0.0.10",
+      fetch,
+      capability: { delivery: "in-app" },
+      loadUpdater: async () => updater,
+    });
+    service.subscribe((status) => statuses.push(status));
+
+    await expect(service.check()).resolves.toMatchObject({
+      state: "available",
+      delivery: "in-app",
+      latestVersion: "0.0.11",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+
+    const downloading = service.download();
+    await vi.waitFor(() => expect(updater.download).toHaveBeenCalledTimes(1));
+    progress({ percent: 125, transferred: 250, total: 200, bytesPerSecond: 12.9 });
+    expect(service.current()).toMatchObject({
+      state: "downloading",
+      progress: {
+        percent: 100,
+        transferredBytes: 200,
+        totalBytes: 200,
+        bytesPerSecond: 12,
+      },
+    });
+    finishDownload();
+    await expect(downloading).resolves.toMatchObject({ state: "downloaded" });
+
+    expect(service.beginInstall()).toMatchObject({ state: "installing" });
+    expect(service.blockInstall("terminal")).toMatchObject({
+      state: "downloaded",
+      installBlocker: "terminal",
+    });
+    service.beginInstall();
+    await service.quitAndInstall();
+    expect(quitAndInstall).toHaveBeenCalledTimes(1);
+    expect(statuses.every((status, index) => index === 0 || status.revision > statuses[index - 1]!.revision)).toBe(true);
+  });
+
+  it("scopes cancellation to the active download and permits an explicit retry", async () => {
+    let cancel!: () => void;
+    let settle!: () => void;
+    const updater: AppUpdaterAdapter = {
+      check: vi.fn(async () => ({ available: true, version: "0.0.11" })),
+      download: vi.fn((callbacks): AppUpdaterDownload => {
+        let cancelled = false;
+        cancel = () => {
+          cancelled = true;
+          callbacks.onCancelled();
+          settle();
+        };
+        return {
+          promise: new Promise<void>((resolve, reject) => {
+            settle = () => cancelled
+              ? reject(new Error("cancelled"))
+              : resolve();
+          }),
+          cancel,
+        };
+      }),
+      quitAndInstall: vi.fn(async () => true),
+    };
+    const service = new AppUpdateService({
+      currentVersion: "0.0.10",
+      fetch: vi.fn<typeof globalThis.fetch>(),
+      capability: { delivery: "in-app" },
+      loadUpdater: async () => updater,
+    });
+    await service.check();
+    const first = service.download();
+    await vi.waitFor(() => expect(updater.download).toHaveBeenCalledTimes(1));
+    expect(service.cancelDownload()).toMatchObject({ state: "cancelled" });
+    await expect(first).resolves.toMatchObject({ state: "cancelled" });
+
+    const second = service.download();
+    await vi.waitFor(() => expect(updater.download).toHaveBeenCalledTimes(2));
+    settle();
+    await expect(second).resolves.toMatchObject({ state: "downloaded" });
+    cancel();
+    expect(service.current().state).toBe("downloaded");
+  });
+
+  it("does not start a cancelled native download and queues an immediate retry", async () => {
+    let settleRetry!: () => void;
+    const updater: AppUpdaterAdapter = {
+      check: vi.fn(async () => ({ available: true, version: "0.0.11" })),
+      download: vi.fn(() => ({
+        promise: new Promise<void>((resolve) => { settleRetry = resolve; }),
+        cancel: vi.fn(),
+      })),
+      quitAndInstall: vi.fn(async () => true),
+    };
+    const service = new AppUpdateService({
+      currentVersion: "0.0.10",
+      fetch: vi.fn<typeof globalThis.fetch>(),
+      capability: { delivery: "in-app" },
+      loadUpdater: async () => updater,
+    });
+    await service.check();
+
+    const cancelled = service.download();
+    service.cancelDownload();
+    const retry = service.download();
+    await expect(cancelled).resolves.toMatchObject({ state: "cancelled" });
+    await vi.waitFor(() => expect(updater.download).toHaveBeenCalledTimes(1));
+    settleRetry();
+    await expect(retry).resolves.toMatchObject({ state: "downloaded" });
+  });
+
+  it("honors a native platform or staged-rollout exclusion", async () => {
+    const updater: AppUpdaterAdapter = {
+      check: vi.fn(async () => ({ available: false, version: "0.0.11" })),
+      download: vi.fn(),
+      quitAndInstall: vi.fn(async () => true),
+    };
+    const service = new AppUpdateService({
+      currentVersion: "0.0.10",
+      fetch: vi.fn<typeof globalThis.fetch>(),
+      capability: { delivery: "in-app" },
+      loadUpdater: async () => updater,
+    });
+
+    await expect(service.check()).resolves.toMatchObject({
+      state: "current",
+      latestVersion: "0.0.11",
+    });
+    await expect(service.download()).rejects.toThrow("No checked update");
   });
 
   it("coalesces requests, caches success, and lets an explicit refresh bypass the cache", async () => {
@@ -149,5 +309,23 @@ describe("app update checks", () => {
         latestVersion: null,
       });
     }
+  });
+
+  it("cancels a chunked manual response as soon as the byte limit is crossed", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(40 * 1_024));
+        controller.enqueue(new Uint8Array(40 * 1_024));
+      },
+      cancel() { cancelled = true; },
+    });
+    const service = new AppUpdateService({
+      currentVersion: "0.0.10",
+      fetch: vi.fn<typeof globalThis.fetch>(async () => new Response(body)),
+    });
+
+    await expect(service.check()).resolves.toMatchObject({ state: "unavailable" });
+    expect(cancelled).toBe(true);
   });
 });

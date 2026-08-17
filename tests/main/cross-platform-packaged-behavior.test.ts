@@ -121,6 +121,37 @@ describe("cross-platform packaged behavior contract", () => {
     expect(results).toContain("JSON.parse(await readFile(path, \"utf8\"))");
   });
 
+  it("fails closed when packaged updater wiring or the test network boundary drifts", async () => {
+    const smoke = await source("scripts/package-smoke.mjs");
+    expect(smoke).toContain('["node_modules", "electron-updater", "package.json"]');
+    expect(smoke).toContain('["node_modules", "electron-updater", "out", "main.js"]');
+    expect(smoke).toContain("The externalized electron-updater production package is incomplete.");
+    expect(smoke).toContain('join(resourcesDirectory, "app-update.yml")');
+    expect(smoke).toContain('configuration.provider !== "generic"');
+    expect(smoke).toContain(
+      '"https://github.com/eduardtomas1/inertia/releases/latest/download"',
+    );
+    expect(smoke).toContain("capability.delivery === \"in-app\"");
+    expect(smoke).toContain("MANUAL_UPDATE_REASONS.has(marker.reason)");
+    expect(smoke).toContain('`--proxy-server=${updateNetworkTrap.proxy}`');
+    expect(smoke).toContain('"api.github.com"');
+    expect(smoke).toContain('"github.com"');
+    expect(smoke).toContain('"release-assets.githubusercontent.com"');
+    expect(smoke).toContain("updateNetworkTrap.assertNoUpdateRequests()");
+
+    const main = await source("src/main/index.ts");
+    const capabilityStart = main.indexOf("const appUpdateCapability =");
+    const serviceStart = main.indexOf("appUpdateService = new AppUpdateService", capabilityStart);
+    const bootstrapUpdateBoundary = main.slice(capabilityStart, serviceStart + 900);
+    expect(capabilityStart).toBeGreaterThanOrEqual(0);
+    expect(serviceStart).toBeGreaterThan(capabilityStart);
+    expect(bootstrapUpdateBoundary).toContain('process.env.NODE_ENV === "test"');
+    expect(bootstrapUpdateBoundary).toContain('delivery: "manual" as const');
+    expect(bootstrapUpdateBoundary).toContain("resolveAppUpdateCapability({");
+    expect(bootstrapUpdateBoundary).toContain("tag_name:");
+    expect(bootstrapUpdateBoundary).toContain(": net.fetch as typeof globalThis.fetch");
+  });
+
   it("registers runtime socket handlers before sending the first hydration frame", async () => {
     const boundary = await source("src/server/runtime/websocket-boundary.ts");
     const start = boundary.indexOf('webSockets.on("connection"');
@@ -151,18 +182,40 @@ describe("cross-platform packaged behavior contract", () => {
       releaseFunction.indexOf("releaseFromRenderer"),
     );
 
+    const cleanupStart = main.indexOf("function runPrivilegedCleanup()");
+    const cleanupEnd = main.indexOf("\nasync function bootstrap()", cleanupStart);
+    const cleanupHandler = main.slice(cleanupStart, cleanupEnd);
+    expect(cleanupStart).toBeGreaterThanOrEqual(0);
+    expect(cleanupHandler).toContain("cleanupPrivilegedOwners({");
+    expect(cleanupHandler).toContain("runtime: supervisorToStop");
+    expect(cleanupHandler).toContain(
+      "disposeTemporaryAttachments: disposeImportedAttachments",
+    );
+    expect(cleanupHandler).toContain(
+      "Retaining temporary attachments because runtime process exit was not confirmed",
+    );
+    expect(cleanupHandler.indexOf("conversationAttachments = null"))
+      .toBeLessThan(cleanupHandler.indexOf("closeConversationAttachmentAccess"));
+
+    const privilegedShutdown = await source("src/main/privileged-shutdown.ts");
+    const sequenceStart = privilegedShutdown.indexOf(
+      "export async function runPrivilegedCleanupSequence",
+    );
+    const sequenceEnd = privilegedShutdown.indexOf(
+      "\nexport function cleanupPrivilegedOwners",
+      sequenceStart,
+    );
+    const cleanupSequence = privilegedShutdown.slice(sequenceStart, sequenceEnd);
+    expect(sequenceStart).toBeGreaterThanOrEqual(0);
+    expect(cleanupSequence.indexOf("stopRuntimeAndPrivateConnect(")).toBeLessThan(
+      cleanupSequence.indexOf("options.disposeTemporaryAttachments()"),
+    );
+    expect(cleanupSequence).toContain("if (runtimeExitConfirmed)");
     const quitStart = main.indexOf('app.on("before-quit"');
     const quitEnd = main.indexOf("\n  });", quitStart);
     const quitHandler = main.slice(quitStart, quitEnd);
-    expect(quitHandler.indexOf("supervisorToStop.stop()")).toBeLessThan(
-      quitHandler.indexOf("disposeImportedAttachments()"),
-    );
-    expect(quitHandler).toContain("if (runtimeExitConfirmed)");
-    expect(quitHandler).toContain(
-      "Retaining temporary attachments because runtime process exit was not confirmed",
-    );
-    expect(quitHandler.indexOf("closeConversationAttachmentAccess"))
-      .toBeLessThan(quitHandler.indexOf("finishQuitAfterCleanup"));
+    expect(quitHandler).toContain("appUpdateInstallCoordinator?.allowBeforeQuit()");
+    expect(quitHandler).toContain("runPrivilegedCleanup().then(finishQuitAfterCleanup");
     expect(main.indexOf("conversationAttachments = null")).toBeLessThan(
       main.indexOf("closeConversationAttachmentAccess(retainedAttachments)"),
     );
@@ -208,6 +261,8 @@ describe("cross-platform packaged behavior contract", () => {
       "codesign --verify --deep --strict",
       "xcrun stapler validate",
       "Get-AuthenticodeSignature",
+      "Install locked release-validation dependencies",
+      "run: npm ci --ignore-scripts",
     ]) {
       expect(workflow).toContain(expected);
     }

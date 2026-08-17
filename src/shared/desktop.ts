@@ -38,17 +38,60 @@ export type DatabaseRecoveryImportResult =
   | { status: "cancelled" }
   | { status: "imported"; summary: DatabaseRecoveryImportSummary };
 
-export type AppUpdateState = "available" | "current" | "unavailable";
+export type AppUpdateState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "cancelled"
+  | "downloaded"
+  | "installing"
+  | "current"
+  | "unavailable"
+  | "failed";
 export type AppUpdateFreshness = "fresh" | "cached" | "unavailable";
+export type AppUpdateDelivery = "in-app" | "manual";
+export type AppUpdateDeliveryReason =
+  | "development-build"
+  | "capability-missing"
+  | "capability-invalid"
+  | "platform-mismatch"
+  | "macos-signing-unavailable"
+  | "windows-signing-unavailable"
+  | "appimage-unavailable"
+  | "appimage-invalid"
+  | "appimage-not-replaceable";
+export type AppUpdateInstallBlocker =
+  | "active-work"
+  | "terminal"
+  | "maintenance"
+  | "database-recovery"
+  | "local-operation"
+  | "runtime-transition"
+  | "private-connect"
+  | "shutdown";
+
+export interface AppUpdateProgress {
+  percent: number;
+  transferredBytes: number;
+  totalBytes: number;
+  bytesPerSecond: number;
+}
 
 export interface AppUpdateStatus {
+  /** Monotonic within one desktop process; rejects stale invoke responses. */
+  revision: number;
   state: AppUpdateState;
   freshness: AppUpdateFreshness;
+  delivery: AppUpdateDelivery;
+  deliveryReason: AppUpdateDeliveryReason | null;
+  installBlocker: AppUpdateInstallBlocker | null;
+  progress: AppUpdateProgress | null;
   currentVersion: string;
   latestVersion: string | null;
   releaseUrl: string | null;
   checkedAt: string | null;
-  lastAttemptedAt: string;
+  lastAttemptedAt: string | null;
   message: string;
 }
 
@@ -291,8 +334,15 @@ export interface DesktopBridge {
   copyRuntimeDiagnosticReport: () => Promise<{ copied: boolean; eventCount: number }>;
   /** Writes renderer-visible text to the system clipboard; the hardened renderer session denies direct clipboard access. */
   copyText: (text: string) => Promise<boolean>;
-  /** Reads only the latest public GitHub release metadata; updates are never downloaded or installed. */
+  /** Checks the fixed release channel; unsupported packages remain manual-only. */
   checkAppUpdate: (force?: boolean) => Promise<AppUpdateStatus>;
+  /** Downloads only an update already selected by the privileged updater service. */
+  downloadAppUpdate: () => Promise<AppUpdateStatus>;
+  cancelAppUpdateDownload: () => Promise<AppUpdateStatus>;
+  /** Requests a guarded runtime shutdown and installs only after cleanup is confirmed. */
+  installAppUpdate: () => Promise<AppUpdateStatus>;
+  /** Receives sanitized authoritative updater snapshots. */
+  onAppUpdateStatus: (listener: (status: AppUpdateStatus) => void) => () => void;
   selectAttachments: () => Promise<DesktopAttachment[]>;
   importAttachments: (files: AttachmentImport[]) => Promise<DesktopAttachment[]>;
   /** Pins one exact send request across the renderer/runtime IPC handoff. */

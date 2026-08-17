@@ -45,8 +45,11 @@ const runtimeIdentity = {
   systemBootId: "test:00000000-0000-4000-8000-000000000001",
 } as const;
 
-function send(socket: WebSocket, command: object): void {
-  socket.send(JSON.stringify(command));
+function send(socket: WebSocket, command: object): void { socket.send(JSON.stringify(command)); }
+function providerReady(provider: ProviderInfo): boolean {
+  const { models, rateLimits } = provider.metadataState;
+  return provider.authState === "authenticated" && provider.canRun && models.lastAttemptedAt !== null
+    && rateLimits.lastAttemptedAt !== null && !models.refreshing && !rateLimits.refreshing;
 }
 
 async function loadConversationDetailResult(
@@ -422,7 +425,7 @@ process.exit(child.status ?? 1);
       client.events,
       welcome.snapshot,
       "codex",
-      (provider) => provider.authState === "authenticated" && provider.canRun,
+      providerReady,
     );
     const conversationId = ready.activeConversationId!;
     const requestId = randomUUID();
@@ -2000,7 +2003,8 @@ process.exit(child.status ?? 1);
     send(client.socket, { type: "provider.refresh", requestId: refreshRequestId, payload: { providerId: "codex" } });
     const connected = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-        event.type === "snapshot.updated" && event.snapshot.providers.some((provider) => provider.id === "codex" && provider.authState === "authenticated" && provider.canRun),
+        event.type === "snapshot.updated"
+        && event.snapshot.providers.some((provider) => provider.id === "codex" && providerReady(provider)),
     );
     expect(connected.snapshot.providers.find(({ id }) => id === "codex")).toMatchObject({
       installState: "installed",
@@ -2061,7 +2065,8 @@ process.exit(child.status ?? 1);
 
     const connected = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-        event.type === "snapshot.updated" && event.snapshot.providers.some((provider) => provider.id === "codex" && provider.authState === "authenticated" && provider.canRun),
+        event.type === "snapshot.updated"
+        && event.snapshot.providers.some((provider) => provider.id === "codex" && providerReady(provider)),
     );
     expect(connected.snapshot.providers.find(({ id }) => id === "codex")).toMatchObject({
       installState: "installed",

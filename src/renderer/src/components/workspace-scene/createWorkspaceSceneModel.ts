@@ -469,6 +469,9 @@ export function createWorkspaceSceneModel({
       appUpdateStatus: appUpdate.status,
       checkingAppUpdate: appUpdate.checking,
       onCheckAppUpdate: () => appUpdate.check(true),
+      onDownloadAppUpdate: appUpdate.download,
+      onCancelAppUpdateDownload: appUpdate.cancelDownload,
+      onInstallAppUpdate: appUpdate.install,
       onOpenAppRelease: appUpdate.openRelease,
       onUnarchive: (thread) => {
         void actions.run("conversation.unarchive", {

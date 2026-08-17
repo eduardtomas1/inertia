@@ -1,14 +1,20 @@
 import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 
+const delayedAnswerGate = "inertia-anchor-answer-ready";
+
 const delayedAnchorAppServer = `
+const fs = require("node:fs");
+const path = require("node:path");
 const readline = require("node:readline");
 const args = process.argv.slice(2);
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const answerGate = path.join(process.cwd(), ".git", "inertia-anchor-answer-ready");
 if (args[0] === "--help") {
   process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n");
   process.exit(0);
@@ -38,7 +44,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "turn/start") {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
-    setTimeout(() => {
+    const sendAnswer = () => {
       send({
         method: "item/agentMessage/delta",
         params: {
@@ -52,7 +58,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         method: "turn/completed",
         params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } },
       }), 100);
-    }, 1_200);
+    };
+    const waitForAnswerGate = () => {
+      if (fs.existsSync(answerGate)) {
+        sendAnswer();
+        return;
+      }
+      setTimeout(waitForAnswerGate, 25);
+    };
+    waitForAnswerGate();
   }
 });
 `;
@@ -143,31 +157,30 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
     });
     await expect(acceptedRow).toBeVisible();
 
-    await page.waitForTimeout(750);
     await expect(page.getByRole("button", { name: "Jump to latest" }))
       .toHaveCount(0);
-    const clamped = await acceptedRow.evaluate((row) => {
+    await expect.poll(() => acceptedRow.evaluate((row) => {
       const transcriptElement = document.querySelector<HTMLElement>(
         ".message-scroll",
       );
       const viewport = transcriptElement?.getBoundingClientRect();
       return transcriptElement && viewport
-        ? {
-            offset: row.getBoundingClientRect().top - viewport.top,
-            bottomGap: transcriptElement.scrollHeight
-              - transcriptElement.clientHeight
-              - transcriptElement.scrollTop,
-          }
-        : null;
-    });
-    expect(clamped).not.toBeNull();
-    expect(clamped?.offset ?? 0).toBeGreaterThan(11);
-    expect(clamped?.bottomGap ?? Number.POSITIVE_INFINITY)
-      .toBeLessThanOrEqual(2);
+        ? row.getBoundingClientRect().top - viewport.top > 11
+          && transcriptElement.scrollHeight
+            - transcriptElement.clientHeight
+            - transcriptElement.scrollTop <= 2
+        : false;
+    })).toBe(true);
 
     const latestLine = page.getByText(
       "Live anchored answer line 79.",
       { exact: true },
+    );
+    await expect(latestLine).toHaveCount(0);
+    await writeFile(
+      join(app.workspaceDirectory, ".git", delayedAnswerGate),
+      "ready\n",
+      "utf8",
     );
     await expect(latestLine).toBeVisible({ timeout: 5_000 });
     await expect.poll(() => latestLine.evaluate((line) => {
@@ -204,13 +217,24 @@ test("positions a completed answer at the viewport start by default", async () =
     await app.resizeWindow(1440, 920);
     const { page } = app;
     const composer = page.getByRole("region", { name: "Message composer" });
+    const request = "Position this completed answer for reading.";
     await composer.getByRole("textbox", { name: "Message" })
-      .fill("Position this completed answer for reading.");
+      .fill(request);
     await composer.getByRole("button", { name: "Send message" }).click();
 
+    const acceptedRow = page.locator("[data-turn-id]").filter({
+      has: page.getByText(request, { exact: true }),
+    });
+    await expect(acceptedRow).toBeVisible();
     const finalAnswer = page.locator(
       '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
     ).last();
+    await expect(finalAnswer).toHaveCount(0);
+    await writeFile(
+      join(app.workspaceDirectory, ".git", delayedAnswerGate),
+      "ready\n",
+      "utf8",
+    );
     await expect(finalAnswer).toBeVisible({ timeout: 10_000 });
     await expect.poll(() => finalAnswer.evaluate((answer) => {
       const viewport = answer.closest<HTMLElement>(".message-scroll")

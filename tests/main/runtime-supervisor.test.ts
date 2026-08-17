@@ -162,6 +162,136 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor", () => {
+  it("prepares and releases only the current runtime generation for an update", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const preparing = supervisor.prepareForUpdate();
+    const command = children[0].messages.findLast(
+      (message) => message.type === "runtime.prepare-update",
+    );
+    expect(command).toMatchObject({
+      type: "runtime.prepare-update",
+      generation: 1,
+      operationId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    });
+    if (command?.type !== "runtime.prepare-update") {
+      throw new Error("Expected update preparation command.");
+    }
+    children[0].message({
+      type: "runtime.prepare-update-result",
+      operationId: command.operationId,
+      generation: 2,
+      ready: true,
+    });
+    children[0].message({
+      type: "runtime.prepare-update-result",
+      operationId: command.operationId,
+      generation: 1,
+      ready: true,
+    });
+    await expect(preparing).resolves.toEqual({ ready: true });
+
+    await expect(supervisor.prepareForUpdate()).resolves.toEqual({ ready: true });
+    expect(children[0].messages.filter(
+      (message) => message.type === "runtime.prepare-update",
+    )).toHaveLength(1);
+
+    const releasing = supervisor.releaseUpdatePreparation();
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.release-update-preparation",
+      operationId: command.operationId,
+      generation: 1,
+    });
+    children[0].message({
+      type: "runtime.release-update-preparation-result",
+      operationId: command.operationId,
+      generation: 1,
+      released: true,
+    });
+    await expect(releasing).resolves.toBe(true);
+    await expect(supervisor.releaseUpdatePreparation()).resolves.toBe(true);
+  });
+
+  it("returns sanitized update preparation blockers without retaining a gate", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const preparing = supervisor.prepareForUpdate();
+    const command = children[0].messages.at(-1);
+    if (command?.type !== "runtime.prepare-update") {
+      throw new Error("Expected update preparation command.");
+    }
+    children[0].message({
+      type: "runtime.prepare-update-result",
+      operationId: command.operationId,
+      generation: command.generation,
+      ready: false,
+      blocker: "terminal",
+    });
+    await expect(preparing).resolves.toEqual({
+      ready: false,
+      blocker: "terminal",
+    });
+
+    const retry = supervisor.prepareForUpdate();
+    const retryCommand = children[0].messages.at(-1);
+    expect(retryCommand).toMatchObject({
+      type: "runtime.prepare-update",
+      generation: 1,
+      operationId: expect.not.stringMatching(command.operationId),
+    });
+    if (retryCommand?.type !== "runtime.prepare-update") {
+      throw new Error("Expected retry update preparation command.");
+    }
+    children[0].message({
+      type: "runtime.prepare-update-result",
+      operationId: retryCommand.operationId,
+      generation: retryCommand.generation,
+      ready: false,
+      blocker: "runtime-operation",
+    });
+    await expect(retry).resolves.toEqual({
+      ready: false,
+      blocker: "runtime-operation",
+    });
+  });
+
+  it("releases the exact preparation identity after a supervisor timeout", async () => {
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const preparing = supervisor.prepareForUpdate();
+    const prepareCommand = children[0].messages.at(-1);
+    if (prepareCommand?.type !== "runtime.prepare-update") {
+      throw new Error("Expected update preparation command.");
+    }
+    const rejection = expect(preparing).rejects.toThrow(
+      "did not finish update preparation",
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejection;
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.release-update-preparation",
+      operationId: prepareCommand.operationId,
+      generation: prepareCommand.generation,
+    });
+    children[0].message({
+      type: "runtime.release-update-preparation-result",
+      operationId: prepareCommand.operationId,
+      generation: prepareCommand.generation,
+      released: true,
+    });
+    await Promise.resolve();
+    expect(forceKill).not.toHaveBeenCalled();
+  });
+
   it("waits for authenticated readiness before handing out a connection", () => {
     const { children, supervisor } = createHarness();
     supervisor.start();

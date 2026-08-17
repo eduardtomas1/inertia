@@ -217,18 +217,24 @@ test("positions a completed answer at the viewport start by default", async () =
     await app.resizeWindow(1440, 920);
     const { page } = app;
     const composer = page.getByRole("region", { name: "Message composer" });
+    const request = "Position this completed answer for reading.";
+    await composer.getByRole("textbox", { name: "Message" })
+      .fill(request);
+    await composer.getByRole("button", { name: "Send message" }).click();
+
+    const acceptedRow = page.locator("[data-turn-id]").filter({
+      has: page.getByText(request, { exact: true }),
+    });
+    await expect(acceptedRow).toBeVisible();
+    const finalAnswer = page.locator(
+      '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
+    ).last();
+    await expect(finalAnswer).toHaveCount(0);
     await writeFile(
       join(app.workspaceDirectory, ".git", delayedAnswerGate),
       "ready\n",
       "utf8",
     );
-    await composer.getByRole("textbox", { name: "Message" })
-      .fill("Position this completed answer for reading.");
-    await composer.getByRole("button", { name: "Send message" }).click();
-
-    const finalAnswer = page.locator(
-      '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
-    ).last();
     await expect(finalAnswer).toBeVisible({ timeout: 10_000 });
     await expect.poll(() => finalAnswer.evaluate((answer) => {
       const viewport = answer.closest<HTMLElement>(".message-scroll")

@@ -162,11 +162,13 @@ function splitActivityTitle(
 export const ActivityRow = memo(function ActivityRow({
   activity,
   visibility,
+  revealIndex,
   onBeforeToggle,
   onAfterToggle,
 }: {
   activity: AgentActivity;
   visibility?: "recent" | "details" | "important";
+  revealIndex?: number;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
@@ -235,6 +237,12 @@ export const ActivityRow = memo(function ActivityRow({
       data-activity-category={executionCategory}
       data-activity-severity={severity}
       data-activity-visibility={visibility}
+      data-activity-reveal={revealIndex === undefined ? undefined : "expanded-history"}
+      style={revealIndex === undefined
+        ? undefined
+        : {
+            "--activity-reveal-index": Math.min(revealIndex, 5),
+          } as React.CSSProperties}
       title={fullLabel}
     >
       <Icon size={12} aria-hidden="true" />
@@ -419,6 +427,15 @@ export const ActivityGroup = memo(function ActivityGroup({
     entry.activities,
     expanded,
   );
+  const collapsedActivityIds = new Set(
+    resolveActivityGroupPresentation(entry.activities, false)
+      .visibleActivities.map(({ id }) => id),
+  );
+  const revealIndexById = new Map(
+    entry.activities
+      .filter(({ id }) => !collapsedActivityIds.has(id))
+      .map(({ id }, index) => [id, index]),
+  );
   const containsAttention = entry.activities.some(activityNeedsAttention);
   const toggle = (): void => {
     onBeforeToggle?.();
@@ -429,12 +446,14 @@ export const ActivityGroup = memo(function ActivityGroup({
     <div
       className="turn-activity-group"
       data-activity-group={entry.id}
+      data-activity-group-expanded={expanded ? "true" : "false"}
       data-activity-group-mode={containsAttention ? "attention" : "calls"}
     >
       {visibleActivities.map((activity) => (
         <ActivityRow
           activity={activity}
           visibility={activityNeedsAttention(activity) ? "important" : "recent"}
+          revealIndex={expanded ? revealIndexById.get(activity.id) : undefined}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
           key={activity.id}

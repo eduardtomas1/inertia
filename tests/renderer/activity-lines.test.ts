@@ -211,10 +211,16 @@ describe("Minimal Workstream activity lines", () => {
     );
     expect(activitySource).toContain('className="turn-activity-group"');
     expect(activitySource).toContain("data-activity-group={entry.id}");
+    expect(activitySource).toContain("data-activity-group-expanded={expanded");
+    expect(activitySource).toContain('data-activity-reveal={revealIndex === undefined');
     expect(activitySource).toContain("aria-expanded={expanded}");
     expect(activitySource).toContain("previous tool");
     expect(reducedMotion).toContain(
       ".turn-work-log .agent-activity.is-running svg",
+    );
+    expect(css).toContain("@keyframes activity-row-reveal");
+    expect(reducedMotion).toContain(
+      '.agent-activity[data-activity-reveal="expanded-history"]',
     );
     expect(reducedMotion).toContain("animation: none");
     expect(requestCardSource).toContain('className="agent-request-command"');

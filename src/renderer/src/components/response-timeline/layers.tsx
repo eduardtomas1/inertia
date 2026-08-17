@@ -16,6 +16,7 @@ import {
 } from "../../utils/userRequestPresentation";
 import {
   activeAgentPresentation,
+  agentPixelMotionPattern,
   buildTurnExecutionStream,
   shouldConsolidateSettledWorkIntoRunDetails,
   type ActiveAgentPhase,
@@ -37,7 +38,17 @@ import {
 import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 
-const AGENT_PIXEL_GRID_CELLS = Array.from({ length: 9 }, (_, index) => index);
+const AGENT_PIXEL_GRID_CELLS = [
+  { driveDelay: 0, orbitDelay: 0 },
+  { driveDelay: 75, orbitDelay: 120 },
+  { driveDelay: 150, orbitDelay: 240 },
+  { driveDelay: 75, orbitDelay: 840 },
+  { driveDelay: 150, orbitDelay: 0 },
+  { driveDelay: 225, orbitDelay: 360 },
+  { driveDelay: 150, orbitDelay: 720 },
+  { driveDelay: 225, orbitDelay: 600 },
+  { driveDelay: 300, orbitDelay: 480 },
+] as const;
 
 function AgentPixelLoader({
   animated,
@@ -51,9 +62,18 @@ function AgentPixelLoader({
       className="agent-pixel-loader"
       aria-hidden="true"
       data-animated={animated ? "true" : "false"}
+      data-motion={agentPixelMotionPattern(phase)}
       data-phase={phase}
     >
-      {AGENT_PIXEL_GRID_CELLS.map((index) => <span key={index} />)}
+      {AGENT_PIXEL_GRID_CELLS.map(({ driveDelay, orbitDelay }, index) => (
+        <span
+          key={index}
+          style={{
+            "--pixel-drive-delay": `${driveDelay}ms`,
+            "--pixel-orbit-delay": `${orbitDelay}ms`,
+          } as React.CSSProperties}
+        />
+      ))}
     </span>
   );
 }

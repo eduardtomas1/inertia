@@ -25,11 +25,31 @@ export type ActiveAgentPhase =
   | "waiting-for-approval"
   | "waiting-for-input";
 
+export type AgentPixelMotionPattern = "dots" | "drive" | "orbit";
+
 export interface ActiveAgentPresentation {
   phase: ActiveAgentPhase;
   label: string;
   detail: string | null;
   animated: boolean;
+}
+
+/**
+ * Keeps the decorative loader variant tied to a truthful product phase.
+ * Lifecycle states use quiet dots, live reasoning traces the perimeter, and
+ * concrete execution keeps the established diagonal drive.
+ */
+export function agentPixelMotionPattern(
+  phase: ActiveAgentPhase,
+): AgentPixelMotionPattern {
+  if (phase === "thinking") return "orbit";
+  if (
+    phase === "queued"
+    || phase === "starting"
+    || phase === "waiting-for-approval"
+    || phase === "waiting-for-input"
+  ) return "dots";
+  return "drive";
 }
 
 const CANONICAL_SEARCH_ACTIVITY_PATTERN = /^web (?:fetch|search)$/iu;

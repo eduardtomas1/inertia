@@ -33,9 +33,11 @@ export {
 } from "./response-timeline/timing";
 export {
   activeAgentPresentation,
+  agentPixelMotionPattern,
   activityExecutionCategory,
   type ActiveAgentPhase,
   type ActiveAgentPresentation,
+  type AgentPixelMotionPattern,
   type ActivityExecutionCategory,
   type StreamingAgentChannel,
 } from "./response-timeline/active-state";

@@ -50,6 +50,9 @@ describe("Minimal Workstream active pixel signal", () => {
       "data-active-agent-phase={activePresentation.phase}",
     );
     expect(activeBranch).toContain("<AgentPixelLoader");
+    expect(timelineSource).toContain(
+      "data-motion={agentPixelMotionPattern(phase)}",
+    );
     expect(settledBranch).not.toContain("data-active-work-region");
     expect(settledBranch).not.toContain("<AgentPixelLoader");
   });
@@ -57,7 +60,9 @@ describe("Minimal Workstream active pixel signal", () => {
   it("keeps animation authority on the derived pixel state, never the label", () => {
     expect(timelineSource).toContain("animated={activePresentation.animated}");
     expect(timelineSource).toContain('data-animated={animated ? "true" : "false"}');
-    expect(timelineSource).toContain("Array.from({ length: 9 }");
+    expect(timelineSource).toContain("AGENT_PIXEL_GRID_CELLS = [");
+    expect(timelineSource).toContain("--pixel-drive-delay");
+    expect(timelineSource).toContain("--pixel-orbit-delay");
     expect(css).toContain('.agent-pixel-loader[data-animated="true"] > span');
     expect(css).not.toMatch(/\.turn-working-(?:status|copy)[^{]*\{[^}]*animation:/su);
     expect(css).not.toContain(".turn-working-status::before");
@@ -82,6 +87,23 @@ describe("Minimal Workstream active pixel signal", () => {
     expect(`${activePixelRule}\n${keyframes}`).not.toMatch(/transform:|scale:/iu);
   });
 
+  it("keeps Dots, Drive, and Orbit inside the same bounded pixel grid", () => {
+    const orbitCenterRule = cssBlock(
+      css,
+      '.agent-pixel-loader[data-animated="true"][data-motion="orbit"] > span:nth-child(5)',
+    );
+    const dotsRule = cssBlock(
+      css,
+      '.agent-pixel-loader[data-motion="dots"] > span',
+    );
+
+    expect(dotsRule).toContain("border-radius: 50%");
+    expect(orbitCenterRule).toContain("animation: none");
+    expect(orbitCenterRule).toContain("opacity: 0.1");
+    expect(timelineSource).toContain("orbitDelay: 840");
+    expect(css).not.toMatch(/agent-pixel-loader[^}]*url\(/su);
+  });
+
   it("uses a static readable grid when reduced motion is requested", () => {
     const reducedMotion = css.slice(
       css.lastIndexOf("@media (prefers-reduced-motion: reduce)"),
@@ -93,6 +115,9 @@ describe("Minimal Workstream active pixel signal", () => {
 
     expect(reducedPixelRule).toContain("animation: none");
     expect(reducedPixelRule).toContain("opacity: 0.42");
+    expect(reducedMotion).toContain(
+      '.agent-pixel-loader[data-animated="true"][data-motion="orbit"] > span:nth-child(5)',
+    );
   });
 
   it("keeps the grid visible in forced-colors mode", () => {

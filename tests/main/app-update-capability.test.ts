@@ -77,6 +77,15 @@ describe("packaged update capability", () => {
       appImagePath: appImage,
     })).toEqual({ delivery: "in-app" });
 
+    const aliasedRoot = join(root, "root-alias");
+    symlinkSync(root, aliasedRoot, process.platform === "win32" ? "junction" : "dir");
+    expect(resolveAppUpdateCapability({
+      isPackaged: true,
+      platform: "linux",
+      appPath: root,
+      appImagePath: join(aliasedRoot, "Inertia.AppImage"),
+    })).toEqual({ delivery: "in-app" });
+
     const symlink = join(root, "linked.AppImage");
     symlinkSync(appImage, symlink);
     expect(resolveAppUpdateCapability({

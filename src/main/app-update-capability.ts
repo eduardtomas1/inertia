@@ -52,7 +52,6 @@ function linuxAppImageCapability(appImagePath: string | undefined): AppUpdateCap
     const metadata = lstatSync(appImagePath);
     if (!metadata.isFile() || metadata.isSymbolicLink()) return manual("appimage-invalid");
     const actualPath = realpathSync(appImagePath);
-    if (actualPath !== appImagePath) return manual("appimage-invalid");
     accessSync(actualPath, constants.W_OK);
     accessSync(dirname(actualPath), constants.W_OK);
     return { delivery: "in-app" };

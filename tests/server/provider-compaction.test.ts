@@ -227,7 +227,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ id: message.id, result: {} });
     send({ method: "item/started", params: { threadId: message.params.threadId, turnId: "stale-turn", startedAtMs: 1, item: { id: "compact-stale", type: "contextCompaction" } } });
     send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: "stale-turn", completedAtMs: 2, item: { id: "compact-stale", type: "contextCompaction" } } });
-    return setTimeout(() => process.exit(0), 10);
+    return setImmediate(() => send({ id: 9999, method: "fixture/reject-invalid-compaction" }));
   }
 });
 `);
@@ -245,7 +245,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-existing",
     }))).resolves.toMatchObject({
       status: "failed",
-      message: expect.stringContaining("early"),
+      message: expect.stringContaining("unexpected server request"),
     });
   });
 
@@ -276,7 +276,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ id: message.id, result: {} });
     send({ method: "item/started", params: { threadId: message.params.threadId, turnId: ${JSON.stringify(startedTurnId)}, startedAtMs: Date.now(), item: { id: ${JSON.stringify(startedItemId)}, type: "contextCompaction" } } });
     send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: ${JSON.stringify(completedTurnId)}, completedAtMs: Date.now(), item: { id: ${JSON.stringify(completedItemId)}, type: "contextCompaction" } } });
-    return setTimeout(() => process.exit(0), 10);
+    return setImmediate(() => send({ id: 9999, method: "fixture/reject-invalid-compaction" }));
   }
 });
 `);
@@ -294,7 +294,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-existing",
     }))).resolves.toMatchObject({
       status: "failed",
-      message: expect.stringContaining("early"),
+      message: expect.stringContaining("unexpected server request"),
     });
   });
 
@@ -313,7 +313,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "thread/compact/start") {
     send({ id: message.id, result: {} });
     send({ method: "item/completed", params: { threadId: message.params.threadId, item: { id: "compact-stale", type: "contextCompaction" } } });
-    return setTimeout(() => process.exit(0), 10);
+    return setImmediate(() => send({ id: 9999, method: "fixture/reject-invalid-compaction" }));
   }
 });
 `);
@@ -331,7 +331,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-existing",
     }))).resolves.toMatchObject({
       status: "failed",
-      message: expect.stringContaining("early"),
+      message: expect.stringContaining("unexpected server request"),
     });
   });
 
@@ -350,7 +350,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "thread/compact/start") {
     send({ id: message.id, result: {} });
     send({ method: "item/completed", params: { threadId: "different-thread", item: { id: "compact-wrong", type: "contextCompaction" } } });
-    return setTimeout(() => process.exit(0), 10);
+    return setImmediate(() => send({ id: 9999, method: "fixture/reject-invalid-compaction" }));
   }
 });
 `);
@@ -368,7 +368,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-existing",
     }))).resolves.toMatchObject({
       status: "failed",
-      message: expect.stringContaining("early"),
+      message: expect.stringContaining("unexpected server request"),
     });
   });
 
@@ -389,7 +389,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method === "thread/compact/start") {
     send({ id: message.id, result: {} });
-    return setTimeout(() => process.exit(0), 10);
+    return setImmediate(() => send({ id: 9999, method: "fixture/reject-invalid-compaction" }));
   }
 });
 `);
@@ -407,7 +407,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-existing",
     }))).resolves.toMatchObject({
       status: "failed",
-      message: expect.stringContaining("early"),
+      message: expect.stringContaining("unexpected server request"),
     });
   });
 

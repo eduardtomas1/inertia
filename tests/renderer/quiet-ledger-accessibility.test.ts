@@ -346,17 +346,11 @@ describe("Quiet Ledger transcript accessibility", () => {
     const emphasizedRule = styles.match(
       /\.timeline-minimap button\[data-emphasized="true"\]::before[^{]*\{(?<body>[\s\S]*?)\n\}/u,
     )?.groups?.body ?? "";
-    const size = (rule: string): { width: number; height: number } => ({
-      width: Number(rule.match(/width:\s*(?<value>\d+(?:\.\d+)?)px;/u)?.groups?.value),
-      height: Number(rule.match(/height:\s*(?<value>\d+(?:\.\d+)?)px;/u)?.groups?.value),
-    });
-    const rest = size(restRule);
-    const emphasized = size(emphasizedRule);
 
-    // The pointer target stays 24x24 so twelve markers keep an accessible hit
-    // area, while the marker itself only carries the resting visual weight.
-    expect(buttonRule).toContain("width: 24px");
-    expect(buttonRule).toContain("height: 24px");
+    // The Codex-style rail uses a compact 36x10 pointer row while the visible
+    // line grows horizontally from 6px to 26px without shifting that target.
+    expect(buttonRule).toContain("width: 36px");
+    expect(buttonRule).toContain("height: 10px");
     expect(minimapRule).toContain("max-height: min(320px, calc(100cqh - 24px))");
     expect(trackRule).toContain("max-height: inherit");
     expect(trackRule).toContain("overflow-y: auto");
@@ -370,11 +364,11 @@ describe("Quiet Ledger transcript accessibility", () => {
     expect(styles).toMatch(
       /\.terminal-resume-popover \.resume-picker-list\s*\{[^}]*max-height:\s*clamp\(48px, calc\(100cqh - 126px\), 268px\);/su,
     );
-    expect(rest.width).toBeGreaterThan(0);
-    expect(rest.height).toBeGreaterThan(0);
-    // Hover and keyboard focus must grow the marker enough to be unmistakable
-    // alongside the preview, independent of how the growth is expressed.
-    expect(emphasized.width / rest.width).toBeGreaterThanOrEqual(2.5);
-    expect(emphasized.height / rest.height).toBeGreaterThanOrEqual(1.8);
+    expect(restRule).toContain(
+      "width: calc(6px + 20px * var(--timeline-marker-progress))",
+    );
+    expect(restRule).toContain("height: 2px");
+    expect(styles).toContain("--timeline-marker-progress: 1;");
+    expect(emphasizedRule).toContain("opacity: 1;");
   });
 });

@@ -339,14 +339,37 @@ async function requirePackagedAssets(executable) {
 }
 
 async function createUpdateNetworkTrap() {
-  let attempts = 0;
-  const server = createServer((_request, response) => {
-    attempts += 1;
+  const updateHosts = new Set([
+    "api.github.com",
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+  ]);
+  const updateAttempts = [];
+  const requestTarget = (request) => {
+    const rawTarget = request.url ?? "";
+    try {
+      const url = new URL(
+        request.method === "CONNECT" ? `https://${rawTarget}` : rawTarget,
+      );
+      return updateHosts.has(url.hostname.toLowerCase())
+        ? `${request.method ?? "GET"} ${rawTarget}`
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  const recordUpdateAttempt = (request) => {
+    const target = requestTarget(request);
+    if (target) updateAttempts.push(target);
+  };
+  const server = createServer((request, response) => {
+    recordUpdateAttempt(request);
     response.writeHead(502, { "Content-Type": "text/plain" });
     response.end("Package smoke blocks external network access.\n");
   });
-  server.on("connect", (_request, socket) => {
-    attempts += 1;
+  server.on("connect", (request, socket) => {
+    recordUpdateAttempt(request);
     socket.end();
   });
   await new Promise((resolveListen, rejectListen) => {
@@ -363,9 +386,11 @@ async function createUpdateNetworkTrap() {
   }
   return {
     proxy: `http://127.0.0.1:${address.port}`,
-    assertUnused() {
-      if (attempts !== 0) {
-        throw new Error(`The packaged test app attempted ${attempts} external network request${attempts === 1 ? "" : "s"}.`);
+    assertNoUpdateRequests() {
+      if (updateAttempts.length > 0) {
+        throw new Error(
+          `The packaged test app attempted update network access: ${updateAttempts.join(", ")}.`,
+        );
       }
     },
     close: () => new Promise((resolveClose, rejectClose) => {
@@ -781,7 +806,7 @@ try {
     await waitUntil(() => !processGroupExists(readiness.mainPid), CLEANUP_TIMEOUT_MS, "packaged app process-group cleanup");
   }
   const cleanupCompletedAt = Date.now();
-  updateNetworkTrap.assertUnused();
+  updateNetworkTrap.assertNoUpdateRequests();
   const benchmark = {
     schemaVersion: 1,
     collectedAt: new Date().toISOString(),

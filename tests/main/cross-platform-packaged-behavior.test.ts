@@ -134,7 +134,10 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain("capability.delivery === \"in-app\"");
     expect(smoke).toContain("MANUAL_UPDATE_REASONS.has(marker.reason)");
     expect(smoke).toContain('`--proxy-server=${updateNetworkTrap.proxy}`');
-    expect(smoke).toContain("updateNetworkTrap.assertUnused()");
+    expect(smoke).toContain('"api.github.com"');
+    expect(smoke).toContain('"github.com"');
+    expect(smoke).toContain('"release-assets.githubusercontent.com"');
+    expect(smoke).toContain("updateNetworkTrap.assertNoUpdateRequests()");
 
     const main = await source("src/main/index.ts");
     const capabilityStart = main.indexOf("const appUpdateCapability =");

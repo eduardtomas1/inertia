@@ -74,16 +74,17 @@ export function defaultSelectionForProject(
   const provider = snapshot.providers.find(({ id }) =>
     id === settings.defaultProvider);
   const configuredModel = settings.defaultModel || "provider-default";
-  const modelId = configuredModel !== "provider-default"
+  const configuredModelWasRemoved = configuredModel !== "provider-default"
     && provider?.metadataState.models.freshness === "fresh"
-    && !provider.models.some(({ id }) => id === configuredModel)
+    && !provider.models.some(({ id }) => id === configuredModel);
+  const modelId = configuredModelWasRemoved
     ? "provider-default"
     : configuredModel;
   return nativeModelSelection({
     providerId: settings.defaultProvider,
     modelId,
     alias: modelId === "provider-default" ? null : modelId,
-    reasoningEffort: modelId === "provider-default"
+    reasoningEffort: configuredModelWasRemoved
       ? null
       : settings.defaultReasoningEffort || null,
   });

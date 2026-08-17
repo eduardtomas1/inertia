@@ -25,20 +25,19 @@ import {
 } from "./duo";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { usageDashboardSchema } from "./usage-dashboard-schema";
+import { dailyWorkDashboardSchema } from "./daily-work-schema";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 type UnknownRecord = Record<string, unknown>;
+
 function record(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
 function stringField(value: UnknownRecord, key: string): boolean {
   return typeof value[key] === "string";
 }
-
 function nonemptyStringField(value: UnknownRecord, key: string): boolean {
   return stringField(value, key) && (value[key] as string).length > 0;
 }
-
 function nullableStringField(value: UnknownRecord, key: string): boolean {
   return value[key] === null || stringField(value, key);
 }
@@ -1127,6 +1126,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "provider.maintenance.operation": (value) =>
     providerMaintenanceOperation(value.operation),
   "usage.dashboard": (value) => usageDashboardSchema(value.dashboard),
+  "daily.work": (value) => dailyWorkDashboardSchema(value.dashboard),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "project.created": (value) => stringField(value, "projectId"),
   "git.action": (value) => stringField(value, "message"),

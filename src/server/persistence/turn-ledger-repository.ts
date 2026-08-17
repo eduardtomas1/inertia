@@ -5,6 +5,7 @@ import {
   isAgentTurnTerminalStatus,
   type AgentTurn,
   type ChatMessage,
+  type DailyWorkDashboard,
   type UsageDashboard,
 } from "../../shared/contracts";
 import {
@@ -44,6 +45,8 @@ import {
   UsageDashboardRepository,
   type UsageDashboardRange,
 } from "./usage-dashboard-repository";
+import { DailyWorkRepository } from "./daily-work-repository";
+import type { DailyWorkRange } from "../daily-work";
 import {
   compactMessageContentForTurn,
   compactReasoningContentForTurn,
@@ -59,6 +62,10 @@ export class TurnLedgerRepository {
 
   usageDashboard(range: UsageDashboardRange): UsageDashboard {
     return new UsageDashboardRepository(this.context.database).read(range);
+  }
+
+  dailyWork(range: DailyWorkRange): DailyWorkDashboard {
+    return new DailyWorkRepository(this.context.database).read(range);
   }
 
   create(input: CreateAgentTurnInput): AgentTurn {
@@ -571,4 +578,4 @@ export class TurnLedgerRepository {
   }
 }
 
-export type { UsageDashboardRange };
+export type { DailyWorkRange, UsageDashboardRange };

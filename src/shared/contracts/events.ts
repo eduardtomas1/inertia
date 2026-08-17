@@ -53,6 +53,7 @@ import type {
   WorkspaceFilePreview,
 } from "./workspace";
 import type { UsageDashboard } from "./usage-dashboard";
+import type { DailyWorkDashboard } from "./daily-work";
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -167,6 +168,7 @@ export type ServerEvent =
         | { kind: "provider.maintenance"; providers: ProviderMaintenanceStatus[] }
         | { kind: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
         | { kind: "usage.dashboard"; dashboard: UsageDashboard }
+        | { kind: "daily.work"; dashboard: DailyWorkDashboard }
         | { kind: "agent.workflow"; workflow: AgentWorkflowState }
         | {
             kind: "agent.skills";

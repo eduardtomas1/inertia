@@ -107,6 +107,21 @@ function provider(freshness: "fresh" | "stale"): ProviderInfo {
 }
 
 describe("default conversation selection", () => {
+  it("preserves an explicitly stored effort for the provider-default model", () => {
+    expect(defaultSelectionForProject({
+      backendProfiles: [],
+      backendDefaults: [],
+      providers: [provider("fresh")],
+    }, {
+      ...defaultSettings,
+      defaultModel: "",
+      defaultReasoningEffort: "xhigh",
+    }, projectId)).toMatchObject({
+      modelId: "provider-default",
+      reasoningEffort: "xhigh",
+    });
+  });
+
   it("skips a stale project default in favor of a valid global default", () => {
     const current = customSelection(2);
     const result = defaultSelectionForProject({

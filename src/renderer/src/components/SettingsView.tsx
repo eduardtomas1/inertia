@@ -304,10 +304,22 @@ export function SettingsView({
     setKeybindingsDraft(settings.keybindings);
   }, [keybindingsFingerprint, settings.keybindings]);
   const defaultProvider = providers.find(({ id }) => id === settings.defaultProvider);
-  const defaultModel = defaultProvider?.models.find(({ id }) => id === settings.defaultModel)
-    ?? defaultProvider?.models.find(({ isDefault }) => isDefault)
-    ?? defaultProvider?.models[0];
-  const reasoningOptions = defaultModel?.reasoningOptions ?? [];
+  const storedDefaultModel = defaultProvider?.models.find(
+    ({ id }) => id === settings.defaultModel,
+  );
+  const providerDefaultModel = defaultProvider?.models.find(
+    ({ isDefault }) => isDefault,
+  ) ?? defaultProvider?.models[0];
+  const effectiveDefaultModel = storedDefaultModel ?? providerDefaultModel;
+  const reasoningOptions = effectiveDefaultModel?.reasoningOptions ?? [];
+  const modelDefaultReasoning = reasoningOptions.find(
+    ({ value }) => value === effectiveDefaultModel?.defaultReasoningEffort,
+  );
+  const providerDefaultModelLabel = providerDefaultModel
+    ? `Provider default — ${providerDefaultModel.label}`
+    : "Provider default";
+  const modelDefaultReasoningLabel = modelDefaultReasoning?.label
+    ?? effectiveDefaultModel?.defaultReasoningEffort;
   const primaryModifier = window.inertia.getPlatform() === "darwin" ? "⌘" : "Ctrl";
   const archivedByProvider = useMemo(() => new Map(providers.map((provider) => [provider.id, provider.label])), [providers]);
   useEffect(() => {
@@ -705,8 +717,8 @@ export function SettingsView({
               <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="defaults-heading">New chat defaults</h3><p>These choices apply only when a new chat is created.</p></span></div>
               <div className="settings-form-grid">
                 <label><span>Provider</span><select value={settings.defaultProvider} disabled={disabled} onChange={(event) => onUpdate({ defaultProvider: event.target.value as ProviderId, defaultModel: "", defaultReasoningEffort: "" })}>{providers.map((provider) => <option value={provider.id} key={provider.id}>{provider.label} — {providerStateLabel(provider)}</option>)}</select></label>
-                <label><span>Model</span><select value={defaultModel?.id ?? ""} disabled={disabled || !defaultProvider?.models.length} onChange={(event) => { const model = defaultProvider?.models.find(({ id }) => id === event.target.value); onUpdate({ defaultModel: event.target.value, defaultReasoningEffort: model?.defaultReasoningEffort ?? "" }); }}><option value="">Provider default</option>{defaultProvider?.models.map((model) => <option value={model.id} key={model.id}>{model.label}{model.isDefault ? " — Default" : ""}</option>)}</select></label>
-                <label><span>Reasoning</span><select value={settings.defaultReasoningEffort || defaultModel?.defaultReasoningEffort || ""} disabled={disabled || reasoningOptions.length === 0} onChange={(event) => onUpdate({ defaultReasoningEffort: event.target.value })}><option value="">Model default</option>{reasoningOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+                <label><span>Model</span><select value={settings.defaultModel} disabled={disabled || !defaultProvider?.models.length} onChange={(event) => { const model = defaultProvider?.models.find(({ id }) => id === event.target.value); onUpdate({ defaultModel: event.target.value, defaultReasoningEffort: model?.defaultReasoningEffort ?? "" }); }}><option value="">{providerDefaultModelLabel}</option>{settings.defaultModel && !storedDefaultModel && <option value={settings.defaultModel}>{settings.defaultModel} — Unavailable</option>}{defaultProvider?.models.map((model) => <option value={model.id} key={model.id}>{model.label}{model.isDefault ? " — Default" : ""}</option>)}</select></label>
+                <label><span>Reasoning</span><select value={settings.defaultReasoningEffort} disabled={disabled || reasoningOptions.length === 0} onChange={(event) => onUpdate({ defaultReasoningEffort: event.target.value })}><option value="">Model default{modelDefaultReasoningLabel ? ` — ${modelDefaultReasoningLabel}` : ""}</option>{settings.defaultReasoningEffort && !reasoningOptions.some(({ value }) => value === settings.defaultReasoningEffort) && <option value={settings.defaultReasoningEffort}>{settings.defaultReasoningEffort} — Unavailable</option>}{reasoningOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
                 <label><span>Mode</span><select value={settings.defaultInteractionMode} disabled={disabled} onChange={(event) => onUpdate({ defaultInteractionMode: event.target.value as AppSettings["defaultInteractionMode"] })}><option value="build">Build</option><option value="plan">Plan</option></select></label>
                 <label><span>Access</span><select value={settings.defaultAccessMode} disabled={disabled} onChange={(event) => onUpdate({ defaultAccessMode: event.target.value as AppSettings["defaultAccessMode"] })}><option value="supervised">Supervised</option><option value="auto-edit">Auto-accept edits</option><option value="full">Full access</option></select></label>
                 <label><span>Chat location</span><select value={settings.newThreadMode} disabled={disabled} onChange={(event) => onUpdate({ newThreadMode: event.target.value as AppSettings["newThreadMode"] })}><option value="local">Current checkout</option><option value="worktree">Isolated worktree</option></select></label>

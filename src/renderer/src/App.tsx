@@ -132,6 +132,7 @@ export default function App(): React.JSX.Element {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [dailyWorkOpen, setDailyWorkOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
   const [latestContentVisible, setLatestContentVisible] = useState(false);
@@ -487,6 +488,7 @@ export default function App(): React.JSX.Element {
         latestContentVisible,
         obstructed: workspaceAttentionObstructed({
           paletteOpen, commitDialogOpen,
+          dailyWorkOpen,
           authProviderOpen: authProviderId !== null,
           multiSpawnOpen: multiSpawn.open,
           mobileSidebarOpen: mobileNavigation && sidebarOpen,
@@ -505,6 +507,7 @@ export default function App(): React.JSX.Element {
     attentionVisibilityVersion,
     authProviderId,
     commitDialogOpen,
+    dailyWorkOpen,
     conversation?.id,
     latestContentVisible,
     mobileNavigation, multiSpawn.open,
@@ -664,7 +667,7 @@ export default function App(): React.JSX.Element {
   useGlobalShortcuts({
     keybindings: settings.keybindings,
     createConversation: () => createConversation(),
-    mobileNavigation, suspended: multiSpawn.open,
+    mobileNavigation, suspended: multiSpawn.open || dailyWorkOpen,
     setActiveTool: sceneSetActiveTool,
     setPaletteOpen,
     setSidebarCollapsed,
@@ -1018,6 +1021,8 @@ export default function App(): React.JSX.Element {
       setActionError={setActionError}
       commitDialogOpen={commitDialogOpen}
       setCommitDialogOpen={setCommitDialogOpen}
+      dailyWorkOpen={dailyWorkOpen}
+      setDailyWorkOpen={setDailyWorkOpen}
       paletteOpen={paletteOpen}
       setPaletteOpen={setPaletteOpen}
       project={project}

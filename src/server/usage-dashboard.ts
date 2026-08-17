@@ -77,7 +77,7 @@ type TokenFieldKey = Extract<
   | "reasoningOutputTokens"
 >;
 
-const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
+export const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
@@ -266,7 +266,7 @@ function hasComparableCumulativeProvenance(turn: UsageDashboardTurn): boolean {
     );
 }
 
-function measuredProcessedTokens(turn: UsageDashboardTurn): number | null {
+export function measuredProcessedTokens(turn: UsageDashboardTurn): number | null {
   const completion = turn.usageAtCompletion;
   const completionTotal = completion?.totalProcessedTokens;
   const scope = completion?.totalProcessedScope;

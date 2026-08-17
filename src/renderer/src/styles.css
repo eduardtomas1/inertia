@@ -11127,7 +11127,7 @@ button.sent-attachment-open:focus-visible {
   opacity: 0.24;
 }
 
-.agent-pixel-loader[data-motion="dots"] > span {
+.agent-pixel-loader:is([data-phase="queued"], [data-phase="starting"]) > span {
   border-radius: 50%;
 }
 
@@ -11136,11 +11136,11 @@ button.sent-attachment-open:focus-visible {
   animation-delay: var(--pixel-drive-delay);
 }
 
-.agent-pixel-loader[data-animated="true"][data-motion="orbit"] > span {
+.agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span {
   animation-delay: var(--pixel-orbit-delay);
 }
 
-.agent-pixel-loader[data-animated="true"][data-motion="orbit"] > span:nth-child(5) {
+.agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span:nth-child(5) {
   animation: none;
   opacity: 0.1;
 }
@@ -11353,7 +11353,7 @@ button.sent-attachment-open:focus-visible {
 }
 
 .turn-activity-group[data-activity-group-expanded="true"]
-  .agent-activity[data-activity-reveal="expanded-history"] {
+  > .agent-activity:not(:last-of-type) {
   animation: activity-row-reveal var(--motion-slow) var(--motion-ease) both;
   animation-delay: calc(var(--activity-reveal-index, 0) * 32ms);
 }
@@ -13073,12 +13073,12 @@ button.sent-attachment-open:focus-visible {
   }
 
   .agent-pixel-loader[data-animated="true"] > span:nth-child(5),
-  .agent-pixel-loader[data-animated="true"][data-motion="orbit"] > span:nth-child(5) {
+  .agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span:nth-child(5) {
     opacity: 0.82;
   }
 
   .turn-activity-group[data-activity-group-expanded="true"]
-    .agent-activity[data-activity-reveal="expanded-history"] {
+    > .agent-activity:not(:last-of-type) {
     animation: none;
     opacity: 1;
     transform: none;

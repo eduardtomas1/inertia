@@ -433,12 +433,12 @@ export function ChangesPanel({
           <progress aria-label={`${reviewedHunks} of ${totalHunks} hunks reviewed`} max={totalHunks} value={reviewedHunks} />
           <div className="diff-review-filter" role="group" aria-label="Filter review state">
             {([
-              ["all", "All", totalHunks],
-              ["unreviewed", "Unreviewed", totalHunks - reviewedHunks],
-              ["reviewed", "Reviewed", reviewedHunks],
-            ] as const).map(([value, label, count]) => (
+              ["all", totalHunks],
+              ["unreviewed", totalHunks - reviewedHunks],
+              ["reviewed", reviewedHunks],
+            ] as const).map(([value, count]) => (
               <button type="button" aria-pressed={reviewFilter === value} onClick={() => setReviewFilter(value)} key={value}>
-                {label}<span>{count}</span>
+                {value}<span>{count}</span>
               </button>
             ))}
           </div>
@@ -514,7 +514,7 @@ export function ChangesPanel({
                     && selectionAnswer.hunkId === hunk.id
                     ? selectionAnswer
                     : null;
-                  return <div className="diff-filter-row" data-shown={shown ? "true" : "false"} aria-hidden={shown ? undefined : true} inert={shown ? undefined : true} key={hunk.id}><div><section className="diff-hunk" id={`review-${hunk.id}`}>
+                  return <div className="diff-filter-row" inert={!shown} key={hunk.id}><div><section className="diff-hunk" id={`review-${hunk.id}`}>
                     <div className="diff-hunk-header">
                       <code>{hunk.header}</code>{hunkSummary && <span><Sparkles size={12} />{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
                       <span className="diff-hunk-actions">

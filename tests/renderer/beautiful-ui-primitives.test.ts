@@ -53,10 +53,10 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(changesSource).toContain('role="group"');
     expect(changesSource).toContain('aria-label="Filter review state"');
     expect(changesSource).toContain("aria-pressed={reviewFilter === value}");
-    expect(changesSource).toContain('["unreviewed", "Unreviewed", totalHunks - reviewedHunks]');
+    expect(changesSource).toContain('["unreviewed", totalHunks - reviewedHunks]');
     expect(changesSource).not.toContain('<select aria-label="Filter review state"');
     expect(changesSource).toContain('className="diff-filter-row"');
-    expect(changesSource).toContain('data-shown={shown ? "true" : "false"}');
+    expect(changesSource).toContain("inert={!shown}");
     expect(styles).toContain("grid-template-rows 300ms cubic-bezier(0.23, 1, 0.32, 1)");
   });
 
@@ -67,8 +67,9 @@ describe("Beautiful UI primitive adaptations", () => {
   });
 
   it("ports the Beautiful UI motion constants onto real Inertia state", () => {
-    expect(layersSource).toContain("{ driveDelay: 90, orbitDelay: 0 }");
-    expect(layersSource).toContain("{ driveDelay: 0, orbitDelay: 770 }");
+    expect(layersSource).toContain("Array.from({ length: 9 }");
+    expect(styles).toContain("--pixel-drive-delay: 90ms");
+    expect(styles).toContain("--pixel-orbit-delay: 770ms");
     expect(styles).toContain("animation: agent-pixel-shimmer 650ms ease-in-out infinite");
     expect(styles).toContain("animation-duration: 950ms");
     expect(styles).toContain("animation: beautiful-shimmer-text 1.4s linear infinite");

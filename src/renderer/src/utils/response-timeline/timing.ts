@@ -6,7 +6,13 @@ function timestamp(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function formatElapsed(milliseconds: number): string {
+export function formatElapsed(milliseconds: number, precise = false): string {
+  if (precise) {
+    const tenths = Math.floor(Math.max(0, milliseconds) / 100);
+    const minutes = Math.floor(tenths / 600);
+    const seconds = ((tenths % 600) / 10).toFixed(1);
+    return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  }
   const seconds = Math.max(0, Math.round(milliseconds / 1_000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);

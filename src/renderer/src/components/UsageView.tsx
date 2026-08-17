@@ -279,12 +279,9 @@ function UsageDashboardContent({
               </div>
             </div>
 
-            <div className="usage-daily-panel" data-usage-surface="insight">
+            <div className="usage-daily-panel">
               <div className="usage-daily-heading">
-                <div>
-                  <span className="usage-section-kicker">Insight</span>
-                  <h2>Daily processed tokens</h2>
-                </div>
+                <h2>Daily processed tokens</h2>
                 <div>
                   <div className="usage-mini-segment" role="group" aria-label="Chart metric">
                     <button

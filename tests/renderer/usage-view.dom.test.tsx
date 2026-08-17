@@ -152,8 +152,7 @@ describe("UsageView", () => {
     const view = render(<UsageView status="online" request={request} />);
 
     expect(await screen.findByRole("heading", { name: "Daily processed tokens" })).toBeVisible();
-    expect(screen.getByText("Insight", { exact: true })).toBeVisible();
-    expect(view.container.querySelector('[data-usage-surface="insight"]')).toBeVisible();
+    expect(view.container.querySelector(".usage-daily-panel")).toBeVisible();
     const totals = screen.getByRole("region", { name: "Usage totals" });
     expect(within(totals).getByText("6", { exact: true })).toBeVisible();
     expect(within(totals).getByText(/1 interrupted/u)).toBeVisible();

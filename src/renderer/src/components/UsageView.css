@@ -639,12 +639,13 @@
   to { opacity: 1; filter: blur(0); }
 }
 
-.usage-daily-heading > div:first-child {
+.usage-daily-heading > h2 {
   display: grid;
   gap: 2px;
 }
 
-.usage-section-kicker {
+.usage-daily-heading > h2::before {
+  content: "Insight";
   color: var(--accent-strong);
   font-size: 7px;
   font-weight: 720;

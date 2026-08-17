@@ -8,7 +8,6 @@ import type {
 } from "../../src/shared/contracts";
 import {
   activeAgentPresentation,
-  agentPixelMotionPattern,
   activityExecutionCategory,
   type ResponseTurn,
 } from "../../src/renderer/src/utils/responseTimeline";
@@ -64,24 +63,6 @@ function turn(
 }
 
 describe("truthful active agent presentation", () => {
-  it("maps truthful phases onto the restrained Beautiful UI loader variants", () => {
-    expect(agentPixelMotionPattern("queued")).toBe("dots");
-    expect(agentPixelMotionPattern("starting")).toBe("dots");
-    expect(agentPixelMotionPattern("waiting-for-approval")).toBe("dots");
-    expect(agentPixelMotionPattern("waiting-for-input")).toBe("dots");
-    expect(agentPixelMotionPattern("thinking")).toBe("orbit");
-    for (const phase of [
-      "searching",
-      "coding",
-      "command",
-      "tool",
-      "responding",
-      "working",
-    ] as const) {
-      expect(agentPixelMotionPattern(phase)).toBe("drive");
-    }
-  });
-
   it("uses authoritative lifecycle states before activity inference", () => {
     const cases: Array<[
       AgentTurnStatus,

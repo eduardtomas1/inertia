@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { FilePenLine, MessageCircleQuestion, ShieldAlert, TerminalSquare } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest } from "@shared/contracts";
 import { agentRequestProviderName, buildAgentInputAnswers, inputRequestTitle } from "../utils/agentInput";
 
@@ -8,22 +7,29 @@ type ApprovalCardProps = {
   onRespond: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
 };
 
+const APPROVAL_BUTTONS = [
+  ["cancel", "Cancel turn"],
+  ["deny", "Deny"],
+  ["approve", "Approve once"],
+] as const;
+
+async function runResponse(setBusy: (busy: boolean) => void, respond: () => Promise<void>): Promise<void> {
+  setBusy(true);
+  try { await respond(); } finally { setBusy(false); }
+}
+
 export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const descriptionId = `approval-${request.id}-description`;
-  const RequestIcon = request.kind === "command"
-    ? TerminalSquare
-    : request.kind === "permissions"
-      ? ShieldAlert
-      : FilePenLine;
-  const respond = async (decision: AgentApprovalDecision) => {
+  const detailRows = ([
+    ["Reason", request.reason],
+    ["Location", request.cwd],
+    ["Network", request.networkScope && `${request.networkScope.protocol.toUpperCase()} · ${request.networkScope.host}`],
+    ["Requested access", request.permissionRoots.length > 0 && request.permissionRoots.map(({ access, path }) => `${access}: ${path}`).join(" · ")],
+  ] as [string, string | null | false | undefined][]).filter(([, value]) => value);
+  const respond = (decision: AgentApprovalDecision) => {
     if (busy) return;
-    setBusy(true);
-    try {
-      await onRespond(request, decision);
-    } finally {
-      setBusy(false);
-    }
+    return runResponse(setBusy, () => onRespond(request, decision));
   };
 
   return (
@@ -37,7 +43,7 @@ export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.J
       data-agent-request-state="approval"
     >
       <div className="agent-request-heading">
-        <span className="agent-request-icon" aria-hidden="true"><RequestIcon size={15} /></span>
+        <span className="agent-request-icon" aria-hidden="true">?</span>
         <span className="agent-request-heading-copy">
           <span className="agent-request-kicker">Approval required</span>
           <strong id={`approval-${request.id}`}>{request.title}</strong>
@@ -50,23 +56,15 @@ export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.J
         </code>
       )}
       {request.detail && <p className="agent-request-detail">{request.detail}</p>}
-      {(request.reason || request.cwd || request.networkScope || request.permissionRoots.length > 0) && (
+      {detailRows.length > 0 && (
         <dl className="agent-request-details">
-          {request.reason && <><dt>Reason</dt><dd>{request.reason}</dd></>}
-          {request.cwd && <><dt>Location</dt><dd>{request.cwd}</dd></>}
-          {request.networkScope && <><dt>Network</dt><dd>{request.networkScope.protocol.toUpperCase()} · {request.networkScope.host}</dd></>}
-          {request.permissionRoots.length > 0 && (
-            <>
-              <dt>Requested access</dt>
-              <dd>{request.permissionRoots.map(({ access, path }) => `${access}: ${path}`).join(" · ")}</dd>
-            </>
-          )}
+          {detailRows.flatMap(([label, value]) => [<dt key={label}>{label}</dt>, <dd key={`${label}-value`}>{value}</dd>])}
         </dl>
       )}
       <div className="agent-request-actions">
-        {request.availableDecisions.includes("cancel") && <button type="button" className="secondary-button" data-agent-request-decision="cancel" disabled={busy} onClick={() => void respond("cancel")}>Cancel turn</button>}
-        {request.availableDecisions.includes("deny") && <button type="button" className="secondary-button" data-agent-request-decision="deny" disabled={busy} onClick={() => void respond("deny")}>Deny</button>}
-        {request.availableDecisions.includes("approve") && <button type="button" className="primary-button" data-agent-request-decision="approve" disabled={busy} onClick={() => void respond("approve")}>Approve once</button>}
+        {APPROVAL_BUTTONS.map(([decision, label]) => request.availableDecisions.includes(decision) && (
+          <button type="button" className={decision === "approve" ? "primary-button" : "secondary-button"} data-agent-request-decision={decision} disabled={busy} onClick={() => void respond(decision)} key={decision}>{label}</button>
+        ))}
       </div>
     </section>
   );
@@ -84,24 +82,14 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
   const descriptionId = `input-${request.id}-description`;
 
   useEffect(() => { setAnswers({}); setActiveQuestionIndex(0); }, [request.id]);
-  const complete = useMemo(
-    () => request.questions.every(({ id }) => (answers[id] ?? []).some((value) => Boolean(value.trim()))),
-    [answers, request.questions],
-  );
-  const activeQuestionComplete = (answers[request.questions[activeQuestionIndex]?.id ?? ""] ?? [])
-    .some((value) => Boolean(value.trim()));
+  const hasAnswer = (id: string) => (answers[id] ?? []).some((value) => Boolean(value.trim()));
+  const complete = request.questions.every(({ id }) => hasAnswer(id));
+  const lastQuestion = activeQuestionIndex === request.questions.length - 1;
+  const activeQuestionComplete = hasAnswer(request.questions[activeQuestionIndex]?.id ?? "");
 
-  const submit = async () => {
+  const submit = () => {
     if (!complete || busy) return;
-    setBusy(true);
-    try {
-      await onRespond(
-        request,
-        buildAgentInputAnswers(request, answers),
-      );
-    } finally {
-      setBusy(false);
-    }
+    return runResponse(setBusy, () => onRespond(request, buildAgentInputAnswers(request, answers)));
   };
 
   return (
@@ -116,7 +104,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
       data-agent-request-state="question"
     >
       <div className="agent-request-heading">
-        <span className="agent-request-icon" aria-hidden="true"><MessageCircleQuestion size={15} /></span>
+        <span className="agent-request-icon" aria-hidden="true">?</span>
         <span className="agent-request-heading-copy">
           <span className="agent-request-kicker">Input required</span>
           <strong id={`input-${request.id}`}>{inputRequestTitle(request.providerId)}</strong>
@@ -124,7 +112,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
         </span>
       </div>
       <div className="agent-input-questions">
-        {request.questions.map((question, questionIndex) => {
+        {request.questions.slice(activeQuestionIndex, activeQuestionIndex + 1).map((question) => {
           const optionIds = new Set(question.options.map(({ id }) => id));
           const selected = answers[question.id] ?? [];
           const otherValue = selected.find((value) => !optionIds.has(value)) ?? "";
@@ -153,12 +141,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
             });
           };
           return (
-            <fieldset
-              className="agent-input-question"
-              key={question.id}
-              disabled={busy}
-              hidden={questionIndex !== activeQuestionIndex}
-            >
+            <fieldset className="agent-input-question" key={question.id} disabled={busy}>
               <legend><span>{question.header}</span>{question.question}</legend>
               {question.options.length > 0 && (
                 <div className="agent-input-options">
@@ -212,31 +195,24 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
                 <button
                   type="button"
                   aria-label={`Go to question ${questionIndex + 1}`}
-                  aria-current={questionIndex === activeQuestionIndex ? "step" : undefined}
-                  data-answered={(answers[question.id] ?? []).some((value) => Boolean(value.trim()))}
+                  aria-current={questionIndex === activeQuestionIndex}
+                  data-answered={hasAnswer(question.id)}
                   disabled={busy}
                   onClick={() => setActiveQuestionIndex(questionIndex)}
                   key={question.id}
                 />
               ))}
             </span>
-            <span className="agent-input-page-count">
-              {activeQuestionIndex + 1} of {request.questions.length}
-            </span>
           </div>
           <div className="agent-request-actions">
-            {activeQuestionIndex === request.questions.length - 1 ? (
-              <button type="button" className="primary-button" disabled={!complete || busy} onClick={() => void submit()}>Continue</button>
-            ) : (
-              <button
-                type="button"
-                className="primary-button"
-                disabled={!activeQuestionComplete || busy}
-                onClick={() => setActiveQuestionIndex(activeQuestionIndex + 1)}
-              >
-                Next →
-              </button>
-            )}
+            <button
+              type="button"
+              className="primary-button"
+              disabled={busy || (lastQuestion ? !complete : !activeQuestionComplete)}
+              onClick={() => lastQuestion ? void submit() : setActiveQuestionIndex(activeQuestionIndex + 1)}
+            >
+              {lastQuestion ? "Continue" : "Next →"}
+            </button>
           </div>
         </div>
       )}

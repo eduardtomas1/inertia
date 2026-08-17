@@ -58,9 +58,7 @@ describe("Minimal Workstream active pixel signal", () => {
       "data-active-agent-phase={activePresentation.phase}",
     );
     expect(activeBranch).toContain("<AgentPixelLoader");
-    expect(timelineSource).toContain(
-      "data-motion={agentPixelMotionPattern(phase)}",
-    );
+    expect(timelineSource).toContain("data-phase={phase}");
     expect(settledBranch).not.toContain("data-active-work-region");
     expect(settledBranch).not.toContain("<AgentPixelLoader");
   });
@@ -68,9 +66,9 @@ describe("Minimal Workstream active pixel signal", () => {
   it("keeps pixel motion on the derived state and mirrors the reference label shimmer", () => {
     expect(timelineSource).toContain("animated={activePresentation.animated}");
     expect(timelineSource).toContain('data-animated={animated ? "true" : "false"}');
-    expect(timelineSource).toContain("AGENT_PIXEL_GRID_CELLS = [");
-    expect(timelineSource).toContain("--pixel-drive-delay");
-    expect(timelineSource).toContain("--pixel-orbit-delay");
+    expect(timelineSource).toContain("AGENT_PIXEL_GRID_CELLS = Array.from");
+    expect(exactMotionCss).toContain("--pixel-drive-delay: 90ms");
+    expect(exactMotionCss).toContain("--pixel-orbit-delay: 770ms");
     expect(css).toContain('.agent-pixel-loader[data-animated="true"] > span');
     expect(css).toContain("animation: beautiful-shimmer-text 1.4s linear infinite");
     expect(css).not.toContain(".turn-working-status::before");
@@ -94,17 +92,17 @@ describe("Minimal Workstream active pixel signal", () => {
   it("keeps Dots, Drive, and Orbit inside the same bounded pixel grid", () => {
     const orbitCenterRule = cssBlock(
       exactMotionCss,
-      '.agent-pixel-loader[data-animated="true"][data-motion="orbit"] > span:nth-child(5)',
+      '.agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span:nth-child(5)',
     );
     const dotsRule = cssBlock(
       css,
-      '.agent-pixel-loader[data-motion="dots"] > span',
+      '.agent-pixel-loader:is([data-phase="queued"], [data-phase="starting"]) > span',
     );
 
     expect(dotsRule).toContain("border-radius: 50%");
     expect(orbitCenterRule).toContain("animation: none");
     expect(orbitCenterRule).toContain("opacity: .07");
-    expect(timelineSource).toContain("orbitDelay: 770");
+    expect(exactMotionCss).toContain("--pixel-orbit-delay: 770ms");
     expect(css).not.toMatch(/agent-pixel-loader[^}]*url\(/su);
   });
 
@@ -122,7 +120,7 @@ describe("Minimal Workstream active pixel signal", () => {
     expect(reducedMotion).toContain(".turn-working-status .turn-working-copy strong");
     expect(reducedMotion).toContain("background: none");
     expect(reducedMotion).toContain(
-      '.agent-pixel-loader[data-animated="true"][data-motion="orbit"] > span:nth-child(5)',
+      '.agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span:nth-child(5)',
     );
   });
 

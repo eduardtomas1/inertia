@@ -34,6 +34,7 @@ import {
   activityExecutionCategory,
   activityNeedsAttention,
   buildTurnExecutionStream,
+  formatElapsed,
   isInterruptedActivity,
   resolveActivityGroupPresentation,
   turnStatusLabel,
@@ -112,11 +113,7 @@ export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Ele
       window.removeEventListener("blur", synchronize);
     };
   }, []);
-  const elapsed = Math.max(0, now - Date.parse(startedAt));
-  const totalTenths = Math.floor(elapsed / 100);
-  const minutes = Math.floor(totalTenths / 600);
-  const seconds = ((totalTenths % 600) / 10).toFixed(1);
-  return <span>{minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`}</span>;
+  return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)), true)}</span>;
 }
 
 type ActivityLineSeverity = "neutral" | ActivityAttentionSeverity;
@@ -164,13 +161,11 @@ function splitActivityTitle(
 export const ActivityRow = memo(function ActivityRow({
   activity,
   visibility,
-  revealIndex,
   onBeforeToggle,
   onAfterToggle,
 }: {
   activity: AgentActivity;
   visibility?: "recent" | "details" | "important";
-  revealIndex?: number;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
@@ -239,7 +234,6 @@ export const ActivityRow = memo(function ActivityRow({
       data-activity-category={executionCategory}
       data-activity-severity={severity}
       data-activity-visibility={visibility}
-      data-activity-reveal={revealIndex === undefined ? undefined : "expanded-history"}
       title={fullLabel}
     >
       <Icon size={12} aria-hidden="true" />
@@ -424,15 +418,6 @@ export const ActivityGroup = memo(function ActivityGroup({
     entry.activities,
     expanded,
   );
-  const collapsedActivityIds = new Set(
-    resolveActivityGroupPresentation(entry.activities, false)
-      .visibleActivities.map(({ id }) => id),
-  );
-  const revealIndexById = new Map(
-    entry.activities
-      .filter(({ id }) => !collapsedActivityIds.has(id))
-      .map(({ id }, index) => [id, index]),
-  );
   const containsAttention = entry.activities.some(activityNeedsAttention);
   const toggle = (): void => {
     onBeforeToggle?.();
@@ -443,14 +428,13 @@ export const ActivityGroup = memo(function ActivityGroup({
     <div
       className="turn-activity-group"
       data-activity-group={entry.id}
-      data-activity-group-expanded={expanded ? "true" : "false"}
+      data-activity-group-expanded={expanded}
       data-activity-group-mode={containsAttention ? "attention" : "calls"}
     >
       {visibleActivities.map((activity) => (
         <ActivityRow
           activity={activity}
           visibility={activityNeedsAttention(activity) ? "important" : "recent"}
-          revealIndex={expanded ? revealIndexById.get(activity.id) : undefined}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
           key={activity.id}
@@ -793,7 +777,7 @@ export function WorkLog({
             <small>{expanded ? "Hide details" : "Details"}</small>
             <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
           </summary>
-          <div className="turn-work-details-shell" id={detailsId} hidden={!expanded}>
+          <div id={detailsId} hidden={!expanded}>
             {expanded && (
               <SettledWorkDetails
                 entries={stream}

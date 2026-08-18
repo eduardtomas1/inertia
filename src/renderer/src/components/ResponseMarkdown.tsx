@@ -37,6 +37,12 @@ import {
 } from "../utils/workspaceFileReference";
 import { writeClipboardText } from "../utils/clipboard";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
+import { workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
+import { markdownHeadingDomId } from "../utils/markdownHeading";
+import {
+  MarkdownImageSchedulerProvider,
+  useMarkdownImageSchedule,
+} from "./markdown/MarkdownImageScheduler";
 
 export const RESPONSE_MARKDOWN_TAG_NAMES = [
   "a", "blockquote", "br", "code", "dd", "del", "details", "div", "dl", "dt",
@@ -51,12 +57,18 @@ const sanitizeSchema = {
   tagNames: [...RESPONSE_MARKDOWN_TAG_NAMES],
   protocols: {
     href: ["http", "https", "mailto"],
-    src: ["http", "https", "data"],
+    src: ["http", "https"],
     cite: ["http", "https"],
   },
   attributes: {
     a: ["href", "title"],
     img: ["src", "alt", "title"],
+    h1: ["id"],
+    h2: ["id"],
+    h3: ["id"],
+    h4: ["id"],
+    h5: ["id"],
+    h6: ["id"],
     div: [["className", "math", "math-display"]],
     span: [["className", /^hljs(?:-[a-z-]+)?$/u, /^language-[\w+-]+$/u, "math", "math-inline"]],
     code: [
@@ -79,12 +91,13 @@ const REMARK_PLUGINS: NonNullable<
 > = [remarkGfm, preserveCodeMeta];
 const REHYPE_PLUGINS: NonNullable<
   ComponentProps<typeof ReactMarkdown>["rehypePlugins"]
-> = [rehypeRaw, [rehypeSanitize, sanitizeSchema]];
+> = [rehypeRaw, stableHeadingIds, [rehypeSanitize, sanitizeSchema]];
 type ResponseMarkdownProps = {
   content: string;
   projectRoot: string;
   projectId: string;
   conversationId?: string;
+  markdownBasePath?: string;
   defaultCodeWrap: boolean;
   streaming?: boolean;
   announceCopyFeedback?: boolean;
@@ -92,6 +105,7 @@ type ResponseMarkdownProps = {
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ) => void;
 };
 
@@ -103,17 +117,76 @@ type ProjectLink =
       action: "reveal";
       location?: WorkspaceFileLocation;
       literalPath?: boolean;
+      headingId?: string;
     }
   | { kind: "anchor"; href: string }
   | { kind: "unsafe" };
 
 type MarkdownAstNode = {
   type?: string;
+  value?: unknown;
   url?: unknown;
   meta?: unknown;
   data?: { hProperties?: Record<string, unknown> };
   children?: MarkdownAstNode[];
 };
+
+type MarkdownHtmlNode = {
+  type?: string;
+  tagName?: string;
+  value?: unknown;
+  properties?: Record<string, unknown>;
+  children?: MarkdownHtmlNode[];
+};
+
+const GITHUB_HEADING_PUNCTUATION = /[\u2000-\u206f\u2e00-\u2e7f\\'!"#$%&()*+,./:;<=>?@[\]^`{|}~]/gu;
+
+export function githubHeadingSlug(value: string): string {
+  return value
+    .toLocaleLowerCase("en-US")
+    .trim()
+    .replace(GITHUB_HEADING_PUNCTUATION, "")
+    .replace(/\s/gu, "-");
+}
+
+function uniqueGithubHeadingSlug(
+  value: string,
+  occurrences: Map<string, number>,
+): string {
+  const original = githubHeadingSlug(value);
+  let slug = original;
+  while (occurrences.has(slug)) {
+    const next = (occurrences.get(original) ?? 0) + 1;
+    occurrences.set(original, next);
+    slug = `${original}-${next}`;
+  }
+  occurrences.set(slug, 0);
+  return slug;
+}
+
+function markdownHtmlText(node: MarkdownHtmlNode): string {
+  if (typeof node.value === "string") return node.value;
+  return node.children?.map(markdownHtmlText).join("") ?? "";
+}
+
+function stableHeadingIds() {
+  return (tree: MarkdownHtmlNode) => {
+    const occurrences = new Map<string, number>();
+    const visit = (node: MarkdownHtmlNode): void => {
+      if (
+        node.type === "element"
+        && /^h[1-6]$/u.test(node.tagName ?? "")
+      ) {
+        node.properties = {
+          ...node.properties,
+          id: uniqueGithubHeadingSlug(markdownHtmlText(node), occurrences),
+        };
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
+}
 
 function preserveCodeMeta() {
   return (tree: MarkdownAstNode) => {
@@ -171,6 +244,7 @@ export function resolveResponseLink(
   projectRoot: string,
   rawHref: string,
   syntax: "markdown" | "file" = "markdown",
+  markdownBasePath = "",
 ): ProjectLink {
   const href = rawHref.trim();
   if (!href || href.includes("\0")) return { kind: "unsafe" };
@@ -200,6 +274,9 @@ export function resolveResponseLink(
     : href.indexOf("#");
   const fragmentLocation = hashIndex >= 0
     ? workspaceFileLocationFromFragment(href.slice(hashIndex))
+    : null;
+  const headingId = syntax === "markdown" && hashIndex >= 0 && !fragmentLocation
+    ? responseHeadingIdFromFragment(href.slice(hashIndex))
     : null;
   let rawPath = syntax === "file"
     ? fragmentLocation
@@ -239,6 +316,9 @@ export function resolveResponseLink(
   ) return { kind: "unsafe" };
   const root = normalizedPath(projectRoot).replace(/\/+$/u, "");
   if (!root) return { kind: "unsafe" };
+  const base = syntax === "markdown" && markdownBasePath
+    ? normalizedPath(`${root}/${markdownBasePath}`)
+    : root;
   const markdownCollapsedUnc = root.startsWith("//")
     && decoded.startsWith("\\")
     && !decoded.startsWith("\\\\");
@@ -247,7 +327,7 @@ export function resolveResponseLink(
     || /^[a-z]:[\\/]/iu.test(decoded)
     || resolvedDecoded.startsWith("\\\\");
   const candidate = normalizedPath(
-    isAbsolute ? resolvedDecoded : `${root}/${resolvedDecoded}`,
+    isAbsolute ? resolvedDecoded : `${base}/${resolvedDecoded}`,
   );
   const insensitive = /^[a-z]:\//iu.test(root) || root.startsWith("//");
   const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
@@ -261,16 +341,19 @@ export function resolveResponseLink(
         action: "reveal",
         ...(location ? { location } : {}),
         ...(encodedPathDelimiter ? { literalPath: true } : {}),
+        ...(headingId ? { headingId } : {}),
       }
     : { kind: "unsafe" };
 }
 
-export function responseLinkHasDirectoryHint(rawHref: string): boolean {
-  const path = rawHref.trim().split("#", 1)[0]!.split("?", 1)[0]!;
+export function responseHeadingIdFromFragment(fragment: string): string | null {
+  const raw = fragment.startsWith("#") ? fragment.slice(1) : fragment;
+  if (!raw || raw.length > 512) return null;
   try {
-    return /[\\/]$/u.test(decodeURIComponent(path));
+    const decoded = decodeURIComponent(raw);
+    return decoded && !/[\0\r\n]/u.test(decoded) ? decoded : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -445,6 +528,7 @@ function CodeBlock({
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ) => void;
 }): React.JSX.Element {
   const { announceCopyFeedback } = useMarkdownRenderContext();
@@ -568,6 +652,7 @@ interface MarkdownRenderContextValue {
   projectRoot: string;
   projectId: string;
   conversationId?: string;
+  markdownBasePath: string;
   defaultCodeWrap: boolean;
   streaming: boolean;
   announceCopyFeedback: boolean;
@@ -575,6 +660,7 @@ interface MarkdownRenderContextValue {
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ) => void;
 }
 
@@ -597,9 +683,15 @@ function MarkdownLink({
     projectRoot,
     projectId,
     conversationId,
+    markdownBasePath,
     onOpenProjectFile,
   } = useMarkdownRenderContext();
-  const target = resolveResponseLink(projectRoot, href);
+  const target = resolveResponseLink(
+    projectRoot,
+    href,
+    "markdown",
+    markdownBasePath,
+  );
   if (target.kind === "external") {
     return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
   }
@@ -613,8 +705,15 @@ function MarkdownLink({
       .join(" ");
     return <a {...props} className={projectLinkClass} data-language-family={language.family} href={href} onClick={(event) => {
       event.preventDefault();
-      if (onOpenProjectFile && !responseLinkHasDirectoryHint(href)) {
-        if (target.literalPath) {
+      if (onOpenProjectFile) {
+        if (target.headingId) {
+          onOpenProjectFile(
+            target.relativePath,
+            target.location,
+            target.literalPath,
+            target.headingId,
+          );
+        } else if (target.literalPath) {
           onOpenProjectFile(
             target.relativePath,
             target.location ?? undefined,
@@ -636,9 +735,101 @@ function MarkdownLink({
     }}>{children}</a>;
   }
   if (target.kind === "anchor") {
-    return <a {...props} href={target.href}>{children}</a>;
+    return <a {...props} href={target.href} onClick={(event) => {
+      event.preventDefault();
+      const headingId = responseHeadingIdFromFragment(target.href);
+      const markdown = event.currentTarget.closest(".response-markdown");
+      const heading = headingId
+        ? [...(markdown?.querySelectorAll<HTMLElement>("[id]") ?? [])]
+          .find(({ id }) => id === markdownHeadingDomId(headingId))
+        : null;
+      heading?.scrollIntoView({ block: "start", inline: "nearest" });
+      if (heading) heading.tabIndex = -1;
+      heading?.focus({ preventScroll: true });
+    }}>{children}</a>;
   }
   return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;
+}
+
+function MarkdownImage({
+  src = "",
+  alt = "",
+  title,
+  className,
+}: ComponentProps<"img">): React.JSX.Element {
+  const {
+    projectRoot,
+    projectId,
+    conversationId,
+    markdownBasePath,
+  } = useMarkdownRenderContext();
+  const unavailableAlt = alt.trim();
+  const target = resolveResponseLink(
+    projectRoot,
+    src,
+    "markdown",
+    markdownBasePath,
+  );
+  const trustedSource = target.kind === "project"
+    ? workspaceImagePreviewUrl({
+        projectId,
+        ...(conversationId ? { conversationId } : {}),
+        relativePath: target.relativePath,
+      })
+    : null;
+  const schedule = useMarkdownImageSchedule(trustedSource);
+  const placeholder = (reason: string, overflow = false): React.JSX.Element => {
+    const message = unavailableAlt
+      ? `${unavailableAlt} (${reason})`
+      : reason.charAt(0).toUpperCase() + reason.slice(1);
+    return unavailableAlt ? (
+      <span
+        className="response-markdown-image-unavailable"
+        role="img"
+        aria-label={unavailableAlt}
+        data-markdown-image-overflow={overflow ? "true" : undefined}
+        title={title}
+      >
+        {message}
+      </span>
+    ) : (
+      <span
+        className="response-markdown-image-unavailable"
+        aria-hidden="true"
+        data-markdown-image-overflow={overflow ? "true" : undefined}
+        title={title}
+      >
+        {message}
+      </span>
+    );
+  };
+  if (!trustedSource) {
+    return placeholder("image unavailable");
+  }
+  return (
+    <span
+      ref={schedule.shellRef}
+      className="response-markdown-image-shell"
+      data-markdown-image-state={schedule.state}
+    >
+      {schedule.state === "loading" || schedule.state === "loaded" ? (
+        <img
+          src={trustedSource}
+          alt={alt}
+          title={title}
+          className={className}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => schedule.complete(false)}
+          onError={() => schedule.complete(true)}
+        />
+      ) : schedule.state === "overflow"
+        ? placeholder("image not loaded: document image limit reached", true)
+        : schedule.state === "error"
+          ? placeholder("image unavailable")
+          : placeholder("image waiting to load")}
+    </span>
+  );
 }
 
 function MarkdownParagraph(props: ComponentProps<"p">): React.JSX.Element {
@@ -686,6 +877,7 @@ const RESPONSE_MARKDOWN_COMPONENTS: NonNullable<
   pre: MarkdownCodeBlock,
   table: MarkdownTable,
   details: MarkdownDetails,
+  img: MarkdownImage,
 };
 
 export function stabilizeStreamingMarkdown(content: string): string {
@@ -700,16 +892,24 @@ function ResponseMarkdownComponent({
   projectRoot,
   projectId,
   conversationId,
+  markdownBasePath = "",
   defaultCodeWrap,
   streaming = false,
   announceCopyFeedback = true,
   onOpenProjectFile,
 }: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
+  const imageSchedulerIdentity = [
+    projectRoot,
+    projectId,
+    conversationId ?? "",
+    markdownBasePath,
+  ].join("\0");
   const renderContext = useMemo<MarkdownRenderContextValue>(() => ({
     projectRoot,
     projectId,
     conversationId,
+    markdownBasePath,
     defaultCodeWrap,
     streaming,
     announceCopyFeedback,
@@ -718,6 +918,7 @@ function ResponseMarkdownComponent({
     announceCopyFeedback,
     conversationId,
     defaultCodeWrap,
+    markdownBasePath,
     onOpenProjectFile,
     projectId,
     projectRoot,
@@ -725,15 +926,17 @@ function ResponseMarkdownComponent({
   ]);
   return (
     <MarkdownRenderContext.Provider value={renderContext}>
-      <div className={`response-markdown${streaming ? " is-streaming" : ""}`}>
-        <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          rehypePlugins={REHYPE_PLUGINS}
-          components={RESPONSE_MARKDOWN_COMPONENTS}
-        >
-          {renderedContent}
-        </ReactMarkdown>
-      </div>
+      <MarkdownImageSchedulerProvider key={imageSchedulerIdentity}>
+        <div className={`response-markdown${streaming ? " is-streaming" : ""}`}>
+          <ReactMarkdown
+            remarkPlugins={REMARK_PLUGINS}
+            rehypePlugins={REHYPE_PLUGINS}
+            components={RESPONSE_MARKDOWN_COMPONENTS}
+          >
+            {renderedContent}
+          </ReactMarkdown>
+        </div>
+      </MarkdownImageSchedulerProvider>
     </MarkdownRenderContext.Provider>
   );
 }

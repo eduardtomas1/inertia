@@ -761,12 +761,16 @@ export function createWorkspaceSceneModel({
         preview: workspaceTools.filePreview,
         selectedPath: workspaceTools.selectedFile,
         selectedLocation: workspaceTools.selectedFileLocation,
+        projectRoot: conversation?.worktreePath ?? project.normalizedPath,
+        projectId: project.id,
+        conversationId: conversation?.id,
         loading: workspaceTools.filesLoading,
         previewLoading: workspaceTools.filePreviewLoading,
         error: workspaceTools.filesError,
         previewError: workspaceTools.filePreviewError,
         entriesTruncated: workspaceTools.entriesTruncated,
         onSelectFile: workspaceTools.selectWorkspaceFile,
+        onOpenWorkspaceEntry: workspaceTools.openWorkspaceFile,
         onLoadEntries: workspaceTools.requestWorkspaceEntries,
         onRefresh: () => {
           void workspaceTools.loadFiles().catch((error) => setActionError(

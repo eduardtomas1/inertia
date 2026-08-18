@@ -20,6 +20,11 @@ vi.mock("../../src/renderer/src/utils/workspaceTree", async (importOriginal) => 
 
 import { FilesPanel } from "../../src/renderer/src/components/FilesPanel";
 
+const FILES_PROJECT = {
+  projectRoot: "/work/project",
+  projectId: "11111111-1111-4111-8111-111111111111",
+} as const;
+
 const entries: WorkspaceEntry[] = [
   { path: "src", kind: "directory" },
   { path: "README.md", kind: "file" },
@@ -36,6 +41,7 @@ describe("FilesPanel root initialization", () => {
     metrics.sorts = 0;
     const view = render(
       <FilesPanel
+        {...FILES_PROJECT}
         entries={entries}
         preview={null}
         selectedPath={null}
@@ -47,6 +53,7 @@ describe("FilesPanel root initialization", () => {
     expect(metrics.sorts).toBe(1);
     view.rerender(
       <FilesPanel
+        {...FILES_PROJECT}
         entries={entries}
         preview={null}
         selectedPath={null}
@@ -59,6 +66,7 @@ describe("FilesPanel root initialization", () => {
 
     view.rerender(
       <FilesPanel
+        {...FILES_PROJECT}
         entries={[...entries]}
         preview={null}
         selectedPath={null}

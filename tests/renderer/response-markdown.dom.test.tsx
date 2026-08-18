@@ -1,7 +1,75 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseMarkdown } from "../../src/renderer/src/components/ResponseMarkdown";
+import {
+  MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS,
+  MAX_MARKDOWN_IMAGES_PER_DOCUMENT,
+} from "../../src/renderer/src/components/markdown/MarkdownImageScheduler";
+
+const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
+const CONVERSATION_ID = "22222222-2222-4222-8222-222222222222";
+
+type ObservedIntersection = Pick<
+  IntersectionObserverEntry,
+  "intersectionRatio" | "isIntersecting" | "target"
+>;
+
+class TestIntersectionObserver {
+  static instances: TestIntersectionObserver[] = [];
+
+  readonly observed = new Set<Element>();
+
+  constructor(
+    private readonly callback: IntersectionObserverCallback,
+  ) {
+    TestIntersectionObserver.instances.push(this);
+  }
+
+  observe = (element: Element): void => {
+    this.observed.add(element);
+  };
+
+  unobserve = (element: Element): void => {
+    this.observed.delete(element);
+  };
+
+  disconnect = (): void => {
+    this.observed.clear();
+  };
+
+  reveal(elements: Element[]): void {
+    this.notify(elements, true);
+  }
+
+  hide(elements: Element[]): void {
+    this.notify(elements, false);
+  }
+
+  private notify(elements: Element[], visible: boolean): void {
+    const observations: ObservedIntersection[] = elements.map((target) => ({
+      intersectionRatio: visible ? 1 : 0,
+      isIntersecting: visible,
+      target,
+    }));
+    this.callback(
+      observations as IntersectionObserverEntry[],
+      this as unknown as IntersectionObserver,
+    );
+  }
+}
+
+function markdownImages(count: number): string {
+  return Array.from(
+    { length: count },
+    (_, index) => `![Diagram ${index + 1}](assets/diagram-${index + 1}.png)`,
+  ).join("\n\n");
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  TestIntersectionObserver.instances = [];
+});
 
 describe("ResponseMarkdown project files", () => {
   it("keeps encoded delimiters as literal project filenames", () => {
@@ -204,22 +272,281 @@ describe("ResponseMarkdown project files", () => {
     );
     expect(onOpenProjectFile).toHaveBeenNthCalledWith(
       4,
-      "docs",
+      "src/server",
     );
     expect(onOpenProjectFile).toHaveBeenNthCalledWith(
       5,
-      "src/server/adapter.ts",
+      "docs",
     );
     expect(onOpenProjectFile).toHaveBeenNthCalledWith(
       6,
+      "src/server/adapter.ts",
+    );
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(
+      7,
       "src/my component.tsx",
     );
-    expect(openProjectPath).toHaveBeenCalledWith({
-      projectId: "11111111-1111-4111-8111-111111111111",
-      conversationId: "22222222-2222-4222-8222-222222222222",
-      relativePath: "src/server",
-      action: "reveal",
+    expect(openProjectPath).not.toHaveBeenCalled();
+  });
+
+  it("preserves decomposed Unicode in same-file and cross-file heading ids", () => {
+    const onOpenProjectFile = vi.fn();
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
     });
+    render(
+      <ResponseMarkdown
+        content={[
+          "[Local section](#cafe%CC%81)",
+          "[Other section](guide.md#cafe%CC%81)",
+          "",
+          "## Cafe\u0301",
+        ].join("\n")}
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+        onOpenProjectFile={onOpenProjectFile}
+      />,
+    );
+    const heading = screen.getByRole("heading", { name: "Cafe\u0301" });
+    expect(heading).toHaveAttribute("id", "user-content-cafe\u0301");
+
+    fireEvent.click(screen.getByRole("link", { name: "Local section" }));
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      block: "start",
+      inline: "nearest",
+    });
+    expect(heading).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("link", { name: "Other section" }));
+    expect(onOpenProjectFile).toHaveBeenCalledWith(
+      "guide.md",
+      undefined,
+      undefined,
+      "cafe\u0301",
+    );
+  });
+
+  it("keeps empty alt text decorative for trusted images", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const { container } = render(
+      <ResponseMarkdown
+        content="![](assets/divider.png)\n\n![](https://example.com/unavailable.png)\n\n![   ](https://example.com/space.png)"
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+      />,
+    );
+    const trusted = await waitFor(() => {
+      const image = container.querySelector("img");
+      expect(image).not.toBeNull();
+      return image;
+    });
+    expect(trusted).toHaveAttribute("alt", "");
+    expect(trusted).not.toHaveAccessibleName();
+    const unavailable = container.querySelectorAll(
+      ".response-markdown-image-unavailable",
+    );
+    expect(unavailable).toHaveLength(2);
+    for (const placeholder of unavailable) {
+      expect(placeholder).toHaveAttribute("aria-hidden", "true");
+      expect(placeholder).not.toHaveAttribute("role");
+      expect(placeholder).not.toHaveAttribute("aria-label");
+    }
+    expect(screen.queryByRole("img", { name: "Markdown image" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("admits a bounded image set and restores load slots on completion", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const { container } = render(
+      <ResponseMarkdown
+        content={markdownImages(MAX_MARKDOWN_IMAGES_PER_DOCUMENT + 2)}
+        projectRoot="/workspace"
+        projectId={PROJECT_ID}
+        conversationId={CONVERSATION_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+
+    await waitFor(() => expect(container.querySelectorAll(
+      '[data-markdown-image-state="loading"] img',
+    )).toHaveLength(MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS));
+    const shells = container.querySelectorAll(".response-markdown-image-shell");
+    expect(shells).toHaveLength(MAX_MARKDOWN_IMAGES_PER_DOCUMENT + 2);
+    const overflow = container.querySelectorAll(
+      '[data-markdown-image-overflow="true"]',
+    );
+    expect(overflow).toHaveLength(2);
+    for (const placeholder of overflow) {
+      expect(placeholder.closest(".response-markdown-image-shell")
+        ?.querySelector("img[src]")).toBeNull();
+      expect(placeholder).toHaveTextContent("document image limit reached");
+    }
+
+    const firstLoading = container.querySelector<HTMLImageElement>(
+      '[data-markdown-image-state="loading"] img',
+    );
+    expect(firstLoading).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-image/${PROJECT_ID}/${CONVERSATION_ID}/assets%2Fdiagram-1.png`,
+    );
+    expect(firstLoading).toHaveAttribute("loading", "lazy");
+    expect(firstLoading).toHaveAttribute("decoding", "async");
+    fireEvent.load(firstLoading!);
+    await waitFor(() => {
+      expect(container.querySelectorAll(
+        '[data-markdown-image-state="loaded"] img',
+      )).toHaveLength(1);
+      expect(container.querySelectorAll(
+        '[data-markdown-image-state="loading"] img',
+      )).toHaveLength(MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS);
+    });
+
+    const nextLoading = container.querySelector<HTMLImageElement>(
+      '[data-markdown-image-state="loading"] img',
+    );
+    fireEvent.error(nextLoading!);
+    await waitFor(() => {
+      expect(container.querySelectorAll(
+        '[data-markdown-image-state="error"] img',
+      )).toHaveLength(0);
+      expect(container.querySelectorAll(
+        '[data-markdown-image-state="loading"] img',
+      )).toHaveLength(MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS);
+    });
+  });
+
+  it("loads only observed-near images and releases hidden resources", async () => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      TestIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const { container } = render(
+      <ResponseMarkdown
+        content={markdownImages(4)}
+        projectRoot="/workspace"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+    await waitFor(() => expect(TestIntersectionObserver.instances)
+      .toHaveLength(1));
+    const observer = TestIntersectionObserver.instances[0]!;
+    const shells = [...container.querySelectorAll(
+      ".response-markdown-image-shell",
+    )];
+    expect(observer.observed.size).toBe(4);
+    expect(container.querySelector("img[src]")).toBeNull();
+
+    act(() => observer.reveal(shells.slice(0, 3)));
+    await waitFor(() => expect(container.querySelectorAll(
+      '[data-markdown-image-state="loading"] img',
+    )).toHaveLength(MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS));
+    expect(shells[2]).toHaveAttribute("data-markdown-image-state", "waiting");
+
+    fireEvent.load(shells[0]!.querySelector("img")!);
+    await waitFor(() => expect(shells[2])
+      .toHaveAttribute("data-markdown-image-state", "loading"));
+    act(() => observer.hide([shells[0]!]));
+    expect(shells[0]).toHaveAttribute("data-markdown-image-state", "waiting");
+    expect(shells[0]!.querySelector("img[src]")).toBeNull();
+
+    fireEvent.error(shells[1]!.querySelector("img")!);
+    await waitFor(() => expect(container.querySelectorAll(
+      '[data-markdown-image-state="loading"] img',
+    )).toHaveLength(1));
+    act(() => observer.reveal([shells[3]!]));
+    await waitFor(() => expect(container.querySelectorAll(
+      '[data-markdown-image-state="loading"] img',
+    )).toHaveLength(MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS));
+  });
+
+  it("restores admission after an image unmounts", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const original = markdownImages(MAX_MARKDOWN_IMAGES_PER_DOCUMENT + 1);
+    const view = render(
+      <ResponseMarkdown
+        content={original}
+        projectRoot="/workspace"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+    await waitFor(() => expect(view.container.querySelectorAll(
+      '[data-markdown-image-overflow="true"]',
+    )).toHaveLength(1));
+
+    const withoutEighth = [
+      markdownImages(MAX_MARKDOWN_IMAGES_PER_DOCUMENT - 1),
+      `![Diagram ${MAX_MARKDOWN_IMAGES_PER_DOCUMENT + 1}](assets/diagram-${MAX_MARKDOWN_IMAGES_PER_DOCUMENT + 1}.png)`,
+    ].join("\n\n");
+    view.rerender(
+      <ResponseMarkdown
+        content={withoutEighth}
+        projectRoot="/workspace"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+    await waitFor(() => expect(view.container.querySelector(
+      '[data-markdown-image-overflow="true"]',
+    )).toBeNull());
+    expect(view.container.querySelectorAll(".response-markdown-image-shell"))
+      .toHaveLength(MAX_MARKDOWN_IMAGES_PER_DOCUMENT);
+  });
+
+  it("disposes image admissions when the render identity changes", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const oldProjectId = "11111111-1111-4111-8111-111111111111";
+    const newProjectId = "33333333-3333-4333-8333-333333333333";
+    const view = render(
+      <ResponseMarkdown
+        content={markdownImages(3)}
+        projectRoot="/workspace"
+        projectId={oldProjectId}
+        defaultCodeWrap={false}
+      />,
+    );
+    await waitFor(() => expect(view.container.querySelectorAll(
+      '[data-markdown-image-state="loading"] img',
+    )).toHaveLength(MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS));
+
+    view.rerender(
+      <ResponseMarkdown
+        content={markdownImages(3)}
+        projectRoot="/workspace"
+        projectId={newProjectId}
+        defaultCodeWrap={false}
+      />,
+    );
+    await waitFor(() => {
+      const active = [...view.container.querySelectorAll<HTMLImageElement>(
+        '[data-markdown-image-state="loading"] img',
+      )];
+      expect(active).toHaveLength(MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS);
+      for (const image of active) {
+        expect(image.src).toContain(newProjectId);
+        expect(image.src).not.toContain(oldProjectId);
+      }
+    });
+  });
+
+  it("blocks inline image data and preserves descriptive placeholder access", () => {
+    const { container } = render(
+      <ResponseMarkdown
+        content="![Inline chart](data:image/png;base64,iVBORw0KGgo=)"
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+      />,
+    );
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector('[src^="data:image/"]')).toBeNull();
+    expect(screen.getByRole("img", { name: "Inline chart" }))
+      .toHaveTextContent("Inline chart (image unavailable)");
   });
 
   it("preserves interactive code state across an equivalent parent render", () => {

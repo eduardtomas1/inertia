@@ -8,6 +8,11 @@ import {
 } from "../../src/renderer/src/components/FilesPanel";
 import type { WorkspaceEntry } from "../../src/shared/contracts";
 
+const FILES_PROJECT = {
+  projectRoot: "/work/project",
+  projectId: "11111111-1111-4111-8111-111111111111",
+} as const;
+
 const ROOT_ENTRIES: WorkspaceEntry[] = [
   { path: "src", kind: "directory" },
   { path: "README.md", kind: "file" },
@@ -58,6 +63,7 @@ describe("FilesPanel root refresh", () => {
     });
     render(
       <FilesPanel
+        {...FILES_PROJECT}
         entries={ROOT_ENTRIES}
         preview={null}
         selectedPath={null}
@@ -123,6 +129,7 @@ describe("FilesPanel root refresh", () => {
     });
     const view = render(
       <FilesPanel
+        {...FILES_PROJECT}
         entries={ROOT_ENTRIES}
         preview={null}
         selectedPath={null}
@@ -150,6 +157,7 @@ describe("FilesPanel root refresh", () => {
 
     view.rerender(
       <FilesPanel
+        {...FILES_PROJECT}
         entries={[...ROOT_ENTRIES]}
         preview={null}
         selectedPath={null}

@@ -188,8 +188,8 @@ describe("Minimal Workstream activity lines", () => {
 
   it("uses semantic warning/failure lines without card backgrounds or large alert rows", () => {
     const important = cssBlock(
-      css,
-      ".turn-work-log .agent-activity.is-important,\n.turn-work-log > .agent-activity.is-failed {",
+      baseCss,
+      ".turn-work-log > .agent-activity.is-failed {",
     );
     const warning = cssBlock(
       css,

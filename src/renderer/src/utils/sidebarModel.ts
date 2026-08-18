@@ -247,7 +247,12 @@ export function sortSidebarThreadViews(
         - Number(Boolean(a.conversation.pinnedAt))
       || statusPriority[a.status] - statusPriority[b.status]
       || Number(b.unread) - Number(a.unread)
-      || b.conversation.updatedAt.localeCompare(a.conversation.updatedAt)
+      || (
+        a.status === "working" && b.status === "working"
+          ? (b.run?.startedAt ?? b.conversation.createdAt)
+              .localeCompare(a.run?.startedAt ?? a.conversation.createdAt)
+          : b.conversation.updatedAt.localeCompare(a.conversation.updatedAt)
+      )
       || a.conversation.id.localeCompare(b.conversation.id)
     ));
 }

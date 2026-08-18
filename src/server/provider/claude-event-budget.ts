@@ -216,7 +216,11 @@ function structuredReadMedia(
   ) {
     throw new Error("Claude sent oversized tool-result media.");
   }
-  if (decodedBytes !== file.originalSize) {
+  // Claude can resize/optimize image data before placing it in `base64`, while
+  // `originalSize` continues to describe the source file. PDFs have no such
+  // transformed representation in the SDK contract, so retain the exact-size
+  // invariant for that topology and fail closed if it drifts.
+  if (result.type === "pdf" && decodedBytes !== file.originalSize) {
     throw new Error("Claude sent inconsistent tool-result media metadata.");
   }
   return {

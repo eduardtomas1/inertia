@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -257,7 +257,12 @@ function gifDataSubBlocks(options: {
 }
 
 async function temporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "inertia-workspace-image-"));
+  // macOS exposes its temporary directory through the `/var` -> `/private/var`
+  // system alias. The runtime path authority returns canonical paths, so keep
+  // these direct resolver fixtures faithful to that production contract.
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "inertia-workspace-image-")),
+  );
   temporaryDirectories.push(directory);
   return directory;
 }

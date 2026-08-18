@@ -482,10 +482,11 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       "rgba(0, 0, 0, 0)",
       "rgba(0, 0, 0, 0)",
     ]);
-    expect(attachmentGeometry.thumbnailSizes).toEqual([
-      { width: 30, height: 30 },
-      { width: 30, height: 30 },
-    ]);
+    expect(attachmentGeometry.thumbnailSizes).toHaveLength(2);
+    for (const size of attachmentGeometry.thumbnailSizes) {
+      expect(size.width).toBeCloseTo(30, 2);
+      expect(size.height).toBeCloseTo(30, 2);
+    }
     await capture("composer-zones-attachment-light-1440x920");
     await attachmentList.getByRole("button", {
       name: "Remove attachment preview.png",

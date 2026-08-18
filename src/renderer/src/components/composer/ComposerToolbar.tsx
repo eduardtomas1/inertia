@@ -25,9 +25,10 @@ import {
   modelSelectionUsesFastMode,
   routeSupportsNativeFastModeIdentity,
 } from "../../../../shared/model-routing";
-import type {
-  ComposerFollowUpState,
-  ComposerPrimaryActionState,
+import {
+  supportsActiveParentFollowUp,
+  type ComposerFollowUpState,
+  type ComposerPrimaryActionState,
 } from "../../utils/composerPrimaryAction";
 import type { ComposerModelRoute } from "../../utils/modelChooserRoutes";
 import type { ModelSearchRoute } from "../../utils/modelSearch";
@@ -175,6 +176,9 @@ export function ComposerToolbar({
   onSubmit,
   onStop,
 }: ComposerToolbarProps): React.JSX.Element {
+  const canAttachWhileRunning = supportsActiveParentFollowUp(
+    latestTurn?.harnessId ?? null,
+  );
   const {
     menu,
     toggleMenu,
@@ -186,12 +190,12 @@ export function ComposerToolbar({
     <div className="composer-toolbar" data-composer-zone="controls">
       <div className="composer-tools">
         <IconButton
-          label="Attach images or documents"
+          label={running ? "Attach follow-up images" : "Attach images or documents"}
           onClick={() => void onChooseAttachments()}
           disabled={
             disabled
             || primaryAction === "submitting"
-            || running
+            || (running && !canAttachWhileRunning)
             || attachmentCount >= MAX_CHAT_ATTACHMENTS
           }
         >

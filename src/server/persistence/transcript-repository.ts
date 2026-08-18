@@ -129,6 +129,7 @@ export class TranscriptRepository {
     content: string,
     createdAt?: string,
     acknowledgedAt?: string,
+    attachments: readonly ChatAttachment[] = [],
   ): ChatMessage {
     const conversation = this.context.requireConversation(conversationId);
     const turn = agentTurnFromRow(this.context.requireAgentTurn(turnId));
@@ -147,7 +148,7 @@ export class TranscriptRepository {
       turnId,
       role: "user",
       content,
-      attachments: [],
+      attachments: rendererSafeAttachments(attachments),
       createdAt: submittedAt,
     };
     this.context.database.transaction(() => {
@@ -155,8 +156,11 @@ export class TranscriptRepository {
         INSERT INTO messages (
           id, conversation_id, turn_id, role, content,
           attachments_json, created_at
-        ) VALUES (@id, @conversationId, @turnId, 'user', @content, '[]', @createdAt)
-      `).run(message);
+        ) VALUES (@id, @conversationId, @turnId, 'user', @content, @attachmentsJson, @createdAt)
+      `).run({
+        ...message,
+        attachmentsJson: JSON.stringify(message.attachments),
+      });
       this.context.database.prepare(`
         UPDATE conversations
         SET updated_at = MAX(updated_at, ?),

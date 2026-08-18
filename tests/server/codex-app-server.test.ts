@@ -1640,7 +1640,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         steered = true;
         void manager.steer(
           event.conversationId,
-          "Include the edge case.",
+          { content: "Include the edge case.", imagePaths: ["/durable/follow-up.png"] },
           { runId: event.runId, turnId: event.turnId! },
         );
       },
@@ -1673,11 +1673,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       params: {
         threadId: "thread-new",
         expectedTurnId: "turn-1",
-        input: [{
-          type: "text",
-          text: "Include the edge case.",
-          text_elements: [],
-        }],
+        input: [
+          { type: "text", text: "Include the edge case.", text_elements: [] },
+          { type: "localImage", path: "/durable/follow-up.png" },
+        ],
       },
     });
   });

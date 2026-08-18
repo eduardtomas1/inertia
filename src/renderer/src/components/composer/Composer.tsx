@@ -3,7 +3,7 @@ import {
 } from "react";
 import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
-import { MAX_CHAT_ATTACHMENTS } from "@shared/attachments";
+import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import { fastModeProviderValue, legacyProviderIdForHarness,
   routeSupportsNativeFastModeIdentity, withModelSelectionFastMode,
@@ -17,7 +17,6 @@ import {
 } from "../../utils/modelChooserRoutes";
 import { resolveModelRouteTransition } from "../../utils/modelRouteTransition";
 import { buildComposerTurnRequest } from "../../utils/requestContext";
-import { mergeComposerAttachments } from "../../utils/composerAttachments";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
   composerFollowUpState,
@@ -48,6 +47,7 @@ import {
 } from "../../utils/composerPrefill";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
+import { composerAttachmentActions } from "./composerAttachmentActions";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -363,8 +363,21 @@ export const Composer = memo(function Composer({
   ]);
 
   useEffect(() => {
+    attachmentAuthorityRef.current += 1;
     if (running) {
       dismissMenu("context-change");
+      const retainedImages = attachmentsRef.current.filter(
+        ({ mimeType }) => chatAttachmentKind(mimeType) === "image",
+      );
+      for (const attachment of attachmentsRef.current) {
+        if (chatAttachmentKind(attachment.mimeType) !== "image") {
+          void releaseAttachmentRef.current(attachment.id);
+        }
+      }
+      if (retainedImages.length !== attachmentsRef.current.length) {
+        attachmentsRef.current = retainedImages;
+        setAttachments(() => retainedImages);
+      }
       if (submissionReleaseTimerRef.current !== null) {
         window.clearTimeout(submissionReleaseTimerRef.current);
         submissionReleaseTimerRef.current = null;
@@ -549,7 +562,7 @@ export const Composer = memo(function Composer({
     setSubmitting(true);
     try {
       await onSend(
-        request.visibleContent,
+        running ? request.visibleContent || attachmentFallback : request.visibleContent,
         submittedAttachments,
         request.context,
         running ? [] : selectedSkillIds,
@@ -676,67 +689,23 @@ export const Composer = memo(function Composer({
     }
   };
 
-  const addAttachments = (incoming: readonly ChatAttachment[]): void => {
-    const merged = mergeComposerAttachments(attachmentsRef.current, incoming);
-    const changed = merged.attachments.length !== attachmentsRef.current.length
-      || merged.attachments.some(
-        ({ id }, index) => id !== attachmentsRef.current[index]?.id,
-      );
-    if (changed) markEditorChanged();
-    attachmentsRef.current = merged.attachments;
-    setAttachments(merged.attachments);
-    for (const attachment of merged.rejected) {
-      void onReleaseAttachment(attachment.id);
-    }
-  };
-
-  const removeAttachment = (attachment: ChatAttachment): void => {
-    if (!attachmentsRef.current.some(({ id }) => id === attachment.id)) return;
-    markEditorChanged();
-    const next = attachmentsRef.current.filter(({ id }) => id !== attachment.id);
-    attachmentsRef.current = next;
-    setAttachments(next);
-    void onReleaseAttachment(attachment.id);
-  };
-
-  const chooseAttachments = async () => {
-    if (submittingRef.current || disabled || sending || running) return;
-    const authority = attachmentAuthorityRef.current;
-    const attachmentConversationId = conversation.id;
-    const selected = await onChooseAttachments();
-    if (
-      !mountedRef.current
-      || attachmentAuthorityRef.current !== authority
-      || conversationIdRef.current !== attachmentConversationId
-    ) {
-      for (const attachment of selected) {
-        void releaseAttachmentRef.current(attachment.id);
-      }
-      return;
-    }
-    addAttachments(selected);
-  };
-
-  const importAttachments = async (files: File[]) => {
-    if (submittingRef.current || disabled || sending || running) return;
-    const authority = attachmentAuthorityRef.current;
-    const attachmentConversationId = conversation.id;
-    const remaining = Math.max(0, MAX_CHAT_ATTACHMENTS - attachmentsRef.current.length);
-    const candidates = files.slice(0, remaining);
-    if (candidates.length === 0) return;
-    const selected = await onImportAttachments(candidates);
-    if (
-      !mountedRef.current
-      || attachmentAuthorityRef.current !== authority
-      || conversationIdRef.current !== attachmentConversationId
-    ) {
-      for (const attachment of selected) {
-        void releaseAttachmentRef.current(attachment.id);
-      }
-      return;
-    }
-    addAttachments(selected);
-  };
+  const { chooseAttachments, importAttachments, removeAttachment } =
+    composerAttachmentActions({
+      attachmentAuthorityRef,
+      attachmentsRef,
+      blocked: disabled || sending,
+      conversationId: conversation.id,
+      conversationIdRef,
+      harnessId: latestTurn?.harnessId ?? null,
+      markEditorChanged,
+      mountedRef,
+      onChooseAttachments,
+      onImportAttachments,
+      releaseAttachmentRef,
+      running,
+      setAttachments,
+      submittingRef,
+    });
 
   const routeState = useMemo(() => resolveComposerRouteState({
     conversationProviderId: conversation.providerId,
@@ -762,7 +731,10 @@ export const Composer = memo(function Composer({
     : selectedProvider
       ? `${providerIdentityLabels?.[selectedProvider.id] ?? selectedProvider.label} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
       : conversation.modelSelection.backendProfileDisplayName;
-  const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached file." : selectedPreviewUrlRef.current ? "Please inspect the current preview." : "Please review the selected diff context.")).length;
+  const attachmentFallback = running
+    ? "Please inspect the attached image."
+    : "Please inspect the attached file.";
+  const composedLength = (message.trim() || (attachments.length > 0 ? attachmentFallback : selectedPreviewUrlRef.current ? "Please inspect the current preview." : "Please review the selected diff context.")).length;
   const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
   const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected)
@@ -792,9 +764,9 @@ export const Composer = memo(function Composer({
   const followUpState = composerFollowUpState({
     running,
     harnessId: latestTurn?.harnessId ?? null,
-    hasDraft: Boolean(message.trim()),
+    hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:
-      attachments.length === 0
+      attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
       && !promptContext
       && !previewContextSelected
       && fileReferences.length === 0

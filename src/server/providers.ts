@@ -54,6 +54,7 @@ import {
   type ProviderRunCallbacks,
   type ProviderRunInput,
   type ProviderRunResult,
+  type ProviderSteerInput,
 } from "./provider/contracts";
 import { detectProvider, detectProviders } from "./provider/discovery";
 import {
@@ -825,7 +826,7 @@ export class ProviderManager {
 
   async steer(
     conversationId: string,
-    content: string,
+    input: ProviderSteerInput,
     identity: { runId: string; turnId: string },
   ): Promise<boolean> {
     const active = this.activeRuns.get(conversationId);
@@ -842,7 +843,7 @@ export class ProviderManager {
       : undefined;
     if (!steer) return false;
     try {
-      return await steer(content);
+      return await steer(input);
     } catch {
       return false;
     }

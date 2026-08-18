@@ -110,6 +110,16 @@ export type ProviderRunInput = ProviderRunRequest &
     | { threadId: string; conversationId?: never }
   );
 
+/**
+ * Privileged input for one parent-turn follow-up. Local image paths never
+ * cross the runtime/renderer boundary and are valid only for the exact live
+ * provider run that admitted them.
+ */
+export interface ProviderSteerInput {
+  content: string;
+  imagePaths: readonly string[];
+}
+
 export type ProviderRunStatus =
   | "starting"
   | "running"

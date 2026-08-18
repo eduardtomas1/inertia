@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseAttachmentPickerMode,
   parseOpenProjectPathRequest,
   parsePrivateConnectDeviceUpdateRequest,
   parsePrivateConnectPairingApprovalRequest,
@@ -37,6 +38,17 @@ describe("desktop project-path contract", () => {
     }
     expect(parseOpenProjectPathRequest({ ...request, action: "open" })).toBeNull();
     expect(parseOpenProjectPathRequest({ ...request, absolutePath: "/tmp/renderer-controlled" })).toBeNull();
+  });
+});
+
+describe("desktop attachment picker contract", () => {
+  it("keeps image-only follow-up selection explicit and fail-closed", () => {
+    expect(parseAttachmentPickerMode(undefined)).toBe("all");
+    expect(parseAttachmentPickerMode("all")).toBe("all");
+    expect(parseAttachmentPickerMode("images")).toBe("images");
+    for (const value of [null, "documents", { mode: "images" }, ["images"]]) {
+      expect(parseAttachmentPickerMode(value)).toBeNull();
+    }
   });
 });
 

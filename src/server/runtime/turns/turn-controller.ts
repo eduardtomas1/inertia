@@ -9,6 +9,7 @@ import {
   type AgentTurn,
   type AgentTurnStatus,
   type AgentTurnTerminalStatus,
+  type ChatAttachment,
   type ChatMessage,
   type SubagentTrace,
 } from "../../../shared/contracts";
@@ -17,9 +18,11 @@ import type {
   ProviderEvent,
   ProviderRunFailure,
   ProviderRunResult,
+  ProviderSteerInput,
 } from "../../provider/contracts";
 import type {
   ActiveTurn,
+  FollowUpAdmissionLease,
   QueuedTurn,
   QueueTurnRequest,
   TurnControllerHooks,
@@ -55,6 +58,7 @@ import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
 import { providerFailureCause } from "./turn-provider-result";
+import { TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
 
 interface ProviderStartAttempt {
   accepted: boolean;
@@ -98,6 +102,7 @@ export class TurnController {
   private readonly settlementTasks = new Set<Promise<unknown>>();
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
   private readonly providerRunOwnershipBarriers = new Map<string, Promise<void>>();
+  private readonly followUps: TurnFollowUpCoordinator;
   private readonly nativeGoalMutations = new TurnNativeGoalMutationGate();
   private closing = false;
 
@@ -123,6 +128,13 @@ export class TurnController {
     this.turnTimeoutMs = Math.max(1, options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
     this.runtimeGenerationId = options.runtimeGenerationId ?? `${randomUUID()}:1`;
     this.systemBootId = options.systemBootId ?? `test:${randomUUID()}`;
+    this.followUps = new TurnFollowUpCoordinator({
+      store: this.store,
+      providers: this.providers,
+      now: () => this.now(),
+      activeForConversation: (conversationId) =>
+        this.activeByConversation.get(conversationId),
+    });
     this.activities = new TurnActivityProjection({
       store: this.store,
       hooks: this.hooks,
@@ -843,32 +855,20 @@ export class TurnController {
     return this.settle(active, "failed", "turn-start-failed", message);
   }
 
+  acquireFollowUpAdmission(conversationId: string): FollowUpAdmissionLease | null {
+    return this.followUps.acquire(this.activeByConversation.get(conversationId));
+  }
   async steer(
-    conversationId: string,
-    content: string,
+    lease: FollowUpAdmissionLease,
+    input: ProviderSteerInput,
+    attachments: readonly ChatAttachment[] = [],
+    onProviderAcknowledged?: () => void,
   ): Promise<ChatMessage | null> {
-    const active = this.activeByConversation.get(conversationId);
-    const followUp = content.trim();
-    if (
-      !active
-      || active.settled
-      || !active.acceptingProviderEvents
-      || !followUp
-      || !this.providers.steer
-    ) return null;
-    const submittedAt = this.now();
-    const accepted = await this.providers.steer(
-      conversationId,
-      followUp,
-      { runId: active.turn.runId, turnId: active.turn.id },
-    );
-    if (!accepted) return null;
-    return this.store.createAcknowledgedFollowUpMessage(
-      conversationId,
-      active.turn.id,
-      followUp,
-      submittedAt,
-      this.now(),
+    return this.followUps.steer(
+      lease,
+      input,
+      attachments,
+      onProviderAcknowledged,
     );
   }
 
@@ -1159,6 +1159,7 @@ export class TurnController {
   }
 
   private async releaseTurnAttachments(active: ActiveTurn): Promise<void> {
+    await this.followUps.drain(active);
     if (
       active.attachmentsReleased
       || (

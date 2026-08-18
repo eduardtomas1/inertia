@@ -26,6 +26,7 @@ import type {
   ProviderRunCallbacks,
   ProviderRunInput,
   ProviderRunResult,
+  ProviderSteerInput,
 } from "../../provider/contracts";
 import type { HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
 import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
@@ -70,7 +71,7 @@ export interface TurnProviderRuntime {
   ): boolean;
   steer?(
     conversationId: string,
-    content: string,
+    input: ProviderSteerInput,
     identity: { runId: string; turnId: string },
   ): Promise<boolean>;
   setGoal?(
@@ -233,6 +234,11 @@ export interface ActiveTurn {
   nativeGoalStartAcknowledgement: NativeGoalStartAcknowledgement | null;
   attachmentsReleased: boolean;
   attachmentRelease: Promise<void> | null;
+  /** Exact follow-up admissions that must drain before attachment cleanup. */
+  followUpAdmissions: Set<Promise<void>>;
+  /** FIFO admission tail for parent follow-ups on this exact active turn. */
+  followUpAdmissionTail: Promise<void>;
+  supportsFollowUpImages: boolean;
   acceptingProviderEvents: boolean;
   settled: boolean;
   sessionAfter: string | null;
@@ -255,4 +261,15 @@ export interface ActiveTurn {
   approvalIds: Set<string>;
   inputIds: Set<string>;
   onSettled?: QueueTurnRequest["onSettled"];
+}
+
+export interface FollowUpAdmissionLease {
+  readonly conversationId: string;
+  readonly runId: string;
+  readonly turnId: string;
+  readonly supportsImages: boolean;
+  readonly submittedAt: string;
+  readonly ready: Promise<void>;
+  /** Idempotent; every acquired lease must be released. */
+  release(): void;
 }

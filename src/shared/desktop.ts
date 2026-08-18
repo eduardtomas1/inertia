@@ -103,6 +103,18 @@ export interface DesktopAttachment {
   size: number;
 }
 
+export type AttachmentPickerMode = "all" | "images";
+
+export function parseAttachmentPickerMode(
+  value: unknown,
+): AttachmentPickerMode | null {
+  return value === undefined || value === "all"
+    ? "all"
+    : value === "images"
+      ? "images"
+      : null;
+}
+
 export interface AttachmentImport {
   name: string;
   /** Renderer-declared only; the privileged boundary verifies it against bytes and extension. */
@@ -343,7 +355,9 @@ export interface DesktopBridge {
   installAppUpdate: () => Promise<AppUpdateStatus>;
   /** Receives sanitized authoritative updater snapshots. */
   onAppUpdateStatus: (listener: (status: AppUpdateStatus) => void) => () => void;
-  selectAttachments: () => Promise<DesktopAttachment[]>;
+  selectAttachments: (
+    mode?: AttachmentPickerMode,
+  ) => Promise<DesktopAttachment[]>;
   importAttachments: (files: AttachmentImport[]) => Promise<DesktopAttachment[]>;
   /** Pins one exact send request across the renderer/runtime IPC handoff. */
   prepareAttachmentHandoff: (request: {

@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { extname } from "node:path";
 
 import {
   query as claudeQuery,
@@ -38,6 +36,11 @@ import { providerFailureMessage } from "./adapters";
 import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import {
+  claudePrompt,
+  claudePromptReservationBytes,
+  normalizedClaudeFollowUp,
+} from "./claude-prompt";
+import {
   CLAUDE_ISOLATED_SKILL_SETTINGS,
   claudePluginLoadedSelectedSkills,
   stageClaudeSkillPlugin,
@@ -58,7 +61,6 @@ import { clampProviderPercent, providerTimestamp } from "./usage-values";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_INPUT_QUESTIONS = 4;
 const MAX_INPUT_OPTIONS = 4;
 const MAX_RUN_EVENTS = 8_192;
@@ -565,8 +567,19 @@ function startClaudeRun(
       const promptText = options.input.operation?.kind === "compact"
         ? `/compact${compactInstruction ? ` ${compactInstruction}` : ""}`
         : options.input.prompt;
-      const prompt = await claudePrompt(promptText, options.input.imagePaths ?? []);
-      if (!promptChannel.push(prompt)) {
+      const initialImagePaths = options.input.imagePaths ?? [];
+      const promptReservation = promptChannel.reserve(
+        claudePromptReservationBytes(promptText, initialImagePaths.length > 0),
+      );
+      if (!promptReservation) return finishResult("cancelled");
+      let prompt: SDKUserMessage;
+      try {
+        prompt = await claudePrompt(promptText, initialImagePaths);
+      } catch (error) {
+        promptChannel.release(promptReservation);
+        throw error;
+      }
+      if (!promptChannel.push(prompt, promptReservation)) {
         return finishResult("cancelled");
       }
       const selectedClaudeSkills = (options.input.skills ?? []).filter(
@@ -879,7 +892,9 @@ function startClaudeRun(
       // process. The public result below awaits this same memoized attempt
       // after protocol streams and selected-skill resources are closed.
       ownedProcess.requestTermination(true);
-      promptChannel.close();
+      // No consumer survives terminal query cleanup. Discard any admitted
+      // input so retained base64 media and its reservations are released.
+      promptChannel.cancel();
       cancelPending();
       delegateLifecycle.dispose();
       try { query?.close(); } catch { /* The SDK process may already be closed. */ }
@@ -992,14 +1007,25 @@ function startClaudeRun(
       kind: "claude-agent-sdk",
       respondToApproval: settleApproval,
       respondToInput: settleInput,
-      steer: async (content) => {
-        const followUp = claudeTextFollowUp(content);
-        const accepted = Boolean(
-          acceptingFollowUps
-          && !cancelRequested
-          && followUp
-          && promptChannel.push(followUp),
+      steer: async (input) => {
+        const text = normalizedClaudeFollowUp(input.content);
+        if (!text || !acceptingFollowUps || cancelRequested) return false;
+        const reservation = promptChannel.reserve(
+          claudePromptReservationBytes(text, input.imagePaths.length > 0),
         );
+        if (!reservation) return false;
+        let followUp: SDKUserMessage;
+        try {
+          followUp = await claudePrompt(text, input.imagePaths);
+        } catch (error) {
+          promptChannel.release(reservation);
+          throw error;
+        }
+        if (!acceptingFollowUps || cancelRequested) {
+          promptChannel.release(reservation);
+          return false;
+        }
+        const accepted = promptChannel.push(followUp, reservation);
         if (accepted) acceptedFollowUp = true;
         return accepted;
       },
@@ -1046,44 +1072,6 @@ async function emitClaudeModelMetadata(
     if (mapped.length > 0) emit({ type: "metadata", metadata: { models: mapped }, source: "provider", complete: true });
   } finally {
     if (timer) clearTimeout(timer);
-  }
-}
-
-async function claudePrompt(prompt: string, imagePaths: readonly string[]): Promise<SDKUserMessage> {
-  const content: Array<Record<string, unknown>> = [];
-  let imageBytes = 0;
-  for (const path of imagePaths) {
-    const mediaType = imageMediaType(path);
-    if (!mediaType) throw new Error(`Claude does not support the attached image type: ${extname(path) || "unknown"}.`);
-    const data = await readFile(path);
-    imageBytes += data.byteLength;
-    if (imageBytes > MAX_IMAGE_BYTES) throw new Error("Claude image attachments exceed the 20 MB safety limit.");
-    content.push({ type: "image", source: { type: "base64", media_type: mediaType, data: data.toString("base64") } });
-  }
-  content.push({ type: "text", text: prompt });
-  return { type: "user", message: { role: "user", content } as unknown as SDKUserMessage["message"], parent_tool_use_id: null };
-}
-
-function claudeTextFollowUp(content: string): SDKUserMessage | null {
-  const text = content.replaceAll("\0", "").trim();
-  if (!text) return null;
-  return {
-    type: "user",
-    message: {
-      role: "user",
-      content: [{ type: "text", text }],
-    } as unknown as SDKUserMessage["message"],
-    parent_tool_use_id: null,
-  };
-}
-
-function imageMediaType(path: string): "image/jpeg" | "image/png" | "image/gif" | "image/webp" | undefined {
-  switch (extname(path).toLowerCase()) {
-    case ".jpg": case ".jpeg": return "image/jpeg";
-    case ".png": return "image/png";
-    case ".gif": return "image/gif";
-    case ".webp": return "image/webp";
-    default: return undefined;
   }
 }
 

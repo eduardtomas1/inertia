@@ -274,11 +274,13 @@ function startOpenCodeRun(
     compactsAutomatically: null,
   };
   const eventState: OpenCodeEventState = { retainedPartChars: 0 };
+  const pendingFollowUps = new Set<Promise<boolean>>();
   let sessionId = options.input.sessionId;
   let client: OpencodeClient | undefined;
   let child: ChildProcessWithoutNullStreams | undefined;
   let terminateOwnedRun: OwnedProcessTreeTermination | undefined;
   let cancelRequested = false;
+  let acceptingFollowUps = false;
   let terminalError: string | undefined;
   let cancelOwnedRun: (force: boolean) => void = () => {};
   let cancelForceTimer: NodeJS.Timeout | undefined;
@@ -493,6 +495,7 @@ function startOpenCodeRun(
         messageId: null,
         startedAt: null,
       };
+      let sessionIdleObserved = false;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
         onActivity: armEventInactivityDeadline,
         onEvent: (event) => handleOpenCodeEvent(
@@ -509,10 +512,24 @@ function startOpenCodeRun(
           eventState,
           failInteraction,
         ),
-        isDone: (event) => compacting
-          ? event.type === "session.error"
-            || completesRequestedOpenCodeCompaction(event, manualCompaction)
-          : event.type === "session.idle" || event.type === "session.error",
+        isDone: async (event) => {
+          if (compacting) {
+            return event.type === "session.error"
+              || completesRequestedOpenCodeCompaction(event, manualCompaction);
+          }
+          if (event.type === "session.error") return true;
+          if (event.type !== "session.idle") return false;
+          sessionIdleObserved = true;
+          acceptingFollowUps = false;
+          const admissions = [...pendingFollowUps];
+          if (admissions.length === 0) return true;
+          const receipts = await Promise.allSettled(admissions);
+          const admitted = receipts.some((receipt) =>
+            receipt.status === "fulfilled" && receipt.value);
+          if (!admitted || cancelRequested || terminalError) return true;
+          acceptingFollowUps = true;
+          return false;
+        },
       });
       const providerOperation = compacting
         ? (() => {
@@ -535,7 +552,10 @@ function startOpenCodeRun(
           }, { throwOnError: true });
       const completion = Promise.all([providerOperation, pump]);
       await Promise.race([providerOperation, completion, runInterrupted]);
-      if (!cancelRequested && !terminalError) emitter.status("running");
+      if (!cancelRequested && !terminalError && !sessionIdleObserved) {
+        acceptingFollowUps = true;
+        emitter.status("running");
+      }
       await Promise.race([completion, runInterrupted]);
       outcome = cancelRequested
         ? { status: "cancelled" }
@@ -553,6 +573,8 @@ function startOpenCodeRun(
             error: terminalError ?? safeError(error, serverDiagnostic(serverOutput)),
           };
     }
+    acceptingFollowUps = false;
+    await Promise.allSettled(pendingFollowUps);
     clearDeadlineTimers();
     if (cancelForceTimer) clearTimeout(cancelForceTimer);
     eventAbort.abort();
@@ -597,6 +619,7 @@ function startOpenCodeRun(
   cancelOwnedRun = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    acceptingFollowUps = false;
     clearDeadlineTimers();
     emitter.status("cancelling");
     rejectPending();
@@ -631,8 +654,84 @@ function startOpenCodeRun(
     providerId: "opencode",
     result,
     cancel: cancelOwnedRun,
-    extension: { kind: "opencode-sdk", respondToApproval: settleApproval, respondToInput: settleInput },
+    extension: {
+      kind: "opencode-sdk",
+      respondToApproval: settleApproval,
+      respondToInput: settleInput,
+      steer: async (input) => {
+        const activeClient = client;
+        const activeSessionId = sessionId;
+        const text = input.content.replaceAll("\0", "").trim();
+        if (
+          !acceptingFollowUps
+          || cancelRequested
+          || !activeClient
+          || !activeSessionId
+          || !text
+        ) return false;
+        const id = randomUUID();
+        const files = input.imagePaths.map((path) => ({
+          uri: pathToFileURL(path).href,
+          name: path.split(/[\\/]/u).at(-1),
+        }));
+        const followUp = (async (): Promise<boolean> => {
+          try {
+            const response = await withOpenCodeRequestDeadline(
+              deadlines.initializationTimeoutMs,
+              "Timed out waiting for OpenCode to admit the follow-up.",
+              async (signal) => await activeClient.v2.session.prompt({
+                sessionID: activeSessionId,
+                id,
+                delivery: "steer",
+                prompt: {
+                  text,
+                  ...(files.length > 0 ? { files } : {}),
+                },
+              }, { signal, throwOnError: true }),
+              eventAbort.signal,
+            );
+            return exactOpenCodeSteerReceipt(
+              response.data,
+              id,
+              activeSessionId,
+              text,
+              files.map(({ uri }) => uri),
+            );
+          } catch {
+            return false;
+          }
+        })();
+        pendingFollowUps.add(followUp);
+        try {
+          return await followUp;
+        } finally {
+          pendingFollowUps.delete(followUp);
+        }
+      },
+    },
   };
+}
+
+export function exactOpenCodeSteerReceipt(
+  value: unknown,
+  id: string,
+  sessionId: string,
+  text: string,
+  fileUris: readonly string[],
+): boolean {
+  const envelope = objectValue(value);
+  const receipt = objectValue(envelope?.data);
+  const prompt = objectValue(receipt?.prompt);
+  const files = Array.isArray(prompt?.files) ? prompt.files : [];
+  if (
+    receipt?.id !== id
+    || receipt.sessionID !== sessionId
+    || receipt.delivery !== "steer"
+    || prompt?.text !== text
+    || files.length !== fileUris.length
+  ) return false;
+  return files.every((file, index) =>
+    objectValue(file)?.uri === fileUris[index]);
 }
 
 function completesRequestedOpenCodeCompaction(
@@ -677,7 +776,7 @@ async function pumpOpenCodeEvents(
   handlers: {
     onActivity: () => void;
     onEvent: (event: Event) => void;
-    isDone: (event: Event) => boolean;
+    isDone: (event: Event) => boolean | Promise<boolean>;
   },
 ): Promise<void> {
   const eventBudget = new ProviderRunEventBudget(
@@ -691,7 +790,7 @@ async function pumpOpenCodeEvents(
     if (openCodeEventSessionId(event) !== sessionId) continue;
     handlers.onActivity();
     handlers.onEvent(event);
-    if (handlers.isDone(event)) return;
+    if (await handlers.isDone(event)) return;
   }
   throw new Error("OpenCode closed its event stream before the session completed.");
 }

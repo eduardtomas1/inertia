@@ -1713,6 +1713,10 @@ describe("Claude Agent SDK harness", () => {
   it("queues an active parent follow-up on the same Query and stops an exact live task", async () => {
     const root = portableFixtureRoot("Claude SDK active follow-up");
     roots.push(root);
+    const followUpImage = join(root, "follow-up.png");
+    writeFileSync(followUpImage, Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]));
     const prompts: SDKUserMessage[] = [];
     const stoppedTaskIds: string[] = [];
     let releaseStop!: () => void;
@@ -1773,7 +1777,10 @@ describe("Claude Agent SDK harness", () => {
         if (event.status !== "running" || followUpAccepted) return;
         followUpAccepted = manager.steer(
           event.conversationId,
-          "Check the second condition too.",
+          {
+            content: "Check the second condition too.",
+            imagePaths: [followUpImage],
+          },
           { runId: event.runId, turnId: event.turnId! },
         );
       },
@@ -1801,7 +1808,17 @@ describe("Claude Agent SDK harness", () => {
         ?.text ?? "");
     expect(prompts.map(promptText)).toEqual([
       "Start delegated work",
-      "Check the second condition too.",
+      "",
+    ]);
+    expect(prompts[1]?.message.content).toEqual([
+      expect.objectContaining({
+        type: "image",
+        source: expect.objectContaining({
+          type: "base64",
+          media_type: "image/png",
+        }),
+      }),
+      { type: "text", text: "Check the second condition too." },
     ]);
   });
 
@@ -1867,7 +1884,7 @@ describe("Claude Agent SDK harness", () => {
     await initialPromptRead;
     await expect(manager.steer(
       "claude-stop-queued-follow-up",
-      "Run another tool after this response.",
+      { content: "Run another tool after this response.", imagePaths: [] },
       {
         runId: "claude-stop-queued-run",
         turnId: "claude-stop-queued-turn",

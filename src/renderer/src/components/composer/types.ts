@@ -17,6 +17,7 @@ import type {
   WorkspaceEntry,
 } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
+import type { AttachmentPickerMode } from "@shared/desktop";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import type { ChatGoalControlProps } from "../ChatGoalControl";
 import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
@@ -73,7 +74,9 @@ export interface ComposerProps {
     selection: ModelSelection,
     options?: { prefillText?: string },
   ) => Promise<void>;
-  onChooseAttachments: () => Promise<ChatAttachment[]>;
+  onChooseAttachments: (
+    mode?: AttachmentPickerMode,
+  ) => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onReleaseAttachment: (id: string) => Promise<void>;
   onRunAction: (action: ProjectAction) => void;

@@ -39,6 +39,7 @@ import type {
   ProviderGoalMutation,
   ProviderGoalSnapshot,
   ProviderRunFailure,
+  ProviderSteerInput,
 } from "../provider/contracts";
 import { providerProcessInvocation } from "../provider/process";
 import {
@@ -607,8 +608,8 @@ export function startCodexAppServerRun(
     });
   });
 
-  const steer = async (content: string): Promise<boolean> => {
-    const text = content.replaceAll("\0", "").trim();
+  const steer = async (input: ProviderSteerInput): Promise<boolean> => {
+    const text = input.content.replaceAll("\0", "").trim();
     if (
       !text
       || settled
@@ -620,7 +621,10 @@ export function startCodexAppServerRun(
     try {
       await request("turn/steer", {
         threadId: providerThreadId,
-        input: [{ type: "text", text, text_elements: [] }],
+        input: [
+          { type: "text", text, text_elements: [] },
+          ...input.imagePaths.map((path) => ({ type: "localImage", path })),
+        ],
         expectedTurnId: activeTurnId,
       }, undefined, false);
       return true;

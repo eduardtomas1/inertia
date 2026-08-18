@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatAttachment } from "@shared/contracts";
 import type { PreviewBounds, PreviewState } from "@shared/desktop";
+import type { AttachmentPickerMode } from "@shared/desktop";
 import {
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
@@ -84,9 +85,9 @@ export function useDesktopTools({
   }, [previewContextId, previewOwnerId]);
 
   const chooseComposerAttachments = useCallback(
-    async (): Promise<ChatAttachment[]> => {
+    async (mode: AttachmentPickerMode = "all"): Promise<ChatAttachment[]> => {
       try {
-        return await window.inertia.selectAttachments();
+        return await window.inertia.selectAttachments(mode);
       } catch (error) {
         setActionError(
           error instanceof Error

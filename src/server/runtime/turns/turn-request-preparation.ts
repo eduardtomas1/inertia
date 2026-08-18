@@ -113,6 +113,21 @@ export function resolveTurnRequest(
       })
     : routeSelection;
   const route = dependencies.providers.resolveModelRoute(routeSelection);
+  const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
+  const exactModel = routeSelection.modelId === "provider-default"
+    ? exactProvider?.models.find(({ isDefault }) => isDefault)
+      ?? exactProvider?.models[0]
+    : exactProvider?.models.find(({ id }) => id === routeSelection.modelId);
+  const usesNativeCatalog = route.backendProfile.source === "built-in"
+    && route.backendProfile.id === nativeBackendProfile(route.providerId).id;
+  const externalImageCapability = routeSelection.capabilities.find(
+    ({ id }) => id === "images",
+  );
+  const supportsImages = usesNativeCatalog
+    ? exactModel?.inputModalities.includes("image") === true
+    : externalImageCapability !== undefined
+      && externalImageCapability.state !== "unknown"
+      && externalImageCapability.state !== "unavailable";
   const expectedFastMode = route.providerId === "codex"
     ? "priority"
     : route.providerId === "claude"
@@ -125,21 +140,6 @@ export function resolveTurnRequest(
     ? expectedFastMode
     : null;
   if ((request.generatedAttachmentPaths?.length ?? 0) > 0) {
-    const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
-    const exactModel = routeSelection.modelId === "provider-default"
-      ? exactProvider?.models.find(({ isDefault }) => isDefault)
-        ?? exactProvider?.models[0]
-      : exactProvider?.models.find(({ id }) => id === routeSelection.modelId);
-    const usesNativeCatalog = route.backendProfile.source === "built-in"
-      && route.backendProfile.id === nativeBackendProfile(route.providerId).id;
-    const externalImageCapability = routeSelection.capabilities.find(
-      ({ id }) => id === "images",
-    );
-    const supportsImages = usesNativeCatalog
-      ? exactModel?.inputModalities.includes("image") === true
-      : externalImageCapability !== undefined
-        && externalImageCapability.state !== "unknown"
-        && externalImageCapability.state !== "unavailable";
     if (!supportsImages) {
       throw new Error(
         "The selected model cannot inspect scanned PDF page images.",
@@ -277,6 +277,9 @@ export function resolveTurnRequest(
           nativeGoalStartAcknowledgement: null,
           attachmentsReleased: false,
           attachmentRelease: null,
+          followUpAdmissions: new Set<Promise<void>>(),
+          followUpAdmissionTail: Promise.resolve(),
+          supportsFollowUpImages: Boolean(supportsImages),
           acceptingProviderEvents: true,
           settled: false,
           sessionAfter: canResume ? conversation.providerSessionId : null,

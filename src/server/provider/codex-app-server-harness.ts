@@ -63,19 +63,28 @@ function codexServiceTier(
     : undefined;
 }
 
-export function createCodexAppServerHarness(): AgentHarness {
+export interface CodexAppServerHarnessDependencies {
+  withControlClient?: typeof withCodexControlClient;
+}
+
+export function createCodexAppServerHarness(
+  dependencies: CodexAppServerHarnessDependencies = {},
+): AgentHarness {
   return {
     id: "codex-app-server",
     providerId: "codex",
     capabilities: CODEX_APP_SERVER_HARNESS_CAPABILITIES,
     supports: (input) => input.providerId === "codex",
-    start: startCodexRun,
+    start: (options) => startCodexRun(options, dependencies),
   };
 }
 
-function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
+function startCodexRun(
+  options: AgentHarnessStartOptions,
+  dependencies: CodexAppServerHarnessDependencies,
+): AgentHarnessRun {
   if (options.input.operation?.kind === "compact") {
-    return startCodexCompaction(options);
+    return startCodexCompaction(options, dependencies);
   }
   const providerId = "codex" as const;
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
@@ -257,6 +266,7 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
 
 function startCodexCompaction(
   options: AgentHarnessStartOptions,
+  dependencies: CodexAppServerHarnessDependencies,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId
     ?? options.input.threadId
@@ -303,7 +313,7 @@ function startCodexCompaction(
         );
         completionTimer.unref();
       });
-      await withCodexControlClient({
+      await (dependencies.withControlClient ?? withCodexControlClient)({
         executable: options.executable,
         environment: options.environment,
         cwd: options.input.cwd,

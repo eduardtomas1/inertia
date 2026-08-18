@@ -186,6 +186,94 @@ afterEach(() => {
 });
 
 describe("compact Work sidebar", () => {
+  it("does not reshuffle working rows when providers publish activity updates", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const conversations = [
+      conversation("codex-running", "Codex running", new Date(2026, 7, 11, 9), {
+        providerId: "codex",
+        status: "running",
+      }),
+      conversation("claude-running", "Claude running", new Date(2026, 7, 11, 10), {
+        providerId: "claude",
+        status: "running",
+      }),
+      conversation("opencode-running", "OpenCode running", new Date(2026, 7, 11, 11), {
+        providerId: "opencode",
+        status: "running",
+      }),
+    ];
+    const runs = conversations.map((entry, index): WorkspaceRun => ({
+      id: `run-${entry.id}`,
+      kind: "agent",
+      projectId: entry.projectId,
+      conversationId: entry.id,
+      actionId: null,
+      label: entry.title,
+      detail: null,
+      status: "running",
+      attentionState: "acknowledged",
+      canStop: true,
+      port: null,
+      startedAt: new Date(2026, 7, 11, 9 + index).toISOString(),
+      finishedAt: null,
+    }));
+    const view = renderSidebar(conversations, vi.fn(), runs);
+    const rowState = () => {
+      const work = screen.getByRole("list", { name: "Work" });
+      const rows = within(work).getAllByRole("listitem");
+      return {
+        identities: rows.map((row) => row.getAttribute("data-sidebar-motion-id")),
+        positions: rows.map((row) => row.getAttribute("aria-posinset")),
+      };
+    };
+
+    expect(rowState()).toEqual({
+      identities: [
+        "thread:opencode-running",
+        "thread:claude-running",
+        "thread:codex-running",
+      ],
+      positions: ["1", "2", "3"],
+    });
+
+    const noisyActivityUpdates = conversations.map((entry, index) => ({
+      ...entry,
+      updatedAt: new Date(2026, 7, 11, 15 - index).toISOString(),
+    }));
+    view.rerenderSnapshot(snapshot(noisyActivityUpdates, runs));
+    expect(rowState()).toEqual({
+      identities: [
+        "thread:opencode-running",
+        "thread:claude-running",
+        "thread:codex-running",
+      ],
+      positions: ["1", "2", "3"],
+    });
+
+    const approvalConversation = {
+      ...noisyActivityUpdates[1]!,
+      status: "needs-input" as const,
+      attentionKind: "approval" as const,
+    };
+    const waitingRuns = runs.map((run) => run.conversationId === approvalConversation.id
+      ? { ...run, status: "waiting" as const }
+      : run);
+    view.rerenderSnapshot(snapshot([
+      noisyActivityUpdates[0]!,
+      approvalConversation,
+      noisyActivityUpdates[2]!,
+    ], waitingRuns));
+    expect(rowState()).toEqual({
+      identities: [
+        "thread:claude-running",
+        "thread:opencode-running",
+        "thread:codex-running",
+      ],
+      positions: ["1", "2", "3"],
+    });
+  });
+
   it("opens Daily work from the footer above Usage and Settings", () => {
     const view = renderSidebar([]);
     const footerButtons = within(view.container.querySelector(".sidebar-footer")!)

@@ -333,6 +333,160 @@ describe("work-first chat model", () => {
     ]);
   });
 
+  it("keeps mixed-provider working chats stable while activity timestamps change", () => {
+    const entries = [
+      conversation({
+        id: "codex-working",
+        projectId: "p",
+        providerId: "codex",
+        status: "running",
+        createdAt: "2026-07-23T08:00:00.000Z",
+        updatedAt: "2026-07-23T12:00:00.000Z",
+      }),
+      conversation({
+        id: "claude-working",
+        projectId: "p",
+        providerId: "claude",
+        status: "running",
+        createdAt: "2026-07-23T08:01:00.000Z",
+        updatedAt: "2026-07-23T12:01:00.000Z",
+      }),
+      conversation({
+        id: "opencode-working",
+        projectId: "p",
+        providerId: "opencode",
+        status: "running",
+        createdAt: "2026-07-23T08:02:00.000Z",
+        updatedAt: "2026-07-23T12:02:00.000Z",
+      }),
+    ];
+    const runs = [
+      workspaceRun("codex-working", {
+        status: "running",
+        startedAt: "2026-07-23T09:00:00.000Z",
+        finishedAt: null,
+      }),
+      workspaceRun("claude-working", {
+        status: "running",
+        startedAt: "2026-07-23T10:00:00.000Z",
+        finishedAt: null,
+      }),
+      workspaceRun("opencode-working", {
+        status: "running",
+        startedAt: "2026-07-23T11:00:00.000Z",
+        finishedAt: null,
+      }),
+    ];
+    const orderedIds = (
+      conversations: readonly Conversation[],
+      workspaceRuns: readonly WorkspaceRun[],
+    ) => sortActivityThreads(conversations, null, workspaceRuns)
+      .map(({ conversation: entry }) => entry.id);
+
+    expect(orderedIds(entries, runs)).toEqual([
+      "opencode-working",
+      "claude-working",
+      "codex-working",
+    ]);
+
+    const noisyActivityUpdates = entries.map((entry, index) => ({
+      ...entry,
+      updatedAt: [
+        "2026-07-23T15:00:00.000Z",
+        "2026-07-23T14:00:00.000Z",
+        "2026-07-23T13:00:00.000Z",
+      ][index]!,
+    }));
+    expect(orderedIds(noisyActivityUpdates, runs)).toEqual([
+      "opencode-working",
+      "claude-working",
+      "codex-working",
+    ]);
+
+    const cursor = conversation({
+      id: "cursor-working",
+      projectId: "p",
+      providerId: "cursor",
+      status: "running",
+      createdAt: "2026-07-23T08:03:00.000Z",
+      updatedAt: "2026-07-23T12:03:00.000Z",
+    });
+    const cursorRun = workspaceRun(cursor.id, {
+      status: "running",
+      startedAt: "2026-07-23T12:00:00.000Z",
+      finishedAt: null,
+    });
+    expect(orderedIds([...noisyActivityUpdates, cursor], [...runs, cursorRun]))
+      .toEqual([
+        "cursor-working",
+        "opencode-working",
+        "claude-working",
+        "codex-working",
+      ]);
+
+    const meaningfulConversationChanges = [
+      noisyActivityUpdates[0]!,
+      {
+        ...noisyActivityUpdates[1]!,
+        status: "needs-input" as const,
+        attentionKind: "approval" as const,
+      },
+      noisyActivityUpdates[2]!,
+      cursor,
+    ];
+    const meaningfulRunChanges = [
+      runs[0]!,
+      {
+        ...runs[1]!,
+        status: "waiting" as const,
+      },
+      {
+        ...runs[2]!,
+        status: "succeeded" as const,
+        attentionState: "acknowledged" as const,
+        finishedAt: "2026-07-23T11:30:00.000Z",
+      },
+      cursorRun,
+    ];
+    expect(orderedIds(meaningfulConversationChanges, meaningfulRunChanges))
+      .toEqual([
+        "claude-working",
+        "cursor-working",
+        "codex-working",
+        "opencode-working",
+      ]);
+  });
+
+  it("uses shell creation time and conversation id for working chats without a run", () => {
+    const entries = [
+      conversation({
+        id: "alpha",
+        projectId: "p",
+        status: "running",
+        createdAt: "2026-07-23T09:00:00.000Z",
+        updatedAt: "2026-07-23T15:00:00.000Z",
+      }),
+      conversation({
+        id: "gamma",
+        projectId: "p",
+        status: "running",
+        createdAt: "2026-07-23T10:00:00.000Z",
+        updatedAt: "2026-07-23T14:00:00.000Z",
+      }),
+      conversation({
+        id: "beta",
+        projectId: "p",
+        status: "running",
+        createdAt: "2026-07-23T10:00:00.000Z",
+        updatedAt: "2026-07-23T13:00:00.000Z",
+      }),
+    ];
+
+    expect(sortActivityThreads(entries, null).map(({ conversation: entry }) => (
+      entry.id
+    ))).toEqual(["beta", "gamma", "alpha"]);
+  });
+
   it("groups calm work by local day while keeping stale urgent work visible", () => {
     const now = new Date(2026, 7, 11, 12).getTime();
     const entries = [

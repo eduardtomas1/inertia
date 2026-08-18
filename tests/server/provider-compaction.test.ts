@@ -71,16 +71,12 @@ describe.sequential("provider compaction adapters", () => {
   it("uses Codex App Server compaction and waits for its completion item", async () => {
     const root = portableFixtureRoot("Codex compact");
     roots.push(root);
-    const capturePath = join(root, "capture.jsonl");
     const command = process.execPath;
     writeNodeSubcommand(root, "app-server", `
-const fs = require("node:fs");
 const readline = require("node:readline");
-const capture = (value) => fs.appendFileSync(${JSON.stringify(capturePath)}, JSON.stringify(value) + "\\n");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
-  capture(message);
   if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fixture" } });
   if (message.method === "initialized") return;
   if (message.method === "thread/resume") return send({ id: message.id, result: { thread: { id: message.params.threadId } } });
@@ -89,6 +85,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ method: "item/started", params: { threadId: message.params.threadId, turnId: "compact-turn-1", startedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
     return send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: "compact-turn-1", completedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
   }
+  return send({ id: 9999, method: "fixture/reject-unexpected-request", params: { method: message.method } });
 });
 `);
     const manager = trackManager(
@@ -108,11 +105,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       instructionForwarded: false,
       message: expect.stringContaining("was not forwarded"),
     });
-    const messages = readFileSync(capturePath, "utf8").trim().split("\n")
-      .map((line) => JSON.parse(line) as { method: string });
-    expect(messages.some(({ method }) => method === "thread/compact/start"))
-      .toBe(true);
-    expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
   });
 
   it.each([

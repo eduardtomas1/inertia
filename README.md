@@ -174,13 +174,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.35
+### Version 0.0.36
 
-This focused release keeps Standard Codex requests working with current Codex App Server versions, which identify normal processing with the canonical `default` service-tier attestation. New conversations, continuations, and native compaction accept that truthful Standard response without weakening provider verification.
+This release adds guarded in-app updates to eligible packages. Inertia verifies package capability, update metadata, signatures or AppImage replaceability, active privileged work, and the native handoff before installation; development, unsigned Windows, and ad-hoc macOS builds keep the manual browser flow.
 
-Fast mode still requires the exact priority-tier attestation. Claude keeps its separate exact on/off verification, and providers without native response-speed controls do not invent them.
+Daily Work now summarizes the selected local day with settled runtime, tokens, providers, and navigable conversations. Persisted chat defaults stay visible across restarts, the prompt index adopts a compact Codex-style rail, and real agent states use the exact Beautiful UI motion contract with reduced-motion and bundle-budget safeguards.
 
-Download [Inertia v0.0.35](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.35):
+Download [Inertia v0.0.36](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.36):
 
 | Platform | Download |
 | --- | --- |

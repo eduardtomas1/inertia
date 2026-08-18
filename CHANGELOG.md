@@ -4,6 +4,30 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.36 — 2026-08-18
+
+### Updates install only when the package can prove they are safe
+
+- Update-capable packages can now check, download, cancel, retry, report progress, and restart into a verified release. Real release AppImages opt in after replaceability checks; Windows and macOS opt in only with complete Authenticode or Developer ID signing and notarization. Development, unsigned Windows, and ad-hoc macOS builds retain the manual browser flow.
+- Installation waits for provider runtimes, terminals, database recovery, and durable Private Connect work to release privileged ownership before Electron hands off to the native updater. Ambiguous shutdown, filesystem, signing, or handoff state fails closed instead of risking live work.
+- Exact-tag publishing now validates update metadata, package digests, blockmaps, and the complete cross-platform asset union before publication. Draft reuse cannot overwrite or silently replace an asset, `SHA256SUMS.txt` covers the public set, and build provenance attests that same verified union.
+
+### Daily work and conversation navigation stay clear
+
+- A lazy Daily Work dashboard summarizes the selected local day with settled runtime and token totals, provider breakdowns, and navigable conversation cards. Work crossing midnight is clipped to the requested day, older conversations with work today remain visible, and active turns appear without being counted as settled.
+- New-chat defaults now show the persisted provider, model, and reasoning choices truthfully across restarts, including explicit provider and model defaults when no override is stored.
+- The in-chat prompt index uses a compact Codex-style line rail with progressive neighbor expansion while preserving stable targets, keyboard navigation, virtualization, tooltips, screen-reader labels, reduced motion, and forced-colors behavior.
+
+### Agent activity uses the Beautiful UI motion contract
+
+- Loading, reasoning, streamed answers and citations, approval paging, tool disclosures, task rows, prompt suggestions, context cards, diff filtering, connected plan rows, changed files, and usage insights now carry the matching Beautiful UI durations, easing, blur, transforms, shimmer, stagger, loader sequences, and chart interpolation on real Inertia state.
+- The approval surface is a keyboard-native multi-question pager that preserves answers, while counted diff filters and insight charts remain tied to authoritative application data. All 20 referenced primitives are mapped to existing workflows; showcase-only behavior that would require invented runtime data remains deliberately omitted.
+- Motion honors the operating system's reduced-motion preference and stays code-split with the response timeline so the renderer entry bundle remains inside its enforced budget.
+
+### Release confidence
+
+- Architecture and both lint layers, all TypeScript projects, more than 3,600 unit and integration tests, portable provider contracts, focused renderer and Electron scenarios, production audits, bundle budgets, package smoke, Electron fuses, and exact-head Linux, macOS, and Windows gates protect the release.
+
 ## 0.0.35 — 2026-08-14
 
 ### Standard Codex requests remain standard

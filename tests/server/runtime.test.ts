@@ -572,7 +572,7 @@ process.exit(child.status ?? 1);
     send(client.socket, {
       type: "settings.update",
       requestId: settingsRequestId,
-      payload: { theme: "dark", compactSidebar: true, terminalFontSize: 15 },
+      payload: { theme: "dark", colorTheme: "iris", compactSidebar: true, terminalFontSize: 15 },
     });
     const settingsResult = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
@@ -582,7 +582,7 @@ process.exit(child.status ?? 1);
     const settingsSnapshot = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated",
     );
-    expect(settingsSnapshot.snapshot.settings).toMatchObject({ theme: "dark", compactSidebar: true, terminalFontSize: 15 });
+    expect(settingsSnapshot.snapshot.settings).toMatchObject({ theme: "dark", colorTheme: "iris", compactSidebar: true, terminalFontSize: 15 });
 
     const projectRequestId = randomUUID();
     send(client.socket, {

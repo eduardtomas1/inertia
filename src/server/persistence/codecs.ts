@@ -352,6 +352,7 @@ function keybindingsFromJson(value: string): AppSettings["keybindings"] {
 export function settingsFromState(state: StateRow): AppSettings {
   return {
     theme: state.theme,
+    colorTheme: state.color_theme,
     compactSidebar: state.compact_sidebar === 1,
     showTimestamps: state.show_timestamps === 1,
     terminalFontSize: state.terminal_font_size,

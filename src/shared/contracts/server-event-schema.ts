@@ -5,10 +5,7 @@ import {
   pullRequestCapabilityStateCoherent,
   runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent,
 } from "./server-event-discriminants";
-import {
-  APP_SHORTCUT_KEYS,
-  DEFAULT_APP_KEYBINDINGS,
-} from "../keybindings";
+import { APP_SHORTCUT_KEYS, DEFAULT_APP_KEYBINDINGS } from "../keybindings";
 import { continuationIdentitySchema, modelSelectionSchema } from "../model-routing";
 import {
   modelBackendDefaultSchema,
@@ -27,6 +24,7 @@ import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { usageDashboardSchema } from "./usage-dashboard-schema";
 import { dailyWorkDashboardSchema } from "./daily-work-schema";
 import { providerFastModeField } from "./provider-fast-mode-schema";
+import { COLOR_THEME_IDS } from "./app";
 type UnknownRecord = Record<string, unknown>;
 
 function record(value: unknown): value is UnknownRecord {
@@ -348,6 +346,7 @@ function appSettings(value: unknown): boolean {
   const strings = ["defaultModel", "defaultReasoningEffort", "codexBinaryPath"];
   const enums = {
     theme: ["system", "light", "dark"],
+    colorTheme: COLOR_THEME_IDS,
     defaultProvider: ["codex", "claude", "cursor", "opencode"],
     defaultAccessMode: ["supervised", "auto-edit", "full"],
     newThreadMode: ["local", "worktree"],

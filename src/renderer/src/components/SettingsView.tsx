@@ -3,7 +3,6 @@ import {
   ArchiveRestore,
   Activity,
   Bot,
-  Check,
   Copy,
   Database,
   Download,
@@ -12,7 +11,6 @@ import {
   GitCompareArrows,
   Keyboard,
   Laptop,
-  Moon,
   PanelLeft,
   RefreshCw,
   RotateCcw,
@@ -38,7 +36,6 @@ import {
   type ProviderInfo,
   type ProviderMaintenanceOperation,
   type ProviderMaintenanceProviderId,
-  type ThemePreference,
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
 import type { AppHealthSnapshot, AppUpdateStatus } from "@shared/desktop";
@@ -58,6 +55,7 @@ import {
   prefetchSettingsSection,
 } from "./settingsSectionLoaders";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import { ThemeLibrary } from "./ThemeLibrary";
 
 export type SettingsViewProps = {
   target?: {
@@ -115,12 +113,6 @@ export type SettingsViewProps = {
 };
 
 type SettingsSection = "general" | "providers" | "backends" | "connections" | "source" | "keybindings" | "archive";
-
-const themes: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
-  { value: "system", label: "System", icon: Laptop },
-  { value: "light", label: "Light", icon: Sun },
-  { value: "dark", label: "Dark", icon: Moon },
-];
 
 const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> = [
   { id: "general", label: "General", icon: PanelLeft },
@@ -472,10 +464,8 @@ export function SettingsView({
         {section === "general" && (
           <>
             <section className="settings-card" aria-labelledby="appearance-heading">
-              <div className="settings-card-heading"><div><Sun size={18} /></div><span><h3 id="appearance-heading">Appearance</h3><p>Choose a theme and a coherent scale for the whole interface.</p></span></div>
-              <div className="theme-options" role="radiogroup" aria-label="Theme">
-                {themes.map((theme) => { const ThemeIcon = theme.icon; return <button type="button" role="radio" aria-checked={settings.theme === theme.value} className={clsx("theme-option", settings.theme === theme.value && "is-active")} disabled={disabled} key={theme.value} onClick={() => onUpdate({ theme: theme.value })}><ThemeIcon size={18} /><span>{theme.label}</span>{settings.theme === theme.value && <Check size={15} />}</button>; })}
-              </div>
+              <div className="settings-card-heading"><div><Sun size={18} /></div><span><h3 id="appearance-heading">Appearance</h3><p>Choose an appearance mode, then make the whole workbench feel like yours.</p></span></div>
+              <ThemeLibrary settings={settings} disabled={disabled} onUpdate={onUpdate} />
               <div className="response-density-setting interface-scale-setting">
                 <span><strong>Interface scale</strong><small>Scale navigation, messages, controls, files, and diffs live. Terminal text stays independent.</small></span>
                 <div role="radiogroup" aria-label="Interface scale">

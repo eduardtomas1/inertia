@@ -19,6 +19,7 @@ import {
   type DatabaseMigrationDefinition,
 } from "./catalog";
 import { conversationWorktreeOwnershipMigration } from "./conversation-worktree-ownership";
+import { persistColorTheme } from "./color-theme";
 import { durableDataMigrationDefinitions } from "./durable-data";
 import { protectCancellingDuoDeletion, protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
@@ -296,7 +297,6 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
             conversation.id,
           );
         }
-
         const updateTurn = database.prepare(`
           UPDATE agent_turns
           SET model_selection_json = ?,
@@ -1225,6 +1225,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           WHERE usage_start_json IS NOT NULL;
         `,
       },
+      persistColorTheme,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

@@ -2,10 +2,12 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(
-  new URL("../../src/renderer/src/styles.css", import.meta.url),
-  "utf8",
-).replace(/\r\n?/gu, "\n");
+const css = [
+  "../../src/renderer/src/styles.css",
+  "../../src/renderer/public/color-themes.css",
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
+  .join("\n")
+  .replace(/\r\n?/gu, "\n");
 
 type Rgb = readonly [number, number, number];
 
@@ -47,10 +49,19 @@ function contrast(foreground: string, background: string): number {
     / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
 }
 
-function themeTokens(theme: "light" | "dark"): Map<string, string> {
+function themeTokens(
+  theme: "light" | "dark",
+  colorTheme: "inertia" | "grove" | "ocean" | "ember" | "iris" = "inertia",
+): Map<string, string> {
   const tokens = hexTokens(cssBlock(":root"));
   if (theme === "dark") {
     for (const [name, value] of hexTokens(cssBlock(':root[data-theme="dark"]'))) {
+      tokens.set(name, value);
+    }
+  }
+  if (colorTheme !== "inertia") {
+    const selector = `:root[data-theme="${theme}"][data-color-theme="${colorTheme}"]`;
+    for (const [name, value] of hexTokens(cssBlock(selector))) {
       tokens.set(name, value);
     }
   }
@@ -58,6 +69,31 @@ function themeTokens(theme: "light" | "dark"): Map<string, string> {
 }
 
 describe("visual contrast system", () => {
+  it.each([
+    ["grove", "light"],
+    ["grove", "dark"],
+    ["ocean", "light"],
+    ["ocean", "dark"],
+    ["ember", "light"],
+    ["ember", "dark"],
+    ["iris", "light"],
+    ["iris", "dark"],
+  ] as const)("keeps the %s %s palette readable", (colorTheme, theme) => {
+    const tokens = themeTokens(theme, colorTheme);
+    const surfaces = ["app-bg", "surface", "surface-strong", "surface-muted"];
+    for (const foregroundName of ["text", "text-soft", "text-muted", "accent"]) {
+      for (const backgroundName of surfaces) {
+        expect(contrast(
+          tokens.get(foregroundName)!,
+          tokens.get(backgroundName)!,
+        ), `${colorTheme} ${theme} --${foregroundName} on --${backgroundName}`)
+          .toBeGreaterThanOrEqual(foregroundName === "accent" ? 3 : 4.5);
+      }
+    }
+    expect(contrast(tokens.get("accent-text")!, tokens.get("accent")!))
+      .toBeGreaterThanOrEqual(4.5);
+  });
+
   it("uses the readable application typography scale for Git file metadata", () => {
     for (const selector of [
       ".change-file-status",

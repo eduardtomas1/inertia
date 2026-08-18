@@ -49,7 +49,13 @@ import {
   routeWorkspaceRunPreview,
 } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
-import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
+import {
+  cacheColorTheme,
+  cacheThemePreference,
+  cachedColorTheme,
+  cachedThemePreference,
+  nextQuickTheme,
+} from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { planFromText } from "./utils/planFromText";
@@ -152,10 +158,12 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.settings ?? {
       ...defaultSettings,
       theme: cachedThemePreference(window.localStorage) ?? defaultSettings.theme,
+      colorTheme: cachedColorTheme(window.localStorage)
+        ?? defaultSettings.colorTheme,
     },
     [connection.snapshot?.settings],
   );
-  useTheme(settings.theme);
+  useTheme(settings.theme, settings.colorTheme);
 
   useEffect(() => {
     const preference = connection.snapshot?.settings.theme;
@@ -163,6 +171,12 @@ export default function App(): React.JSX.Element {
     cacheThemePreference(window.localStorage, preference);
     void window.inertia.syncThemePreference(preference).catch(() => undefined);
   }, [connection.snapshot?.settings.theme]);
+
+  useEffect(() => {
+    const colorTheme = connection.snapshot?.settings.colorTheme;
+    if (!colorTheme) return;
+    cacheColorTheme(window.localStorage, colorTheme);
+  }, [connection.snapshot?.settings.colorTheme]);
 
   useEffect(() => {
     applyInterfaceScale(settings.interfaceScale);
@@ -1043,6 +1057,7 @@ export default function App(): React.JSX.Element {
         provider: authProvider,
         status: connection.status,
         theme: settings.theme,
+        colorTheme: settings.colorTheme,
         fontSize: settings.terminalFontSize,
         sendCommand,
         subscribe: connection.subscribe,

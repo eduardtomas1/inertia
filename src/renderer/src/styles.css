@@ -9412,43 +9412,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: var(--surface-muted);
 }
 
-.theme-options {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.theme-option {
-  position: relative;
-  display: flex;
-  min-height: 66px;
-  align-items: center;
-  gap: 9px;
-  padding: 0 13px;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  color: var(--text-soft);
-  background: var(--surface-strong);
-  font-size: 10px;
-  font-weight: 590;
-}
-
-.theme-option:hover {
-  border-color: var(--border-strong);
-  color: var(--text);
-  background: var(--surface-hover);
-}
-
-.theme-option.is-active {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  color: var(--text);
-  background: var(--accent-soft);
-}
-
-.theme-option svg:last-child {
-  margin-left: auto;
-  color: var(--accent);
-}
 
 .settings-rows {
   overflow: visible;
@@ -10379,13 +10342,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     display: none;
   }
 
-  .theme-options {
-    grid-template-columns: 1fr;
-  }
-
-  .theme-option {
-    min-height: 46px;
-  }
+  .color-theme-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   .settings-card {
     padding: 16px;
@@ -13397,7 +13354,8 @@ button.sent-attachment-open:focus-visible {
 }
 
 .settings-navigation nav button,
-.theme-option,
+.appearance-mode-option,
+.color-theme-option,
 .response-density-setting button {
   min-height: var(--ui-control-height);
   font-size: var(--ui-font-secondary);

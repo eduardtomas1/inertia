@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 import { ChevronDown, Columns2, Maximize2, MessagesSquare, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
 import type {
   ClientCommand,
+  ColorThemeId,
   ProviderTerminalResumeAvailability,
   ProviderTerminalResumeDescriptor,
   ServerEvent,
@@ -26,6 +27,7 @@ type TerminalPanelProps = {
   status: ConnectionStatus;
   fontSize: number;
   theme: ThemePreference;
+  colorTheme?: ColorThemeId;
   sendCommand: (command: ClientCommand) => Promise<ServerEvent>;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   actionId?: string | null;
@@ -80,6 +82,7 @@ function TerminalSession({
   status,
   fontSize,
   theme,
+  colorTheme,
   sendCommand,
   subscribe,
   actionId,
@@ -256,7 +259,7 @@ function TerminalSession({
     update();
     if (theme === "system") media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
-  }, [fontSize, theme]);
+  }, [colorTheme, fontSize, theme]);
 
   useEffect(() => {
     if (!visible) return;

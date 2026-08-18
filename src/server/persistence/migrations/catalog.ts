@@ -1,7 +1,7 @@
 import type { DatabaseMigration } from "./runner";
 
 export const LEGACY_SCHEMA_MIGRATION_COUNT = 17;
-export const CURRENT_DATABASE_SCHEMA_VERSION = 58;
+export const CURRENT_DATABASE_SCHEMA_VERSION = 59;
 
 export type DatabaseMigrationDefinition = Omit<DatabaseMigration, "version">;
 

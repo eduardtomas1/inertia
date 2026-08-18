@@ -22,6 +22,9 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 
 type LifecycleScenario =
   | "resume"
+  | "resume-rejected-steer"
+  | "resume-stuck-steer"
+  | "idle-before-prompt-receipt"
   | "compact"
   | "compact-stale"
   | "compact-equal-timestamp"
@@ -83,8 +86,13 @@ const server = http.createServer((req, res) => {
     if (url.pathname === "/session/" + sessionID && req.method !== "GET") return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
+      if (scenario === "idle-before-prompt-receipt") {
+        setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 10);
+        setTimeout(() => json(res, undefined, 204), 50);
+        return;
+      }
       json(res, undefined, 204);
-      if (scenario === "resume") setTimeout(() => {
+      if (["resume", "resume-rejected-steer", "resume-stuck-steer"].includes(scenario)) setTimeout(() => {
         sendEvent({ type: "session.idle", properties: { sessionID: "stale-session" } });
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "text", sessionID, messageID: "assistant", type: "text", text: "Resumed OpenCode response" } } });
@@ -107,14 +115,21 @@ const server = http.createServer((req, res) => {
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/prompt") {
-      return json(res, { data: {
+      if (scenario === "resume-stuck-steer") return;
+      setTimeout(() => json(res, { data: {
         admittedSeq: 2,
         id: parsed.id,
         sessionID,
         prompt: parsed.prompt,
-        delivery: parsed.delivery,
+        delivery: scenario === "resume-rejected-steer" ? "queue" : parsed.delivery,
         timeCreated: Date.now(),
-      } });
+      } }), 50);
+      if (scenario === "resume") setTimeout(() => {
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "follow-up-assistant", sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "follow-up-text", sessionID, messageID: "follow-up-assistant", type: "text", text: "Follow-up OpenCode response" } } });
+        sendEvent({ type: "session.idle", properties: { sessionID } });
+      }, 75);
+      return;
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/compact") {
       json(res, undefined, 204);
@@ -710,7 +725,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     })).resolves.toMatchObject({
       status: "completed",
       sessionId: "opencode-lifecycle-session",
-      text: "Resumed OpenCode response",
+      text: "Resumed OpenCode responseFollow-up OpenCode response",
     });
     await expect(followUp).resolves.toBe(true);
     const { captured } = JSON.parse(readFileSync(capturePath, "utf8")) as { captured: Array<{ method: string; path: string; body?: Record<string, unknown> }> };
@@ -727,6 +742,117 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
         },
       });
   });
+
+  it("does not advertise a running session after idle beats the prompt receipt", async () => {
+    const root = portableFixtureRoot("OpenCode early idle");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "idle-before-prompt-receipt"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const statuses: string[] = [];
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-early-idle",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onStatus: ({ status }) => statuses.push(status),
+    })).resolves.toMatchObject({
+      status: "completed",
+      sessionId: "opencode-lifecycle-session",
+    });
+    expect(statuses).not.toContain("running");
+  });
+
+  it("finishes after an in-flight steer receipt is rejected at idle", async () => {
+    const root = portableFixtureRoot("OpenCode rejected steer");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "resume-rejected-steer"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let followUp: Promise<boolean> | null = null;
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-rejected-steer",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || followUp) return;
+        followUp = manager.steer(event.conversationId, {
+          content: "Do not admit this follow-up.",
+          imagePaths: [],
+        }, { runId: event.runId, turnId: event.turnId! });
+      },
+    })).resolves.toMatchObject({ status: "completed" });
+    await expect(followUp).resolves.toBe(false);
+  });
+
+  it("cancels within the force deadline while a steer receipt is pending", async () => {
+    const root = portableFixtureRoot("OpenCode pending steer cancellation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "resume-stuck-steer"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let followUp: Promise<boolean> | null = null;
+    let cancel!: () => void;
+    const cancelRequested = new Promise<void>((resolve) => { cancel = resolve; });
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-pending-steer-cancel",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || followUp) return;
+        followUp = manager.steer(event.conversationId, {
+          content: "Hold this follow-up.",
+          imagePaths: [],
+        }, { runId: event.runId, turnId: event.turnId! });
+        expect(manager.cancel(event.conversationId)).toBe(true);
+        cancel();
+      },
+    });
+
+    await cancelRequested;
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    await expect(followUp).resolves.toBe(false);
+  }, 10_000);
 
   it("uses the native v2 compaction endpoint and waits for its completion event", async () => {
     const root = portableFixtureRoot("OpenCode compact");

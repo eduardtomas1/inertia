@@ -274,6 +274,7 @@ function startOpenCodeRun(
     compactsAutomatically: null,
   };
   const eventState: OpenCodeEventState = { retainedPartChars: 0 };
+  const pendingFollowUps = new Set<Promise<boolean>>();
   let sessionId = options.input.sessionId;
   let client: OpencodeClient | undefined;
   let child: ChildProcessWithoutNullStreams | undefined;
@@ -494,6 +495,7 @@ function startOpenCodeRun(
         messageId: null,
         startedAt: null,
       };
+      let sessionIdleObserved = false;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
         onActivity: armEventInactivityDeadline,
         onEvent: (event) => handleOpenCodeEvent(
@@ -510,10 +512,24 @@ function startOpenCodeRun(
           eventState,
           failInteraction,
         ),
-        isDone: (event) => compacting
-          ? event.type === "session.error"
-            || completesRequestedOpenCodeCompaction(event, manualCompaction)
-          : event.type === "session.idle" || event.type === "session.error",
+        isDone: async (event) => {
+          if (compacting) {
+            return event.type === "session.error"
+              || completesRequestedOpenCodeCompaction(event, manualCompaction);
+          }
+          if (event.type === "session.error") return true;
+          if (event.type !== "session.idle") return false;
+          sessionIdleObserved = true;
+          acceptingFollowUps = false;
+          const admissions = [...pendingFollowUps];
+          if (admissions.length === 0) return true;
+          const receipts = await Promise.allSettled(admissions);
+          const admitted = receipts.some((receipt) =>
+            receipt.status === "fulfilled" && receipt.value);
+          if (!admitted || cancelRequested || terminalError) return true;
+          acceptingFollowUps = true;
+          return false;
+        },
       });
       const providerOperation = compacting
         ? (() => {
@@ -536,7 +552,7 @@ function startOpenCodeRun(
           }, { throwOnError: true });
       const completion = Promise.all([providerOperation, pump]);
       await Promise.race([providerOperation, completion, runInterrupted]);
-      if (!cancelRequested && !terminalError) {
+      if (!cancelRequested && !terminalError && !sessionIdleObserved) {
         acceptingFollowUps = true;
         emitter.status("running");
       }
@@ -558,6 +574,7 @@ function startOpenCodeRun(
           };
     }
     acceptingFollowUps = false;
+    await Promise.allSettled(pendingFollowUps);
     clearDeadlineTimers();
     if (cancelForceTimer) clearTimeout(cancelForceTimer);
     eventAbort.abort();
@@ -657,30 +674,38 @@ function startOpenCodeRun(
           uri: pathToFileURL(path).href,
           name: path.split(/[\\/]/u).at(-1),
         }));
-        try {
-          const response = await withOpenCodeRequestDeadline(
-            deadlines.initializationTimeoutMs,
-            "Timed out waiting for OpenCode to admit the follow-up.",
-            async (signal) => await activeClient.v2.session.prompt({
-              sessionID: activeSessionId,
+        const followUp = (async (): Promise<boolean> => {
+          try {
+            const response = await withOpenCodeRequestDeadline(
+              deadlines.initializationTimeoutMs,
+              "Timed out waiting for OpenCode to admit the follow-up.",
+              async (signal) => await activeClient.v2.session.prompt({
+                sessionID: activeSessionId,
+                id,
+                delivery: "steer",
+                prompt: {
+                  text,
+                  ...(files.length > 0 ? { files } : {}),
+                },
+              }, { signal, throwOnError: true }),
+              eventAbort.signal,
+            );
+            return exactOpenCodeSteerReceipt(
+              response.data,
               id,
-              delivery: "steer",
-              prompt: {
-                text,
-                ...(files.length > 0 ? { files } : {}),
-              },
-            }, { signal, throwOnError: true }),
-            eventAbort.signal,
-          );
-          return exactOpenCodeSteerReceipt(
-            response.data,
-            id,
-            activeSessionId,
-            text,
-            files.map(({ uri }) => uri),
-          );
-        } catch {
-          return false;
+              activeSessionId,
+              text,
+              files.map(({ uri }) => uri),
+            );
+          } catch {
+            return false;
+          }
+        })();
+        pendingFollowUps.add(followUp);
+        try {
+          return await followUp;
+        } finally {
+          pendingFollowUps.delete(followUp);
         }
       },
     },
@@ -751,7 +776,7 @@ async function pumpOpenCodeEvents(
   handlers: {
     onActivity: () => void;
     onEvent: (event: Event) => void;
-    isDone: (event: Event) => boolean;
+    isDone: (event: Event) => boolean | Promise<boolean>;
   },
 ): Promise<void> {
   const eventBudget = new ProviderRunEventBudget(
@@ -765,7 +790,7 @@ async function pumpOpenCodeEvents(
     if (openCodeEventSessionId(event) !== sessionId) continue;
     handlers.onActivity();
     handlers.onEvent(event);
-    if (handlers.isDone(event)) return;
+    if (await handlers.isDone(event)) return;
   }
   throw new Error("OpenCode closed its event stream before the session completed.");
 }

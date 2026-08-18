@@ -7,6 +7,7 @@ import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
 
 const changesSource = readFileSync(new URL("../../src/renderer/src/components/ChangesPanel.tsx", import.meta.url), "utf8");
 const composerSource = readFileSync(new URL("../../src/renderer/src/components/composer/ComposerInputZone.tsx", import.meta.url), "utf8");
+const commandMenuSource = readFileSync(new URL("../../src/renderer/src/components/composer/ComposerCommandMenu.tsx", import.meta.url), "utf8");
 const responseSource = readFileSync(new URL("../../src/renderer/src/components/ResponseMarkdown.tsx", import.meta.url), "utf8");
 const layersSource = readFileSync(new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url), "utf8");
 const styles = [
@@ -62,7 +63,7 @@ describe("Beautiful UI primitive adaptations", () => {
 
   it("animates project references and slash commands as prompt actions", () => {
     expect(composerSource).toContain('aria-label="Project files"');
-    expect(composerSource).toContain('aria-label="Composer commands"');
+    expect(commandMenuSource).toContain('aria-label="Composer commands"');
     expect(styles).toContain("animation: beautiful-pop-in 180ms cubic-bezier(0.23, 1, 0.32, 1)");
   });
 

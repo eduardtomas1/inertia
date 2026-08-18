@@ -172,7 +172,7 @@ export const Composer = memo(function Composer({
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
   const dismissCommandSurface = useCallback((
-    reason: "action" | "escape" | "owner-change",
+    reason: "action" | "escape" | "outside" | "owner-change",
   ) => {
     setCommandSurface(null);
     if (reason === "action" || reason === "escape") {
@@ -1021,7 +1021,10 @@ export const Composer = memo(function Composer({
     <div className="composer-shell">
       <section
         ref={composerRef}
-        className={clsx("composer", menu && "has-open-menu")}
+        className={clsx(
+          "composer",
+          (menu || slashMatch || commandSurface) && "has-open-menu",
+        )}
         aria-label="Message composer"
         aria-busy={
           submissionPending

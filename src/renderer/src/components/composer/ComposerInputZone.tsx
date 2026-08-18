@@ -1,5 +1,12 @@
-import type { RefObject } from "react";
-import { MessageSquarePlus, RefreshCw, X } from "lucide-react";
+import { lazy, Suspense, useState, type RefObject } from "react";
+import {
+  Box,
+  Check,
+  CircleAlert,
+  MessageSquarePlus,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import clsx from "clsx";
 import type {
   ChatAttachment,
@@ -21,11 +28,16 @@ import type { PendingModelRoute } from "./types";
 
 type RouteReadiness = ReturnType<typeof composerRouteReadiness>;
 
+const ComposerCommandMenu = lazy(async () => ({
+  default: (await import("./ComposerCommandMenu")).ComposerCommandMenu,
+}));
+
 interface ComposerSlashCommand {
   id: string;
   label: string;
   disabled: boolean;
   disabledWhileRunning: boolean;
+  section: "built-in" | "provider";
   action?: () => void;
   mode?: InteractionMode;
 }
@@ -117,23 +129,65 @@ export function ComposerInputZone({
   onUpdateConversation,
 }: ComposerInputZoneProps): React.JSX.Element {
   const slashCommands: ComposerSlashCommand[] = [
-    { id: "goal", label: "View or set this chat's goal", action: onOpenGoal, disabled: !goalAvailable, disabledWhileRunning: false },
-    { id: "resume", label: "Resume a provider chat from this folder", action: onOpenResume, disabled: false, disabledWhileRunning: false },
-    { id: "compact", label: "Compact this chat's provider context", action: onCompactCommand, disabled: false, disabledWhileRunning: true },
-    { id: "plan", label: "Plan mode", mode: "plan", disabled: false, disabledWhileRunning: true },
-    { id: "build", label: "Build mode", mode: "build", disabled: false, disabledWhileRunning: true },
+    { id: "goal", label: "View or set this chat's goal", section: "built-in", action: onOpenGoal, disabled: !goalAvailable, disabledWhileRunning: false },
+    { id: "plan", label: "Switch this chat into plan mode", section: "built-in", mode: "plan", disabled: false, disabledWhileRunning: true },
+    { id: "build", label: "Switch this chat back to build mode", section: "built-in", mode: "build", disabled: false, disabledWhileRunning: true },
+    { id: "resume", label: "Resume a provider chat from this folder", section: "provider", action: onOpenResume, disabled: false, disabledWhileRunning: false },
+    { id: "compact", label: "Compact this chat's provider context", section: "provider", action: onCompactCommand, disabled: false, disabledWhileRunning: true },
   ];
   const matchingSlashCommands = slashMatch
     ? slashCommands.filter(({ id }) =>
         id.startsWith(slashMatch[1].toLowerCase()))
     : [];
-  const selectedSlashCommand = matchingSlashCommands.find(
-    ({ id }) => id === slashMatch?.[1].toLowerCase(),
-  ) ?? (matchingSlashCommands.length === 1 ? matchingSlashCommands[0] : null);
   const slashCommandDisabled = (item: ComposerSlashCommand): boolean =>
     disabled || item.disabled || (running && item.disabledWhileRunning);
+  const slashSearchKey = slashMatch?.[1].toLowerCase() ?? null;
+  const selectableSlashCommands = matchingSlashCommands.filter((item) =>
+    !slashCommandDisabled(item));
+  const [highlightedSlashCommand, setHighlightedSlashCommand] = useState<{
+    query: string;
+    id: string;
+  } | null>(null);
+  const [dismissedSlashValue, setDismissedSlashValue] = useState<string | null>(
+    null,
+  );
+  const highlightedSlashCommandId = highlightedSlashCommand?.query
+    === slashSearchKey
+    ? highlightedSlashCommand.id
+    : selectableSlashCommands[0]?.id ?? null;
+  const activeSlashCommand = selectableSlashCommands.find((item) =>
+    item.id === highlightedSlashCommandId)
+    ?? selectableSlashCommands[0]
+    ?? null;
+  const slashMenuVisible = Boolean(
+    slashMatch && dismissedSlashValue !== message,
+  );
+
+  const moveSlashHighlight = (
+    direction: "previous" | "next" | "first" | "last",
+  ): void => {
+    if (slashSearchKey === null || selectableSlashCommands.length === 0) return;
+    const activeIndex = selectableSlashCommands.findIndex((item) =>
+      item.id === activeSlashCommand?.id);
+    let nextIndex = 0;
+    if (direction === "last") nextIndex = selectableSlashCommands.length - 1;
+    else if (direction === "previous") {
+      nextIndex = activeIndex <= 0
+        ? selectableSlashCommands.length - 1
+        : activeIndex - 1;
+    } else if (direction === "next") {
+      nextIndex = activeIndex < 0 || activeIndex === selectableSlashCommands.length - 1
+        ? 0
+        : activeIndex + 1;
+    }
+    setHighlightedSlashCommand({
+      query: slashSearchKey,
+      id: selectableSlashCommands[nextIndex]!.id,
+    });
+  };
   const activateSlashCommand = (item: ComposerSlashCommand): void => {
     if (slashCommandDisabled(item)) return;
+    setDismissedSlashValue(message);
     if (item.action) {
       item.action();
       return;
@@ -260,15 +314,31 @@ export function ComposerInputZone({
             role={compactNotice.kind === "error" ? "alert" : "status"}
             aria-live={compactNotice.kind === "error" ? "assertive" : "polite"}
           >
-            {compactNotice.kind === "working" && (
-              <span className="loading-mark" aria-hidden="true" />
-            )}
+            <span className="composer-compact-notice-icon" aria-hidden="true">
+              <Box size={14} />
+            </span>
             <span>{compactNotice.message}</span>
+            <span className="composer-compact-notice-state" aria-hidden="true">
+              {compactNotice.kind === "working" ? (
+                <span className="composer-status-dots">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              ) : compactNotice.kind === "success" ? (
+                <Check size={13} />
+              ) : (
+                <CircleAlert size={13} />
+              )}
+            </span>
           </div>
         )}
         <textarea
           ref={textareaRef}
           value={message}
+          onFocus={() => {
+            void import("./ComposerCommandMenu");
+          }}
           onChange={(event) => onMessageChange(event.target.value)}
           onPaste={(event) => {
             if (event.clipboardData.files.length > 0) {
@@ -277,13 +347,39 @@ export function ComposerInputZone({
             }
           }}
           onKeyDown={(event) => {
+            if (slashMenuVisible && slashMatch) {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setDismissedSlashValue(message);
+                return;
+              }
+              if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+                event.preventDefault();
+                moveSlashHighlight(
+                  event.key === "ArrowUp"
+                    ? "previous"
+                    : event.key === "ArrowDown"
+                      ? "next"
+                      : event.key === "End"
+                        ? "last"
+                        : "first",
+                );
+                return;
+              }
+              if (event.key === "Tab" && !event.shiftKey && activeSlashCommand) {
+                event.preventDefault();
+                activateSlashCommand(activeSlashCommand);
+                return;
+              }
+            }
             if (
-              matchingSlashCommands.length > 0
+              slashMenuVisible
+              && matchingSlashCommands.length > 0
               && shouldSubmitComposerKey(event)
             ) {
               event.preventDefault();
-              if (selectedSlashCommand) {
-                activateSlashCommand(selectedSlashCommand);
+              if (activeSlashCommand) {
+                activateSlashCommand(activeSlashCommand);
               }
               return;
             }
@@ -336,25 +432,29 @@ export function ComposerInputZone({
           ))}
         </div>
       )}
-      {slashMatch && (
-        <div
-          className="composer-suggestion-menu"
-          role="listbox"
-          aria-label="Composer commands"
-        >
-          {matchingSlashCommands.map((item) => (
-            <button
-              type="button"
-              role="option"
-              aria-selected="false"
-              disabled={slashCommandDisabled(item)}
-              key={item.id}
-              onClick={() => activateSlashCommand(item)}
-            >
-              <span>/{item.id}</span>
-              <small>{item.label}</small>
-            </button>
-          ))}
+      {slashMenuVisible && slashMatch && (
+        <div className="composer-command-layer">
+          <Suspense fallback={null}>
+            <ComposerCommandMenu
+              items={matchingSlashCommands.map((item) => ({
+                id: item.id,
+                label: `/${item.id}`,
+                description: item.label,
+                section: item.section,
+                disabled: slashCommandDisabled(item),
+              }))}
+              activeItemId={activeSlashCommand?.id ?? null}
+              grouped={slashSearchKey === ""}
+              onActiveItemChange={(id) => {
+                setHighlightedSlashCommand({ query: slashSearchKey ?? "", id });
+              }}
+              onSelect={(id) => {
+                const item = matchingSlashCommands.find((candidate) =>
+                  candidate.id === id);
+                if (item) activateSlashCommand(item);
+              }}
+            />
+          </Suspense>
         </div>
       )}
     </>

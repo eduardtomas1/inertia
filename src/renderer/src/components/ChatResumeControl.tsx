@@ -1,9 +1,8 @@
-import { useEffect } from "react";
-import { MessagesSquare, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import { ProviderResumePicker } from "./ProviderResumePicker";
-import { IconButton } from "./ui";
+import "./composer/ComposerCommandMenu.css";
 
 export interface ChatResumeControlProps {
   options: readonly ProviderTerminalResumeOption[];
@@ -13,7 +12,7 @@ export interface ChatResumeControlProps {
 
 export interface ChatResumeInlineProps extends ChatResumeControlProps {
   open: boolean;
-  onDismiss: (reason: "action" | "escape") => void;
+  onDismiss: (reason: "action" | "escape" | "outside") => void;
 }
 
 export function ChatResumeControl({
@@ -23,46 +22,39 @@ export function ChatResumeControl({
   onDismiss,
   onResume,
 }: ChatResumeInlineProps): React.JSX.Element | null {
+  const surfaceRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open) return;
     const dismissOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       onDismiss("escape");
     };
+    const dismissOnPointerDown = (event: PointerEvent): void => {
+      if (surfaceRef.current?.contains(event.target as Node)) return;
+      onDismiss("outside");
+    };
     document.addEventListener("keydown", dismissOnEscape);
+    document.addEventListener("pointerdown", dismissOnPointerDown);
     return () => {
       document.removeEventListener("keydown", dismissOnEscape);
+      document.removeEventListener("pointerdown", dismissOnPointerDown);
     };
   }, [onDismiss, open]);
 
   if (!open) return null;
 
   return (
-    <div className="chat-command-surface is-command-surface">
+    <div className="composer-command-layer is-resume-layer">
       <div
-        className="chat-command-inline"
+        ref={surfaceRef}
+        className="composer-command-menu composer-resume-menu"
         role="region"
         aria-label="Resume a provider chat"
         aria-busy={busy}
       >
-        <header>
-          <span>
-            <MessagesSquare size={15} aria-hidden="true" />
-            <span>
-              <strong>Resume a provider chat</strong>
-              <small>
-                Reattach a saved provider session in this project&apos;s terminal
-              </small>
-            </span>
-          </span>
-          <IconButton
-            label="Close resume controls"
-            onClick={() => onDismiss("action")}
-          >
-            <X size={14} />
-          </IconButton>
-        </header>
+        <div className="composer-command-group-label">Provider chats</div>
         <ProviderResumePicker
           options={options}
           selectedConversationId={null}

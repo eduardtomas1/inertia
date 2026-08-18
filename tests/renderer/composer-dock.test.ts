@@ -10,6 +10,10 @@ const inputSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerInputZone.tsx", import.meta.url),
   "utf8",
 );
+const commandMenuSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerCommandMenu.tsx", import.meta.url),
+  "utf8",
+);
 const toolbarSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
   "utf8",
@@ -150,7 +154,7 @@ describe("cohesive composer dock", () => {
     expect(composerSource).toContain('event.dataTransfer.types.includes("Files")');
     expect(inputSource).toContain("event.clipboardData.files.length > 0");
     expect(inputSource).toContain('aria-label="Project files"');
-    expect(inputSource).toContain('aria-label="Composer commands"');
+    expect(commandMenuSource).toContain('aria-label="Composer commands"');
     expect(routeConfirmationSource).toContain('role="alertdialog"');
     expect(composerSource).not.toContain("documentAttachmentSendBoundary");
   });

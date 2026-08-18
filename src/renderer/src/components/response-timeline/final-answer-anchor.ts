@@ -64,7 +64,7 @@ export function startFinalAnswerAnchor({
     onEvent?.({ ...result, conversationId, answerId });
   };
   const scheduleSettle = (): void => {
-    if (finished || frame !== 0) return;
+    if (finished || frame) return;
     frame = window.requestAnimationFrame(() => {
       frame = 0;
       settle();
@@ -72,15 +72,17 @@ export function startFinalAnswerAnchor({
   };
   const settle = (): void => {
     if (finished) return;
-    if (attempts >= maximumSettleFrames || performance.now() >= settleUntil) {
-      finish({ status: "cancelled" });
-      return;
-    }
+    const exhausted = attempts >= maximumSettleFrames
+      || performance.now() >= settleUntil;
     const answer = [...root.querySelectorAll<HTMLElement>(
       "[data-terminal-answer-id]",
     )].find((element) =>
       element.dataset.terminalAnswerId === answerId) ?? null;
     if (!answer) {
+      if (exhausted) {
+        finish({ status: "cancelled" });
+        return;
+      }
       if (virtualized && attempts % 4 === 0) scrollToIndex(getAnswerIndex());
       attempts += 1;
       scheduleSettle();
@@ -88,8 +90,7 @@ export function startFinalAnswerAnchor({
     }
 
     const viewportBounds = scrollElement.getBoundingClientRect();
-    const currentOffset = answer.getBoundingClientRect().top - viewportBounds.top;
-    const delta = currentOffset - 8;
+    const delta = answer.getBoundingClientRect().top - viewportBounds.top - 8;
     if (Math.abs(delta) >= 0.5) scrollElement.scrollTop += delta;
     const answerBounds = answer.getBoundingClientRect();
     const settledOffset = answerBounds.top - viewportBounds.top;
@@ -106,11 +107,18 @@ export function startFinalAnswerAnchor({
       || fullyVisibleAtClampedBottom
     ) ? stableFrames + 1 : 0;
     attempts += 1;
-    if (stableFrames < 2) {
+    if (stableFrames < 2 && !exhausted) {
       scheduleSettle();
       return;
     }
-    finish({ status: "positioned", followsLatest });
+    finish({
+      status: "positioned",
+      // An exhausted provisional measurement remains positioned in reading
+      // mode. Bottom-following is safe only after the complete answer is both
+      // stable and visible at the clamped bottom.
+      followsLatest: stableFrames > 1
+        && fullyVisibleAtClampedBottom,
+    });
   };
   function cancelForUserIntent(event: Event): void {
     if (

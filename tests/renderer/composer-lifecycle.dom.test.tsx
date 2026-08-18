@@ -389,6 +389,69 @@ describe("composer asynchronous ownership", () => {
     );
   });
 
+  it("selects image-only media and sends an attachment-only active follow-up", async () => {
+    const current = conversation("15151515-1515-4515-8515-151515151515");
+    const selected = attachment("follow-up-reference");
+    const chooseAttachments = vi.fn(async () => [selected]);
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      running: true,
+      latestTurn: {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        harnessId: "opencode-sdk",
+      },
+      onChooseAttachments: chooseAttachments,
+      onSend,
+    })} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach follow-up images",
+    }));
+    await screen.findByText("follow-up-reference.png");
+    expect(chooseAttachments).toHaveBeenCalledExactlyOnceWith("images");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      "Please inspect the attached image.",
+      [selected],
+      undefined,
+      [],
+    ));
+    await waitFor(() => expect(screen.queryByText("follow-up-reference.png"))
+      .not.toBeInTheDocument());
+  });
+
+  it("keeps non-image media unavailable during an active follow-up", async () => {
+    const current = conversation("16161616-1616-4616-8616-161616161616");
+    const document: ChatAttachment = {
+      ...attachment("unsafe-document"),
+      name: "unsafe-document.pdf",
+      mimeType: "application/pdf",
+    };
+    const onSend = vi.fn(async () => undefined);
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      running: true,
+      latestTurn: {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        harnessId: "claude-agent-sdk",
+      },
+      onChooseAttachments: async () => [document],
+      onReleaseAttachment,
+      onSend,
+    })} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach follow-up images",
+    }));
+    await waitFor(() => expect(onReleaseAttachment)
+      .toHaveBeenCalledExactlyOnceWith(document.id));
+    expect(screen.queryByText("unsafe-document.pdf")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send follow-up" }))
+      .not.toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("opens goal and folder resume flows directly from slash commands", async () => {
     const current = conversation("08080808-0808-4808-8808-080808080808");
     const onOpenResume = vi.fn();
@@ -975,6 +1038,35 @@ describe("composer asynchronous ownership", () => {
       "late-picker",
     ));
     expect(screen.queryByText("late-picker.png")).toBeNull();
+  });
+
+  it("rechecks active-turn authority after the image picker settles", async () => {
+    const current = conversation("23232323-2323-4323-8323-232323232323");
+    const picked = deferred<ChatAttachment[]>();
+    const release = vi.fn(async () => undefined);
+    const overrides = {
+      latestTurn: {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        harnessId: "codex-app-server" as const,
+      },
+      onChooseAttachments: () => picked.promise,
+      onReleaseAttachment: release,
+    };
+    const view = render(<Composer {...composerProps(current, overrides)} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach images or documents",
+    }));
+    view.rerender(<Composer {...composerProps(current, {
+      ...overrides,
+      running: true,
+    })} />);
+    await act(async () => picked.resolve([attachment("stale-picker-mode")]));
+
+    await waitFor(() => expect(release).toHaveBeenCalledExactlyOnceWith(
+      "stale-picker-mode",
+    ));
+    expect(screen.queryByText("stale-picker-mode.png")).not.toBeInTheDocument();
   });
 
   it("releases only unsent attachments before the renderer reloads", async () => {

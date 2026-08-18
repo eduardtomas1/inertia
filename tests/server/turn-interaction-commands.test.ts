@@ -202,6 +202,15 @@ function dependencies(options: {
     } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
     turns: {
       isActive: vi.fn(() => false),
+      acquireFollowUpAdmission: vi.fn(() => ({
+        conversationId,
+        runId: "66666666-6666-4666-8666-666666666666",
+        turnId: "88888888-8888-4888-8888-888888888888",
+        supportsImages: true,
+        submittedAt: "2026-07-30T06:00:00.000Z",
+        ready: Promise.resolve(),
+        release: vi.fn(),
+      })),
       steer: vi.fn(async () => null),
       queue: options.queue,
       start: vi.fn(() => true),
@@ -966,6 +975,147 @@ describe("message attachment ownership transfer", () => {
       type: "conversation.detail.invalidated",
       conversationId,
     });
+  });
+
+  it("retains, delivers, persists, and releases an acknowledged image follow-up", async () => {
+    const durableAttachment = {
+      ...trustedAttachment,
+      path: "/private/conversation-attachments/request.png",
+    };
+    const relinquishAll = vi.fn(async () => undefined);
+    const handlerDependencies = dependencies({
+      queue: vi.fn(),
+      relinquishAll,
+    });
+    const releaseAll = vi.mocked(
+      handlerDependencies.attachmentResolver!.releaseAll,
+    );
+    vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
+    vi.mocked(handlerDependencies.conversationAttachments.retain)
+      .mockResolvedValue([durableAttachment]);
+    vi.mocked(handlerDependencies.turns.steer).mockImplementation(async (
+      _lease,
+      input,
+      attachments,
+      acknowledge,
+    ) => {
+      expect(input).toEqual({
+        content: "Use the selected attachment.",
+        imagePaths: [durableAttachment.path],
+      });
+      expect(attachments).toEqual([durableAttachment]);
+      acknowledge?.();
+      return {
+        id: "77777777-7777-4777-8777-777777777777",
+        conversationId,
+        turnId: "88888888-8888-4888-8888-888888888888",
+        role: "user",
+        content: input.content,
+        attachments: [...(attachments ?? [])],
+        createdAt: "2026-07-30T06:00:00.000Z",
+      };
+    });
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).resolves.toBe("handled");
+
+    expect(handlerDependencies.conversationAttachments.acceptRetention)
+      .toHaveBeenCalledOnce();
+    expect(releaseAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(releaseAll).toHaveBeenCalledOnce();
+    expect(relinquishAll).not.toHaveBeenCalled();
+    expect(handlerDependencies.broadcast).toHaveBeenCalledWith({
+      type: "conversation.message.persisted",
+      message: expect.objectContaining({ attachments: [durableAttachment] }),
+    });
+  });
+
+  it("rolls back the exact image claim when the live provider rejects a follow-up", async () => {
+    const relinquishAll = vi.fn(async () => undefined);
+    const handlerDependencies = dependencies({
+      queue: vi.fn(),
+      relinquishAll,
+    });
+    vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
+    vi.mocked(handlerDependencies.turns.steer).mockResolvedValue(null);
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).rejects.toThrow("cannot accept a follow-up");
+
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
+      .toHaveBeenCalledOnce();
+    expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(handlerDependencies.attachmentResolver!.releaseAll)
+      .not.toHaveBeenCalled();
+  });
+
+  it("rolls back accepted durable images when follow-up persistence fails", async () => {
+    const relinquishAll = vi.fn(async () => undefined);
+    const handlerDependencies = dependencies({ queue: vi.fn(), relinquishAll });
+    vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
+    vi.mocked(handlerDependencies.turns.steer).mockImplementation(async (
+      _lease,
+      _input,
+      _attachments,
+      acknowledge,
+    ) => {
+      acknowledge?.();
+      return null;
+    });
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).rejects.toThrow("cannot accept a follow-up");
+
+    expect(handlerDependencies.conversationAttachments.release)
+      .toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(handlerDependencies.conversationAttachments.releaseRetention)
+      .not.toHaveBeenCalled();
+    expect(handlerDependencies.attachmentResolver!.releaseAll)
+      .toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(relinquishAll).not.toHaveBeenCalled();
+  });
+
+  it("rejects follow-up documents and immutable non-image active models before delivery", async () => {
+    const document = {
+      attachment: {
+        ...trustedAttachment,
+        name: "notes.pdf",
+        mimeType: "application/pdf" as const,
+      },
+      bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+    };
+    const relinquishAll = vi.fn(async () => undefined);
+    const handlerDependencies = dependencies({
+      queue: vi.fn(),
+      relinquishAll,
+      resolvedPayloads: [document],
+    });
+    vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
+    const documentCommand = messageCommand();
+    documentCommand.payload.attachments = [document.attachment];
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      documentCommand,
+    )).rejects.toThrow("support images only");
+    expect(relinquishAll).toHaveBeenCalledWith([document.attachment.id]);
+    expect(handlerDependencies.turns.steer).not.toHaveBeenCalled();
+
+    const admission = vi.mocked(
+      handlerDependencies.turns.acquireFollowUpAdmission,
+    ).mock.results[0]?.value;
+    vi.mocked(handlerDependencies.turns.acquireFollowUpAdmission)
+      .mockReturnValue({ ...admission, supportsImages: false });
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).rejects.toThrow("active model cannot inspect follow-up images");
   });
 
   it("rejects a changed skill route before persisting its checkpoint", async () => {

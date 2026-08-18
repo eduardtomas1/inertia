@@ -110,6 +110,7 @@ describe("composer Send and Stop", () => {
   it("keeps Stop primary while exposing only truthful parent follow-ups", () => {
     expect(supportsActiveParentFollowUp("codex-app-server")).toBe(true);
     expect(supportsActiveParentFollowUp("claude-agent-sdk")).toBe(true);
+    expect(supportsActiveParentFollowUp("opencode-sdk")).toBe(true);
     expect(supportsActiveParentFollowUp("codex-cli")).toBe(false);
     expect(supportsActiveParentFollowUp("claude-cli")).toBe(false);
     expect(composerFollowUpState({

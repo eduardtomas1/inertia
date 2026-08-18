@@ -44,6 +44,7 @@ import {
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
 import { ResponseMarkdown } from "../ResponseMarkdown";
+import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { parseReasoningSummary } from "../../utils/reasoningSummary";
 
 export function ReasoningSummary({
@@ -353,7 +354,7 @@ const CommentaryRow = memo(function CommentaryRow({
   );
 });
 
-function FollowUpRow({
+export function FollowUpRow({
   entry,
 }: {
   entry: Extract<TurnExecutionStreamEntry, { kind: "follow-up" }>;
@@ -366,6 +367,10 @@ function FollowUpRow({
     >
       <span>You</span>
       <p>{entry.message.content}</p>
+      <SentMessageAttachmentList
+        attachments={entry.message.attachments}
+        label="Follow-up attachments"
+      />
     </article>
   );
 }

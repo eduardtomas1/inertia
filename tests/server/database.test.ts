@@ -397,11 +397,25 @@ describe("RuntimeStore conversation lifecycle", () => {
       "Accepted immediately before the parent settled.",
       at(4_000),
       at(7_000),
+      [{
+        id: "77777777-7777-4777-8777-777777777777",
+        name: "follow-up.png",
+        path: "/private/conversation-attachments/follow-up.png",
+        mimeType: "image/png",
+        size: 128,
+      }],
     );
     expect(acknowledgedFollowUp).toMatchObject({
       turnId: turn.id,
       role: "user",
       createdAt: at(4_000),
+      attachments: [{
+        id: "77777777-7777-4777-8777-777777777777",
+        name: "follow-up.png",
+        path: "77777777-7777-4777-8777-777777777777",
+        mimeType: "image/png",
+        size: 128,
+      }],
     });
     expect(store.conversation(conversation.id)).toMatchObject({ updatedAt: at(7_000), lastViewedAt: at(7_000) });
     expect(store.project(conversation.projectId).updatedAt).toBe(at(7_000));

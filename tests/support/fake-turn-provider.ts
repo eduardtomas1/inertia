@@ -141,8 +141,11 @@ export class FakeTurnProvider implements TurnProviderRuntime {
     return this.inputSupported;
   }
 
-  async steer(_conversationId: string, content: string): Promise<boolean> {
-    this.steerCalls.push(content);
+  async steer(
+    _conversationId: string,
+    input: import("../../src/server/provider/contracts").ProviderSteerInput,
+  ): Promise<boolean> {
+    this.steerCalls.push(input.content);
     return this.steerSupported;
   }
 

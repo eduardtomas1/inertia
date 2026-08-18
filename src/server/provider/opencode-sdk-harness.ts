@@ -279,6 +279,7 @@ function startOpenCodeRun(
   let child: ChildProcessWithoutNullStreams | undefined;
   let terminateOwnedRun: OwnedProcessTreeTermination | undefined;
   let cancelRequested = false;
+  let acceptingFollowUps = false;
   let terminalError: string | undefined;
   let cancelOwnedRun: (force: boolean) => void = () => {};
   let cancelForceTimer: NodeJS.Timeout | undefined;
@@ -535,7 +536,10 @@ function startOpenCodeRun(
           }, { throwOnError: true });
       const completion = Promise.all([providerOperation, pump]);
       await Promise.race([providerOperation, completion, runInterrupted]);
-      if (!cancelRequested && !terminalError) emitter.status("running");
+      if (!cancelRequested && !terminalError) {
+        acceptingFollowUps = true;
+        emitter.status("running");
+      }
       await Promise.race([completion, runInterrupted]);
       outcome = cancelRequested
         ? { status: "cancelled" }
@@ -553,6 +557,7 @@ function startOpenCodeRun(
             error: terminalError ?? safeError(error, serverDiagnostic(serverOutput)),
           };
     }
+    acceptingFollowUps = false;
     clearDeadlineTimers();
     if (cancelForceTimer) clearTimeout(cancelForceTimer);
     eventAbort.abort();
@@ -597,6 +602,7 @@ function startOpenCodeRun(
   cancelOwnedRun = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    acceptingFollowUps = false;
     clearDeadlineTimers();
     emitter.status("cancelling");
     rejectPending();
@@ -631,8 +637,76 @@ function startOpenCodeRun(
     providerId: "opencode",
     result,
     cancel: cancelOwnedRun,
-    extension: { kind: "opencode-sdk", respondToApproval: settleApproval, respondToInput: settleInput },
+    extension: {
+      kind: "opencode-sdk",
+      respondToApproval: settleApproval,
+      respondToInput: settleInput,
+      steer: async (input) => {
+        const activeClient = client;
+        const activeSessionId = sessionId;
+        const text = input.content.replaceAll("\0", "").trim();
+        if (
+          !acceptingFollowUps
+          || cancelRequested
+          || !activeClient
+          || !activeSessionId
+          || !text
+        ) return false;
+        const id = randomUUID();
+        const files = input.imagePaths.map((path) => ({
+          uri: pathToFileURL(path).href,
+          name: path.split(/[\\/]/u).at(-1),
+        }));
+        try {
+          const response = await withOpenCodeRequestDeadline(
+            deadlines.initializationTimeoutMs,
+            "Timed out waiting for OpenCode to admit the follow-up.",
+            async (signal) => await activeClient.v2.session.prompt({
+              sessionID: activeSessionId,
+              id,
+              delivery: "steer",
+              prompt: {
+                text,
+                ...(files.length > 0 ? { files } : {}),
+              },
+            }, { signal, throwOnError: true }),
+            eventAbort.signal,
+          );
+          return exactOpenCodeSteerReceipt(
+            response.data,
+            id,
+            activeSessionId,
+            text,
+            files.map(({ uri }) => uri),
+          );
+        } catch {
+          return false;
+        }
+      },
+    },
   };
+}
+
+export function exactOpenCodeSteerReceipt(
+  value: unknown,
+  id: string,
+  sessionId: string,
+  text: string,
+  fileUris: readonly string[],
+): boolean {
+  const envelope = objectValue(value);
+  const receipt = objectValue(envelope?.data);
+  const prompt = objectValue(receipt?.prompt);
+  const files = Array.isArray(prompt?.files) ? prompt.files : [];
+  if (
+    receipt?.id !== id
+    || receipt.sessionID !== sessionId
+    || receipt.delivery !== "steer"
+    || prompt?.text !== text
+    || files.length !== fileUris.length
+  ) return false;
+  return files.every((file, index) =>
+    objectValue(file)?.uri === fileUris[index]);
 }
 
 function completesRequestedOpenCodeCompaction(

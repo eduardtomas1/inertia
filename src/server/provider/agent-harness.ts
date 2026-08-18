@@ -15,6 +15,7 @@ import type {
   ProviderMetadataEvent,
   ProviderRunInput,
   ProviderRunResult,
+  ProviderSteerInput,
   ProviderSessionEvent,
   ProviderStatusEvent,
   ProviderSubagentEvent,
@@ -243,7 +244,7 @@ export interface CodexAppServerRunExtension {
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Parent-turn steering; Codex exposes no truthful direct-child messaging. */
-  steer?: (content: string) => Promise<boolean>;
+  steer?: (input: ProviderSteerInput) => Promise<boolean>;
   setGoal: (input: ProviderGoalMutation) => Promise<ProviderGoalSnapshot>;
   clearGoal: () => Promise<boolean>;
 }
@@ -253,7 +254,7 @@ export interface ProviderInteractiveRunExtension {
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Present only for transports with a persistent parent-session input stream. */
-  steer?: (content: string) => Promise<boolean>;
+  steer?: (input: ProviderSteerInput) => Promise<boolean>;
   /** Present only when the transport can stop an exact live delegated task. */
   stopSubagent?: (providerTaskId: string) => Promise<boolean>;
 }

@@ -14,6 +14,7 @@ import {
   turnGitArtifactCompletenessWarning,
   turnGitArtifactPatchAvailable,
 } from "../../src/renderer/src/components/ResponseTimeline";
+import { FollowUpRow } from "../../src/renderer/src/components/response-timeline/activity";
 import {
   activityNeedsAttention,
   buildResponseTimeline,
@@ -257,6 +258,37 @@ describe("authoritative response timeline", () => {
       "call-after",
       "commentary-after",
     ]);
+  });
+
+  it("renders accepted follow-up images with the shared sent-media treatment", () => {
+    const followUp: ChatMessage = {
+      ...message(
+        "user-follow-up-image",
+        "turn-follow-up-image",
+        "user",
+        "Inspect this reference too",
+        "2026-07-23T10:00:06.000Z",
+      ),
+      attachments: [{
+        id: "attachment-follow-up",
+        name: "follow-up.png",
+        path: "attachment-follow-up",
+        mimeType: "image/png",
+        size: 512,
+      }],
+    };
+    const html = renderToStaticMarkup(createElement(FollowUpRow, {
+      entry: {
+        kind: "follow-up",
+        id: followUp.id,
+        createdAt: followUp.createdAt,
+        message: followUp,
+      },
+    }));
+
+    expect(html).toContain('aria-label="Follow-up attachments"');
+    expect(html).toContain("follow-up.png");
+    expect(html).toContain("attachment-preview/attachment-follow-up");
   });
 
   it("groups only adjacent calls and preserves commentary between work phases", () => {

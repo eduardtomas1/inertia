@@ -4,10 +4,12 @@ import { join } from "node:path";
 import type WebSocket from "ws";
 
 import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
+import { chatAttachmentKind } from "../../../shared/attachments";
 
 import {
   type AgentApprovalRequest,
   type AgentInputRequest,
+  type ChatAttachment,
   type ProviderInfo,
   type RuntimeMutationEvent,
   type ServerEvent,
@@ -90,40 +92,166 @@ export function createTurnInteractionCommandHandler(
         }
         if (dependencies.turns.isActive(conversation.id)) {
           if (
-            command.payload.attachments.length > 0
-            || command.payload.context !== undefined
+            command.payload.context !== undefined
             || (command.payload.skillIds?.length ?? 0) > 0
           ) {
             throw new RuntimeRequestError(
-              "Follow-ups while the agent is working support text only and cannot add skills.",
+              "Follow-ups while the agent is working cannot add skills or workspace context.",
             );
           }
-          const followUpMessage = await dependencies.turns.steer(
+          const admission = dependencies.turns.acquireFollowUpAdmission(
             conversation.id,
-            command.payload.content,
           );
-          if (!followUpMessage?.turnId) {
+          if (!admission) {
             throw new RuntimeRequestError(
               "This active agent route cannot accept a follow-up.",
             );
           }
-          dependencies.send(socket, {
-            type: "request.result",
-            requestId: command.requestId,
-            result: {
-              kind: "message.accepted",
-              conversationId: followUpMessage.conversationId,
-              turnId: followUpMessage.turnId,
-              userMessageId: followUpMessage.id,
-              disposition: "follow-up",
-            },
-          });
-          dependencies.broadcast({
-            type: "conversation.message.persisted",
-            message: followUpMessage,
-          });
-          dependencies.broadcastSnapshot();
-          return "handled";
+          const requestedAttachments = command.payload.attachments;
+          if (requestedAttachments.length > 0 && !admission.supportsImages) {
+            admission.release();
+            throw new RuntimeRequestError(
+              "The active model cannot inspect follow-up images.",
+            );
+          }
+          const preparationDeadlineAt = messageSendPreparationDeadline();
+          let sourceAttachmentIds: string[] = [];
+          let retentionId: ReturnType<typeof randomUUID> | null = null;
+          let retentionAccepted = false;
+          let retentionCompleted = false;
+          let retention: Promise<ChatAttachment[]> | null = null;
+          let attachments: ChatAttachment[] = [];
+          let followUpPersisted = false;
+          let sourceClaimSettled = false;
+          try {
+            let resolvedAttachments: Awaited<
+              ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
+            > = [];
+            if (requestedAttachments.length > 0) {
+              const resolver = dependencies.attachmentResolver;
+              if (!resolver) {
+                throw new RuntimeRequestError(
+                  "The selected attachment is no longer available or could not be verified.",
+                );
+              }
+              const resolutionAbort = new AbortController();
+              resolvedAttachments = await awaitMessageSendPreparation(
+                resolver.resolvePayloads(
+                  requestedAttachments,
+                  command.requestId,
+                  resolutionAbort.signal,
+                ),
+                preparationDeadlineAt,
+                () => resolutionAbort.abort(),
+              );
+              if (resolvedAttachments.some(({ attachment }) =>
+                chatAttachmentKind(attachment.mimeType) !== "image")) {
+                sourceAttachmentIds = resolvedAttachments.map(
+                  ({ attachment }) => attachment.id,
+                );
+                throw new RuntimeRequestError(
+                  "Follow-ups while the agent is working support images only.",
+                );
+              }
+              sourceAttachmentIds = resolvedAttachments.map(
+                ({ attachment }) => attachment.id,
+              );
+            }
+            attachments = resolvedAttachments.map(
+              ({ attachment }) => attachment,
+            );
+            if (resolvedAttachments.length > 0) {
+              retentionId = randomUUID();
+              const retentionAbort = new AbortController();
+              retention = dependencies.conversationAttachments.retain(
+                resolvedAttachments,
+                retentionAbort.signal,
+                retentionId,
+              );
+              attachments = await awaitMessageSendPreparation(
+                retention,
+                preparationDeadlineAt,
+                () => retentionAbort.abort(),
+              );
+              retentionCompleted = true;
+            }
+            const followUpMessage = await dependencies.turns.steer(
+              admission,
+              {
+                content: command.payload.content,
+                imagePaths: attachments.map(({ path }) => path),
+              },
+              attachments,
+              () => {
+                if (!retentionId) return;
+                dependencies.conversationAttachments.acceptRetention(retentionId);
+                retentionAccepted = true;
+              },
+            );
+            if (!followUpMessage?.turnId) {
+              throw new RuntimeRequestError(
+                "This active agent route cannot accept a follow-up.",
+              );
+            }
+            followUpPersisted = true;
+            await dependencies.attachmentResolver?.releaseAll(
+              sourceAttachmentIds,
+            );
+            sourceClaimSettled = true;
+            dependencies.send(socket, {
+              type: "request.result",
+              requestId: command.requestId,
+              result: {
+                kind: "message.accepted",
+                conversationId: followUpMessage.conversationId,
+                turnId: followUpMessage.turnId,
+                userMessageId: followUpMessage.id,
+                disposition: "follow-up",
+              },
+            });
+            dependencies.broadcast({
+              type: "conversation.message.persisted",
+              message: followUpMessage,
+            });
+            dependencies.broadcastSnapshot();
+            return "handled";
+          } catch (error) {
+            if (retentionId && !retentionAccepted) {
+              const exactRetentionId = retentionId;
+              if (retention && !retentionCompleted) {
+                void retention.then(
+                  () => dependencies.conversationAttachments
+                    .releaseRetention(exactRetentionId),
+                  () => undefined,
+                ).catch(() => undefined);
+              } else {
+                await dependencies.conversationAttachments
+                  .releaseRetention(exactRetentionId)
+                  .catch(() => undefined);
+              }
+            }
+            if (retentionAccepted) {
+              await Promise.all([
+                followUpPersisted
+                  ? undefined
+                  : dependencies.conversationAttachments.release(
+                      attachments.map(({ id }) => id),
+                    ),
+                sourceClaimSettled
+                  ? undefined
+                  : dependencies.attachmentResolver?.releaseAll(
+                      sourceAttachmentIds,
+                    ),
+              ]);
+            } else if (!sourceClaimSettled) {
+              await dependencies.attachmentResolver?.relinquishAll(
+                sourceAttachmentIds,
+              );
+            }
+            throw error;
+          } finally {
+            admission.release();
+          }
         }
         if (dependencies.isolatedRuns.has(conversation.id)) {
           throw new RuntimeRequestError(

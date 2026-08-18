@@ -254,15 +254,23 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.controller.start(queued.turn.id);
     const beforeRejected = runtime.store.snapshot();
     vi.spyOn(runtime.provider, "steer").mockResolvedValue(false);
-    expect(await runtime.controller.steer(runtime.conversationId, "Do not leave this rejected follow-up behind.")).toBeNull();
+    const rejectedAdmission = runtime.controller.acquireFollowUpAdmission(runtime.conversationId)!;
+    expect(await runtime.controller.steer(rejectedAdmission, {
+      content: "Do not leave this rejected follow-up behind.", imagePaths: [],
+    })).toBeNull();
+    rejectedAdmission.release();
     expect(runtime.store.snapshot()).toEqual(beforeRejected);
     let acknowledgeFollowUp!: (accepted: boolean) => void;
-    vi.mocked(runtime.provider.steer).mockImplementation(async (_conversationId, content) => {
-      runtime.provider.steerCalls.push(content);
+    vi.mocked(runtime.provider.steer).mockImplementation(async (_conversationId, input) => {
+      runtime.provider.steerCalls.push(input.content);
       return await new Promise<boolean>((resolve) => { acknowledgeFollowUp = resolve; });
     });
     const beforeAcknowledgement = runtime.store.snapshot().messages;
-    const pendingFollowUp = runtime.controller.steer(runtime.conversationId, "Inspect the edge case next.");
+    const admission = runtime.controller.acquireFollowUpAdmission(runtime.conversationId)!;
+    const pendingFollowUp = runtime.controller.steer(admission, {
+      content: "Inspect the edge case next.",
+      imagePaths: [],
+    });
     await flushPromises();
     expect(runtime.store.snapshot().messages).toEqual(beforeAcknowledgement);
     runtime.provider.emit({
@@ -277,6 +285,7 @@ describe("TurnController authoritative lifecycle", () => {
     const explicitlySettled = runtime.store.settleConversation(runtime.conversationId, true);
     acknowledgeFollowUp(true);
     const followedUp = await pendingFollowUp;
+    admission.release();
     expect(followedUp).toMatchObject({ role: "user", turnId: queued.turn.id, content: "Inspect the edge case next." });
     expect(followedUp!.createdAt < interimActivity!.createdAt).toBe(true);
     const refreshedConversation = runtime.store.conversation(runtime.conversationId);
@@ -293,7 +302,6 @@ describe("TurnController authoritative lifecycle", () => {
     expect(reopened.conversation(runtime.conversationId).settledAt).toBe(explicitlySettled.settledAt);
     reopened.close();
   });
-
   it("persists and broadcasts only native goals for the active Codex thread", async () => {
     const synchronizedSessions: string[] = [];
     let recoverRefreshWarning = false;

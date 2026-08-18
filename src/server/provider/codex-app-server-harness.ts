@@ -244,10 +244,10 @@ function startCodexRun(
       kind: "codex-app-server",
       respondToApproval: (requestId, decision) => !settled && !cancelRequested && codexRun.respondToApproval(requestId, decision),
       respondToInput: (requestId, answers) => !settled && !cancelRequested && codexRun.respondToInput(requestId, answers),
-      steer: async (content) =>
+      steer: async (input) =>
         !settled
         && !cancelRequested
-        && Boolean(await codexRun.steer?.(content)),
+        && Boolean(await codexRun.steer?.(input)),
       setGoal: async (input) => {
         if (settled || cancelRequested) {
           throw new Error("The Codex goal connection is not active.");

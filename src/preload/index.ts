@@ -106,7 +106,7 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.on(IPC.appUpdateStatus, handler);
     return () => ipcRenderer.removeListener(IPC.appUpdateStatus, handler);
   },
-  selectAttachments: () => ipcRenderer.invoke(IPC.selectAttachments) as ReturnType<DesktopBridge["selectAttachments"]>,
+  selectAttachments: (mode: Parameters<DesktopBridge["selectAttachments"]>[0]) => ipcRenderer.invoke(IPC.selectAttachments, mode) as ReturnType<DesktopBridge["selectAttachments"]>,
   importAttachments: (files: Parameters<DesktopBridge["importAttachments"]>[0]) => ipcRenderer.invoke(IPC.importAttachments, files) as ReturnType<DesktopBridge["importAttachments"]>,
   prepareAttachmentHandoff: (request: Parameters<DesktopBridge["prepareAttachmentHandoff"]>[0]) =>
     ipcRenderer.invoke(IPC.prepareAttachmentHandoff, request) as Promise<void>,

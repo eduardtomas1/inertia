@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  attachmentPickerConfiguration,
   validateAttachmentImport,
   validateSelectedAttachmentCount,
   validateSelectedAttachmentOpen,
   validateSelectedAttachmentRead,
   validateSelectedAttachmentStats,
+  validateAttachmentPickerName,
 } from "../../src/main/attachment-import";
 import {
   MAX_CHAT_ATTACHMENTS,
@@ -22,6 +24,19 @@ const webp = Buffer.from("RIFF\0\0\0\0WEBP", "binary");
 const pdf = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n", "ascii");
 
 describe("privileged attachment import validation", () => {
+  it("configures and enforces the image-only follow-up picker in main", () => {
+    expect(attachmentPickerConfiguration("images")).toEqual({
+      title: "Attach follow-up images",
+      filterName: "Images",
+      extensions: ["png", "jpg", "jpeg", "webp", "gif"],
+    });
+    expect(() => validateAttachmentPickerName("images", "reference.webp"))
+      .not.toThrow();
+    expect(() => validateAttachmentPickerName("images", "notes.pdf"))
+      .toThrow("Follow-up attachments must be images.");
+    expect(() => validateAttachmentPickerName("all", "notes.pdf"))
+      .not.toThrow();
+  });
   it("rejects an oversized selection instead of silently truncating it", () => {
     expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS + 1))
       .toThrow(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);

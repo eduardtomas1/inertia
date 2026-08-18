@@ -28,16 +28,15 @@ import {
   KIMI_CLAUDE_BUILTIN_PROFILE_ID,
 } from "../shared/claude-backend-profiles.js";
 import {
-  type AppHealthSnapshot,
-  type AppProcessHealth,
-  parseDesktopNotificationRequest,
+  type AppHealthSnapshot, type AppProcessHealth,
+  parseAttachmentPickerMode, parseDesktopNotificationRequest,
   parseOpenProjectPathRequest,
 } from "../shared/desktop.js";
 import { safeHttpUrl } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import {
-  validateSelectedAttachmentCount,
-  validateSelectedAttachmentOpen,
+  attachmentPickerConfiguration, validateAttachmentPickerName,
+  validateSelectedAttachmentCount, validateSelectedAttachmentOpen,
   validateSelectedAttachmentRead,
   validateSelectedAttachmentStats,
   type SelectedAttachmentReadSnapshot,
@@ -145,7 +144,6 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
-
 let mainWindow: BrowserWindow | null = null;
 let mainWindowCreation: Promise<void> | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
@@ -552,17 +550,17 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.selectAttachments, async (event, ...args) => {
-    assertTrustedIpc(event, args.length);
+    assertTrustedIpc(event, args.length, 1);
+    const mode = parseAttachmentPickerMode(args[0]);
+    if (!mode) throw new Error("Invalid attachment picker mode.");
     if (!mainWindow) return [];
+    const picker = attachmentPickerConfiguration(mode);
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: "Attach images or documents",
+      title: picker.title,
       buttonLabel: "Attach",
       filters: [{
-        name: "Images and safe documents",
-        extensions: [
-          "png", "jpg", "jpeg", "webp", "gif",
-          "pdf", "txt", "md", "markdown", "csv", "json",
-        ],
+        name: picker.filterName,
+        extensions: picker.extensions,
       }],
       properties: ["openFile", "multiSelections"],
     });
@@ -628,6 +626,8 @@ function registerIpcHandlers(): void {
       })));
       const values = [];
       for (const selected of selectedFiles) {
+        const name = basename(selected.path);
+        validateAttachmentPickerName(mode, name);
         const data = Buffer.alloc(selected.size);
         let offset = 0;
         while (offset < data.length) {
@@ -661,7 +661,7 @@ function registerIpcHandlers(): void {
           isSymbolicLink: after.isSymbolicLink(),
         });
         values.push({
-          name: basename(selected.path),
+          name,
           mimeType: "",
           data,
         });

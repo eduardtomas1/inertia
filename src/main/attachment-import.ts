@@ -6,12 +6,53 @@ import {
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   MAX_TEXT_ATTACHMENT_BYTES,
   chatAttachmentMimeTypeForName,
+  chatAttachmentKind,
   chatAttachmentStorageExtension,
   isPotentialChatAttachment,
   type ChatAttachmentMimeType,
   type DocumentAttachmentMimeType,
   type ImageAttachmentMimeType,
 } from "../shared/attachments.js";
+import type { AttachmentPickerMode } from "../shared/desktop.js";
+
+const IMAGE_ATTACHMENT_EXTENSIONS = [
+  "png", "jpg", "jpeg", "webp", "gif",
+] as const;
+const DOCUMENT_ATTACHMENT_EXTENSIONS = [
+  "pdf", "txt", "md", "markdown", "csv", "json",
+] as const;
+
+export function attachmentPickerConfiguration(mode: AttachmentPickerMode): {
+  title: string;
+  filterName: string;
+  extensions: string[];
+} {
+  return mode === "images"
+    ? {
+        title: "Attach follow-up images",
+        filterName: "Images",
+        extensions: [...IMAGE_ATTACHMENT_EXTENSIONS],
+      }
+    : {
+        title: "Attach images or documents",
+        filterName: "Images and safe documents",
+        extensions: [
+          ...IMAGE_ATTACHMENT_EXTENSIONS,
+          ...DOCUMENT_ATTACHMENT_EXTENSIONS,
+        ],
+      };
+}
+
+export function validateAttachmentPickerName(
+  mode: AttachmentPickerMode,
+  name: string,
+): void {
+  const mimeType = chatAttachmentMimeTypeForName(name);
+  if (
+    mode === "images"
+    && (mimeType === null || chatAttachmentKind(mimeType) !== "image")
+  ) throw new Error("Follow-up attachments must be images.");
+}
 
 export interface ValidatedAttachmentImport {
   readonly displayName: string;

@@ -332,8 +332,8 @@ describe("Claude persistent parent prompt channel", () => {
   it("preserves FIFO parent-session input and closes without dropping queued work", async () => {
     const channel = new ClaudePromptChannel();
     const iterator = channel[Symbol.asyncIterator]();
-    expect(channel.push(userMessage("first"))).toBe(true);
-    expect(channel.push(userMessage("second"))).toBe(true);
+    expect(channel.push(userMessage("first"), channel.reserve(128)!)).toBe(true);
+    expect(channel.push(userMessage("second"), channel.reserve(128)!)).toBe(true);
     channel.close();
 
     expect(await iterator.next()).toMatchObject({
@@ -345,6 +345,47 @@ describe("Claude persistent parent prompt channel", () => {
       value: { type: "user" },
     });
     expect(await iterator.next()).toEqual({ done: true, value: undefined });
-    expect(channel.push(userMessage("late"))).toBe(false);
+    const late = channel.reserve(128);
+    expect(late).toBeNull();
+  });
+
+  it("bounds queued prompt reservations and restores capacity on consumption and cancellation", async () => {
+    const channel = new ClaudePromptChannel(2, 10);
+    const first = channel.reserve(6)!;
+    expect(channel.push(userMessage("first"), first)).toBe(true);
+    expect(channel.reserve(5)).toBeNull();
+
+    const iterator = channel[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { type: "user" },
+    });
+    const second = channel.reserve(5)!;
+    expect(channel.push(userMessage("second"), second)).toBe(true);
+    const third = channel.reserve(5)!;
+    expect(channel.reserve(1)).toBeNull();
+
+    channel.cancel();
+    expect(channel.reserve(1)).toBeNull();
+    expect(channel.push(userMessage("late"), third)).toBe(false);
+    await expect(iterator.next()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
+  });
+
+  it("discards reserved input when the SDK finalizes its iterator", async () => {
+    const channel = new ClaudePromptChannel(1, 10);
+    const iterator = channel[Symbol.asyncIterator]();
+    expect(channel.push(userMessage("queued"), channel.reserve(10)!)).toBe(true);
+
+    await expect(iterator.return!()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
   });
 });

@@ -13,7 +13,8 @@ export type ComposerFollowUpState =
 
 export function supportsActiveParentFollowUp(harnessId: string | null): boolean {
   return harnessId === "codex-app-server"
-    || harnessId === "claude-agent-sdk";
+    || harnessId === "claude-agent-sdk"
+    || harnessId === "opencode-sdk";
 }
 
 export function composerFollowUpState({

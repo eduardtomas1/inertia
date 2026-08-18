@@ -6,6 +6,7 @@ import { AgentHarnessRegistry, ProviderManager } from "../../src/server/provider
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   createOpenCodeSdkHarness,
+  exactOpenCodeSteerReceipt,
   openCodeApprovalDisplay,
   readOpenCodeSdkModels,
 } from "../../src/server/provider/opencode-sdk-harness";
@@ -104,6 +105,16 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "heartbeat", sessionID, role: "assistant" } } });
       }, 50);
       return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/prompt") {
+      return json(res, { data: {
+        admittedSeq: 2,
+        id: parsed.id,
+        sessionID,
+        prompt: parsed.prompt,
+        delivery: parsed.delivery,
+        timeCreated: Date.now(),
+      } });
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/compact") {
       json(res, undefined, 204);
@@ -306,6 +317,34 @@ server.listen(port, "127.0.0.1", () => {
 describe.sequential("OpenCode SDK harness", () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
+
+  it("requires an exact v2 steer admission receipt", () => {
+    const receipt = {
+      data: {
+        id: "follow-up-id",
+        sessionID: "session-id",
+        delivery: "steer",
+        prompt: {
+          text: "Inspect",
+          files: [{ uri: "file:///safe/reference.png" }],
+        },
+      },
+    };
+    expect(exactOpenCodeSteerReceipt(
+      receipt,
+      "follow-up-id",
+      "session-id",
+      "Inspect",
+      ["file:///safe/reference.png"],
+    )).toBe(true);
+    expect(exactOpenCodeSteerReceipt(
+      { data: { ...receipt.data, delivery: "queue" } },
+      "follow-up-id",
+      "session-id",
+      "Inspect",
+      ["file:///safe/reference.png"],
+    )).toBe(false);
+  });
 
   it("rejects direction-changing approval titles, details, and paths", () => {
     expect(openCodeApprovalDisplay({
@@ -641,12 +680,17 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     roots.push(root);
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
+    const imagePath = join(root, "follow-up.png");
+    writeFileSync(imagePath, Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]));
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "resume"));
     const manager = new ProviderManager(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
 
+    let followUp: Promise<boolean> | null = null;
     await expect(manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-resume",
@@ -655,15 +699,33 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       interactionMode: "build",
       access: "supervised",
       sessionId: "opencode-lifecycle-session",
-    }))).resolves.toMatchObject({
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || followUp) return;
+        followUp = manager.steer(event.conversationId, {
+          content: "Inspect the attached reference too.",
+          imagePaths: [imagePath],
+        }, { runId: event.runId, turnId: event.turnId! });
+      },
+    })).resolves.toMatchObject({
       status: "completed",
       sessionId: "opencode-lifecycle-session",
       text: "Resumed OpenCode response",
     });
-    const { captured } = JSON.parse(readFileSync(capturePath, "utf8")) as { captured: Array<{ method: string; path: string }> };
+    await expect(followUp).resolves.toBe(true);
+    const { captured } = JSON.parse(readFileSync(capturePath, "utf8")) as { captured: Array<{ method: string; path: string; body?: Record<string, unknown> }> };
     expect(captured.some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);
     expect(captured.some(({ method, path }) => method === "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
     expect(captured.some(({ method, path }) => method !== "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
+    expect(captured.find(({ path }) =>
+      path === "/api/session/opencode-lifecycle-session/prompt")?.body)
+      .toMatchObject({
+        delivery: "steer",
+        prompt: {
+          text: "Inspect the attached reference too.",
+          files: [{ uri: expect.stringMatching(/^file:/u), name: "follow-up.png" }],
+        },
+      });
   });
 
   it("uses the native v2 compaction endpoint and waits for its completion event", async () => {

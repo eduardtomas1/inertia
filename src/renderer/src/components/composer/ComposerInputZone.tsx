@@ -271,7 +271,7 @@ export function ComposerInputZone({
           value={message}
           onChange={(event) => onMessageChange(event.target.value)}
           onPaste={(event) => {
-            if (!running && event.clipboardData.files.length > 0) {
+            if (event.clipboardData.files.length > 0) {
               event.preventDefault();
               void onImportAttachments([...event.clipboardData.files]);
             }

@@ -13,6 +13,7 @@ import type {
   ProviderGoalSnapshot,
   ProviderGoalMutation,
   ProviderRunFailure,
+  ProviderSteerInput,
 } from "../provider/contracts";
 import type { ProcessTreeTerminator } from "../process-lifecycle";
 
@@ -124,7 +125,7 @@ export interface CodexAppServerRun {
   cancel: (force?: boolean) => void;
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
-  steer?: (content: string) => Promise<boolean>;
+  steer?: (input: ProviderSteerInput) => Promise<boolean>;
   setGoal: (input: ProviderGoalMutation) => Promise<ProviderGoalSnapshot>;
   clearGoal: () => Promise<boolean>;
 }

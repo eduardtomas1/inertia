@@ -163,7 +163,9 @@ type ChatWorkspaceProps = {
     selection: ModelSelection,
     options?: { prefillText?: string },
   ) => Promise<void>;
-  onChooseAttachments: () => Promise<ChatAttachment[]>;
+  onChooseAttachments: (
+    mode?: import("@shared/desktop").AttachmentPickerMode,
+  ) => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onReleaseAttachment: (id: string) => Promise<void>;
   onRunAction: (action: ProjectAction) => void;

@@ -174,7 +174,9 @@ export function AgentExecutionLayer({
               <span className="turn-working-copy">
                 <strong>{activePresentation.label}</strong>
                 {activePresentation.detail && (
-                  <small aria-hidden="true">{activePresentation.detail}</small>
+                  <small className="turn-working-detail-chip" aria-hidden="true">
+                    {activePresentation.detail}
+                  </small>
                 )}
               </span>
             </span>

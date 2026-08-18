@@ -117,6 +117,47 @@ export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Ele
   return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)), true)}</span>;
 }
 
+export const MAX_ANIMATED_STREAM_WORDS = 96;
+
+/**
+ * Keeps the live fast path as escaped plain text while giving newly appended
+ * words stable keyed spans. Only the recent tail gets nodes, which bounds DOM
+ * work during long responses and lets React preserve already animated words.
+ */
+export function StreamingPlainText({
+  content,
+}: {
+  content: string;
+}): React.JSX.Element {
+  const tokens = content.split(/(\s+)/u).filter(Boolean);
+  let words = 0;
+  let animatedStart = 0;
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    if (!/\S/u.test(tokens[index]!)) continue;
+    words += 1;
+    if (words === MAX_ANIMATED_STREAM_WORDS) {
+      animatedStart = index;
+      break;
+    }
+  }
+  const prefix = tokens.slice(0, animatedStart).join("");
+  return (
+    <p>
+      {prefix}
+      {tokens.slice(animatedStart).map((token, offset) => {
+        const index = animatedStart + offset;
+        return /\S/u.test(token)
+          ? (
+              <span className="response-stream-word" key={`stream-word-${index}`}>
+                {token}
+              </span>
+            )
+          : token;
+      })}
+    </p>
+  );
+}
+
 type ActivityLineSeverity = "neutral" | ActivityAttentionSeverity;
 
 function activityTitleConveysSeverity(
@@ -237,7 +278,9 @@ export const ActivityRow = memo(function ActivityRow({
       data-activity-visibility={visibility}
       title={fullLabel}
     >
-      <Icon size={12} aria-hidden="true" />
+      <span className="agent-activity-icon" aria-hidden="true">
+        <Icon size={12} />
+      </span>
       <span className={clsx(
         "agent-activity-copy",
         detailPresentation.full && !showPreview && !needsAttention && "has-detail",
@@ -335,8 +378,9 @@ const CommentaryRow = memo(function CommentaryRow({
             <div
               className="response-markdown is-streaming is-plain-stream"
               data-stream-renderer="plain-text"
+              data-stream-motion="word-reveal"
             >
-              <p>{entry.content}</p>
+              <StreamingPlainText content={entry.content} />
             </div>
           )
         : (

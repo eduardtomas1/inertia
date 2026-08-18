@@ -21,6 +21,7 @@ import {
 } from "../utils/subagentDisclosure";
 import type { SubagentDisclosureRow } from "../utils/subagentDisclosure";
 import { SubagentElapsed } from "./SubagentElapsed";
+import { SubagentStatusMark } from "./SubagentStatusMark";
 import { SubagentTraceDetails } from "./SubagentTraceDetails";
 
 interface SubagentDisclosureProps {
@@ -193,7 +194,7 @@ export function SubagentDisclosure({
         />
       </summary>
       <ol id={listId} aria-label="Delegated agent tree">
-        {visibleRows.map(({ trace, depth, canStop, omittedAncestors }) => {
+        {visibleRows.map(({ trace, depth, canStop, omittedAncestors }, index) => {
           const detail = subagentTraceSummary(trace);
           const label = subagentTraceLabel(trace);
           const route = subagentRouteLabel(trace, turns);
@@ -211,22 +212,29 @@ export function SubagentDisclosure({
               key={trace.id}
               data-status={trace.status}
               data-depth={depth}
+              data-expanded={expanded ? "true" : "false"}
               aria-label={`${label}, ${route}, ${state}`}
-              style={{ "--subagent-depth": depth } as React.CSSProperties}
+              style={{
+                "--subagent-depth": depth,
+                "--motion-index": Math.min(index, 6),
+              } as React.CSSProperties}
             >
-              <span className="subagent-status-dot" aria-hidden="true" />
+              <SubagentStatusMark key={trace.status} trace={trace} />
               <span className="subagent-copy">
                 <span className="subagent-copy-heading">
                   <strong>{label}</strong>
-                  <small
-                    title={trace.providerStatus
-                      ? `Exact provider state: ${trace.providerStatus}`
-                      : undefined}
-                  >
-                    {route} · {state} ·{" "}
-                    <SubagentElapsed trace={trace} now={fixedNow} />
-                  </small>
+                  <span className="subagent-state-pill" key={trace.status}>
+                    {state}
+                  </span>
                 </span>
+                <small
+                  className="subagent-route"
+                  title={trace.providerStatus
+                    ? `Exact provider state: ${trace.providerStatus}`
+                    : undefined}
+                >
+                  {route} · <SubagentElapsed trace={trace} now={fixedNow} />
+                </small>
                 {subagentHasNestedParent(trace) && (
                   <small className="subagent-relationship">
                     {relationship}
@@ -283,12 +291,14 @@ export function SubagentDisclosure({
                 )}
               </span>
               {expanded && (
-                <SubagentTraceDetails
-                  id={detailId}
-                  trace={trace}
-                  traces={subagents}
-                  turns={turns}
-                />
+                <div className="subagent-detail-reveal">
+                  <SubagentTraceDetails
+                    id={detailId}
+                    trace={trace}
+                    traces={subagents}
+                    turns={turns}
+                  />
+                </div>
               )}
             </li>
           );

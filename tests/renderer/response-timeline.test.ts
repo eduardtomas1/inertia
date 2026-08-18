@@ -461,7 +461,9 @@ describe("authoritative response timeline", () => {
     expect(activeHtml).not.toContain("turn-final-answer-document");
     expect(activeHtml).toContain("turn-commentary-row is-streaming");
     expect(activeHtml).toContain('data-turn-layer="agent-execution"');
-    expect(activeHtml).toContain("Answer in progress");
+    expect(activeHtml).toContain('data-stream-motion="word-reveal"');
+    expect(activeHtml).toContain('<span class="response-stream-word">Answer</span>');
+    expect(activeHtml).toContain('<span class="response-stream-word">progress</span>');
     expect(activeHtml).not.toContain('aria-label="Final answer actions and run metadata"');
     expect(activeHtml).not.toContain('data-turn-layer="supporting-ledger"');
     expect(settledHtml).toContain("turn-final-answer-document");

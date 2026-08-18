@@ -13,6 +13,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
+import "./BeautifulUiMotion.css";
 
 import type {
   AgentGoal,
@@ -38,6 +39,7 @@ import {
 } from "../utils/subagentDisclosure";
 import { formatElapsed } from "../utils/responseTimeline";
 import { SubagentElapsed } from "./SubagentElapsed";
+import { SubagentStatusMark } from "./SubagentStatusMark";
 import { SubagentTraceDetails } from "./SubagentTraceDetails";
 import { MAX_SELECTED_SKILLS } from "./composer/config";
 import {
@@ -654,7 +656,7 @@ function SubagentsSection({
             depth,
             canStop,
             omittedAncestors,
-          }) => {
+          }, index) => {
             const detail = subagentTraceSummary(trace);
             const mayFollowUp = Boolean(
               onFollowUpSubagent && canFollowUpSubagent?.(trace),
@@ -681,14 +683,21 @@ function SubagentsSection({
                 key={trace.id}
                 data-status={trace.status}
                 data-depth={depth}
+                data-expanded={expanded ? "true" : "false"}
                 aria-label={`${label}, ${route}, ${status}`}
-                style={{ "--goal-subagent-depth": depth } as React.CSSProperties}
+                style={{
+                  "--goal-subagent-depth": depth,
+                  "--motion-index": Math.min(index, 6),
+                } as React.CSSProperties}
               >
-                <span className="goal-panel-subagent-dot" aria-hidden="true" />
+                <SubagentStatusMark key={trace.status} trace={trace} />
                 <span className="goal-panel-subagent-copy">
                   <span>
                     <strong>{label}</strong>
-                    <span className="goal-panel-subagent-state">
+                    <span
+                      className="goal-panel-subagent-state"
+                      key={trace.status}
+                    >
                       {status}
                     </span>
                     <small
@@ -770,12 +779,14 @@ function SubagentsSection({
                   )}
                 </span>
                 {expanded && (
-                  <SubagentTraceDetails
-                    id={detailId}
-                    trace={trace}
-                    traces={subagents}
-                    turns={turns}
-                  />
+                  <div className="subagent-detail-reveal">
+                    <SubagentTraceDetails
+                      id={detailId}
+                      trace={trace}
+                      traces={subagents}
+                      turns={turns}
+                    />
+                  </div>
                 )}
               </li>
             );

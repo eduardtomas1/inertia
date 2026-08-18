@@ -474,6 +474,12 @@ describe("GoalPanel", () => {
     const codexRow = screen.getByRole("listitem", {
       name: /Codex audit, Codex · App Server, Running/u,
     });
+    expect(within(codexRow).getByText("Running")).toHaveClass(
+      "goal-panel-subagent-state",
+    );
+    expect(codexRow.querySelector(".subagent-status-mark"))
+      .toHaveAttribute("data-live", "true");
+    expect(codexRow).toHaveStyle({ "--motion-index": "1" });
     await user.click(within(codexRow).getByRole("button", {
       name: "View parent turn for Codex audit",
     }));
@@ -481,6 +487,9 @@ describe("GoalPanel", () => {
     await user.click(within(codexRow).getByRole("button", {
       name: "Details",
     }));
+    expect(codexRow).toHaveAttribute("data-expanded", "true");
+    expect(codexRow.querySelector(".subagent-detail-reveal"))
+      .toBeInTheDocument();
     expect(within(codexRow).getByText("Route")).toBeInTheDocument();
     expect(within(codexRow).getByText("Codex · App Server"))
       .toBeInTheDocument();

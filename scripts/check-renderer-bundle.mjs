@@ -4,13 +4,12 @@ import { resolve } from "node:path";
 const outputDirectory = resolve("out/renderer");
 const assetDirectory = resolve(outputDirectory, "assets");
 const kibibyte = 1024;
-// The core and entry-CSS ceilings had been consumed to within a kibibyte,
-// which blocked ordinary renderer work rather than catching regressions.
-// They keep roughly a percent of working room; the deferred and lazily
-// loaded ceilings are unchanged.
+// The core ceiling had been consumed to within a kibibyte, which blocked
+// ordinary renderer work rather than catching regressions. Keep roughly a
+// percent of working room; all other ceilings remain unchanged.
 const budgets = {
   entryJavaScript: 700 * kibibyte,
-  entryCss: 340 * kibibyte,
+  entryCss: 330 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
   coreJavaScript: 1_920 * kibibyte,

@@ -534,7 +534,7 @@
 }
 
 .daily-work-unavailable {
-  color: var(--text-faint);
+  color: var(--text-muted);
   font-size: 0.78em;
   font-weight: 580;
   letter-spacing: 0;
@@ -580,6 +580,14 @@
   .daily-work-card-chevron {
     transition: none;
     transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .daily-work-provider-meter > i { background: CanvasText; }
+  .daily-work-provider-meter.is-unavailable {
+    border: 1px dashed CanvasText;
+    background: Canvas;
   }
 }
 

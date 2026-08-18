@@ -39,7 +39,7 @@ describe("response Markdown", () => {
       "",
       "<details><summary>More</summary><p>Calm detail.</p></details>",
     ].join("\n"));
-    expect(html).toContain("<h1>Result</h1>");
+    expect(html).toContain('<h1 id="user-content-result">Result</h1>');
     expect(html).toContain('type="checkbox"');
     expect(html).toContain("<span>Markdown</span>");
     expect(html).toContain("<span>CSV</span>");
@@ -90,6 +90,65 @@ describe("response Markdown", () => {
       "markdown",
       "docs/reference",
     )).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink(
+      "/work/project",
+      "../guide.md#overview",
+      "markdown",
+      "docs/reference",
+    )).toEqual({
+      kind: "project",
+      relativePath: "docs/guide.md",
+      action: "reveal",
+      headingId: "overview",
+    });
+  });
+
+  it("creates stable GitHub-compatible duplicate and Unicode heading ids", () => {
+    const html = render([
+      "# Foo",
+      "# Foo",
+      "# Foo-1",
+      "# Привет non-latin 你好",
+      "# 😄 emoji",
+      "# root",
+      "# workspace-content",
+    ].join("\n"));
+    expect(html).toContain('<h1 id="user-content-foo">Foo</h1>');
+    expect(html).toContain('<h1 id="user-content-foo-1">Foo</h1>');
+    expect(html).toContain('<h1 id="user-content-foo-1-1">Foo-1</h1>');
+    expect(html).toContain('<h1 id="user-content-привет-non-latin-你好">');
+    expect(html).toContain('<h1 id="user-content-😄-emoji">');
+    expect(html).toContain('<h1 id="user-content-root">root</h1>');
+    expect(html).toContain(
+      '<h1 id="user-content-workspace-content">workspace-content</h1>',
+    );
+    expect(render('<h2 id="__proto__">Raw heading</h2>'))
+      .toContain('<h2 id="user-content-raw-heading">Raw heading</h2>');
+  });
+
+  it("does not assign workspace image resources before client admission", () => {
+    const html = renderToStaticMarkup(createElement(ResponseMarkdown, {
+      content: "![Architecture](<./assets/diagram one.png>)\n\n![](../outside.png)",
+      projectRoot: "/work/project",
+      projectId: "11111111-1111-4111-8111-111111111111",
+      conversationId: "22222222-2222-4222-8222-222222222222",
+      markdownBasePath: "docs",
+      defaultCodeWrap: false,
+    }));
+    expect(html).not.toContain("inertia://bundle/workspace-image/");
+    expect(html).not.toContain("<img");
+    expect(html).toContain('data-markdown-image-state="waiting"');
+    expect(html).toContain('aria-label="Architecture"');
+    expect(html).toContain("Architecture (image waiting to load)");
+    expect(html).toContain('aria-hidden="true"');
+  });
+
+  it("never emits inline image data outside the guarded resource path", () => {
+    const html = render("![Inline](data:image/png;base64,iVBORw0KGgo=)");
+    expect(html).not.toContain("data:image/");
+    expect(html).not.toContain("<img");
+    expect(html).toContain('aria-label="Inline"');
+    expect(html).toContain("Inline (image unavailable)");
   });
 
   it("keeps highlighted code as inert text", () => {
@@ -149,7 +208,9 @@ describe("response Markdown", () => {
     expect(html).toContain("<code>ModelSelection</code>");
     expect(html).toContain('rel="noreferrer noopener"');
     expect(html).toContain('target="_blank"');
-    expect(html).toContain('alt="A constrained result preview"');
+    expect(html).toContain('aria-label="A constrained result preview"');
+    expect(html).toContain("A constrained result preview (image unavailable)");
+    expect(html).not.toContain('<img src="https://example.com/result.png"');
     expect(html).not.toContain("javascript:");
   });
 

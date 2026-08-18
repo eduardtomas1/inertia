@@ -58,7 +58,8 @@ describe("FilesPanel", () => {
     expect(html).toContain('aria-label="Rendered preview of README.md"');
     expect(html).toContain('data-language-family="markup"');
     expect(html).toContain("Markdown recognized locally");
-    expect(html).toContain("<h1>Project</h1>");
+    expect(html).toContain("Rendering Markdown");
+    expect(html).not.toContain("<h1");
     expect(html).not.toContain('role="list"');
   });
 

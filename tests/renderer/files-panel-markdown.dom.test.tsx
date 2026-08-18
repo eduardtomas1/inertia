@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -23,8 +29,9 @@ function markdownPreview(content: string, path = "docs/README.md") {
 }
 
 describe("FilesPanel Markdown preview", () => {
-  it("renders safe GFM by default and opens relative project links", () => {
+  it("renders safe GFM by default and opens relative project links", async () => {
     const onSelectFile = vi.fn();
+    const onOpenWorkspaceEntry = vi.fn();
     const { container } = render(
       <FilesPanel
         {...FILES_PROJECT}
@@ -45,6 +52,7 @@ describe("FilesPanel Markdown preview", () => {
         ].join("\n"))}
         selectedPath="docs/README.md"
         onSelectFile={onSelectFile}
+        onOpenWorkspaceEntry={onOpenWorkspaceEntry}
         onLoadEntries={vi.fn()}
       />,
     );
@@ -52,20 +60,27 @@ describe("FilesPanel Markdown preview", () => {
     const document = screen.getByRole("document", {
       name: "Rendered preview of docs/README.md",
     });
-    expect(within(document).getByRole("heading", { name: "Project guide" }))
+    expect(await within(document).findByRole("heading", { name: "Project guide" }))
       .toBeInTheDocument();
     expect(within(document).getByRole("table")).toBeInTheDocument();
     expect(within(document).getByRole("checkbox")).toBeChecked();
     expect(container.querySelector("script")).toBeNull();
-    expect(container.querySelector("img")).not.toHaveAttribute("onerror");
+    expect(container.querySelector("img")).toBeNull();
+    const unavailable = container.querySelector(
+      ".response-markdown-image-unavailable",
+    );
+    expect(unavailable).toHaveAttribute("aria-hidden", "true");
+    expect(within(document).queryByRole("img")).not.toBeInTheDocument();
 
     fireEvent.click(within(document).getByRole("link", {
       name: "Open the guide",
     }));
-    expect(onSelectFile).toHaveBeenCalledWith(
+    expect(onOpenWorkspaceEntry).toHaveBeenCalledWith(
       "docs/guide.md",
       { startLine: 7, endLine: 7 },
+      undefined,
     );
+    expect(onSelectFile).not.toHaveBeenCalled();
   });
 
   it("switches between rendered Markdown and highlighted source", () => {
@@ -158,5 +173,109 @@ describe("FilesPanel Markdown preview", () => {
     expect(screen.getByText(/Rendered preview is limited to 2,000 lines/u))
       .toBeInTheDocument();
     expect(container.querySelectorAll(".file-preview-line")).toHaveLength(2_000);
+  });
+
+  it("resets interactive and pending copy state when the preview identity changes", async () => {
+    let finishCopy: ((copied: boolean) => void) | undefined;
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        copyText: vi.fn(() => new Promise<boolean>((resolve) => {
+          finishCopy = resolve;
+        })),
+      },
+    });
+    const props = {
+      ...FILES_PROJECT,
+      entries: [
+        { path: "docs/a.md", kind: "file" as const },
+        { path: "docs/b.md", kind: "file" as const },
+      ],
+      onSelectFile: vi.fn(),
+      onLoadEntries: vi.fn(),
+    };
+    const view = render(
+      <FilesPanel
+        {...props}
+        preview={markdownPreview("```ts\nconst a = true;\n```", "docs/a.md")}
+        selectedPath="docs/a.md"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
+    expect(screen.getByRole("button", { name: "Copying" })).toBeDisabled();
+
+    view.rerender(
+      <FilesPanel
+        {...props}
+        preview={markdownPreview("```ts\nconst b = true;\n```", "docs/b.md")}
+        selectedPath="docs/b.md"
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Copy" }))
+      .not.toBeDisabled();
+    finishCopy?.(true);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Copy" }))
+        .toHaveTextContent("Copy");
+    });
+  });
+
+  it("hands directory links and cross-file heading fragments to workspace routing", async () => {
+    const onOpenWorkspaceEntry = vi.fn();
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const props = {
+      ...FILES_PROJECT,
+      entries: [{ path: "docs/README.md", kind: "file" as const }],
+      selectedPath: "docs/README.md",
+      onSelectFile: vi.fn(),
+      onOpenWorkspaceEntry,
+      onLoadEntries: vi.fn(),
+    };
+    const view = render(
+      <FilesPanel
+        {...props}
+        preview={markdownPreview([
+          "[Directory](../docs)",
+          "[Directory hint](../docs/)",
+          "[Guide section](./guide.md#cafe%CC%81)",
+        ].join("\n\n"))}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("link", { name: "Directory" }));
+    fireEvent.click(screen.getByRole("link", { name: "Directory hint" }));
+    fireEvent.click(screen.getByRole("link", { name: "Guide section" }));
+    expect(onOpenWorkspaceEntry).toHaveBeenNthCalledWith(
+      1,
+      "docs",
+      undefined,
+      undefined,
+    );
+    expect(onOpenWorkspaceEntry).toHaveBeenNthCalledWith(
+      2,
+      "docs",
+      undefined,
+      undefined,
+    );
+    expect(onOpenWorkspaceEntry).toHaveBeenNthCalledWith(
+      3,
+      "docs/guide.md",
+      undefined,
+      undefined,
+    );
+    view.rerender(
+      <FilesPanel
+        {...props}
+        preview={markdownPreview("# Cafe\u0301", "docs/guide.md")}
+        selectedPath="docs/guide.md"
+      />,
+    );
+    const heading = await screen.findByRole("heading", { name: "Cafe\u0301" });
+    expect(heading).toHaveAttribute("id", "user-content-cafe\u0301");
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    expect(heading).toHaveFocus();
   });
 });

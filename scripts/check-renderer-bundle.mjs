@@ -11,7 +11,11 @@ const budgets = {
   entryJavaScript: 700 * kibibyte,
   entryCss: 330 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
+  filesFirstLoadJavaScript: 115 * kibibyte,
+  deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
+  // This is the shared core ceiling from the visual-polish work. Markdown is
+  // accounted for explicitly below rather than stacking another core increase.
   coreJavaScript: 1_920 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
@@ -23,6 +27,37 @@ function formatBytes(bytes) {
 
 async function assetBytes(assetPath) {
   return (await stat(resolve(outputDirectory, assetPath))).size;
+}
+
+async function staticJavaScriptImports(assetName) {
+  const source = await readFile(resolve(assetDirectory, assetName), "utf8");
+  const imports = new Set();
+  const pattern = /\bimport(?:\{[^;]*?\}from)?["']\.\/([^"']+\.js)["']/gu;
+  for (const match of source.matchAll(pattern)) imports.add(match[1]);
+  return imports;
+}
+
+async function javaScriptClosure(entryName) {
+  const pending = [entryName];
+  const closure = new Set();
+  while (pending.length > 0) {
+    const name = pending.pop();
+    if (!name || closure.has(name)) continue;
+    closure.add(name);
+    for (const dependency of await staticJavaScriptImports(name)) {
+      if (!closure.has(dependency)) pending.push(dependency);
+    }
+  }
+  return closure;
+}
+
+async function closureBytes(closure, excluded = new Set()) {
+  const sizes = await Promise.all(
+    [...closure]
+      .filter((name) => !excluded.has(name))
+      .map(async (name) => (await stat(resolve(assetDirectory, name))).size),
+  );
+  return sizes.reduce((total, bytes) => total + bytes, 0);
 }
 
 const html = await readFile(resolve(outputDirectory, "index.html"), "utf8");
@@ -46,6 +81,12 @@ const transcriptJavaScript = assetNames.find(
 const settingsJavaScript = assetNames.find(
   (name) => /^SettingsView-.*\.js$/u.test(name),
 );
+const filesJavaScript = assetNames.find(
+  (name) => /^FilesPanel-.*\.js$/u.test(name),
+);
+const deferredMarkdownJavaScript = assetNames.find(
+  (name) => /^ResponseMarkdown-.*\.js$/u.test(name),
+);
 const deferredPdfJavaScript = assetNames.find(
   (name) => /^pdf-.*\.js$/u.test(name),
 );
@@ -62,6 +103,11 @@ if (!settingsJavaScript) {
     "Renderer bundle check could not find the deferred settings shell.",
   );
 }
+if (!filesJavaScript || !deferredMarkdownJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred Files or Markdown chunks.",
+  );
+}
 if (!deferredPdfJavaScript || !deferredPdfWorker) {
   throw new Error(
     "Renderer bundle check could not find the deferred PDF engine.",
@@ -70,8 +116,26 @@ if (!deferredPdfJavaScript || !deferredPdfWorker) {
 
 const entryJavaScriptBytes = await assetBytes(entryJavaScript);
 const entryCssBytes = await assetBytes(entryCss);
-const transcriptJavaScriptBytes = await assetBytes(
-  `assets/${transcriptJavaScript}`,
+const entryJavaScriptName = entryJavaScript.replace(/^assets\//u, "");
+const entryJavaScriptClosure = await javaScriptClosure(entryJavaScriptName);
+const filesJavaScriptClosure = await javaScriptClosure(filesJavaScript);
+const markdownJavaScriptClosure = await javaScriptClosure(
+  deferredMarkdownJavaScript,
+);
+const transcriptJavaScriptClosure = await javaScriptClosure(
+  transcriptJavaScript,
+);
+const filesFirstLoadJavaScriptBytes = await closureBytes(
+  filesJavaScriptClosure,
+  entryJavaScriptClosure,
+);
+const deferredMarkdownJavaScriptBytes = await closureBytes(
+  markdownJavaScriptClosure,
+  entryJavaScriptClosure,
+);
+const transcriptJavaScriptBytes = await closureBytes(
+  transcriptJavaScriptClosure,
+  entryJavaScriptClosure,
 );
 const settingsJavaScriptBytes = await assetBytes(
   `assets/${settingsJavaScript}`,
@@ -97,6 +161,8 @@ const measurements = {
   entryJavaScript: entryJavaScriptBytes,
   entryCss: entryCssBytes,
   settingsJavaScript: settingsJavaScriptBytes,
+  filesFirstLoadJavaScript: filesFirstLoadJavaScriptBytes,
+  deferredMarkdownJavaScript: deferredMarkdownJavaScriptBytes,
   transcriptJavaScript: transcriptJavaScriptBytes,
   coreJavaScript: coreJavaScriptBytes,
   deferredPdfJavaScript: deferredPdfJavaScriptBytes,

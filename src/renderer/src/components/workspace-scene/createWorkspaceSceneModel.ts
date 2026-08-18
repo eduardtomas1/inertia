@@ -770,6 +770,7 @@ export function createWorkspaceSceneModel({
         previewError: workspaceTools.filePreviewError,
         entriesTruncated: workspaceTools.entriesTruncated,
         onSelectFile: workspaceTools.selectWorkspaceFile,
+        onOpenWorkspaceEntry: workspaceTools.openWorkspaceFile,
         onLoadEntries: workspaceTools.requestWorkspaceEntries,
         onRefresh: () => {
           void workspaceTools.loadFiles().catch((error) => setActionError(

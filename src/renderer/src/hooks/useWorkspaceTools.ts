@@ -123,6 +123,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     ...files,
     ...review,
     ...artifacts,
+    openWorkspaceFile,
     gitLoading: git.loading,
     gitError: git.loadError,
     toolsLoading: git.loading || artifacts.loading,

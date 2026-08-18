@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -36,13 +38,17 @@ import {
   type WorkspaceTreeRow,
 } from "../utils/workspaceTree";
 import { highlightedSourceLines } from "../utils/sourceHighlighting";
+import { markdownHeadingDomId } from "../utils/markdownHeading";
 import {
   workspaceFileLocationLabel,
   type WorkspaceFileLocation,
 } from "../utils/workspaceFileReference";
 import { IconButton, LoadingMark } from "./ui";
 import { FileEditorDialog } from "./FileEditorDialog";
-import { ResponseMarkdown } from "./ResponseMarkdown";
+
+const ResponseMarkdown = lazy(async () => ({
+  default: (await import("./ResponseMarkdown")).ResponseMarkdown,
+}));
 
 export interface WorkspaceEntriesPage {
   directory: string;
@@ -64,6 +70,11 @@ export type FilesPanelProps = {
   previewError?: string | null;
   entriesTruncated?: boolean;
   onSelectFile: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
+  onOpenWorkspaceEntry?: (
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
@@ -209,6 +220,7 @@ export function FilesPanel({
   previewError = null,
   entriesTruncated = false,
   onSelectFile,
+  onOpenWorkspaceEntry,
   onLoadEntries,
   onRefresh,
   onOpenFile,
@@ -232,9 +244,14 @@ export function FilesPanel({
     useState<WorkspaceFilePreview | null>(null);
   const [previewViewState, setPreviewViewState] =
     useState<FilePreviewViewState>({ identity: "", view: "preview" });
+  const [pendingMarkdownHeading, setPendingMarkdownHeading] = useState<{
+    path: string;
+    id: string;
+  } | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const previewLineRefs = useRef(new Map<number, HTMLSpanElement>());
   const previewCodeRef = useRef<HTMLPreElement>(null);
+  const previewMarkdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchGeneration = useRef(0);
   const mounted = useRef(true);
@@ -289,6 +306,64 @@ export function FilesPanel({
     [preview, previewLanguage, renderedMarkdownPreview],
   );
   const previewPath = preview?.path ?? null;
+
+  const openMarkdownEntry = useCallback((
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+    headingId?: string,
+  ): void => {
+    if (headingId) {
+      setPendingMarkdownHeading({ path, id: headingId });
+      if (previewPath === path) return;
+    } else {
+      setPendingMarkdownHeading(null);
+    }
+    (onOpenWorkspaceEntry ?? onSelectFile)(path, location, literalPath);
+  }, [onOpenWorkspaceEntry, onSelectFile, previewPath]);
+
+  useEffect(() => {
+    if (
+      !pendingMarkdownHeading
+      || pendingMarkdownHeading.path !== previewPath
+      || !renderedMarkdownPreview
+    ) return;
+    const container = previewMarkdownRef.current;
+    if (!container) return;
+    let frame: number | null = null;
+    const reveal = (): boolean => {
+      const heading = [...container.querySelectorAll<HTMLElement>("[id]")]
+        .find(({ id }) => id === markdownHeadingDomId(
+          pendingMarkdownHeading.id,
+        ));
+      if (!heading) return false;
+      heading.scrollIntoView({ block: "start", inline: "nearest" });
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+      setPendingMarkdownHeading((current) =>
+        current?.path === pendingMarkdownHeading.path
+          && current.id === pendingMarkdownHeading.id
+          ? null
+          : current);
+      return true;
+    };
+    const scheduleReveal = (): void => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        if (reveal()) observer.disconnect();
+      });
+    };
+    const observer = new MutationObserver(scheduleReveal);
+    if (!reveal()) {
+      observer.observe(container, { childList: true, subtree: true });
+      scheduleReveal();
+    }
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [pendingMarkdownHeading, previewPath, renderedMarkdownPreview]);
 
   useEffect(() => {
     if (!previewPath || !selectedLocation || renderedMarkdownPreview) return;
@@ -525,6 +600,7 @@ export function FilesPanel({
   const activateRow = (row: WorkspaceTreeRow): void => {
     setFocusedPath(row.entry.path);
     if (row.entry.kind === "file") {
+      setPendingMarkdownHeading(null);
       onSelectFile(row.entry.path);
     } else if (searchActive) {
       void revealSearchDirectory(row.entry.path);
@@ -547,6 +623,7 @@ export function FilesPanel({
     if (action.type === "focus") {
       focusItem(action.path);
     } else if (action.type === "open") {
+      setPendingMarkdownHeading(null);
       onSelectFile(action.path);
     } else if (searchActive) {
       void revealSearchDirectory(action.path);
@@ -828,20 +905,29 @@ export function FilesPanel({
               </header>
               {renderedMarkdownPreview ? (
                 <div
+                  ref={previewMarkdownRef}
                   className="file-preview-markdown"
                   role="document"
                   tabIndex={0}
                   aria-label={`Rendered preview of ${preview.path}`}
                 >
-                  <ResponseMarkdown
-                    content={preview.content}
-                    projectRoot={projectRoot}
-                    projectId={projectId}
-                    conversationId={conversationId}
-                    markdownBasePath={workspaceParentPath(preview.path)}
-                    defaultCodeWrap
-                    onOpenProjectFile={onSelectFile}
-                  />
+                  <Suspense fallback={(
+                    <div className="panel-loading" role="status">
+                      <LoadingMark label="Rendering Markdown" />
+                      <span>Rendering Markdown…</span>
+                    </div>
+                  )}>
+                    <ResponseMarkdown
+                      key={previewViewIdentity}
+                      content={preview.content}
+                      projectRoot={projectRoot}
+                      projectId={projectId}
+                      conversationId={conversationId}
+                      markdownBasePath={workspaceParentPath(preview.path)}
+                      defaultCodeWrap
+                      onOpenProjectFile={openMarkdownEntry}
+                    />
+                  </Suspense>
                 </div>
               ) : (
                 <pre ref={previewCodeRef} className="file-preview-code" tabIndex={0} aria-label={`Contents of ${preview.path}`}>

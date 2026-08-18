@@ -6989,6 +6989,9 @@ button.environment-row:focus-visible,
 .file-preview-markdown .response-markdown h1:first-child {
   letter-spacing: -0.018em;
 }
+.file-preview-markdown .response-markdown :is(h1, h2, h3, h4, h5, h6)[id] {
+  scroll-margin-block-start: 16px;
+}
 .file-language,
 .file-location {
   flex: 0 0 auto;
@@ -12651,6 +12654,15 @@ button.sent-attachment-open:focus-visible {
   margin: var(--markdown-paragraph-spacing) auto;
   border-radius: var(--radius-medium);
   object-fit: contain;
+}
+
+.response-markdown-image-shell {
+  display: block;
+}
+
+.response-markdown-image-unavailable {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 .response-markdown hr {

@@ -1,6 +1,6 @@
 import { constants, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, open, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, relative, resolve, join, sep } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   app,
@@ -55,7 +55,6 @@ import {
   type ConversationAttachmentAccess,
   openPdfAttachment,
   openConversationAttachments,
-  resolveAttachmentPreviewResponse,
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
 import { resolveAppUpdateCapability } from "./app-update-capability.js";
@@ -81,6 +80,7 @@ import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
 import { packageSmokeEnvironment } from "./package-smoke-environment.js";
 import { waitForRequestedPackageSmokeResults } from "./package-smoke-results.js";
+import { APP_HOST, APP_SCHEME, registerAppProtocol } from "./app-protocol.js";
 import {
   activateThreadNotification,
   waitForThreadNotificationWindowLoad,
@@ -130,8 +130,6 @@ const IPC = {
   clearBackendCredential: "inertia:clear-backend-credential",
   getBackendCredentialState: "inertia:get-backend-credential-state",
 } as const;
-const APP_SCHEME = "inertia";
-const APP_HOST = "bundle";
 protocol.registerSchemesAsPrivileged([
   {
     scheme: APP_SCHEME,
@@ -177,11 +175,6 @@ interface WindowState { x?: number; y?: number; width: number; height: number; m
 
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
 function windowAppearancePath(): string { return join(app.getPath("userData"), WINDOW_APPEARANCE_FILENAME); }
-
-function isContained(root: string, target: string): boolean {
-  const child = relative(root, target);
-  return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
-}
 
 function attachmentStorageRoot(): string {
   return join(app.getPath("temp"), "inertia-attachments");
@@ -282,36 +275,6 @@ function disposeImportedAttachments(): Promise<void> {
       });
   }
   return attachmentCleanup;
-}
-
-function registerAppProtocol(): void {
-  const rendererRoot = fileURLToPath(new URL("../renderer/", import.meta.url));
-  protocol.handle(APP_SCHEME, async (request) => {
-    try {
-      const url = new URL(request.url);
-      if (url.hostname !== APP_HOST || url.username || url.password || url.search || url.hash) throw new Error();
-      const requestedPath = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
-      if (requestedPath.includes("\0")) throw new Error();
-      const previewId = /^attachment-preview\/([0-9a-f-]{36})$/iu.exec(requestedPath)?.[1];
-      if (previewId) {
-        const response = await resolveAttachmentPreviewResponse(
-          importedAttachments,
-          conversationAttachments,
-          previewId,
-        );
-        if (!response) throw new Error();
-        return response;
-      }
-      const target = resolve(rendererRoot, requestedPath);
-      if (!isContained(rendererRoot, target)) throw new Error();
-      return net.fetch(pathToFileURL(target).toString());
-    } catch {
-      return new Response("Not found", {
-        status: 404,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
-      });
-    }
-  });
 }
 
 function readWindowState(): WindowState {
@@ -1025,7 +988,11 @@ async function bootstrap(): Promise<void> {
     ),
   );
 
-  registerAppProtocol();
+  registerAppProtocol({
+    attachmentRegistry: () => importedAttachments,
+    conversationAttachments: () => conversationAttachments,
+    runtimeSupervisor: () => runtimeSupervisor,
+  });
   // Paint the secure renderer while private attachment storage is reconciled.
   // The renderer can show its bounded starting state until the runtime-ready
   // signal arrives; orphan cleanup no longer blocks the first window.

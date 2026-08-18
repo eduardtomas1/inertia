@@ -288,6 +288,18 @@ describe("cross-platform packaged behavior contract", () => {
     expect(linuxBuild).toContain("if: runner.os == 'Linux'");
     expect(linuxBuild).not.toContain("_CSC_");
     expect(linuxBuild).not.toContain("APPLE_API_");
+
+    const releaseUpload = workflowStep(
+      workflow,
+      "Upload without replacing existing assets",
+    );
+    expect(releaseUpload).toContain(
+      'gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100"',
+    );
+    expect(releaseUpload).toContain(
+      'gh api "repos/$GITHUB_REPOSITORY/releases/$release_id"',
+    );
+    expect(releaseUpload).not.toContain("releases/tags/$RELEASE_TAG");
   });
 
   it("runs the real Kimi suite only when its CI secret is explicitly available", async () => {

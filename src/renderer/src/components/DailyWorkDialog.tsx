@@ -1,10 +1,13 @@
 import {
   Activity,
+  ChevronRight,
+  RefreshCw,
   X,
 } from "lucide-react";
 import {
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -56,6 +59,37 @@ export function dailyWorkCommand(now = new Date()): DailyWorkCommand {
   };
 }
 
+/** Renders the dashboard day key as a calendar label without re-parsing as UTC. */
+function formatDateLabel(dateKey: string | undefined): string | null {
+  if (!dateKey) return null;
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    }).format(new Date(year, month - 1, day));
+  } catch {
+    return null;
+  }
+}
+
+/** Share of a settled total, or null when either side is unmeasured. */
+function shareOfTotal(
+  part: UsageMeasuredValue,
+  total: UsageMeasuredValue,
+): number | null {
+  if (part.value === null || total.value === null || total.value <= 0) return null;
+  return Math.min(1, Math.max(0, part.value / total.value));
+}
+
+function formatShare(share: number): string {
+  const percent = share * 100;
+  if (percent > 0 && percent < 1) return "<1%";
+  return `${Math.round(percent)}%`;
+}
+
 function MetricValue({
   metric,
   format,
@@ -75,13 +109,16 @@ function MetricValue({
 
 function ProviderSummary({
   provider,
+  share,
 }: {
   provider: DailyWorkProviderSummary;
+  share: number | null;
 }): React.JSX.Element {
   return (
-    <article className="daily-work-provider-summary">
+    <article className="daily-work-provider-summary" data-provider={provider.providerId}>
       <header>
         <span><ProviderMark providerId={provider.providerId} />{provider.providerLabel}</span>
+        {share !== null && <b className="daily-work-provider-share">{formatShare(share)}</b>}
       </header>
       <div>
         <span>
@@ -92,7 +129,19 @@ function ProviderSummary({
           <strong><MetricValue metric={provider.runtime} format={formatDuration} /></strong>
           <small>runtime</small>
         </span>
+        <span>
+          <strong>{formatCount(provider.turnCount)}</strong>
+          <small>{provider.turnCount === 1 ? "turn" : "turns"}</small>
+        </span>
       </div>
+      <span
+        className={share === null
+          ? "daily-work-provider-meter is-unavailable"
+          : "daily-work-provider-meter"}
+        aria-hidden="true"
+      >
+        {share !== null && <i style={{ width: `${share * 100}%` }} />}
+      </span>
     </article>
   );
 }
@@ -133,6 +182,10 @@ export function DailyWorkDialog({
   const error = status === "offline"
     ? "Daily work is unavailable while the local service is offline."
     : requestError;
+  const dateLabel = useMemo(
+    () => formatDateLabel(dashboard?.date),
+    [dashboard?.date],
+  );
   useNativePreviewSuspension(true);
 
   useEffect(() => {
@@ -195,7 +248,9 @@ export function DailyWorkDialog({
           <span className="daily-work-header-icon"><Activity size={18} aria-hidden="true" /></span>
           <div>
             <h2 id={titleId}>Daily work</h2>
-            <p id={descriptionId}>Today’s agent work</p>
+            <p id={descriptionId}>
+              Today’s agent work{dateLabel && <span className="daily-work-header-date">{dateLabel}</span>}
+            </p>
           </div>
           <button
             type="button"
@@ -204,7 +259,7 @@ export function DailyWorkDialog({
             disabled={loading || status !== "online"}
             onClick={() => setRefreshVersion((version) => version + 1)}
           >
-            <span aria-hidden="true">↻</span>
+            <RefreshCw size={14} aria-hidden="true" />
           </button>
           <IconButton ref={closeRef} label="Close daily work" onClick={onClose}>
             <X size={16} />
@@ -214,8 +269,14 @@ export function DailyWorkDialog({
         <div className="daily-work-content">
           {loading && (
             <div className="daily-work-loading">
-              <LoadingMark label="Loading daily work" />
-              <span>Loading today’s work…</span>
+              <p className="daily-work-loading-status">
+                <LoadingMark label="Loading daily work" />
+                <span>Loading today’s work…</span>
+              </p>
+              <div className="daily-work-skeleton" aria-hidden="true">
+                <div className="daily-work-skeleton-band"><i /><i /><i /></div>
+                <div className="daily-work-skeleton-rows"><i /><i /><i /><i /></div>
+              </div>
             </div>
           )}
           {!loading && error && (
@@ -227,7 +288,7 @@ export function DailyWorkDialog({
           {!loading && !error && dashboard && (
             <>
               <section className="daily-work-totals" aria-label="Today’s totals">
-                <article>
+                <article className="is-primary">
                   <span>Processed tokens</span>
                   <strong><MetricValue metric={dashboard.totals.processedTokens} format={formatCompact} /></strong>
                   <small>Settled only</small>
@@ -255,7 +316,14 @@ export function DailyWorkDialog({
                   <h3 id="daily-work-provider-heading">By provider</h3>
                   <div>
                     {dashboard.providers.map((provider) => (
-                      <ProviderSummary provider={provider} key={provider.providerId} />
+                      <ProviderSummary
+                        provider={provider}
+                        share={shareOfTotal(
+                          provider.processedTokens,
+                          dashboard.totals.processedTokens,
+                        )}
+                        key={provider.providerId}
+                      />
                     ))}
                   </div>
                 </section>
@@ -288,10 +356,10 @@ export function DailyWorkDialog({
                         </span>
                         <span className="daily-work-conversation-identity">
                           <strong>{conversation.title}</strong>
-                          <small>{conversation.projectName} · {conversation.turnCount} {conversation.turnCount === 1 ? "turn" : "turns"}</small>
-                          <span>
-                            {conversation.running && <em>Running</em>}
-                            {conversation.createdToday && <em>Created today</em>}
+                          <span className="daily-work-conversation-meta">
+                            <small>{conversation.projectName} · {conversation.turnCount} {conversation.turnCount === 1 ? "turn" : "turns"}</small>
+                            {conversation.running && <em className="daily-work-badge is-running">Running</em>}
+                            {conversation.createdToday && <em className="daily-work-badge is-new">Created today</em>}
                           </span>
                         </span>
                         <span className="daily-work-card-metrics">
@@ -304,18 +372,21 @@ export function DailyWorkDialog({
                             <strong><MetricValue metric={conversation.processedTokens} format={formatCompact} /></strong>
                           </span>
                         </span>
+                        <ChevronRight className="daily-work-card-chevron" size={15} aria-hidden="true" />
                       </button>
                     ))}
                   </div>
                 )}
               </section>
-
-              <footer className="daily-work-note">
-                Runtime is clipped to today. Tokens count when turns settle.
-              </footer>
             </>
           )}
         </div>
+
+        {!loading && !error && dashboard && (
+          <footer className="daily-work-note">
+            Runtime is clipped to today. Tokens count when turns settle.
+          </footer>
+        )}
       </section>
     </div>
   );

@@ -116,9 +116,12 @@ describe("Claude Agent SDK large event boundary", () => {
       roots.push(root);
       const raw = Buffer.alloc(512 * 1024, kind === "image" ? 0xa5 : 0x5a);
       const base64 = raw.toString("base64");
+      // Claude may resize/optimize an image for the model while retaining the
+      // source file's byte count in `originalSize`.
+      const originalSize = kind === "image" ? 768 * 1024 : raw.byteLength;
       const mediaEvent = claudeReadMediaResult({
         base64,
-        bytes: raw.byteLength,
+        bytes: originalSize,
         kind,
       });
       expect(Buffer.byteLength(JSON.stringify(mediaEvent), "utf8"))
@@ -187,7 +190,7 @@ describe("Claude Agent SDK large event boundary", () => {
     },
   );
 
-  it("enforces supported scale, per-event bytes, canonical base64, and declared size", () => {
+  it("enforces supported scale, per-event bytes, canonical base64, and source size", () => {
     const largeBytes = 16.5 * 1024 * 1024;
     const largeBase64 = Buffer.alloc(largeBytes, 0xa5).toString("base64");
     const large = projectClaudeSdkEventMedia(claudeReadMediaResult({
@@ -216,9 +219,24 @@ describe("Claude Agent SDK large event boundary", () => {
         bytes: 1,
       }))).toThrow(/non-canonical base64|malformed tool-result media/u);
     }
+    expect(projectClaudeSdkEventMedia(claudeReadMediaResult({
+      base64: "YQ==",
+      bytes: 2,
+    })).mediaBytes).toBe(1);
+    for (const originalSize of [0, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => projectClaudeSdkEventMedia(claudeReadMediaResult({
+        base64: "YQ==",
+        bytes: originalSize,
+      }))).toThrow("Claude sent malformed structured tool-result media.");
+    }
+    expect(() => projectClaudeSdkEventMedia(claudeReadMediaResult({
+      base64: "YQ==",
+      bytes: MAX_CLAUDE_EVENT_MEDIA_BYTES + 1,
+    }))).toThrow("Claude sent oversized tool-result media.");
     expect(() => projectClaudeSdkEventMedia(claudeReadMediaResult({
       base64: "YQ==",
       bytes: 2,
+      kind: "pdf",
     }))).toThrow("Claude sent inconsistent tool-result media metadata.");
   });
 

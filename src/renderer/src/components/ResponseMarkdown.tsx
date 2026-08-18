@@ -85,6 +85,7 @@ type ResponseMarkdownProps = {
   projectRoot: string;
   projectId: string;
   conversationId?: string;
+  markdownBasePath?: string;
   defaultCodeWrap: boolean;
   streaming?: boolean;
   announceCopyFeedback?: boolean;
@@ -171,6 +172,7 @@ export function resolveResponseLink(
   projectRoot: string,
   rawHref: string,
   syntax: "markdown" | "file" = "markdown",
+  markdownBasePath = "",
 ): ProjectLink {
   const href = rawHref.trim();
   if (!href || href.includes("\0")) return { kind: "unsafe" };
@@ -239,6 +241,9 @@ export function resolveResponseLink(
   ) return { kind: "unsafe" };
   const root = normalizedPath(projectRoot).replace(/\/+$/u, "");
   if (!root) return { kind: "unsafe" };
+  const base = syntax === "markdown" && markdownBasePath
+    ? normalizedPath(`${root}/${markdownBasePath}`)
+    : root;
   const markdownCollapsedUnc = root.startsWith("//")
     && decoded.startsWith("\\")
     && !decoded.startsWith("\\\\");
@@ -247,7 +252,7 @@ export function resolveResponseLink(
     || /^[a-z]:[\\/]/iu.test(decoded)
     || resolvedDecoded.startsWith("\\\\");
   const candidate = normalizedPath(
-    isAbsolute ? resolvedDecoded : `${root}/${resolvedDecoded}`,
+    isAbsolute ? resolvedDecoded : `${base}/${resolvedDecoded}`,
   );
   const insensitive = /^[a-z]:\//iu.test(root) || root.startsWith("//");
   const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
@@ -568,6 +573,7 @@ interface MarkdownRenderContextValue {
   projectRoot: string;
   projectId: string;
   conversationId?: string;
+  markdownBasePath: string;
   defaultCodeWrap: boolean;
   streaming: boolean;
   announceCopyFeedback: boolean;
@@ -597,9 +603,15 @@ function MarkdownLink({
     projectRoot,
     projectId,
     conversationId,
+    markdownBasePath,
     onOpenProjectFile,
   } = useMarkdownRenderContext();
-  const target = resolveResponseLink(projectRoot, href);
+  const target = resolveResponseLink(
+    projectRoot,
+    href,
+    "markdown",
+    markdownBasePath,
+  );
   if (target.kind === "external") {
     return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
   }
@@ -700,6 +712,7 @@ function ResponseMarkdownComponent({
   projectRoot,
   projectId,
   conversationId,
+  markdownBasePath = "",
   defaultCodeWrap,
   streaming = false,
   announceCopyFeedback = true,
@@ -710,6 +723,7 @@ function ResponseMarkdownComponent({
     projectRoot,
     projectId,
     conversationId,
+    markdownBasePath,
     defaultCodeWrap,
     streaming,
     announceCopyFeedback,
@@ -718,6 +732,7 @@ function ResponseMarkdownComponent({
     announceCopyFeedback,
     conversationId,
     defaultCodeWrap,
+    markdownBasePath,
     onOpenProjectFile,
     projectId,
     projectRoot,

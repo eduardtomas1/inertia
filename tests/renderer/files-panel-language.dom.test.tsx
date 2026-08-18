@@ -3,6 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { FilesPanel } from "../../src/renderer/src/components/FilesPanel";
 
+const FILES_PROJECT = {
+  projectRoot: "/work/project",
+  projectId: "11111111-1111-4111-8111-111111111111",
+} as const;
+
 const JAVA_CONTENT = [
   "package demo;",
   "",
@@ -30,6 +35,7 @@ describe("FilesPanel language presentation", () => {
       .mockImplementation(() => undefined);
     const { container } = render(
       <FilesPanel
+        {...FILES_PROJECT}
         entries={[
           { path: "OrderService.java", kind: "file" },
           { path: "check.py", kind: "file" },
@@ -98,6 +104,7 @@ describe("FilesPanel language presentation", () => {
   it("keeps an unknown extension neutral instead of trusting protocol metadata", () => {
     const { container } = render(
       <FilesPanel
+        {...FILES_PROJECT}
         entries={[{ path: "notes.unknown", kind: "file" }]}
         preview={{
           path: "notes.unknown",
@@ -121,6 +128,7 @@ describe("FilesPanel language presentation", () => {
   it("bounds a newline-dense preview while keeping its requested line visible", () => {
     const { container } = render(
       <FilesPanel
+        {...FILES_PROJECT}
         entries={[{ path: "dense.txt", kind: "file" }]}
         preview={{
           path: "dense.txt",

@@ -73,6 +73,23 @@ describe("response Markdown", () => {
     expect(resolveResponseLink("/work/project", "file:///etc/passwd:42")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "javascript:alert(1)")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "https://example.com/docs")).toMatchObject({ kind: "external" });
+    expect(resolveResponseLink(
+      "/work/project",
+      "../guide.md#L4",
+      "markdown",
+      "docs/reference",
+    )).toEqual({
+      kind: "project",
+      relativePath: "docs/guide.md",
+      action: "reveal",
+      location: { startLine: 4, endLine: 4 },
+    });
+    expect(resolveResponseLink(
+      "/work/project",
+      "../../../secret.txt",
+      "markdown",
+      "docs/reference",
+    )).toEqual({ kind: "unsafe" });
   });
 
   it("keeps highlighted code as inert text", () => {

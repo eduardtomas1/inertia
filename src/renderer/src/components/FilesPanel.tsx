@@ -10,6 +10,8 @@ import clsx from "clsx";
 import {
   AlertCircle,
   ChevronRight,
+  Code2,
+  Eye,
   ExternalLink,
   File,
   FileSearch,
@@ -40,6 +42,7 @@ import {
 } from "../utils/workspaceFileReference";
 import { IconButton, LoadingMark } from "./ui";
 import { FileEditorDialog } from "./FileEditorDialog";
+import { ResponseMarkdown } from "./ResponseMarkdown";
 
 export interface WorkspaceEntriesPage {
   directory: string;
@@ -51,13 +54,20 @@ export type FilesPanelProps = {
   entries: WorkspaceEntry[];
   preview: WorkspaceFilePreview | null;
   selectedPath: string | null;
+  projectRoot: string;
+  projectId: string;
+  conversationId?: string;
   selectedLocation?: WorkspaceFileLocation | null;
   loading?: boolean;
   previewLoading?: boolean;
   error?: string | null;
   previewError?: string | null;
   entriesTruncated?: boolean;
-  onSelectFile: (path: string) => void;
+  onSelectFile: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
   onLoadEntries: (request: {
     directory?: string;
     query?: string;
@@ -105,6 +115,14 @@ const EMPTY_SEARCH: SearchState = {
 };
 
 const MAX_RENDERED_PREVIEW_LINES = 2_000;
+export const MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS = 100_000;
+
+type FilePreviewView = "preview" | "source";
+
+interface FilePreviewViewState {
+  identity: string;
+  view: FilePreviewView;
+}
 
 interface FilePreviewLine {
   lineNumber: number;
@@ -181,6 +199,9 @@ export function FilesPanel({
   entries,
   preview,
   selectedPath,
+  projectRoot,
+  projectId,
+  conversationId,
   selectedLocation = null,
   loading = false,
   previewLoading = false,
@@ -209,6 +230,8 @@ export function FilesPanel({
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
   const [editingFile, setEditingFile] =
     useState<WorkspaceFilePreview | null>(null);
+  const [previewViewState, setPreviewViewState] =
+    useState<FilePreviewViewState>({ identity: "", view: "preview" });
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const previewLineRefs = useRef(new Map<number, HTMLSpanElement>());
   const previewCodeRef = useRef<HTMLPreElement>(null);
@@ -232,16 +255,43 @@ export function FilesPanel({
     () => filePreviewWindow(preview?.content ?? "", selectedLocation),
     [preview, selectedLocation],
   );
+  const markdownPreview = previewLanguage?.id === "markdown";
+  const markdownPreviewBlockedReason = markdownPreview && preview
+    ? preview.truncated
+      ? "Rendered preview is unavailable because this file preview is incomplete."
+      : preview.content.length > MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS
+        ? `Rendered preview is limited to ${MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS.toLocaleString("en-US")} characters to keep the Files panel responsive.`
+        : previewWindow.totalLines > MAX_RENDERED_PREVIEW_LINES
+          ? `Rendered preview is limited to ${MAX_RENDERED_PREVIEW_LINES.toLocaleString("en-US")} lines to keep the Files panel responsive.`
+          : null
+    : null;
+  const previewViewIdentity = preview
+    ? [
+        preview.path,
+        preview.contentDigest,
+        selectedLocation?.startLine ?? "",
+        selectedLocation?.endLine ?? "",
+      ].join("\0")
+    : "";
+  const defaultPreviewView: FilePreviewView = selectedLocation
+    ? "source"
+    : "preview";
+  const requestedPreviewView = previewViewState.identity === previewViewIdentity
+    ? previewViewState.view
+    : defaultPreviewView;
+  const renderedMarkdownPreview = markdownPreview
+    && markdownPreviewBlockedReason === null
+    && requestedPreviewView === "preview";
   const highlightedPreviewLines = useMemo(
-    () => preview && previewLanguage
+    () => preview && previewLanguage && !renderedMarkdownPreview
       ? highlightedSourceLines(preview.content, previewLanguage)
       : null,
-    [preview, previewLanguage],
+    [preview, previewLanguage, renderedMarkdownPreview],
   );
   const previewPath = preview?.path ?? null;
 
   useEffect(() => {
-    if (!previewPath || !selectedLocation) return;
+    if (!previewPath || !selectedLocation || renderedMarkdownPreview) return;
     let frame: number | null = null;
     let observer: ResizeObserver | null = null;
     let userMoved = false;
@@ -285,7 +335,7 @@ export function FilesPanel({
       previewCode?.removeEventListener("touchstart", stopRecentering);
       previewCode?.removeEventListener("wheel", stopRecentering);
     };
-  }, [previewPath, selectedLocation]);
+  }, [previewPath, renderedMarkdownPreview, selectedLocation]);
 
   useEffect(() => {
     mounted.current = true;
@@ -700,7 +750,12 @@ export function FilesPanel({
           ) : preview ? (
             <>
               <header className="file-preview-header">
-                <div title={preview.path} role="status" aria-live="polite">
+                <div
+                  className="file-preview-identity"
+                  title={preview.path}
+                  role="status"
+                  aria-live="polite"
+                >
                   <strong>{workspacePathName(preview.path)}</strong>
                   <span>{preview.path}</span>
                 </div>
@@ -717,6 +772,39 @@ export function FilesPanel({
                   <span className="file-location">
                     {workspaceFileLocationLabel(selectedLocation)}
                   </span>
+                )}
+                {markdownPreview && (
+                  <div
+                    className="file-preview-view-toggle"
+                    role="group"
+                    aria-label="Markdown view"
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={renderedMarkdownPreview}
+                      disabled={markdownPreviewBlockedReason !== null}
+                      title={markdownPreviewBlockedReason ?? "Show rendered Markdown"}
+                      onClick={() => setPreviewViewState({
+                        identity: previewViewIdentity,
+                        view: "preview",
+                      })}
+                    >
+                      <Eye size={11} aria-hidden="true" />
+                      <span>Preview</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={!renderedMarkdownPreview}
+                      title="Show Markdown source"
+                      onClick={() => setPreviewViewState({
+                        identity: previewViewIdentity,
+                        view: "source",
+                      })}
+                    >
+                      <Code2 size={11} aria-hidden="true" />
+                      <span>Source</span>
+                    </button>
+                  </div>
                 )}
                 {onSaveFile && (
                   <IconButton
@@ -738,49 +826,73 @@ export function FilesPanel({
                   </IconButton>
                 )}
               </header>
-              <pre ref={previewCodeRef} className="file-preview-code" tabIndex={0} aria-label={`Contents of ${preview.path}`}>
-                <code className={highlightedPreviewLines ? "hljs" : undefined}>
-                  {previewWindow.lines.map(({ lineNumber, text }) => {
-                    const referenced = selectedLocation !== null
-                      && lineNumber >= selectedLocation.startLine
-                      && lineNumber <= selectedLocation.endLine;
-                    const referenceStart = selectedLocation?.startLine === lineNumber;
-                    const highlightedLine = highlightedPreviewLines?.[lineNumber - 1];
-                    return (
-                      <span
-                        className={clsx(
-                          "file-preview-line",
-                          referenced && "is-referenced",
-                        )}
-                        data-source-line={lineNumber}
-                        key={lineNumber}
-                        ref={(node) => {
-                          if (node) previewLineRefs.current.set(lineNumber, node);
-                          else previewLineRefs.current.delete(lineNumber);
-                        }}
-                        tabIndex={referenceStart ? -1 : undefined}
-                        aria-label={referenceStart && selectedLocation
-                          ? `${workspaceFileLocationLabel(selectedLocation)} in ${preview.path}`
-                          : undefined}
-                      >
-                        <span className="file-preview-line-number" aria-hidden="true">{lineNumber}</span>
-                        {highlightedLine !== undefined
-                          ? (
-                              <span
-                                dangerouslySetInnerHTML={{
-                                  __html: highlightedLine || " ",
-                                }}
-                              />
-                            )
-                          : <span>{text || " "}</span>}
-                      </span>
-                    );
-                  })}
-                </code>
-              </pre>
-              {previewWindow.lines.length < previewWindow.totalLines && (
+              {renderedMarkdownPreview ? (
+                <div
+                  className="file-preview-markdown"
+                  role="document"
+                  tabIndex={0}
+                  aria-label={`Rendered preview of ${preview.path}`}
+                >
+                  <ResponseMarkdown
+                    content={preview.content}
+                    projectRoot={projectRoot}
+                    projectId={projectId}
+                    conversationId={conversationId}
+                    markdownBasePath={workspaceParentPath(preview.path)}
+                    defaultCodeWrap
+                    onOpenProjectFile={onSelectFile}
+                  />
+                </div>
+              ) : (
+                <pre ref={previewCodeRef} className="file-preview-code" tabIndex={0} aria-label={`Contents of ${preview.path}`}>
+                  <code className={highlightedPreviewLines ? "hljs" : undefined}>
+                    {previewWindow.lines.map(({ lineNumber, text }) => {
+                      const referenced = selectedLocation !== null
+                        && lineNumber >= selectedLocation.startLine
+                        && lineNumber <= selectedLocation.endLine;
+                      const referenceStart = selectedLocation?.startLine === lineNumber;
+                      const highlightedLine = highlightedPreviewLines?.[lineNumber - 1];
+                      return (
+                        <span
+                          className={clsx(
+                            "file-preview-line",
+                            referenced && "is-referenced",
+                          )}
+                          data-source-line={lineNumber}
+                          key={lineNumber}
+                          ref={(node) => {
+                            if (node) previewLineRefs.current.set(lineNumber, node);
+                            else previewLineRefs.current.delete(lineNumber);
+                          }}
+                          tabIndex={referenceStart ? -1 : undefined}
+                          aria-label={referenceStart && selectedLocation
+                            ? `${workspaceFileLocationLabel(selectedLocation)} in ${preview.path}`
+                            : undefined}
+                        >
+                          <span className="file-preview-line-number" aria-hidden="true">{lineNumber}</span>
+                          {highlightedLine !== undefined
+                            ? (
+                                <span
+                                  dangerouslySetInnerHTML={{
+                                    __html: highlightedLine || " ",
+                                  }}
+                                />
+                              )
+                            : <span>{text || " "}</span>}
+                        </span>
+                      );
+                    })}
+                  </code>
+                </pre>
+              )}
+              {!renderedMarkdownPreview && previewWindow.lines.length < previewWindow.totalLines && (
                 <p className="panel-notice file-preview-truncated">
                   Showing lines {previewWindow.lines[0]?.lineNumber ?? 1}–{previewWindow.lines.at(-1)?.lineNumber ?? 1} of {previewWindow.totalLines} to keep this preview responsive.
+                </p>
+              )}
+              {markdownPreviewBlockedReason && (
+                <p className="panel-notice file-preview-truncated" role="status">
+                  {markdownPreviewBlockedReason} Source view remains available.
                 </p>
               )}
               {preview.truncated && (

@@ -8,6 +8,11 @@ import {
 } from "../../src/renderer/src/components/FilesPanel";
 import { MAX_WORKSPACE_FILE_EDIT_BYTES } from "../../src/shared/contracts";
 
+const FILES_PROJECT = {
+  projectRoot: "/work/project",
+  projectId: "11111111-1111-4111-8111-111111111111",
+} as const;
+
 describe("FilesPanel", () => {
   it("drops cached child directories when the root listing is refreshed", () => {
     const pages = freshWorkspaceDirectoryPages([
@@ -24,6 +29,7 @@ describe("FilesPanel", () => {
 
   it("renders a lazy accessible tree with roving focus and a clear selection", () => {
     const html = renderToStaticMarkup(createElement(FilesPanel, {
+      ...FILES_PROJECT,
       entries: [
         { path: "src", kind: "directory" as const },
         { path: "README.md", kind: "file" as const },
@@ -49,15 +55,16 @@ describe("FilesPanel", () => {
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('aria-current="true"');
     expect(html).toContain('title="README.md"');
-    expect(html).toContain('aria-label="Contents of README.md"');
+    expect(html).toContain('aria-label="Rendered preview of README.md"');
     expect(html).toContain('data-language-family="markup"');
     expect(html).toContain("Markdown recognized locally");
-    expect(html).toContain('class="hljs"');
+    expect(html).toContain("<h1>Project</h1>");
     expect(html).not.toContain('role="list"');
   });
 
   it("renders bounded root, loading, and preview failure states accessibly", () => {
     const loadingHtml = renderToStaticMarkup(createElement(FilesPanel, {
+      ...FILES_PROJECT,
       entries: [],
       preview: null,
       selectedPath: null,
@@ -70,6 +77,7 @@ describe("FilesPanel", () => {
     expect(loadingHtml).toContain("Loading files");
 
     const errorHtml = renderToStaticMarkup(createElement(FilesPanel, {
+      ...FILES_PROJECT,
       entries: [{ path: "deep/file.ts", kind: "file" as const }],
       preview: null,
       selectedPath: "deep/file.ts",
@@ -84,6 +92,7 @@ describe("FilesPanel", () => {
 
   it("keeps previews above the transport-safe edit limit read-only", () => {
     const html = renderToStaticMarkup(createElement(FilesPanel, {
+      ...FILES_PROJECT,
       entries: [{ path: "large.txt", kind: "file" as const }],
       preview: {
         path: "large.txt",
@@ -108,6 +117,7 @@ describe("FilesPanel", () => {
 
   it("enables editing only when the exact save command passes preflight", () => {
     const html = renderToStaticMarkup(createElement(FilesPanel, {
+      ...FILES_PROJECT,
       entries: [{ path: "ordinary.txt", kind: "file" as const }],
       preview: {
         path: "ordinary.txt",

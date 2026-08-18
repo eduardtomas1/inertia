@@ -6926,9 +6926,69 @@ button.environment-row:focus-visible,
   z-index: 1;
 }
 .file-preview-header { display: flex; min-height: 43px; align-items: center; justify-content: space-between; gap: 6px 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); }
-.file-preview-header > div { display: flex; min-width: 0; flex: 1 1 120px; flex-direction: column; gap: 1px; }
+.file-preview-identity { display: flex; min-width: 0; flex: 1 1 120px; flex-direction: column; gap: 1px; }
 .file-preview-header strong { font-size: 9px; }
 .file-preview-header span { overflow: hidden; color: var(--text-muted); font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-view-toggle {
+  display: flex;
+  min-width: max-content;
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+.file-preview-view-toggle button {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.file-preview-view-toggle button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--surface-strong);
+  box-shadow: 0 1px 3px color-mix(in srgb, black 16%, transparent);
+}
+.file-preview-view-toggle button:focus-visible {
+  outline: 1px solid var(--accent-strong);
+  outline-offset: 1px;
+}
+.file-preview-view-toggle button:disabled {
+  opacity: 0.44;
+  cursor: not-allowed;
+}
+.file-preview-view-toggle button span {
+  color: inherit;
+  font-size: 7.5px;
+  font-weight: 620;
+}
+.file-preview-markdown {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  padding: clamp(18px, 3vw, 34px) clamp(18px, 4vw, 48px) 56px;
+  overflow: auto;
+  color: var(--text-soft);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 62%, transparent), transparent 112px),
+    var(--surface-strong);
+}
+.file-preview-markdown .response-markdown {
+  width: min(100%, 840px);
+  margin: 0 auto;
+  font-size: max(var(--ui-font-main), 10px);
+  line-height: 1.65;
+}
+.file-preview-markdown .response-markdown h1:first-child {
+  letter-spacing: -0.018em;
+}
 .file-language,
 .file-location {
   flex: 0 0 auto;

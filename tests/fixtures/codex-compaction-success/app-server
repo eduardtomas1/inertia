@@ -1,0 +1,51 @@
+import { createInterface } from "node:readline";
+
+const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
+const input = createInterface({ input: process.stdin });
+
+input.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send({ id: message.id, result: { userAgent: "fixture" } });
+    return;
+  }
+  if (message.method === "initialized") return;
+  if (message.method === "thread/resume") {
+    send({
+      id: message.id,
+      result: { thread: { id: message.params.threadId } },
+    });
+    return;
+  }
+  if (message.method === "thread/compact/start") {
+    send({ id: message.id, result: {} });
+    send({
+      method: "item/started",
+      params: {
+        threadId: message.params.threadId,
+        turnId: "compact-turn-1",
+        startedAtMs: Date.now(),
+        item: { id: "compact-1", type: "contextCompaction" },
+      },
+    });
+    send({
+      method: "item/completed",
+      params: {
+        threadId: message.params.threadId,
+        turnId: "compact-turn-1",
+        completedAtMs: Date.now(),
+        item: { id: "compact-1", type: "contextCompaction" },
+      },
+    });
+    return;
+  }
+  if (message.id !== undefined) {
+    send({
+      id: message.id,
+      error: { code: -32601, message: "Unexpected fixture method" },
+    });
+    return;
+  }
+  process.stderr.write(`Unexpected fixture notification: ${String(message.method)}\n`);
+  process.exit(2);
+});

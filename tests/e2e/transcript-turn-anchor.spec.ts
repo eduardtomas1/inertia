@@ -218,14 +218,6 @@ test("positions a completed answer at the viewport start by default", async () =
     const { page } = app;
     const composer = page.getByRole("region", { name: "Message composer" });
     const request = "Position this completed answer for reading.";
-    // This scenario owns the completed-answer geometry, not the delayed-answer
-    // transition covered above. Release the fixture before submission so the
-    // renderer observes one deterministic running -> answer -> completed flow.
-    await writeFile(
-      join(app.workspaceDirectory, ".git", delayedAnswerGate),
-      "ready\n",
-      "utf8",
-    );
     await composer.getByRole("textbox", { name: "Message" })
       .fill(request);
     await composer.getByRole("button", { name: "Send message" }).click();
@@ -237,6 +229,12 @@ test("positions a completed answer at the viewport start by default", async () =
     const finalAnswer = page.locator(
       '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
     ).last();
+    await expect(finalAnswer).toHaveCount(0);
+    await writeFile(
+      join(app.workspaceDirectory, ".git", delayedAnswerGate),
+      "ready\n",
+      "utf8",
+    );
     await expect(finalAnswer).toBeVisible({ timeout: 10_000 });
     await expect.poll(() => finalAnswer.evaluate((answer) => {
       const viewport = answer.closest<HTMLElement>(".message-scroll")

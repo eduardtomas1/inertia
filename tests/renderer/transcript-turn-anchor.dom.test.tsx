@@ -594,6 +594,57 @@ describe("completed answer positioning", () => {
     ]);
   });
 
+  it("keeps a measured long answer in reading mode when virtual geometry stays clamped", async () => {
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const harness = renderAnswerTimeline(true, positioned);
+    const scroll = harness.scrollElementRef.current!;
+    let scrollTop = 1_500;
+    Object.defineProperties(scroll, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 2_317 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = Math.min(value, 1_917);
+        },
+      },
+    });
+    scroll.getBoundingClientRect = () => rect(100, 400);
+
+    harness.settle();
+    const answer = harness.timelineElementRef.current!
+      .querySelector<HTMLElement>(`[data-terminal-answer-id="${harness.answer.id}"]`)!;
+    answer.getBoundingClientRect = () => rect(2_100 - scrollTop, 2_400);
+    now = 700;
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(now);
+    });
+
+    expect(scrollTop).toBe(1_917);
+    expect(positioned.mock.calls).toEqual([
+      [{
+        status: "started",
+        conversationId,
+        answerId: harness.answer.id,
+      }],
+      [{
+        status: "positioned",
+        conversationId,
+        answerId: harness.answer.id,
+        followsLatest: false,
+      }],
+    ]);
+  });
+
   it("cancels a pending final-answer anchor for fresh reader intent", async () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

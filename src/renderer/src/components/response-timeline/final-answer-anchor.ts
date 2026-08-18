@@ -72,15 +72,17 @@ export function startFinalAnswerAnchor({
   };
   const settle = (): void => {
     if (finished) return;
-    if (attempts >= maximumSettleFrames || performance.now() >= settleUntil) {
-      finish({ status: "cancelled" });
-      return;
-    }
+    const exhausted = attempts >= maximumSettleFrames
+      || performance.now() >= settleUntil;
     const answer = [...root.querySelectorAll<HTMLElement>(
       "[data-terminal-answer-id]",
     )].find((element) =>
       element.dataset.terminalAnswerId === answerId) ?? null;
     if (!answer) {
+      if (exhausted) {
+        finish({ status: "cancelled" });
+        return;
+      }
       if (virtualized && attempts % 4 === 0) scrollToIndex(getAnswerIndex());
       attempts += 1;
       scheduleSettle();
@@ -107,10 +109,25 @@ export function startFinalAnswerAnchor({
     ) ? stableFrames + 1 : 0;
     attempts += 1;
     if (stableFrames < 2) {
+      if (exhausted) {
+        // A virtual row can remain temporarily clamped while its measured
+        // height catches up with the final answer. The answer is already in
+        // view, so hand ownership back in reading mode instead of reporting a
+        // cancellation that lets the transcript's follow-latest observers
+        // snap it to the bottom as soon as the late measurement lands.
+        finish({ status: "positioned", followsLatest: false });
+        return;
+      }
       scheduleSettle();
       return;
     }
-    finish({ status: "positioned", followsLatest });
+    finish({
+      status: "positioned",
+      // Bottom-following is safe only when the complete answer fits in the
+      // viewport. A provisional virtual height can otherwise make the bottom
+      // gap look settled while most of a long answer is still below the fold.
+      followsLatest: fullyVisibleAtClampedBottom && followsLatest,
+    });
   };
   function cancelForUserIntent(event: Event): void {
     if (

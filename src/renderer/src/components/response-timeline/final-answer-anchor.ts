@@ -38,7 +38,7 @@ export function startFinalAnswerAnchor({
   let stableFrames = 0;
   let resizeObserver: ResizeObserver | null = null;
   let mutationObserver: MutationObserver | null = null;
-  const maximumSettleFrames = 30;
+  const cancelledResult = { status: "cancelled" } as const;
   const settleUntil = performance.now() + 600;
   activeOwner.current = owner;
   cancelLayoutAnchorRestoration();
@@ -64,7 +64,7 @@ export function startFinalAnswerAnchor({
     onEvent?.({ ...result, conversationId, answerId });
   };
   const scheduleSettle = (): void => {
-    if (finished || frame !== 0) return;
+    if (finished || frame) return;
     frame = window.requestAnimationFrame(() => {
       frame = 0;
       settle();
@@ -72,15 +72,14 @@ export function startFinalAnswerAnchor({
   };
   const settle = (): void => {
     if (finished) return;
-    const exhausted = attempts >= maximumSettleFrames
+    const exhausted = attempts >= 30
       || performance.now() >= settleUntil;
-    const answer = [...root.querySelectorAll<HTMLElement>(
-      "[data-terminal-answer-id]",
-    )].find((element) =>
-      element.dataset.terminalAnswerId === answerId) ?? null;
+    const answer = root.querySelector<HTMLElement>(
+      `[data-terminal-answer-id="${CSS.escape(answerId)}"]`,
+    );
     if (!answer) {
       if (exhausted) {
-        finish({ status: "cancelled" });
+        finish(cancelledResult);
         return;
       }
       if (virtualized && attempts % 4 === 0) scrollToIndex(getAnswerIndex());
@@ -90,8 +89,7 @@ export function startFinalAnswerAnchor({
     }
 
     const viewportBounds = scrollElement.getBoundingClientRect();
-    const currentOffset = answer.getBoundingClientRect().top - viewportBounds.top;
-    const delta = currentOffset - 8;
+    const delta = answer.getBoundingClientRect().top - viewportBounds.top - 8;
     if (Math.abs(delta) >= 0.5) scrollElement.scrollTop += delta;
     const answerBounds = answer.getBoundingClientRect();
     const settledOffset = answerBounds.top - viewportBounds.top;
@@ -108,25 +106,17 @@ export function startFinalAnswerAnchor({
       || fullyVisibleAtClampedBottom
     ) ? stableFrames + 1 : 0;
     attempts += 1;
-    if (stableFrames < 2) {
-      if (exhausted) {
-        // A virtual row can remain temporarily clamped while its measured
-        // height catches up with the final answer. The answer is already in
-        // view, so hand ownership back in reading mode instead of reporting a
-        // cancellation that lets the transcript's follow-latest observers
-        // snap it to the bottom as soon as the late measurement lands.
-        finish({ status: "positioned", followsLatest: false });
-        return;
-      }
+    if (stableFrames < 2 && !exhausted) {
       scheduleSettle();
       return;
     }
     finish({
       status: "positioned",
-      // Bottom-following is safe only when the complete answer fits in the
-      // viewport. A provisional virtual height can otherwise make the bottom
-      // gap look settled while most of a long answer is still below the fold.
-      followsLatest: fullyVisibleAtClampedBottom && followsLatest,
+      // An exhausted provisional measurement remains positioned in reading
+      // mode. Bottom-following is safe only after the complete answer is both
+      // stable and visible at the clamped bottom.
+      followsLatest: stableFrames > 1
+        && fullyVisibleAtClampedBottom,
     });
   };
   function cancelForUserIntent(event: Event): void {
@@ -135,7 +125,7 @@ export function startFinalAnswerAnchor({
       && !isTranscriptReaderNavigationKey(event.key)
     ) return;
     if (event instanceof PointerEvent && event.target !== scrollElement) return;
-    finish({ status: "cancelled" });
+    finish(cancelledResult);
   }
 
   scrollElement.addEventListener("wheel", cancelForUserIntent, { passive: true });
@@ -156,5 +146,5 @@ export function startFinalAnswerAnchor({
   }
   if (virtualized) scrollToIndex(getAnswerIndex());
   scheduleSettle();
-  return () => finish({ status: "cancelled" });
+  return () => finish(cancelledResult);
 }

@@ -67,6 +67,43 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
+  it("shards the full Windows unit suite without restoring native fixture contention", async () => {
+    const workflow = await source(".github/workflows/ci.yml");
+    const ordinaryCheck = workflowStep(
+      workflow,
+      "Typecheck, unit test, and build",
+    );
+    expect(ordinaryCheck).toContain("if: runner.os != 'Windows'");
+    expect(ordinaryCheck).toContain("run: npm run check");
+
+    const windowsPlatformCheck = workflowStep(
+      workflow,
+      "Typecheck and build the Windows platform gate",
+    );
+    expect(windowsPlatformCheck).toContain("if: runner.os == 'Windows'");
+    expect(windowsPlatformCheck).toContain("run: npm run check:platform");
+
+    expect(workflow).toContain("name: Windows unit tests (${{ matrix.shard }}/2)");
+    expect(workflow).toContain("timeout-minutes: 30");
+    expect(workflow).toContain("shard: [1, 2]");
+    expect(workflow).toContain(
+      "run: npm test -- --shard=${{ matrix.shard }}/2",
+    );
+
+    const packageJson = JSON.parse(await source("package.json")) as {
+      scripts: Record<string, string>;
+    };
+    expect(packageJson.scripts["check:platform"]).toBe(
+      "npm run check:quality && npm run check:private-connect && npm run build:bundle",
+    );
+    expect(packageJson.scripts.check).toBe(
+      "npm run check:quality && npm run test && npm run check:private-connect && npm run build:bundle",
+    );
+
+    const vitest = await source("vitest.config.ts");
+    expect(vitest).toContain("maxWorkers: isWindowsCi ? 1 : undefined");
+  });
+
   it("keeps one native smoke implementation for macOS, Windows, and Linux runtime supervision", async () => {
     const smoke = await source("scripts/package-smoke.mjs");
     expect(smoke).toContain('process.platform === "darwin"');

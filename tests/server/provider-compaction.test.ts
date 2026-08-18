@@ -11,6 +11,10 @@ import {
   AgentHarnessRegistry,
   ProviderManager,
 } from "../../src/server/providers";
+import {
+  createCodexAppServerHarness,
+  type CodexAppServerHarnessDependencies,
+} from "../../src/server/provider/codex-app-server-harness";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import {
   portableFixtureRoot,
@@ -69,21 +73,51 @@ describe.sequential("provider compaction adapters", () => {
   });
 
   it("uses Codex App Server compaction and waits for its completion item", async () => {
-    const root = join(
-      process.cwd(),
-      "tests",
-      "fixtures",
-      "codex-compaction-success",
-    );
-    const command = process.execPath;
+    // The control client's process and JSON-lines transport have their own
+    // focused coverage. Keep this adapter proof in-process so Windows endpoint
+    // inspection cannot stall a second short-lived Node launch in the same job.
+    const requests: string[] = [];
+    const withControlClient: NonNullable<
+      CodexAppServerHarnessDependencies["withControlClient"]
+    > = async (options, runWithClient) => await runWithClient({
+      request: async (method, params = {}) => {
+        requests.push(method);
+        if (method === "thread/resume") {
+          return { thread: { id: params.threadId } };
+        }
+        if (method !== "thread/compact/start") {
+          throw new Error(`Unexpected control request: ${method}`);
+        }
+        queueMicrotask(() => {
+          options.onNotification?.("item/started", {
+            threadId: params.threadId,
+            turnId: "compact-turn-1",
+            startedAtMs: Number.MAX_SAFE_INTEGER,
+            item: { id: "compact-1", type: "contextCompaction" },
+          });
+          options.onNotification?.("item/completed", {
+            threadId: params.threadId,
+            turnId: "compact-turn-1",
+            completedAtMs: Number.MAX_SAFE_INTEGER,
+            item: { id: "compact-1", type: "contextCompaction" },
+          });
+        });
+        return {};
+      },
+    });
     const manager = trackManager(
-      new ProviderManager({ commands: { codex: command } }),
+      new ProviderManager(
+        { commands: { codex: process.execPath } },
+        new AgentHarnessRegistry([
+          createCodexAppServerHarness({ withControlClient }),
+        ]),
+      ),
     );
 
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "codex-compact",
-      cwd: root,
+      cwd: process.cwd(),
       prompt: "/compact",
       interactionMode: "build",
       access: "supervised",
@@ -93,7 +127,8 @@ describe.sequential("provider compaction adapters", () => {
       instructionForwarded: false,
       message: expect.stringContaining("was not forwarded"),
     });
-  }, 35_000);
+    expect(requests).toEqual(["thread/resume", "thread/compact/start"]);
+  });
 
   it.each([
     ["Fast", "priority", "echo"],

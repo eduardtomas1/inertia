@@ -170,6 +170,57 @@ describe("DailyWorkDialog", () => {
       .toHaveTextContent("Created today");
   });
 
+  it("renders each provider's settled token share against the day total", async () => {
+    const shared = dashboard();
+    shared.totals.processedTokens = metric(4_000, 2, 2);
+    shared.providers[0]!.processedTokens = metric(3_000, 2, 2);
+    shared.providers[1]!.processedTokens = metric(1_000, 1, 1);
+    const view = renderDialog({ request: vi.fn(async () => result(shared)) });
+    await screen.findByRole("dialog", { name: "Daily work" });
+
+    const codex = await waitFor(() => {
+      const card = view.container.querySelector(
+        '.daily-work-provider-summary[data-provider="codex"]',
+      );
+      if (!card) throw new Error("Codex summary is not rendered yet");
+      return card;
+    });
+    const claude = view.container.querySelector(
+      '.daily-work-provider-summary[data-provider="claude"]',
+    );
+    expect(codex).toHaveTextContent("75%");
+    expect(claude).toHaveTextContent("25%");
+    expect(codex.querySelector(".daily-work-provider-meter > i"))
+      .toHaveStyle({ width: "75%" });
+  });
+
+  it("marks provider shares unavailable when the day total is unmeasured", async () => {
+    const unmeasured = dashboard();
+    unmeasured.totals.processedTokens = metric(null, 0, 2);
+    const view = renderDialog({ request: vi.fn(async () => result(unmeasured)) });
+    await screen.findByRole("dialog", { name: "Daily work" });
+
+    await waitFor(() => {
+      expect(view.container.querySelectorAll(
+        ".daily-work-provider-meter.is-unavailable",
+      )).toHaveLength(2);
+    });
+    expect(view.container.querySelector(".daily-work-provider-share")).toBeNull();
+  });
+
+  it("distinguishes the running badge from the created-today badge", async () => {
+    renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Daily work" });
+
+    const running = await waitFor(() => within(dialog).getByRole("button", {
+      name: /Implement daily work/u,
+    }));
+    const created = within(dialog).getByRole("button", { name: /New planning chat/u });
+    expect(running.querySelector(".daily-work-badge.is-running")).toHaveTextContent("Running");
+    expect(created.querySelector(".daily-work-badge.is-running")).toBeNull();
+    expect(created.querySelector(".daily-work-badge.is-new")).toHaveTextContent("Created today");
+  });
+
   it("focuses the close control, closes on Escape, and restores prior focus", async () => {
     const trigger = document.createElement("button");
     document.body.append(trigger);

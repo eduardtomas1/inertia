@@ -102,7 +102,9 @@ describe("global shortcut DOM integration", () => {
       ([name]) => name === "keydown" || name === "keyup",
     ).length;
 
-    await waitFor(() => expect(shortcutAdds()).toBe(2));
+    // The listener must exist in the mount commit. A deferred module load can
+    // otherwise drop the first shortcut pressed immediately after a reload.
+    expect(shortcutAdds()).toBe(2);
     fireEvent.click(screen.getByRole("button", { name: "Unrelated update 0" }));
     expect(screen.getByRole("button", { name: "Unrelated update 1" }))
       .toBeInTheDocument();

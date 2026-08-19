@@ -1483,6 +1483,46 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
+  it("preserves the provider failure when owned-server cleanup is also unconfirmed", async () => {
+    const root = portableFixtureRoot("OpenCode inactive unconfirmed cleanup");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "slow"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        eventInactivityDeadlineMs: 100,
+        terminateProcessTree: async (child, force) => {
+          await terminateProcessTreeAndWait(child, force);
+          return false;
+        },
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-inactive-unconfirmed-cleanup",
+      cwd: root,
+      prompt: "Wait forever",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringMatching(
+        /event stream became inactive.*Cleanup also failed: OpenCode server process tree could not be confirmed stopped\./u,
+      ),
+      cleanupConfirmed: false,
+    });
+    expect(manager.activeConversationIds()).toContain(
+      "opencode-inactive-unconfirmed-cleanup",
+    );
+  });
+
   it("fails and cleans up an active endless stream at the absolute run deadline", async () => {
     const root = portableFixtureRoot("OpenCode endless stream");
     roots.push(root);

@@ -445,6 +445,14 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       exact: true,
       },
     )).toBeVisible();
+    await expect(disclosure).not.toHaveAttribute("open");
+    await disclosure.locator("summary").click();
+    await expect(disclosure).toHaveAttribute("open");
+    await page.reload();
+    await expect(page.getByRole("heading", {
+      name: "Delegated agent trace fixture",
+      level: 1,
+    })).toBeVisible();
     await expect(disclosure).toHaveAttribute("open");
     const delegatedWork = disclosure.getByRole("list", {
       name: "Delegated agent tree",

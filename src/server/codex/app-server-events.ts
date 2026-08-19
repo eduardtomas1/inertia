@@ -9,6 +9,13 @@ import {
   type CodexRunPhase,
 } from "./app-server-config";
 import {
+  CodexSubagentLifecycle,
+  strictCodexProviderIdentifier,
+  type CodexSubagentAuthority,
+  type CodexSubagentProjection,
+  type CodexSubagentUpdate,
+} from "./app-server-subagents";
+import {
   parseCodexGoalClearedNotification,
   parseCodexGoalUpdatedNotification,
 } from "./goals";
@@ -25,7 +32,7 @@ import {
 import {
   codexInputAnswers,
   isCodexInputRequestMethod,
-  parseCodexInputRequest,
+  parseCodexOwnedInputRequest,
 } from "./questions";
 import { completedReasoningSummary } from "./reasoning";
 import { parseCodexTokenUsage } from "./usage";
@@ -89,12 +96,6 @@ export interface CodexAppServerEventHost {
   ) => void;
 }
 
-type CodexSubagentUpdate = Parameters<
-  NonNullable<CodexAppServerOptions["onSubagent"]>
->[0];
-
-type CodexSubagentAuthority = "activity" | "state" | "turn";
-
 const SUBAGENT_AUTHORITY: Record<CodexSubagentAuthority, number> = {
   activity: 0,
   state: 1,
@@ -118,26 +119,24 @@ const TERMINAL_SUBAGENT_STATUSES =
     "lost",
   ]);
 
-interface CodexSubagentProjection {
-  status: CodexSubagentUpdate["status"];
-  authority: CodexSubagentAuthority;
-  isLive: boolean;
-}
-
 interface PendingParentCompletion {
   status: CodexAppServerResult["status"];
   exitCode: number | null;
 }
 
+const MAX_CODEX_PENDING_SERVER_REQUESTS = 32;
+
+function rpcRequestKey(id: RpcId): string {
+  return `${typeof id}:${String(id)}`;
+}
+
 export class CodexAppServerEvents {
   private readonly pendingApprovals = new Map<string, PendingApproval>();
   private readonly pendingInputs = new Map<string, PendingInput>();
+  private readonly pendingServerRequestIds = new Set<string>();
   private readonly deltaItems = new Set<string>();
   private readonly reasoningDeltaItems = new Set<string>();
   private readonly completedTurnIds = new Set<string>();
-  private readonly childParents = new Map<string, string>();
-  private readonly childResults = new Map<string, CappedTextBuffer>();
-  private readonly childDeltaItems = new Set<string>();
   private readonly subagentProjection = new Map<
     string,
     CodexSubagentProjection
@@ -158,6 +157,7 @@ export class CodexAppServerEvents {
   private readonly nativeGoalRevisionFingerprints = new Set<string>();
   private pendingGoalMutations = 0;
   private pendingGoalActivations = 0;
+  private readonly subagents: CodexSubagentLifecycle;
 
   constructor(private readonly host: CodexAppServerEventHost) {
     this.subagentDrainTimeoutMs = codexSubagentDrainTimeoutMs(
@@ -169,6 +169,16 @@ export class CodexAppServerEvents {
     this.nativeGoalStatus = host.options.goalContinuationExpected
       ? "active"
       : null;
+    this.subagents = new CodexSubagentLifecycle({
+      rootThreadId: host.providerThreadId,
+      rootTurnId: host.activeTurnId,
+      emitSubagent: (update, authority, isLive) => {
+        this.emitSubagent(update, authority, isLive);
+      },
+      projection: (providerAgentId) =>
+        this.subagentProjection.get(providerAgentId),
+      rejectMalformed: (message) => this.rejectMalformedSubagent(message),
+    });
   }
 
   dispose(): void {
@@ -184,13 +194,20 @@ export class CodexAppServerEvents {
     this.pendingGoalMutationCompletion = null;
     this.liveSubagentIds.clear();
     this.completedTurnIds.clear();
+    this.subagents.dispose();
   }
 
   cancelPendingParentCompletion(): boolean {
     if (!this.pendingParentCompletion) return false;
-    this.dispose();
-    this.host.finish("cancelled", null, null);
+    this.discardPendingParentCompletion();
     return true;
+  }
+
+  interruptibleChildTurns(): ReadonlyArray<{
+    threadId: string;
+    turnId: string;
+  }> {
+    return this.subagents.interruptibleTurns();
   }
 
   hasObservedTurn(turnId: string): boolean {
@@ -272,6 +289,7 @@ export class CodexAppServerEvents {
       this.host.options.onInputResolved?.(request.requestId);
     }
     this.pendingInputs.clear();
+    this.pendingServerRequestIds.clear();
   }
 
   respondToApproval(
@@ -308,6 +326,7 @@ export class CodexAppServerEvents {
         };
     if (!this.host.writeMessage({ id: pending.rpcId, result })) return false;
     this.pendingApprovals.delete(requestId);
+    this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
     this.host.options.onApprovalResolved?.(requestId, decision);
     if (decision === "cancel") this.host.cancel();
     return true;
@@ -326,6 +345,7 @@ export class CodexAppServerEvents {
       result: { answers: response },
     })) return false;
     this.pendingInputs.delete(requestId);
+    this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
     this.host.options.onInputResolved?.(requestId);
     return true;
   }
@@ -336,6 +356,21 @@ export class CodexAppServerEvents {
     params: JsonObject,
   ): void {
     if (this.host.isSettled()) return;
+    const requestKey = rpcRequestKey(id);
+    if (this.pendingServerRequestIds.has(requestKey)) {
+      const message = "Codex reused an outstanding JSON-RPC request id.";
+      this.host.setLastError(message);
+      this.host.rememberFailure(
+        "malformed-protocol",
+        "Codex sent an ambiguous server request.",
+        message,
+      );
+      this.emitActivity("system", "failed", message);
+      // Do not emit a second response with the duplicate id. Cancellation
+      // settles the original request exactly once before closing transport.
+      this.host.cancel();
+      return;
+    }
     const parsedApproval = parseCodexApprovalRequest(method, params);
     if (parsedApproval) {
       if (
@@ -366,6 +401,7 @@ export class CodexAppServerEvents {
         this.host.cancel();
         return;
       }
+      if (!this.reserveServerRequest(id)) return;
       this.pendingApprovals.set(approval.requestId, {
         rpcId: id,
         request: approval,
@@ -394,13 +430,27 @@ export class CodexAppServerEvents {
       return;
     }
 
-    const requestedInput = parseCodexInputRequest(method, params);
+    const requestedInput = parseCodexOwnedInputRequest(method, params);
     if (requestedInput) {
-      this.pendingInputs.set(requestedInput.requestId, {
+      if (!this.subagents.isOwnedProviderTurn(
+        requestedInput.providerThreadId,
+        requestedInput.providerTurnId,
+      )) {
+        const message =
+          "Codex sent a user-input request for a different provider turn.";
+        this.host.writeMessage({ id, error: { code: -32602, message } });
+        this.host.setLastError(message);
+        this.emitActivity("system", "failed", message);
+        this.host.cancel();
+        return;
+      }
+      if (!this.reserveServerRequest(id)) return;
+      const { request } = requestedInput;
+      this.pendingInputs.set(request.requestId, {
         rpcId: id,
-        request: requestedInput,
+        request,
       });
-      this.host.options.onInputRequest?.(requestedInput);
+      this.host.options.onInputRequest?.(request);
       return;
     }
     if (isCodexInputRequestMethod(method)) {
@@ -429,18 +479,45 @@ export class CodexAppServerEvents {
     });
   }
 
-  private isOwnedProviderThread(threadId: string): boolean {
-    const rootThreadId = this.host.providerThreadId();
-    if (!rootThreadId) return false;
-    let currentThreadId: string | undefined = threadId;
-    const visited = new Set<string>();
-    while (currentThreadId) {
-      if (currentThreadId === rootThreadId) return true;
-      if (visited.has(currentThreadId)) return false;
-      visited.add(currentThreadId);
-      currentThreadId = this.childParents.get(currentThreadId);
+  private reserveServerRequest(id: RpcId): boolean {
+    if (
+      this.pendingServerRequestIds.size
+      >= MAX_CODEX_PENDING_SERVER_REQUESTS
+    ) {
+      const message =
+        `Codex exceeded the ${MAX_CODEX_PENDING_SERVER_REQUESTS}-request interaction limit.`;
+      this.host.writeMessage({ id, error: { code: -32600, message } });
+      this.host.setLastError(message);
+      this.host.rememberFailure(
+        "malformed-protocol",
+        "Codex sent too many concurrent server requests.",
+        message,
+      );
+      this.emitActivity("system", "failed", message);
+      this.host.cancel();
+      return false;
     }
-    return false;
+    this.pendingServerRequestIds.add(rpcRequestKey(id));
+    return true;
+  }
+
+  private isOwnedProviderThread(threadId: string): boolean {
+    return this.subagents.isOwnedProviderThread(threadId);
+  }
+
+  private rejectMalformedSubagent(message: string): void {
+    this.host.setLastError(message);
+    this.host.rememberFailure(
+      "malformed-protocol",
+      "Codex sent malformed delegated-agent lifecycle data.",
+      message,
+    );
+    this.emitActivity(
+      "system",
+      "failed",
+      "Codex sent malformed delegated-agent lifecycle data",
+    );
+    this.host.cancel();
   }
 
   handleNotification(method: string, params: JsonObject): void {
@@ -460,20 +537,10 @@ export class CodexAppServerEvents {
       this.handleResolvedRequest(params);
       return;
     }
-    if (method === "thread/started" && this.handleChildThread(params)) return;
-
     const notificationThreadId = boundedText(params.threadId, 512);
     const notificationTurnId = boundedText(params.turnId, 512)
       ?? boundedText(objectValue(params.turn)?.id, 512);
-    if (
-      notificationThreadId
-      && this.childParents.has(notificationThreadId)
-      && this.handleChildNotification(
-        method,
-        params,
-        notificationThreadId,
-      )
-    ) return;
+    if (this.subagents.handleNotification(method, params)) return;
 
     if (method === "thread/goal/updated") {
       this.projectGoalUpdate(params);
@@ -912,268 +979,23 @@ export class CodexAppServerEvents {
     }
   }
 
-  private collabStatus(
-    providerStatus: string | null,
-  ): CodexSubagentUpdate["status"] | null {
-    if (providerStatus === "pendingInit") return "queued";
-    if (providerStatus === "running") return "running";
-    if (providerStatus === "interrupted") return "interrupted";
-    if (providerStatus === "completed") return "completed";
-    if (providerStatus === "errored") return "failed";
-    if (providerStatus === "notFound") return "lost";
-    if (providerStatus === "shutdown") return "unknown";
-    return providerStatus ? "unknown" : null;
-  }
-
-  private emitCollabAgentItem(
-    item: JsonObject,
-    itemPhase: "started" | "completed",
-  ): boolean {
-    if (stringValue(item.type) !== "collabAgentToolCall") return false;
-    const tool = stringValue(item.tool);
-    if (
-      tool !== "spawnAgent"
-      && tool !== "sendInput"
-      && tool !== "resumeAgent"
-      && tool !== "wait"
-      && tool !== "closeAgent"
-    ) return true;
-    const senderThreadId = boundedText(item.senderThreadId, 1_000);
-    const receiverThreadIds = Array.isArray(item.receiverThreadIds)
-      ? item.receiverThreadIds.flatMap((value) => {
-          const id = boundedText(value, 1_000);
-          return id ? [id] : [];
-        })
-      : [];
-    const toolUseId = boundedText(item.id, 1_000) ?? null;
-    const prompt = boundedText(item.prompt, 4_000) ?? null;
-    const agentsStates = objectValue(item.agentsStates) ?? {};
-    for (const providerAgentId of receiverThreadIds) {
-      if (senderThreadId) {
-        this.childParents.set(providerAgentId, senderThreadId);
-      }
-      const agentState = objectValue(agentsStates[providerAgentId]);
-      const providerStatus =
-        boundedText(agentState?.status, 200) ?? null;
-      const exactStatus = this.collabStatus(providerStatus);
-      const fallbackStatus: CodexSubagentUpdate["status"] | null =
-        tool === "spawnAgent"
-          ? itemPhase === "started" ? "spawned" : "running"
-          : tool === "wait"
-            ? itemPhase === "started" ? "waiting" : "running"
-            : tool === "closeAgent"
-              ? null
-              : "running";
-      const status = exactStatus ?? fallbackStatus;
-      if (!status) continue;
-      const terminal = TERMINAL_SUBAGENT_STATUSES.has(status);
-      const isLive = status === "unknown"
-        ? providerStatus !== "shutdown"
-        : LIVE_SUBAGENT_STATUSES.has(status);
-      this.emitSubagent({
-        providerTaskId: null,
-        providerAgentId,
-        parentProviderAgentId:
-          senderThreadId && senderThreadId !== this.host.providerThreadId()
-            ? senderThreadId
-            : null,
-        parentProviderToolUseId: null,
-        providerToolUseId: toolUseId,
-        providerRole: null,
-        providerName: null,
-        providerStatus,
-        status,
-        description: tool === "spawnAgent" ? prompt : null,
-        progress: terminal
-          ? null
-          : boundedText(agentState?.message, 4_000) ?? null,
-        result: terminal
-          ? boundedText(agentState?.message, 16_000) ?? null
-          : null,
-      }, exactStatus ? "state" : "activity", isLive);
-    }
-    return true;
-  }
-
-  private emitSubagentActivity(item: JsonObject): boolean {
-    if (stringValue(item.type) !== "subAgentActivity") return false;
-    const providerAgentId = boundedText(item.agentThreadId, 1_000);
-    const kind = stringValue(item.kind);
-    if (!providerAgentId || !kind) return true;
-    const parentProviderAgentId =
-      this.childParents.get(providerAgentId) ?? null;
-    this.emitSubagent({
-      providerTaskId: null,
-      providerAgentId,
-      parentProviderAgentId:
-        parentProviderAgentId === this.host.providerThreadId()
-          ? null
-          : parentProviderAgentId,
-      parentProviderToolUseId: null,
-      providerToolUseId: boundedText(item.id, 1_000) ?? null,
-      providerRole: null,
-      providerName: null,
-      providerStatus: kind,
-      status: kind === "started" || kind === "interacted"
-        ? "running"
-        : kind === "interrupted"
-          ? "interrupted"
-          : "unknown",
-      description: null,
-      progress: null,
-      result: null,
-    }, kind === "started" || kind === "interacted" ? "activity" : "state",
-    kind !== "interrupted");
-    return true;
-  }
-
   private handleResolvedRequest(params: JsonObject): void {
     const resolvedRpcId = rpcId(params.requestId);
     if (resolvedRpcId === undefined) return;
     for (const [requestId, pending] of this.pendingApprovals) {
       if (pending.rpcId !== resolvedRpcId) continue;
       this.pendingApprovals.delete(requestId);
+      this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
       this.host.options.onApprovalResolved?.(requestId, "cancelled");
       return;
     }
     for (const [requestId, pending] of this.pendingInputs) {
       if (pending.rpcId !== resolvedRpcId) continue;
       this.pendingInputs.delete(requestId);
+      this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
       this.host.options.onInputResolved?.(requestId);
       return;
     }
-  }
-
-  private handleChildThread(params: JsonObject): boolean {
-    const thread = objectValue(params.thread);
-    const childThreadId = boundedText(thread?.id, 1_000);
-    const parentThreadId = boundedText(thread?.parentThreadId, 1_000);
-    if (
-      !childThreadId
-      || !parentThreadId
-      || childThreadId === this.host.providerThreadId()
-      || (
-        parentThreadId !== this.host.providerThreadId()
-        && !this.childParents.has(parentThreadId)
-      )
-    ) return false;
-    this.childParents.set(childThreadId, parentThreadId);
-    this.emitSubagent({
-      providerTaskId: null,
-      providerAgentId: childThreadId,
-      parentProviderAgentId:
-        parentThreadId === this.host.providerThreadId()
-          ? null
-          : parentThreadId,
-      parentProviderToolUseId: null,
-      providerToolUseId: null,
-      providerRole: boundedText(thread?.agentRole, 200) ?? null,
-      providerName:
-        boundedText(thread?.agentNickname, 200)
-        ?? boundedText(thread?.name, 200)
-        ?? null,
-      providerStatus: null,
-      status: "running",
-      description: boundedText(thread?.preview, 4_000) ?? null,
-      progress: null,
-      result: null,
-    }, "activity");
-    return true;
-  }
-
-  private handleChildNotification(
-    method: string,
-    params: JsonObject,
-    threadId: string,
-  ): boolean {
-    if (method === "item/agentMessage/delta") {
-      const delta = stringValue(params.delta);
-      if (delta) {
-        const itemId = boundedText(params.itemId, 1_000);
-        if (itemId) this.childDeltaItems.add(itemId);
-        const buffer =
-          this.childResults.get(threadId) ?? new CappedTextBuffer(16_000);
-        buffer.append(delta);
-        this.childResults.set(threadId, buffer);
-      }
-      return true;
-    }
-    if (method === "item/started" || method === "item/completed") {
-      const item = objectValue(params.item);
-      if (!item) return true;
-      if (this.emitCollabAgentItem(
-        item,
-        method === "item/started" ? "started" : "completed",
-      )) return true;
-      if (this.emitSubagentActivity(item)) return true;
-      if (
-        method === "item/completed"
-        && stringValue(item.type) === "agentMessage"
-      ) {
-        const text = stringValue(item.text);
-        const itemId = boundedText(item.id, 1_000);
-        if (text && (!itemId || !this.childDeltaItems.has(itemId))) {
-          const buffer =
-            this.childResults.get(threadId) ?? new CappedTextBuffer(16_000);
-          buffer.append(text);
-          this.childResults.set(threadId, buffer);
-          this.emitSubagent({
-            providerTaskId: null,
-            providerAgentId: threadId,
-            parentProviderAgentId:
-              this.childParents.get(threadId) === this.host.providerThreadId()
-                ? null
-                : this.childParents.get(threadId) ?? null,
-            parentProviderToolUseId: null,
-            providerToolUseId: itemId ?? null,
-            providerRole: null,
-            providerName: null,
-            providerStatus: null,
-            status: "running",
-            description: null,
-            progress: boundedText(text, 4_000) ?? null,
-            result: null,
-          }, "activity");
-        }
-      }
-      return true;
-    }
-    if (method !== "turn/completed") return false;
-    const turn = objectValue(params.turn);
-    const status = stringValue(turn?.status);
-    const turnError = objectValue(turn?.error);
-    const result = this.childResults.get(threadId)?.toString();
-    const terminalStatus: CodexSubagentUpdate["status"] =
-      status === "completed"
-        ? "completed"
-        : status === "failed"
-          ? "failed"
-          : status === "interrupted"
-            ? "interrupted"
-            : "unknown";
-    const failure = boundedText(turnError?.message, 16_000) ?? null;
-    const output = boundedText(result, 16_000) ?? null;
-    this.emitSubagent({
-      providerTaskId: null,
-      providerAgentId: threadId,
-      parentProviderAgentId:
-        this.childParents.get(threadId) === this.host.providerThreadId()
-          ? null
-          : this.childParents.get(threadId) ?? null,
-      parentProviderToolUseId: null,
-      providerToolUseId: null,
-      providerRole: null,
-      providerName: null,
-      providerStatus: boundedText(status, 200) ?? null,
-      status: terminalStatus,
-      description: null,
-      progress: null,
-      result: terminalStatus === "failed"
-        ? failure ?? output
-        : output ?? failure,
-    }, "turn");
-    this.childResults.delete(threadId);
-    return true;
   }
 
   private handleItem(
@@ -1183,14 +1005,11 @@ export class CodexAppServerEvents {
     const item = objectValue(params.item);
     const activityId = boundedText(item?.id, 1_000);
     if (activityId) this.host.setLastActivityId(activityId);
-    if (
-      item
-      && this.emitCollabAgentItem(
-        item,
-        method === "item/started" ? "started" : "completed",
-      )
-    ) return;
-    if (item && this.emitSubagentActivity(item)) return;
+    if (item && this.subagents.handleItem(
+      item,
+      method === "item/started" ? "started" : "completed",
+      strictCodexProviderIdentifier(params.threadId),
+    )) return;
     const itemType = stringValue(item?.type);
     const phase = method === "item/completed" ? "completed" : "started";
     if (itemType === "reasoning") {

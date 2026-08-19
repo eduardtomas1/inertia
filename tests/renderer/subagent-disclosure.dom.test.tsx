@@ -127,7 +127,8 @@ describe("delegated-agent timeline disclosure", () => {
       providerTaskId: null,
       providerAgentId: "codex-child",
       providerToolUseId: "spawn-codex",
-      providerName: "Build verifier",
+      providerName: "provider_lifecycle_audit",
+      description: "Audit provider lifecycle and terminal event ordering.",
       turnId: "turn-codex",
       providerStatus: "pendingInit",
       status: "queued",
@@ -176,10 +177,10 @@ describe("delegated-agent timeline disclosure", () => {
       .toHaveTextContent("Claude · Agent SDK · 10s");
     expect(screen.getByText("Child of Evidence scout")).toBeInTheDocument();
     expect(screen.queryByRole("button", {
-      name: "Stop Build verifier",
+      name: "Stop Provider lifecycle audit",
     })).not.toBeInTheDocument();
     expect(screen.getByRole("button", {
-      name: "Stop Future-state worker",
+      name: "Stop Future state worker",
     })).toBeInTheDocument();
 
     const childRow = screen.getByRole("listitem", {
@@ -187,6 +188,17 @@ describe("delegated-agent timeline disclosure", () => {
     });
     expect(within(childRow).getByText("Waiting")).toHaveClass(
       "subagent-state-pill",
+    );
+    expect(within(childRow).getByText("Researcher")).toHaveClass(
+      "subagent-role-pill",
+    );
+    expect(within(childRow).getByText("Inspect the repository.")).toHaveClass(
+      "subagent-mission",
+    );
+    expect(screen.getByRole("listitem", {
+      name: /Provider lifecycle audit/u,
+    })).toHaveTextContent(
+      "Audit provider lifecycle and terminal event ordering.",
     );
     expect(childRow.querySelector(".subagent-status-mark"))
       .toHaveAttribute("data-live", "true");

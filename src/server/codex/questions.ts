@@ -14,11 +14,21 @@ const MAX_OPTION_DESCRIPTION_CHARS = 500;
 const MAX_AUTO_RESOLUTION_MS = 24 * 60 * 60 * 1_000;
 const CODEX_INPUT_REQUEST_METHOD = "item/tool/requestUserInput";
 
+export interface ParsedCodexInputRequest {
+  request: AgentInputRequest;
+  providerThreadId: string;
+  providerTurnId: string;
+  providerItemId: string;
+}
+
 export function isCodexInputRequestMethod(method: string): boolean {
   return method === CODEX_INPUT_REQUEST_METHOD;
 }
 
-export function parseCodexInputRequest(method: string, params: JsonObject): AgentInputRequest | undefined {
+export function parseCodexInputRequest(
+  method: string,
+  params: JsonObject,
+): AgentInputRequest | undefined {
   if (!isCodexInputRequestMethod(method) || !Array.isArray(params.questions)) return undefined;
   if (
     params.questions.length === 0
@@ -93,6 +103,30 @@ export function parseCodexInputRequest(method: string, params: JsonObject): Agen
     ? rawAutoResolutionMs
     : null;
   return { requestId: randomUUID(), questions, autoResolutionMs };
+}
+
+export function parseCodexOwnedInputRequest(
+  method: string,
+  params: JsonObject,
+): ParsedCodexInputRequest | undefined {
+  const providerThreadId = strictIdentifier(params.threadId);
+  const providerTurnId = strictIdentifier(params.turnId);
+  const providerItemId = strictIdentifier(params.itemId);
+  if (!providerThreadId || !providerTurnId || !providerItemId) return undefined;
+  const request = parseCodexInputRequest(method, params);
+  return request
+    ? { request, providerThreadId, providerTurnId, providerItemId }
+    : undefined;
+}
+
+function strictIdentifier(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.includes("\0")) return undefined;
+  const identifier = value.trim();
+  return identifier
+      && identifier === value
+      && identifier.length <= 1_000
+    ? identifier
+    : undefined;
 }
 
 function strictText(

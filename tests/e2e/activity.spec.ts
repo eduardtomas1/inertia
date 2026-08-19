@@ -490,7 +490,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       "Add a follow-up while the agent works…",
     );
     const evidenceRow = delegatedWork.getByRole("listitem", {
-      name: /Evidence Scout, Claude · Agent SDK, Running/u,
+      name: /Evidence Scout, Checking the provider lifecycle and exact task identity\., Claude · Agent SDK, Running/u,
     });
     await evidenceRow.getByRole("button", { name: "Guide parent" }).click();
     await expect(textbox).toHaveValue(

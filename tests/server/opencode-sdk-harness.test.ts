@@ -25,6 +25,14 @@ type LifecycleScenario =
   | "resume-rejected-steer"
   | "resume-stuck-steer"
   | "idle-before-prompt-receipt"
+  | "status-idle-before-prompt-receipt"
+  | "idle-after-admission"
+  | "out-of-order-parts"
+  | "out-of-order-buffer-overflow"
+  | "next-events"
+  | "external-interactions"
+  | "session-deleted"
+  | "message-role-mutation"
   | "compact"
   | "compact-stale"
   | "compact-equal-timestamp"
@@ -86,12 +94,76 @@ const server = http.createServer((req, res) => {
     if (url.pathname === "/session/" + sessionID && req.method !== "GET") return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
-      if (scenario === "idle-before-prompt-receipt") {
-        setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 10);
+      if (["idle-before-prompt-receipt", "status-idle-before-prompt-receipt"].includes(scenario)) {
+        setTimeout(() => sendEvent(scenario === "idle-before-prompt-receipt"
+          ? { type: "session.idle", properties: { sessionID } }
+          : { type: "session.status", properties: { sessionID, status: { type: "idle" } } }), 10);
         setTimeout(() => json(res, undefined, 204), 50);
+        setTimeout(() => {
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "fresh-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+          sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "fresh-text", sessionID, messageID: "fresh-assistant", type: "text", text: "Fresh response" } } });
+          sendEvent(scenario === "idle-before-prompt-receipt"
+            ? { type: "session.status", properties: { sessionID, status: { type: "idle" } } }
+            : { type: "session.idle", properties: { sessionID } });
+        }, 75);
         return;
       }
       json(res, undefined, 204);
+      if (scenario === "idle-after-admission") {
+        setTimeout(() => {
+          sendEvent({ type: "session.next.prompt.admitted", properties: { timestamp: Date.now(), sessionID, messageID: parsed.messageID, prompt: { text: "Continue", files: [] }, delivery: "queue" } });
+          sendEvent({ type: "session.idle", properties: { sessionID } });
+        }, 10);
+        setTimeout(() => {
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "admitted-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+          sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "admitted-text", sessionID, messageID: "admitted-assistant", type: "text", text: "Admitted response" } } });
+          sendEvent({ type: "session.idle", properties: { sessionID } });
+        }, 30);
+      }
+      if (scenario === "out-of-order-parts") setTimeout(() => {
+        sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "ordered-assistant", partID: "ordered-text", field: "text", delta: " world" } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "ordered-text", sessionID, messageID: "ordered-assistant", type: "text", text: "Hello world" } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "ordered-tool", sessionID, messageID: "ordered-assistant", type: "tool", callID: "ordered-call", tool: "read", state: { status: "completed", input: { path: "README.md" }, output: "ok", title: "Read file" } } } });
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "ordered-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "ordered-text", sessionID, messageID: "ordered-assistant", type: "text", text: "Hello world" } } });
+        sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "ordered-assistant", partID: "ordered-text", field: "text", delta: "!" } });
+        sendEvent({ type: "message.part.removed", properties: { sessionID, messageID: "ordered-assistant", partID: "ordered-text" } });
+        sendEvent({ type: "message.part.removed", properties: { sessionID, messageID: "ordered-assistant", partID: "ordered-text" } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "ordered-text", sessionID, messageID: "ordered-assistant", type: "text", text: " Again" } } });
+        sendEvent({ type: "session.status", properties: { sessionID, status: { type: "idle" } } });
+      }, 10);
+      if (scenario === "out-of-order-buffer-overflow") setTimeout(() => {
+        sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "buffered-assistant", partID: "buffered-text", field: "text", delta: "x".repeat(256 * 1024 + 1) } });
+      }, 10);
+      if (scenario === "next-events") setTimeout(() => {
+        sendEvent({ type: "session.next.prompt.admitted", properties: { timestamp: Date.now(), sessionID, messageID: parsed.messageID, prompt: { text: "Continue", files: [] }, delivery: "queue" } });
+        sendEvent({ type: "session.next.text.started", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", textID: "next-text" } });
+        sendEvent({ type: "session.next.text.delta", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", textID: "next-text", delta: "Next response" } });
+        sendEvent({ type: "session.next.text.ended", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", textID: "next-text", text: "Next response" } });
+        sendEvent({ type: "session.next.reasoning.delta", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", reasoningID: "next-reasoning", delta: "Checked" } });
+        sendEvent({ type: "session.next.reasoning.ended", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", reasoningID: "next-reasoning", text: "Checked" } });
+        sendEvent({ type: "session.next.shell.started", properties: { timestamp: Date.now(), sessionID, messageID: "next-assistant", callID: "shell-call", command: "npm test" } });
+        sendEvent({ type: "session.next.shell.ended", properties: { timestamp: Date.now(), sessionID, callID: "shell-call", output: "ok" } });
+        sendEvent({ type: "session.next.tool.called", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", callID: "tool-call", tool: "read", input: { path: "README.md" }, provider: { executed: true } } });
+        sendEvent({ type: "session.next.tool.success", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", callID: "tool-call", structured: {}, content: [], result: "done", provider: { executed: true } } });
+        sendEvent({ type: "session.next.step.ended", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", finish: "stop", cost: 0, tokens: { input: 4, output: 2, reasoning: 1, cache: { read: 3, write: 0 } } } });
+        sendEvent({ type: "session.status", properties: { sessionID, status: { type: "idle" } } });
+      }, 10);
+      if (scenario === "external-interactions") setTimeout(() => {
+        sendEvent({ type: "permission.v2.asked", properties: { id: "external-permission", sessionID, action: "edit", resources: ["src/app.ts"], metadata: {} } });
+        sendEvent({ type: "permission.v2.replied", properties: { sessionID, requestID: "external-permission", reply: "reject" } });
+        sendEvent({ type: "question.v2.asked", properties: { id: "external-question", sessionID, questions: [{ header: "Scope", question: "Continue?", options: [{ label: "Yes", description: "Continue" }], custom: false }] } });
+        sendEvent({ type: "question.v2.rejected", properties: { sessionID, requestID: "external-question" } });
+        sendEvent({ type: "session.idle", properties: { sessionID } });
+      }, 10);
+      if (scenario === "session-deleted") setTimeout(() => {
+        sendEvent({ type: "session.deleted", properties: { info: session } });
+      }, 10);
+      if (scenario === "message-role-mutation") setTimeout(() => {
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "mutating-text", sessionID, messageID: "mutating-message", type: "text", text: "Must not leak" } } });
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "mutating-message", sessionID, role: "user" } } });
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "mutating-message", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+      }, 10);
       if (["resume", "resume-rejected-steer", "resume-stuck-steer"].includes(scenario)) setTimeout(() => {
         sendEvent({ type: "session.idle", properties: { sessionID: "stale-session" } });
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
@@ -743,15 +815,18 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       });
   });
 
-  it("does not advertise a running session after idle beats the prompt receipt", async () => {
-    const root = portableFixtureRoot("OpenCode early idle");
+  it.each([
+    ["idle-before-prompt-receipt", "legacy session.idle"],
+    ["status-idle-before-prompt-receipt", "session.status idle"],
+  ] as const)("ignores a stale %s until the current prompt is observed (%s)", async (scenario, _label) => {
+    const root = portableFixtureRoot(`OpenCode early idle ${scenario}`);
     roots.push(root);
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(
       root,
       "serve",
-      lifecycleServerSource(root, capturePath, "idle-before-prompt-receipt"),
+      lifecycleServerSource(root, capturePath, scenario),
     );
     const manager = new ProviderManager(
       { commands: { opencode: command } },
@@ -772,8 +847,227 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     })).resolves.toMatchObject({
       status: "completed",
       sessionId: "opencode-lifecycle-session",
+      text: "Fresh response",
     });
-    expect(statuses).not.toContain("running");
+    expect(statuses).toContain("running");
+    const capture = readStableCapture<{
+      captured: Array<{ path: string; body?: Record<string, unknown> }>;
+    }>(capturePath);
+    expect(capture.captured.find(({ path }) => path.endsWith("/prompt_async"))?.body)
+      .toMatchObject({ messageID: expect.stringMatching(/^msg_[a-f0-9]{32}$/u) });
+  });
+
+  it("does not treat admission alone as proof that a queued prompt has run", async () => {
+    const root = portableFixtureRoot("OpenCode idle after admission");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "idle-after-admission"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-idle-after-admission",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "completed",
+      text: "Admitted response",
+    });
+  });
+
+  it("buffers and de-duplicates out-of-order assistant part events", async () => {
+    const root = portableFixtureRoot("OpenCode out of order parts");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "out-of-order-parts"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const activities: Array<{ activityId?: string; phase: string }> = [];
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-out-of-order",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onActivity: (event) => activities.push(event),
+    })).resolves.toMatchObject({
+      status: "completed",
+      text: "Hello world! Again",
+    });
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "ordered-call",
+      phase: "completed",
+    }));
+  });
+
+  it("fails closed when buffered out-of-order deltas exceed the per-part bound", async () => {
+    const root = portableFixtureRoot("OpenCode buffered delta overflow");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "out-of-order-buffer-overflow"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({ eventInactivityDeadlineMs: 1_000 })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-buffer-overflow",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: "OpenCode sent an oversized buffered message-part delta.",
+    });
+  });
+
+  it("normalizes installed session.next text, reasoning, tool, shell, usage, and status events", async () => {
+    const root = portableFixtureRoot("OpenCode next events");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "next-events"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const events: Array<Record<string, unknown>> = [];
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-next-events",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onEvent: (event) => events.push(event as unknown as Record<string, unknown>),
+    })).resolves.toMatchObject({ status: "completed", text: "Next response" });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "reasoning-summary",
+      text: "Checked",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      kind: "command",
+      phase: "completed",
+      activityId: "shell-call",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      kind: "tool",
+      phase: "completed",
+      activityId: "tool-call",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "usage",
+      usage: expect.objectContaining({
+        inputTokens: 4,
+        cachedInputTokens: 3,
+        outputTokens: 2,
+        reasoningOutputTokens: 1,
+      }),
+    }));
+  });
+
+  it("settles externally answered v2 approvals and questions", async () => {
+    const root = portableFixtureRoot("OpenCode external interactions");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "external-interactions"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const events: Array<Record<string, unknown>> = [];
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-external-interactions",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onEvent: (event) => events.push(event as unknown as Record<string, unknown>),
+    })).resolves.toMatchObject({ status: "completed" });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "approval-resolved",
+      decision: "deny",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "input-resolved" }));
+  });
+
+  it("fails promptly when OpenCode deletes the active session", async () => {
+    const root = portableFixtureRoot("OpenCode deleted session");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "session-deleted"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-deleted-session",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: "OpenCode deleted the active session before the run completed.",
+    });
+  });
+
+  it("fails closed instead of replaying parts when a message role mutates", async () => {
+    const root = portableFixtureRoot("OpenCode message role mutation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "message-role-mutation"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-message-role-mutation",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      text: "",
+      error: "OpenCode changed a retained message's role identity.",
+    });
   });
 
   it("finishes after an in-flight steer receipt is rejected at idle", async () => {
@@ -1187,6 +1481,46 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     );
     expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
     expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("preserves the provider failure when owned-server cleanup is also unconfirmed", async () => {
+    const root = portableFixtureRoot("OpenCode inactive unconfirmed cleanup");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "slow"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        eventInactivityDeadlineMs: 100,
+        terminateProcessTree: async (child, force) => {
+          await terminateProcessTreeAndWait(child, force);
+          return false;
+        },
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-inactive-unconfirmed-cleanup",
+      cwd: root,
+      prompt: "Wait forever",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringMatching(
+        /event stream became inactive.*Cleanup also failed: OpenCode server process tree could not be confirmed stopped\./u,
+      ),
+      cleanupConfirmed: false,
+    });
+    expect(manager.activeConversationIds()).toContain(
+      "opencode-inactive-unconfirmed-cleanup",
+    );
   });
 
   it("fails and cleans up an active endless stream at the absolute run deadline", async () => {

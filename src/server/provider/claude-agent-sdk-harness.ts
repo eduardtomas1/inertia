@@ -27,14 +27,11 @@ import {
   type ClaudeAgentSdkHarnessCapabilities,
 } from "./agent-harness";
 import type { ProviderRunResult } from "./contracts";
-import type {
-  AgentApprovalDecision,
-  AgentInputRequest,
-  AgentPlanStep,
-} from "./interactions";
+import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
 import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
+import { claudeQuestions } from "./claude-questions";
 import {
   claudePrompt,
   claudePromptReservationBytes,
@@ -61,8 +58,6 @@ import { clampProviderPercent, providerTimestamp } from "./usage-values";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
-const MAX_INPUT_QUESTIONS = 4;
-const MAX_INPUT_OPTIONS = 4;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const CLAUDE_STOP_TASK_TIMEOUT_MS = 2_000;
@@ -108,6 +103,7 @@ export interface ClaudeAgentSdkHarnessOptions
 }
 
 export { readClaudeAgentSdkSkills } from "./claude-skill-query";
+export { claudeQuestions } from "./claude-questions";
 
 function claudeStopTaskTimeout(value: number | undefined): number {
   if (
@@ -397,6 +393,7 @@ function startClaudeRun(
   let cancelRequested = false;
   let acceptingFollowUps = false;
   let acceptedFollowUp = false;
+  const pendingFollowUpIds = new Set<string>();
   let sessionId = options.input.sessionId;
   let latestContextUsage: Awaited<ReturnType<typeof readClaudeContextUsage>>;
   let contextUsageRequest: Promise<void> | null = null;
@@ -579,6 +576,7 @@ function startClaudeRun(
         promptChannel.release(promptReservation);
         throw error;
       }
+      prompt.uuid = randomUUID();
       if (!promptChannel.push(prompt, promptReservation)) {
         return finishResult("cancelled");
       }
@@ -670,6 +668,8 @@ function startClaudeRun(
         drainTerminalSubagents = false;
         eventBudget.observe(message);
         const record = message as unknown as Record<string, unknown>;
+        const childOwned = record.parent_tool_use_id !== null
+          && record.parent_tool_use_id !== undefined;
         const messageSessionId = stringValue(record.session_id);
         const initAttestsRequestedSession = messageSessionId !== undefined
           && (options.input.sessionId === undefined
@@ -698,7 +698,11 @@ function startClaudeRun(
         }
         const provesRequestedCompaction = options.input.operation?.kind === "compact"
           && messageSessionId === options.input.sessionId;
-        if (typeof record.session_id === "string" && record.session_id !== sessionId) {
+        if (
+          !childOwned
+          && typeof record.session_id === "string"
+          && record.session_id !== sessionId
+        ) {
           sessionId = record.session_id;
           emitter.session(sessionId);
         }
@@ -707,12 +711,18 @@ function startClaudeRun(
         if (
           lifecycle.turnEnded
           && message.type !== "result"
+          && pendingFollowUpIds.size === 0
           && !subagentTracker.hasLiveTasks()
         ) break;
-        if (lifecycle.turnEnded && subagentTracker.hasLiveTasks()) {
+        if (
+          lifecycle.turnEnded
+          && pendingFollowUpIds.size === 0
+          && subagentTracker.hasLiveTasks()
+        ) {
           drainTerminalSubagents = true;
         }
         if (message.type === "stream_event") {
+          if (childOwned) continue;
           const delta = objectValue(objectValue(record.event)?.delta);
           const deltaType = stringValue(delta?.type);
           const value = stringValue(delta?.text) ?? stringValue(delta?.thinking);
@@ -726,13 +736,14 @@ function startClaudeRun(
           continue;
         }
         if (message.type === "assistant") {
+          if (childOwned) continue;
           const content = Array.isArray(objectValue(record.message)?.content) ? objectValue(record.message)?.content as unknown[] : [];
           for (const block of content) {
             const item = objectValue(block);
             if (!item) continue;
-            if (item.type === "text" && !sawStreamText && typeof item.text === "string") {
+            if (item.type === "text" && !sawStreamText && stringValue(item.text)) {
               sawOutputText = true;
-              emitText(item.text, text, emitter.text);
+              emitText(item.text as string, text, emitter.text);
             }
             if (item.type === "thinking" && typeof item.thinking === "string") emitter.rich({ type: "reasoning-summary", text: bounded(item.thinking) });
             if (item.type === "tool_use") {
@@ -765,6 +776,7 @@ function startClaudeRun(
           continue;
         }
         if (message.type === "user") {
+          if (childOwned) continue;
           const content = Array.isArray(objectValue(record.message)?.content)
             ? objectValue(record.message)?.content as unknown[]
             : [];
@@ -833,6 +845,23 @@ function startClaudeRun(
           if (usage) {
             emitter.rich({ type: "usage", usage });
           }
+          if (message.subtype === "success" && pendingFollowUpIds.size > 0) {
+            const userMessageId = stringValue(record.user_message_uuid);
+            if (!userMessageId) {
+              throw new Error(
+                "Claude returned a successful result without correlating an accepted follow-up.",
+              );
+            }
+            pendingFollowUpIds.delete(userMessageId);
+            if (pendingFollowUpIds.size > 0) {
+              // Each streaming-input result ends one SDK user turn. Parent
+              // snapshots from the next turn must not be suppressed by text
+              // that was emitted before the admitted follow-up was handled.
+              sawStreamText = false;
+              sawOutputText = false;
+              continue;
+            }
+          }
           if (lifecycle.turnEnded && !subagentTracker.hasLiveTasks()) break;
           if (lifecycle.turnEnded) drainTerminalSubagents = true;
           continue;
@@ -842,6 +871,11 @@ function startClaudeRun(
         throw new Error("Claude did not confirm the selected isolated skills.");
       }
       if (cancelRequested) return finishResult("cancelled");
+      if (pendingFollowUpIds.size > 0) {
+        throw new Error(
+          "Claude Agent SDK exited before correlating every accepted follow-up.",
+        );
+      }
       if (options.input.operation?.kind === "compact"
         && (compactFailure || !compactSucceeded)) {
         return finishResult(
@@ -985,8 +1019,8 @@ function startClaudeRun(
     const runningQuery = query;
     if (!runningQuery) return;
     void runningQuery.interrupt().then((receipt) => {
-      // Inertia's follow-ups are UUID-less and therefore cannot appear in the
-      // SDK's still_queued receipt, even when they survived the interrupt.
+      // The conservative local admission bit also covers SDK versions that do
+      // not return every UUID which may already have crossed into dispatch.
       const queuedInputMaySurvive = acceptedFollowUp
         || Boolean(receipt?.still_queued.length);
       if (!queuedInputMaySurvive) return;
@@ -1025,8 +1059,14 @@ function startClaudeRun(
           promptChannel.release(reservation);
           return false;
         }
+        followUp.uuid = randomUUID();
+        pendingFollowUpIds.add(followUp.uuid);
         const accepted = promptChannel.push(followUp, reservation);
-        if (accepted) acceptedFollowUp = true;
+        if (accepted) {
+          acceptedFollowUp = true;
+        } else {
+          pendingFollowUpIds.delete(followUp.uuid);
+        }
         return accepted;
       },
       stopSubagent: async (providerTaskId) => {
@@ -1073,114 +1113,6 @@ async function emitClaudeModelMetadata(
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-export function claudeQuestions(requestId: string, toolUseId: string, input: Record<string, unknown>): AgentInputRequest {
-  if (!Array.isArray(input.questions)) {
-    throw new Error("Claude sent an invalid question request.");
-  }
-  const questions = input.questions;
-  if (questions.length === 0) {
-    throw new Error("Claude sent an empty question request.");
-  }
-  if (questions.length > MAX_INPUT_QUESTIONS) {
-    throw new Error(`Claude sent more than ${MAX_INPUT_QUESTIONS} questions.`);
-  }
-  const identityPrefix = (toolUseId || requestId).slice(0, 96);
-  const prompts = new Set<string>();
-  return {
-    requestId,
-    autoResolutionMs: null,
-    questions: questions.map((value, index) => {
-      const question = objectValue(value);
-      if (!question) {
-        throw new Error(`Claude sent an invalid question at position ${index + 1}.`);
-      }
-      const text = strictClaudeText(
-        question.question,
-        `question ${index + 1}`,
-      );
-      if (prompts.has(text)) {
-        throw new Error("Claude sent duplicate question prompts.");
-      }
-      prompts.add(text);
-      const header = strictClaudeText(
-        question.header,
-        `question ${index + 1} header`,
-      );
-      if (!Array.isArray(question.options)) {
-        throw new Error(`Claude sent invalid options for question ${index + 1}.`);
-      }
-      const options = question.options;
-      if (options.length > MAX_INPUT_OPTIONS) {
-        throw new Error(`Claude sent more than ${MAX_INPUT_OPTIONS} options for question ${index + 1}.`);
-      }
-      if (
-        question.multiSelect !== undefined
-        && typeof question.multiSelect !== "boolean"
-      ) {
-        throw new Error(`Claude sent an invalid selection mode for question ${index + 1}.`);
-      }
-      if (
-        question.allowMultiple !== undefined
-        && typeof question.allowMultiple !== "boolean"
-      ) {
-        throw new Error(`Claude sent an invalid selection mode for question ${index + 1}.`);
-      }
-      const optionLabels = new Set<string>();
-      return {
-        id: `${identityPrefix}:question:${index + 1}`,
-        header,
-        question: text,
-        isOther: true,
-        isSecret: false,
-        allowMultiple: question.multiSelect === true || question.allowMultiple === true,
-        options: options.map((option, optionIndex) => {
-          const item = objectValue(option);
-          if (!item) {
-            throw new Error(
-              `Claude sent an invalid option ${optionIndex + 1} for question ${index + 1}.`,
-            );
-          }
-          const label = strictClaudeText(
-            item.label,
-            `option ${optionIndex + 1} label`,
-          );
-          if (optionLabels.has(label)) {
-            throw new Error(
-              `Claude sent a duplicate option label for question ${index + 1}.`,
-            );
-          }
-          optionLabels.add(label);
-          return {
-            id: `option-${optionIndex + 1}`,
-            label,
-            description: strictClaudeText(
-              item.description,
-              `option ${optionIndex + 1} description`,
-              true,
-            ),
-          };
-        }),
-      };
-    }),
-  };
-}
-
-function strictClaudeText(
-  value: unknown,
-  label: string,
-  allowEmpty = false,
-): string {
-  if (
-    typeof value !== "string"
-    || value.includes("\0")
-    || value.length > MAX_EVENT_TEXT_CHARS
-    || (!allowEmpty && value.trim().length === 0)
-  ) {
-    throw new Error(`Claude sent an invalid ${label}.`);
-  }
-  return value;
 }
 
 function planSteps(markdown: string): AgentPlanStep[] {

@@ -324,7 +324,7 @@ describe("ProviderManager terminal resume launch", () => {
   it("rejects a runnable but unverified Cursor CLI version", async () => {
     const manager = new ProviderManager();
     vi.spyOn(manager, "detect").mockResolvedValue({
-      provider: { id: "cursor", name: "Cursor", command: "agent" },
+      provider: { id: "cursor", name: "Cursor", command: "cursor-agent" },
       available: true,
       version: "2026.07.31",
       executable: "/opt/cursor/agent",

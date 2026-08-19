@@ -14,6 +14,7 @@ import type {
   SessionConfigOption,
   SessionModeState,
   SessionNotification,
+  ToolCallStatus,
   ToolKind,
   Usage,
 } from "@agentclientprotocol/sdk";
@@ -41,6 +42,7 @@ import { providerActivityDetailSections } from "./activity-detail";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { providerProcessInvocation } from "./process";
+import { cursorAgentCommandArgs } from "./cursor-command";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -49,6 +51,9 @@ const MAX_STDERR_CHARS = 32 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 20;
+const MAX_PENDING_INTERACTIONS = 64;
+const MAX_TRACKED_TOOL_ACTIVITIES = 1_024;
+const MAX_AVAILABLE_COMMANDS = 256;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const COMMAND_ADVERTISEMENT_TIMEOUT_MS = 2_000;
@@ -60,7 +65,7 @@ export function cursorAcpProcessInvocation(
 ) {
   return providerProcessInvocation(
     executable,
-    ["acp"],
+    cursorAgentCommandArgs(executable, ["acp"]),
     environment,
     platform,
   );
@@ -142,7 +147,12 @@ function startCursorRun(
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
   const toolActivities = new Map<
     string,
-    { kind: "command" | "tool"; label: string }
+    {
+      kind: "command" | "tool";
+      label: string;
+      rawInput?: unknown;
+      status?: ToolCallStatus | null;
+    }
   >();
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
@@ -187,7 +197,7 @@ function startCursorRun(
         && params.update.sessionUpdate === "available_commands_update"
       ) {
         availableCommandNames = new Set(
-          params.update.availableCommands.map(({ name }) =>
+          params.update.availableCommands.slice(0, MAX_AVAILABLE_COMMANDS).map(({ name }) =>
             name.replace(/^\//u, "").toLowerCase()),
         );
         resolveCommandAdvertisement();
@@ -206,6 +216,9 @@ function startCursorRun(
       const requestId = randomUUID();
       const request = cursorQuestions(requestId, params);
       const answers = await new Promise<Record<string, string[]>>((resolve) => {
+        if (inputs.size >= MAX_PENDING_INTERACTIONS) {
+          throw new Error("Cursor exceeded the bounded question budget.");
+        }
         inputs.set(requestId, { resolve, settled: false });
         signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
         emitter.rich({ type: "input", request });
@@ -282,7 +295,7 @@ function startCursorRun(
     activeContext = context;
     const initialized = await context.request(acp.methods.agent.initialize, {
       protocolVersion: 1,
-      clientCapabilities: {},
+      clientCapabilities: { plan: {} },
       clientInfo: { name: "Inertia", version: INERTIA_VERSION },
     });
     validateCursorInitialize(initialized);
@@ -472,6 +485,9 @@ async function cursorPermission(
   }
   const requestId = randomUUID();
   const decision = await new Promise<AgentApprovalDecision>((resolve) => {
+    if (approvals.size >= MAX_PENDING_INTERACTIONS) {
+      throw new Error("Cursor exceeded the bounded approval budget.");
+    }
     approvals.set(requestId, { resolve, settled: false });
     signal.addEventListener("abort", () => {
       const pending = approvals.get(requestId);
@@ -537,79 +553,205 @@ function handleCursorUpdate(
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
   supportsImages: boolean,
   contextUsage: CursorContextUsage,
-  toolActivities: Map<string, { kind: "command" | "tool"; label: string }>,
+  toolActivities: Map<
+    string,
+    {
+      kind: "command" | "tool";
+      label: string;
+      rawInput?: unknown;
+      status?: ToolCallStatus | null;
+    }
+  >,
 ): void {
   const update = notification.update;
-  if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
-    const value = bounded(update.content.text);
-    resultText.append(value);
-    emitter.text(value);
-  } else if (update.sessionUpdate === "agent_thought_chunk" && update.content.type === "text") {
-    emitter.rich({ type: "reasoning-summary", text: bounded(update.content.text) });
-  } else if (update.sessionUpdate === "tool_call") {
-    const activityId = update.toolCallId;
-    const kind = update.kind === "execute" ? "command" : "tool";
-    const label = bounded(update.title);
-    const rawInput = objectValue(update.rawInput);
-    toolActivities.set(activityId, { kind, label });
-    emitter.activity(kind, "started", label, {
-      activityId,
-      ...(providerActivityDetailSections({ command: rawInput?.command })
-        ? {
-            detail: providerActivityDetailSections({
-              command: rawInput?.command,
-            })!,
-          }
-        : {}),
-    });
-  } else if (update.sessionUpdate === "tool_call_update") {
-    const phase = update.status === "failed"
-      ? "failed"
-      : update.status === "completed"
-        ? "completed"
-        : "started";
-    const record = update as unknown as Record<string, unknown>;
-    const activityId = update.toolCallId;
-    const existing = toolActivities.get(activityId);
-    const kind = existing?.kind ?? (update.kind === "execute" ? "command" : "tool");
-    const label = existing?.label ?? bounded(update.title ?? update.name ?? "Cursor tool");
-    const rawInput = objectValue(record.rawInput);
-    const output = record.rawOutput ?? record.output ?? record.content;
-    const failed = phase === "failed";
-    const detail = providerActivityDetailSections({
-      command: rawInput?.command,
-      [failed ? "error" : "output"]: output,
-    });
-    emitter.activity(kind, phase, label, {
-      activityId,
-      ...(detail ? { detail } : {}),
-    });
-    if (phase === "completed" || phase === "failed") {
-      toolActivities.delete(activityId);
+  switch (update.sessionUpdate) {
+    case "user_message_chunk":
+      // This is an echo of client-authored input, not assistant output.
+      return;
+    case "agent_message_chunk":
+      if (update.content.type === "text") {
+        const value = bounded(update.content.text);
+        resultText.append(value);
+        emitter.text(value);
+      }
+      return;
+    case "agent_thought_chunk":
+      if (update.content.type === "text") {
+        emitter.rich({
+          type: "reasoning-summary",
+          text: bounded(update.content.text),
+        });
+      }
+      return;
+    case "tool_call": {
+      const activityId = update.toolCallId;
+      if (
+        !toolActivities.has(activityId)
+        && toolActivities.size >= MAX_TRACKED_TOOL_ACTIVITIES
+      ) {
+        throw new Error("Cursor exceeded the bounded tool activity budget.");
+      }
+      const kind = update.kind === "execute" ? "command" : "tool";
+      const label = bounded(update.title);
+      const phase = cursorToolActivityPhase(update.status);
+      const rawInput = objectValue(update.rawInput);
+      const detail = providerActivityDetailSections({
+        command: rawInput?.command,
+        [phase === "failed" ? "error" : "output"]:
+          update.rawOutput ?? update.content,
+      });
+      emitter.activity(kind, phase, label, {
+        activityId,
+        ...(detail ? { detail } : {}),
+      });
+      if (phase === "completed" || phase === "failed") {
+        toolActivities.delete(activityId);
+      } else {
+        toolActivities.set(activityId, {
+          kind,
+          label,
+          rawInput: update.rawInput,
+          status: update.status,
+        });
+      }
+      return;
     }
-  } else if (update.sessionUpdate === "plan") {
-    emitter.rich({ type: "plan", explanation: null, steps: update.entries.map((entry) => ({ step: bounded(entry.content), status: entry.status === "in_progress" ? "inProgress" : entry.status })) });
-  } else if (update.sessionUpdate === "usage_update") {
-    contextUsage.usedTokens = tokenCount(update.used);
-    contextUsage.maxTokens = tokenCount(update.size);
-    emitter.rich({
-      type: "usage",
-      usage: {
-        usedTokens: contextUsage.usedTokens,
-        totalProcessedTokens: null,
-        totalProcessedScope: "session",
-        maxTokens: contextUsage.maxTokens,
-        inputTokens: null,
-        cachedInputTokens: null,
-        cacheWriteInputTokens: null,
-        outputTokens: null,
-        reasoningOutputTokens: null,
-        compactsAutomatically: null,
-      },
-    });
-  } else if (update.sessionUpdate === "config_option_update") {
-    emitCursorMetadata(update.configOptions, supportsImages, emitter.rich);
+    case "tool_call_update": {
+      const activityId = update.toolCallId;
+      const existing = toolActivities.get(activityId);
+      if (
+        !existing
+        && toolActivities.size >= MAX_TRACKED_TOOL_ACTIVITIES
+      ) {
+        throw new Error("Cursor exceeded the bounded tool activity budget.");
+      }
+      const kind = update.kind === "execute"
+        ? "command"
+        : existing?.kind ?? "tool";
+      const label = bounded(
+        update.title ?? update.name ?? existing?.label ?? "Cursor tool",
+      );
+      const status = update.status ?? existing?.status;
+      const phase = cursorToolActivityPhase(status);
+      const rawInputValue = update.rawInput ?? existing?.rawInput;
+      const rawInput = objectValue(rawInputValue);
+      const detail = providerActivityDetailSections({
+        command: rawInput?.command,
+        [phase === "failed" ? "error" : "output"]:
+          update.rawOutput ?? update.content,
+      });
+      emitter.activity(kind, phase, label, {
+        activityId,
+        ...(detail ? { detail } : {}),
+      });
+      if (phase === "completed" || phase === "failed") {
+        toolActivities.delete(activityId);
+      } else {
+        toolActivities.set(activityId, {
+          kind,
+          label,
+          rawInput: rawInputValue,
+          status,
+        });
+      }
+      return;
+    }
+    case "plan":
+      emitter.rich({
+        type: "plan",
+        explanation: null,
+        steps: cursorPlanSteps(update.entries),
+      });
+      return;
+    case "plan_update":
+      if (update.plan.type === "items") {
+        emitter.rich({
+          type: "plan",
+          explanation: null,
+          steps: cursorPlanSteps(update.plan.entries),
+        });
+      } else if (update.plan.type === "markdown") {
+        emitter.rich({
+          type: "plan",
+          explanation: bounded(update.plan.content),
+          steps: [],
+        });
+      } else {
+        emitter.rich({
+          type: "plan",
+          explanation: `Cursor plan: ${bounded(update.plan.uri)}`,
+          steps: [],
+        });
+      }
+      return;
+    case "plan_removed":
+      emitter.rich({ type: "plan", explanation: null, steps: [] });
+      return;
+    case "available_commands_update":
+      // The enclosing notification handler retains the bounded command set.
+      return;
+    case "current_mode_update":
+      emitter.activity(
+        "system",
+        "info",
+        `Cursor switched to ${bounded(update.currentModeId)} mode`,
+      );
+      return;
+    case "config_option_update":
+      emitCursorMetadata(update.configOptions, supportsImages, emitter.rich);
+      return;
+    case "session_info_update":
+      if (update.title) {
+        emitter.activity(
+          "system",
+          "info",
+          `Cursor session: ${bounded(update.title)}`,
+        );
+      }
+      return;
+    case "usage_update":
+      contextUsage.usedTokens = tokenCount(update.used);
+      contextUsage.maxTokens = tokenCount(update.size);
+      emitter.rich({
+        type: "usage",
+        usage: {
+          usedTokens: contextUsage.usedTokens,
+          totalProcessedTokens: null,
+          totalProcessedScope: "session",
+          maxTokens: contextUsage.maxTokens,
+          inputTokens: null,
+          cachedInputTokens: null,
+          cacheWriteInputTokens: null,
+          outputTokens: null,
+          reasoningOutputTokens: null,
+          compactsAutomatically: null,
+        },
+      });
+      return;
   }
+  const unsupportedUpdate: never = update;
+  return unsupportedUpdate;
+}
+
+function cursorToolActivityPhase(
+  status: ToolCallStatus | null | undefined,
+): "started" | "completed" | "failed" {
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  return "started";
+}
+
+function cursorPlanSteps(
+  entries: ReadonlyArray<{ content: string; status: string }>,
+): AgentPlanStep[] {
+  return entries.slice(0, 100).map((entry) => ({
+    step: bounded(entry.content),
+    status: entry.status === "in_progress"
+      ? "inProgress"
+      : entry.status === "completed"
+        ? "completed"
+        : "pending",
+  }));
 }
 
 function cursorSelectChoices(option: SessionConfigOption | undefined): Array<{ value: string; name: string; description?: string | null }> {

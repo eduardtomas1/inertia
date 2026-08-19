@@ -683,6 +683,86 @@ setInterval(() => {}, 1000);
     });
   });
 
+  it("prefers the Cursor-specific executable and rejects an unrelated generic ACP agent", async () => {
+    const root = temporaryRoot();
+    const cursorAgent = join(root, "cursor-agent");
+    const genericAgent = join(root, "agent");
+    const candidates = new Map([
+      ["cursor-agent", [cursorAgent]],
+      ["agent", [genericAgent]],
+    ]);
+    const probeProcess = async (executable: string, args: readonly string[]) => ({
+      started: true,
+      timedOut: false,
+      exitCode: 0,
+      output: args[0] === "--version"
+        ? executable === genericAgent ? "generic-agent 99.0.0" : "cursor-agent 1.0.0"
+        : args[0] === "status"
+          ? "Logged in"
+          : executable === genericAgent ? "Agent Client Protocol (ACP)" : "Cursor Agent Client Protocol (ACP)",
+      cleanupConfirmed: true,
+    });
+
+    await expect(detectProvider("cursor", { cwd: root }, {
+      executableCandidates: async (command) => candidates.get(command) ?? [],
+      probeProcess,
+    })).resolves.toMatchObject({
+      available: true,
+      executable: cursorAgent,
+      version: "1.0.0",
+      canRun: true,
+    });
+
+    await expect(detectProvider("cursor", {
+      command: genericAgent,
+      cwd: root,
+    }, {
+      executableCandidates: async () => [genericAgent],
+      probeProcess,
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      canRun: false,
+      statusMessage: "Cursor CLI found, but ACP is unavailable",
+    });
+  });
+
+  it("probes a configured Cursor editor launcher through its agent subcommand", async () => {
+    const root = temporaryRoot();
+    const editor = join(root, "cursor");
+    const probes: string[][] = [];
+
+    await expect(detectProvider("cursor", {
+      command: editor,
+      cwd: root,
+    }, {
+      executableCandidates: async () => [editor],
+      probeProcess: async (_executable, args) => {
+        probes.push([...args]);
+        return {
+          started: true,
+          timedOut: false,
+          exitCode: 0,
+          output: args[0] === "--version"
+            ? "Cursor 2.0.0"
+            : args.at(-1) === "status"
+              ? "Logged in"
+              : "Cursor Agent Client Protocol (ACP)",
+          cleanupConfirmed: true,
+        };
+      },
+    })).resolves.toMatchObject({
+      available: true,
+      executable: editor,
+      canRun: true,
+    });
+    expect(probes).toEqual([
+      ["--version"],
+      ["agent", "acp", "--help"],
+      ["agent", "status"],
+    ]);
+  });
+
   it("normalizes streamed session output from the other provider adapters", async () => {
     const fixtures: Array<{ providerId: ProviderId; lines: unknown[]; expectedText: string; sessionId: string }> = [
       {
@@ -962,10 +1042,41 @@ process.exit(1);
     const result = await manager.run(nativeProviderRunInput({ providerId: "codex", harnessId: "codex-cli", conversationId: "failed-conversation", cwd: root, prompt: "Respond", interactionMode: "build", access: "full" }));
 
     expect(result).toMatchObject({ status: "failed", exitCode: 1, error: "Codex is not authenticated. Sign in with its CLI and try again." });
-    expect(manager.isRunning("failed-conversation")).toBe(true);
-    await expect(manager.disposeAll()).rejects.toThrow(
-      "Provider process cleanup could not be confirmed.",
+    expect(result.cleanupConfirmed).toBe(true);
+    expect(manager.isRunning("failed-conversation")).toBe(false);
+    await expect(manager.disposeAll()).resolves.toBeUndefined();
+  });
+
+  it("fails a clean CLI exit that omitted the provider terminal event", async () => {
+    const root = temporaryRoot();
+    const { command, program } = nodeProgram(
+      root,
+      "incomplete-codex",
+      "process.exit(0);",
     );
+    const manager = new ProviderManager(
+      { commands: { codex: command } },
+      new AgentHarnessRegistry([
+        createCliAgentHarness("codex", { prefixArgs: [program] }),
+      ]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      harnessId: "codex-cli",
+      conversationId: "incomplete-conversation",
+      cwd: root,
+      prompt: "Respond",
+      interactionMode: "build",
+      access: "full",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      exitCode: 0,
+      error: "Codex could not complete the request.",
+      cleanupConfirmed: true,
+    });
+    expect(manager.isRunning("incomplete-conversation")).toBe(false);
+    await expect(manager.disposeAll()).resolves.toBeUndefined();
   });
 
   it("attributes custom backend failures without echoing raw provider diagnostics", () => {

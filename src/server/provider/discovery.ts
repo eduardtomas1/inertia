@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { basename } from "node:path";
 
 import {
   credentialFreeProviderEnvironment,
@@ -26,8 +27,23 @@ import {
 import { CappedProviderBuffer } from "./io";
 import { providerProcessInvocation } from "./process";
 import { windowsCodexExecutableCandidates } from "./windows-codex";
+import { cursorAgentCommandArgs } from "./cursor-command";
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
+
+function cursorExecutablePreference(executable: string): number {
+  const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
+  return name === "cursor-agent" ? 1 : 0;
+}
+
+function cursorCandidateIsIdentified(
+  executable: string,
+  versionOutput: string,
+  acpOutput: string,
+): boolean {
+  return cursorExecutablePreference(executable) > 0
+    || /\bcursor(?:[ -]agent)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
+}
 
 function versionFromOutput(output: string): string | undefined {
   return output.match(/\bv?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?\b/u)?.[0];
@@ -250,7 +266,7 @@ export async function detectProvider(
       }
     : environment;
   const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
-    ? [command, "cursor-agent"]
+    ? [command, "agent"]
     : [command];
   const candidates = providerId === "codex"
     && process.platform === "win32"
@@ -279,13 +295,24 @@ export async function detectProvider(
   const versionProbes = await Promise.all(candidates.map(async (executable) => {
     const probe = await runProbe(executable, ["--version"], environment, cwd, timeoutMs);
     const acpProbe = providerId === "cursor" && probe.started && !probe.timedOut && probe.exitCode === 0
-      ? await runProbe(executable, ["acp", "--help"], environment, cwd, timeoutMs)
+      ? await runProbe(
+          executable,
+          cursorAgentCommandArgs(executable, ["acp", "--help"]),
+          environment,
+          cwd,
+          timeoutMs,
+        )
       : undefined;
     const acpReady = !acpProbe || (
       acpProbe.started
       && !acpProbe.timedOut
       && acpProbe.exitCode === 0
       && /(?:agent client protocol|\bacp\b|cursor)/iu.test(acpProbe.output)
+      && cursorCandidateIsIdentified(
+        executable,
+        probe.output,
+        acpProbe.output,
+      )
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(executable, ["app-server", "--help"], environment, cwd, timeoutMs)
@@ -310,7 +337,11 @@ export async function detectProvider(
   const working = versionProbes
     .filter(({ probe, acpReady }) => probe.started && !probe.timedOut && probe.exitCode === 0 && acpReady)
     .sort((left, right) =>
-      compareVersions(right.version, left.version)
+      (providerId === "cursor"
+        ? cursorExecutablePreference(right.executable)
+          - cursorExecutablePreference(left.executable)
+        : 0)
+      || compareVersions(right.version, left.version)
       || nativeExecutablePreference(right.executable) - nativeExecutablePreference(left.executable));
   const selected = providerId === "codex"
     ? working.find(({ appServerReady }) => appServerReady) ?? working[0]
@@ -354,7 +385,19 @@ export async function detectProvider(
     };
   }
 
-  const authProbe = await runProbe(selected.executable, providerAuthStatusArgs(providerId), environment, cwd, timeoutMs);
+  const authArgs = providerId === "cursor"
+    ? cursorAgentCommandArgs(
+        selected.executable,
+        providerAuthStatusArgs(providerId),
+      )
+    : providerAuthStatusArgs(providerId);
+  const authProbe = await runProbe(
+    selected.executable,
+    authArgs,
+    environment,
+    cwd,
+    timeoutMs,
+  );
   const authState = authStateFromProbe(providerId, authProbe);
   const authenticated = authState === "authenticated" || authState === "configured";
   const appServerReady = selected.appServerReady;

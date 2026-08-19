@@ -93,10 +93,30 @@ export function subagentRouteLabel(
   return `${subagentProviderLabel(trace)} · ${subagentHarnessLabel(trace, turns)}`;
 }
 
+function humanizeSubagentIdentifier(value: string): string {
+  const words = value.trim().replace(/[_\s-]+/gu, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function subagentTraceLabel(trace: SubagentTrace): string {
-  return trace.providerName
-    ?? trace.providerRole
-    ?? `${subagentProviderLabel(trace)} delegated task`;
+  const name = trace.providerName ?? trace.providerRole;
+  if (name) return humanizeSubagentIdentifier(name);
+  return `${subagentProviderLabel(trace)} delegated task`;
+}
+
+export function subagentRoleLabel(trace: SubagentTrace): string | null {
+  const role = trace.providerRole;
+  return role && role !== trace.providerName
+    ? humanizeSubagentIdentifier(role)
+    : null;
+}
+
+export function subagentMissionSummary(trace: SubagentTrace): string | null {
+  const mission = trace.description?.trim();
+  if (!mission) return null;
+  return mission.length <= MAX_SUBAGENT_SUMMARY_CHARS
+    ? mission
+    : `${mission.slice(0, MAX_SUBAGENT_SUMMARY_CHARS - 1).trimEnd()}…`;
 }
 
 const EQUIVALENT_PROVIDER_STATUSES: Readonly<

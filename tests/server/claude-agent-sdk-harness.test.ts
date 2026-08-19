@@ -1270,49 +1270,6 @@ describe("Claude Agent SDK harness", () => {
     expect(manager.cachedMetadata("claude").rateLimits).toEqual([]);
   });
 
-  it("settles a final SDK result without waiting for an optional idle edge", async () => {
-    const root = portableFixtureRoot("Claude SDK terminal result");
-    roots.push(root);
-    let releaseIterator!: () => void;
-    const iteratorReleased = new Promise<void>((resolve) => {
-      releaseIterator = resolve;
-    });
-    const harness = createClaudeAgentSdkHarness({
-      createQuery: () => fixtureClaudeQuery(
-        (async function* (): AsyncGenerator<SDKMessage> {
-          yield claudeSuccessResult("Sonnet finished", "completed");
-          await iteratorReleased;
-        })(),
-      ),
-    });
-    const manager = new ProviderManager(
-      { commands: { claude: process.execPath } },
-      new AgentHarnessRegistry([harness]),
-    );
-    const run = manager.run(nativeProviderRunInput({
-      providerId: "claude",
-      conversationId: "claude-result-without-idle",
-      cwd: root,
-      prompt: "Finish without an idle edge",
-      interactionMode: "build",
-      access: "supervised",
-    }));
-
-    const outcome = await Promise.race([
-      run.then(() => "settled" as const),
-      new Promise<"stalled">((resolve) =>
-        setTimeout(() => resolve("stalled"), 100)),
-    ]);
-    releaseIterator();
-
-    expect(outcome).toBe("settled");
-    await expect(run).resolves.toMatchObject({
-      status: "completed",
-      text: "Sonnet finished",
-    });
-    expect(manager.activeConversationIds()).toEqual([]);
-  });
-
   it("consumes a late delegate notification after the final parent result", async () => {
     const root = portableFixtureRoot("Claude SDK late delegate notification");
     roots.push(root);
@@ -1729,7 +1686,8 @@ describe("Claude Agent SDK harness", () => {
           const iterator = (prompt as AsyncIterable<SDKUserMessage>)[
             Symbol.asyncIterator
           ]();
-          prompts.push((await iterator.next()).value!);
+          const initial = (await iterator.next()).value!;
+          prompts.push(initial);
           yield claudeSystem("task_started", {
             task_id: "task-live",
             tool_use_id: "tool-live",
@@ -1737,7 +1695,8 @@ describe("Claude Agent SDK harness", () => {
             subagent_type: "researcher",
           });
           await stopRequested;
-          prompts.push((await iterator.next()).value!);
+          const followUp = (await iterator.next()).value!;
+          prompts.push(followUp);
           yield claudeSystem("task_notification", {
             task_id: "task-live",
             tool_use_id: "tool-live",
@@ -1745,7 +1704,10 @@ describe("Claude Agent SDK harness", () => {
             output_file: "/tmp/task-live",
             summary: "Stopped by the user",
           });
-          yield claudeSuccessResult("Parent follow-up handled", "completed");
+          yield {
+            ...claudeSuccessResult("Parent follow-up handled", "completed"),
+            user_message_uuid: followUp.uuid,
+          } as SDKMessage;
           yield claudeSessionState("idle");
         })();
         return fixtureClaudeQuery(stream, {

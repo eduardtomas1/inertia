@@ -31,7 +31,6 @@ import type {
   AgentApprovalDecision,
   AgentPlanStep,
 } from "./interactions";
-import { providerActivityDetailSections } from "./activity-detail";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import {
@@ -45,20 +44,32 @@ import {
   openCodeQuestions,
 } from "./opencode-boundary";
 import {
+  openCodeCleanupFailureMessage,
   OpenCodeServerCleanupUnconfirmedError,
   startOwnedOpenCodeServer,
   waitForOpenCodeHealth,
   withOpenCodeRequestDeadline,
 } from "./opencode-owned-server";
+import {
+  createOpenCodeEventState,
+  emitOpenCodeNextActivity,
+  emitOpenCodeUsage,
+  emitOpenCodeUsageSnapshot,
+  handleOpenCodeNextTextEvent,
+  handleOpenCodePart,
+  handleOpenCodePartDelta,
+  rememberOpenCodeMessageRole,
+  removeOpenCodeMessage,
+  removeOpenCodePart,
+  replayOpenCodeParts,
+  type OpenCodeEventState,
+  type OpenCodeUsageState,
+} from "./opencode-event-projection";
 const MAX_EVENT_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
-const MAX_TRACKED_MESSAGES = 2_048;
-const MAX_TRACKED_PARTS = 4_096;
 const MAX_PENDING_INTERACTIONS = 64;
-const MAX_PART_CHARS = 256 * 1024;
-const MAX_RETAINED_PART_CHARS = 8 * 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_SERVER_OUTPUT_CHARS = 32 * 1024;
 const START_TIMEOUT_MS = 10_000;
@@ -88,25 +99,10 @@ export const OPENCODE_SDK_CAPABILITIES = {
 
 interface PendingApproval { nativeId: string; settled: boolean }
 interface PendingInput { nativeId: string; questions: QuestionInfo[]; settled: boolean }
-interface OpenCodeMessageUsage {
-  total: number | null;
-  input: number | null;
-  cachedRead: number | null;
-  cacheWrite: number | null;
-  output: number | null;
-  reasoning: number | null;
-}
-interface OpenCodeUsageState {
-  maxTokens: number | null;
-  currentContextTokens: number | null;
-  messages: Map<string, OpenCodeMessageUsage>;
-  totalProcessedTokens: number;
-  unknownTotalMessages: number;
-  last: OpenCodeMessageUsage | null;
-  compactsAutomatically: true | null;
-}
-interface OpenCodeEventState {
-  retainedPartChars: number;
+interface OpenCodePromptLifecycle {
+  messageId: string;
+  observed: boolean;
+  activityObserved: boolean;
 }
 interface OpenCodeManualCompactionProof {
   initiatedAt: number | null;
@@ -262,7 +258,6 @@ function startOpenCodeRun(
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
   const eventAbort = new AbortController();
-  const assistantMessages = new Set<string>();
   const emittedParts = new Map<string, string>();
   const usageState: OpenCodeUsageState = {
     maxTokens: null,
@@ -273,7 +268,12 @@ function startOpenCodeRun(
     last: null,
     compactsAutomatically: null,
   };
-  const eventState: OpenCodeEventState = { retainedPartChars: 0 };
+  const eventState = createOpenCodeEventState();
+  const promptLifecycle: OpenCodePromptLifecycle = {
+    messageId: `msg_${randomUUID().replaceAll("-", "")}`,
+    observed: false,
+    activityObserved: false,
+  };
   const pendingFollowUps = new Set<Promise<boolean>>();
   let sessionId = options.input.sessionId;
   let client: OpencodeClient | undefined;
@@ -506,10 +506,10 @@ function startOpenCodeRun(
           emitter,
           approvals,
           inputs,
-          assistantMessages,
           emittedParts,
           usageState,
           eventState,
+          promptLifecycle,
           failInteraction,
         ),
         isDone: async (event) => {
@@ -518,7 +518,8 @@ function startOpenCodeRun(
               || completesRequestedOpenCodeCompaction(event, manualCompaction);
           }
           if (event.type === "session.error") return true;
-          if (event.type !== "session.idle") return false;
+          if (!isOpenCodeIdleEvent(event)) return false;
+          if (!promptLifecycle.observed || !promptLifecycle.activityObserved) return false;
           sessionIdleObserved = true;
           acceptingFollowUps = false;
           const admissions = [...pendingFollowUps];
@@ -541,6 +542,7 @@ function startOpenCodeRun(
           })()
         : client.session.promptAsync({
             sessionID: sessionId,
+            messageID: promptLifecycle.messageId,
             directory: options.input.cwd,
             ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
             ...(agent ? { agent: agent.name } : {}),
@@ -549,7 +551,13 @@ function startOpenCodeRun(
               { type: "text", text: options.input.prompt },
               ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),
             ],
-          }, { throwOnError: true });
+          }, { throwOnError: true }).then((response) => {
+            // Older OpenCode servers do not emit prompt-admission events. The
+            // successful prompt receipt is the earliest safe compatibility
+            // boundary after which an idle event can belong to this run.
+            promptLifecycle.observed = true;
+            return response;
+          });
       const completion = Promise.all([providerOperation, pump]);
       await Promise.race([providerOperation, completion, runInterrupted]);
       if (!cancelRequested && !terminalError && !sessionIdleObserved) {
@@ -586,10 +594,7 @@ function startOpenCodeRun(
         cleanupConfirmed = false;
         outcome = {
           status: "failed",
-          error: safeError(
-            error,
-            "OpenCode server process tree could not be confirmed stopped.",
-          ),
+          error: openCodeCleanupFailureMessage(outcome.error, error),
         };
       }
     }
@@ -845,32 +850,61 @@ function handleOpenCodeEvent(
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
   approvals: Map<string, PendingApproval>,
   inputs: Map<string, PendingInput>,
-  assistantMessages: Set<string>,
   emittedParts: Map<string, string>,
   usageState: OpenCodeUsageState,
   eventState: OpenCodeEventState,
+  promptLifecycle: OpenCodePromptLifecycle,
   onFailure: (error: unknown) => void,
 ): void {
   const properties = event.properties as Record<string, unknown>;
+  if (
+    event.type === "session.next.prompt.admitted"
+    && stringValue(properties.messageID) === promptLifecycle.messageId
+  ) {
+    promptLifecycle.observed = true;
+  }
+  if (promptLifecycle.observed && isOpenCodeRunActivityEvent(event, properties)) {
+    promptLifecycle.activityObserved = true;
+  }
   if (event.type === "message.updated") {
     const info = objectValue(properties.info);
-    if (info?.role === "assistant" && typeof info.id === "string") {
+    const messageId = stringValue(info?.id);
+    if (messageId) {
+      rememberOpenCodeMessageRole(
+        messageId,
+        info?.role === "assistant" ? "assistant" : "other",
+        eventState,
+      );
+      if (messageId === promptLifecycle.messageId) promptLifecycle.observed = true;
       if (
-        !assistantMessages.has(info.id)
-        && assistantMessages.size >= MAX_TRACKED_MESSAGES
-      ) throw new Error("OpenCode exceeded the bounded message budget.");
-      assistantMessages.add(info.id);
+        info?.role === "assistant"
+        && stringValue(info.parentID) === promptLifecycle.messageId
+      ) {
+        promptLifecycle.observed = true;
+        promptLifecycle.activityObserved = true;
+      }
+    }
+    if (info?.role === "assistant" && messageId) {
       const tokens = objectValue(info.tokens);
-      if (tokens) emitOpenCodeUsage(info.id, tokens, usageState, emitter.rich);
+      if (tokens) emitOpenCodeUsage(messageId, tokens, usageState, emitter.rich);
       const error = objectValue(info.error);
       if (error) emitter.activity("system", "failed", bounded(errorMessage(error)));
+      replayOpenCodeParts(
+        messageId,
+        emittedParts,
+        resultText,
+        emitter,
+        eventState,
+      );
     }
+  } else if (event.type === "message.removed") {
+    const messageId = stringValue(properties.messageID);
+    if (messageId) removeOpenCodeMessage(messageId, emittedParts, eventState);
   } else if (event.type === "message.part.updated") {
     const part = objectValue(properties.part);
     if (part) {
       handleOpenCodePart(
         part,
-        assistantMessages,
         emittedParts,
         resultText,
         emitter,
@@ -878,17 +912,79 @@ function handleOpenCodeEvent(
         eventState,
       );
     }
+  } else if (event.type === "message.part.removed") {
+    const partId = stringValue(properties.partID);
+    if (partId) removeOpenCodePart(partId, emittedParts, eventState);
   } else if (event.type === "message.part.delta") {
     const partId = stringValue(properties.partID);
     const messageId = stringValue(properties.messageID);
     const delta = stringValue(properties.delta);
-    if (partId && messageId && delta && assistantMessages.has(messageId)) {
-      const previous = emittedParts.get(partId) ?? "";
-      const next = `${previous}${delta}`;
-      trackOpenCodePart(partId, previous, next, emittedParts, eventState);
-      emittedParts.set(partId, next);
-      emitOpenCodeText(delta, resultText, emitter.text);
-    }
+    if (partId && messageId && delta) handleOpenCodePartDelta(
+      partId,
+      messageId,
+      delta,
+      emittedParts,
+      resultText,
+      emitter,
+      eventState,
+    );
+  } else if (
+    event.type === "session.next.text.started"
+    || event.type === "session.next.text.delta"
+    || event.type === "session.next.text.ended"
+  ) {
+    handleOpenCodeNextTextEvent(
+      event.type,
+      properties,
+      "text",
+      emittedParts,
+      resultText,
+      emitter,
+      eventState,
+    );
+  } else if (
+    event.type === "session.next.reasoning.started"
+    || event.type === "session.next.reasoning.delta"
+    || event.type === "session.next.reasoning.ended"
+  ) {
+    handleOpenCodeNextTextEvent(
+      event.type,
+      properties,
+      "reasoning",
+      emittedParts,
+      resultText,
+      emitter,
+      eventState,
+    );
+  } else if (event.type === "session.next.step.ended") {
+    const messageId = stringValue(properties.assistantMessageID);
+    const tokens = objectValue(properties.tokens);
+    if (messageId && tokens) emitOpenCodeUsage(messageId, tokens, usageState, emitter.rich);
+  } else if (event.type === "session.next.step.failed") {
+    const error = objectValue(properties.error);
+    emitter.activity(
+      "system",
+      "failed",
+      bounded(error ? errorMessage(error) : "OpenCode step failed."),
+    );
+  } else if (event.type === "session.next.retried") {
+    const error = objectValue(properties.error);
+    const attempt = finite(properties.attempt);
+    emitter.activity(
+      "system",
+      "info",
+      bounded(`OpenCode retried the model${attempt === null ? "" : ` (attempt ${attempt})`}`),
+      error ? { detail: bounded(errorMessage(error)) } : {},
+    );
+  } else if (
+    event.type === "session.next.shell.started"
+    || event.type === "session.next.shell.ended"
+    || event.type === "session.next.tool.called"
+    || event.type === "session.next.tool.progress"
+    || event.type === "session.next.tool.success"
+    || event.type === "session.next.tool.failed"
+  ) {
+    emitOpenCodeNextActivity(event.type, properties, emitter);
   } else if (event.type === "todo.updated") {
     const todos = Array.isArray(properties.todos) ? properties.todos : [];
     emitter.rich({ type: "plan", explanation: null, steps: todos.flatMap(todoStep) });
@@ -925,6 +1021,9 @@ function handleOpenCodeEvent(
         availableDecisions: ["approve", "deny", "cancel"],
       },
     });
+  } else if (event.type === "permission.replied" || event.type === "permission.v2.replied") {
+    const nativeId = stringValue(properties.requestID);
+    if (nativeId) resolveOpenCodeApproval(nativeId, properties.reply, approvals, emitter);
   } else if (event.type === "question.asked" || event.type === "question.v2.asked") {
     const nativeId = openCodeInteractionId(properties.id, "question");
     const questions = openCodeQuestionPayload(properties.questions);
@@ -934,6 +1033,25 @@ function handleOpenCodeEvent(
     }
     inputs.set(requestId, { nativeId, questions, settled: false });
     emitter.rich({ type: "input", request: openCodeQuestions(requestId, questions) });
+  } else if (
+    event.type === "question.replied"
+    || event.type === "question.v2.replied"
+    || event.type === "question.rejected"
+    || event.type === "question.v2.rejected"
+  ) {
+    const nativeId = stringValue(properties.requestID);
+    if (nativeId) resolveOpenCodeInput(nativeId, inputs, emitter);
+  } else if (event.type === "session.deleted") {
+    throw new Error("OpenCode deleted the active session before the run completed.");
+  } else if (event.type === "session.status") {
+    const status = objectValue(properties.status);
+    if (status?.type === "retry") {
+      emitter.activity(
+        "system",
+        "info",
+        bounded(stringValue(status.message) ?? "OpenCode is retrying the model"),
+      );
+    }
   } else if (event.type === "session.error") {
     const error = objectValue(properties.error);
     const message = error ? errorMessage(error) : "OpenCode reported a session error.";
@@ -946,6 +1064,39 @@ function handleOpenCodeEvent(
     usageState.currentContextTokens = null;
     emitOpenCodeUsageSnapshot(usageState, emitter.rich);
     emitter.activity("system", "info", "OpenCode compacted the session context");
+  }
+}
+
+function resolveOpenCodeApproval(
+  nativeId: string,
+  reply: unknown,
+  approvals: Map<string, PendingApproval>,
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
+): void {
+  for (const [requestId, pending] of approvals) {
+    if (pending.nativeId !== nativeId) continue;
+    pending.settled = true;
+    approvals.delete(requestId);
+    emitter.rich({
+      type: "approval-resolved",
+      requestId,
+      decision: reply === "reject" ? "deny" : "approve",
+    });
+    return;
+  }
+}
+
+function resolveOpenCodeInput(
+  nativeId: string,
+  inputs: Map<string, PendingInput>,
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
+): void {
+  for (const [requestId, pending] of inputs) {
+    if (pending.nativeId !== nativeId) continue;
+    pending.settled = true;
+    inputs.delete(requestId);
+    emitter.rich({ type: "input-resolved", requestId });
+    return;
   }
 }
 
@@ -971,79 +1122,6 @@ export function openCodeApprovalDisplay(
       && resources.every((path) => isSafeApprovalDisplayText(path))
     ? { detail, resources, title }
     : null;
-}
-
-function handleOpenCodePart(
-  part: Record<string, unknown>,
-  assistantMessages: Set<string>,
-  emittedParts: Map<string, string>,
-  resultText: CappedProviderBuffer,
-  emitter: ReturnType<typeof createAgentHarnessEmitter>,
-  usageState: OpenCodeUsageState,
-  eventState: OpenCodeEventState,
-): void {
-  if (part.type === "compaction") {
-    usageState.currentContextTokens = null;
-    if (part.auto === true) usageState.compactsAutomatically = true;
-    emitOpenCodeUsageSnapshot(usageState, emitter.rich);
-  }
-  const id = stringValue(part.id);
-  const messageId = stringValue(part.messageID);
-  if (!id || !messageId || !assistantMessages.has(messageId)) return;
-  if ((part.type === "text" || part.type === "reasoning") && typeof part.text === "string") {
-    const previous = emittedParts.get(id) ?? "";
-    const next = bounded(part.text);
-    const delta = next.slice(commonPrefixLength(previous, next));
-    trackOpenCodePart(id, previous, next, emittedParts, eventState);
-    emittedParts.set(id, next);
-    if (!delta) return;
-    if (part.type === "reasoning") emitter.rich({ type: "reasoning-summary", text: delta });
-    else emitOpenCodeText(delta, resultText, emitter.text);
-  } else if (part.type === "tool") {
-    const state = objectValue(part.state);
-    const status = stringValue(state?.status) ?? "pending";
-    const phase = status === "completed" ? "completed" : status === "error" ? "failed" : "started";
-    const tool = stringValue(part.tool) ?? "OpenCode tool";
-    const input = objectValue(state?.input);
-    const error = objectValue(state?.error);
-    const detail = providerActivityDetailSections({
-      command: input?.command,
-      ...(phase === "failed"
-        ? { error: stringValue(error?.message) ?? state?.error }
-        : { output: state?.output }),
-    });
-    emitter.activity(
-      tool === "bash" ? "command" : "tool",
-      phase,
-      bounded(stringValue(state?.title) ?? tool),
-      {
-        ...(stringValue(part.callID) ?? stringValue(part.id)
-          ? { activityId: (stringValue(part.callID) ?? stringValue(part.id))! }
-          : {}),
-        ...(detail ? { detail } : {}),
-      },
-    );
-  }
-}
-
-function trackOpenCodePart(
-  id: string,
-  previous: string,
-  next: string,
-  parts: Map<string, string>,
-  state: OpenCodeEventState,
-): void {
-  if (!parts.has(id) && parts.size >= MAX_TRACKED_PARTS) {
-    throw new Error("OpenCode exceeded the bounded part budget.");
-  }
-  if (next.length > MAX_PART_CHARS) {
-    throw new Error("OpenCode sent an oversized retained message part.");
-  }
-  const retainedPartChars = state.retainedPartChars - previous.length + next.length;
-  if (retainedPartChars > MAX_RETAINED_PART_CHARS) {
-    throw new Error("OpenCode exceeded the bounded retained-text budget.");
-  }
-  state.retainedPartChars = retainedPartChars;
 }
 
 export function resolveOpenCodeModel(
@@ -1086,66 +1164,6 @@ function openCodePermissions(access: "full" | "supervised" | "auto-edit"): Permi
   ];
 }
 
-function emitOpenCodeUsage(
-  messageId: string,
-  tokens: Record<string, unknown>,
-  state: OpenCodeUsageState,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
-): void {
-  const input = finite(tokens.input);
-  const output = finite(tokens.output);
-  const reasoning = finite(tokens.reasoning);
-  const cache = objectValue(tokens.cache);
-  const cachedRead = finite(cache?.read);
-  const cacheWrite = finite(cache?.write);
-  const messageUsage: OpenCodeMessageUsage = {
-    total: finite(tokens.total) ?? sumTokenParts([input, output, reasoning, cachedRead, cacheWrite]),
-    input,
-    cachedRead,
-    cacheWrite,
-    output,
-    reasoning,
-  };
-  const previous = state.messages.get(messageId);
-  if (!previous && state.messages.size >= MAX_TRACKED_MESSAGES) {
-    throw new Error("OpenCode exceeded the bounded usage-message budget.");
-  }
-  if (previous?.total === null) state.unknownTotalMessages -= 1;
-  else if (previous) state.totalProcessedTokens -= previous.total;
-  if (messageUsage.total === null) state.unknownTotalMessages += 1;
-  else state.totalProcessedTokens += messageUsage.total;
-  state.messages.set(messageId, messageUsage);
-  state.last = messageUsage;
-  state.currentContextTokens = sumTokenParts([input, cachedRead, cacheWrite]);
-  emitOpenCodeUsageSnapshot(state, emit);
-}
-
-function sumTokenParts(values: Array<number | null>): number | null {
-  return values.every((value): value is number => value !== null) ? values.reduce((sum, value) => sum + value, 0) : null;
-}
-
-function emitOpenCodeUsageSnapshot(state: OpenCodeUsageState, emit: ReturnType<typeof createAgentHarnessEmitter>["rich"]): void {
-  const last = state.last;
-  emit({
-    type: "usage",
-    usage: {
-      usedTokens: state.currentContextTokens,
-      totalProcessedTokens: state.messages.size > 0
-        && state.unknownTotalMessages === 0
-        ? state.totalProcessedTokens
-        : null,
-      totalProcessedScope: "run",
-      maxTokens: state.maxTokens,
-      inputTokens: last?.input ?? null,
-      cachedInputTokens: last?.cachedRead ?? null,
-      cacheWriteInputTokens: last?.cacheWrite ?? null,
-      outputTokens: last?.output ?? null,
-      reasoningOutputTokens: last?.reasoning ?? null,
-      compactsAutomatically: state.compactsAutomatically,
-    },
-  });
-}
-
 function todoStep(value: unknown): AgentPlanStep[] {
   const todo = objectValue(value);
   const content = stringValue(todo?.content);
@@ -1156,13 +1174,51 @@ function todoStep(value: unknown): AgentPlanStep[] {
 
 function openCodeEventSessionId(event: Event): string | undefined {
   const properties = event.properties as Record<string, unknown>;
-  return stringValue(properties.sessionID) ?? stringValue(objectValue(properties.info)?.sessionID);
+  const info = objectValue(properties.info);
+  return stringValue(properties.sessionID)
+    ?? stringValue(info?.sessionID)
+    ?? (event.type === "session.created"
+      || event.type === "session.updated"
+      || event.type === "session.deleted"
+      ? stringValue(info?.id)
+      : undefined);
 }
 
-function emitOpenCodeText(value: string, buffer: CappedProviderBuffer, emit: (value: string) => void): void {
-  const safe = bounded(value);
-  buffer.append(safe);
-  emit(safe);
+function isOpenCodeIdleEvent(event: Event): boolean {
+  if (event.type === "session.idle") return true;
+  if (event.type !== "session.status") return false;
+  return objectValue((event.properties as Record<string, unknown>).status)?.type === "idle";
+}
+
+function isOpenCodeRunActivityEvent(
+  event: Event,
+  properties: Record<string, unknown>,
+): boolean {
+  if (event.type === "message.updated") {
+    return objectValue(properties.info)?.role === "assistant";
+  }
+  return event.type === "message.part.updated"
+    || event.type === "message.part.delta"
+    || event.type === "permission.asked"
+    || event.type === "permission.v2.asked"
+    || event.type === "question.asked"
+    || event.type === "question.v2.asked"
+    || event.type === "todo.updated"
+    || event.type === "session.next.text.started"
+    || event.type === "session.next.text.delta"
+    || event.type === "session.next.text.ended"
+    || event.type === "session.next.reasoning.started"
+    || event.type === "session.next.reasoning.delta"
+    || event.type === "session.next.reasoning.ended"
+    || event.type === "session.next.shell.started"
+    || event.type === "session.next.shell.ended"
+    || event.type === "session.next.step.started"
+    || event.type === "session.next.step.ended"
+    || event.type === "session.next.step.failed"
+    || event.type === "session.next.tool.called"
+    || event.type === "session.next.tool.progress"
+    || event.type === "session.next.tool.success"
+    || event.type === "session.next.tool.failed";
 }
 
 function imageMime(path: string): string {
@@ -1175,7 +1231,6 @@ function imageMime(path: string): string {
   }
 }
 function bounded(value: string): string { return value.slice(0, MAX_EVENT_TEXT_CHARS); }
-function commonPrefixLength(left: string, right: string): number { let index = 0; while (index < left.length && index < right.length && left[index] === right[index]) index += 1; return index; }
 function objectValue(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function stringValue(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 ? value : undefined; }
 function finite(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null; }

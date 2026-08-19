@@ -3,10 +3,11 @@ import { StringDecoder } from "node:string_decoder";
 export class ProviderNdjsonDecoder {
   private readonly decoder = new StringDecoder("utf8");
   private buffer = "";
+  private bufferBytes = 0;
   private discardingLine = false;
 
   constructor(
-    private readonly maxLineChars: number,
+    private readonly maxLineBytes: number,
     private readonly onLine: (line: string) => void,
     private readonly onOverflow: () => void,
   ) {}
@@ -19,6 +20,7 @@ export class ProviderNdjsonDecoder {
     this.consume(this.decoder.end());
     if (!this.discardingLine && this.buffer.trim()) this.onLine(this.buffer.trimEnd());
     this.buffer = "";
+    this.bufferBytes = 0;
   }
 
   private consume(text: string): void {
@@ -28,12 +30,15 @@ export class ProviderNdjsonDecoder {
       if (newline === -1) {
         const remainder = text.slice(offset);
         if (this.discardingLine) return;
-        if (this.buffer.length + remainder.length > this.maxLineChars) {
+        const remainderBytes = Buffer.byteLength(remainder, "utf8");
+        if (this.bufferBytes + remainderBytes > this.maxLineBytes) {
           this.buffer = "";
+          this.bufferBytes = 0;
           this.discardingLine = true;
           this.onOverflow();
         } else {
           this.buffer += remainder;
+          this.bufferBytes += remainderBytes;
         }
         return;
       }
@@ -42,15 +47,19 @@ export class ProviderNdjsonDecoder {
       offset = newline + 1;
       if (this.discardingLine) {
         this.discardingLine = false;
+        this.bufferBytes = 0;
         continue;
       }
-      if (this.buffer.length + segment.length > this.maxLineChars) {
+      const segmentBytes = Buffer.byteLength(segment, "utf8");
+      if (this.bufferBytes + segmentBytes > this.maxLineBytes) {
         this.buffer = "";
+        this.bufferBytes = 0;
         this.onOverflow();
         continue;
       }
       const line = `${this.buffer}${segment}`.trimEnd();
       this.buffer = "";
+      this.bufferBytes = 0;
       if (line) this.onLine(line);
     }
   }

@@ -476,7 +476,7 @@ describe("provider process-tree termination", () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 
-  it("refuses to signal a POSIX PGID after the owned root and stdio fully closed", async () => {
+  it("only probes a POSIX PGID after the owned root and stdio fully closed", async () => {
     const child = fakeChild();
     child.exitCode = 0;
     child.stdio[1] = { closed: true };
@@ -494,8 +494,61 @@ describe("provider process-tree termination", () => {
       },
     )).resolves.toBe(false);
 
-    expect(killProcess).not.toHaveBeenCalled();
+    expect(killProcess).toHaveBeenCalledOnce();
+    expect(killProcess).toHaveBeenCalledWith(-4_242, 0);
     expect(spawnProcessSync).not.toHaveBeenCalled();
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("confirms a naturally exited POSIX process group is already gone", async () => {
+    const child = fakeChild();
+    child.exitCode = 0;
+    child.stdio[1] = { closed: true };
+    const killProcess = vi.fn(() => {
+      const error = new Error("group gone") as NodeJS.ErrnoException;
+      error.code = "ESRCH";
+      throw error;
+    });
+    const spawnProcessSync = vi.fn();
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "linux",
+        killProcess,
+        spawnProcessSync: spawnProcessSync as never,
+        waitMs: 25,
+      },
+    )).resolves.toBe(true);
+
+    expect(killProcess).toHaveBeenCalledWith(-4_242, 0);
+    expect(spawnProcessSync).not.toHaveBeenCalled();
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("does not mistake a denied POSIX process-group probe for an absent group", async () => {
+    const child = fakeChild();
+    child.exitCode = 0;
+    child.stdio[1] = { closed: true };
+    const killProcess = vi.fn(() => {
+      const error = new Error("operation not permitted") as NodeJS.ErrnoException;
+      error.code = "EPERM";
+      throw error;
+    });
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "linux",
+        killProcess,
+        spawnProcessSync: vi.fn() as never,
+        waitMs: 25,
+      },
+    )).resolves.toBe(false);
+
+    expect(killProcess).toHaveBeenCalledWith(-4_242, 0);
     expect(child.kill).not.toHaveBeenCalled();
   });
 

@@ -547,7 +547,20 @@ export async function terminateProcessTreeAndWait(
   // identify an unrelated recycled process group. Callers that must clean up
   // descendants therefore start their memoized owned termination before
   // closing/reaping the provider and await that original attempt afterward.
-  if (directChildResourcesAreClosed(child)) return false;
+  if (directChildResourcesAreClosed(child)) {
+    // A no-signal existence probe can still prove that the owned group is
+    // already gone. Never signal a group after this point: an extant numeric
+    // PGID may have been recycled and therefore remains unconfirmed.
+    try {
+      killProcess(-pid, 0);
+      return false;
+    } catch (error) {
+      // `ESRCH` is the only proof that the group no longer exists. `EPERM`
+      // still means an extant group, and unexpected probe failures must remain
+      // unconfirmed rather than releasing ownership unsafely.
+      return (error as NodeJS.ErrnoException).code === "ESRCH";
+    }
+  }
 
   if (force) {
     const descendants = forceKillPosixProcessTree(pid, {

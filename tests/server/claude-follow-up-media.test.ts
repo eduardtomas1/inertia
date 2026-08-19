@@ -41,6 +41,7 @@ describe("Claude media follow-up queue", () => {
     const initialPromptRead = new Promise<void>((resolve) => {
       markInitialPromptRead = resolve;
     });
+    const consumedFollowUps: SDKUserMessage[] = [];
     let releaseStream!: () => void;
     const streamReleased = new Promise<void>((resolve) => {
       releaseStream = resolve;
@@ -56,7 +57,14 @@ describe("Claude media follow-up queue", () => {
             markInitialPromptRead();
             yield claudeSessionState("running");
             await streamReleased;
-            yield claudeSuccessResult("Queued media handled", "completed");
+            yield {
+              ...claudeSuccessResult("First queued media handled", "completed"),
+              user_message_uuid: consumedFollowUps[0]?.uuid,
+            } as SDKMessage;
+            yield {
+              ...claudeSuccessResult("Queued media handled", "completed"),
+              user_message_uuid: consumedFollowUps[1]?.uuid,
+            } as SDKMessage;
             yield claudeSessionState("idle");
           })(),
         );
@@ -89,16 +97,20 @@ describe("Claude media follow-up queue", () => {
     await expect(steerMedia("First queued image")).resolves.toBe(true);
     await expect(steerMedia("Rejected while the image budget is held"))
       .resolves.toBe(false);
-    await expect(promptIterator!.next()).resolves.toMatchObject({
+    const firstConsumed = await promptIterator!.next();
+    expect(firstConsumed).toMatchObject({
       done: false,
       value: { type: "user" },
     });
+    consumedFollowUps.push(firstConsumed.value!);
     await expect(steerMedia("Accepted after SDK consumption"))
       .resolves.toBe(true);
-    await expect(promptIterator!.next()).resolves.toMatchObject({
+    const secondConsumed = await promptIterator!.next();
+    expect(secondConsumed).toMatchObject({
       done: false,
       value: { type: "user" },
     });
+    consumedFollowUps.push(secondConsumed.value!);
     releaseStream();
 
     await expect(result).resolves.toMatchObject({

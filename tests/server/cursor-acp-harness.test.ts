@@ -6,6 +6,7 @@ import type { PermissionOption, ToolKind } from "@agentclientprotocol/sdk";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
   createCursorAcpHarness,
+  cursorAcpProcessInvocation,
   cursorOneShotPermissionOption,
   cursorPermissionDisplayIsSafe,
   isCursorFileMutationKind,
@@ -136,6 +137,25 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 describe.sequential("Cursor ACP harness", () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
+
+  it("routes a configured Cursor editor launcher through its agent subcommand", () => {
+    expect(cursorAcpProcessInvocation(
+      "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+      {},
+      "darwin",
+    )).toMatchObject({
+      command: "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+      args: ["agent", "acp"],
+    });
+    expect(cursorAcpProcessInvocation(
+      "/usr/local/bin/cursor-agent",
+      {},
+      "linux",
+    )).toMatchObject({
+      command: "/usr/local/bin/cursor-agent",
+      args: ["acp"],
+    });
+  });
 
   it("rejects question payloads the interaction surface cannot represent", () => {
     const question = (index: number, optionCount = 1) => ({
@@ -532,8 +552,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "stale-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "stale" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Checking" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan", entries: [{ content: "Implement", priority: "high", status: "pending" }] } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan_update", plan: { type: "items", planId: "plan-1", entries: [{ content: "Verify", priority: "high", status: "completed" }] } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan_update", plan: { type: "markdown", planId: "plan-1", content: "Review the final diff." } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan_removed", planId: "plan-1" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: "plan" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "session_info_update", title: "Provider audit" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-4", title: "Run command", kind: "execute", status: "in_progress", rawInput: { command: "npm test" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-4", title: "Run command", kind: "execute", status: "completed", rawOutput: "passed" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-5", title: "Already complete", kind: "execute", status: "completed", rawInput: { command: "npm run check" }, rawOutput: "green" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-6", title: "Retained input", kind: "execute", status: "pending", rawInput: { command: "npm run lint" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-6", status: "completed", rawOutput: "clean" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: 321, size: 200000 } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Cursor response" } } } });
     return send({ jsonrpc: "2.0", id: promptRequestId, result: { stopReason: "end_turn", usage: { totalTokens: 350, inputTokens: 320, outputTokens: 30, thoughtTokens: 5, cachedReadTokens: 20 } } });
@@ -547,6 +575,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const approvals: string[] = [];
     const questions: string[] = [];
     const plans: string[] = [];
+    const planExplanations: Array<string | null> = [];
     const reasoning: string[] = [];
     const usage: Array<number | null> = [];
     const usageDetails: Array<Record<string, unknown>> = [];
@@ -579,7 +608,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           notes: ["Use the exact free-text answer"],
         })).toBe(true);
       },
-      onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
+      onPlan: (event) => {
+        planExplanations.push(event.explanation);
+        plans.push(...event.steps.map((step) => step.step));
+      },
       onReasoning: (event) => reasoning.push(event.text),
       onActivity: (event) => activities.push(event),
       onUsage: (event) => {
@@ -592,18 +624,39 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(result).toMatchObject({ status: "completed", text: "Cursor response", sessionId: "44444444-4444-4444-8444-444444444444" });
     expect(approvals).toEqual(["Run tests"]);
     expect(questions).toEqual(["Which scopes?"]);
-    expect(plans).toEqual(expect.arrayContaining(["Inspect", "Implement"]));
+    expect(plans).toEqual(expect.arrayContaining(["Inspect", "Implement", "Verify"]));
+    expect(planExplanations).toContain("Review the final diff.");
     expect(reasoning).toEqual(["Checking"]);
     expect(activities).toContainEqual(expect.objectContaining({
       activityId: "tool-4",
       phase: "completed",
-      detail: "Output:\npassed",
+      detail: "Command:\nnpm test\n\nOutput:\npassed",
     }));
     expect(activities).toContainEqual(expect.objectContaining({
       activityId: "tool-4",
       phase: "started",
       detail: "Command:\nnpm test",
     }));
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "tool-5",
+      phase: "completed",
+      detail: "Command:\nnpm run check\n\nOutput:\ngreen",
+    }));
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "tool-6",
+      phase: "completed",
+      detail: "Command:\nnpm run lint\n\nOutput:\nclean",
+    }));
+    expect(activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        phase: "info",
+        label: "Cursor switched to plan mode",
+      }),
+      expect.objectContaining({
+        phase: "info",
+        label: "Cursor session: Provider audit",
+      }),
+    ]));
     expect(usage).toEqual([321, 321]);
     expect(usageDetails.at(-1)).toMatchObject({
       usedTokens: 321,

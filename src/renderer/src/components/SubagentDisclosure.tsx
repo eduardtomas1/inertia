@@ -11,8 +11,10 @@ import {
   subagentDisclosureRows,
   subagentDisclosureSummary,
   subagentHasNestedParent,
+  subagentMissionSummary,
   subagentNeedsReview,
   subagentRelationshipLabel,
+  subagentRoleLabel,
   subagentRouteLabel,
   subagentStatusLabel,
   subagentTraceLabel,
@@ -197,6 +199,8 @@ export function SubagentDisclosure({
         {visibleRows.map(({ trace, depth, canStop, omittedAncestors }, index) => {
           const detail = subagentTraceSummary(trace);
           const label = subagentTraceLabel(trace);
+          const mission = subagentMissionSummary(trace);
+          const role = subagentRoleLabel(trace);
           const route = subagentRouteLabel(trace, turns);
           const state = subagentStatusLabel(trace);
           const relationship = subagentRelationshipLabel(trace, subagents);
@@ -213,7 +217,7 @@ export function SubagentDisclosure({
               data-status={trace.status}
               data-depth={depth}
               data-expanded={expanded ? "true" : "false"}
-              aria-label={`${label}, ${route}, ${state}`}
+              aria-label={`${label}, ${mission ? `${mission}, ` : ""}${route}, ${state}`}
               style={{
                 "--subagent-depth": depth,
                 "--motion-index": Math.min(index, 6),
@@ -223,10 +227,18 @@ export function SubagentDisclosure({
               <span className="subagent-copy">
                 <span className="subagent-copy-heading">
                   <strong>{label}</strong>
+                  {role && (
+                    <span className="subagent-role-pill">{role}</span>
+                  )}
                   <span className="subagent-state-pill" key={trace.status}>
                     {state}
                   </span>
                 </span>
+                {mission && (
+                  <small className="subagent-mission" title={mission}>
+                    {mission}
+                  </small>
+                )}
                 <small
                   className="subagent-route"
                   title={trace.providerStatus
@@ -247,7 +259,7 @@ export function SubagentDisclosure({
                       : "ancestors"} compacted
                   </small>
                 )}
-                {detail && (
+                {detail && detail !== mission && (
                   <small className="subagent-detail" title={detail}>
                     {detail}
                   </small>

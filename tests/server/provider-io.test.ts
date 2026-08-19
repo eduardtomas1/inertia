@@ -1,8 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import { ProviderRunEventBudget } from "../../src/server/provider/io";
+import {
+  ProviderNdjsonDecoder,
+  ProviderRunEventBudget,
+} from "../../src/server/provider/io";
 
 describe("provider run event budget", () => {
+  it("bounds NDJSON lines by UTF-8 bytes and recovers at the next line", () => {
+    const lines: string[] = [];
+    let overflows = 0;
+    const decoder = new ProviderNdjsonDecoder(
+      4,
+      (line) => lines.push(line),
+      () => { overflows += 1; },
+    );
+    const split = Buffer.from("é\n", "utf8");
+
+    decoder.push(split.subarray(0, 1));
+    decoder.push(split.subarray(1));
+    decoder.push(Buffer.from("ééé\nok\n", "utf8"));
+    decoder.end();
+
+    expect(lines).toEqual(["é", "ok"]);
+    expect(overflows).toBe(1);
+  });
+
   it("bounds both event cardinality and aggregate UTF-8 bytes", () => {
     const countBudget = new ProviderRunEventBudget("Provider", 16, 2, 32);
     countBudget.observe("a");

@@ -6,6 +6,10 @@ import { boundedSubagentText } from "./subagent-trace";
 export const MAX_PROVIDER_ACTIVITY_DETAIL_CHARS = 32 * 1024;
 /** Maximum persisted technical detail across one authoritative turn. */
 export const MAX_PROVIDER_ACTIVITY_DETAIL_PER_TURN_CHARS = 256 * 1024;
+/** Smaller envelope reserved for one terminal failure dossier. */
+export const MAX_PROVIDER_FAILURE_DETAIL_CHARS = 16 * 1024;
+/** Failure summaries stay useful in the transcript without becoming logs. */
+export const MAX_PROVIDER_FAILURE_SUMMARY_CHARS = 480;
 
 type JsonObject = Record<string, unknown>;
 
@@ -88,6 +92,91 @@ export function sanitizeProviderActivityDetail(
     text,
     options.maxChars ?? MAX_PROVIDER_ACTIVITY_DETAIL_CHARS,
   );
+}
+
+/**
+ * Produces the one-line, renderer-safe failure summary used by the terminal
+ * event and persisted error activity. Provider output belongs in the bounded
+ * technical detail, never in this always-visible field.
+ */
+export function sanitizeProviderFailureSummary(
+  value: unknown,
+  fallback: string,
+  options: {
+    workspaceRoot?: string;
+    homeDirectory?: string;
+  } = {},
+): string {
+  const sanitized = sanitizeProviderActivityDetail(value, {
+    ...options,
+    maxChars: MAX_PROVIDER_FAILURE_SUMMARY_CHARS * 2,
+  });
+  const summary = sanitized
+    ?.split("\n")
+    .map((line) => line.replace(/\s+/gu, " ").trim())
+    .find(Boolean)
+    ?.slice(0, MAX_PROVIDER_FAILURE_SUMMARY_CHARS);
+  return summary || fallback;
+}
+
+const FAILURE_METADATA_LINE = /^(?:Reason|Phase|Exit code|Signal|Terminal event|Turn|Activity|Cleanup):/iu;
+
+function failureMetadataValue(value: unknown): string {
+  const sanitized = sanitizeProviderActivityDetail(value, { maxChars: 512 });
+  return sanitized?.replace(/\s+/gu, " ").trim() || "not reported";
+}
+
+/**
+ * Canonical persisted envelope for a failed provider run. Its header contains
+ * only allowlisted lifecycle/process facts. Optional provider context has
+ * already crossed the scrubber once, is scrubbed again here, and is mounted by
+ * the renderer only after an explicit disclosure.
+ */
+export function providerFailureActivityDetail(input: {
+  reason: string;
+  phase?: string;
+  exitCode: number | null;
+  signal: string | null;
+  terminalEvent?: string;
+  activityId?: string;
+  cleanupConfirmed: boolean;
+  cause?: string;
+  stack?: string;
+  technicalDetail?: string;
+  workspaceRoot?: string;
+}): string {
+  const cause = sanitizeProviderActivityDetail(input.cause, {
+    workspaceRoot: input.workspaceRoot,
+    maxChars: 2 * 1024,
+  });
+  const stack = sanitizeProviderActivityDetail(input.stack, {
+    workspaceRoot: input.workspaceRoot,
+    maxChars: 8 * 1024,
+  });
+  const context = sanitizeProviderActivityDetail(input.technicalDetail, {
+    workspaceRoot: input.workspaceRoot,
+    maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+  })
+    ?.split("\n")
+    .filter((line) => !FAILURE_METADATA_LINE.test(line.trim()))
+    .join("\n")
+    .trim();
+  const detail = [
+    `Reason: ${failureMetadataValue(input.reason)}`,
+    `Phase: ${failureMetadataValue(input.phase)}`,
+    `Exit code: ${input.exitCode ?? "not reported"}`,
+    `Signal: ${failureMetadataValue(input.signal)}`,
+    `Terminal event: ${failureMetadataValue(input.terminalEvent)}`,
+    `Activity: ${failureMetadataValue(input.activityId)}`,
+    `Cleanup: ${input.cleanupConfirmed ? "confirmed" : "unconfirmed"}`,
+    ...(cause ? [`Cause: ${cause}`] : []),
+    ...(stack ? ["Stack:", stack] : []),
+    ...(context ? ["", "Recent provider context:", context] : []),
+  ].join("\n");
+  return sanitizeProviderActivityDetail(detail, {
+    workspaceRoot: input.workspaceRoot,
+    maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+  }) ?? "Reason: provider-error";
 }
 
 /**

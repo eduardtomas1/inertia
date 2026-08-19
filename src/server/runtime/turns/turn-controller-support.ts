@@ -5,8 +5,14 @@ import {
   type ProviderId,
   type ThreadUsageSnapshot,
 } from "../../../shared/contracts";
-import { sanitizeProviderActivityDetail } from "../../provider/activity-detail";
-import type { ProviderRunFailure } from "../../provider/contracts";
+import {
+  providerFailureActivityDetail,
+  sanitizeProviderFailureSummary,
+} from "../../provider/activity-detail";
+import type {
+  ProviderRunFailure,
+  ProviderRunResult,
+} from "../../provider/contracts";
 import type { ActiveTurn, TurnTimerScheduler } from "./turn-controller-types";
 
 export const MAX_ASSISTANT_TEXT = 4 * 1024 * 1024;
@@ -115,23 +121,68 @@ export function providerPromiseFailure(
   const message = isCodexAppServer
     ? "The Codex App Server connection closed before the turn completed."
     : "The provider connection closed before the turn completed.";
-  const technicalDetail = sanitizeProviderActivityDetail(
-    [
-      "Reason: transport-closed",
-      `Phase: ${active.turn.status}`,
-      "Exit code: unavailable",
-      "Signal: unavailable",
-      "Terminal event: not received",
-      `Activity: ${activityId ?? "not reported"}`,
-      `Cause: ${publicTurnError(error)}`,
-    ].join("\n"),
-    { workspaceRoot: active.providerInput.cwd },
-  );
+  const technicalDetail = providerFailureActivityDetail({
+    reason: "transport-closed",
+    phase: active.turn.status,
+    exitCode: null,
+    signal: null,
+    terminalEvent: "not received",
+    activityId,
+    cleanupConfirmed: false,
+    cause: publicTurnError(error),
+    stack: error instanceof Error ? error.stack : undefined,
+    workspaceRoot: active.providerInput.cwd,
+  });
   return {
     reason: "transport-closed",
     message,
     phase: active.turn.status,
     ...(activityId ? { activityId } : {}),
     ...(technicalDetail ? { technicalDetail } : {}),
+  };
+}
+
+/**
+ * Converts every failed harness result into the same safe, durable envelope.
+ * Existing harness errors keep their user-visible value only after the same
+ * path/credential/content-key scrubber used by persisted provider activity.
+ * Typed ProviderRunFailure context remains the richer diagnostic source.
+ */
+export function normalizedProviderRunFailure(
+  active: ActiveTurn,
+  result: ProviderRunResult,
+): ProviderRunFailure {
+  const reported = result.failure;
+  const reason = reported?.reason
+    ?? (result.signal !== null
+      ? "process-signal"
+      : result.exitCode !== null
+        ? "process-exit"
+        : "provider-error");
+  const fallback = `${providerLabel(result.providerId)} could not complete the request.`;
+  const message = sanitizeProviderFailureSummary(
+    result.error ?? reported?.message,
+    fallback,
+    { workspaceRoot: active.providerInput.cwd },
+  );
+  const technicalDetail = providerFailureActivityDetail({
+    reason,
+    phase: reported?.phase ?? active.turn.status,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    terminalEvent: reported?.terminalEvent,
+    activityId: reported?.activityId,
+    cleanupConfirmed: result.cleanupConfirmed,
+    cause: result.error,
+    technicalDetail: reported?.technicalDetail,
+    workspaceRoot: active.providerInput.cwd,
+  });
+  return {
+    reason,
+    message,
+    phase: reported?.phase ?? active.turn.status,
+    ...(reported?.terminalEvent ? { terminalEvent: reported.terminalEvent } : {}),
+    ...(reported?.activityId ? { activityId: reported.activityId } : {}),
+    technicalDetail,
   };
 }

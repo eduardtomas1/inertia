@@ -9,6 +9,7 @@ export function providerFailureCause(
   }
   const transportFailure = result.failure
     ? result.failure.reason !== "codex-error"
+      && result.failure.reason !== "provider-error"
     : result.exitCode !== null || result.signal !== null;
   return transportFailure ? "provider-process-exit" : "provider-error";
 }

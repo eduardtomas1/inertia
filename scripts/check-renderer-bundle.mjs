@@ -14,8 +14,9 @@ const budgets = {
   filesFirstLoadJavaScript: 115 * kibibyte,
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
-  // This is the shared core ceiling from the visual-polish work. Markdown is
-  // accounted for explicitly below rather than stacking another core increase.
+  deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
+  // The rare failure dossier has its own strict deferred ceiling below, while
+  // its conditional loader remains inside the existing shared core ceiling.
   coreJavaScript: 1_920 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
@@ -90,6 +91,9 @@ const deferredMarkdownJavaScript = assetNames.find(
 const deferredPdfJavaScript = assetNames.find(
   (name) => /^pdf-.*\.js$/u.test(name),
 );
+const deferredFailureDiagnosticsJavaScript = assetNames.find(
+  (name) => /^failurePanel-.*\.js$/u.test(name),
+);
 const deferredPdfWorker = assetNames.find(
   (name) => /^pdf\.worker\.min-.*\.mjs$/u.test(name),
 );
@@ -111,6 +115,11 @@ if (!filesJavaScript || !deferredMarkdownJavaScript) {
 if (!deferredPdfJavaScript || !deferredPdfWorker) {
   throw new Error(
     "Renderer bundle check could not find the deferred PDF engine.",
+  );
+}
+if (!deferredFailureDiagnosticsJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred failure diagnostics chunk.",
   );
 }
 
@@ -146,6 +155,9 @@ const deferredPdfJavaScriptBytes = await assetBytes(
 const deferredPdfWorkerBytes = await assetBytes(
   `assets/${deferredPdfWorker}`,
 );
+const deferredFailureDiagnosticsJavaScriptBytes = await assetBytes(
+  `assets/${deferredFailureDiagnosticsJavaScript}`,
+);
 const javaScriptSizes = await Promise.all(
   assetNames
     .filter((name) => name.endsWith(".js"))
@@ -156,7 +168,9 @@ const totalJavaScriptBytes = javaScriptSizes.reduce(
   0,
 );
 const coreJavaScriptBytes =
-  totalJavaScriptBytes - deferredPdfJavaScriptBytes;
+  totalJavaScriptBytes
+  - deferredPdfJavaScriptBytes
+  - deferredFailureDiagnosticsJavaScriptBytes;
 const measurements = {
   entryJavaScript: entryJavaScriptBytes,
   entryCss: entryCssBytes,
@@ -164,6 +178,8 @@ const measurements = {
   filesFirstLoadJavaScript: filesFirstLoadJavaScriptBytes,
   deferredMarkdownJavaScript: deferredMarkdownJavaScriptBytes,
   transcriptJavaScript: transcriptJavaScriptBytes,
+  deferredFailureDiagnosticsJavaScript:
+    deferredFailureDiagnosticsJavaScriptBytes,
   coreJavaScript: coreJavaScriptBytes,
   deferredPdfJavaScript: deferredPdfJavaScriptBytes,
   deferredPdfWorker: deferredPdfWorkerBytes,

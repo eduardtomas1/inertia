@@ -313,6 +313,30 @@ export const createQuietLedgerFixture = ({
     detail: "One actionable assertion needs attention.",
     status: "failed",
   });
+  store.addActivity({
+    conversationId: conversation.id,
+    runId: failed.turn.runId,
+    turnId: failed.turn.id,
+    kind: "error",
+    title: "The provider connection closed before verification completed.",
+    detail: [
+      "Reason: transport-closed",
+      "Phase: running",
+      "Exit code: 17",
+      "Signal: not reported",
+      "Terminal event: not received",
+      "Activity: renderer-verification",
+      "Cleanup: confirmed",
+      "Cause: RPC transport closed",
+      "Stack:",
+      "    at verify (<workspace>/src/renderer/verification.ts:41:9)",
+      "",
+      "Recent provider context:",
+      "Renderer assertion 17 did not settle before the transport closed.",
+      "The diagnostic tail was retained after redaction.",
+    ].join("\n"),
+    status: "failed",
+  });
   settleTurn(
     failed,
     "The verification stopped at one actionable renderer failure. The failed command remains visible above this answer.",

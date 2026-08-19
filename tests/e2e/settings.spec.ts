@@ -465,7 +465,7 @@ test("persists composer usage modes without losing the followed transcript", asy
   expect(toolbarIntegration).toEqual({
     inComposer: true,
     inToolbar: true,
-    parentClass: "composer-options",
+    parentClass: "composer-actions",
     nextLabel: "Send message",
     detachedUsageRows: 0,
     toolbarUsageControls: 1,

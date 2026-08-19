@@ -4116,10 +4116,6 @@ button.environment-row:focus-visible,
   justify-self: start;
 }
 
-.composer-options {
-  position: relative;
-}
-
 .composer-options,
 .composer-actions {
   justify-self: end;

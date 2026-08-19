@@ -8,7 +8,6 @@ import {
   readdirSync,
   renameSync,
   statSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -17,6 +16,13 @@ import { Worker } from "node:worker_threads";
 import Database from "better-sqlite3";
 
 import { validAttachmentCapabilities } from "./attachment-capability-schema";
+import {
+  regularOwnedFile,
+  removeDatabaseFileFamily,
+  removeIfRegularFile,
+  removeInterruptedDatabaseFileFamily,
+  waitForOperationOrAbort,
+} from "./database-backup-cancellation";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "./migrations/catalog";
 import {
   indexColumns,
@@ -167,25 +173,6 @@ function ensureOwnedDirectory(path: string): void {
     throw new Error("The database recovery path is not a local directory.");
   }
   chmodSync(path, DIRECTORY_MODE);
-}
-
-function regularOwnedFile(path: string): boolean {
-  try {
-    const metadata = lstatSync(path);
-    return metadata.isFile() && !metadata.isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
-function removeIfRegularFile(path: string): void {
-  if (regularOwnedFile(path)) unlinkSync(path);
-}
-
-function removeDatabaseFileFamily(path: string): void {
-  for (const suffix of ["", "-wal", "-shm"]) {
-    removeIfRegularFile(`${path}${suffix}`);
-  }
 }
 
 function validateOpenDatabase(
@@ -556,7 +543,10 @@ function validateDatabaseOffThread(
       clearTimeout(timer);
       signal.removeEventListener("abort", cancel);
       // Worker.terminate() resolves only after the thread has exited. Do not
-      // release the backup operation while Windows may still hold SQLite open.
+      // report validator settlement while Windows may still hold SQLite open.
+      // Cancellation is raced by the backup manager, so this worker must not
+      // keep a shutting-down runtime process alive while native SQLite exits.
+      worker.unref();
       void worker.terminate().then(
         () => finish(error),
         (terminationError: unknown) => finish(terminationError),
@@ -993,9 +983,14 @@ export class DatabaseBackupManager {
       });
       if (signal.aborted) throw new DatabaseBackupCancelledError();
       chmodSync(partialPath, FILE_MODE);
-      const validation = await (
+      const validationOperation = (
         this.options.validateBackup ?? validateDatabaseOffThread
       )(partialPath, signal);
+      const validation = await waitForOperationOrAbort(
+        validationOperation,
+        signal,
+        () => new DatabaseBackupCancelledError(),
+      );
       if (validation !== "valid-current") {
         throw new Error("The database backup failed validation.");
       }
@@ -1022,7 +1017,7 @@ export class DatabaseBackupManager {
       }
       return result;
     } catch (error) {
-      removeDatabaseFileFamily(partialPath);
+      removeInterruptedDatabaseFileFamily(partialPath);
       throw error;
     }
   }

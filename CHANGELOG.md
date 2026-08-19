@@ -11,6 +11,7 @@ The useful changes in each Inertia release, in plain language.
 - Markdown and Markdown-linked project images now render directly in Files with accessible Preview and Source modes, exact heading and cross-file navigation, bounded near-viewport loading, strict image validation, and a safe source fallback for incomplete or oversized documents.
 - Image-only and text-plus-image follow-ups can reach an active Codex, Claude, or OpenCode turn without changing its identity or ordering. Private copies, provider acknowledgement, persistence, rollback, and Claude queue reservations remain bounded and attributable across success, failure, cancellation, and restart.
 - Claude Read results accept legitimate resized or optimized images while retaining strict MIME, base64, duplicate-payload, event, aggregate-size, and unchanged-PDF validation.
+- Cancelling an in-progress database backup no longer lets native validation hold application shutdown open. No partial is published, and a Windows file handle that is still settling remains explicitly unpublished for safe startup cleanup.
 
 ### Appearance and active work read more clearly
 

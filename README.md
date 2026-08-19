@@ -182,6 +182,8 @@ This release renders safe Markdown previews and project images directly in Files
 
 Five persisted color-theme families, polished `/resume` and `/compact` surfaces, clearer Daily Work presentation, stable running-chat order, and motion grounded in real agent states make active work easier to scan while preserving keyboard, reduced-motion, forced-colors, and renderer-budget safeguards.
 
+Database-backup cancellation also stays inside the shutdown path even when native validation is still unwinding; incomplete backup files remain unpublished and are cleaned safely on startup.
+
 Download [Inertia v0.0.37](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.37):
 
 | Platform | Download |

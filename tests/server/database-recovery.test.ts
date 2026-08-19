@@ -1016,6 +1016,40 @@ describe("database backup and startup recovery", () => {
     database.close();
   });
 
+  it("does not let non-interruptible validation block database shutdown", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const database = new Database(databasePath);
+    let validationStarted!: () => void;
+    let finishValidation!: (result: "valid-current") => void;
+    const started = new Promise<void>((resolve) => { validationStarted = resolve; });
+    const manager = new DatabaseBackupManager(database, databasePath, {
+      validateBackup: () => new Promise((resolve) => {
+        finishValidation = resolve;
+        validationStarted();
+      }),
+    });
+    const backup = manager.createBackup();
+    const rejected = expect(backup).rejects.toBeInstanceOf(
+      DatabaseBackupCancelledError,
+    );
+    await started;
+
+    const before = Date.now();
+    await manager.cancelAndWait();
+    expect(Date.now() - before).toBeLessThan(500);
+    await rejected;
+    expect(readdirSync(databaseRecoveryPaths(databasePath).backupsDirectory))
+      .toEqual([]);
+
+    finishValidation("valid-current");
+    await Promise.resolve();
+    expect(backupNames(databasePath)).toEqual([]);
+    database.close();
+  });
+
   it("restores a valid backup when a quick-checkable primary has no released schema", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

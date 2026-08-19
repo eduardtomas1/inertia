@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { ChevronDown, MessageSquare, Network, Square } from "lucide-react";
 
 import type {
@@ -22,11 +22,17 @@ import {
   urgentSubagentBranchEndpoints,
 } from "../utils/subagentDisclosure";
 import type { SubagentDisclosureRow } from "../utils/subagentDisclosure";
+import {
+  readSubagentDisclosureOpen,
+  writeSubagentDisclosureOpen,
+} from "../utils/subagentDisclosurePreference";
 import { SubagentElapsed } from "./SubagentElapsed";
 import { SubagentStatusMark } from "./SubagentStatusMark";
 import { SubagentTraceDetails } from "./SubagentTraceDetails";
 
 interface SubagentDisclosureProps {
+  conversationId: string;
+  turnId: string;
   subagents: readonly SubagentTrace[];
   turns: readonly AgentTurn[];
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
@@ -37,6 +43,15 @@ interface SubagentDisclosureProps {
 }
 
 const MAX_INLINE_SUBAGENTS = 6;
+
+function rendererLocalStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 function compactInlineRows(
   rows: readonly SubagentDisclosureRow[],
@@ -90,6 +105,8 @@ function compactInlineRows(
 }
 
 export function SubagentDisclosure({
+  conversationId,
+  turnId,
   subagents,
   turns,
   onFollowUpSubagent,
@@ -102,11 +119,12 @@ export function SubagentDisclosure({
   const listId = `${disclosureId}-subagent-list`;
   const hasLiveSubagents = subagents.some(isLiveSubagentTrace);
   const hasReviewableOutcome = subagents.some(subagentNeedsReview);
-  const activeIdentity = subagents
-    .filter(isLiveSubagentTrace)
-    .map(({ id }) => id)
-    .join("\0");
-  const [open, setOpen] = useState(hasLiveSubagents);
+  const [open, setOpen] = useState(() => {
+    const storage = rendererLocalStorage();
+    return storage
+      ? readSubagentDisclosureOpen(storage, { conversationId, turnId })
+      : false;
+  });
   const [showAll, setShowAll] = useState(false);
   const [expandedTraceIds, setExpandedTraceIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -114,13 +132,6 @@ export function SubagentDisclosure({
   const [stoppingTraceIds, setStoppingTraceIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const previousActiveIdentity = useRef(activeIdentity);
-  useEffect(() => {
-    const previouslyActive = previousActiveIdentity.current.length > 0;
-    const currentlyActive = activeIdentity.length > 0;
-    if (!previouslyActive && currentlyActive) setOpen(true);
-    previousActiveIdentity.current = activeIdentity;
-  }, [activeIdentity]);
   const rows = useMemo(
     () => subagentDisclosureRows(subagents, turns),
     [subagents, turns],
@@ -133,6 +144,17 @@ export function SubagentDisclosure({
     ? rows.map((row) => ({ ...row, omittedAncestors: 0 }))
     : compactRows;
   const hiddenCount = rows.length - compactRows.length;
+  const updateOpen = (nextOpen: boolean): void => {
+    setOpen(nextOpen);
+    const storage = rendererLocalStorage();
+    if (storage) {
+      writeSubagentDisclosureOpen(
+        storage,
+        { conversationId, turnId },
+        nextOpen,
+      );
+    }
+  };
   const finishToggle = (): void => {
     if (!onAfterToggle) return;
     window.requestAnimationFrame(() => onAfterToggle?.());
@@ -168,7 +190,7 @@ export function SubagentDisclosure({
       data-needs-review={hasReviewableOutcome}
       open={open}
       onToggle={(event) => {
-        setOpen(event.currentTarget.open);
+        updateOpen(event.currentTarget.open);
         finishToggle();
       }}
     >
@@ -178,7 +200,7 @@ export function SubagentDisclosure({
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           onBeforeToggle?.();
-          setOpen((current) => !current);
+          updateOpen(!open);
         }}
       >
         <Network size={13} aria-hidden="true" />

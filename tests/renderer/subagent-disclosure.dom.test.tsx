@@ -5,7 +5,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SubagentDisclosure } from "../../src/renderer/src/components/SubagentDisclosure";
 import type {
@@ -14,6 +14,14 @@ import type {
 } from "../../src/shared/contracts";
 
 const NOW = Date.parse("2030-01-01T00:00:10.000Z");
+const DISCLOSURE_OWNER = {
+  conversationId: "conversation-1",
+  turnId: "turn-1",
+} as const;
+
+afterEach(() => {
+  window.localStorage.clear();
+});
 
 function trace(update: Partial<SubagentTrace> = {}): SubagentTrace {
   const status = update.status ?? "running";
@@ -99,7 +107,7 @@ function turn(update: Partial<AgentTurn> = {}): AgentTurn {
 }
 
 describe("delegated-agent timeline disclosure", () => {
-  it("opens live work, exposes hierarchy and exact provider metadata, and scopes Stop", async () => {
+  it("keeps live work folded until requested, then exposes exact metadata and scoped controls", async () => {
     const user = userEvent.setup();
     let acknowledgeStop!: () => void;
     const onStop = vi.fn(async () =>
@@ -148,6 +156,7 @@ describe("delegated-agent timeline disclosure", () => {
 
     render(
       <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
         subagents={[parent, child, unsupportedCodex, futureClaude]}
         turns={[
           turn(),
@@ -163,9 +172,12 @@ describe("delegated-agent timeline disclosure", () => {
       />,
     );
 
-    const disclosure = screen.getByText(
+    const summary = screen.getByText(
       "4 delegated tasks · 4 working",
-    ).closest("details");
+    ).closest("summary");
+    const disclosure = summary?.closest("details");
+    expect(disclosure).not.toHaveAttribute("open");
+    await user.click(summary!);
     expect(disclosure).toHaveAttribute("open");
     expect(screen.getByTitle("Exact provider state: running"))
       .toHaveTextContent("Claude · Agent SDK · 10s");
@@ -246,6 +258,7 @@ describe("delegated-agent timeline disclosure", () => {
     });
     render(
       <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
         subagents={[completed]}
         turns={[turn({
           providerId: "codex",
@@ -280,10 +293,76 @@ describe("delegated-agent timeline disclosure", () => {
       .not.toBeInTheDocument();
   });
 
-  it("keeps the roster open when live work settles into a reviewable failure", () => {
+  it("restores only the exact roster state the user left and never reopens for activity", async () => {
+    const user = userEvent.setup();
+    let view = render(
+      <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
+        subagents={[trace()]}
+        turns={[turn()]}
+        now={NOW}
+      />,
+    );
+    let disclosure = screen.getByText(
+      "1 delegated task · 1 working",
+    ).closest("details")!;
+    expect(disclosure).not.toHaveAttribute("open");
+    await user.click(disclosure.querySelector("summary")!);
+    expect(disclosure).toHaveAttribute("open");
+
+    view.unmount();
+    view = render(
+      <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
+        subagents={[trace()]}
+        turns={[turn()]}
+        now={NOW}
+      />,
+    );
+    disclosure = screen.getByText(
+      "1 delegated task · 1 working",
+    ).closest("details")!;
+    expect(disclosure).toHaveAttribute("open");
+    await user.click(disclosure.querySelector("summary")!);
+    expect(disclosure).not.toHaveAttribute("open");
+
+    view.rerender(
+      <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
+        subagents={[trace({
+          id: "trace-new-activity",
+          providerAgentId: "agent-new-activity",
+          providerTaskId: "task-new-activity",
+          providerToolUseId: "tool-new-activity",
+          sequence: 2,
+        })]}
+        turns={[turn()]}
+        now={NOW}
+      />,
+    );
+    expect(disclosure).not.toHaveAttribute("open");
+
+    view.unmount();
+    render(
+      <SubagentDisclosure
+        conversationId="conversation-1"
+        turnId="turn-2"
+        subagents={[trace({ turnId: "turn-2" })]}
+        turns={[turn({ id: "turn-2" })]}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText(
+      "1 delegated task · 1 working",
+    ).closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("keeps a user-opened roster open when live work settles into a reviewable failure", async () => {
+    const user = userEvent.setup();
     const active = trace({ providerName: "Lifecycle audit" });
     const view = render(
       <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
         subagents={[active]}
         turns={[turn()]}
         now={NOW}
@@ -292,10 +371,13 @@ describe("delegated-agent timeline disclosure", () => {
     const disclosure = screen.getByText(
       "1 delegated task · 1 working",
     ).closest("details");
+    expect(disclosure).not.toHaveAttribute("open");
+    await user.click(disclosure!.querySelector("summary")!);
     expect(disclosure).toHaveAttribute("open");
 
     view.rerender(
       <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
         subagents={[trace({
           providerName: "Lifecycle audit",
           providerStatus: "failed",
@@ -332,6 +414,7 @@ describe("delegated-agent timeline disclosure", () => {
     }));
     render(
       <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
         subagents={traces}
         turns={[turn()]}
         now={NOW}
@@ -340,6 +423,12 @@ describe("delegated-agent timeline disclosure", () => {
       />,
     );
 
+    await user.click(screen.getByText(
+      "8 delegated tasks · 8 working",
+    ).closest("summary")!);
+    await waitFor(() => expect(onAfterToggle).toHaveBeenCalledTimes(1));
+    onBeforeToggle.mockClear();
+    onAfterToggle.mockClear();
     const tree = screen.getByRole("list", { name: "Delegated agent tree" });
     expect(tree.children).toHaveLength(6);
     expect(screen.getByText("Worker 7")).toBeInTheDocument();
@@ -353,7 +442,8 @@ describe("delegated-agent timeline disclosure", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("reserves compact roster slots for separate urgent branches", () => {
+  it("reserves compact roster slots for separate urgent branches", async () => {
+    const user = userEvent.setup();
     const deepBranch = Array.from({ length: 11 }, (_, index) => trace({
       id: `deep-${index}`,
       providerTaskId: `deep-task-${index}`,
@@ -377,12 +467,16 @@ describe("delegated-agent timeline disclosure", () => {
     });
     render(
       <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
         subagents={[failedSibling, ...deepBranch]}
         turns={[turn()]}
         now={NOW}
       />,
     );
 
+    await user.click(screen.getByText(
+      "12 delegated tasks · 6 working · 1 needs review · 5 settled",
+    ).closest("summary")!);
     const tree = screen.getByRole("list", { name: "Delegated agent tree" });
     expect(tree.children).toHaveLength(6);
     expect(screen.getByText("Failed sibling")).toBeInTheDocument();
@@ -395,6 +489,7 @@ describe("delegated-agent timeline disclosure", () => {
     try {
       render(
         <SubagentDisclosure
+          {...DISCLOSURE_OWNER}
           subagents={[trace()]}
           turns={[turn()]}
         />,
@@ -414,6 +509,7 @@ describe("delegated-agent timeline disclosure", () => {
     try {
       const view = render(
         <SubagentDisclosure
+          {...DISCLOSURE_OWNER}
           subagents={[
             trace(),
             trace({
@@ -442,8 +538,8 @@ describe("delegated-agent timeline disclosure", () => {
     const item = trace({ status: "completed", isLive: false });
     const { container } = render(
       <>
-        <SubagentDisclosure subagents={[item]} turns={[turn()]} now={NOW} />
-        <SubagentDisclosure subagents={[item]} turns={[turn()]} now={NOW} />
+        <SubagentDisclosure {...DISCLOSURE_OWNER} subagents={[item]} turns={[turn()]} now={NOW} />
+        <SubagentDisclosure {...DISCLOSURE_OWNER} subagents={[item]} turns={[turn()]} now={NOW} />
       </>,
     );
     const ids = [...container.querySelectorAll<HTMLElement>("[id]")]

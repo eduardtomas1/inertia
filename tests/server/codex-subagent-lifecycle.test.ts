@@ -332,9 +332,14 @@ const capture = (value) => fs.appendFileSync(
 );
 const rootThreadId = "cancel-root";
 const rootTurnId = "cancel-root-turn";
+const childrenReadyRequestId = "children-ready";
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   capture(message);
+  if (message.id === childrenReadyRequestId && message.error) {
+    fs.writeFileSync(process.env.CODEX_TEST_READY, "ready");
+    return;
+  }
   if (message.method === "initialize") {
     send({ id: message.id, result: { userAgent: "fixture" } });
     return;
@@ -371,7 +376,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       threadId: "provisional-child",
       turn: { id: "provisional-turn", status: "inProgress" },
     } });
-    fs.writeFileSync(process.env.CODEX_TEST_READY, "ready");
+    send({
+      id: childrenReadyRequestId,
+      method: "fixture/childrenReady",
+      params: {},
+    });
     return;
   }
   if (message.method === "turn/interrupt") {
@@ -402,12 +411,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
       await waitFor("both child turns to reach the client", () =>
         existsSync(readyPath));
-      // The fixture writes the marker immediately after the notifications;
-      // allow the stdout decoder to consume the same event-loop batch.
-      await waitFor("both child turns to be interruptible", () => {
-        run.cancel();
-        return true;
-      });
+      // The marker follows the client's response to a request queued after
+      // both notifications, so cancellation observes both child turns.
+      run.cancel();
 
       await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
       const messages = readFileSync(capturePath, "utf8")

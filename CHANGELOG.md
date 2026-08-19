@@ -4,7 +4,7 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
-## 0.0.38 — 2026-08-19
+## 0.0.39 — 2026-08-19
 
 ### Provider work stays attributable from start to finish
 
@@ -21,6 +21,7 @@ The useful changes in each Inertia release, in plain language.
 ### Release confidence
 
 - Exact-tag publishing now tolerates GitHub's delayed draft-release visibility with bounded retries before asset verification and upload, avoiding a manual rerun without weakening no-replacement safeguards.
+- Delegated-agent cancellation fixtures now wait for an explicit protocol acknowledgement before stopping child turns, preserving the real children-before-root contract without racing the Windows full-suite decoder.
 - Architecture and both lint layers, all TypeScript projects, more than 3,700 unit and integration tests, portable provider contracts, Electron scenarios, production builds, bundle budgets, package smoke, Electron fuses, and exact-head Linux, macOS, and Windows gates protect the release.
 
 ## 0.0.37 — 2026-08-19

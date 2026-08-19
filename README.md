@@ -176,7 +176,7 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.38
+### Version 0.0.39
 
 This release hardens the installed Codex, Claude, Cursor, and OpenCode lifecycle boundaries so delegated work, follow-ups, out-of-order provider events, cancellation, and process cleanup remain tied to the exact owning conversation and turn. Delegated-agent cards now carry readable names, roles, and missions, while their rosters remember an explicit open choice without expanding automatically.
 
@@ -184,7 +184,7 @@ Failed runs gain a privacy-bounded diagnostic disclosure, the composer separates
 
 Exact-tag publishing also retries GitHub's delayed draft visibility before verification and upload without relaxing the release workflow's no-replacement safeguards.
 
-Download [Inertia v0.0.38](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.38):
+Download [Inertia v0.0.39](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.39):
 
 | Platform | Download |
 | --- | --- |

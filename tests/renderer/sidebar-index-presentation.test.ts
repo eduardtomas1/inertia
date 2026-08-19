@@ -28,10 +28,10 @@ describe("sidebar index presentation contracts", () => {
     expect(css).toMatch(/\.activity-thread-menu-button\s*\{[^}]*top:\s*0;[^}]*bottom:\s*0;[^}]*margin-block:\s*auto;/su);
   });
 
-  it("stops decorative motion for reduced motion and inactive documents", () => {
+  it("stops decorative motion for reduced motion and hidden documents", () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.activity-thread\.status-working \.activity-thread-state-mark\s*\{[\s\S]*?animation:\s*none;/u);
     expect(css).toContain(
-      '.app-shell[data-document-active="false"] .activity-thread.status-working .activity-thread-state-mark',
+      '.app-shell[data-document-visible="false"] .activity-thread.status-working .activity-thread-state-mark',
     );
     expect(css).toContain("animation-play-state: paused;");
   });

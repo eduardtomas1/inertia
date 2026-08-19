@@ -42,7 +42,7 @@ export function updateSidebarIndexMotion(container: HTMLElement): void {
   if (
     state.positions.size > 0
     && document.visibilityState !== "hidden"
-    && shell?.dataset.documentActive !== "false"
+    && shell?.dataset.documentVisible !== "false"
   ) {
     for (const row of rows) {
       const identity = row.dataset.sidebarMotionId;

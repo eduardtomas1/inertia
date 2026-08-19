@@ -104,8 +104,11 @@ export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Ele
     const synchronize = (): void => {
       stopTimer();
       setNow(Date.now());
-      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
-      timer = window.setInterval(() => setNow(Date.now()), 100);
+      if (document.visibilityState !== "visible") return;
+      timer = window.setInterval(
+        () => setNow(Date.now()),
+        document.hasFocus() ? 100 : 1_000,
+      );
     };
     synchronize();
     document.addEventListener("visibilitychange", synchronize);

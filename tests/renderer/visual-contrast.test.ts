@@ -318,7 +318,7 @@ describe("visual contrast system", () => {
       /\.chat-workspace\[data-reasoning-effort="ultra"\]::after/u,
     );
     expect(css).toMatch(
-      /\.app-shell\[data-document-active="false"\][\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\] \.composer::after\s*\{[^}]*animation-play-state:\s*paused;/u,
+      /\.app-shell\[data-document-visible="false"\][\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\] \.composer::after\s*\{[^}]*animation-play-state:\s*paused;/u,
     );
     expect(css).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\] \.composer::after\s*\{[^}]*animation:\s*none;/u,

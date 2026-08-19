@@ -402,11 +402,11 @@
   }
 }
 
-.app-shell[data-document-active="false"] .response-stream-word,
-.app-shell[data-document-active="false"] .subagent-status-mark[data-live="true"]::after,
-.app-shell[data-document-active="false"]
+.app-shell[data-document-visible="false"] .response-stream-word,
+.app-shell[data-document-visible="false"] .subagent-status-mark[data-live="true"]::after,
+.app-shell[data-document-visible="false"]
   .subagent-disclosure[data-active="true"] > summary > svg:first-child,
-.app-shell[data-document-active="false"]
+.app-shell[data-document-visible="false"]
   .agent-activity.is-running .agent-activity-icon::after {
   animation-play-state: paused;
 }

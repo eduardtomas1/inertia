@@ -42,6 +42,7 @@ import { useMultiSpawn } from "./hooks/useMultiSpawn";
 import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
 import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
+import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
 import {
@@ -77,26 +78,6 @@ const focusPrimaryPreview = (): void => {
   focusWorkspacePreviewAddress("primary");
 };
 
-function useDocumentActive(): boolean {
-  const [active, setActive] = useState(
-    () => document.visibilityState === "visible" && document.hasFocus(),
-  );
-  useEffect(() => {
-    const synchronize = (): void => {
-      setActive(document.visibilityState === "visible" && document.hasFocus());
-    };
-    document.addEventListener("visibilitychange", synchronize);
-    window.addEventListener("focus", synchronize);
-    window.addEventListener("blur", synchronize);
-    return () => {
-      document.removeEventListener("visibilitychange", synchronize);
-      window.removeEventListener("focus", synchronize);
-      window.removeEventListener("blur", synchronize);
-    };
-  }, []);
-  return active;
-}
-
 export function commandMayChangeWorkspaceAuthority(
   command: CommandWithoutId,
 ): boolean {
@@ -122,7 +103,7 @@ export default function App(): React.JSX.Element {
   const providerQuotaNotices = useStableController(
     useProviderQuotaNotices(connection.snapshot?.providers ?? []),
   );
-  const documentActive = useDocumentActive();
+  const { documentActive, documentVisible } = useDocumentPresence();
   const providerMaintenance = useStableController(
     useProviderMaintenance(
       connection.snapshot,
@@ -1023,6 +1004,7 @@ export default function App(): React.JSX.Element {
     <AppLayout
       platform={platform}
       documentActive={documentActive}
+      documentVisible={documentVisible}
       settings={settings}
       connection={connection}
       appUpdate={appUpdate}

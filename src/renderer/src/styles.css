@@ -2450,7 +2450,7 @@ button.environment-row:focus-visible,
   animation: ultra-reasoning-frame-flow 6s linear infinite;
 }
 
-.app-shell[data-document-active="false"]
+.app-shell[data-document-visible="false"]
   .chat-workspace[data-reasoning-effort="ultra"] .composer::after {
   animation-play-state: paused;
 }
@@ -11213,24 +11213,24 @@ button.sent-attachment-open:focus-visible {
   opacity: 0.72;
 }
 
-.app-shell[data-document-active="false"] .agent-pixel-loader > span {
+.app-shell[data-document-visible="false"] .agent-pixel-loader > span {
   animation-play-state: paused;
 }
 
-.app-shell[data-document-active="false"] .streaming-caret,
-.app-shell[data-document-active="false"]
+.app-shell[data-document-visible="false"] .streaming-caret,
+.app-shell[data-document-visible="false"]
   .response-markdown.is-streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
-.app-shell[data-document-active="false"]
+.app-shell[data-document-visible="false"]
   .response-markdown.is-streaming > :is(ul, ol):last-child > li:last-child::after,
-.app-shell[data-document-active="false"]
+.app-shell[data-document-visible="false"]
   .response-markdown.is-streaming > blockquote:last-child > :last-child::after,
-.app-shell[data-document-active="false"]
+.app-shell[data-document-visible="false"]
   .response-markdown.is-streaming > .response-code-block:last-child pre code::after,
-.app-shell[data-document-active="false"]
+.app-shell[data-document-visible="false"]
   .response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after,
-.app-shell[data-document-active="false"]
+.app-shell[data-document-visible="false"]
   .response-turn.is-active .agent-activity.is-running svg,
-.app-shell[data-document-active="false"] .thread-status-dot.is-working {
+.app-shell[data-document-visible="false"] .thread-status-dot.is-working {
   animation-play-state: paused;
 }
 

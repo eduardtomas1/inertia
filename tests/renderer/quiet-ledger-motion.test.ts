@@ -18,6 +18,10 @@ const appLayoutSource = readFileSync(
   new URL("../../src/renderer/src/components/AppLayout.tsx", import.meta.url),
   "utf8",
 );
+const documentPresenceSource = readFileSync(
+  new URL("../../src/renderer/src/hooks/useDocumentPresence.ts", import.meta.url),
+  "utf8",
+);
 const activitySource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
   "utf8",
@@ -204,20 +208,26 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(quietLedgerReducedMotion).toContain("transform: none");
   });
 
-  it("pauses live timers and the active text signal while the document is inactive", () => {
+  it("pauses live timers and active motion only while the document is hidden", () => {
     expect(activitySource).toContain('document.visibilityState !== "visible"');
-    expect(activitySource).toContain("!document.hasFocus()");
+    expect(activitySource).toContain("document.hasFocus() ? 100 : 1_000");
     expect(activitySource).toContain('document.addEventListener("visibilitychange", synchronize)');
     expect(activitySource).toContain('window.addEventListener("blur", synchronize)');
-    expect(appSource).toContain("function useDocumentActive()");
+    expect(appSource).toContain("useDocumentPresence()");
+    expect(documentPresenceSource).toContain("useSyncExternalStore(");
+    expect(documentPresenceSource).toContain("document.hasFocus()");
     expect(appLayoutSource).toContain(
       'data-document-active={documentActive ? "true" : "false"}',
+    );
+    expect(appLayoutSource).toContain(
+      'data-document-visible={documentVisible ? "true" : "false"}',
     );
     expect(activitySource).toContain("memo(function ActivityRow");
     expect(activitySource).toContain("memo(function ActivityGroup");
     expect(activitySource).toContain("const durableStream = useMemo(");
     expect(activitySource).toContain("instead of sorting the complete workstream");
-    expect(css).toContain('data-document-active="false"');
+    expect(css).toContain('data-document-visible="false"');
+    expect(css).not.toContain('data-document-active="false"');
     expect(css).toContain("animation-play-state: paused");
     expect(css).toContain("agent-pixel-shimmer");
     expect(css).not.toContain("active-work-tonal-wash");

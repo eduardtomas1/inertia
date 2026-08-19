@@ -130,7 +130,7 @@
   }
 }
 
-.app-shell[data-document-active="false"] .activity-thread.status-working .activity-thread-state-mark {
+.app-shell[data-document-visible="false"] .activity-thread.status-working .activity-thread-state-mark {
   animation-play-state: paused;
 }
 

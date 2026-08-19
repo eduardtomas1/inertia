@@ -231,6 +231,9 @@ export function AgentExecutionLayer({
         </div>
       ) : null}
       <SubagentDisclosure
+        key={`${props.conversationId}:${turn.id}`}
+        conversationId={props.conversationId}
+        turnId={turn.id}
         subagents={subagents}
         turns={props.turns}
         onFollowUpSubagent={props.onFollowUpSubagent}

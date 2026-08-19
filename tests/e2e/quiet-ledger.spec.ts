@@ -11,6 +11,7 @@ import {
 } from "./support/browser-websocket-fixture";
 import { verifyAgentExecutionStateSequence } from "./support/agent-execution-states";
 import { createQuietLedgerFixture } from "./support/quiet-ledger-fixture";
+import { verifyFailureDiagnostics } from "./support/failure-diagnostics";
 import {
   revealVirtualizedTimelineTurn,
   verifyDesktopMarkdownControls,
@@ -27,7 +28,6 @@ let rendererErrors!: AppFixture["rendererErrors"];
 let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
 let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
-
 test.beforeAll(async () => {
   app = await createAppFixture({
     name: "quiet-ledger",
@@ -47,7 +47,6 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await app.close();
 });
-
 test("presents the Quiet Ledger states as one calm, responsive conversation", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const {
@@ -478,6 +477,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(failedTurn.locator(".turn-settled-summary")).toContainText("Failed after 42s · 2 actions");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toContainText("Renderer verification failed");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toBeVisible();
+    const failureDiagnostics = failedTurn.locator("[data-turn-failure-diagnostics]");
+    await verifyFailureDiagnostics(failureDiagnostics, captureElementScenario);
     const exceptionalGeometry = await Promise.all(
       [warningTurn, failedTurn].map((exceptionalTurn) =>
         exceptionalTurn.evaluate((element) => {

@@ -1,5 +1,7 @@
 import {
   memo,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -46,6 +48,8 @@ import {
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { parseReasoningSummary } from "../../utils/reasoningSummary";
+
+const FailureDiagnostics = lazy(() => import("./failurePanel"));
 
 export function ReasoningSummary({
   content,
@@ -731,7 +735,6 @@ export function WorkLog({
       ? `${planStepCount} ${planStepCount === 1 ? "step" : "steps"}`
       : null,
   ].filter(Boolean).join(" · ") || `${supplementalCount} update`;
-
   if (turn.isActive) {
     if (stream.length === 0 && supplementalCount === 0) return null;
     return (
@@ -851,12 +854,22 @@ export function WorkLog({
         </div>
       )}
       {turn.importantActivities.map((activity) => (
-        <ActivityRow
-          activity={activity}
-          onBeforeToggle={onBeforeToggle}
-          onAfterToggle={onAfterToggle}
-          key={activity.id}
-        />
+        activity.kind === "error" && activity.status === "failed" ? (
+          <Suspense fallback={null} key={activity.id}>
+            <FailureDiagnostics
+              turn={turn.agentTurn}
+              activity={activity}
+              anchor={[onBeforeToggle, onAfterToggle]}
+            />
+          </Suspense>
+        ) : (
+          <ActivityRow
+            activity={activity}
+            onBeforeToggle={onBeforeToggle}
+            onAfterToggle={onAfterToggle}
+            key={activity.id}
+          />
+        )
       ))}
     </div>
   );

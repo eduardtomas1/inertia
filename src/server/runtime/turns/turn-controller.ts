@@ -33,6 +33,7 @@ import type {
 import {
   defaultTurnScheduler,
   DEFAULT_TURN_TIMEOUT_MS,
+  normalizedProviderRunFailure,
   providerLabel,
   providerPromiseFailure,
   publicTurnError,
@@ -1076,13 +1077,8 @@ export class TurnController {
     } else if (result.status === "cancelled") {
       this.settle(active, "cancelled", "user-cancelled", "Stopped");
     } else {
-      this.settle(
-        active,
-        "failed",
-        providerFailureCause(result),
-        result.error ?? "The provider could not complete the request.",
-        result.failure,
-      );
+      const failure = normalizedProviderRunFailure(active, result);
+      this.settle(active, "failed", providerFailureCause(result), failure.message, failure);
     }
   }
 

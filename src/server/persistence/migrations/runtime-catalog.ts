@@ -20,6 +20,7 @@ import {
 } from "./catalog";
 import { conversationWorktreeOwnershipMigration } from "./conversation-worktree-ownership";
 import { persistColorTheme } from "./color-theme";
+import { persistAgentThreadManagement } from "./agent-thread-management";
 import { durableDataMigrationDefinitions } from "./durable-data";
 import { protectCancellingDuoDeletion, protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
@@ -1226,6 +1227,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         `,
       },
       persistColorTheme,
+      persistAgentThreadManagement,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

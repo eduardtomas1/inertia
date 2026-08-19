@@ -24,7 +24,7 @@ export class SettingsRepository {
     const next = { ...current, ...update };
     this.context.database.prepare(`
       UPDATE app_state SET
-        theme = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?,
+        theme = ?, color_theme = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?,
         default_provider = ?, default_model = ?, default_access_mode = ?,
         new_thread_mode = ?, wrap_diffs = ?, ignore_whitespace = ?, show_thinking = ?,
         show_usage = ?, usage_display_mode = ?, interface_scale = ?, response_density = ?,
@@ -41,6 +41,7 @@ export class SettingsRepository {
       WHERE id = 1
     `).run(
       next.theme,
+      next.colorTheme,
       Number(next.compactSidebar),
       Number(next.showTimestamps),
       next.terminalFontSize,

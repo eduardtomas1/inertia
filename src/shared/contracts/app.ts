@@ -22,6 +22,8 @@ import type { PromptPreset } from "../prompt-presets";
 export type { ProviderId } from "../provider";
 
 export type ThemePreference = "system" | "light" | "dark";
+export const COLOR_THEME_IDS = ["inertia", "grove", "ocean", "ember", "iris"] as const;
+export type ColorThemeId = (typeof COLOR_THEME_IDS)[number];
 export type ProjectStatus = "ready" | "working" | "attention";
 export type MessageRole = "user" | "assistant" | "system";
 export type ProviderInstallState = "checking" | "installed" | "not-installed" | "error";
@@ -129,6 +131,7 @@ export interface ProviderInfo {
 
 export interface AppSettings {
   theme: ThemePreference;
+  colorTheme: ColorThemeId;
   compactSidebar: boolean;
   showTimestamps: boolean;
   terminalFontSize: number;
@@ -275,6 +278,7 @@ export interface DatabaseBackupStatus {
 
 export const defaultSettings: AppSettings = {
   theme: "system",
+  colorTheme: "inertia",
   compactSidebar: false,
   showTimestamps: true,
   terminalFontSize: 13,

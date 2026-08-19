@@ -1703,10 +1703,14 @@ describe("runtime migration catalog", () => {
       { version: 56 },
       { version: 57 },
       { version: 58 },
+      { version: 59 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
     ).get() as { enabled: number }).enabled).toBe(1);
+    expect((migrated.prepare(
+      "SELECT color_theme AS colorTheme FROM app_state WHERE id = 1",
+    ).get() as { colorTheme: string }).colorTheme).toBe("inertia");
     expect(migrated.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'prompt_presets'",
     ).get()).toEqual({ name: "prompt_presets" });

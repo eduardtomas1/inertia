@@ -33,7 +33,9 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Open the optional Inertia Private Connect PWA through your private Tailscale network without exposing files, terminals, approvals, Git, provider settings, or Full Access to the browser.
 - Search commands, projects, and threads from one keyboard-friendly palette.
 - Resize or collapse either side of the workspace whenever the conversation needs more room.
-- Choose System, Light, or Dark with a restrained glass finish and clear contrast.
+- Pair System, Light, or Dark appearance with Inertia, Grove, Ocean, Ember, or Iris color themes, each tuned for clear semantic contrast.
+
+![Choose an appearance and color theme in Inertia](docs/screenshots/inertia-theme-library.png)
 
 ![Two independent projects sharing a split Inertia workspace](docs/screenshots/inertia-split-workspace.png)
 

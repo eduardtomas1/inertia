@@ -15,6 +15,7 @@ import type {
   ProviderId,
   SubagentTraceStatus,
   ThemePreference,
+  ColorThemeId,
   ThreadUsageSnapshot,
   TurnGitArtifactAbsenceReason,
   TurnGitArtifactCompleteness,
@@ -295,6 +296,7 @@ export interface ThreadUsageRow {
 
 export interface StateRow {
   theme: ThemePreference;
+  color_theme: ColorThemeId;
   compact_sidebar: 0 | 1;
   show_timestamps: 0 | 1;
   terminal_font_size: number;

@@ -26,6 +26,7 @@ import {
   conversationCreateCommandSchema,
   conversationCreatePayloadSchema,
 } from "./conversation-create";
+import { COLOR_THEME_IDS } from "../app";
 
 const duoSideSchema = conversationCreatePayloadSchema.extend({
   activate: z.literal(false).optional(),
@@ -247,6 +248,7 @@ export const configurationCommandSchemas = [
       payload: z
         .object({
           theme: z.enum(["system", "light", "dark"]).optional(),
+          colorTheme: z.enum(COLOR_THEME_IDS).optional(),
           compactSidebar: z.boolean().optional(),
           showTimestamps: z.boolean().optional(),
           terminalFontSize: z.number().int().min(11).max(22).optional(),

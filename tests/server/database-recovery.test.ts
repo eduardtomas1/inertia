@@ -1112,7 +1112,7 @@ describe("database backup and startup recovery", () => {
     upgraded.close();
   });
 
-  it("restores the released V0.0.6 fixture through schema 58 without losing data", () => {
+  it("restores the released V0.0.6 fixture through schema 59 without losing data", () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
     const paths = databaseRecoveryPaths(databasePath);
@@ -1153,7 +1153,10 @@ describe("database backup and startup recovery", () => {
     ).all()).toEqual(messagesBefore);
     expect((upgraded.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(58);
+    ).get() as { version: number }).version).toBe(59);
+    expect((upgraded.prepare(
+      "SELECT color_theme AS colorTheme FROM app_state WHERE id = 1",
+    ).get() as { colorTheme: string }).colorTheme).toBe("inertia");
     expect(upgraded.prepare(`
       SELECT name FROM sqlite_master
       WHERE type = 'index'

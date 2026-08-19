@@ -16,7 +16,7 @@ describe("provider authentication terminal lifecycle", () => {
       "fontSize: latestFontSizeRef.current",
     );
     expect(source).toMatch(
-      /\[fontSize,\s*instanceReady,\s*providerId,\s*theme\]/u,
+      /\[colorTheme,\s*fontSize,\s*instanceReady,\s*providerId,\s*theme\]/u,
     );
   });
 });

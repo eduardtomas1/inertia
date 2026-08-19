@@ -1086,7 +1086,9 @@ describe("RuntimeStore conversation lifecycle", () => {
   it("persists response presentation preferences across restart", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     expect(store.snapshot().settings.usageDisplayMode).toBe("compact");
+    expect(store.snapshot().settings.colorTheme).toBe("inertia");
     store.updateSettings({
+      colorTheme: "ocean",
       responseDensity: "comfortable",
       defaultCodeWrap: true,
       autoCollapseWorkLog: false,
@@ -1103,6 +1105,7 @@ describe("RuntimeStore conversation lifecycle", () => {
 
     const reopened = new RuntimeStore(databasePath, workspacePath);
     expect(reopened.snapshot().settings).toMatchObject({
+      colorTheme: "ocean",
       responseDensity: "comfortable",
       defaultCodeWrap: true,
       autoCollapseWorkLog: false,

@@ -184,7 +184,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           && bounds.height > 0;
       }).map((control) => control.getBoundingClientRect().height);
       const optionMarkers = [...element.querySelectorAll<HTMLElement>(
-        ".composer-options > *, .composer-setting-family > *",
+        ".composer-options > *, .composer-setting-family > *, .composer-actions > *",
       )].map((control) => {
         if (control.classList.contains("model-chooser-anchor")) return "model";
         if (control.classList.contains("composer-reasoning-control")) return "reasoning";
@@ -229,6 +229,10 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         inputPaddingInline: inputStyle?.paddingInline,
         inputPaddingBlock: inputStyle?.paddingBlock,
         toolbarBorderTop: toolbarStyle?.borderTopWidth,
+        toolbarBackground: toolbarStyle?.backgroundColor,
+        toolbarGroups: [...(toolbarElement?.querySelectorAll<HTMLElement>(
+          "[data-composer-group]",
+        ) ?? [])].map((group) => group.dataset.composerGroup),
         textareaBorder: textareaStyle?.borderTopWidth,
         textareaBackground: textareaStyle?.backgroundColor,
         controlHeightDelta: visibleControlHeights.length > 0
@@ -253,6 +257,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.inputPaddingInline).toBe("12px");
     expect(wideGeometry.inputPaddingBlock).toBe("8px");
     expect(wideGeometry.toolbarBorderTop).toBe("1px");
+    expect(wideGeometry.toolbarBackground)
+      .not.toBe(wideGeometry.textareaBackground);
+    expect(wideGeometry.toolbarGroups).toEqual(["context", "route", "action"]);
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);

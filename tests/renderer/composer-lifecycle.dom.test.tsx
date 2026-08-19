@@ -7,6 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -176,6 +177,41 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("presents a two-tier editor and keyboard-navigable grouped control rail", async () => {
+    const current = conversation("composer-two-tier-control-rail");
+    render(<Composer {...composerProps(current)} />);
+    const composer = screen.getByRole("region", { name: "Message composer" });
+    const input = within(composer).getByRole("textbox", { name: "Message" });
+    const toolbar = within(composer).getByRole("group", {
+      name: "Composer controls",
+    });
+
+    expect(input.compareDocumentPosition(toolbar)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(toolbar).getByRole("group", { name: "Add context" }))
+      .toBeInTheDocument();
+    expect(within(toolbar).getByRole("group", {
+      name: "Model, service, and run settings",
+    })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("group", {
+      name: "Budget and message actions",
+    })).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "Keep every control reachable" } });
+    const attach = within(toolbar).getByRole("button", {
+      name: "Attach images or documents",
+    });
+    const presets = await within(toolbar).findByRole("button", {
+      name: "Prompt presets",
+    });
+    const send = within(toolbar).getByRole("button", { name: "Send message" });
+    attach.focus();
+    await userEvent.setup().tab();
+    expect(presets).toHaveFocus();
+    expect(attach).not.toHaveAttribute("tabindex", "-1");
+    expect(send).not.toHaveAttribute("tabindex", "-1");
+  });
+
   it("compacts with optional focus text without sending a chat turn", async () => {
     const current = conversation("07070707-0707-4707-8707-070707070707");
     const operation = deferred<{

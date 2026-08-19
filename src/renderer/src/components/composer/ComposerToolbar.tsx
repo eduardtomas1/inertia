@@ -187,8 +187,18 @@ export function ComposerToolbar({
     setMenuPopover,
   } = menuController;
   return (
-    <div className="composer-toolbar" data-composer-zone="controls">
-      <div className="composer-tools">
+    <div
+      className="composer-toolbar"
+      data-composer-zone="controls"
+      role="group"
+      aria-label="Composer controls"
+    >
+      <div
+        className="composer-tools"
+        role="group"
+        aria-label="Add context"
+        data-composer-group="context"
+      >
         <IconButton
           label={running ? "Attach follow-up images" : "Attach images or documents"}
           onClick={() => void onChooseAttachments()}
@@ -254,7 +264,7 @@ export function ComposerToolbar({
             onClear={onClearSelectedSkills}
           />
         </Suspense>
-        {actions.length > 0 && (
+        {actions.length > 0 ? (
           <div className="popover-anchor composer-action-control">
             <button
               ref={(node) => setMenuTrigger("action", node)}
@@ -302,9 +312,14 @@ export function ComposerToolbar({
               </div>
             )}
           </div>
-        )}
+        ) : null}
       </div>
-      <div className="composer-options">
+      <div
+        className="composer-options"
+        role="group"
+        aria-label="Model, service, and run settings"
+        data-composer-group="route"
+      >
         <ModelChooser
           routes={modelRoutes}
           selectedRoute={selectedModelRoute}
@@ -315,7 +330,7 @@ export function ComposerToolbar({
           }}
           onSelect={onChooseModelRoute}
         />
-        {conversationUpdateError && (
+        {conversationUpdateError ? (
           <p
             className="composer-control-error composer-route-control-error"
             role="alert"
@@ -323,7 +338,7 @@ export function ComposerToolbar({
           >
             {conversationUpdateError}
           </p>
-        )}
+        ) : null}
         <ComposerSettings
           selectedModel={selectedModel}
           selectedReasoning={selectedReasoning}
@@ -356,7 +371,14 @@ export function ComposerToolbar({
             conversationUpdatePending={conversationUpdatePending}
           />
         </Suspense>
-        {selectedProvider && (
+      </div>
+      <div
+        className="composer-actions"
+        role="group"
+        aria-label="Budget and message actions"
+        data-composer-group="action"
+      >
+        {selectedProvider ? (
           <UsageIndicator
             usage={usage}
             rateLimits={selectedProvider.rateLimits}
@@ -373,7 +395,7 @@ export function ComposerToolbar({
             )}
             onModeChange={onUsageDisplayModeChange}
           />
-        )}
+        ) : null}
         {followUpState === "ready" || followUpState === "pending" ? (
           <button
             type="button"

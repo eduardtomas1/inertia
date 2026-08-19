@@ -100,18 +100,14 @@ export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Ele
     const synchronize = (): void => {
       stopTimer();
       setNow(Date.now());
-      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      if (document.visibilityState !== "visible") return;
       timer = window.setInterval(() => setNow(Date.now()), 100);
     };
     synchronize();
     document.addEventListener("visibilitychange", synchronize);
-    window.addEventListener("focus", synchronize);
-    window.addEventListener("blur", synchronize);
     return () => {
       stopTimer();
       document.removeEventListener("visibilitychange", synchronize);
-      window.removeEventListener("focus", synchronize);
-      window.removeEventListener("blur", synchronize);
     };
   }, []);
   return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)), true)}</span>;

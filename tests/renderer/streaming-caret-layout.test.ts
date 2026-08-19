@@ -28,7 +28,7 @@ describe("streaming caret layout", () => {
       ".response-markdown.is-streaming > .response-code-block:last-child pre code::after",
     );
     expect(css).toMatch(
-      /data-document-active="false"[\s\S]*?response-markdown\.is-streaming[\s\S]*?animation-play-state:\s*paused/u,
+      /data-document-visible="false"[\s\S]*?response-markdown\.is-streaming[\s\S]*?animation-play-state:\s*paused/u,
     );
     expect(css).not.toContain(
       ".response-markdown.is-streaming > :last-child::after",

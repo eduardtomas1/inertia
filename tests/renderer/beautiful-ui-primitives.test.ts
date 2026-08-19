@@ -106,6 +106,6 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(styles).toContain("beautiful-task-row-enter 450ms cubic-bezier(0.23, 1, 0.32, 1)");
     expect(styles).toContain("beautiful-spin 1.1s linear infinite");
     expect(styles).toContain('.subagent-status-mark[data-live="true"]::after');
-    expect(styles).toContain('.app-shell[data-document-active="false"] .response-stream-word');
+    expect(styles).toContain('.app-shell[data-document-visible="false"] .response-stream-word');
   });
 });

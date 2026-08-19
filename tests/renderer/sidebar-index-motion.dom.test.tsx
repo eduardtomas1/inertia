@@ -8,10 +8,12 @@ function MotionHarness({
   active = true,
   enabled,
   order,
+  visible = true,
 }: {
   active?: boolean;
   enabled: boolean;
   order: string[];
+  visible?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   useSidebarIndexMotion({
@@ -20,7 +22,11 @@ function MotionHarness({
     layoutKey: order.join(":"),
   });
   return (
-    <div className="app-shell" data-document-active={active}>
+    <div
+      className="app-shell"
+      data-document-active={active}
+      data-document-visible={visible}
+    >
       <div ref={containerRef}>
         {order.map((identity) => (
           <div data-sidebar-motion-id={identity} key={identity}>{identity}</div>
@@ -98,8 +104,8 @@ describe("sidebar index position motion", () => {
 
   it.each([
     ["reduced motion", false, true],
-    ["inactive document", true, false],
-  ] as const)("does not animate for %s", async (_label, enabled, active) => {
+    ["hidden document", true, false],
+  ] as const)("does not animate for %s", async (_label, enabled, visible) => {
     const getBounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function getBounds(this: HTMLElement) {
         const top = [...(this.parentElement?.children ?? [])].indexOf(this) * 48;
@@ -117,14 +123,14 @@ describe("sidebar index position motion", () => {
       });
     const animate = installAnimateStub();
     const view = render(
-      <MotionHarness active={active} enabled={enabled} order={["a", "b"]} />,
+      <MotionHarness enabled={enabled} order={["a", "b"]} visible={visible} />,
     );
     if (enabled) {
       await waitFor(() => expect(getBounds).toHaveBeenCalledTimes(3));
     }
 
     view.rerender(
-      <MotionHarness active={active} enabled={enabled} order={["b", "a"]} />,
+      <MotionHarness enabled={enabled} order={["b", "a"]} visible={visible} />,
     );
     if (enabled) {
       await waitFor(() => expect(getBounds).toHaveBeenCalledTimes(6));
@@ -133,6 +139,66 @@ describe("sidebar index position motion", () => {
     }
 
     expect(animate).not.toHaveBeenCalled();
+  });
+
+  it("continues position motion while the visible document is unfocused", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function getBounds(this: HTMLElement) {
+        const top = [...(this.parentElement?.children ?? [])].indexOf(this) * 48;
+        return {
+          bottom: top + 48,
+          height: 48,
+          left: 0,
+          right: 240,
+          top,
+          width: 240,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        };
+      });
+    const animate = installAnimateStub();
+    const view = render(
+      <MotionHarness active={false} enabled order={["a", "b"]} visible />,
+    );
+    await waitFor(() => expect(animate).not.toHaveBeenCalled());
+
+    view.rerender(
+      <MotionHarness active={false} enabled order={["b", "a"]} visible />,
+    );
+    await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
+  });
+
+  it("resynchronizes hidden layout changes before visible motion resumes", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function getBounds(this: HTMLElement) {
+        const top = [...(this.parentElement?.children ?? [])].indexOf(this) * 48;
+        return {
+          bottom: top + 48,
+          height: 48,
+          left: 0,
+          right: 240,
+          top,
+          width: 240,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        };
+      });
+    const animate = installAnimateStub();
+    const view = render(<MotionHarness enabled order={["a", "b"]} />);
+    await waitFor(() => expect(animate).not.toHaveBeenCalled());
+
+    view.rerender(<MotionHarness enabled order={["b", "a"]} visible={false} />);
+    await act(async () => undefined);
+    expect(animate).not.toHaveBeenCalled();
+
+    view.rerender(<MotionHarness enabled order={["b", "a"]} visible />);
+    await act(async () => undefined);
+    expect(animate).not.toHaveBeenCalled();
+
+    view.rerender(<MotionHarness enabled order={["a", "b"]} visible />);
+    await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
   });
 
   it("cancels active position motion when reduced motion becomes active", async () => {

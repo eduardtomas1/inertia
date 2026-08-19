@@ -121,6 +121,7 @@ interface AppLayoutActions {
 interface AppLayoutProps {
   platform: string;
   documentActive: boolean;
+  documentVisible: boolean;
   settings: AppSettings;
   connection: Connection;
   appUpdate: AppUpdate;
@@ -206,6 +207,7 @@ export function activeConversationIsVisible(input: {
 export function AppLayout({
   platform,
   documentActive,
+  documentVisible,
   settings,
   connection,
   appUpdate,
@@ -414,6 +416,7 @@ export function AppLayout({
       data-runtime-generation={connection.runtimeGeneration ?? undefined}
       data-connection-status={connection.status}
       data-document-active={documentActive ? "true" : "false"}
+      data-document-visible={documentVisible ? "true" : "false"}
       style={shellStyle}
     >
       <Suspense fallback={null}>

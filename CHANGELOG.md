@@ -4,6 +4,24 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.37 — 2026-08-19
+
+### Files and live conversations handle rich content safely
+
+- Markdown and Markdown-linked project images now render directly in Files with accessible Preview and Source modes, exact heading and cross-file navigation, bounded near-viewport loading, strict image validation, and a safe source fallback for incomplete or oversized documents.
+- Image-only and text-plus-image follow-ups can reach an active Codex, Claude, or OpenCode turn without changing its identity or ordering. Private copies, provider acknowledgement, persistence, rollback, and Claude queue reservations remain bounded and attributable across success, failure, cancellation, and restart.
+- Claude Read results accept legitimate resized or optimized images while retaining strict MIME, base64, duplicate-payload, event, aggregate-size, and unchanged-PDF validation.
+
+### Appearance and active work read more clearly
+
+- A keyboard-accessible theme library adds Inertia, Grove, Ocean, Ember, and Iris palettes across light and dark appearance, terminal colors, first paint, persistence, recovery, and restart. Schema 59 stores the selected palette.
+- `/resume`, `/compact`, and the slash-command menu share a stable floating command surface with complete keyboard navigation and clear provider and completion states. Daily Work gains denser totals, truthful provider shares, stable conversation rows, a fixed explanatory footer, and reduced-motion-safe loading.
+- Live commentary, tool actions, delegated agents, and Goal tasks now use bounded Beautiful UI motion tied to real states, including truthful warning and failure colors. Concurrent working chats keep their canonical run order instead of jumping as activity updates arrive.
+
+### Release confidence
+
+- Windows unit tests are split into two isolated single-worker shards without reducing coverage, while cross-platform compaction, layout, and release-draft checks are more deterministic. Architecture and lint layers, all TypeScript projects, more than 3,700 unit and integration tests, portable provider contracts, Electron scenarios, production builds, bundle budgets, package smoke, Electron fuses, and exact-head Linux, macOS, and Windows gates protect the release.
+
 ## 0.0.36 — 2026-08-18
 
 ### Updates install only when the package can prove they are safe

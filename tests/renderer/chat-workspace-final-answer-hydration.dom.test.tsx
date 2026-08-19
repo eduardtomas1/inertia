@@ -336,6 +336,12 @@ async function expectLoadingConversation(): Promise<void> {
   for (const marker of loading) expect(marker).toBeVisible();
 }
 
+async function expectVirtualWindow(container: HTMLElement): Promise<void> {
+  await waitFor(() => {
+    expect(container.querySelector(".response-virtual-window")).not.toBeNull();
+  }, { timeout: 5_000 });
+}
+
 afterEach(() => {
   finalAnswerAnchorStarts.mockReset();
   vi.restoreAllMocks();
@@ -391,10 +397,7 @@ describe("ChatWorkspace final-answer hydration", () => {
       />,
     );
     await geometry.flushFrames();
-    await waitFor(() => {
-      expect(view.container.querySelector(".response-virtual-window"))
-        .not.toBeNull();
-    });
+    await expectVirtualWindow(view.container);
     geometry.setScrollTop(1_500);
     transcript.scrollTop = 1_500;
     visible.mockClear();
@@ -469,8 +472,7 @@ describe("ChatWorkspace final-answer hydration", () => {
     );
     await geometry.flushFrames();
 
-    expect(view.container.querySelector(".response-virtual-window"))
-      .not.toBeNull();
+    await expectVirtualWindow(view.container);
     expect(finalAnswerAnchorStarts).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,3 @@
-import type { CSSProperties } from "react";
-import { Check, Laptop, Moon, Sun } from "lucide-react";
 import clsx from "clsx";
 import "./ThemeLibrary.css";
 
@@ -8,19 +6,15 @@ import type {
   ColorThemeId,
   ThemePreference,
 } from "@shared/contracts";
-import {
-  COLOR_THEME_OPTIONS,
-  type ColorThemePreview,
-} from "../utils/colorThemes";
+import { COLOR_THEME_OPTIONS } from "../utils/colorThemes";
 
 const APPEARANCE_OPTIONS: ReadonlyArray<{
   value: ThemePreference;
   label: string;
-  icon: typeof Sun;
 }> = [
-  { value: "system", label: "System", icon: Laptop },
-  { value: "light", label: "Light", icon: Sun },
-  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
 ];
 
 function AppearancePane({
@@ -39,13 +33,6 @@ function AppearancePane({
         clip && `is-${clip}`,
       )}
     >
-      <span className="appearance-wireframe-sidebar" />
-      <span className="appearance-wireframe-canvas">
-        <span className="appearance-wireframe-heading" />
-        <span className="appearance-wireframe-line is-long" />
-        <span className="appearance-wireframe-line" />
-        <span className="appearance-wireframe-composer" />
-      </span>
     </span>
   );
 }
@@ -63,43 +50,19 @@ function AppearancePreview({ mode }: { mode: ThemePreference }): React.JSX.Eleme
   );
 }
 
-type PreviewStyle = CSSProperties & {
-  "--theme-preview-canvas": string;
-  "--theme-preview-sidebar": string;
-  "--theme-preview-surface": string;
-  "--theme-preview-accent": string;
-  "--theme-preview-accent-soft": string;
-  "--theme-preview-message-action": string;
-};
-
-function previewStyle(preview: ColorThemePreview): PreviewStyle {
-  return {
-    "--theme-preview-canvas": preview.canvas,
-    "--theme-preview-sidebar": preview.sidebar,
-    "--theme-preview-surface": preview.surface,
-    "--theme-preview-accent": preview.accent,
-    "--theme-preview-accent-soft": preview.accentSoft,
-    "--theme-preview-message-action": preview.messageAction,
-  };
-}
-
 function ColorThemeSwatch({
   mode,
-  preview,
+  colorTheme,
 }: {
   mode: "light" | "dark";
-  preview: ColorThemePreview;
+  colorTheme: ColorThemeId;
 }): React.JSX.Element {
   return (
     <span
       className={clsx("color-theme-swatch", `is-${mode}`)}
-      style={previewStyle(preview)}
+      data-color-theme={colorTheme}
       aria-hidden="true"
-    >
-      <span className="color-theme-swatch-sidebar" />
-      <span className="color-theme-swatch-card" />
-      <span className="color-theme-swatch-accent" />
-    </span>
+    />
   );
 }
 
@@ -128,7 +91,6 @@ export function ThemeLibrary({
         aria-label="Appearance"
       >
         {APPEARANCE_OPTIONS.map((option) => {
-          const OptionIcon = option.icon;
           const active = settings.theme === option.value;
           return (
             <button
@@ -142,7 +104,13 @@ export function ThemeLibrary({
               onClick={() => { void onUpdate({ theme: option.value }); }}
             >
               <AppearancePreview mode={option.value} />
-              <span><OptionIcon size={14} />{option.label}</span>
+              <span>
+                <span
+                  className={`appearance-mode-icon is-${option.value}`}
+                  aria-hidden="true"
+                />
+                {option.label}
+              </span>
             </button>
           );
         })}
@@ -171,17 +139,15 @@ export function ThemeLibrary({
               onClick={() => selectColorTheme(option.id)}
             >
               <span className="color-theme-preview-pair">
-                <ColorThemeSwatch mode="light" preview={option.light} />
-                <ColorThemeSwatch mode="dark" preview={option.dark} />
+                <ColorThemeSwatch mode="light" colorTheme={option.id} />
+                <ColorThemeSwatch mode="dark" colorTheme={option.id} />
               </span>
               <span className="color-theme-option-copy">
                 <strong>{option.label}</strong>
                 <small>{option.description}</small>
               </span>
               {active && (
-                <span className="color-theme-selected" aria-hidden="true">
-                  <Check size={12} />
-                </span>
+                <span className="color-theme-selected" aria-hidden="true" />
               )}
             </button>
           );

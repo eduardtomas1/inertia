@@ -176,13 +176,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.36
+### Version 0.0.37
 
-This release adds guarded in-app updates to eligible packages. Inertia verifies package capability, update metadata, signatures or AppImage replaceability, active privileged work, and the native handoff before installation; development, unsigned Windows, and ad-hoc macOS builds keep the manual browser flow.
+This release renders safe Markdown previews and project images directly in Files, and lets image follow-ups reach active Codex, Claude, and OpenCode turns with bounded ownership, ordering, and provider acknowledgement. Claude Read also accepts legitimate resized image results without weakening payload validation.
 
-Daily Work now summarizes the selected local day with settled runtime, tokens, providers, and navigable conversations. Persisted chat defaults stay visible across restarts, the prompt index adopts a compact Codex-style rail, and real agent states use the exact Beautiful UI motion contract with reduced-motion and bundle-budget safeguards.
+Five persisted color-theme families, polished `/resume` and `/compact` surfaces, clearer Daily Work presentation, stable running-chat order, and motion grounded in real agent states make active work easier to scan while preserving keyboard, reduced-motion, forced-colors, and renderer-budget safeguards.
 
-Download [Inertia v0.0.36](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.36):
+Download [Inertia v0.0.37](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.37):
 
 | Platform | Download |
 | --- | --- |

@@ -67,6 +67,27 @@
   font-weight: 620;
 }
 
+.appearance-mode-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  background: currentColor;
+  mask: var(--appearance-mode-icon) center / contain no-repeat;
+}
+
+.appearance-mode-icon.is-system {
+  --appearance-mode-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z'/%3E%3Cpath d='M20.054 15.987H3.946'/%3E%3C/svg%3E");
+}
+
+.appearance-mode-icon.is-light {
+  --appearance-mode-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2M20 12h2m-2.34 5.66-1.41 1.41m1.41-14.14-1.41 1.41'/%3E%3C/svg%3E");
+}
+
+.appearance-mode-icon.is-dark {
+  --appearance-mode-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401'/%3E%3C/svg%3E");
+}
+
 .appearance-wireframe {
   position: relative;
   display: block;
@@ -86,7 +107,6 @@
   --wire-accent: #6259d9;
   position: absolute;
   inset: 0;
-  display: flex;
   overflow: hidden;
   background: var(--wire-canvas);
 }
@@ -102,51 +122,28 @@
 .appearance-wireframe-pane.is-left { clip-path: inset(0 50% 0 0); }
 .appearance-wireframe-pane.is-right { clip-path: inset(0 0 0 50%); }
 
-.appearance-wireframe-sidebar {
-  width: 25%;
-  flex: 0 0 auto;
+.appearance-wireframe-pane::before {
+  position: absolute;
+  inset: 0;
   border-right: 1px solid color-mix(in srgb, var(--wire-line) 24%, transparent);
-  background: var(--wire-sidebar);
+  background:
+    linear-gradient(var(--wire-sidebar), var(--wire-sidebar)) 0 0 / 25% 100% no-repeat,
+    linear-gradient(var(--wire-accent), var(--wire-accent)) calc(25% + 10px) 10px / 33% 5px no-repeat,
+    linear-gradient(var(--wire-line), var(--wire-line)) calc(25% + 10px) 20px / 57% 3px no-repeat,
+    linear-gradient(var(--wire-line), var(--wire-line)) calc(25% + 10px) 28px / 41% 3px no-repeat;
+  content: "";
 }
 
-.appearance-wireframe-canvas {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 5px;
-  padding: 10px 10px 8px;
-}
-
-.appearance-wireframe-heading,
-.appearance-wireframe-line,
-.appearance-wireframe-composer {
-  display: block;
-  border-radius: 999px;
-}
-
-.appearance-wireframe-heading {
-  width: 44%;
-  height: 5px;
-  background: var(--wire-accent);
-}
-
-.appearance-wireframe-line {
-  width: 55%;
-  height: 3px;
-  background: var(--wire-line);
-}
-
-.appearance-wireframe-line.is-long { width: 76%; }
-
-.appearance-wireframe-composer {
-  width: 88%;
-  height: 14px;
-  margin-top: auto;
+.appearance-wireframe-pane::after {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  left: calc(25% + 10px);
+  height: 12px;
   border: 1px solid color-mix(in srgb, var(--wire-line) 35%, transparent);
   border-radius: 5px;
   background: var(--wire-surface);
+  content: "";
 }
 
 .theme-library-heading { margin-top: 5px; }
@@ -213,32 +210,116 @@
     0 2px 8px color-mix(in srgb, var(--text) 12%, transparent);
 }
 
+.color-theme-swatch[data-color-theme="inertia"].is-light {
+  --theme-preview-canvas: #f1f1f3;
+  --theme-preview-sidebar: #ececf0;
+  --theme-preview-surface: #fcfcfd;
+  --theme-preview-accent: #4239cc;
+  --theme-preview-accent-soft: #e2e1fb;
+  --theme-preview-message-action: #6259d9;
+}
+
+.color-theme-swatch[data-color-theme="inertia"].is-dark {
+  --theme-preview-canvas: #070708;
+  --theme-preview-sidebar: #111113;
+  --theme-preview-surface: #161618;
+  --theme-preview-accent: #a89fff;
+  --theme-preview-accent-soft: #232033;
+  --theme-preview-message-action: #c4beff;
+}
+
+.color-theme-swatch[data-color-theme="grove"].is-light {
+  --theme-preview-canvas: #eef2ed;
+  --theme-preview-sidebar: #e7ede5;
+  --theme-preview-surface: #fbfcfa;
+  --theme-preview-accent: #2f6f4e;
+  --theme-preview-accent-soft: #d5e8da;
+  --theme-preview-message-action: #8a6328;
+}
+
+.color-theme-swatch[data-color-theme="grove"].is-dark {
+  --theme-preview-canvas: #101713;
+  --theme-preview-sidebar: #131d16;
+  --theme-preview-surface: #1c281f;
+  --theme-preview-accent: #82c99a;
+  --theme-preview-accent-soft: #223c2c;
+  --theme-preview-message-action: #d8b66d;
+}
+
+.color-theme-swatch[data-color-theme="ocean"].is-light {
+  --theme-preview-canvas: #edf3f6;
+  --theme-preview-sidebar: #e6eff3;
+  --theme-preview-surface: #fcfdfe;
+  --theme-preview-accent: #28698a;
+  --theme-preview-accent-soft: #d6e9f1;
+  --theme-preview-message-action: #2b7c78;
+}
+
+.color-theme-swatch[data-color-theme="ocean"].is-dark {
+  --theme-preview-canvas: #0e171d;
+  --theme-preview-sidebar: #101d25;
+  --theme-preview-surface: #192a34;
+  --theme-preview-accent: #78b9d7;
+  --theme-preview-accent-soft: #1b3542;
+  --theme-preview-message-action: #73c7c0;
+}
+
+.color-theme-swatch[data-color-theme="ember"].is-light {
+  --theme-preview-canvas: #f5f0ed;
+  --theme-preview-sidebar: #f1e9e4;
+  --theme-preview-surface: #fffdfb;
+  --theme-preview-accent: #a14830;
+  --theme-preview-accent-soft: #f0d8ce;
+  --theme-preview-message-action: #b4583d;
+}
+
+.color-theme-swatch[data-color-theme="ember"].is-dark {
+  --theme-preview-canvas: #191311;
+  --theme-preview-sidebar: #201713;
+  --theme-preview-surface: #2c1f1a;
+  --theme-preview-accent: #e89a78;
+  --theme-preview-accent-soft: #44271d;
+  --theme-preview-message-action: #f0aa8c;
+}
+
+.color-theme-swatch[data-color-theme="iris"].is-light {
+  --theme-preview-canvas: #f2f0f7;
+  --theme-preview-sidebar: #ece9f3;
+  --theme-preview-surface: #fdfcff;
+  --theme-preview-accent: #6550ad;
+  --theme-preview-accent-soft: #e1daf5;
+  --theme-preview-message-action: #9a4f92;
+}
+
+.color-theme-swatch[data-color-theme="iris"].is-dark {
+  --theme-preview-canvas: #12101a;
+  --theme-preview-sidebar: #171320;
+  --theme-preview-surface: #211c2e;
+  --theme-preview-accent: #b49bf0;
+  --theme-preview-accent-soft: #30264a;
+  --theme-preview-message-action: #dda0d5;
+}
+
 .color-theme-swatch + .color-theme-swatch { margin-left: -10px; }
 
-.color-theme-swatch-sidebar {
+.color-theme-swatch::before {
   position: absolute;
   inset: 10px auto 10px 9px;
   width: 12px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--theme-preview-sidebar) 90%, transparent);
+  content: "";
 }
 
-.color-theme-swatch-card {
+.color-theme-swatch::after {
   position: absolute;
   inset: 15px 9px 15px 25px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--theme-preview-surface) 88%, transparent);
+  background:
+    linear-gradient(var(--theme-preview-accent), var(--theme-preview-accent)) right 4px bottom 4px / 12px 4px no-repeat,
+    color-mix(in srgb, var(--theme-preview-surface) 88%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-preview-accent) 14%, transparent);
-}
-
-.color-theme-swatch-accent {
-  position: absolute;
-  right: 13px;
-  bottom: 19px;
-  width: 12px;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--theme-preview-accent);
+  content: "";
 }
 
 .color-theme-option-copy {
@@ -273,4 +354,12 @@
   color: var(--accent-text);
   background: var(--accent);
   box-shadow: 0 2px 6px color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.color-theme-selected::after {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  content: "";
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
 }

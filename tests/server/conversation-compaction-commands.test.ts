@@ -298,7 +298,9 @@ describe("conversation compaction command", () => {
     const root = portableFixtureRoot(`Cursor compact ${accessMode} approval`);
     roots.push(root);
     const capturePath = join(root, "capture.jsonl");
-    const command = portableNodeExecutable(root, "cursor");
+    // Model the dedicated Cursor Agent binary. A basename of `cursor` is the
+    // editor launcher and is intentionally invoked through `cursor agent …`.
+    const command = portableNodeExecutable(root, "cursor-agent");
     writeNodeSubcommand(root, "acp", `
 const fs = require("node:fs");
 const readline = require("node:readline");

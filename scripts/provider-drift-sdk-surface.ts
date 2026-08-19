@@ -5,6 +5,12 @@ import {
   type Options as ClaudeOptions,
   type PermissionResult,
   type Query,
+  type SDKAssistantMessage,
+  type SDKMessage,
+  type SDKPartialAssistantMessage,
+  type SDKResultMessage,
+  type SDKTaskNotificationMessage,
+  type SDKTaskStartedMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
@@ -21,6 +27,22 @@ import {
 export const cursorClient: acp.ClientApp = acp.client({ name: "Inertia provider drift" });
 export const cursorPermissionMethod: "session/request_permission" =
   acp.methods.client.session.requestPermission;
+export const cursorCriticalMethods = {
+  initialize: acp.methods.agent.initialize,
+  authenticate: acp.methods.agent.authenticate,
+  sessionNew: acp.methods.agent.session.new,
+  sessionLoad: acp.methods.agent.session.load,
+  sessionPrompt: acp.methods.agent.session.prompt,
+  sessionCancel: acp.methods.agent.session.cancel,
+  sessionSetMode: acp.methods.agent.session.setMode,
+  sessionSetConfigOption: acp.methods.agent.session.setConfigOption,
+  sessionUpdate: acp.methods.client.session.update,
+} as const;
+export type CursorSessionUpdateSurface = acp.SessionNotification["update"];
+export type CursorPromptTerminalSurface = Pick<
+  acp.PromptResponse,
+  "stopReason" | "usage"
+>;
 
 export type ClaudeQueryFactory = (params: {
   prompt: string | AsyncIterable<SDKUserMessage>;
@@ -63,12 +85,23 @@ export const claudeProductOptions = {
 } satisfies ClaudeOptions;
 export type ClaudeMetadataSurface = Pick<
   Query,
-  "supportedModels" | "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET"
+  | "close"
+  | "interrupt"
+  | "stopTask"
+  | "supportedModels"
+  | "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET"
 >;
 export type ClaudeUserMessageToolResultSurface = Pick<
   SDKUserMessage,
   "tool_use_result"
 >;
+export type ClaudeLifecycleMessageSurface =
+  | SDKMessage
+  | SDKAssistantMessage
+  | SDKPartialAssistantMessage
+  | SDKResultMessage
+  | SDKTaskStartedMessage
+  | SDKTaskNotificationMessage;
 
 export const openCodeClient: OpencodeClient = createOpencodeClient({
   baseUrl: "http://127.0.0.1:9",
@@ -82,3 +115,30 @@ export type OpenCodeSurface =
   | PermissionRuleset
   | Provider
   | QuestionInfo;
+export const openCodeCriticalMethods = {
+  subscribe: openCodeClient.event.subscribe,
+  promptAsync: openCodeClient.session.promptAsync,
+  abort: openCodeClient.session.abort,
+  permissionReply: openCodeClient.permission.reply,
+  questionReply: openCodeClient.question.reply,
+  questionReject: openCodeClient.question.reject,
+} as const;
+export type OpenCodeLifecycleEventSurface = Extract<
+  Event,
+  {
+    type:
+      | "message.updated"
+      | "message.part.updated"
+      | "message.part.delta"
+      | "message.part.removed"
+      | "session.next.prompt.admitted"
+      | "session.status"
+      | "session.idle"
+      | "session.error"
+      | "permission.asked"
+      | "permission.v2.asked"
+      | "question.asked"
+      | "question.v2.asked"
+      | "todo.updated";
+  }
+>;

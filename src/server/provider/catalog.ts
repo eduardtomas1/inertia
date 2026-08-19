@@ -14,7 +14,7 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.
   cursor: {
     id: "cursor",
     name: "Cursor",
-    command: "agent",
+    command: "cursor-agent",
   },
   opencode: {
     id: "opencode",

@@ -23,7 +23,7 @@ import type { ProviderId, ProviderRunResult } from "./contracts";
 import { CappedProviderBuffer, ProviderNdjsonDecoder } from "./io";
 import { providerProcessInvocation } from "./process";
 
-const MAX_NDJSON_LINE_CHARS = 1024 * 1024;
+const MAX_NDJSON_LINE_BYTES = 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 
@@ -179,7 +179,7 @@ function startCliRun(
     emitter.text(text);
   };
   const decoder = new ProviderNdjsonDecoder(
-    MAX_NDJSON_LINE_CHARS,
+    MAX_NDJSON_LINE_BYTES,
     (line) => {
       normalizeProviderLine(
         providerId,
@@ -321,7 +321,7 @@ function startCliRun(
 
       if (
         spawnError
-        || (!parserState.sawTerminalEvent && exitCode !== 0)
+        || !parserState.sawTerminalEvent
         || parserState.hadErrorEvent
       ) {
         const message = providerFailureMessage(
@@ -387,6 +387,10 @@ function startCliRun(
     requestProcessTermination(true);
     finish(null, null);
   });
+  // Arm cleanup while the process identity is still owned. A spontaneous CLI
+  // exit may leave descendants in its detached process group; waiting until
+  // `close` would lose the safe opportunity to terminate that tree.
+  child.once("exit", () => requestProcessTermination(true));
   child.once("close", finish);
 
   try {

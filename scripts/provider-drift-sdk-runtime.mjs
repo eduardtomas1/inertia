@@ -8,7 +8,16 @@ if (typeof acp.client !== "function"
 }
 const cursorClient = acp.client({ name: "Inertia provider drift" });
 if (typeof cursorClient?.onRequest !== "function"
-  || typeof cursorClient?.onNotification !== "function") {
+  || typeof cursorClient?.onNotification !== "function"
+  || typeof cursorClient?.connectWith !== "function"
+  || typeof acp.ndJsonStream !== "function"
+  || typeof acp.methods?.agent?.initialize !== "string"
+  || typeof acp.methods?.agent?.session?.new !== "string"
+  || typeof acp.methods?.agent?.session?.load !== "string"
+  || typeof acp.methods?.agent?.session?.prompt !== "string"
+  || typeof acp.methods?.agent?.session?.cancel !== "string"
+  || typeof acp.methods?.agent?.session?.setMode !== "string"
+  || typeof acp.methods?.agent?.session?.setConfigOption !== "string") {
   throw new Error("ACP client runtime surface is incompatible.");
 }
 
@@ -22,8 +31,12 @@ const openCodeClient = createOpencodeClient({
   throwOnError: true,
 });
 if (typeof openCodeClient?.provider?.list !== "function"
+  || typeof openCodeClient?.event?.subscribe !== "function"
+  || typeof openCodeClient?.session?.promptAsync !== "function"
+  || typeof openCodeClient?.session?.abort !== "function"
   || typeof openCodeClient?.permission?.reply !== "function"
-  || typeof openCodeClient?.question?.reply !== "function") {
+  || typeof openCodeClient?.question?.reply !== "function"
+  || typeof openCodeClient?.question?.reject !== "function") {
   throw new Error("OpenCode provider, permission, or question surface is incompatible.");
 }
 

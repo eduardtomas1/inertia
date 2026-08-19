@@ -159,6 +159,93 @@ describe("Claude delegated-agent projection", () => {
     });
   });
 
+  it("covers the SDK's exact local workflow and remote agent task variants", () => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => {
+      updates.push(event);
+    });
+
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "workflow-task",
+      task_type: "local_workflow",
+      workflow_name: "quality-gate",
+      description: "Run the quality workflow",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "workflow-task",
+      description: "Review: provider integrations",
+      usage: { total_tokens: 10, tool_uses: 1, duration_ms: 5 },
+      summary: "Reviewing providers",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "workflow-task",
+      status: "completed",
+      output_file: "/tmp/workflow-task",
+      summary: "Workflow completed",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "remote-task",
+      task_type: "remote_agent",
+      description: "Run a remote review",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "remote-task",
+      status: "stopped",
+      output_file: "/tmp/remote-task",
+      summary: "Remote review stopped",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "local-bash-task",
+      task_type: "local_bash",
+      description: "Ambient workflow shell command",
+    }));
+
+    expect(updates).toEqual([
+      expect.objectContaining({
+        providerTaskId: "workflow-task",
+        providerName: "quality-gate",
+        status: "spawned",
+      }),
+      expect.objectContaining({
+        providerTaskId: "workflow-task",
+        status: "running",
+        progress: "Reviewing providers",
+      }),
+      expect.objectContaining({
+        providerTaskId: "workflow-task",
+        providerStatus: "completed",
+        status: "completed",
+        result: "Workflow completed",
+      }),
+      expect.objectContaining({
+        providerTaskId: "remote-task",
+        status: "spawned",
+      }),
+      expect.objectContaining({
+        providerTaskId: "remote-task",
+        providerStatus: "stopped",
+        status: "cancelled",
+        result: "Remote review stopped",
+      }),
+    ]);
+    expect(tracker.hasLiveTasks()).toBe(false);
+    expect(updates).not.toContainEqual(expect.objectContaining({
+      providerTaskId: "local-bash-task",
+    }));
+  });
+
   it("preserves waiting, failed, and stopped provider states exactly", () => {
     const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
     const tracker = new ClaudeSubagentTraceTracker((event) => {

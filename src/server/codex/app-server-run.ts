@@ -4,7 +4,13 @@ import { staleProviderSessionDecision } from "../../shared/continuation-policy";
 import { INERTIA_VERSION } from "../../shared/version";
 import {
   CODEX_RPC_TIMEOUT_MS,
+  CODEX_CHILD_INTERRUPT_OVERALL_TIMEOUT_MS,
+  CODEX_CHILD_INTERRUPT_TIMEOUT_MS,
+  CODEX_APP_SERVER_MAX_QUEUED_STDIN_BYTES,
+  CODEX_ROOT_INTERRUPT_TIMEOUT_MS,
   CODEX_TRANSPORT_CLOSE_GRACE_MS,
+  MAX_CODEX_PENDING_CANCELLATION_REQUESTS,
+  MAX_CODEX_PENDING_CLIENT_REQUESTS,
   MAX_CODEX_DIAGNOSTIC_CHARS,
   MAX_CODEX_TEXT_CHARS,
   codexAccessPolicy,
@@ -17,6 +23,7 @@ import {
   type CodexRunPhase,
 } from "./app-server-config";
 import { CodexAppServerEvents } from "./app-server-events";
+import { CodexJsonLineWriter } from "./jsonl-writer";
 import {
   boundedText,
   CappedTextBuffer,
@@ -104,6 +111,7 @@ export function startCodexAppServerRun(
   });
   let goalMutationTail = Promise.resolve();
   let events: CodexAppServerEvents;
+  let cancellationStarted = false;
   const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
     child,
     "Codex App Server process tree",
@@ -189,20 +197,32 @@ export function startCodexAppServerRun(
     };
   };
 
+  const stdinWriter = new CodexJsonLineWriter(
+    child.stdin,
+    protocolLimits.maxFrameBytes,
+    CODEX_APP_SERVER_MAX_QUEUED_STDIN_BYTES,
+  );
+
+  const handleWriteFailure = (error: unknown): void => {
+    if (settled) return;
+    const message = error instanceof Error
+      ? error.message
+      : "The Codex App Server input stream closed.";
+    lastError ??= message;
+    rememberFailure(
+      "transport-closed",
+      "The Codex App Server connection closed while sending a request.",
+      message,
+    );
+    finish("failed", child.exitCode, child.signalCode);
+  };
+
   const writeMessage = (message: JsonObject): boolean => {
     if (settled || child.stdin.destroyed || !child.stdin.writable) {
       return false;
     }
-    try {
-      child.stdin.write(`${JSON.stringify(message)}\n`);
-      return true;
-    } catch {
-      rememberFailure(
-        "transport-closed",
-        "The Codex App Server connection closed while sending a request.",
-      );
-      return false;
-    }
+    void stdinWriter.write(message).catch(handleWriteFailure);
+    return true;
   };
 
   const settlePendingRequests = (message: string): void => {
@@ -225,6 +245,7 @@ export function startCodexAppServerRun(
     }
     settled = true;
     phase = "settled";
+    stdinWriter.close(new Error("The Codex App Server run ended."));
     settleStartupGate(
       new Error("The Codex App Server run ended before startup completed."),
     );
@@ -309,7 +330,28 @@ export function startCodexAppServerRun(
     params: JsonObject,
     onResponseFrame?: () => void,
     recordFailure = true,
+    timeoutMs = options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS,
+    useCancellationReserve = false,
   ): Promise<JsonObject> => {
+    const pendingLimit = MAX_CODEX_PENDING_CLIENT_REQUESTS
+      + (useCancellationReserve
+        ? MAX_CODEX_PENDING_CANCELLATION_REQUESTS
+        : 0);
+    if (pendingRequests.size >= pendingLimit) {
+      const message =
+        `Codex exceeded the ${pendingLimit}-request client RPC limit.`;
+      rememberFailure(
+        "malformed-protocol",
+        "Too many Codex App Server requests were pending.",
+        message,
+      );
+      return Promise.reject(new Error(message));
+    }
+    if (!Number.isSafeInteger(nextRequestId)) {
+      const message = "The Codex App Server JSON-RPC id space was exhausted.";
+      rememberFailure("malformed-protocol", message);
+      return Promise.reject(new Error(message));
+    }
     const id = nextRequestId;
     nextRequestId += 1;
     return new Promise<JsonObject>((resolve, reject) => {
@@ -323,7 +365,7 @@ export function startCodexAppServerRun(
           );
         }
         reject(new Error(`${method} timed out.`));
-      }, options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS);
+      }, timeoutMs);
       timeout.unref();
       pendingRequests.set(id, {
         method,
@@ -349,17 +391,59 @@ export function startCodexAppServerRun(
     if (settled) return;
     cancelRequested = true;
     events.settleInteractions();
-    if (events.cancelPendingParentCompletion()) return;
-    if (force || !spawned || !providerThreadId || !activeTurnId) {
+    const parentCompletionWasPending =
+      events.cancelPendingParentCompletion();
+    if (force || !spawned || !providerThreadId) {
       requestProcessTermination(force);
       return;
     }
-    void request("turn/interrupt", {
-      threadId: providerThreadId,
-      turnId: activeTurnId,
-    }).catch(() => {
-      if (!settled) requestProcessTermination(true);
-    });
+    if (cancellationStarted) return;
+    cancellationStarted = true;
+    void (async () => {
+      const childInterrupts = Promise.allSettled(
+        events.interruptibleChildTurns().map(({ threadId, turnId }) =>
+          request(
+            "turn/interrupt",
+            { threadId, turnId },
+            undefined,
+            false,
+            CODEX_CHILD_INTERRUPT_TIMEOUT_MS,
+            true,
+          )),
+      );
+      let overallTimer: NodeJS.Timeout | undefined;
+      const overallDeadline = new Promise<void>((resolve) => {
+        overallTimer = setTimeout(
+          resolve,
+          CODEX_CHILD_INTERRUPT_OVERALL_TIMEOUT_MS,
+        );
+        overallTimer.unref();
+      });
+      await Promise.race([childInterrupts, overallDeadline]);
+      if (overallTimer) clearTimeout(overallTimer);
+      if (settled) return;
+      if (parentCompletionWasPending) {
+        finish("cancelled", null, null);
+        return;
+      }
+      if (!activeTurnId) {
+        requestProcessTermination(false);
+        return;
+      }
+      try {
+        await request(
+          "turn/interrupt",
+          { threadId: providerThreadId, turnId: activeTurnId },
+          undefined,
+          false,
+          CODEX_ROOT_INTERRUPT_TIMEOUT_MS,
+          true,
+        );
+        if (!settled) requestProcessTermination(false);
+      } catch {
+        if (!settled) requestProcessTermination(true);
+      }
+    })();
   };
 
   events = new CodexAppServerEvents({
@@ -514,14 +598,8 @@ export function startCodexAppServerRun(
     diagnostic.append(chunk.toString("utf8"));
   });
   child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-    if (!settled) {
-      lastError ??= error.message;
-      rememberFailure(
-        "transport-closed",
-        "The Codex App Server connection closed while sending a request.",
-        error.message,
-      );
-    }
+    stdinWriter.close(error);
+    handleWriteFailure(error);
   });
   child.once("error", (error: NodeJS.ErrnoException) => {
     lastError = error.message;

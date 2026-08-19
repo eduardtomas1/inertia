@@ -339,7 +339,8 @@ jobs:
           load_release_by_tag() {
             local matches match_count
             matches="$(
-              gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              gh api --paginate -H "Cache-Control: no-cache" \
+                "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
                 | jq -s --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)]'
             )"
             match_count="$(jq 'length' <<< "$matches")"
@@ -353,6 +354,25 @@ jobs:
             jq '.[0]' <<< "$matches" > "$release_json"
           }
 
+          load_release_by_tag_with_retry() {
+            local attempt delay
+            delay=1
+            for attempt in {1..7}; do
+              if load_release_by_tag; then
+                return 0
+              fi
+              if [[ "$attempt" -eq 7 ]]; then
+                break
+              fi
+              echo "Release $RELEASE_TAG is not visible yet; retrying in ${delay}s."
+              sleep "$delay"
+              if [[ "$delay" -lt 8 ]]; then
+                delay="$((delay * 2))"
+              fi
+            done
+            return 1
+          }
+
           if ! load_release_by_tag; then
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
@@ -360,7 +380,7 @@ jobs:
               --draft \
               --title "Inertia $RELEASE_TAG" \
               --generate-notes
-            if ! load_release_by_tag; then
+            if ! load_release_by_tag_with_retry; then
               echo "The newly-created draft release could not be found." >&2
               exit 1
             fi

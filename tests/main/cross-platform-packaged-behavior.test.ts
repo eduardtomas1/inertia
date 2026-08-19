@@ -331,11 +331,17 @@ describe("cross-platform packaged behavior contract", () => {
       "Upload without replacing existing assets",
     );
     expect(releaseUpload).toContain(
-      'gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100"',
+      'gh api --paginate -H "Cache-Control: no-cache"',
+    );
+    expect(releaseUpload).toContain(
+      '"repos/$GITHUB_REPOSITORY/releases?per_page=100"',
     );
     expect(releaseUpload).toContain(
       'gh api "repos/$GITHUB_REPOSITORY/releases/$release_id"',
     );
+    expect(releaseUpload).toContain("load_release_by_tag_with_retry");
+    expect(releaseUpload).toContain("for attempt in {1..7}; do");
+    expect(releaseUpload).toContain('sleep "$delay"');
     expect(releaseUpload).not.toContain("releases/tags/$RELEASE_TAG");
   });
 

@@ -4,6 +4,8 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+- Exact-tag publishing now tolerates GitHub's delayed draft-release visibility with bounded retries before asset verification and upload, avoiding a manual rerun without weakening no-replacement safeguards.
+
 ## 0.0.37 — 2026-08-19
 
 ### Files and live conversations handle rich content safely

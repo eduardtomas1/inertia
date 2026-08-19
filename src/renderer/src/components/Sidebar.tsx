@@ -63,6 +63,7 @@ import {
 } from "../utils/sidebarModel";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { ConversationActionsMenu } from "./ConversationActionsMenu";
+import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
 import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
@@ -1222,7 +1223,7 @@ function SidebarView({
 
         <div className="sidebar-footer">
           <button type="button" className="sidebar-destination" onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
-            <Activity size={16} /><span>Daily work</span>
+            <DailyWorkMark size={16} /><span>Daily work</span>
           </button>
           <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
             <BarChart3 size={16} /><span>Usage</span>

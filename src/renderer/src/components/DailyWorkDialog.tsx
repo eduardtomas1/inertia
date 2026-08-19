@@ -1,5 +1,4 @@
 import {
-  Activity,
   ChevronRight,
   RefreshCw,
   X,
@@ -24,6 +23,7 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
 import { formatCompact, formatCount, formatDuration } from "../lib/usageFormat";
+import { DailyWorkMark } from "./DailyWorkMark";
 import { ProviderMark } from "./ProviderMark";
 import { IconButton, LoadingMark } from "./ui";
 import "./DailyWorkDialog.css";
@@ -245,7 +245,9 @@ export function DailyWorkDialog({
         onKeyDown={trapFocus}
       >
         <header className="daily-work-header">
-          <span className="daily-work-header-icon"><Activity size={18} aria-hidden="true" /></span>
+          <span className="daily-work-header-icon" aria-hidden="true">
+            <DailyWorkMark size={19} />
+          </span>
           <div>
             <h2 id={titleId}>Daily work</h2>
             <p id={descriptionId}>
@@ -336,7 +338,7 @@ export function DailyWorkDialog({
                 </header>
                 {dashboard.conversations.length === 0 ? (
                   <div className="daily-work-empty">
-                    <Activity size={24} aria-hidden="true" />
+                    <DailyWorkMark size={24} />
                     <strong>No work recorded today</strong>
                     <span>New conversations and settled agent turns will appear here.</span>
                   </div>

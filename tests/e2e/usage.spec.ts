@@ -229,6 +229,34 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     path: navigationPath,
     contentType: "image/png",
   });
+  const dailyWorkDestination = page.getByRole("button", {
+    name: "Daily work",
+    exact: true,
+  });
+  const navigationMark = dailyWorkDestination.locator(".daily-work-mark");
+  await expect(navigationMark).toBeVisible();
+  await expect(navigationMark).toHaveAttribute("aria-hidden", "true");
+  await expect(navigationMark).toHaveAttribute("focusable", "false");
+  await dailyWorkDestination.click();
+  const dailyWorkDialog = page.getByRole("dialog", { name: "Daily work" });
+  await expect(dailyWorkDialog).toBeVisible();
+  const headerMark = dailyWorkDialog.locator(".daily-work-mark");
+  await expect(headerMark).toBeVisible();
+  await expect(headerMark).toHaveAttribute("width", "19");
+  await expect(dailyWorkDialog.getByRole("region", {
+    name: "Today’s totals",
+  })).toBeVisible();
+  const dailyWorkPath = testInfo.outputPath("daily-work-day-ledger-mark.png");
+  await dailyWorkDialog.screenshot({
+    path: dailyWorkPath,
+    animations: "disabled",
+  });
+  await testInfo.attach("Daily work · day-ledger mark", {
+    path: dailyWorkPath,
+    contentType: "image/png",
+  });
+  await page.getByRole("button", { name: "Close daily work" }).click();
+  await expect(dailyWorkDialog).toBeHidden();
   await page.getByRole("button", { name: /^Connections & devices/u }).click();
   await expect(page.getByRole("button", {
     name: "Connections & devices",
@@ -358,6 +386,28 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     path: darkPath,
     contentType: "image/png",
   });
+  await projectNavigation.click();
+  await expect(projectNavigation).toHaveAttribute("aria-pressed", "true");
+  await expect(dailyWorkDestination).toBeVisible();
+  await dailyWorkDestination.click();
+  await expect(dailyWorkDialog).toBeVisible();
+  await expect(headerMark).toBeVisible();
+  const dailyWorkDarkPath = testInfo.outputPath(
+    "daily-work-day-ledger-mark-dark.png",
+  );
+  await dailyWorkDialog.screenshot({
+    path: dailyWorkDarkPath,
+    animations: "disabled",
+  });
+  await testInfo.attach("Daily work · day-ledger mark · dark", {
+    path: dailyWorkDarkPath,
+    contentType: "image/png",
+  });
+  await page.getByRole("button", { name: "Close daily work" }).click();
+  await expect(dailyWorkDialog).toBeHidden();
+  await projectNavigation.click();
+  await expect(projectNavigation).toHaveAttribute("aria-pressed", "false");
+  await expect(dailyWorkDestination).toBeHidden();
 
   const methodNote = page.getByText("Measured locally.", { exact: true });
   await methodNote.scrollIntoViewIfNeeded();

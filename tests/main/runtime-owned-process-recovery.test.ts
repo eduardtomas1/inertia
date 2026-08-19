@@ -413,5 +413,26 @@ describe.skipIf(process.platform !== "linux")(
         { deadlineAt: Date.now() + 2_000, platform: "win32" },
       )).toBeNull();
     });
+
+    it("keeps ownership sessions as no-ops on unsupported platforms", () => {
+      const directory = temporaryDirectory();
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, "platform", {
+        configurable: true,
+        enumerable: true,
+        value: "darwin",
+      });
+      try {
+        const journal = new RuntimeOwnedProcessJournal(directory);
+        expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+        expect(journal.finishSession(runtimeGenerationId)).toBe(true);
+      } finally {
+        Object.defineProperty(process, "platform", {
+          configurable: true,
+          enumerable: true,
+          value: originalPlatform,
+        });
+      }
+    });
   },
 );

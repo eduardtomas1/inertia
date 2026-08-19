@@ -252,9 +252,9 @@ export class RuntimeOwnedProcessJournal {
   }
 
   startSession(runtimeGenerationId: string, systemBootId: string): boolean {
+    if (process.platform !== "linux") return true;
     if (
-      process.platform !== "linux"
-      || !validRuntimeGenerationId(runtimeGenerationId)
+      !validRuntimeGenerationId(runtimeGenerationId)
       || !validSystemBootId(systemBootId)
     ) return false;
     let sessions: RuntimeOwnedProcessSession[];
@@ -408,6 +408,7 @@ export class RuntimeOwnedProcessJournal {
   }
 
   finishSession(runtimeGenerationId: string): boolean {
+    if (process.platform !== "linux") return true;
     const records = this.records(runtimeGenerationId);
     if (!records || records.length > 0) return false;
     return removeLeaf(this.root, sessionName(runtimeGenerationId));

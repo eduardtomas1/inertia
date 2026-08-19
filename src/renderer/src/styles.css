@@ -4141,39 +4141,6 @@ button.environment-row:focus-visible,
   align-items: center;
 }
 
-.composer-agent-thread-capability {
-  display: inline-flex;
-  height: var(--composer-control-height);
-  min-height: var(--composer-control-height);
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 5px;
-  padding: 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface-muted) 72%, transparent);
-  font-size: var(--ui-font-micro);
-  font-weight: 620;
-  white-space: nowrap;
-}
-
-.composer-agent-thread-capability.is-supported {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-  color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent-soft) 54%, transparent);
-}
-
-.composer-agent-thread-capability.is-unavailable {
-  opacity: .58;
-}
-
-@media (max-width: 760px) {
-  .composer-agent-thread-capability > span {
-    display: none;
-  }
-}
-
 .composer-toolbar {
   position: relative;
   display: grid;

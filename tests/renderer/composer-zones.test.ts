@@ -117,12 +117,9 @@ describe("composer input and control zones", () => {
     expect(toolbarSource).toContain("selectedProvider.agentThreadManagement.state");
     expect(toolbarSource).toContain("Agent chat tools:");
     expect(toolbarSource).toContain("<MessagesSquare");
-    expect(css).toMatch(
-      /\.composer-agent-thread-capability\.is-supported\s*\{[^}]*color:\s*var\(--accent-strong\)/su,
-    );
-    expect(css).toMatch(
-      /@media \(max-width:\s*760px\)\s*\{[^}]*\.composer-agent-thread-capability > span\s*\{[^}]*display:\s*none/su,
-    );
+    expect(toolbarSource).toContain("composer-pill composer-action-control");
+    expect(toolbarSource).toContain('? "is-active"');
+    expect(css).toMatch(/@container \(max-width:\s*720px\)[^{]*\{[\s\S]*?\.composer-action-control,[\s\S]*?display:\s*none/u);
   });
 
   it("integrates previews and notices without nested card surfaces", () => {

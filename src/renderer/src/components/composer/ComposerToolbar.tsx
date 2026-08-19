@@ -364,10 +364,10 @@ export function ComposerToolbar({
         {selectedProvider?.agentThreadManagement && (
           <span
             className={clsx(
-              "composer-agent-thread-capability",
+              "composer-pill composer-action-control",
               selectedProvider.agentThreadManagement.state === "supported"
-                ? "is-supported"
-                : "is-unavailable",
+                ? "is-active"
+                : undefined,
             )}
             aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
             title={selectedProvider.agentThreadManagement.detail}

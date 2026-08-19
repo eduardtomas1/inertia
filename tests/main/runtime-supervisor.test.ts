@@ -144,8 +144,7 @@ function createHarness(options: {
     shutdownGraceMs: options.shutdownGraceMs ?? 1_000,
     forceKillWaitMs: options.forceKillWaitMs ?? 500,
     forceKill,
-    // Generic supervisor tests model a platform with exact cleanup authority.
-    // Platform-specific fail-closed behavior is injected explicitly below.
+    // Generic tests model exact cleanup; fail-closed cases override it below.
     recoverOwnedProcesses: options.recoverOwnedProcesses ?? (() => true),
     credentialBroker: options.credentialBroker,
     credentialRequestTimeoutMs: options.credentialRequestTimeoutMs,

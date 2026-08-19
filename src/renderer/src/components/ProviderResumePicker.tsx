@@ -218,6 +218,11 @@ export function ProviderResumePicker({
                   }}
                   onClick={() => commit(index)}
                 >
+                  <MessagesSquare
+                    className="resume-picker-option-icon"
+                    size={14}
+                    aria-hidden="true"
+                  />
                   <span className="resume-picker-option-copy">
                     <strong>{row.option.conversationTitle}</strong>
                     <small>

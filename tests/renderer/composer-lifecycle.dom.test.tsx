@@ -471,16 +471,20 @@ describe("composer asynchronous ownership", () => {
 
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "/" } });
-    expect(screen.getByRole("listbox", { name: "Composer commands" }))
-      .toHaveTextContent("/goal");
-    expect(screen.getByRole("listbox", { name: "Composer commands" }))
-      .toHaveTextContent("/compact");
-    expect(screen.getByRole("listbox", { name: "Composer commands" }))
-      .toHaveTextContent("/resume");
+    const commands = screen.getByRole("listbox", { name: "Composer commands" });
+    expect(commands).toHaveTextContent("Built-in");
+    expect(commands).toHaveTextContent("Provider");
+    expect(commands).toHaveTextContent("/goal");
+    expect(commands).toHaveTextContent("/compact");
+    expect(commands).toHaveTextContent("/resume");
+    expect(screen.getByRole("option", { name: /\/goal/u }))
+      .toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("option", { name: /\/plan/u })).toBeDisabled();
     expect(screen.getByRole("option", { name: /\/build/u })).toBeDisabled();
 
-    fireEvent.change(input, { target: { value: "/resume" } });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: /\/resume/u }))
+      .toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onOpenResume).toHaveBeenCalledTimes(1);
     expect(input).toHaveValue("");
@@ -489,6 +493,73 @@ describe("composer asynchronous ownership", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(await screen.findByRole("region", { name: "Goal" })).toBeVisible();
     expect(input).toHaveValue("");
+  });
+
+  it("opens the resume picker as a floating command layer", async () => {
+    const current = conversation("09090909-0909-4909-8909-090909090909");
+    const onOpenResume = vi.fn();
+    const onResumeConversation = vi.fn();
+    const resumeOptions = [
+      {
+        projectId: current.projectId,
+        projectName: "Inertia",
+        conversationId: "resume-first",
+        conversationTitle: "First provider chat",
+        availability: {
+          kind: "available" as const,
+          resume: {
+            providerId: "codex" as const,
+            providerLabel: "Codex",
+            sessionId: "11111111-1111-4111-8111-111111111111",
+          },
+          reason: null,
+        },
+      },
+      {
+        projectId: current.projectId,
+        projectName: "Inertia",
+        conversationId: "resume-second",
+        conversationTitle: "Second provider chat",
+        availability: {
+          kind: "available" as const,
+          resume: {
+            providerId: "codex" as const,
+            providerLabel: "Codex",
+            sessionId: "22222222-2222-4222-8222-222222222222",
+          },
+          reason: null,
+        },
+      },
+    ];
+    render(<Composer {...composerProps(current, {
+      onOpenResume,
+      onResumeConversation,
+      resumeOptions,
+    })} />);
+
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/resume" } });
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    const region = await screen.findByRole("region", {
+      name: "Resume a provider chat",
+    });
+    expect(region.parentElement).toHaveClass("composer-command-layer");
+    expect(region).toHaveClass("composer-command-menu");
+    expect(input).toHaveValue("");
+    const search = screen.getByRole("searchbox", {
+      name: "Search resumable chats",
+    });
+    await waitFor(() => expect(search).toHaveFocus());
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(onResumeConversation).toHaveBeenCalledExactlyOnceWith("resume-second");
+    expect(onOpenResume).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("region", {
+      name: "Resume a provider chat",
+    })).not.toBeInTheDocument());
+    await waitFor(() => expect(input).toHaveFocus());
   });
 
   it("keeps the inline goal visible when another workspace control receives focus", async () => {

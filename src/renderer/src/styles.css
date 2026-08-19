@@ -3244,8 +3244,7 @@ button.environment-row:focus-visible,
   padding: 7px clamp(18px, 4vw, 54px) var(--composer-bottom-breathing-room);
 }
 
-.chat-goal-control,
-.chat-command-surface {
+.chat-goal-control {
   position: relative;
   width: 100%;
   overflow: hidden;
@@ -3259,8 +3258,7 @@ button.environment-row:focus-visible,
     color-mix(in srgb, var(--surface-strong) 62%, transparent);
 }
 
-.chat-goal-inline,
-.chat-command-inline {
+.chat-goal-inline {
   width: 100%;
   max-height: min(430px, calc(100dvh - 180px), calc(100cqh - 130px));
   overflow-x: hidden;
@@ -3271,31 +3269,25 @@ button.environment-row:focus-visible,
 
 .chat-goal-inline > header,
 .chat-goal-inline > header > span,
-.chat-goal-inline > header > span > span,
-.chat-command-inline > header,
-.chat-command-inline > header > span,
-.chat-command-inline > header > span > span {
+.chat-goal-inline > header > span > span {
   display: flex;
   min-width: 0;
 }
 
-.chat-goal-inline > header,
-.chat-command-inline > header {
+.chat-goal-inline > header {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 0 0 10px;
 }
 
-.chat-goal-inline > header > span,
-.chat-command-inline > header > span {
+.chat-goal-inline > header > span {
   align-items: center;
   gap: 9px;
 }
 
 /* The icon reads as a deliberate badge rather than a loose glyph. */
-.chat-goal-inline > header > span > svg,
-.chat-command-inline > header > span > svg {
+.chat-goal-inline > header > span > svg {
   box-sizing: content-box;
   flex: 0 0 auto;
   padding: 6px;
@@ -3304,21 +3296,18 @@ button.environment-row:focus-visible,
   background: color-mix(in srgb, var(--accent-soft) 58%, transparent);
 }
 
-.chat-goal-inline > header > span > span,
-.chat-command-inline > header > span > span {
+.chat-goal-inline > header > span > span {
   flex-direction: column;
   gap: 2px;
 }
 
-.chat-goal-inline > header strong,
-.chat-command-inline > header strong {
+.chat-goal-inline > header strong {
   font-size: var(--ui-font-secondary);
   font-weight: 670;
   letter-spacing: -0.01em;
 }
 
-.chat-goal-inline > header small,
-.chat-command-inline > header small {
+.chat-goal-inline > header small {
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
 }
@@ -4072,21 +4061,6 @@ button.environment-row:focus-visible,
 .composer-context small { overflow: hidden; color: var(--text-muted); font-size: max(calc(var(--ui-font-micro) - 1px), 8px); text-overflow: ellipsis; white-space: nowrap; }
 .composer-context button { display: grid; width: 20px; height: 20px; place-items: center; border-radius: var(--radius-small); color: var(--text-muted); background: transparent; }
 .composer-context button:hover { color: var(--text); background: var(--surface-hover); }
-
-.composer-compact-notice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-small);
-  color: var(--text-muted);
-  background: var(--surface-raised);
-  font-size: var(--ui-font-micro);
-}
-
-.composer-compact-notice.is-success { color: var(--success); }
-.composer-compact-notice.is-error { color: var(--danger); }
 
 .composer-preview-context {
   display: flex;
@@ -8360,6 +8334,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   margin: 0;
   padding: 5px;
   overflow-y: auto;
+  scroll-padding-block: 20px;
   list-style: none;
 }
 
@@ -8376,7 +8351,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   width: 100%;
   min-width: 0;
   gap: 3px 9px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   padding: 7px 8px;
   border: 0;
@@ -8385,6 +8360,12 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: transparent;
   font: inherit;
   text-align: left;
+}
+
+.resume-picker-option-icon {
+  align-self: start;
+  margin-top: 2px;
+  color: var(--text-muted);
 }
 
 .resume-picker-list button[data-active="true"] {
@@ -8484,17 +8465,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: var(--surface-muted);
   font-family: inherit;
   font-size: var(--ui-font-micro);
-}
-
-/* Inside the composer the picker is already framed by the command surface. */
-.chat-command-inline .resume-picker {
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface);
-}
-
-.chat-command-inline .resume-picker-footer {
-  background: color-mix(in srgb, var(--surface-muted) 50%, transparent);
 }
 
 .terminal-resume-status code {
@@ -13236,6 +13206,7 @@ button.sent-attachment-open:focus-visible {
 .conversation-menu button,
 .header-popover > button,
 .composer-suggestion-menu button,
+.composer-command-menu button,
 .command-palette button,
 .palette-actions button,
 .palette-group button {

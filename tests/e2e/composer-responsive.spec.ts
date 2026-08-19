@@ -261,7 +261,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.toolbarBorderTop).toBe("1px");
     expect(wideGeometry.toolbarBackground)
       .not.toBe(wideGeometry.textareaBackground);
-    expect(wideGeometry.toolbarGroups).toEqual(["context", "route", "action"]);
+    expect(wideGeometry.toolbarGroups).toEqual(["tools", "options", "actions"]);
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);

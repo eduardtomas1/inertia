@@ -4109,7 +4109,6 @@ button.environment-row:focus-visible,
 .composer-actions {
   min-width: 0;
   gap: 3px;
-  flex-wrap: nowrap;
 }
 
 .composer-tools {
@@ -4450,16 +4449,10 @@ button.environment-row:focus-visible,
   white-space: nowrap;
 }
 
-.subagent-role-pill {
-  flex: 0 1 auto;
+.subagent-role {
   overflow: hidden;
-  padding: 1px 5px;
-  border: 1px solid color-mix(in srgb, var(--border-strong) 62%, transparent);
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--text-muted) 88%, var(--accent));
-  font-size: calc(var(--ui-font-micro) - 1px);
-  font-weight: 560;
-  letter-spacing: 0.015em;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4474,9 +4467,8 @@ button.environment-row:focus-visible,
 .subagent-copy .subagent-mission {
   display: -webkit-box;
   overflow: hidden;
-  color: color-mix(in srgb, var(--text-soft) 88%, var(--text-muted));
+  color: var(--text-soft);
   line-height: 1.35;
-  text-overflow: clip;
   white-space: normal;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -4751,10 +4743,6 @@ button.environment-row:focus-visible,
   .composer-options > .composer-more-control {
     display: block;
     position: static;
-  }
-
-  .composer-tools {
-    justify-self: start;
   }
 
   .composer-options {

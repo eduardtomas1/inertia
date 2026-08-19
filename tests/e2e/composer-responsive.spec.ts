@@ -224,15 +224,17 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         toolbarFits: toolbarElement
           ? toolbarElement.scrollWidth <= toolbarElement.clientWidth + 1
           : false,
-        zoneOrder: [...element.children].map((child) =>
-          child.getAttribute("data-composer-zone")).filter(Boolean),
+        zoneOrder: [...element.children].flatMap((child) =>
+          child.classList.contains("composer-input-zone")
+            ? ["input"]
+            : child.classList.contains("composer-toolbar") ? ["controls"] : []),
         inputPaddingInline: inputStyle?.paddingInline,
         inputPaddingBlock: inputStyle?.paddingBlock,
         toolbarBorderTop: toolbarStyle?.borderTopWidth,
         toolbarBackground: toolbarStyle?.backgroundColor,
         toolbarGroups: [...(toolbarElement?.querySelectorAll<HTMLElement>(
-          "[data-composer-group]",
-        ) ?? [])].map((group) => group.dataset.composerGroup),
+          ":scope > .composer-tools, :scope > .composer-options, :scope > .composer-actions",
+        ) ?? [])].map((group) => group.className.replace("composer-", "")),
         textareaBorder: textareaStyle?.borderTopWidth,
         textareaBackground: textareaStyle?.backgroundColor,
         controlHeightDelta: visibleControlHeights.length > 0

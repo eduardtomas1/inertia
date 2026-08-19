@@ -9,8 +9,8 @@ function PresenceHarness({ onRender }: { onRender: () => void }) {
   const presence = useDocumentPresence();
   return (
     <output
-      data-active={presence.documentActive}
-      data-visible={presence.documentVisible}
+      data-active={presence > 1}
+      data-visible={presence > 0}
     />
   );
 }

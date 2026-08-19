@@ -216,11 +216,9 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(appSource).toContain("useDocumentPresence()");
     expect(documentPresenceSource).toContain("useSyncExternalStore(");
     expect(documentPresenceSource).toContain("document.hasFocus()");
+    expect(documentPresenceSource).toContain("PRESENCE_EVENTS");
     expect(appLayoutSource).toContain(
-      'data-document-active={documentActive ? "true" : "false"}',
-    );
-    expect(appLayoutSource).toContain(
-      'data-document-visible={documentVisible ? "true" : "false"}',
+      "data-document-visible={documentVisible}",
     );
     expect(activitySource).toContain("memo(function ActivityRow");
     expect(activitySource).toContain("memo(function ActivityGroup");

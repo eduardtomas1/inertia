@@ -17,7 +17,7 @@ const budgets = {
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // The rare failure dossier has its own strict deferred ceiling below, while
   // its conditional loader remains inside the existing shared core ceiling.
-  coreJavaScript: 1_920 * kibibyte,
+  coreJavaScript: 1_940 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

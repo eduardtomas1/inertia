@@ -103,7 +103,9 @@ export default function App(): React.JSX.Element {
   const providerQuotaNotices = useStableController(
     useProviderQuotaNotices(connection.snapshot?.providers ?? []),
   );
-  const { documentActive, documentVisible } = useDocumentPresence();
+  const documentPresence = useDocumentPresence();
+  const documentActive = documentPresence > 1;
+  const documentVisible = documentPresence > 0;
   const providerMaintenance = useStableController(
     useProviderMaintenance(
       connection.snapshot,

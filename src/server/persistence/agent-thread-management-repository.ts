@@ -288,30 +288,41 @@ export class AgentThreadManagementRepository {
     sourceRunId: string;
     sourceHarnessId: string;
     now: string;
-  }): AgentManagedConversation {
-    const parent = this.managed(input.sourceConversationId);
-    const depth = (parent?.depth ?? 0) + 1;
-    if (depth > AGENT_THREAD_MAX_DEPTH) {
-      throw new Error("Managed chats cannot create another chat at this depth.");
-    }
-    const rootConversationId = parent?.rootConversationId
-      ?? input.sourceConversationId;
-    this.database.prepare(`
-      INSERT INTO agent_managed_conversations (
-        child_conversation_id, source_conversation_id, source_turn_id,
-        source_run_id, root_conversation_id, source_harness_id,
-        depth, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      input.childConversationId,
-      input.sourceConversationId,
-      input.sourceTurnId,
-      input.sourceRunId,
-      rootConversationId,
-      input.sourceHarnessId,
-      depth,
-      input.now,
-    );
-    return this.managed(input.childConversationId)!;
+  }, operationId?: string): AgentManagedConversation {
+    return this.database.transaction(() => {
+      const parent = this.managed(input.sourceConversationId);
+      const depth = (parent?.depth ?? 0) + 1;
+      if (depth > AGENT_THREAD_MAX_DEPTH) {
+        throw new Error("Managed chats cannot create another chat at this depth.");
+      }
+      const rootConversationId = parent?.rootConversationId
+        ?? input.sourceConversationId;
+      this.database.prepare(`
+        INSERT INTO agent_managed_conversations (
+          child_conversation_id, source_conversation_id, source_turn_id,
+          source_run_id, root_conversation_id, source_harness_id,
+          depth, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.childConversationId,
+        input.sourceConversationId,
+        input.sourceTurnId,
+        input.sourceRunId,
+        rootConversationId,
+        input.sourceHarnessId,
+        depth,
+        input.now,
+      );
+      if (operationId) {
+        this.transition(
+          operationId,
+          ["creating"],
+          "dispatching",
+          { childConversationId: input.childConversationId },
+          input.now,
+        );
+      }
+      return this.managed(input.childConversationId)!;
+    })();
   }
 }

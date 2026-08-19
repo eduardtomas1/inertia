@@ -85,6 +85,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Codex-native goals and Inertia-local objectives are labeled separately, persisted across reconnects, and never substituted for one another.
 - Skills are discovered from the selected Codex or Claude route and attached only to the next turn after privileged revalidation; the renderer never receives their filesystem path or content.
 - Delegated agent trees preserve provider-reported parentage, status, ownership, route identity, and elapsed time. Compact views keep separate live or failed branches represented; Guide parent prepares an ordinary supported follow-up, and direct Stop appears only for an exact live Claude Agent SDK task.
+- New Codex App Server chats can use host-owned tools to list, inspect, create, dispatch, follow up, observe, stop, and archive independent top-level Inertia chats after exact user approval. Inertia derives project authority locally, bounds recursion and per-turn work, persists provenance without transcripts or provider sessions, and marks Claude, Cursor, and OpenCode unavailable until their audited harnesses expose an equivalent tool bridge.
 
 ![Goals and delegated agent work in Inertia](docs/screenshots/inertia-agent-workflows.png)
 

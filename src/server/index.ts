@@ -92,6 +92,7 @@ import {
   createAgentWorkflowCommandHandler,
 } from "./runtime/commands/agent-workflow-commands";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
+import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
 import {
   attachRuntimeWebSocketBoundary,
 } from "./runtime/websocket-boundary";
@@ -175,6 +176,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   );
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
+  let agentThreads: AgentThreadRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
   let closed = false;
   let databaseRecoveryImportActive = false;
@@ -626,6 +628,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastSnapshot,
       broadcastConversationShell,
       providerInfo: () => providerInfo,
+      hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
       },
@@ -680,6 +683,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         // triggers. Failed and cancelled turns restart the same quiet window:
         // their cleanup writes are just as real as a successful completion.
         void store.createInitialBackup({ quietGraceMs: 1_000 }).catch(() => undefined);
+        await agentThreads?.manager.onSourceTurnSettled(turn);
         await duoLaunches?.onTurnSettled(turn);
         await testOnlyOnTurnSettled?.(turn);
       },
@@ -690,6 +694,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       systemBootId: options.systemBootId,
     },
   );
+  agentThreads = createAgentThreadRuntime({
+    store, providers, backendProfileController, workspaceRuns, dataDirectory,
+    turns, providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
+    broadcastConversationShell,
+  });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
     store,
@@ -743,6 +752,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         broadcastSnapshot: flushSnapshot,
         publicError,
         send,
+        creation: agentThreads.creation,
       }),
       createTurnInteractionCommandHandler({
         store, conversationAttachments,

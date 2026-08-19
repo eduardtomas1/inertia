@@ -1,7 +1,5 @@
-import { mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
-
 import type WebSocket from "ws";
+import { resolve } from "node:path";
 
 import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
 
@@ -21,24 +19,17 @@ import {
 import { deleteCheckpoints } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import {
-  createWorktreeWithOwnershipReceipt,
-  getRepositoryStatus,
-  GitError,
   inspectUnacknowledgedWorktreeCreation,
   removeOwnedWorktree,
 } from "../../git";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { ProviderManager } from "../../providers";
-import { normalizeIdentityPath } from "../../project-identity";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
+import { ConversationCreationService } from "../conversation-creation-service";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
-import {
-  pinWorktreeSourceIdentity,
-  verifyWorktreeSourceIdentity,
-} from "../worktree-source-identity";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -103,11 +94,14 @@ export interface ConversationCommandDependencies {
   testHooks?: {
     afterIsolatedWorktreeCreate?: () => void | Promise<void>;
   };
+  creation?: ConversationCreationService;
 }
 
 export function createConversationCommandHandler(
   dependencies: ConversationCommandDependencies,
 ): RuntimeCommandHandler {
+  const creation = dependencies.creation
+    ?? new ConversationCreationService(dependencies);
   return defineRuntimeCommandHandler([
     "conversation.create",
     "conversation.select",
@@ -122,240 +116,21 @@ export function createConversationCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "conversation.create": {
-        const settings = dependencies.store.shellSnapshot().settings;
-        const requestedSelection = command.payload.modelSelection
-          ?? nativeModelSelection({
-            providerId: command.payload.providerId ?? settings.defaultProvider,
-            modelId: command.payload.model
-              || settings.defaultModel
-              || "provider-default",
-            alias: command.payload.model || settings.defaultModel || null,
-            reasoningEffort: command.payload.reasoningEffort
-              || settings.defaultReasoningEffort
-              || null,
-          });
-        const canonicalCreationSelection =
-          dependencies.backendProfileController.validateSelection(
-            requestedSelection,
-            { allowUnavailableNativeCatalog: true },
-          );
-        const canonicalCreationProviderId = dependencies.providers
-          .resolveModelRoute(canonicalCreationSelection).providerId;
-        if (
-          command.payload.providerId !== undefined
-          && command.payload.providerId !== canonicalCreationProviderId
-        ) {
-          throw new RuntimeRequestError(
-            "The selected provider does not match the verified model route.",
-          );
-        }
-        const finishCreation = (
-          conversationId: string,
-        ): "handled" | "mutation" => {
-          if (command.payload.activate !== false) return "mutation";
-          dependencies.broadcastSnapshot();
-          dependencies.send(socket, {
-            type: "request.result",
-            requestId: command.requestId,
-            result: { kind: "conversation.created", conversationId },
-          });
-          return "handled";
-        };
-        const repositoryPath = dependencies.store.projectPath(
-          command.payload.projectId,
+        const conversation = await creation.create(
+          command.payload,
+          command.requestId,
         );
-        if (command.payload.useWorktree && command.payload.worktreePath) {
-          throw new RuntimeRequestError(
-            "Choose either an existing worktree or a new isolated worktree.",
-          );
-        }
-
-        if (command.payload.worktreePath) {
-          const requestedPath = resolve(command.payload.worktreePath);
-          const reusableContext = dependencies.store.shellSnapshot()
-            .conversations.find((candidate) => (
-              candidate.projectId === command.payload.projectId
-              && candidate.worktreePath !== null
-              && normalizeIdentityPath(resolve(candidate.worktreePath))
-                === normalizeIdentityPath(requestedPath)
-            ));
-          const reusablePath = reusableContext
-            ? dependencies.store.conversationPath(reusableContext.id)
-            : null;
-          if (
-            reusablePath === null
-            || normalizeIdentityPath(reusablePath)
-              !== normalizeIdentityPath(requestedPath)
-            || normalizeIdentityPath(requestedPath)
-              === normalizeIdentityPath(resolve(repositoryPath))
-          ) {
-            throw new RuntimeRequestError(
-              "That worktree is not attached to a chat in this project.",
-            );
-          }
-          const status = await getRepositoryStatus(reusablePath);
-          if (
-            command.payload.branch
-            && command.payload.branch !== status.branch
-          ) {
-            throw new RuntimeRequestError(
-              `That worktree is currently on ${status.branch ?? "a detached checkout"}, not ${command.payload.branch}.`,
-            );
-          }
-          const conversation = dependencies.store.createConversation(
-            command.payload.projectId,
-            command.payload.title,
-            {
-              ...command.payload,
-              providerId: canonicalCreationProviderId,
-              modelSelection: canonicalCreationSelection,
-              branch: status.branch,
-              worktreePath: status.root,
-            },
-          );
-          return finishCreation(conversation.id);
-        }
-
-        const worktreeSource = command.payload.useWorktree
-          ? await pinWorktreeSourceIdentity(repositoryPath)
-          : null;
-        let projectStatus: Awaited<
-          ReturnType<typeof getRepositoryStatus>
-        > | null = null;
-        try {
-          projectStatus = await getRepositoryStatus(
-            worktreeSource?.root ?? repositoryPath,
-          );
-        } catch (error) {
-          if (
-            !(error instanceof GitError && error.code === "not-repository")
-          ) {
-            throw error;
-          }
-        }
-        if (
-          command.payload.branch
-          && command.payload.branch !== projectStatus?.branch
-        ) {
-          throw new RuntimeRequestError(
-            `The project checkout is currently on ${projectStatus?.branch ?? "a detached checkout"}, not ${command.payload.branch}.`,
-          );
-        }
-
-        const conversation = dependencies.store.createConversation(
-          command.payload.projectId,
-          command.payload.title,
-          {
-            ...command.payload,
-            providerId: canonicalCreationProviderId,
-            modelSelection: canonicalCreationSelection,
-            branch: projectStatus?.branch ?? null,
-            worktreePath: null,
+        if (command.payload.activate !== false) return "mutation";
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "conversation.created",
+            conversationId: conversation.id,
           },
-        );
-        if (command.payload.useWorktree) {
-          try {
-            if (!worktreeSource) {
-              throw new RuntimeRequestError(
-                "The project repository identity is unavailable.",
-              );
-            }
-            if (!projectStatus?.branch) {
-              throw new RuntimeRequestError(
-                "Check out a branch before creating an isolated worktree.",
-              );
-            }
-            const branch = `inertia/${conversation.id.slice(0, 8)}`;
-            const target = join(
-              dependencies.dataDirectory,
-              "worktrees",
-              conversation.id,
-            );
-            mkdirSync(resolve(target, ".."), {
-              recursive: true,
-              mode: 0o700,
-            });
-            const createdStatus = await dependencies.workspaceRuns.trackSourceControl(
-              "Create worktree",
-              command.payload.projectId,
-              conversation.id,
-              worktreeSource.root,
-              command.requestId,
-              async () => {
-                const verifiedRoot = await verifyWorktreeSourceIdentity(
-                  repositoryPath,
-                  worktreeSource,
-                );
-                const created = await createWorktreeWithOwnershipReceipt(
-                  verifiedRoot,
-                  target,
-                  {
-                    branch,
-                    createBranch: true,
-                    startPoint: projectStatus.branch!,
-                  },
-                  {
-                    beforeAdd: (ownershipToken) => {
-                      dependencies.store.conversationWorktrees.beginCreation(
-                        conversation.id,
-                        target,
-                        branch,
-                        ownershipToken,
-                      );
-                    },
-                    notAdded: () => {
-                      dependencies.store.conversationWorktrees.rejectCreation(
-                        conversation.id,
-                      );
-                    },
-                    added: (identity) => {
-                      dependencies.store.conversationWorktrees.recordCreation(
-                        conversation.id,
-                        target,
-                        branch,
-                        identity,
-                      );
-                    },
-                  },
-                );
-                dependencies.store.updateConversation(conversation.id, {
-                  worktreePath: created.root,
-                  branch: created.branch ?? branch,
-                });
-                await dependencies.testHooks?.afterIsolatedWorktreeCreate?.();
-                await verifyWorktreeSourceIdentity(
-                  repositoryPath,
-                  worktreeSource,
-                );
-                return created;
-              },
-              {
-                recoverReviewedCommit: true,
-                serializationRoot: worktreeSource.root,
-                verifyRepositoryIdentity: async () => {
-                  await verifyWorktreeSourceIdentity(
-                    repositoryPath,
-                    worktreeSource,
-                  );
-                },
-              },
-            );
-            dependencies.store.updateConversation(conversation.id, {
-              worktreePath: createdStatus.root,
-              branch: createdStatus.branch ?? branch,
-            });
-          } catch (error) {
-            const ownership = dependencies.store
-              .conversationWorktrees.get(conversation.id);
-            if (!ownership?.ownsWorktree) {
-              dependencies.store.deleteConversation(conversation.id);
-            } else {
-              dependencies.broadcastSnapshot();
-            }
-            throw error;
-          }
-        }
-        return finishCreation(conversation.id);
+        });
+        return "handled";
       }
       case "conversation.select":
         dependencies.store.selectConversation(

@@ -16,6 +16,20 @@ function emptyMetadataState(): ProviderInfo["metadataState"] {
   return { models: missing(), rateLimits: missing() };
 }
 
+function agentThreadManagement(
+  providerId: ProviderInfo["id"],
+): NonNullable<ProviderInfo["agentThreadManagement"]> {
+  return providerId === "codex"
+    ? {
+        state: "supported",
+        detail: "New Codex chats can use approved Inertia tools to create and manage top-level chats.",
+      }
+    : {
+        state: "unavailable",
+        detail: "This provider harness does not yet expose audited Inertia chat tools.",
+      };
+}
+
 export function initialProviderSnapshots(
   executionEnabled = true,
   cached: Partial<Record<ProviderInfo["id"], Pick<ProviderInfo, "models" | "rateLimits" | "metadataState">>> = {},
@@ -34,6 +48,7 @@ export function initialProviderSnapshots(
     models: cached[provider.id]?.models ?? [],
     rateLimits: cached[provider.id]?.rateLimits ?? [],
     metadataState: cached[provider.id]?.metadataState ?? emptyMetadataState(),
+    agentThreadManagement: agentThreadManagement(provider.id),
   }));
 }
 
@@ -55,6 +70,7 @@ export function providerSnapshot(
     models: metadata.models,
     rateLimits: metadata.rateLimits,
     metadataState: metadata.metadataState,
+    agentThreadManagement: agentThreadManagement(detection.provider.id),
   };
 }
 

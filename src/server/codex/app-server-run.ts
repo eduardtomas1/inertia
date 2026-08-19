@@ -902,7 +902,18 @@ export async function openCodexTurn({
       throw new Error(staleProviderSessionDecision().reason);
     }
   } else {
-    opened = await request("thread/start", threadConfig);
+    opened = await request("thread/start", {
+      ...threadConfig,
+      ...(options.hostTools
+        ? {
+            dynamicTools: options.hostTools.definitions.map((definition) => ({
+              name: definition.name,
+              description: definition.description,
+              inputSchema: definition.inputSchema,
+            })),
+          }
+        : {}),
+    });
   }
 
   const thread = objectValue(opened.thread);

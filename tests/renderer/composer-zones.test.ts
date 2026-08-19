@@ -113,6 +113,18 @@ describe("composer input and control zones", () => {
     );
   });
 
+  it("shows truthful provider chat-tool support without crowding narrow composers", () => {
+    expect(toolbarSource).toContain("selectedProvider.agentThreadManagement.state");
+    expect(toolbarSource).toContain("Agent chat tools:");
+    expect(toolbarSource).toContain("<MessagesSquare");
+    expect(css).toMatch(
+      /\.composer-agent-thread-capability\.is-supported\s*\{[^}]*color:\s*var\(--accent-strong\)/su,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*760px\)\s*\{[^}]*\.composer-agent-thread-capability > span\s*\{[^}]*display:\s*none/su,
+    );
+  });
+
   it("integrates previews and notices without nested card surfaces", () => {
     for (const selector of [
       "composer-attachment",

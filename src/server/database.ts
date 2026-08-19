@@ -25,21 +25,13 @@ import {
   type TurnGitArtifact,
   type WorkspaceRun,
 } from "../shared/contracts";
-import {
-  type ModelBackendDefault,
-  type PersistedModelBackendProfile,
-} from "../shared/backend-profile-settings";
+import type { ModelBackendDefault, PersistedModelBackendProfile } from "../shared/backend-profile-settings";
 import type { BackendCompatibilityProbeResult } from "../shared/backend-probe";
 import type { PersistedProviderMetadata } from "./provider/metadata";
 import type { SanitizedTurnExecutionManifest } from "./runtime/turns/request-context";
 import { BackendProfileRepository } from "./persistence/backend-profile-repository";
-import {
-  AgentThreadManagementRepository,
-} from "./persistence/agent-thread-management-repository";
-import {
-  AgentWorkflowRepository,
-  type NativeAgentGoalMergeResult,
-} from "./persistence/agent-workflow-repository";
+import { AgentThreadManagementRepository } from "./persistence/agent-thread-management-repository";
+import { AgentWorkflowRepository, type NativeAgentGoalMergeResult } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import { ConversationWorktreeRepository } from "./persistence/conversation-worktree-repository";
 import {
@@ -187,9 +179,7 @@ export class RuntimeStore {
       requireConversation: (conversationId) =>
         this.requireConversation(conversationId),
     });
-    this.agentThreadManagement = new AgentThreadManagementRepository(
-      this.database,
-    );
+    this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);

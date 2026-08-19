@@ -127,6 +127,11 @@ export interface ProviderInfo {
   metadataState: ProviderMetadataState;
   /** Present after the runtime has checked this exact installed CLI. */
   maintenance?: ProviderMaintenanceStatus;
+  /** Truthful runtime support for host-owned top-level chat lifecycle tools. */
+  agentThreadManagement?: {
+    state: "supported" | "unavailable";
+    detail: string;
+  };
 }
 
 export interface AppSettings {

@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import {
   ChevronDown,
   Command,
+  MessagesSquare,
   Paperclip,
   Send,
   Square,
@@ -360,6 +361,21 @@ export function ComposerToolbar({
             conversationUpdatePending={conversationUpdatePending}
           />
         </Suspense>
+        {selectedProvider?.agentThreadManagement && (
+          <span
+            className={clsx(
+              "composer-agent-thread-capability",
+              selectedProvider.agentThreadManagement.state === "supported"
+                ? "is-supported"
+                : "is-unavailable",
+            )}
+            aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
+            title={selectedProvider.agentThreadManagement.detail}
+          >
+            <MessagesSquare size={13} aria-hidden="true" />
+            <span>Chat tools</span>
+          </span>
+        )}
       </div>
       <div className="composer-actions">
         {selectedProvider ? (

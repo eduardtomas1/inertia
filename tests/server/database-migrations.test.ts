@@ -70,7 +70,18 @@ function migrateFixtureInPlace(databasePath: string): void {
   }
 }
 
+function dropUnreleasedAgentThreadManagement(
+  database: Database.Database,
+): void {
+  database.exec(`
+    DROP TABLE IF EXISTS agent_thread_operations;
+    DROP TABLE IF EXISTS agent_managed_conversations;
+    DELETE FROM schema_migrations WHERE version = 60;
+  `);
+}
+
 function dropUnreleasedProviderOwnership(database: Database.Database): void {
+  dropUnreleasedAgentThreadManagement(database);
   database.exec(`
     DROP TABLE IF EXISTS provider_run_ownership;
     DROP INDEX IF EXISTS agent_turns_provider_run_identity_idx;
@@ -1492,6 +1503,7 @@ describe("runtime migration catalog", () => {
       ON agent_turns(association, completed_at COLLATE NOCASE, id);
       DELETE FROM schema_migrations WHERE version >= 57;
     `);
+    dropUnreleasedAgentThreadManagement(schema56);
     expect((schema56.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
     ).get() as { version: number }).version).toBe(56);
@@ -1607,6 +1619,7 @@ describe("runtime migration catalog", () => {
       DROP INDEX agent_turns_usage_dashboard_completed_idx;
       DELETE FROM schema_migrations WHERE version >= 57;
     `);
+    dropUnreleasedAgentThreadManagement(schema56);
     expect((schema56.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
     ).get() as { version: number }).version).toBe(56);
@@ -1704,6 +1717,7 @@ describe("runtime migration catalog", () => {
       { version: 57 },
       { version: 58 },
       { version: 59 },
+      { version: 60 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

@@ -435,6 +435,8 @@ describe("append-oriented stream text persistence", () => {
 
     const old = new Database(current.databasePath);
     old.exec(`
+      DROP TABLE agent_thread_operations;
+      DROP TABLE agent_managed_conversations;
       DROP TABLE provider_run_ownership;
       DROP INDEX agent_turns_provider_run_identity_idx;
       DROP TABLE recovery_import_journals;
@@ -485,6 +487,8 @@ describe("append-oriented stream text persistence", () => {
 
     const old = new Database(current.databasePath);
     old.exec(`
+      DROP TABLE agent_thread_operations;
+      DROP TABLE agent_managed_conversations;
       DROP TABLE provider_run_ownership;
       DROP INDEX agent_turns_provider_run_identity_idx;
       DROP INDEX message_content_chunks_message_sequence_idx;

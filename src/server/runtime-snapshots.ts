@@ -19,15 +19,16 @@ function emptyMetadataState(): ProviderInfo["metadataState"] {
 function agentThreadManagement(
   providerId: ProviderInfo["id"],
 ): NonNullable<ProviderInfo["agentThreadManagement"]> {
-  return providerId === "codex"
-    ? {
-        state: "supported",
-        detail: "New Codex chats can use approved Inertia tools to create and manage top-level chats.",
-      }
-    : {
-        state: "unavailable",
-        detail: "This provider harness does not yet expose audited Inertia chat tools.",
-      };
+  const transport = {
+    codex: "Codex dynamic tools",
+    claude: "Claude's in-process tool server",
+    cursor: "Cursor's scoped MCP session",
+    opencode: "OpenCode's scoped MCP session",
+  }[providerId];
+  return {
+    state: "supported",
+    detail: `${transport} can use approved Inertia tools to create and manage top-level chats in this project.`,
+  };
 }
 
 export function initialProviderSnapshots(

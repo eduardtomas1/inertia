@@ -1090,7 +1090,7 @@ describe("server event provider identity boundary", () => {
         id,
         models: [{ ...provider.models[0], fastMode: expectedFastMode }],
         agentThreadManagement: {
-          state: id === "codex" ? "supported" : "unavailable",
+          state: "supported",
           detail: "Audited runtime capability.",
         },
       }))).toMatchObject({

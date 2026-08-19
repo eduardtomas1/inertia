@@ -42,6 +42,8 @@ async function runtime() {
   }).turn;
   const active = new Set<string>();
   const starts: string[] = [];
+  let followUps = 0;
+  let followUpAdmission = true;
   const turns = {
     isActive: (conversationId: string) => active.has(conversationId),
     activeConversationIds: () => [...active],
@@ -81,7 +83,15 @@ async function runtime() {
     failBeforeStart: vi.fn(),
     cancel: (conversationId: string) => active.delete(conversationId),
     waitForProviderCleanup: async () => undefined,
-    acquireFollowUpAdmission: () => null,
+    acquireFollowUpAdmission: (conversationId: string) => (
+      active.has(conversationId) && followUpAdmission
+        ? { conversationId, release: vi.fn() }
+        : null
+    ),
+    setFollowUpAdmission: (accepted: boolean) => {
+      followUpAdmission = accepted;
+    },
+    steer: async () => ({ turnId: `follow-up-${++followUps}` }),
   };
   const creation = {
     create: async (payload: Parameters<RuntimeStore["createConversation"]>[2] & {
@@ -112,7 +122,36 @@ async function runtime() {
     broadcastConversationShell: vi.fn(),
     now: () => "2026-08-19T10:00:00.000Z",
   });
-  return { manager, project, source, sourceTurn, starts, store, turns };
+  let sourceTurnSequence = 1;
+  const beginSourceTurn = () => store.beginAgentTurn({
+    id: `source-turn-${++sourceTurnSequence}`,
+    conversationId: source.id,
+    runId: `source-run-${sourceTurnSequence}`,
+    content: "Continue managing the child chat",
+    activateConversation: false,
+    providerId: source.providerId,
+    harnessId: source.modelSelection.harnessId,
+    backendProfileId: source.modelSelection.backendProfileId,
+    model: source.modelSelection.modelId,
+    modelAlias: source.modelSelection.alias,
+    reasoningEffort: source.modelSelection.reasoningEffort ?? "",
+    interactionMode: source.interactionMode,
+    accessMode: source.accessMode,
+    providerSessionBefore: null,
+    usageAtStart: null,
+    configurationRevision: source.modelSelection.backendConfigurationRevision,
+    association: "authoritative",
+  }).turn;
+  return {
+    beginSourceTurn,
+    manager,
+    project,
+    source,
+    sourceTurn,
+    starts,
+    store,
+    turns,
+  };
 }
 
 function call(
@@ -137,15 +176,22 @@ afterEach(async () => {
 });
 
 describe("AgentThreadManager", () => {
-  it("capability-gates the real host bridge to Codex App Server turns", async () => {
+  it("exposes the same real host bridge to every audited provider harness", async () => {
     const { manager, source, sourceTurn, store } = await runtime();
     try {
       expect(manager.bridgeFor({ conversation: source, turn: sourceTurn }))
         .toBeDefined();
-      expect(manager.bridgeFor({
-        conversation: source,
-        turn: { ...sourceTurn, harnessId: "claude-agent-sdk" },
-      })).toBeUndefined();
+      for (const harnessId of [
+        "codex-app-server",
+        "claude-agent-sdk",
+        "cursor-acp",
+        "opencode-sdk",
+      ] as const) {
+        expect(manager.bridgeFor({
+          conversation: source,
+          turn: { ...sourceTurn, harnessId },
+        })).toBeDefined();
+      }
     } finally {
       store.close();
     }
@@ -168,6 +214,223 @@ describe("AgentThreadManager", () => {
       expect(result.text).not.toContain("SECRET TRANSCRIPT");
       expect(result.text).not.toContain(store.conversationPath(sibling.id));
       expect(result.text).not.toContain("providerSessionId");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("reports exact management ownership for an older recently active child", async () => {
+    const { manager, project, source, sourceTurn, store } = await runtime();
+    try {
+      const oldest = store.createConversation(project.id, "Old managed chat", {
+        activate: false,
+      });
+      store.agentThreadManagement.attachManaged({
+        childConversationId: oldest.id,
+        sourceConversationId: source.id,
+        sourceTurnId: sourceTurn.id,
+        sourceRunId: sourceTurn.runId,
+        sourceHarnessId: sourceTurn.harnessId,
+        now: "2026-08-19T10:00:00.000Z",
+      });
+      for (let index = 1; index <= 25; index += 1) {
+        const child = store.createConversation(
+          project.id,
+          `Newer managed chat ${index}`,
+          { activate: false },
+        );
+        store.agentThreadManagement.attachManaged({
+          childConversationId: child.id,
+          sourceConversationId: source.id,
+          sourceTurnId: sourceTurn.id,
+          sourceRunId: sourceTurn.runId,
+          sourceHarnessId: sourceTurn.harnessId,
+          now: `2026-08-19T10:00:${String(index).padStart(2, "0")}.000Z`,
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      store.updateConversation(oldest.id, { title: "Old managed chat, active now" });
+
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const result = await bridge!.invoke(call(
+        "inertia_list_conversations",
+        { limit: 25 },
+      ));
+      const payload = JSON.parse(result.text) as {
+        conversations: Array<{
+          conversationId: string;
+          managedByCaller: boolean;
+        }>;
+      };
+      expect(payload.conversations.find(
+        ({ conversationId }) => conversationId === oldest.id,
+      )).toMatchObject({ managedByCaller: true });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("cancels a child dispatched by a later parent turn when that turn fails", async () => {
+    const {
+      beginSourceTurn,
+      manager,
+      project,
+      source,
+      sourceTurn,
+      store,
+      turns,
+    } = await runtime();
+    try {
+      const child = store.createConversation(project.id, "Existing child", {
+        activate: false,
+      });
+      store.agentThreadManagement.attachManaged({
+        childConversationId: child.id,
+        sourceConversationId: source.id,
+        sourceTurnId: sourceTurn.id,
+        sourceRunId: sourceTurn.runId,
+        sourceHarnessId: sourceTurn.harnessId,
+        now: "2026-08-19T10:00:00.000Z",
+      });
+      const laterTurn = beginSourceTurn();
+      const bridge = manager.bridgeFor({ conversation: source, turn: laterTurn });
+      expect((await bridge!.invoke(call("inertia_send_message", {
+        conversationId: child.id,
+        content: "Start a later independent check",
+      }))).success).toBe(true);
+      expect(turns.isActive(child.id)).toBe(true);
+
+      await manager.onSourceTurnSettled({ ...laterTurn, status: "failed" });
+
+      expect(turns.isActive(child.id)).toBe(false);
+      expect(store.agentThreadManagement.targetsActedOnByTurn(
+        source.id,
+        laterTurn.id,
+      )).toEqual([child.id]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps a follow-up running after completion but cancels it after failure", async () => {
+    const {
+      beginSourceTurn,
+      manager,
+      project,
+      source,
+      sourceTurn,
+      store,
+      turns,
+    } = await runtime();
+    try {
+      const child = store.createConversation(project.id, "Follow-up child", {
+        activate: false,
+      });
+      store.agentThreadManagement.attachManaged({
+        childConversationId: child.id,
+        sourceConversationId: source.id,
+        sourceTurnId: sourceTurn.id,
+        sourceRunId: sourceTurn.runId,
+        sourceHarnessId: sourceTurn.harnessId,
+        now: "2026-08-19T10:00:00.000Z",
+      });
+      const completedParent = beginSourceTurn();
+      const completedBridge = manager.bridgeFor({
+        conversation: source,
+        turn: completedParent,
+      });
+      expect((await completedBridge!.invoke(call("inertia_send_message", {
+        conversationId: child.id,
+        content: "Start work that should continue",
+      }))).success).toBe(true);
+      await manager.onSourceTurnSettled({
+        ...completedParent,
+        status: "completed",
+      });
+      expect(turns.isActive(child.id)).toBe(true);
+
+      const failedParent = beginSourceTurn();
+      const failedBridge = manager.bridgeFor({
+        conversation: source,
+        turn: failedParent,
+      });
+      const followUp = await failedBridge!.invoke(call("inertia_send_message", {
+        conversationId: child.id,
+        content: "Add one follow-up while the child runs",
+      }));
+      expect(followUp.success).toBe(true);
+      expect(JSON.parse(followUp.text)).toMatchObject({ disposition: "follow-up" });
+
+      await manager.onSourceTurnSettled({ ...failedParent, status: "cancelled" });
+
+      expect(turns.isActive(child.id)).toBe(false);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("does not claim or cancel active work when follow-up admission is rejected", async () => {
+    const {
+      beginSourceTurn,
+      manager,
+      project,
+      source,
+      sourceTurn,
+      store,
+      turns,
+    } = await runtime();
+    try {
+      const child = store.createConversation(project.id, "Busy child", {
+        activate: false,
+      });
+      store.agentThreadManagement.attachManaged({
+        childConversationId: child.id,
+        sourceConversationId: source.id,
+        sourceTurnId: sourceTurn.id,
+        sourceRunId: sourceTurn.runId,
+        sourceHarnessId: sourceTurn.harnessId,
+        now: "2026-08-19T10:00:00.000Z",
+      });
+      const startingParent = beginSourceTurn();
+      const startingBridge = manager.bridgeFor({
+        conversation: source,
+        turn: startingParent,
+      });
+      expect((await startingBridge!.invoke(call("inertia_send_message", {
+        conversationId: child.id,
+        content: "Start work that belongs to the earlier turn",
+      }))).success).toBe(true);
+      await manager.onSourceTurnSettled({
+        ...startingParent,
+        status: "completed",
+      });
+      expect(turns.isActive(child.id)).toBe(true);
+
+      turns.setFollowUpAdmission(false);
+      const rejectedParent = beginSourceTurn();
+      const rejectedBridge = manager.bridgeFor({
+        conversation: source,
+        turn: rejectedParent,
+      });
+      const rejected = await rejectedBridge!.invoke(call(
+        "inertia_send_message",
+        {
+          conversationId: child.id,
+          content: "This follow-up cannot be admitted",
+        },
+      ));
+      expect(rejected.success).toBe(false);
+      expect(store.agentThreadManagement.targetsActedOnByTurn(
+        source.id,
+        rejectedParent.id,
+      )).toEqual([]);
+
+      await manager.onSourceTurnSettled({
+        ...rejectedParent,
+        status: "failed",
+      });
+
+      expect(turns.isActive(child.id)).toBe(true);
     } finally {
       store.close();
     }

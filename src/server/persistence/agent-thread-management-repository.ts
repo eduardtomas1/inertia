@@ -150,17 +150,26 @@ export class AgentThreadManagementRepository {
     return row ? managedFromRow(row) : null;
   }
 
-  children(sourceConversationId: string, limit: number): AgentManagedConversation[] {
-    const bounded = Math.max(1, Math.min(25, Math.trunc(limit)));
+  targetsActedOnByTurn(
+    sourceConversationId: string,
+    sourceTurnId: string,
+  ): string[] {
     return (this.database.prepare(`
-      SELECT * FROM agent_managed_conversations
+      SELECT child_conversation_id, MAX(updated_at) AS last_acted_at
+      FROM agent_thread_operations
       WHERE source_conversation_id = ?
-      ORDER BY created_at DESC, child_conversation_id DESC
+        AND source_turn_id = ?
+        AND child_conversation_id IS NOT NULL
+      GROUP BY child_conversation_id
+      ORDER BY last_acted_at DESC, child_conversation_id DESC
       LIMIT ?
     `).all(
       sourceConversationId,
-      bounded,
-    ) as AgentManagedConversationRow[]).map(managedFromRow);
+      sourceTurnId,
+      AGENT_THREAD_MAX_MUTATIONS_PER_TURN,
+    ) as Array<{ child_conversation_id: string }>).map(
+      ({ child_conversation_id: conversationId }) => conversationId,
+    );
   }
 
   operation(id: string): AgentThreadOperation | null {

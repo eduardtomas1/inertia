@@ -59,6 +59,7 @@ function eventHarness(input: {
       name: "inertia_list_conversations",
       description: "List safe chats.",
       inputSchema: { type: "object" },
+      readOnly: true,
     }],
     invoke: input.invoke ?? (async (call) => {
       calls.push(call);

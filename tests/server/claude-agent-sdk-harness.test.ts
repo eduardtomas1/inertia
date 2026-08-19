@@ -537,6 +537,8 @@ describe("Claude Agent SDK harness", () => {
 
     expect(promptWasRead).toBe(false);
     expect(discoveryOptions?.settingSources).toEqual([]);
+    expect(discoveryOptions?.mcpServers).toBeUndefined();
+    expect(discoveryOptions?.strictMcpConfig).toBeUndefined();
     expect(spawnProcess).toHaveBeenCalledWith(
       "/sdk/final/claude",
       ["--metadata"],

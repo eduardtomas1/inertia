@@ -96,6 +96,8 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
         includeArchived: { type: "boolean" },
       },
     },
+    inputValidator: listSchema,
+    readOnly: true,
   },
   {
     name: "inertia_inspect_conversation",
@@ -106,6 +108,8 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
       properties: { conversationId: { type: "string", format: "uuid" } },
       required: ["conversationId"],
     },
+    inputValidator: inspectSchema,
+    readOnly: true,
   },
   {
     name: "inertia_create_conversation",
@@ -150,6 +154,8 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
       },
       required: ["title", "prompt"],
     },
+    inputValidator: createSchema,
+    readOnly: false,
   },
   {
     name: "inertia_send_message",
@@ -168,6 +174,8 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
       },
       required: ["conversationId", "content"],
     },
+    inputValidator: sendSchema,
+    readOnly: false,
   },
   {
     name: "inertia_get_conversation_status",
@@ -178,6 +186,8 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
       properties: { conversationId: { type: "string", format: "uuid" } },
       required: ["conversationId"],
     },
+    inputValidator: inspectSchema,
+    readOnly: true,
   },
   {
     name: "inertia_get_latest_result",
@@ -188,6 +198,8 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
       properties: { conversationId: { type: "string", format: "uuid" } },
       required: ["conversationId"],
     },
+    inputValidator: inspectSchema,
+    readOnly: true,
   },
   {
     name: "inertia_stop_conversation",
@@ -198,6 +210,8 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
       properties: { conversationId: { type: "string", format: "uuid" } },
       required: ["conversationId"],
     },
+    inputValidator: inspectSchema,
+    readOnly: false,
   },
   {
     name: "inertia_archive_conversation",
@@ -211,6 +225,8 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
       },
       required: ["conversationId"],
     },
+    inputValidator: archiveSchema,
+    readOnly: false,
   },
 ] as const;
 
@@ -306,7 +322,6 @@ export class AgentThreadManager {
   }
 
   bridgeFor(source: AgentThreadSource): ProviderHostToolBridge | undefined {
-    if (source.turn.harnessId !== "codex-app-server") return undefined;
     return {
       definitions: TOOL_DEFINITIONS,
       invoke: (call) => this.invoke(source, call),
@@ -315,13 +330,11 @@ export class AgentThreadManager {
 
   async onSourceTurnSettled(turn: AgentTurn): Promise<void> {
     if (turn.status === "completed") return;
-    const children = this.dependencies.turns.activeConversationIds()
-      .filter((conversationId) => {
-        const managed = this.dependencies.store.agentThreadManagement
-          .managedBy(turn.conversationId, conversationId);
-        return managed?.sourceTurnId === turn.id;
-      });
-    for (const conversationId of children) {
+    const active = new Set(this.dependencies.turns.activeConversationIds());
+    const targets = this.dependencies.store.agentThreadManagement
+      .targetsActedOnByTurn(turn.conversationId, turn.id);
+    for (const conversationId of targets) {
+      if (!active.has(conversationId)) continue;
       this.dependencies.turns.cancel(conversationId);
     }
   }
@@ -364,8 +377,8 @@ export class AgentThreadManager {
           return await this.mutate(source, call, call.tool, (operationId, signal) =>
             this.create(source, call.arguments, operationId, signal));
         case "inertia_send_message":
-          return await this.mutate(source, call, call.tool, (_operationId, signal) =>
-            this.send(source, call.arguments, signal));
+          return await this.mutate(source, call, call.tool, (operationId, signal) =>
+            this.send(source, call.arguments, operationId, signal));
         case "inertia_stop_conversation":
           return await this.mutate(source, call, call.tool, (_operationId, signal) =>
             this.stop(source, call.arguments, signal));
@@ -385,11 +398,6 @@ export class AgentThreadManager {
 
   private list(source: Conversation, args: unknown): ProviderHostToolResult {
     const input = listSchema.parse(args ?? {});
-    const managedIds = new Set(
-      this.dependencies.store.agentThreadManagement
-        .children(source.id, MAX_LIST_LIMIT)
-        .map(({ childConversationId }) => childConversationId),
-    );
     const limit = input.limit ?? 10;
     const candidates = this.dependencies.store.shellSnapshot().conversations
       .filter((conversation) => (
@@ -402,7 +410,8 @@ export class AgentThreadManager {
       .slice(0, limit)
       .map((conversation) => safeConversation(
         conversation,
-        managedIds.has(conversation.id),
+        this.dependencies.store.agentThreadManagement
+          .managedBy(source.id, conversation.id) !== null,
       ));
     return json({ conversations: rows, truncated: candidates.length > limit });
   }
@@ -874,6 +883,7 @@ export class AgentThreadManager {
   private async send(
     source: AgentThreadSource,
     args: unknown,
+    operationId: string,
     signal: AbortSignal,
   ): Promise<ProviderHostToolResult> {
     const input = sendSchema.parse(args);
@@ -885,9 +895,17 @@ export class AgentThreadManager {
         target.modelSelection,
       ),
     );
+    if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
     if (this.dependencies.turns.isActive(target.id)) {
       const lease = this.dependencies.turns.acquireFollowUpAdmission(target.id);
       if (!lease) throw new Error("The target chat cannot accept a follow-up right now.");
+      this.dependencies.store.agentThreadManagement.transition(
+        operationId,
+        ["approved"],
+        "dispatching",
+        { childConversationId: target.id },
+        this.now(),
+      );
       try {
         const message = await this.dependencies.turns.steer(lease, {
           content: input.content,
@@ -905,6 +923,13 @@ export class AgentThreadManager {
         lease.release();
       }
     }
+    this.dependencies.store.agentThreadManagement.transition(
+      operationId,
+      ["approved"],
+      "dispatching",
+      { childConversationId: target.id },
+      this.now(),
+    );
     const queued = this.dependencies.turns.queue({
       conversationId: target.id,
       content: input.content,

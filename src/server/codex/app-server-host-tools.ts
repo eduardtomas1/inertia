@@ -1,23 +1,9 @@
-import { randomUUID } from "node:crypto";
-
 import { strictCodexProviderIdentifier } from "./app-server-subagents";
-import { boundedText, type JsonObject, type RpcId } from "./protocol";
-import type {
-  ProviderHostToolApprovalRequest,
-  ProviderHostToolResult,
-} from "../provider/contracts";
-import type {
-  AgentApprovalDecision,
-  AgentApprovalRequest,
-} from "../provider/interactions";
+import { type JsonObject, type RpcId } from "./protocol";
+import type { ProviderHostToolResult } from "../provider/contracts";
+import type { AgentApprovalDecision } from "../provider/interactions";
+import { ProviderHostToolRuntime } from "../provider/host-tool-runtime";
 import type { CodexAppServerOptions } from "./types";
-
-interface PendingHostToolApproval {
-  request: AgentApprovalRequest;
-  toolCallId: string;
-  resolve: (decision: AgentApprovalDecision) => void;
-  timeout: NodeJS.Timeout;
-}
 
 interface PendingHostToolCall {
   rpcId: RpcId;
@@ -36,7 +22,6 @@ export interface CodexHostToolRuntimeHost {
 }
 
 const HOST_TOOL_APPROVAL_ID_PREFIX = "inertia-host-tool:";
-const HOST_TOOL_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 const MAX_HOST_TOOL_RESULT_BYTES = 32 * 1024;
 
 function boundedHostToolResult(value: string): string {
@@ -60,14 +45,30 @@ export function isHostToolApprovalId(requestId: string): boolean {
 
 /** Exact-run owner for Codex dynamic-tool calls and their local approvals. */
 export class CodexHostToolRuntime {
-  private readonly pendingApprovals = new Map<
-    string,
-    PendingHostToolApproval
-  >();
   private readonly pendingCalls = new Map<string, PendingHostToolCall>();
   private readonly seenCallIds = new Set<string>();
+  private readonly runtime: ProviderHostToolRuntime | undefined;
 
-  constructor(private readonly host: CodexHostToolRuntimeHost) {}
+  constructor(private readonly host: CodexHostToolRuntimeHost) {
+    const bridge = host.options.hostTools;
+    this.runtime = bridge
+      ? new ProviderHostToolRuntime({
+          bridge,
+          conversationId: () => host.providerThreadId(),
+          turnId: () => host.activeTurnId(),
+          cwd: host.options.cwd,
+          onApproval: (request) => host.options.onApproval?.(request),
+          onApprovalResolved: (requestId, decision) => {
+            host.options.onApprovalResolved?.(requestId, decision);
+          },
+          onCancel: (callId) => {
+            this.pendingCalls.get(callId)?.controller.abort();
+            host.cancel();
+          },
+          approvalTimeoutMs: host.options.hostToolApprovalTimeoutMs,
+        })
+      : undefined;
+  }
 
   handle(id: RpcId, params: JsonObject): void {
     const bridge = this.host.options.hostTools;
@@ -121,23 +122,13 @@ export class CodexHostToolRuntime {
     const controller = new AbortController();
     const pending = { rpcId: id, controller };
     this.pendingCalls.set(toolCallId, pending);
-    void bridge.invoke({
-      providerThreadId,
-      providerTurnId,
-      toolCallId,
+    void this.runtime!.invoke({
+      callId: toolCallId,
       tool,
       arguments: params.arguments,
       signal: controller.signal,
-      requestApproval: (request) => this.requestApproval(toolCallId, request),
     }).then(
       (result) => this.respond(toolCallId, pending, result),
-      (error: unknown) => this.respond(toolCallId, pending, {
-        success: false,
-        text: boundedText(
-          error instanceof Error ? error.message : String(error),
-          1_000,
-        ) ?? "The Inertia host tool failed.",
-      }),
     ).finally(() => this.finishCall(toolCallId, pending));
   }
 
@@ -145,30 +136,12 @@ export class CodexHostToolRuntime {
     requestId: string,
     decision: AgentApprovalDecision,
   ): boolean {
-    const pending = this.pendingApprovals.get(requestId);
-    if (
-      !pending
-      || this.host.isSettled()
-      || !pending.request.availableDecisions.includes(decision)
-    ) return false;
-    clearTimeout(pending.timeout);
-    this.pendingApprovals.delete(requestId);
-    pending.resolve(decision);
-    this.host.options.onApprovalResolved?.(requestId, decision);
-    if (decision === "cancel") {
-      this.pendingCalls.get(pending.toolCallId)?.controller.abort();
-      this.host.cancel();
-    }
-    return true;
+    if (this.host.isSettled()) return false;
+    return this.runtime?.respondToApproval(requestId, decision) ?? false;
   }
 
-  settle(decision: AgentApprovalDecision): void {
-    for (const [requestId, pending] of this.pendingApprovals) {
-      clearTimeout(pending.timeout);
-      pending.resolve(decision);
-      this.host.options.onApprovalResolved?.(requestId, "cancelled");
-    }
-    this.pendingApprovals.clear();
+  settle(_decision: AgentApprovalDecision): void {
+    this.runtime?.settle();
     for (const pending of this.pendingCalls.values()) {
       pending.controller.abort();
       this.host.releaseServerRequest(pending.rpcId);
@@ -207,58 +180,6 @@ export class CodexHostToolRuntime {
     if (this.pendingCalls.get(toolCallId) === pendingCall) {
       this.pendingCalls.delete(toolCallId);
     }
-    for (const [requestId, pending] of this.pendingApprovals) {
-      if (pending.toolCallId !== toolCallId) continue;
-      clearTimeout(pending.timeout);
-      this.pendingApprovals.delete(requestId);
-      pending.resolve("cancel");
-      this.host.options.onApprovalResolved?.(requestId, "cancelled");
-    }
-  }
-
-  private requestApproval(
-    toolCallId: string,
-    request: ProviderHostToolApprovalRequest,
-  ): Promise<AgentApprovalDecision> {
-    if (
-      this.host.isSettled()
-      || !this.pendingCalls.has(toolCallId)
-      || [...this.pendingApprovals.values()].some(
-        (pending) => pending.toolCallId === toolCallId,
-      )
-    ) return Promise.resolve("cancel");
-    const requestId = `${HOST_TOOL_APPROVAL_ID_PREFIX}${randomUUID()}`;
-    const approval: AgentApprovalRequest = {
-      requestId,
-      kind: "permissions",
-      title: boundedText(request.title, 200) ?? "Allow Inertia chat action",
-      detail: boundedText(request.detail, 2_000),
-      reason: boundedText(request.reason, 1_000),
-      cwd: this.host.options.cwd,
-      permissionRoots: request.permissionRoots.slice(0, 8),
-      availableDecisions: ["approve", "deny", "cancel"],
-    };
-    return new Promise<AgentApprovalDecision>((resolve) => {
-      const timeout = setTimeout(() => {
-        const pending = this.pendingApprovals.get(requestId);
-        if (!pending) return;
-        this.pendingApprovals.delete(requestId);
-        pending.resolve("deny");
-        this.host.options.onApprovalResolved?.(requestId, "deny");
-      }, Math.max(1, Math.min(
-        HOST_TOOL_APPROVAL_TIMEOUT_MS,
-        this.host.options.hostToolApprovalTimeoutMs
-          ?? HOST_TOOL_APPROVAL_TIMEOUT_MS,
-      )));
-      timeout.unref();
-      this.pendingApprovals.set(requestId, {
-        request: approval,
-        toolCallId,
-        resolve,
-        timeout,
-      });
-      this.host.options.onApproval?.(approval);
-    });
   }
 
   private writeOrCancel(message: JsonObject): void {

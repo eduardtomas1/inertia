@@ -1,3 +1,5 @@
+import type { ZodType } from "zod";
+
 import type {
   AgentGoalStatus,
   ContinuationIdentity,
@@ -340,6 +342,9 @@ export interface ProviderHostToolDefinition {
   name: string;
   description: string;
   inputSchema: Readonly<Record<string, unknown>>;
+  /** Process-local validator used by in-process provider tool transports. */
+  inputValidator?: ZodType<Record<string, unknown>>;
+  readOnly: boolean;
 }
 
 export interface ProviderHostToolApprovalRequest {

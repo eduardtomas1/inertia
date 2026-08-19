@@ -55,6 +55,9 @@ import {
   readClaudeContextUsage,
 } from "./claude-usage";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
+import { createClaudeHostTools } from "./claude-host-tools";
+import { ProviderHostToolRuntime } from "./host-tool-runtime";
+import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -416,6 +419,22 @@ function startClaudeRun(
     "Claude Code process tree",
     lifecycleDependencies,
   );
+  const hostToolRuntime = options.hostTools && options.input.turnId
+    ? new ProviderHostToolRuntime({
+        bridge: options.hostTools,
+        conversationId,
+        turnId: options.input.turnId,
+        cwd: options.input.cwd,
+        onApproval: (request) => emitter.rich({ type: "approval", request }),
+        onApprovalResolved: (requestId, decision) => {
+          emitter.rich({ type: "approval-resolved", requestId, decision });
+        },
+      })
+    : undefined;
+  const claudeHostTools = hostToolRuntime
+    ? createClaudeHostTools(hostToolRuntime)
+    : undefined;
+  let hostToolsCleanupFailed = false;
 
   const refreshContextUsage = (): void => {
     if (!query || contextUsageRequest) return;
@@ -457,6 +476,9 @@ function startClaudeRun(
   };
 
   const canUseTool: CanUseTool = async (toolName, toolInput, callbackOptions) => {
+    if (claudeHostTools?.providerToolNames.has(toolName)) {
+      return { behavior: "allow", updatedInput: toolInput };
+    }
     if (toolName === "AskUserQuestion") {
       const requestId = randomUUID();
       const request = claudeQuestions(requestId, callbackOptions.toolUseID, toolInput);
@@ -634,6 +656,12 @@ function startClaudeRun(
                 : "default",
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool,
+          ...(claudeHostTools
+            ? {
+                mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config },
+                strictMcpConfig: true,
+              }
+            : {}),
           ...(options.input.sessionId ? { resume: options.input.sessionId } : {}),
           ...(options.input.model ? { model: options.input.model } : {}),
           ...(claudeEffort(options.input.reasoningEffort) ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
@@ -922,6 +950,12 @@ function startClaudeRun(
       );
     } finally {
       acceptingFollowUps = false;
+      hostToolRuntime?.settle();
+      try {
+        await claudeHostTools?.close();
+      } catch {
+        hostToolsCleanupFailed = true;
+      }
       // Start the owned shutdown while the SDK child is still an owned live
       // process. The public result below awaits this same memoized attempt
       // after protocol streams and selected-skill resources are closed.
@@ -975,6 +1009,14 @@ function startClaudeRun(
         error: "Claude selected-skill staging could not be cleaned up.",
       };
     }
+    if (hostToolsCleanupFailed) {
+      terminal = {
+        ...terminal,
+        status: "failed",
+        error: "Claude Inertia chat tools could not be cleaned up.",
+        cleanupConfirmed: false,
+      };
+    }
     const child = ownedProcess.child();
     terminal = {
       ...terminal,
@@ -1003,6 +1045,7 @@ function startClaudeRun(
   const cancel = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    hostToolRuntime?.settle();
     skillAbortController.abort(
       new Error("Claude selected-skill staging was cancelled."),
     );
@@ -1039,7 +1082,9 @@ function startClaudeRun(
     cancel,
     extension: {
       kind: "claude-agent-sdk",
-      respondToApproval: settleApproval,
+      respondToApproval: (requestId, decision) =>
+        hostToolRuntime?.respondToApproval(requestId, decision)
+        || settleApproval(requestId, decision),
       respondToInput: settleInput,
       steer: async (input) => {
         const text = normalizedClaudeFollowUp(input.content);

@@ -19,6 +19,7 @@ const hostTools: NonNullable<CodexAppServerOptions["hostTools"]> = {
       additionalProperties: false,
       properties: { limit: { type: "integer", maximum: 25 } },
     },
+    readOnly: true,
   }],
   invoke: vi.fn(async () => ({ success: true, text: "{}" })),
 };
@@ -88,7 +89,11 @@ describe("Codex host-tool registration", () => {
     expect(harness.calls.find(({ method }) => method === "thread/start"))
       .toMatchObject({
         params: {
-          dynamicTools: hostTools.definitions,
+          dynamicTools: hostTools.definitions.map(({
+            name,
+            description,
+            inputSchema,
+          }) => ({ name, description, inputSchema })),
         },
       });
     expect(harness.calls.find(({ method }) => method === "turn/start"))

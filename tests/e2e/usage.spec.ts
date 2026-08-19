@@ -386,6 +386,9 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     path: darkPath,
     contentType: "image/png",
   });
+  await projectNavigation.click();
+  await expect(projectNavigation).toHaveAttribute("aria-pressed", "true");
+  await expect(dailyWorkDestination).toBeVisible();
   await dailyWorkDestination.click();
   await expect(dailyWorkDialog).toBeVisible();
   await expect(headerMark).toBeVisible();
@@ -402,6 +405,9 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   });
   await page.getByRole("button", { name: "Close daily work" }).click();
   await expect(dailyWorkDialog).toBeHidden();
+  await projectNavigation.click();
+  await expect(projectNavigation).toHaveAttribute("aria-pressed", "false");
+  await expect(dailyWorkDestination).toBeHidden();
 
   const methodNote = page.getByText("Measured locally.", { exact: true });
   await methodNote.scrollIntoViewIfNeeded();

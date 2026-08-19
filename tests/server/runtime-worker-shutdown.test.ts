@@ -86,6 +86,25 @@ describe("runtime worker shutdown", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
+  it("keeps the utility alive while an owned process claim remains", async () => {
+    const post = vi.fn();
+    const exit = vi.fn();
+
+    await completeRuntimeWorkerShutdown({
+      runtime: runtimeWithClose(vi.fn(async () => undefined)),
+      cause: "runtime-shutdown",
+      exitCode: 0,
+      closeBrokers: vi.fn(),
+      ownedProcessCleanupConfirmed: () => false,
+      post,
+      exit,
+    });
+
+    expect(post).toHaveBeenCalledWith({ type: "runtime.shutdown-unconfirmed" });
+    expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
+    expect(exit).not.toHaveBeenCalled();
+  });
+
   it("never reports stopped when an owned child misses the shutdown deadline", async () => {
     vi.useFakeTimers();
     try {

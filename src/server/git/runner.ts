@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 
 import {
   DEFAULT_OUTPUT_BYTES,
@@ -198,14 +199,14 @@ export function runGit(
     ?? terminateProcessTreeAndWait;
 
   return new Promise((resolveProcess, rejectProcess) => {
-    const child = spawn("git", [...args], {
+    const child = spawnRuntimeOwnedProcess(() => spawn("git", [...args], {
       cwd,
       shell: false,
       detached: process.platform !== "win32",
       windowsHide: true,
       stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
       env: gitProcessEnvironment(process.env, options.environment),
-    });
+    }));
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let stdoutBytes = 0;
@@ -401,14 +402,14 @@ function runPreparedGitRefTransaction(
   const timeoutMs = Math.min(LOCAL_TIMEOUT_MS, deadlineTimeoutMs);
   const expiresAt = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
-    const child = spawn("git", ["update-ref", "--stdin"], {
+    const child = spawnRuntimeOwnedProcess(() => spawn("git", ["update-ref", "--stdin"], {
       cwd,
       shell: false,
       detached: process.platform !== "win32",
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
       env: gitProcessEnvironment(process.env),
-    });
+    }));
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let outputBytes = 0;

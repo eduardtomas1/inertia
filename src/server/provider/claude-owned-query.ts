@@ -12,6 +12,7 @@ import {
   createOwnedProcessTreeTermination,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
+import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 
 export interface ClaudeOwnedQueryDependencies {
   /** Test seam for the SDK-owned child process creation. */
@@ -64,14 +65,14 @@ export function createClaudeOwnedQueryProcess(
         "Claude Agent SDK attempted to spawn more than one process for a single query.",
       );
     }
-    const ownedChild = spawnProcess(spawnOptions.command, spawnOptions.args, {
+    const ownedChild = spawnRuntimeOwnedProcess(() => spawnProcess(spawnOptions.command, spawnOptions.args, {
       cwd: spawnOptions.cwd,
       env: spawnOptions.env,
       detached: process.platform !== "win32",
       shell: false,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
-    });
+    }));
     child = ownedChild;
     // A custom SDK spawner owns stderr consumption. Drain it so an untrusted
     // provider cannot block shutdown by filling an unread pipe.

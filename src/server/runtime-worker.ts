@@ -16,6 +16,10 @@ import {
 } from "./runtime/database-recovery-queue.js";
 import { RuntimeSecureFileBrokerClient } from "./runtime/secure-file-broker-client.js";
 import { completeRuntimeWorkerShutdown } from "./runtime-worker-shutdown.js";
+import {
+  activateRuntimeOwnedProcessRegistry,
+  runtimeOwnedProcessCleanupConfirmed,
+} from "../node/runtime-owned-processes.js";
 
 let runtime: RunningRuntime | null = null;
 const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
@@ -84,6 +88,7 @@ async function finishShutdown(
       conversationAttachmentStore.close();
       secureFiles.close();
     },
+    ownedProcessCleanupConfirmed: runtimeOwnedProcessCleanupConfirmed,
     post,
     exit: (code) => process.exit(code),
   });
@@ -542,6 +547,23 @@ parentPort.on("message", (messageEvent) => {
   runtimeGeneration = Number(command.options.runtimeGenerationId.split(":")[1]);
   updatePreparation = null;
   lastReleasedUpdatePreparation = null;
+  try {
+    activateRuntimeOwnedProcessRegistry(
+      command.options.dataDirectory,
+      command.options.runtimeGenerationId,
+      command.options.systemBootId,
+    );
+  } catch (error) {
+    starting = false;
+    post({
+      type: "runtime.startup-failed",
+      message: error instanceof Error
+        ? error.message
+        : "Runtime process ownership could not be initialized.",
+    });
+    void shutdown(1);
+    return;
+  }
   void startRuntime({
     ...command.options,
     onCleanupReceiptConsumed: (

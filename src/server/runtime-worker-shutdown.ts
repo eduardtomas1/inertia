@@ -6,6 +6,7 @@ interface RuntimeWorkerShutdownOptions {
   cause: "runtime-shutdown" | "runtime-crash";
   exitCode: number;
   closeBrokers: () => void;
+  ownedProcessCleanupConfirmed?: () => boolean;
   post: (event: RuntimeWorkerEvent) => void;
   exit: (code: number) => void;
 }
@@ -28,6 +29,13 @@ export async function completeRuntimeWorkerShutdown(
     shutdownConfirmed = false;
   }
   options.closeBrokers();
+  if (shutdownConfirmed) {
+    try {
+      shutdownConfirmed = options.ownedProcessCleanupConfirmed?.() ?? true;
+    } catch {
+      shutdownConfirmed = false;
+    }
+  }
   if (!shutdownConfirmed) {
     options.post({ type: "runtime.shutdown-unconfirmed" });
     return;

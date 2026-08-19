@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { basename } from "node:path";
+import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 
 import {
   credentialFreeProviderEnvironment,
@@ -104,7 +105,7 @@ async function probeProcess(
     let child: ChildProcessWithoutNullStreams;
     try {
       const invocation = providerProcessInvocation(executable, args, environment.env);
-      child = spawn(invocation.command, invocation.args, {
+      child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
         cwd,
         env: environment.env,
         detached: process.platform !== "win32",
@@ -112,7 +113,7 @@ async function probeProcess(
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
-      });
+      }));
     } catch {
       finish(null);
       return;

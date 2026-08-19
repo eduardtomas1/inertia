@@ -2,6 +2,10 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import { INERTIA_VERSION } from "../../shared/version";
 import {
+  confirmRuntimeOwnedProcessStopped,
+  spawnRuntimeOwnedProcess,
+} from "../../node/runtime-owned-processes";
+import {
   isProcessTreeTerminationUnconfirmed,
   ProcessTreeTerminationError,
   requireProcessTreeTermination,
@@ -71,7 +75,7 @@ export async function withCodexControlClient<T>(
     options.environment,
   );
   const spawnProcess = options.spawnProcess ?? spawn;
-  const child: ChildProcessWithoutNullStreams = spawnProcess(
+  const child: ChildProcessWithoutNullStreams = spawnRuntimeOwnedProcess(() => spawnProcess(
     invocation.command,
     invocation.args,
     {
@@ -83,7 +87,7 @@ export async function withCodexControlClient<T>(
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     },
-  );
+  ));
   const pending = new Map<number, PendingRequest>();
   let nextId = 1;
   let closed = false;
@@ -109,7 +113,13 @@ export async function withCodexControlClient<T>(
       child,
       true,
       options.processLabel ?? "Codex control process tree",
-    );
+    ).then(() => {
+      if (!confirmRuntimeOwnedProcessStopped(child)) {
+        throw new ProcessTreeTerminationError(
+          options.processLabel ?? "Codex control process tree",
+        );
+      }
+    });
     return termination;
   };
   const failConnection = (error: Error): void => {

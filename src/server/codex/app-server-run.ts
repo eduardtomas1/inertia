@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 
 import { staleProviderSessionDecision } from "../../shared/continuation-policy";
 import { INERTIA_VERSION } from "../../shared/version";
@@ -72,7 +73,7 @@ export function startCodexAppServerRun(
     ["app-server"],
     options.environment,
   );
-  const child = spawn(invocation.command, invocation.args, {
+  const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
     cwd: options.cwd,
     env: options.environment,
     detached: process.platform !== "win32",
@@ -80,7 +81,7 @@ export function startCodexAppServerRun(
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
-  });
+  }));
   const resultText = new CappedTextBuffer(MAX_CODEX_TEXT_CHARS);
   const diagnostic = new CappedTextBuffer(MAX_CODEX_DIAGNOSTIC_CHARS);
   const pendingRequests = new Map<number, PendingClientRequest>();

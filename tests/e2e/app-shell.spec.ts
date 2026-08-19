@@ -10,7 +10,7 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
-import { expectRuntimeCrashSafety } from "./support/runtime-crash-safety";
+import { expectRuntimeCrashRecovery } from "./support/runtime-crash-safety";
 import { seedViewedConversationContext } from "./support/viewed-conversation-context";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 
@@ -514,5 +514,5 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
 });
 
 test("keeps the window alive and reconnects with a rotated capability after a runtime crash", async () => {
-  await expectRuntimeCrashSafety(app);
+  await expectRuntimeCrashRecovery(app);
 });

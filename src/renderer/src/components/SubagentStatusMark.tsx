@@ -16,7 +16,7 @@ export function SubagentStatusMark({
   return (
     <span
       className="subagent-status-mark"
-      data-live={isLiveSubagentTrace(trace) ? "true" : "false"}
+      data-live={isLiveSubagentTrace(trace)}
       data-status={trace.status}
       aria-hidden="true"
     />

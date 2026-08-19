@@ -190,7 +190,7 @@ describe("delegated-agent timeline disclosure", () => {
       "subagent-state-pill",
     );
     expect(within(childRow).getByText("Researcher")).toHaveClass(
-      "subagent-role-pill",
+      "subagent-role",
     );
     expect(within(childRow).getByText("Inspect the repository.")).toHaveClass(
       "subagent-mission",

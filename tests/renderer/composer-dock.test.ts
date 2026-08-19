@@ -52,7 +52,7 @@ describe("cohesive composer dock", () => {
     expect(dock.indexOf("<ComposerInputZone"))
       .toBeLessThan(dock.indexOf("<ComposerToolbar"));
     expect(inputSource).toContain('data-composer-zone="input"');
-    expect(toolbarSource).toContain('data-composer-zone="controls"');
+    expect(toolbarSource).toContain('className="composer-toolbar"');
     expect(inputSource).toContain('className="provider-readiness"');
     expect(inputSource).toContain("<ComposerAttachmentList");
     expect(inputSource).not.toContain(
@@ -62,13 +62,6 @@ describe("cohesive composer dock", () => {
     expect(toolbarSource).toContain('className="composer-toolbar"');
     expect(toolbarSource).toContain('role="group"');
     expect(toolbarSource).toContain('aria-label="Composer controls"');
-    expect(toolbarSource).toContain('aria-label="Add context"');
-    expect(toolbarSource).toContain(
-      'aria-label="Model, service, and run settings"',
-    );
-    expect(toolbarSource).toContain(
-      'aria-label="Budget and message actions"',
-    );
     expect(inputSource.indexOf('className="provider-readiness"'))
       .toBeLessThan(inputSource.indexOf('aria-label="Message"'));
     expect(inputSource.indexOf("<ComposerAttachmentList"))

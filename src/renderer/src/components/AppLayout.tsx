@@ -415,8 +415,7 @@ export function AppLayout({
       data-interface-scale={settings.interfaceScale}
       data-runtime-generation={connection.runtimeGeneration ?? undefined}
       data-connection-status={connection.status}
-      data-document-active={documentActive ? "true" : "false"}
-      data-document-visible={documentVisible ? "true" : "false"}
+      data-document-visible={documentVisible}
       style={shellStyle}
     >
       <Suspense fallback={null}>

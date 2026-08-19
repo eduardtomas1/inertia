@@ -42,9 +42,7 @@ describe("composer input and control zones", () => {
     expect(inputZone).toContain("<ComposerAttachmentList");
     expect(inputZone).toContain("<RouteChangeConfirmation");
     expect(inputZone).toContain('aria-label="Message"');
-    expect(toolbarSource.slice(controlsStart)).toContain(
-      'data-composer-zone="controls"',
-    );
+    expect(toolbarSource.slice(controlsStart)).toContain("composer-tools");
   });
 
   it("drives zone spacing, scale, density, and readability through semantic tokens", () => {

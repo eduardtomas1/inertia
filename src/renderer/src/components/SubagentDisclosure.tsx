@@ -228,7 +228,7 @@ export function SubagentDisclosure({
                 <span className="subagent-copy-heading">
                   <strong>{label}</strong>
                   {role && (
-                    <span className="subagent-role-pill">{role}</span>
+                    <span className="subagent-role">{role}</span>
                   )}
                   <span className="subagent-state-pill" key={trace.status}>
                     {state}

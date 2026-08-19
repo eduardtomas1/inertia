@@ -15,7 +15,6 @@ import {
 
 import type { ProviderModel } from "../../shared/contracts";
 import {
-  ProcessTreeTerminationError,
   terminateProcessTreeAndWait,
   type OwnedProcessTreeTermination,
   type ProcessTreeTerminator,
@@ -45,6 +44,7 @@ import {
   openCodeQuestions,
 } from "./opencode-boundary";
 import {
+  openCodeCleanupFailureMessage,
   OpenCodeServerCleanupUnconfirmedError,
   startOwnedOpenCodeServer,
   waitForOpenCodeHealth,
@@ -592,24 +592,9 @@ function startOpenCodeRun(
         await terminateOwnedRun?.(true);
       } catch (error) {
         cleanupConfirmed = false;
-        const priorError = outcome.error;
         outcome = {
           status: "failed",
-          error: priorError
-            ? new ProcessTreeTerminationError(
-                "OpenCode server process tree",
-                {
-                  priorError: new Error(priorError),
-                  cause: new AggregateError(
-                    [new Error(priorError), error],
-                    "OpenCode operation and cleanup both failed.",
-                  ),
-                },
-              ).message
-            : safeError(
-                error,
-                "OpenCode server process tree could not be confirmed stopped.",
-              ),
+          error: openCodeCleanupFailureMessage(outcome.error, error),
         };
       }
     }

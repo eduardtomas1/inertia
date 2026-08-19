@@ -4,6 +4,7 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 
 import {
   createOwnedProcessTreeTermination,
+  ProcessTreeTerminationError,
   type OwnedProcessTreeTermination,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
@@ -20,6 +21,25 @@ export class OpenCodeServerCleanupUnconfirmedError extends Error {
     super(message, { cause });
     this.name = "OpenCodeServerCleanupUnconfirmedError";
   }
+}
+
+export function openCodeCleanupFailureMessage(
+  priorError: string | undefined,
+  cleanupError: unknown,
+): string {
+  if (!priorError) {
+    return safeError(
+      cleanupError,
+      "OpenCode server process tree could not be confirmed stopped.",
+    );
+  }
+  return new ProcessTreeTerminationError("OpenCode server process tree", {
+    priorError: new Error(priorError),
+    cause: new AggregateError(
+      [new Error(priorError), cleanupError],
+      "OpenCode operation and cleanup both failed.",
+    ),
+  }).message;
 }
 
 export function openCodeServerProcessInvocation(

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { win32 } from "node:path";
 
 import {
@@ -15,6 +16,7 @@ interface RuntimeTreeDependencies {
   kill: typeof process.kill;
   spawnProcessSync: typeof spawnSync;
   environment: NodeJS.ProcessEnv;
+  readFile: (path: string, encoding: "utf8") => string;
   deadlineAt: number;
   now: () => number;
   setTimer: typeof setTimeout;
@@ -22,9 +24,42 @@ interface RuntimeTreeDependencies {
 
 export const runtimeDescendantPids = posixDescendantPids;
 
+type LinuxProcessState = "live" | "zombie" | "missing" | "unknown";
+
+function linuxProcessState(
+  pid: number,
+  readFile: RuntimeTreeDependencies["readFile"],
+): LinuxProcessState {
+  let stat: string;
+  try {
+    stat = readFile(`/proc/${pid}/stat`, "utf8");
+  } catch (error) {
+    return error
+      && typeof error === "object"
+      && "code" in error
+      && (error.code === "ENOENT" || error.code === "ESRCH")
+      ? "missing"
+      : "unknown";
+  }
+  const closingName = stat.lastIndexOf(")");
+  if (closingName < 2) return "unknown";
+  const state = stat.slice(closingName + 1).trimStart()[0];
+  if (state === "Z") return "zombie";
+  return state && /^[A-Za-z]$/u.test(state) ? "live" : "unknown";
+}
+
+function processIsMissing(error: unknown): boolean {
+  return error !== null
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "ESRCH";
+}
+
 async function waitForDescendantsExit(
   descendants: readonly number[],
+  platform: NodeJS.Platform,
   kill: typeof process.kill,
+  readFile: RuntimeTreeDependencies["readFile"],
   deadlineAt: number,
   now: () => number,
   setTimer: typeof setTimeout,
@@ -32,10 +67,20 @@ async function waitForDescendantsExit(
   const remaining = new Set(descendants);
   while (remaining.size > 0) {
     for (const pid of remaining) {
+      if (platform === "linux") {
+        const state = linuxProcessState(pid, readFile);
+        // A zombie has no executable address space and cannot create or retain
+        // descendants. It may remain signal-visible until an external parent
+        // reaps it, which must not turn confirmed cleanup into a reboot.
+        if (state === "missing" || state === "zombie") {
+          remaining.delete(pid);
+          continue;
+        }
+      }
       try {
         kill(pid, 0);
-      } catch {
-        remaining.delete(pid);
+      } catch (error) {
+        if (processIsMissing(error)) remaining.delete(pid);
       }
     }
     if (remaining.size === 0) return true;
@@ -82,6 +127,8 @@ export async function forceKillRuntimeProcessTree(
   const kill = dependencies.kill ?? process.kill;
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
   const environment = dependencies.environment ?? process.env;
+  const readFile = dependencies.readFile
+    ?? ((path, encoding) => readFileSync(path, encoding));
   const now = dependencies.now ?? Date.now;
   const deadlineAt = dependencies.deadlineAt
     ?? now() + PROCESS_TREE_TIMEOUT_MS;
@@ -127,7 +174,9 @@ export async function forceKillRuntimeProcessTree(
   return killed.snapshotConfirmed
     && await waitForDescendantsExit(
       [runtimePid, ...killed.descendants],
+      platform,
       kill,
+      readFile,
       deadlineAt,
       now,
       setTimer,

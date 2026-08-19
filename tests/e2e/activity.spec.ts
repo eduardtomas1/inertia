@@ -455,12 +455,16 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       .toBeVisible();
     await expect(delegatedWork.getByText("Build Verifier", { exact: true }))
       .toBeVisible();
-    await expect(delegatedWork.getByText(/Claude · Agent SDK · Running ·/u))
+    await expect(delegatedWork.locator(".subagent-route")).toHaveCount(3);
+    await expect(delegatedWork.getByText("Running", { exact: true }))
       .toBeVisible();
-    await expect(delegatedWork.getByText(/Claude · Agent SDK · Completed/u))
+    await expect(delegatedWork.getByText("Completed", { exact: true }))
       .toBeVisible();
-    await expect(delegatedWork.getByText(/Claude · Agent SDK · Failed/u))
+    await expect(delegatedWork.getByText("Failed", { exact: true }))
       .toBeVisible();
+    await expect(delegatedWork.locator(
+      '.subagent-status-mark[data-live="true"]',
+    )).toHaveCount(1);
     await expect(delegatedWork.getByRole("button", {
       name: "Stop Evidence Scout",
     })).toBeVisible();

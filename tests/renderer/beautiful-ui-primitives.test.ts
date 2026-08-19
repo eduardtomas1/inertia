@@ -10,6 +10,8 @@ const composerSource = readFileSync(new URL("../../src/renderer/src/components/c
 const commandMenuSource = readFileSync(new URL("../../src/renderer/src/components/composer/ComposerCommandMenu.tsx", import.meta.url), "utf8");
 const responseSource = readFileSync(new URL("../../src/renderer/src/components/ResponseMarkdown.tsx", import.meta.url), "utf8");
 const layersSource = readFileSync(new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url), "utf8");
+const activitySource = readFileSync(new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url), "utf8");
+const subagentSource = readFileSync(new URL("../../src/renderer/src/components/SubagentDisclosure.tsx", import.meta.url), "utf8");
 const styles = [
   readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8"),
   readFileSync(new URL("../../src/renderer/src/components/BeautifulUiMotion.css", import.meta.url), "utf8"),
@@ -90,5 +92,20 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(usageStyles).toContain("width 500ms cubic-bezier(0.23, 1, 0.32, 1)");
     expect(usageStyles).toContain("usage-insight-content-in 250ms ease both");
     expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
+  });
+
+  it("integrates live streams, tool actions, and delegated tasks with real state", () => {
+    expect(activitySource).toContain("MAX_ANIMATED_STREAM_WORDS = 96");
+    expect(activitySource).toContain('data-stream-motion="word-reveal"');
+    expect(activitySource).toContain('className="agent-activity-icon"');
+    expect(subagentSource).toContain("<SubagentStatusMark");
+    expect(subagentSource).toContain('className="subagent-state-pill"');
+    expect(subagentSource).toContain('className="subagent-detail-reveal"');
+
+    expect(styles).toContain("beautiful-tool-row-enter 300ms cubic-bezier(0.23, 1, 0.32, 1)");
+    expect(styles).toContain("beautiful-task-row-enter 450ms cubic-bezier(0.23, 1, 0.32, 1)");
+    expect(styles).toContain("beautiful-spin 1.1s linear infinite");
+    expect(styles).toContain('.subagent-status-mark[data-live="true"]::after');
+    expect(styles).toContain('.app-shell[data-document-active="false"] .response-stream-word');
   });
 });

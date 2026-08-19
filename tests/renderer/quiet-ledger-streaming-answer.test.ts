@@ -13,6 +13,10 @@ import {
   resolveFinalAnswerPresentation,
 } from "../../src/renderer/src/components/ResponseTimeline";
 import {
+  MAX_ANIMATED_STREAM_WORDS,
+  StreamingPlainText,
+} from "../../src/renderer/src/components/response-timeline/activity";
+import {
   buildResponseTimeline,
   buildTurnExecutionStream,
   type ResponseTurn,
@@ -216,8 +220,12 @@ describe("Quiet Ledger streaming answer handoff", () => {
     expect(liveHtml).toContain("turn-commentary-row is-streaming");
     expect(liveHtml).toContain('aria-label="Live agent update"');
     expect(liveHtml).toContain('data-stream-renderer="plain-text"');
+    expect(liveHtml).toContain('data-stream-motion="word-reveal"');
     expect(liveHtml).not.toContain("response-code-block");
-    expect(liveHtml).toContain("some &lt;unsafe&gt; code");
+    expect(liveHtml).toContain(
+      '<span class="response-stream-word">&lt;unsafe&gt;</span>',
+    );
+    expect(liveHtml).not.toContain("<unsafe>");
     expect(liveHtml.match(/response-markdown is-streaming is-plain-stream/gu)).toHaveLength(1);
     expect(liveHtml).not.toContain('class="streaming-caret"');
 
@@ -232,6 +240,22 @@ describe("Quiet Ledger streaming answer handoff", () => {
     expect(handoffHtml.match(/Authoritative persisted answer/gu)).toHaveLength(1);
     expect(handoffHtml).not.toContain("STALE STREAM MUST NOT RENDER");
     expect(handoffHtml).not.toContain("streaming-caret");
+  });
+
+  it("bounds animated live words while preserving the complete escaped stream", () => {
+    const words = Array.from({ length: 120 }, (_, index) => `word-${index}`);
+    const content = `${words.join(" ")} <unsafe>`;
+    const html = renderToStaticMarkup(createElement(StreamingPlainText, {
+      content,
+    }));
+
+    expect(html.match(/class="response-stream-word"/gu)).toHaveLength(
+      MAX_ANIMATED_STREAM_WORDS,
+    );
+    expect(html).toContain("word-0 word-1");
+    expect(html).toContain("word-119");
+    expect(html).toContain("&lt;unsafe&gt;");
+    expect(html).not.toContain("<unsafe>");
   });
 
   it("keeps commentary, activity, later commentary, and the transient tail in chronological segments", () => {
@@ -284,11 +308,14 @@ describe("Quiet Ledger streaming answer handoff", () => {
     const before = html.indexOf("I’m checking the implementation.");
     const work = html.indexOf("Read source");
     const after = html.indexOf("The source confirms the behavior.");
-    const live = html.indexOf("I’m writing the final response.");
+    const live = html.indexOf(
+      `data-assistant-commentary-id="live-commentary:${turn.id}"`,
+    );
     expect(before).toBeGreaterThanOrEqual(0);
     expect(work).toBeGreaterThan(before);
     expect(after).toBeGreaterThan(work);
     expect(live).toBeGreaterThan(after);
+    expect(html).toContain('<span class="response-stream-word">I’m</span>');
     expect(html).toContain(
       'data-assistant-commentary-id="assistant-commentary-before"',
     );

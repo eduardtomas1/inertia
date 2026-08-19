@@ -16,14 +16,21 @@ staggering and 700 ms source reveal; 300 ms filter-row collapse; and 500 ms
 insight-meter interpolation. The shared ease curve is
 `cubic-bezier(0.23, 1, 0.32, 1)` wherever the reference uses its EASE constant.
 
+The live integration keeps motion tied to authoritative runtime updates. Newly
+appended commentary words use stable spans only for the most recent 96 words,
+new tool actions enter as they join the execution stream, and delegated-agent
+rows reuse the task grammar for running, waiting, completed, and failed states.
+Status text remains visible beside every decorative mark, so color and motion
+are never the only signals.
+
 | Beautiful UI reference | Inertia surface                       | Product adaptation                                                                                                                                                          |
 | ---------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Loading State          | Active response timeline              | Dots, Drive, and Orbit reflect waiting, tool execution, and reasoning. The video-like Surfer treatment is omitted because it does not communicate a distinct runtime state. |
 | Thinking               | Reasoning summary and work disclosure | Staggered, expandable reasoning steps with a stable active marker.                                                                                                          |
-| Streaming Text         | Final answer and commentary stream    | Incremental markdown, caret, code/table stabilization, copy actions, and durable follow-ups.                                                                                |
+| Streaming Text         | Final answer and commentary stream    | Incremental markdown plus a bounded escaped-text fast path, caret, code/table stabilization, copy actions, and durable follow-ups.                                         |
 | Approval Card          | Approval and input-request cards      | Privileged actions remain explicit; multi-question requests use a paged, keyboard-native flow that preserves answers.                                                       |
-| Tool Chips             | Work log and changed-files summary    | Compact categorized tool rows, expandable technical output, truthful warning states, and per-file insertion/deletion totals.                                                |
-| Task Rows              | Plan and goal panels                  | Connected status rows with pending, running, completed, and blocked states.                                                                                                 |
+| Tool Chips             | Work log and changed-files summary    | Compact categorized tool rows with visual state marks, expandable technical output, truthful warning states, and per-file insertion/deletion totals.                        |
+| Task Rows              | Plan, goal, and delegated-agent rows  | Connected status rows with pending, running, waiting, completed, blocked, and failed states.                                                                                |
 | Chat                   | Conversation workspace                | The primary product surface already provides provider-aware chat, live work, history, and a composer.                                                                       |
 | Prompt Bar             | Composer                              | `@` file context, `/` commands, attachments, model/reasoning/access controls, skills, dictation-ready input, and follow-up queuing.                                         |
 | Recommendation Card    | Approval and selection-review answers | Agent proposals can be accepted, revised, or denied; no confidence score is invented when providers do not supply one.                                                      |

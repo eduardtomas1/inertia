@@ -6,10 +6,15 @@ import { describe, expect, it } from "vitest";
 import { ActivityRow } from "../../src/renderer/src/components/ResponseTimeline";
 import type { AgentActivity } from "../../src/shared/contracts";
 
-const css = readFileSync(
+const motionCss = readFileSync(
+  new URL("../../src/renderer/src/components/BeautifulUiMotion.css", import.meta.url),
+  "utf8",
+);
+const baseCss = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
+const css = [motionCss, baseCss].join("\n");
 const activitySource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
   "utf8",
@@ -77,6 +82,7 @@ describe("Minimal Workstream activity lines", () => {
     expect(html).not.toContain("<pre>");
     expect(html).toContain("Working:");
     expect(html).toContain('data-activity-category="command"');
+    expect(html).toContain('<span class="agent-activity-icon" aria-hidden="true">');
     expect(html).toContain("lucide-terminal");
   });
 
@@ -149,8 +155,10 @@ describe("Minimal Workstream activity lines", () => {
     expect(error).not.toContain("lucide-check");
   });
 
-  it("uses an extremely compact, rail-aligned line with safe title and detail truncation", () => {
+  it("uses a compact visual action row with safe title and detail truncation", () => {
     const row = cssBlock(css, ".turn-work-log .agent-activity {");
+    const baseRow = cssBlock(baseCss, ".turn-work-log .agent-activity {");
+    const icon = cssBlock(css, ".agent-activity-icon {");
     const rail = cssBlock(css, ".turn-activity-group {");
     const title = cssBlock(css, ".turn-work-log .agent-activity-title {");
     const targetAndDetail = cssBlock(
@@ -158,10 +166,13 @@ describe("Minimal Workstream activity lines", () => {
       ".turn-work-log .agent-activity-target,",
     );
 
-    expect(row).toContain("min-height: 20px");
-    expect(row).toContain("padding: 0");
-    expect(row).toContain("background: transparent");
-    expect(row).toContain("font-size: var(--activity-row-font-size)");
+    expect(row).toContain("min-height: 28px");
+    expect(row).toContain("padding: 3px 5px");
+    expect(row).toContain("border-radius: 7px");
+    expect(baseRow).toContain("background: transparent");
+    expect(baseRow).toContain("font-size: var(--activity-row-font-size)");
+    expect(icon).toContain("width: 20px");
+    expect(icon).toContain("place-items: center");
     expect(rail).toContain(
       "border-left: 1px solid color-mix(in srgb, var(--execution-rail-border) 62%, transparent)",
     );
@@ -170,24 +181,27 @@ describe("Minimal Workstream activity lines", () => {
     expect(title).toContain("overflow: hidden");
     expect(targetAndDetail).toContain("text-overflow: ellipsis");
     expect(targetAndDetail).toContain("white-space: nowrap");
+    expect(cssBlock(css, ".turn-work-log .agent-activity-target {")).toContain(
+      "font-family: var(--font-mono)",
+    );
   });
 
   it("uses semantic warning/failure lines without card backgrounds or large alert rows", () => {
     const important = cssBlock(
-      css,
-      ".turn-work-log .agent-activity.is-important,",
+      baseCss,
+      ".turn-work-log > .agent-activity.is-failed {",
     );
     const warning = cssBlock(
       css,
-      '.turn-work-log .agent-activity[data-activity-severity="warning"] > svg,',
+      '.turn-work-log .agent-activity[data-activity-severity="warning"] > .agent-activity-icon {',
     );
     const failure = cssBlock(
       css,
-      '.turn-work-log .agent-activity[data-activity-severity="failure"] > svg,',
+      '.turn-work-log .agent-activity[data-activity-severity="failure"] > .agent-activity-icon {',
     );
     const completed = cssBlock(
       css,
-      ".turn-work-log .agent-activity.is-completed > svg",
+      ".turn-work-log .agent-activity.is-completed > .agent-activity-icon",
     );
 
     expect(important).toContain("border: 0");
@@ -202,9 +216,7 @@ describe("Minimal Workstream activity lines", () => {
   });
 
   it("preserves adjacent grouping, expandable history, reduced motion, and command review details", () => {
-    const reducedMotion = css.slice(
-      css.lastIndexOf("@media (prefers-reduced-motion: reduce)"),
-    );
+    const reducedMotion = css;
 
     expect(activitySource).toContain(
       '<div className="turn-execution-stream" role="list" aria-label="Agent work transcript">',
@@ -215,8 +227,9 @@ describe("Minimal Workstream activity lines", () => {
     expect(activitySource).toContain("aria-expanded={expanded}");
     expect(activitySource).toContain("previous tool");
     expect(reducedMotion).toContain(
-      ".turn-work-log .agent-activity.is-running svg",
+      ".agent-activity-icon::after",
     );
+    expect(activitySource).toContain('className="agent-activity-icon"');
     expect(css).toContain("@keyframes activity-row-reveal");
     expect(reducedMotion).toContain(
       '> .agent-activity:not(:last-of-type)',

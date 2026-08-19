@@ -167,13 +167,13 @@ describe("delegated-agent timeline disclosure", () => {
     ).closest("details");
     expect(disclosure).toHaveAttribute("open");
     expect(screen.getByTitle("Exact provider state: running"))
-      .toHaveTextContent("Claude · Agent SDK · Running · 10s");
+      .toHaveTextContent("Claude · Agent SDK · 10s");
     expect(screen.getByTitle("Exact provider state: paused"))
-      .toHaveTextContent("Claude · Agent SDK · Waiting · 10s");
+      .toHaveTextContent("Claude · Agent SDK · 10s");
     expect(screen.getByTitle("Exact provider state: pendingInit"))
-      .toHaveTextContent("Codex · App Server · Queued · 10s");
+      .toHaveTextContent("Codex · App Server · 10s");
     expect(screen.getByTitle("Exact provider state: futureState"))
-      .toHaveTextContent("Claude · Agent SDK · Unknown (futureState) · 10s");
+      .toHaveTextContent("Claude · Agent SDK · 10s");
     expect(screen.getByText("Child of Evidence scout")).toBeInTheDocument();
     expect(screen.queryByRole("button", {
       name: "Stop Build verifier",
@@ -185,6 +185,12 @@ describe("delegated-agent timeline disclosure", () => {
     const childRow = screen.getByRole("listitem", {
       name: /Policy reader/u,
     });
+    expect(within(childRow).getByText("Waiting")).toHaveClass(
+      "subagent-state-pill",
+    );
+    expect(childRow.querySelector(".subagent-status-mark"))
+      .toHaveAttribute("data-live", "true");
+    expect(childRow).toHaveStyle({ "--motion-index": "1" });
     await user.click(within(childRow).getByRole("button", {
       name: "Guide parent",
     }));
@@ -192,6 +198,9 @@ describe("delegated-agent timeline disclosure", () => {
     await user.click(within(childRow).getByRole("button", {
       name: "Details",
     }));
+    expect(childRow).toHaveAttribute("data-expanded", "true");
+    expect(childRow.querySelector(".subagent-detail-reveal"))
+      .toBeInTheDocument();
     expect(within(childRow).getByText("Relationship")).toBeInTheDocument();
     expect(within(childRow).getByText("Recent activity")).toBeInTheDocument();
     expect(within(childRow).queryByText(/agent-child|task-child/u))
@@ -245,7 +254,15 @@ describe("delegated-agent timeline disclosure", () => {
     await user.keyboard("{Enter}");
     expect(disclosure).toHaveAttribute("open");
     expect(screen.getByTitle("Exact provider state: completed"))
-      .toHaveTextContent("Codex · App Server · Completed · 7s");
+      .toHaveTextContent("Codex · App Server · 7s");
+    const completedRow = screen.getByRole("listitem", {
+      name: /Completed verifier/u,
+    });
+    expect(within(completedRow).getByText("Completed")).toHaveClass(
+      "subagent-state-pill",
+    );
+    expect(completedRow.querySelector(".subagent-status-mark"))
+      .toHaveAttribute("data-status", "completed");
     expect(screen.getByText("All checks passed.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Stop /u }))
       .not.toBeInTheDocument();

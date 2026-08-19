@@ -139,7 +139,7 @@ describe("Minimal Workstream active pixel signal", () => {
 
   it("keeps running glyph motion scoped to the authoritative active region", () => {
     expect(css).toContain(
-      "[data-active-work-region] .turn-work-log .agent-activity.is-running > svg",
+      "[data-active-work-region] .turn-work-log .agent-activity.is-running > .agent-activity-icon",
     );
     expect(css).not.toMatch(
       /^\.turn-work-log \.agent-activity\.is-running > svg\s*\{[^}]*animation:/mu,

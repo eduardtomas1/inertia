@@ -1,0 +1,26 @@
+.daily-work-mark {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: inherit;
+  fill: none;
+  shape-rendering: geometricPrecision;
+}
+
+.daily-work-mark > path {
+  vector-effect: non-scaling-stroke;
+  stroke: currentcolor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.daily-work-mark-time {
+  color: var(--daily-work-mark-highlight, var(--blue));
+}
+
+@media (forced-colors: active) {
+  .daily-work-mark-time {
+    color: CanvasText;
+  }
+}

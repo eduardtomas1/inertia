@@ -284,7 +284,12 @@ describe("compact Work sidebar", () => {
       "Usage",
       "Settings",
     ]);
-    fireEvent.click(screen.getByRole("button", { name: "Daily work" }));
+    const dailyWork = screen.getByRole("button", { name: "Daily work" });
+    const mark = dailyWork.querySelector(".daily-work-mark");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(mark).toHaveAttribute("focusable", "false");
+    expect(mark).toHaveAttribute("width", "16");
+    fireEvent.click(dailyWork);
     expect(view.onOpenDailyWork).toHaveBeenCalledTimes(1);
     expect(view.onClose).toHaveBeenCalledTimes(1);
   });

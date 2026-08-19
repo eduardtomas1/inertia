@@ -6,6 +6,7 @@ import {
   GitBranch,
   MessagesSquare,
   Paperclip,
+  MessagesSquare,
   Send,
   Square,
   Wrench,
@@ -79,6 +80,9 @@ export interface ComposerToolbarProps {
   running: boolean;
   attachmentCount: number;
   onChooseAttachments: () => Promise<void>;
+  contextAvailable: boolean;
+  contextCount: number;
+  onOpenContext: () => void;
   onRunAction: (action: ProjectAction) => void;
   skills: readonly AgentSkillSummary[];
   skillsCapability: AgentWorkflowSkillsCapability | null;
@@ -140,6 +144,9 @@ export function ComposerToolbar({
   running,
   attachmentCount,
   onChooseAttachments,
+  contextAvailable,
+  contextCount,
+  onOpenContext,
   onRunAction,
   skills,
   skillsCapability,
@@ -295,6 +302,22 @@ export function ComposerToolbar({
           }
         >
           <Paperclip size={16} />
+        </IconButton>
+        <IconButton
+          label={contextCount > 0
+            ? `Add chat context, ${contextCount} selected`
+            : "Add context from another chat"}
+          onClick={onOpenContext}
+          disabled={
+            disabled
+            || running
+            || primaryAction === "submitting"
+            || !contextAvailable
+            || contextCount >= 2
+          }
+          className={contextCount > 0 ? "has-context" : undefined}
+        >
+          <MessagesSquare size={16} />
         </IconButton>
         <Suspense fallback={null}>
           <PromptPresetMenu

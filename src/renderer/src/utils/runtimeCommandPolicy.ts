@@ -111,6 +111,10 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "ambiguous",
   },
   "conversation.create": gitMutation,
+  "conversation.context.create": shortMutation,
+  "conversation.context.load": shortRetrySafe,
+  "conversation.context.remove": shortMutation,
+  "conversation.context.source.load": shortRetrySafe,
   "conversation.delete": gitMutation,
   "conversation.detail.load": {
     timeoutMs: CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,

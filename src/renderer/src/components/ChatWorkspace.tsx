@@ -35,6 +35,7 @@ import type {
   CheckpointSummary,
   ConversationLatestTurnSummary,
   Conversation,
+  ConversationContextPacketSummary,
   ModelBackendProfileView,
   ModelSelection,
   Project,
@@ -72,6 +73,10 @@ import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type { PromptPresetCommandRunner } from "./composer/types";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
+import type {
+  ConversationContextCommandRunner,
+  ConversationContextSourceOption,
+} from "./conversation-context/types";
 import type { FinalAnswerAutoScrollEvent } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
@@ -82,6 +87,8 @@ const ResponseTimeline = lazy(async () => ({
 
 const READER_INTENT_GUARD_MS = 750;
 const EMPTY_PROMPT_PRESETS: readonly PromptPreset[] = [];
+const EMPTY_CONTEXT_SOURCES: readonly ConversationContextSourceOption[] = [];
+const EMPTY_CONTEXT_PACKETS: readonly ConversationContextPacketSummary[] = [];
 
 function recordsOwnedByConversation<T extends { conversationId: string }>(
   records: T[],
@@ -135,6 +142,9 @@ type ChatWorkspaceProps = {
   showChangedFileSummaries: boolean;
   autoScrollToFinalAnswer: boolean;
   promptContext?: string | null;
+  contextSources?: readonly ConversationContextSourceOption[];
+  contextPackets?: readonly ConversationContextPacketSummary[];
+  onConversationContextCommand?: ConversationContextCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
@@ -238,6 +248,9 @@ export function ChatWorkspace({
   showChangedFileSummaries,
   autoScrollToFinalAnswer,
   promptContext,
+  contextSources = EMPTY_CONTEXT_SOURCES,
+  contextPackets = EMPTY_CONTEXT_PACKETS,
+  onConversationContextCommand,
   previewContextUrl,
   providerIdentityLabels,
   loading,
@@ -708,6 +721,7 @@ export function ChatWorkspace({
             <ResponseTimeline
               turns={ownedTurns}
               messages={ownedMessages}
+              contextPackets={contextPackets}
               activities={ownedActivities}
               subagents={ownedSubagents}
               reasonings={ownedReasonings}
@@ -811,6 +825,9 @@ export function ChatWorkspace({
           skillsError={skillsError}
           goal={goalControl}
           promptContext={promptContext}
+          contextSources={contextSources}
+          contextPackets={contextPackets}
+          onConversationContextCommand={onConversationContextCommand}
           previewContextUrl={previewContextUrl}
           providerIdentityLabels={providerIdentityLabels}
           disabled={!conversation}

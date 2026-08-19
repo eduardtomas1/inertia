@@ -71,6 +71,7 @@ const REQUIRED_TABLES_BY_SCHEMA_VERSION = [
   ]],
   [54, ["prompt_presets"]],
   [55, ["provider_run_ownership"]],
+  [61, ["conversation_context_packets"]],
 ] as const;
 
 export interface DatabaseRecoveryReport {

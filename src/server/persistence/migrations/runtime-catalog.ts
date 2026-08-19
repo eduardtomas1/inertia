@@ -28,6 +28,7 @@ import { persistFinalAnswerAutoScroll, roadmapSettingsMigrationDefinitions } fro
 import { quotedSqlIdentifier } from "./sql-identifiers";
 import { ensureTurnAssociationColumns } from "./turn-association-columns";
 import { workspacePathAuthoritiesMigration } from "./workspace-path-authorities";
+import { conversationContextPacketsMigration } from "./conversation-context-packets";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
 const MODEL_SELECTION_COLUMNS = [
   "model_selection_json",
@@ -1223,7 +1224,9 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           WHERE usage_start_json IS NOT NULL;
         `,
       },
-      persistColorTheme, persistAgentThreadManagement,
+      persistColorTheme,
+      persistAgentThreadManagement,
+      conversationContextPacketsMigration,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

@@ -5,6 +5,7 @@ import {
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
 } from "../../attachments";
+import { MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN } from "../../conversation-context";
 
 export const requestBase = {
   requestId: z.string().uuid(),
@@ -86,6 +87,10 @@ export const turnRequestContextSchema = z
       body: z.string().trim().min(1).max(8_000),
       stale: z.boolean().optional(),
     }).strict()).max(16).optional(),
+    conversationContextPacketIds: z.array(z.string().uuid())
+      .max(MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN)
+      .refine((ids) => new Set(ids).size === ids.length, "Context packets must be unique.")
+      .optional(),
   })
   .strict();
 

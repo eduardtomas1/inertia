@@ -4,6 +4,7 @@ import type {
   AgentTurn,
   ChatAttachment,
   Conversation,
+  ConversationContextPacketSummary,
   ConversationLatestTurnSummary,
   ModelBackendProfileView,
   ModelSelection,
@@ -21,6 +22,10 @@ import type { AttachmentPickerMode } from "@shared/desktop";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import type { ChatGoalControlProps } from "../ChatGoalControl";
 import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
+import type {
+  ConversationContextCommandRunner,
+  ConversationContextSourceOption,
+} from "../conversation-context/types";
 
 export interface ComposerProps {
   conversation: Conversation;
@@ -41,6 +46,9 @@ export interface ComposerProps {
   skillsLoading: boolean;
   skillsError: string | null;
   promptContext?: string | null;
+  contextSources?: readonly ConversationContextSourceOption[];
+  contextPackets?: readonly ConversationContextPacketSummary[];
+  onConversationContextCommand?: ConversationContextCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   goal?: ChatGoalControlProps | null;

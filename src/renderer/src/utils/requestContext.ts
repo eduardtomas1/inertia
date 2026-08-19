@@ -61,12 +61,15 @@ export function buildComposerTurnRequest(
   promptContext: string | null | undefined,
   fileReferences: readonly string[] = [],
   previewUrl?: string | null,
+  conversationContextPacketIds: readonly string[] = [],
 ): { visibleContent: string; context?: TurnRequestContext } {
   const visibleContent = message.trim()
     || (attachments.length > 0
       ? "Please inspect the attached file."
       : previewUrl
         ? "Please inspect the current preview."
+        : conversationContextPacketIds.length > 0
+          ? "Please use the selected chat context."
         : "Please review the selected diff context.");
   const promptRequestContext = turnRequestContextFromPromptContext(promptContext);
   const selectedFileReferences = fileReferences.filter((path) =>
@@ -74,12 +77,16 @@ export function buildComposerTurnRequest(
   const context: TurnRequestContext | undefined = promptRequestContext
     || selectedFileReferences.length > 0
     || previewUrl
+    || conversationContextPacketIds.length > 0
     ? {
         ...promptRequestContext,
         ...(selectedFileReferences.length > 0
           ? { fileReferences: selectedFileReferences.map((path) => ({ path })) }
           : {}),
         ...(previewUrl ? { previewContexts: [{ url: previewUrl }] } : {}),
+        ...(conversationContextPacketIds.length > 0
+          ? { conversationContextPacketIds: [...conversationContextPacketIds] }
+          : {}),
       }
     : undefined;
   return { visibleContent, ...(context ? { context } : {}) };

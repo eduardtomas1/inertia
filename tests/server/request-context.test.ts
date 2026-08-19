@@ -176,6 +176,42 @@ describe("bounded structured turn request context", () => {
     expect(loggable).not.toContain("FAIL source.test.ts");
   });
 
+  it("materializes privileged chat packets as hashed user-selected context", async () => {
+    const cwd = await workspace();
+    const packetContent = JSON.stringify({
+      version: 1,
+      kind: "inertia-conversation-context",
+      packetId: "11111111-1111-4111-8111-111111111111",
+      source: { conversationTitle: "Architecture notes" },
+      excerpts: [{ role: "user", content: "Keep the existing fallback." }],
+    });
+    const result = assembleTurnRequest({
+      cwd,
+      visibleContent: "Implement the approved decision.",
+      context: {
+        conversationContextPacketIds: [
+          "11111111-1111-4111-8111-111111111111",
+        ],
+        conversationContexts: [{
+          packetId: "11111111-1111-4111-8111-111111111111",
+          label: "Chat context · Architecture notes · 1 message",
+          content: packetContent,
+        }],
+      },
+    });
+
+    expect(result.executionPrompt).toContain(JSON.stringify(packetContent));
+    expect(result.persistence.manifest.references).toEqual([
+      expect.objectContaining({
+        kind: "attachment",
+        label: "Chat context · Architecture notes · 1 message",
+        truncated: false,
+      }),
+    ]);
+    expect(JSON.stringify(result.persistence.manifest))
+      .not.toContain("Keep the existing fallback");
+  });
+
   it("deduplicates identical context bodies by content address without dropping references", async () => {
     const cwd = await workspace();
     const result = assembleTurnRequest({

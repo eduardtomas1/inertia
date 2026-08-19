@@ -34,6 +34,7 @@ import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
 } from "./command-router";
+import { ConversationContextService } from "../conversation-context-service";
 
 type ConversationUpdatePayload = Extract<
   Parameters<RuntimeCommandHandler>[1],
@@ -107,6 +108,10 @@ export function createConversationCommandHandler(
     "conversation.select",
     "conversation.detail.load",
     "conversation.detail.subscription",
+    "conversation.context.source.load",
+    "conversation.context.create",
+    "conversation.context.load",
+    "conversation.context.remove",
     "conversation.update",
     "conversation.archive",
     "conversation.unarchive",
@@ -205,6 +210,67 @@ export function createConversationCommandHandler(
           requestId: command.requestId,
         });
         return "handled";
+      case "conversation.context.source.load": {
+        const { sourceConversationId, targetConversationId } = command.payload;
+        const service = new ConversationContextService(dependencies.store);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "conversation.context.source",
+            source: service.sourceTranscript(
+              sourceConversationId,
+              targetConversationId,
+            ),
+          },
+        });
+        return "handled";
+      }
+      case "conversation.context.create": {
+        const service = new ConversationContextService(dependencies.store);
+        const packet = service.createFromRenderer(command.payload);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "conversation.context.packet", packet },
+        });
+        dependencies.runtimeSync.broadcast({
+          type: "conversation.detail.invalidated",
+          conversationId: command.payload.targetConversationId,
+        });
+        return "handled";
+      }
+      case "conversation.context.load": {
+        const service = new ConversationContextService(dependencies.store);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "conversation.context.packet",
+            packet: service.load(
+              command.payload.packetId,
+              command.payload.targetConversationId,
+            ),
+          },
+        });
+        return "handled";
+      }
+      case "conversation.context.remove": {
+        const service = new ConversationContextService(dependencies.store);
+        service.remove(
+          command.payload.packetId,
+          command.payload.targetConversationId,
+        );
+        dependencies.send(socket, {
+          type: "request.ok",
+          requestId: command.requestId,
+        });
+        dependencies.runtimeSync.broadcast({
+          type: "conversation.detail.invalidated",
+          conversationId: command.payload.targetConversationId,
+        });
+        return "handled";
+      }
       case "conversation.update": {
         const {
           conversationId,
@@ -522,9 +588,17 @@ export function createConversationCommandHandler(
           const attachmentIds = dependencies.store
             .attachments(finalConversation.id)
             .map(({ id }) => id);
+          const contextTargetConversationIds = dependencies.store.contextPackets
+            .targetConversationIdsForSource(finalConversation.id);
           dependencies.store.deleteConversation(
             finalConversation.id,
           );
+          for (const targetConversationId of contextTargetConversationIds) {
+            dependencies.runtimeSync.broadcast({
+              type: "conversation.detail.invalidated",
+              conversationId: targetConversationId,
+            });
+          }
           try {
             const referencedAttachmentIds = new Set(
               dependencies.store.attachments().map(({ id }) => id),

@@ -17,6 +17,7 @@ import type {
   TurnRequestContext,
 } from "../../../shared/contracts";
 import { chatAttachmentKind } from "../../../shared/attachments";
+import { MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN } from "../../../shared/conversation-context";
 import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
   type DocumentAttachmentContext,
@@ -394,6 +395,12 @@ function materializeContext(
   if ((context.reviewNotes?.length ?? 0) > 16) {
     throw new Error("Execution context contains too many review notes.");
   }
+  if (
+    (context.conversationContexts?.length ?? 0)
+      > MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN
+  ) {
+    throw new Error("Execution context contains too many chat context packets.");
+  }
   const documentContextBytes = documents.reduce(
     (total, document) =>
       total + byteLength(JSON.stringify(document.content).slice(1, -1)),
@@ -415,6 +422,19 @@ function materializeContext(
   materialized.push(
     ...materializeFileReferences(cwd, context.fileReferences ?? []),
   );
+
+  for (const packet of context.conversationContexts ?? []) {
+    materialized.push({
+      kind: "attachment",
+      label: boundedLabel(packet.label, "Chat context label"),
+      content: boundedText(
+        packet.content,
+        `Chat context ${packet.packetId}`,
+        MAX_EXECUTION_CONTEXT_BLOB_BYTES,
+      ),
+      truncated: false,
+    });
+  }
 
   for (const selection of context.diffSelections ?? []) {
     const path = boundedLabel(selection.path, "Diff path");

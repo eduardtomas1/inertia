@@ -1038,7 +1038,108 @@ function conversationDetail(
     && arrayOf(value.reviewSummaries, reviewSummary)
     && arrayOf(value.reviewStates, reviewState)
     && arrayOf(value.reviewNotes, reviewNote)
+    && (value.contextPackets === undefined
+      || arrayOf(value.contextPackets, conversationContextPacketSummary))
     && conversationDetailCollectionsCoherent(value, conversationId);
+}
+
+function conversationContextExcerpt(value: unknown): boolean {
+  return record(value)
+    && recordWithStrings(
+      value,
+      "sourceMessageId",
+      "role",
+      "content",
+      "createdAt",
+    )
+    && nullableStringField(value, "sourceTurnId")
+    && oneOf(value, "role", ["user", "assistant"])
+    && booleanField(value, "truncated")
+    && (value.content as string).length > 0
+    && new TextEncoder().encode(value.content as string).byteLength <= 4 * 1024;
+}
+
+function conversationContextPacketSummary(value: unknown): boolean {
+  return record(value)
+    && recordWithStrings(
+      value,
+      "id",
+      "sourceConversationId",
+      "targetConversationId",
+      "sourceProjectId",
+      "targetProjectId",
+      "sourceConversationTitle",
+      "sourceProjectName",
+      "sourceWorkspaceLabel",
+      "targetWorkspaceLabel",
+      "workspaceRelation",
+      "createdAt",
+      "sourceState",
+    )
+    && oneOf(value, "workspaceRelation", [
+      "same-workspace",
+      "different-workspace",
+    ])
+    && oneOf(value, "sourceState", ["available", "deleted"])
+    && nullableStringField(value, "note")
+    && (
+      value.note === null
+      || new TextEncoder().encode(value.note as string).byteLength <= 1024
+    )
+    && nullableStringField(value, "consumedMessageId")
+    && nullableStringField(value, "consumedAt")
+    && typeof value.messageCount === "number"
+    && Number.isSafeInteger(value.messageCount)
+    && value.messageCount >= 1
+    && value.messageCount <= 12
+    && typeof value.characterCount === "number"
+    && Number.isSafeInteger(value.characterCount)
+    && value.characterCount >= 1
+    && value.characterCount <= 12 * 1024;
+}
+
+function conversationContextPacket(value: unknown): boolean {
+  if (
+    !conversationContextPacketSummary(value)
+    || !record(value)
+    || !arrayOf(value.excerpts, conversationContextExcerpt)
+    || (value.excerpts as unknown[]).length !== value.messageCount
+    || !uniqueRecordField(value.excerpts as unknown[], "sourceMessageId")
+  ) return false;
+  const excerpts = value.excerpts as UnknownRecord[];
+  return excerpts.reduce(
+    (total, excerpt) => total + new TextEncoder().encode(
+      excerpt.content as string,
+    ).byteLength,
+    0,
+  ) <= 12 * 1024
+    && excerpts.reduce(
+      (total, excerpt) => total + (excerpt.content as string).length,
+      0,
+    ) === value.characterCount;
+}
+
+function conversationContextSource(value: unknown): boolean {
+  return record(value)
+    && recordWithStrings(
+      value,
+      "conversationId",
+      "projectId",
+      "conversationTitle",
+      "projectName",
+      "workspaceLabel",
+      "targetConversationId",
+      "targetProjectId",
+      "targetWorkspaceLabel",
+      "workspaceRelation",
+    )
+    && oneOf(value, "workspaceRelation", [
+      "same-workspace",
+      "different-workspace",
+    ])
+    && arrayOf(value.messages, conversationContextExcerpt)
+    && (value.messages as unknown[]).length <= 80
+    && uniqueRecordField(value.messages as unknown[], "sourceMessageId");
 }
 
 function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
@@ -1128,6 +1229,10 @@ const REQUEST_RESULT_VALIDATORS = {
   "usage.dashboard": (value) => usageDashboardSchema(value.dashboard),
   "daily.work": (value) => dailyWorkDashboardSchema(value.dashboard),
   "conversation.created": (value) => stringField(value, "conversationId"),
+  "conversation.context.packet": (value) =>
+    conversationContextPacket(value.packet),
+  "conversation.context.source": (value) =>
+    conversationContextSource(value.source),
   "project.created": (value) => stringField(value, "projectId"),
   "git.action": (value) => stringField(value, "message"),
   "external.url": (value) => recordWithStrings(value, "url", "label"),

@@ -51,6 +51,7 @@ import {
   compactMessageContentForTurn,
   compactReasoningContentForTurn,
 } from "./stream-text-storage";
+import { claimConversationContextPackets } from "./conversation-context-packet-repository";
 
 type TurnLedgerPersistenceContext = Pick<
   PersistenceContext,
@@ -224,6 +225,18 @@ export class TurnLedgerRepository {
       });
       if (input.executionContext) {
         this.persistExecutionContext(turn.id, input.executionContext, message.createdAt);
+      }
+      if (input.conversationContextPacketIds?.length) {
+        if (!input.contextRequestId) {
+          throw new Error("Chat context requires an owning request identity.");
+        }
+        claimConversationContextPackets(this.context.database, {
+          packetIds: input.conversationContextPacketIds,
+          targetConversationId: input.conversationId,
+          messageId: message.id,
+          requestId: input.contextRequestId,
+          consumedAt: message.createdAt,
+        });
       }
       return { message, turn };
     })();

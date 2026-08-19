@@ -28,9 +28,10 @@ function dropUnreleasedAgentThreadManagement(
   database: Database.Database,
 ): void {
   database.exec(`
+    DROP TABLE IF EXISTS conversation_context_packets;
     DROP TABLE IF EXISTS agent_thread_operations;
     DROP TABLE IF EXISTS agent_managed_conversations;
-    DELETE FROM schema_migrations WHERE version = 60;
+    DELETE FROM schema_migrations WHERE version >= 60;
   `);
 }
 

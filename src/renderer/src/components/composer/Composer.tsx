@@ -2,9 +2,14 @@ import {
   lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState,
 } from "react";
 import clsx from "clsx";
-import type { ChatAttachment, PromptPreset } from "@shared/contracts";
+import type {
+  ChatAttachment,
+  ConversationContextPacketSummary,
+  PromptPreset,
+} from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
+import { MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN } from "../../../../shared/conversation-context";
 import { fastModeProviderValue, legacyProviderIdForHarness,
   routeSupportsNativeFastModeIdentity, withModelSelectionFastMode,
 } from "../../../../shared/model-routing";
@@ -49,6 +54,7 @@ import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
+import type { ConversationContextDialogResult } from "../conversation-context/types";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -60,6 +66,14 @@ const ChatResumeControl = lazy(async () => ({
 }));
 const ChatGoalControl = lazy(async () => ({
   default: (await import("../ChatGoalControl")).ChatGoalControl,
+}));
+const ConversationContextDialog = lazy(async () => ({
+  default: (await import("../conversation-context/ConversationContextDialog"))
+    .ConversationContextDialog,
+}));
+const ConversationContextPacketStrip = lazy(async () => ({
+  default: (await import("../conversation-context/ConversationContextPacketStrip"))
+    .ConversationContextPacketStrip,
 }));
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // The first non-empty edit is synchronous. During uninterrupted typing, a
@@ -90,6 +104,9 @@ export const Composer = memo(function Composer({
   skillsLoading,
   skillsError,
   promptContext,
+  contextSources = [],
+  contextPackets = [],
+  onConversationContextCommand,
   previewContextUrl,
   providerIdentityLabels,
   goal,
@@ -131,6 +148,14 @@ export const Composer = memo(function Composer({
   const draftPersistenceTimerRef = useRef<number | null>(null);
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [visibleContextPackets, setVisibleContextPackets] = useState<
+    ConversationContextPacketSummary[]
+  >(() => [...contextPackets]);
+  const [contextDialog, setContextDialog] = useState<
+    | { kind: "create" }
+    | { kind: "preview"; packetId: string }
+    | null
+  >(null);
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -165,6 +190,7 @@ export const Composer = memo(function Composer({
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null);
+  useNativePreviewSuspension(contextDialog !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);
@@ -180,6 +206,43 @@ export const Composer = memo(function Composer({
   }, []);
 
   conversationIdRef.current = conversation.id;
+
+  useEffect(() => {
+    setVisibleContextPackets([...contextPackets]);
+    setContextDialog(null);
+  }, [contextPackets, conversation.id]);
+
+  const draftContextPackets = visibleContextPackets.filter(
+    ({ consumedMessageId }) => consumedMessageId === null,
+  );
+  const contextPacketIds = draftContextPackets.map(({ id }) => id);
+
+  const handleContextResult = useCallback((
+    result: ConversationContextDialogResult,
+  ): void => {
+    if (result.kind === "created") {
+      const { excerpts: _excerpts, ...summary } = result.packet;
+      setVisibleContextPackets((current) => [
+        ...current.filter(({ id }) => id !== summary.id),
+        summary,
+      ]);
+      return;
+    }
+    setVisibleContextPackets((current) =>
+      current.filter(({ id }) => id !== result.packetId));
+  }, []);
+
+  const removeContextPacket = useCallback(async (packetId: string) => {
+    if (!onConversationContextCommand) return;
+    await onConversationContextCommand("conversation.context.remove", {
+      type: "conversation.context.remove",
+      payload: {
+        packetId,
+        targetConversationId: conversation.id,
+      },
+    });
+    handleContextResult({ kind: "removed", packetId });
+  }, [conversation.id, handleContextResult, onConversationContextCommand]);
 
   const flushDraftPersistence = useCallback((): void => {
     if (draftPersistenceTimerRef.current !== null) {
@@ -543,6 +606,7 @@ export const Composer = memo(function Composer({
           promptContext,
           fileReferences,
           selectedPreviewUrlRef.current,
+          contextPacketIds,
         );
     if (
       (!canSend && followUpState !== "ready")
@@ -554,6 +618,7 @@ export const Composer = memo(function Composer({
     const submittedDraft = message;
     const submittedPromptContext = promptContext;
     const submittedPreviewUrl = selectedPreviewUrlRef.current;
+    const submittedContextPacketIds = [...contextPacketIds];
     const submittedRevision =
       editorRevisionsRef.current.get(submittedConversationId) ?? 0;
     const submissionSequence = submissionSequenceRef.current + 1;
@@ -599,6 +664,11 @@ export const Composer = memo(function Composer({
         !mountedRef.current
         || conversationIdRef.current !== submittedConversationId
       ) return;
+      if (submittedContextPacketIds.length > 0) {
+        setVisibleContextPackets((current) => current.filter(
+          ({ id }) => !submittedContextPacketIds.includes(id),
+        ));
+      }
       if (editorUnchanged) {
         draftValueRef.current = "";
         setMessage("");
@@ -740,10 +810,10 @@ export const Composer = memo(function Composer({
   const attachmentFallback = running
     ? "Please inspect the attached image."
     : "Please inspect the attached file.";
-  const composedLength = (message.trim() || (attachments.length > 0 ? attachmentFallback : selectedPreviewUrlRef.current ? "Please inspect the current preview." : "Please review the selected diff context.")).length;
+  const composedLength = (message.trim() || (attachments.length > 0 ? attachmentFallback : selectedPreviewUrlRef.current ? "Please inspect the current preview." : contextPacketIds.length > 0 ? "Please use the selected chat context." : "Please review the selected diff context.")).length;
   const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
-  const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected)
+  const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected || contextPacketIds.length > 0)
     && messageFits
     && routeReadiness.ready
     && !disabled
@@ -761,7 +831,8 @@ export const Composer = memo(function Composer({
     blocked: attachments.length > 0
       || Boolean(promptContext)
       || previewContextSelected
-      || fileReferences.length > 0,
+      || fileReferences.length > 0
+      || contextPacketIds.length > 0,
     flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
     editorRevisions: editorRevisionsRef,
     draftValueRef, textareaRef, setMessage, setSubmitting, onCompact,
@@ -1033,8 +1104,9 @@ export const Composer = memo(function Composer({
     || Boolean(promptContext)
     || previewContextSelected
     || fileReferences.length > 0
+    || contextPacketIds.length > 0
   )
-    ? "Remove attachments, preview or diff context, and file references before transferring this text to a new chat."
+    ? "Remove attachments, shared chat context, preview or diff context, and file references before transferring this text to a new chat."
     : null;
 
   return (
@@ -1076,6 +1148,21 @@ export const Composer = memo(function Composer({
               onResume={(resumeConversationId) => {
                 onResumeConversation?.(resumeConversationId);
                 onOpenResume();
+              }}
+            />
+          </Suspense>
+        )}
+        {draftContextPackets.length > 0 && (
+          <Suspense fallback={null}>
+            <ConversationContextPacketStrip
+              packets={draftContextPackets}
+              disabled={submissionPending || running}
+              onPreview={(packetId) => setContextDialog({
+                kind: "preview",
+                packetId,
+              })}
+              onRemove={(packetId) => {
+                void removeContextPacket(packetId).catch(() => undefined);
               }}
             />
           </Suspense>
@@ -1173,6 +1260,14 @@ export const Composer = memo(function Composer({
           running={running}
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}
+          contextAvailable={Boolean(
+            onConversationContextCommand
+            && contextSources.length > 0
+            && draftContextPackets.length
+              < MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
+          )}
+          contextCount={draftContextPackets.length}
+          onOpenContext={() => setContextDialog({ kind: "create" })}
           onRunAction={onRunAction}
           skills={skills}
           skillsCapability={skillsCapability}
@@ -1237,6 +1332,22 @@ export const Composer = memo(function Composer({
           onSubmit={submit}
           onStop={stop}
         />
+        {contextDialog && onConversationContextCommand && (
+          <Suspense fallback={null}>
+            <ConversationContextDialog
+              targetConversationId={conversation.id}
+              sources={contextSources}
+              previewPacketId={contextDialog.kind === "preview"
+                ? contextDialog.packetId
+                : null}
+              onCommand={onConversationContextCommand}
+              onResult={handleContextResult}
+              onClose={() => {
+                setContextDialog(null);
+              }}
+            />
+          </Suspense>
+        )}
       </section>
     </div>
   );

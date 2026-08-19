@@ -27,6 +27,10 @@ import {
   conversationCreatePayloadSchema,
 } from "./conversation-create";
 import { COLOR_THEME_IDS } from "../app";
+import {
+  MAX_CONVERSATION_CONTEXT_MESSAGES,
+  MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
+} from "../../conversation-context";
 
 const duoSideSchema = conversationCreatePayloadSchema.extend({
   activate: z.literal(false).optional(),
@@ -205,6 +209,50 @@ export const appCommandSchemas = [
       }).strict(),
     })
     .strict(),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.source.load"),
+    payload: z.strictObject({
+      sourceConversationId: z.string().uuid(),
+      targetConversationId: z.string().uuid(),
+    }),
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.create"),
+    payload: z.strictObject({
+      sourceConversationId: z.string().uuid(),
+      targetConversationId: z.string().uuid(),
+      sourceMessageIds: z.array(z.string().uuid())
+        .min(1)
+        .max(MAX_CONVERSATION_CONTEXT_MESSAGES)
+        .refine((ids) => new Set(ids).size === ids.length),
+      note: z.string().trim().min(1).max(MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
+        .refine(
+          (value) => new TextEncoder().encode(value).byteLength
+            <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
+          "Context note exceeds its UTF-8 byte limit.",
+        )
+        .optional(),
+      acknowledgedWorkspaceDifference: z.boolean(),
+    }),
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.load"),
+    payload: z.strictObject({
+      packetId: z.string().uuid(),
+      targetConversationId: z.string().uuid(),
+    }),
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.remove"),
+    payload: z.strictObject({
+      packetId: z.string().uuid(),
+      targetConversationId: z.string().uuid(),
+    }),
+  }),
   z
     .object({
       ...requestBase,

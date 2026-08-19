@@ -1,7 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import {
-  RotateCcw,
-} from "lucide-react";
+import { Link2, MessagesSquare, RotateCcw } from "lucide-react";
 import clsx from "clsx";
 import type {
   ChatMessage,
@@ -36,6 +34,7 @@ import {
 } from "./changedFiles";
 import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
+import "./ConversationContextProvenance.css";
 
 const AGENT_PIXEL_GRID_CELLS = Array.from({ length: 9 }, (_, index) => index);
 
@@ -80,6 +79,9 @@ export function UserRequestLayer({
     setExpanded((current) => !current);
     window.requestAnimationFrame(() => onAfterToggle?.());
   };
+  const contextPackets = props.contextPackets?.filter(
+    ({ consumedMessageId }) => consumedMessageId === turn.userMessage.id,
+  ) ?? [];
   return (
     <article
       className={clsx("message is-user turn-user-request", isDocumentLike && "is-document-like")}
@@ -115,6 +117,26 @@ export function UserRequestLayer({
         attachments={turn.userMessage.attachments}
         label="Request attachments"
       />
+      {contextPackets.length > 0 && (
+        <div className="sent-conversation-context" aria-label="Shared chat context">
+          {contextPackets.map((packet) => (
+            <span key={packet.id} data-source-state={packet.sourceState}>
+              <MessagesSquare size={13} aria-hidden="true" />
+              <span>
+                <strong>Context from {packet.sourceConversationTitle}</strong>
+                <small>
+                  {packet.sourceState === "deleted"
+                    ? "Source chat deleted · immutable sent excerpt"
+                    : `${packet.sourceProjectName} · ${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}`}
+                </small>
+              </span>
+              {packet.workspaceRelation === "different-workspace" && (
+                <Link2 size={12} aria-label="Different workspace" />
+              )}
+            </span>
+          ))}
+        </div>
+      )}
     </article>
   );
 }

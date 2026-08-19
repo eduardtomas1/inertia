@@ -1,0 +1,64 @@
+.conversation-context-strip {
+  display: flex;
+  padding: 0 12px 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.conversation-context-card {
+  display: grid;
+  min-width: min(310px, 100%);
+  max-width: 420px;
+  min-height: 42px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 10px;
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--accent-soft) 24%, var(--surface));
+}
+
+.conversation-context-card[data-workspace-relation="different-workspace"] {
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+}
+
+.conversation-context-card-mark {
+  display: grid;
+  width: 34px;
+  place-items: center;
+  color: var(--accent-strong);
+}
+
+.conversation-context-card-open {
+  display: grid;
+  min-width: 0;
+  padding: 6px 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  text-align: left;
+}
+
+.conversation-context-card-open > span { display: grid; min-width: 0; gap: 2px; }
+.conversation-context-card-open strong,
+.conversation-context-card-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-context-card-open strong { color: var(--text); font-size: 11px; font-weight: 620; }
+.conversation-context-card-open small { color: var(--text-muted); font-size: 10px; }
+.conversation-context-card-open:hover strong { color: var(--accent-strong); }
+
+.conversation-context-card-remove {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--text-faint);
+}
+
+.conversation-context-card-remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--surface-hover);
+}

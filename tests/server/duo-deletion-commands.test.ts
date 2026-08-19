@@ -96,6 +96,7 @@ function conversationDependencies(
     store: {
       attachments: vi.fn(() => []),
       providerRunOwnership: { forConversation: vi.fn(() => []) },
+      contextPackets: { targetConversationIdsForSource: vi.fn(() => []) },
       ...store,
     } as RuntimeStore,
     conversationAttachments: {
@@ -109,7 +110,7 @@ function conversationDependencies(
       acquireAtCheckout: vi.fn(() => true),
       release: vi.fn(),
     } as never,
-    runtimeSync: {} as never,
+    runtimeSync: { broadcast: vi.fn() } as never,
     deletedConversationIds: new Set(),
     dataDirectory: "/data",
     rememberDeletedConversation: vi.fn(),

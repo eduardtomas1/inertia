@@ -33,6 +33,10 @@ import { BackendProfileRepository } from "./persistence/backend-profile-reposito
 import { AgentThreadManagementRepository } from "./persistence/agent-thread-management-repository";
 import { AgentWorkflowRepository, type NativeAgentGoalMergeResult } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
+import {
+  claimConversationContextPackets,
+  ConversationContextPacketRepository,
+} from "./persistence/conversation-context-packet-repository";
 import { ConversationWorktreeRepository } from "./persistence/conversation-worktree-repository";
 import {
   createDuoConversationsAtomically,
@@ -123,6 +127,7 @@ export class RuntimeStore {
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   readonly agentThreadManagement: AgentThreadManagementRepository;
   private readonly conversationRepository: ConversationRepository;
+  readonly contextPackets: ConversationContextPacketRepository;
   readonly conversationWorktrees: ConversationWorktreeRepository;
   private readonly executionLedgerRepository: ExecutionLedgerRepository;
   private readonly gitArtifactRepository: GitArtifactRepository;
@@ -195,6 +200,14 @@ export class RuntimeStore {
       selectProject: (projectId) => this.projectRepository.select(projectId),
       state: () => this.settingsRepository.state(),
       touchProject: (projectId, timestamp) => this.projectRepository.touch(projectId, timestamp),
+    });
+    this.contextPackets = new ConversationContextPacketRepository({
+      database: this.database,
+      conversationPath: (conversationId) =>
+        this.conversationRepository.path(conversationId),
+      requireConversation: (conversationId) =>
+        this.requireConversation(conversationId),
+      requireProject: (projectId) => this.requireProject(projectId),
     });
     this.conversationWorktrees = new ConversationWorktreeRepository(
       this.database,
@@ -383,7 +396,13 @@ export class RuntimeStore {
   }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
-    return this.snapshotRepository.conversationDetail(conversationId);
+    const detail = this.snapshotRepository.conversationDetail(conversationId);
+    return detail
+      ? {
+          ...detail,
+          contextPackets: this.contextPackets.list(conversationId),
+        }
+      : null;
   }
 
   loadProviderMetadata(): PersistedProviderMetadata[] {
@@ -866,6 +885,35 @@ export class RuntimeStore {
       createdAt,
       options,
     );
+  }
+
+  createMessageWithContextPackets(
+    conversationId: string,
+    content: string,
+    attachments: ChatAttachment[],
+    packetIds: readonly string[],
+    requestId: string,
+    options?: CreateMessageOptions,
+  ): ChatMessage {
+    return this.database.transaction(() => {
+      const message = this.transcriptRepository.createMessage(
+        conversationId,
+        content,
+        "user",
+        attachments,
+        null,
+        undefined,
+        options,
+      );
+      claimConversationContextPackets(this.database, {
+        packetIds,
+        targetConversationId: conversationId,
+        messageId: message.id,
+        requestId,
+        consumedAt: message.createdAt,
+      });
+      return message;
+    })();
   }
 
   createAcknowledgedFollowUpMessage(

@@ -196,6 +196,7 @@ export function sameTurnTimelineProps(
     && left.onFollowUpSubagent === right.onFollowUpSubagent
     && left.onStopSubagent === right.onStopSubagent
     && left.turns === right.turns
+    && left.contextPackets === right.contextPackets
     && (!next.turn.isActive || (
       left.streamingText === right.streamingText
       && left.streamingReasoning === right.streamingReasoning

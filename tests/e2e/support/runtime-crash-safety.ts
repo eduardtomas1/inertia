@@ -40,9 +40,16 @@ export async function expectRuntimeCrashRecovery(app: AppFixture): Promise<void>
     // killed. An ordinary interactive shell exits when its PTY owner dies,
     // which intentionally exercises the separate missing-root fail-closed
     // boundary instead of the positive exact-identity recovery path below.
+    // Encode the marker embedded in the command so terminal echo cannot make
+    // the readiness assertion pass before exec installs the SIGHUP handler.
+    const recoveryRootReadyMarker = "INERTIA_RECOVERY_ROOT_READY";
+    const encodedReadyMarker = Buffer.from(
+      `${recoveryRootReadyMarker}\n`,
+      "utf8",
+    ).toString("base64");
     const recoveryRootSource = [
       "process.on('SIGHUP', () => undefined);",
-      "process.stdout.write('INERTIA_RECOVERY_ROOT_READY\\n');",
+      `process.stdout.write(Buffer.from(${JSON.stringify(encodedReadyMarker)},'base64'));`,
       "setInterval(() => undefined, 1000);",
     ].join("");
     const terminalInput = terminal.locator(".xterm-helper-textarea");
@@ -51,7 +58,7 @@ export async function expectRuntimeCrashRecovery(app: AppFixture): Promise<void>
       `exec ${JSON.stringify(process.execPath)} -e ${JSON.stringify(recoveryRootSource)}`,
     );
     await page.keyboard.press("Enter");
-    await expect(terminal).toContainText("INERTIA_RECOVERY_ROOT_READY");
+    await expect(terminal).toContainText(recoveryRootReadyMarker);
   }
   const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
   const conversation = database.prepare(`

@@ -4,7 +4,24 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.38 — 2026-08-19
+
+### Provider work stays attributable from start to finish
+
+- Codex child threads are registered from every authoritative SDK start path, buffered child-first events replay in bounded order, terminal events deduplicate, and cancellation interrupts children before their root. JSONL writes, RPC ownership, topology, payload bytes, and provider process cleanup are now enforced at the same boundary.
+- Claude correlates every accepted follow-up and delegated task with its exact provider identity while keeping child-owned streams out of parent output. OpenCode replays valid out-of-order parts against the current prompt, and Cursor covers the installed ACP lifecycle and permission shapes without mistaking the editor launcher for the agent executable.
+- Delegated-agent cards show readable names, roles, and missions. Their rosters remain folded by default, remember an explicit open choice for the exact conversation and turn, and stay bounded and fail-safe when local preference storage is unavailable.
+
+### Failures and active work explain themselves without adding noise
+
+- Failed provider runs retain a scrubbed one-line summary and an expandable, copyable diagnostic dossier with bounded execution facts, cleanup state, technical causes, and recent provider context. Prompts, answers, credentials, project roots, raw session identifiers, and token values remain excluded.
+- The composer separates writing from a keyboard-ordered control rail for context, route settings, usage, and message actions, while narrow layouts keep every action reachable and popovers inside the workspace.
+- Live status motion continues when Inertia is visible behind another window, pauses when the document is hidden, and resynchronizes elapsed time and sidebar geometry on return. Daily Work uses a compact native day-ledger mark, and redundant renderer subscriptions and styles were consolidated to restore enforced bundle headroom.
+
+### Release confidence
+
 - Exact-tag publishing now tolerates GitHub's delayed draft-release visibility with bounded retries before asset verification and upload, avoiding a manual rerun without weakening no-replacement safeguards.
+- Architecture and both lint layers, all TypeScript projects, more than 3,700 unit and integration tests, portable provider contracts, Electron scenarios, production builds, bundle budgets, package smoke, Electron fuses, and exact-head Linux, macOS, and Windows gates protect the release.
 
 ## 0.0.37 — 2026-08-19
 

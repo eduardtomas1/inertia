@@ -176,15 +176,15 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.37
+### Version 0.0.38
 
-This release renders safe Markdown previews and project images directly in Files, and lets image follow-ups reach active Codex, Claude, and OpenCode turns with bounded ownership, ordering, and provider acknowledgement. Claude Read also accepts legitimate resized image results without weakening payload validation.
+This release hardens the installed Codex, Claude, Cursor, and OpenCode lifecycle boundaries so delegated work, follow-ups, out-of-order provider events, cancellation, and process cleanup remain tied to the exact owning conversation and turn. Delegated-agent cards now carry readable names, roles, and missions, while their rosters remember an explicit open choice without expanding automatically.
 
-Five persisted color-theme families, polished `/resume` and `/compact` surfaces, clearer Daily Work presentation, stable running-chat order, and motion grounded in real agent states make active work easier to scan while preserving keyboard, reduced-motion, forced-colors, and renderer-budget safeguards.
+Failed runs gain a privacy-bounded diagnostic disclosure, the composer separates its writing plane from a keyboard-ordered control rail, visible background work keeps moving, and Daily Work gains a compact native day-ledger mark. Consolidated renderer subscriptions and styles restore enforced bundle headroom.
 
-Database-backup cancellation also stays inside the shutdown path even when native validation is still unwinding; incomplete backup files remain unpublished and are cleaned safely on startup.
+Exact-tag publishing also retries GitHub's delayed draft visibility before verification and upload without relaxing the release workflow's no-replacement safeguards.
 
-Download [Inertia v0.0.37](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.37):
+Download [Inertia v0.0.38](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.38):
 
 | Platform | Download |
 | --- | --- |

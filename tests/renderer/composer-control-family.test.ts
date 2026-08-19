@@ -118,7 +118,7 @@ describe("composer setting control family", () => {
       /\.composer-setting-popover button\[aria-checked="true"\]\s*\{[^}]*background:\s*color-mix/su,
     );
     expect(css).toMatch(
-      /\.composer-options\s*\{[^}]*position:\s*relative;[^}]*flex:\s*0 1 auto/su,
+      /\.composer-options,[\s\S]*?\.composer-actions\s*\{[^}]*justify-self:\s*end;[^}]*justify-content:\s*flex-end;[^}]*border-left:\s*1px solid var\(--composer-zone-separator\)/su,
     );
     expect(css).toMatch(
       /\.composer-skills-popover\s*\{[^}]*right:\s*auto;[^}]*left:\s*8px;[^}]*width:\s*min\([^}]*calc\(100% - 16px\)[^}]*calc\(100cqw - 16px\)[^}]*max-width:\s*min\([^}]*calc\(100% - 16px\)[^}]*calc\(100cqw - 16px\)/su,

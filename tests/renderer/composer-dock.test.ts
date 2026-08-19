@@ -60,6 +60,15 @@ describe("cohesive composer dock", () => {
     );
     expect(inputSource).toContain('aria-label="Message"');
     expect(toolbarSource).toContain('className="composer-toolbar"');
+    expect(toolbarSource).toContain('role="group"');
+    expect(toolbarSource).toContain('aria-label="Composer controls"');
+    expect(toolbarSource).toContain('aria-label="Add context"');
+    expect(toolbarSource).toContain(
+      'aria-label="Model, service, and run settings"',
+    );
+    expect(toolbarSource).toContain(
+      'aria-label="Budget and message actions"',
+    );
     expect(inputSource.indexOf('className="provider-readiness"'))
       .toBeLessThan(inputSource.indexOf('aria-label="Message"'));
     expect(inputSource.indexOf("<ComposerAttachmentList"))
@@ -70,7 +79,7 @@ describe("cohesive composer dock", () => {
 
   it("preserves the integrated control order and compact overflow priority", () => {
     const toolbarStart = toolbarSource.indexOf(
-      '<div className="composer-toolbar"',
+      'className="composer-toolbar"',
     );
     const toolbar = toolbarSource.slice(toolbarStart);
     const controlOrder = [
@@ -95,7 +104,7 @@ describe("cohesive composer dock", () => {
       /@container \(max-width:\s*720px\)\s*\{[\s\S]*?\.composer-more-control\s*\{[^}]*display:\s*block/su,
     );
     expect(css).toMatch(
-      /\.composer-options\s*\{[^}]*min-width:\s*0;[^}]*gap:\s*3px/su,
+      /\.composer-tools,[\s\S]*?\.composer-options,[\s\S]*?\.composer-actions\s*\{[^}]*min-width:\s*0;[^}]*gap:\s*3px/su,
     );
     expect(css).toMatch(
       /\.composer-usage\s*\{[^}]*flex:\s*0 0 auto/su,
@@ -136,7 +145,7 @@ describe("cohesive composer dock", () => {
 
   it("retains multiline, attachment, route, mention, slash, and keyboard behavior", () => {
     expect(css).toMatch(
-      /\.composer textarea\s*\{[^}]*min-height:\s*46px;[^}]*max-height:\s*176px;[^}]*resize:\s*none;[^}]*overflow-y:\s*auto/su,
+      /\.composer textarea\s*\{[^}]*min-height:\s*52px;[^}]*max-height:\s*176px;[^}]*resize:\s*none;[^}]*overflow-y:\s*auto/su,
     );
     expect(css).not.toMatch(
       /\.composer textarea\s*\{[^}]*transition:\s*height/su,

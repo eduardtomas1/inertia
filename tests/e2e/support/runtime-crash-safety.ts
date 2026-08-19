@@ -32,6 +32,19 @@ export async function expectRuntimeCrashRecovery(app: AppFixture): Promise<void>
   const tools = await ensureWorkspaceTools(page);
   await selectWorkspaceTool(tools, "Terminal");
   const terminal = page.locator("aside.terminal-panel").first();
+  const restartTerminal = terminal.getByRole("button", { name: "Start again" });
+  let retriedTerminalAdmission = false;
+  await expect.poll(async () => {
+    if (await terminal.getAttribute("data-terminal-id")) return true;
+    if (
+      !retriedTerminalAdmission
+      && await restartTerminal.isVisible().catch(() => false)
+    ) {
+      retriedTerminalAdmission = true;
+      await restartTerminal.click();
+    }
+    return false;
+  }, { timeout: 5_000 }).toBe(true);
   await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
   const beforeTerminalId = await terminal.getAttribute("data-terminal-id");
   expect(beforeTerminalId).toBeTruthy();
@@ -54,7 +67,7 @@ export async function expectRuntimeCrashRecovery(app: AppFixture): Promise<void>
     ].join("");
     const terminalInput = terminal.locator(".xterm-helper-textarea");
     await terminalInput.focus();
-    await page.keyboard.type(
+    await page.keyboard.insertText(
       `exec ${JSON.stringify(process.execPath)} -e ${JSON.stringify(recoveryRootSource)}`,
     );
     await page.keyboard.press("Enter");
@@ -113,22 +126,55 @@ export async function expectRuntimeCrashRecovery(app: AppFixture): Promise<void>
     Reflect.get(window, "__inertiaNoReloadMarker"))).toBe(marker);
   await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
   const newChat = page.getByRole("button", { name: "New chat" }).first();
-  await expect(newChat).toBeEnabled();
-  await expect(page.getByText(
+  const interruptedNotice = page.getByText(
     "The previous run ended when Inertia closed. Send another message to continue.",
-  )).toBeVisible();
+  );
   await expect(page.getByRole("heading", { name: "Timeline response", level: 1 }))
     .toBeVisible();
   await expect(page.getByRole("button", { name: "Copy" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Markdown" })).toBeVisible();
   expect(await page.evaluate(() =>
     Reflect.get(window, "__unsafeMarkdown"))).toBeUndefined();
+  const safetyAlert = page.locator(".error-toast[role=\"alert\"]");
+  if (process.platform !== "linux") {
+    await expect(interruptedNotice).toHaveCount(0);
+    await expect(safetyAlert).toContainText(
+      "Changes are unavailable in recovery safety mode.",
+    );
+    await expect(terminal).not.toHaveAttribute("data-terminal-id", /.+/u);
+    await safetyAlert.getByRole("button", { name: "Dismiss error" }).click();
+    await expect(safetyAlert).toHaveCount(0);
+    await newChat.click();
+    await expect(safetyAlert).toContainText(
+      "Changes are unavailable in recovery safety mode.",
+    );
+    const preserved = new Database(join(testDirectory, "data", "inertia.sqlite"), {
+      readonly: true,
+    });
+    try {
+      expect((preserved.prepare("SELECT COUNT(*) AS count FROM conversations")
+        .get() as { count: number }).count).toBe(conversationCount);
+      expect(preserved.prepare("SELECT status FROM conversations WHERE id = ?")
+        .get(conversation.id)).toEqual({ status: "running" });
+      expect(preserved.prepare("SELECT status FROM activities WHERE run_id = ?")
+        .get("e2e-interrupted-run")).toEqual({ status: "running" });
+    } finally {
+      preserved.close();
+    }
+    if (before.pid) {
+      await expect.poll(() => processExists(before.pid as number), {
+        timeout: 5_000,
+      }).toBe(false);
+    }
+    return;
+  }
+  await expect(newChat).toBeEnabled();
+  await expect(interruptedNotice).toBeVisible();
   await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
   await expect.poll(() => terminal.getAttribute("data-terminal-id"))
     .not.toBe(beforeTerminalId);
   await expect(terminal.locator(".terminal-overlay[role=\"status\"]"))
     .toHaveCount(0);
-  const safetyAlert = page.locator(".error-toast[role=\"alert\"]");
   await expect(safetyAlert).toHaveCount(0);
   await newChat.click();
   await expect.poll(() => {

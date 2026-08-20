@@ -94,7 +94,6 @@ export function ComposerConversationContextStrip({
   controller: ComposerConversationContextController;
   disabled: boolean;
 }): React.JSX.Element | null {
-  if (controller.draftContextPackets.length === 0) return null;
   return (
     <ConversationContextPacketStrip
       packets={controller.draftContextPackets}

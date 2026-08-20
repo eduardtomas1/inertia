@@ -255,7 +255,7 @@ describe("Quiet Ledger user request layer", () => {
 
     expect(html).toContain('aria-label="Shared chat context"');
     expect(html).toContain("Context from Architecture decisions");
-    expect(html).toContain("Source chat deleted · immutable sent excerpt");
+    expect(html).toContain("Source deleted · immutable sent excerpt");
     expect(html).not.toContain("2 messages");
   });
 

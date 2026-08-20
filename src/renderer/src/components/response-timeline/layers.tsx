@@ -126,7 +126,7 @@ export function UserRequestLayer({
                 <strong>Context from {packet.sourceConversationTitle}</strong>
                 <small>
                   {packet.sourceState === "deleted"
-                    ? "Source chat deleted · immutable sent excerpt"
+                    ? "Source deleted · immutable sent excerpt"
                     : `${packet.sourceProjectName} · ${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}${packet.workspaceRelation === "different-workspace" ? " · different workspace" : ""}`}
                 </small>
               </span>

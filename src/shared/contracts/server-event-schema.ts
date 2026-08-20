@@ -14,6 +14,7 @@ import { providerFastModeField } from "./provider-fast-mode-schema";
 import { COLOR_THEME_IDS } from "./app";
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "opencode"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
+const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 
 function record(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -478,16 +479,15 @@ function approvalRequest(value: unknown): boolean {
     && arrayOf(value.availableDecisions, (entry) =>
       entry === "approve" || entry === "deny" || entry === "cancel");
 }
-
 function conversationContextExcerpt(value: unknown): boolean {
   return recordWithStrings(value, "sourceMessageId", "role", "content", "createdAt") && nullableStringField(value, "sourceTurnId")
     && oneOf(value, "role", ["user", "assistant"]) && booleanField(value, "truncated") && (value.content as string).length > 0
-    && UTF8_ENCODER.encode(value.content as string).byteLength <= MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
+    && utf8Length(value.content as string) <= MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
 }
 function conversationContextPacketSummary(value: unknown): value is UnknownRecord {
   return recordWithStrings(value, "id", "sourceConversationId", "targetConversationId", "sourceProjectId", "targetProjectId", "sourceConversationTitle", "sourceProjectName", "sourceWorkspaceLabel", "targetWorkspaceLabel", "workspaceRelation", "createdAt", "sourceState")
     && oneOf(value, "workspaceRelation", WORKSPACE_RELATIONS) && oneOf(value, "sourceState", ["available", "deleted"])
-    && nullableStringField(value, "note") && (value.note === null || UTF8_ENCODER.encode(value.note as string).byteLength <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
+    && nullableStringField(value, "note") && (value.note === null || utf8Length(value.note as string) <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
     && nullableStringField(value, "consumedMessageId") && nullableStringField(value, "consumedAt")
     && integerField(value, "messageCount") && (value.messageCount as number) >= 1 && (value.messageCount as number) <= MAX_CONVERSATION_CONTEXT_MESSAGES
     && integerField(value, "characterCount") && (value.characterCount as number) >= 1 && (value.characterCount as number) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES;
@@ -496,13 +496,13 @@ function conversationContextPacket(value: unknown): boolean {
   if (!conversationContextPacketSummary(value) || !arrayOf(value.excerpts, conversationContextExcerpt)
     || (value.excerpts as unknown[]).length !== value.messageCount || !uniqueRecordField(value.excerpts as unknown[], "sourceMessageId")) return false;
   const excerpts = value.excerpts as UnknownRecord[];
-  return excerpts.reduce((total, excerpt) => total + UTF8_ENCODER.encode(excerpt.content as string).byteLength, 0) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
-    && excerpts.reduce((total, excerpt) => total + (excerpt.content as string).length, 0) === value.characterCount;
+  let bytes = 0; let characters = 0;
+  for (const excerpt of excerpts) { const content = excerpt.content as string; bytes += utf8Length(content); characters += content.length; }
+  return bytes <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES && characters === value.characterCount;
 }
 function conversationContextSource(value: unknown): boolean {
-  return recordWithStrings(value, "conversationId", "projectId", "conversationTitle", "projectName", "workspaceLabel", "targetConversationId", "targetProjectId", "targetWorkspaceLabel", "workspaceRelation")
-    && oneOf(value, "workspaceRelation", WORKSPACE_RELATIONS) && arrayOf(value.messages, conversationContextExcerpt)
-    && (value.messages as unknown[]).length <= MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES && uniqueRecordField(value.messages as unknown[], "sourceMessageId");
+  return recordWithStrings(value, "conversationId", "projectId", "conversationTitle", "projectName", "workspaceLabel", "targetConversationId", "targetProjectId", "targetWorkspaceLabel", "workspaceRelation") && oneOf(value, "workspaceRelation", WORKSPACE_RELATIONS)
+    && arrayOf(value.messages, conversationContextExcerpt) && (value.messages as unknown[]).length <= MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES && uniqueRecordField(value.messages as unknown[], "sourceMessageId");
 }
 function inputRequest(value: unknown): boolean {
   if (!recordWithStrings(value, "id", "providerId", "conversationId", "runId", "turnId") || !providerId(value, "providerId")

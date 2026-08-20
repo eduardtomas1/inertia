@@ -128,11 +128,7 @@ export const Composer = memo(function Composer({
   const draftPersistenceTimerRef = useRef<number | null>(null);
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const conversationContext = useComposerConversationContext({
-    conversationId: conversation.id,
-    contextPackets,
-    onCommand: onConversationContextCommand,
-  });
+  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -1087,10 +1083,7 @@ export const Composer = memo(function Composer({
             />
           </Suspense>
         )}
-        <ComposerConversationContextStrip
-          controller={conversationContext}
-          disabled={submissionPending || running}
-        />
+        <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
@@ -1184,11 +1177,7 @@ export const Composer = memo(function Composer({
           running={running}
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}
-          {...composerConversationContextToolbarProps(
-            conversationContext,
-            contextSources.length,
-            Boolean(onConversationContextCommand),
-          )}
+          {...composerConversationContextToolbarProps(conversationContext, contextSources.length, Boolean(onConversationContextCommand))}
           onRunAction={onRunAction}
           skills={skills}
           skillsCapability={skillsCapability}
@@ -1253,13 +1242,7 @@ export const Composer = memo(function Composer({
           onSubmit={submit}
           onStop={stop}
         />
-        <ComposerConversationContextDialog
-          controller={conversationContext}
-          targetConversationId={conversation.id}
-          sources={contextSources}
-          agentRequest={agentContextRequest}
-          onCommand={onConversationContextCommand}
-        />
+        <ComposerConversationContextDialog controller={conversationContext} targetConversationId={conversation.id} sources={contextSources} agentRequest={agentContextRequest} onCommand={onConversationContextCommand} />
       </section>
     </div>
   );

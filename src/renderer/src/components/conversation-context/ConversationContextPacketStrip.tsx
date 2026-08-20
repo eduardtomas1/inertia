@@ -15,7 +15,7 @@ export function ConversationContextPacketStrip({
 }): React.JSX.Element | null {
   if (packets.length === 0) return null;
   return (
-    <div className="p-s" aria-label="Selected chat context">
+    <div className="p-s" aria-label="Chat context">
       {packets.map((packet) => (
         <article
           key={packet.id}

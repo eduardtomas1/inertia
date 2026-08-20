@@ -11,8 +11,7 @@ import { createPortal } from "react-dom";
 import type { WorkspaceFilePreview } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
-  captureModalFocus,
-  focusOnAnimationFrame,
+  focusModalOnAnimationFrame,
   trapModalFocus,
 } from "../utils/modalFocus";
 import { LoadingMark } from "./ui";
@@ -72,12 +71,7 @@ export function FileEditorDialog({
   useNativePreviewSuspension(true);
 
   useEffect(() => {
-    const restoreFocus = captureModalFocus();
-    const cancelFocus = focusOnAnimationFrame(() => editorRef.current?.focus());
-    return () => {
-      cancelFocus();
-      restoreFocus();
-    };
+    return focusModalOnAnimationFrame(() => editorRef.current?.focus());
   }, []);
 
   const closeSafely = (): void => {

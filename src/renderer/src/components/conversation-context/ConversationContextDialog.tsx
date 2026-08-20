@@ -33,8 +33,9 @@ import type {
 } from "./types";
 import "./ConversationContextDialog.css";
 
-const INVALID_CONTEXT_RESPONSE = "Invalid context response.";
+const INVALID_CONTEXT_RESPONSE = "Invalid context.";
 const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder();
 
 function failureMessage(failure: unknown): string {
   return failure instanceof Error ? failure.message : "Context unavailable.";
@@ -66,20 +67,13 @@ function selectedPreview(
     Math.floor(MAX_CONVERSATION_CONTEXT_TOTAL_BYTES / Math.max(selected.length, 1)),
   );
   return selected.map((message) => {
-    if (UTF8_ENCODER.encode(message.content).byteLength <= budget) return message;
-    let low = 0;
-    let high = message.content.length;
-    while (low < high) {
-      const middle = Math.ceil((low + high) / 2);
-      if (UTF8_ENCODER.encode(message.content.slice(0, middle)).byteLength <= budget) {
-        low = middle;
-      } else {
-        high = middle - 1;
-      }
-    }
+    const encoded = UTF8_ENCODER.encode(message.content);
+    if (encoded.byteLength <= budget) return message;
+    let end = budget;
+    while ((encoded[end]! & 0xc0) === 0x80) end -= 1;
     return {
       ...message,
-      content: message.content.slice(0, low),
+      content: UTF8_DECODER.decode(encoded.subarray(0, end)),
       truncated: true,
     };
   });
@@ -146,12 +140,12 @@ function PacketPreview({ packet }: {
       </div>
       {packet.sourceState === "deleted" && (
         <p className="c-wr" role="status">
-          Source chat deleted. This is the immutable sent excerpt.
+          Source deleted · immutable sent excerpt.
         </p>
       )}
       {packet.workspaceRelation === "different-workspace" && (
         <p className="c-bd">
-          <ShieldCheck size={14} /> From a different project or worktree.
+          <ShieldCheck size={14} /> Different project or worktree.
         </p>
       )}
       {packet.note && <blockquote>{packet.note}</blockquote>}
@@ -207,10 +201,10 @@ export function ConversationContextDialog({
     source?.messages ?? [],
     selectedIds,
   ), [selectedIds, source]);
-  const noteBytes = useMemo(
-    () => UTF8_ENCODER.encode(note.trim()).byteLength,
-    [note],
-  );
+  const noteBytes = UTF8_ENCODER.encode(note.trim()).byteLength;
+  const differentWorkspace = (
+    source?.workspaceRelation ?? selectedSource?.workspaceRelation
+  ) === "different-workspace";
 
   useEffect(() => {
     const restoreFocus = captureModalFocus(false);
@@ -225,7 +219,7 @@ export function ConversationContextDialog({
       void closeDialog();
       return;
     }
-    trapModalFocus(event, event.currentTarget, true);
+    trapModalFocus(event, event.currentTarget);
   };
 
   useEffect(() => {
@@ -376,10 +370,10 @@ export function ConversationContextDialog({
                   : "Bring context from another chat"}
             </strong>
             <small>{previewPacketId
-              ? "Exact bounded excerpt attached here"
+              ? "Exact bounded excerpt attached"
               : agentRequest
-                ? "Choose the exact messages this agent receives"
-                : "Choose messages this agent should receive"}</small>
+                ? "Choose exactly what this agent receives"
+                : "Choose what this agent receives"}</small>
           </span>
           <button ref={closeRef} type="button" aria-label="Close chat context" onClick={() => void closeDialog()}>
             <X size={16} />
@@ -447,7 +441,7 @@ export function ConversationContextDialog({
               </div>
               <p className="c-n">
                 <ShieldCheck size={14} />
-                Secrets are redacted as a safeguard, not a guarantee. Review each excerpt.
+                Redaction is a safeguard, not a guarantee. Review every excerpt.
               </p>
               {loading ? <p className="c-st">Loading visible messages…</p>
                 : error ? <p className="c-st is-error" role="alert">{error}</p>
@@ -476,9 +470,8 @@ export function ConversationContextDialog({
               </small>
               {previewExcerpts.length > 0
                 ? <ExcerptList excerpts={previewExcerpts} />
-                : <div className="c-ep"><MessagesSquare size={22} /><span>Select messages to preview the packet.</span></div>}
-              {(source?.workspaceRelation ?? selectedSource?.workspaceRelation)
-                === "different-workspace" && (
+                : <div className="c-ep"><MessagesSquare size={22} /><span>Select messages to preview.</span></div>}
+              {differentWorkspace && (
                 <label className="c-a">
                   <input
                     type="checkbox"
@@ -506,8 +499,7 @@ export function ConversationContextDialog({
                 saving
                 || selectedIds.size === 0
                 || noteBytes > MAX_CONVERSATION_CONTEXT_NOTE_BYTES
-                || ((source?.workspaceRelation ?? selectedSource?.workspaceRelation)
-                  === "different-workspace" && !acknowledged)
+                || (differentWorkspace && !acknowledged)
               }
               onClick={() => void createPacket()}
             >

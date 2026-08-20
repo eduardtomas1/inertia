@@ -1,4 +1,4 @@
-const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), iframe, [href], [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = ':is(button,input,textarea,select):not(:disabled),iframe,[href],[tabindex]:not([tabindex="-1"])';
 
 export function captureModalFocus(preventScroll = true): () => void {
   const previous = document.activeElement instanceof HTMLElement
@@ -10,20 +10,25 @@ export function captureModalFocus(preventScroll = true): () => void {
   };
 }
 
-export function focusOnAnimationFrame(focus: () => void): () => void {
+export function focusModalOnAnimationFrame(
+  focus: () => void,
+  preventScroll = true,
+): () => void {
+  const restoreFocus = captureModalFocus(preventScroll);
   const frame = window.requestAnimationFrame(focus);
-  return () => window.cancelAnimationFrame(frame);
+  return () => {
+    window.cancelAnimationFrame(frame);
+    restoreFocus();
+  };
 }
 
 export function trapModalFocus(
   event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault">,
   root: HTMLElement,
-  visibleOnly = false,
 ): void {
   if (event.key !== "Tab") return;
   const elements = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)]
-    .filter((element) => !element.hidden
-      && (!visibleOnly || element.getClientRects().length > 0));
+    .filter((element) => !element.hidden && element.getClientRects().length > 0);
   const first = elements[0];
   const last = elements.at(-1);
   if (!first || !last) {

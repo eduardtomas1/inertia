@@ -23,8 +23,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
 import { formatCompact, formatCount, formatDuration } from "../lib/usageFormat";
 import {
-  captureModalFocus,
-  focusOnAnimationFrame,
+  focusModalOnAnimationFrame,
   trapModalFocus,
 } from "../utils/modalFocus";
 import { DailyWorkMark } from "./DailyWorkMark";
@@ -176,8 +175,9 @@ export function DailyWorkDialog({
   useNativePreviewSuspension(true);
 
   useEffect(() => {
-    const restoreFocus = captureModalFocus();
-    const cancelFocus = focusOnAnimationFrame(() => closeRef.current?.focus());
+    const restoreFocus = focusModalOnAnimationFrame(
+      () => closeRef.current?.focus(),
+    );
     const closeOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -186,7 +186,6 @@ export function DailyWorkDialog({
     };
     document.addEventListener("keydown", closeOnEscape, true);
     return () => {
-      cancelFocus();
       document.removeEventListener("keydown", closeOnEscape, true);
       restoreFocus();
     };

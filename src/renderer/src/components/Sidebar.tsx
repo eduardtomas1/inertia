@@ -41,8 +41,7 @@ import type { AppSnapshot, Conversation, Project, ProjectGroupingMode, Workspace
 import { formatRelativeTime } from "../lib/format";
 import { agentRequestProviderName } from "../utils/agentInput";
 import {
-  captureModalFocus,
-  focusOnAnimationFrame,
+  focusModalOnAnimationFrame,
   trapModalFocus,
 } from "../utils/modalFocus";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
@@ -294,8 +293,7 @@ function SidebarView({
   useEffect(() => {
     if (!mobile || !open) return;
     const sidebar = sidebarRef.current;
-    const restoreFocus = captureModalFocus();
-    const cancelFocus = focusOnAnimationFrame(() => (
+    const restoreFocus = focusModalOnAnimationFrame(() => (
       sidebar?.querySelector<HTMLElement>('[aria-label="Close navigation"]')?.focus({ preventScroll: true })
     ));
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -308,7 +306,6 @@ function SidebarView({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
-      cancelFocus();
       document.removeEventListener("keydown", onKeyDown);
       restoreFocus();
     };

@@ -17,8 +17,7 @@ import {
 } from "../utils/composerAttachments";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
-  captureModalFocus,
-  focusOnAnimationFrame,
+  focusModalOnAnimationFrame,
   trapModalFocus,
 } from "../utils/modalFocus";
 import { PdfAttachmentPreview } from "./PdfAttachmentPreview";
@@ -44,8 +43,9 @@ export function AttachmentPreviewDialog({
   useNativePreviewSuspension(Boolean(previewKind && previewUrl));
 
   useEffect(() => {
-    const restoreFocus = captureModalFocus();
-    const cancelFocus = focusOnAnimationFrame(() => closeRef.current?.focus());
+    const restoreFocus = focusModalOnAnimationFrame(
+      () => closeRef.current?.focus(),
+    );
     const closeOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -54,7 +54,6 @@ export function AttachmentPreviewDialog({
     };
     document.addEventListener("keydown", closeOnEscape, true);
     return () => {
-      cancelFocus();
       document.removeEventListener("keydown", closeOnEscape, true);
       restoreFocus();
     };

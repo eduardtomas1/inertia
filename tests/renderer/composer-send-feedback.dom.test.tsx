@@ -10,75 +10,122 @@ import {
 afterEach(() => vi.useRealTimers());
 
 describe("composer send feedback ownership", () => {
-  it("expires definite acceptance and hides it from another conversation", () => {
+  it("expires definite acceptance", () => {
     vi.useFakeTimers();
-    const view = renderHook(
-      ({ conversationId }) => useComposerSendFeedback(conversationId),
-      { initialProps: { conversationId: "conversation-one" } },
-    );
-    act(() => view.result.current[1]({
-      kind: "message.accepted",
+    const acceptance = {
+      kind: "message.accepted" as const,
       conversationId: "conversation-one",
       turnId: "turn-one",
       userMessageId: "message-one",
+      disposition: "new-turn" as const,
+    };
+    const view = renderHook(
+      ({ conversationId, currentAcceptance }) => useComposerSendFeedback(
+        conversationId,
+        currentAcceptance,
+      ),
+      {
+        initialProps: {
+          conversationId: "conversation-one",
+          currentAcceptance: acceptance,
+        },
+      },
+    );
+    expect(view.result.current).toEqual({
       disposition: "new-turn",
-    }));
-    expect(view.result.current[0]).toEqual({
-      conversationId: "conversation-one",
-      disposition: "new-turn",
-      sequence: 1,
       turnId: "turn-one",
       visible: true,
     });
 
-    view.rerender({ conversationId: "conversation-two" });
-    expect(view.result.current[0]).toBeNull();
-    view.rerender({ conversationId: "conversation-one" });
     act(() => {
       vi.advanceTimersByTime(COMPOSER_SEND_FEEDBACK_MS);
     });
-    expect(view.result.current[0]?.visible).toBe(false);
+    expect(view.result.current?.visible).toBe(false);
     act(() => {
       vi.advanceTimersByTime(
         COMPOSER_SEND_FEEDBACK_RETENTION_MS - COMPOSER_SEND_FEEDBACK_MS,
       );
     });
-    expect(view.result.current[0]).toBeNull();
+    expect(view.result.current).toBeNull();
+  });
+
+  it("does not replay acceptance after switching conversations", () => {
+    vi.useFakeTimers();
+    const acceptance = {
+      kind: "message.accepted" as const,
+      conversationId: "conversation-one",
+      turnId: "turn-one",
+      userMessageId: "message-one",
+      disposition: "new-turn" as const,
+    };
+    const view = renderHook(
+      ({ conversationId }) => useComposerSendFeedback(conversationId, acceptance),
+      { initialProps: { conversationId: "conversation-one" } },
+    );
+
+    view.rerender({ conversationId: "conversation-two" });
+    expect(view.result.current).toBeNull();
+    view.rerender({ conversationId: "conversation-one" });
+
+    expect(view.result.current).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("ignores legacy acknowledgements and clears its timer on unmount", () => {
     vi.useFakeTimers();
-    const view = renderHook(() => useComposerSendFeedback("conversation-one"));
-    act(() => view.result.current[1](null));
-    expect(view.result.current[0]).toBeNull();
+    const view = renderHook(
+      ({ acceptance }) => useComposerSendFeedback("conversation-one", acceptance),
+      { initialProps: { acceptance: null as Parameters<typeof useComposerSendFeedback>[1] } },
+    );
+    expect(view.result.current).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
-    act(() => view.result.current[1]({
+    view.rerender({ acceptance: {
       kind: "message.accepted",
       conversationId: "conversation-one",
       turnId: "turn-one",
       userMessageId: "message-one",
-      disposition: "follow-up",
-    }));
+      disposition: "follow-up" as const,
+    } });
     expect(vi.getTimerCount()).toBe(2);
     view.unmount();
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("ignores an acceptance owned by another conversation", () => {
+    vi.useFakeTimers();
+    const view = renderHook(() => useComposerSendFeedback("conversation-one", {
+      kind: "message.accepted",
+      conversationId: "conversation-two",
+      turnId: "turn-two",
+      userMessageId: "message-two",
+      disposition: "new-turn",
+    }));
+
+    expect(view.result.current).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("clears retained acceptance before the next submission", () => {
     vi.useFakeTimers();
-    const view = renderHook(() => useComposerSendFeedback("conversation-one"));
-    act(() => view.result.current[1]({
+    const acceptance = {
       kind: "message.accepted",
       conversationId: "conversation-one",
       turnId: "turn-one",
       userMessageId: "message-one",
-      disposition: "new-turn",
-    }));
-    expect(view.result.current[0]?.turnId).toBe("turn-one");
+      disposition: "new-turn" as const,
+    } as const;
+    const view = renderHook(
+      ({ currentAcceptance }) => useComposerSendFeedback(
+        "conversation-one",
+        currentAcceptance,
+      ),
+      { initialProps: { currentAcceptance: acceptance as typeof acceptance | null } },
+    );
+    expect(view.result.current?.turnId).toBe("turn-one");
 
-    act(() => view.result.current[2]());
+    view.rerender({ currentAcceptance: null });
 
-    expect(view.result.current[0]).toBeNull();
+    expect(view.result.current).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -213,7 +213,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     await expect(textbox).toBeFocused();
     expect(await textbox.evaluate((element) =>
       (element as HTMLTextAreaElement).readOnly)).toBe(true);
-    await expect(composer.locator(".loading-mark")).toHaveCount(1);
+    await expect(submitting.locator('[data-icon-state="sending"]')).toHaveCount(1);
     await expectComposerEndsAtDock(composer);
     expect(await composer.locator(".usage-context-ring").evaluateAll((rings) =>
       rings.reduce((count, ring) =>

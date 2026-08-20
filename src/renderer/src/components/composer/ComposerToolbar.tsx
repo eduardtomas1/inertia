@@ -14,6 +14,7 @@ import type {
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
   Conversation,
+  MessageSendAcceptance,
   ModelBackendProfileView,
   ProjectAction,
   ProviderInfo,
@@ -48,8 +49,6 @@ import {
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { PromptPresetCommandRunner } from "./types";
 import type { PromptStashEntry } from "../../utils/promptStash";
-import { ComposerSendActions } from "./ComposerSendActions";
-import type { ComposerSendFeedback } from "./useComposerSendFeedback";
 
 const PromptStashMenu = lazy(async () => ({
   default: (await import("./PromptStashMenu")).PromptStashMenu,
@@ -60,6 +59,21 @@ const PromptPresetMenu = lazy(async () => ({
 const ComposerSkillsMenu = lazy(async () => ({
   default: (await import("./ComposerSkillsMenu")).ComposerSkillsMenu,
 }));
+const ComposerSendActions = lazy(async () => ({
+  default: (await import("./ComposerSendActions")).ConversationComposerSendActions,
+}));
+
+function ComposerSendActionsFallback(): React.JSX.Element {
+  return (
+    <IconButton
+      label="Loading message action"
+      className="send-button"
+      disabled
+    >
+      <span aria-hidden="true">…</span>
+    </IconButton>
+  );
+}
 const ComposerMoreMenu = lazy(async () => ({
   default: (await import("./ComposerMoreMenu")).ComposerMoreMenu,
 }));
@@ -137,7 +151,7 @@ export interface ComposerToolbarProps {
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   followUpState: ComposerFollowUpState;
   primaryAction: ComposerPrimaryActionState;
-  sendFeedback: ComposerSendFeedback | null;
+  sendAcceptance: MessageSendAcceptance | null;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }
@@ -198,7 +212,7 @@ export function ComposerToolbar({
   onUsageDisplayModeChange,
   followUpState,
   primaryAction,
-  sendFeedback,
+  sendAcceptance,
   onSubmit,
   onStop,
 }: ComposerToolbarProps): React.JSX.Element {
@@ -460,13 +474,18 @@ export function ComposerToolbar({
             onModeChange={onUsageDisplayModeChange}
           />
         ) : null}
-        <ComposerSendActions
-          followUpState={followUpState}
-          primaryAction={primaryAction}
-          feedback={sendFeedback}
-          onSubmit={onSubmit}
-          onStop={onStop}
-        />
+        <Suspense
+          fallback={<ComposerSendActionsFallback />}
+        >
+          <ComposerSendActions
+            conversationId={conversation.id}
+            followUpState={followUpState}
+            primaryAction={primaryAction}
+            acceptance={sendAcceptance}
+            onSubmit={onSubmit}
+            onStop={onStop}
+          />
+        </Suspense>
         </div>
       </div>
       {showCheckoutContext && (

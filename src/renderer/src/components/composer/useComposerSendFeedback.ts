@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MessageSendAcceptance } from "@shared/contracts";
 import { COMPOSER_ACTION_STALE_FALLBACK_MS } from "../../utils/composerPrimaryAction";
 
@@ -11,69 +11,39 @@ export type ComposerSendFeedback = Pick<
   "disposition" | "turnId"
 > & { visible: boolean };
 
-interface OwnedComposerSendFeedback extends ComposerSendFeedback {
-  conversationId: string;
-  sequence: number;
-}
-
-export function useComposerSendFeedback(conversationId: string): readonly [
-  ComposerSendFeedback | null,
-  (acceptance: MessageSendAcceptance | null | void) => void,
-  () => void,
-] {
-  const [entry, setEntry] = useState<OwnedComposerSendFeedback | null>(null);
-  const visualTimerRef = useRef<number | null>(null);
-  const retentionTimerRef = useRef<number | null>(null);
-  const sequenceRef = useRef(0);
-
-  useEffect(() => () => {
-    if (visualTimerRef.current !== null) window.clearTimeout(visualTimerRef.current);
-    if (retentionTimerRef.current !== null) {
-      window.clearTimeout(retentionTimerRef.current);
+export function useComposerSendFeedback(
+  conversationId: string,
+  acceptance: MessageSendAcceptance | null,
+): ComposerSendFeedback | null {
+  const [entry, setEntry] = useState<ComposerSendFeedback | null>(null);
+  const shownMessageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!acceptance) {
+      shownMessageIdRef.current = null;
+      setEntry(null);
+      return;
     }
-  }, []);
-
-  const showAccepted = useCallback((acceptance: MessageSendAcceptance | null | void): void => {
-    if (!acceptance) return;
-    sequenceRef.current += 1;
-    const sequence = sequenceRef.current;
-    if (visualTimerRef.current !== null) window.clearTimeout(visualTimerRef.current);
-    if (retentionTimerRef.current !== null) {
-      window.clearTimeout(retentionTimerRef.current);
+    if (acceptance.conversationId !== conversationId) {
+      setEntry(null);
+      return;
     }
+    if (shownMessageIdRef.current === acceptance.userMessageId) return;
+    shownMessageIdRef.current = acceptance.userMessageId;
     setEntry({
-      conversationId,
       disposition: acceptance.disposition,
       turnId: acceptance.turnId,
-      sequence,
       visible: true,
     });
-    visualTimerRef.current = window.setTimeout(() => {
-      visualTimerRef.current = null;
-      setEntry((current) => current?.sequence === sequence
-        ? { ...current, visible: false }
-        : current);
+    const visualTimer = window.setTimeout(() => {
+      setEntry((current) => current ? { ...current, visible: false } : current);
     }, COMPOSER_SEND_FEEDBACK_MS);
-    retentionTimerRef.current = window.setTimeout(() => {
-      retentionTimerRef.current = null;
-      setEntry((current) => current?.sequence === sequence ? null : current);
+    const retentionTimer = window.setTimeout(() => {
+      setEntry(null);
     }, COMPOSER_SEND_FEEDBACK_RETENTION_MS);
-  }, [conversationId]);
-
-  const clearFeedback = useCallback((): void => {
-    sequenceRef.current += 1;
-    if (visualTimerRef.current !== null) window.clearTimeout(visualTimerRef.current);
-    if (retentionTimerRef.current !== null) {
-      window.clearTimeout(retentionTimerRef.current);
-    }
-    visualTimerRef.current = null;
-    retentionTimerRef.current = null;
-    setEntry(null);
-  }, []);
-
-  return [
-    entry?.conversationId === conversationId ? entry : null,
-    showAccepted,
-    clearFeedback,
-  ] as const;
+    return () => {
+      window.clearTimeout(visualTimer);
+      window.clearTimeout(retentionTimer);
+    };
+  }, [acceptance, conversationId]);
+  return acceptance?.conversationId === conversationId ? entry : null;
 }

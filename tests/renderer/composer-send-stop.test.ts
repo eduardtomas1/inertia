@@ -184,7 +184,7 @@ describe("composer Send and Stop", () => {
     expect(sendActionsSource).toContain('iconState: "sending"');
     expect(sendActionsSource).toContain('label: "Message accepted"');
     expect(sendActionsSource).toContain('"Follow-up accepted."');
-    expect(morphIconSource).toContain('reducedMotion="user"');
+    expect(morphIconSource).toContain('reducedMotion: "user"');
     expect(sendActionsCss).toContain("prefers-reduced-motion: reduce");
     expect(sendActionsCss).toContain("animation: none");
   });

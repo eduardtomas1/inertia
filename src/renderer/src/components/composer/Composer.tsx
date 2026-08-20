@@ -1,6 +1,10 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import type { ChatAttachment, PromptPreset } from "@shared/contracts";
+import type {
+  ChatAttachment,
+  MessageSendAcceptance,
+  PromptPreset,
+} from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import { fastModeProviderValue, legacyProviderIdForHarness,
@@ -40,7 +44,6 @@ import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
-import { useComposerSendFeedback } from "./useComposerSendFeedback";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
@@ -164,7 +167,7 @@ export const Composer = memo(function Composer({
   const [commandSurface, setCommandSurface] = useState<"goal" | "resume" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
-  const [sendFeedback, showSendAccepted, clearSendFeedback] = useComposerSendFeedback(conversation.id);
+  const [sendAcceptance, setSendAcceptance] = useState<MessageSendAcceptance | null>(null);
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null);
   useNativePreviewSuspension(conversationContext.dialog !== null || agentContextRequest !== null);
@@ -523,7 +526,7 @@ export const Composer = memo(function Composer({
       (!canSend && followUpState !== "ready")
       || submittingRef.current
     ) return;
-    clearSendFeedback();
+    setSendAcceptance(null);
     flushDraftPersistence();
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
@@ -568,7 +571,11 @@ export const Composer = memo(function Composer({
         !mountedRef.current
         || conversationIdRef.current !== submittedConversationId
       ) return;
-      showSendAccepted(acceptance);
+      setSendAcceptance(
+        acceptance?.conversationId === submittedConversationId
+          ? acceptance
+          : null,
+      );
       if (editorUnchanged) {
         draftValueRef.current = "";
         setMessage("");
@@ -1218,7 +1225,7 @@ export const Composer = memo(function Composer({
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           followUpState={followUpState}
           primaryAction={primaryAction}
-          sendFeedback={sendFeedback}
+          sendAcceptance={sendAcceptance}
           onSubmit={submit}
           onStop={stop}
         />

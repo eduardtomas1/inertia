@@ -131,6 +131,12 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
+async function waitForComposerSendEnhancement(): Promise<void> {
+  await waitFor(() => expect(
+    screen.getByRole("button", { name: "Send message" }),
+  ).toHaveAttribute("data-motion-state", "send"));
+}
+
 function composerProps(
   current: Conversation,
   overrides: Partial<React.ComponentProps<typeof Composer>> = {},
@@ -191,6 +197,7 @@ describe("composer asynchronous ownership", () => {
     const view = render(<Composer {...composerProps(current, {
       onSend: () => sent.promise,
     })} />);
+    await waitForComposerSendEnhancement();
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
       target: { value: "Animate only definite acceptance" },
     });
@@ -224,8 +231,32 @@ describe("composer asynchronous ownership", () => {
     const current = conversation("conversation-null-acceptance");
     const onSend = vi.fn(async () => null);
     render(<Composer {...composerProps(current, { onSend })} />);
+    await waitForComposerSendEnhancement();
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
       target: { value: "Keep legacy acknowledgement neutral" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("button", { name: "Message accepted" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sending message" }))
+      .toHaveAttribute("data-motion-state", "sending");
+  });
+
+  it("does not claim acceptance returned for another conversation", async () => {
+    const current = conversation("conversation-mismatched-acceptance");
+    const onSend = vi.fn(async (): Promise<MessageSendAcceptance> => ({
+      kind: "message.accepted",
+      conversationId: "another-conversation",
+      turnId: "turn-from-another-conversation",
+      userMessageId: "message-from-another-conversation",
+      disposition: "new-turn",
+    }));
+    render(<Composer {...composerProps(current, { onSend })} />);
+    await waitForComposerSendEnhancement();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Keep acceptance conversation-owned" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -241,6 +272,7 @@ describe("composer asynchronous ownership", () => {
     const sent = deferred<MessageSendAcceptance>();
     const onSend = () => sent.promise;
     const view = render(<Composer {...composerProps(current, { onSend })} />);
+    await waitForComposerSendEnhancement();
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
       target: { value: "Preserve the Stop control" },
     });

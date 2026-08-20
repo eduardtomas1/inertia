@@ -1,5 +1,4 @@
 import { useState } from "react";
-import clsx from "clsx";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import {
   checkMorphIcon,
@@ -8,12 +7,15 @@ import {
   sendMorphIcon,
   squareMorphIcon,
 } from "../motion/lucideMorphData";
-import { IconButton } from "../ui";
 import type {
   ComposerFollowUpState,
   ComposerPrimaryActionState,
 } from "../../utils/composerPrimaryAction";
-import type { ComposerSendFeedback } from "./useComposerSendFeedback";
+import type { MessageSendAcceptance } from "@shared/contracts";
+import {
+  type ComposerSendFeedback,
+  useComposerSendFeedback,
+} from "./useComposerSendFeedback";
 import "./ComposerSendActions.css";
 
 function FollowUpAction({
@@ -69,10 +71,9 @@ function AcceptanceStatus({
   const label = kind === "follow-up" ? "Follow-up accepted." : "Message accepted.";
   return (
     <span
-      className={clsx(
-        "composer-send-acceptance",
-        visuallyHidden && "visually-hidden",
-      )}
+      className={visuallyHidden
+        ? "composer-send-acceptance visually-hidden"
+        : "composer-send-acceptance"}
       data-motion-state="accepted"
       role="status"
       aria-live="polite"
@@ -166,14 +167,15 @@ export function ComposerSendActions({
       {showPrimaryStatus ? (
         <AcceptanceStatus kind="message" visuallyHidden={primaryAccepted} />
       ) : null}
-      <IconButton
-        label={presentation.label}
-        className={clsx(
-          "send-button",
-          presentation.action === "stop" && "stop-button",
-          presentation.iconState === "sending" && "send-button-loading",
-          presentation.iconState === "accepted" && "send-button-accepted",
-        )}
+      <button
+        type="button"
+        aria-label={presentation.label}
+        title={presentation.label}
+        className={`icon-button send-button${
+          presentation.action === "stop" ? " stop-button" : ""
+        }${presentation.iconState === "sending" ? " send-button-loading" : ""}${
+          presentation.iconState === "accepted" ? " send-button-accepted" : ""
+        }`}
         data-composer-action-state={primaryAction}
         data-motion-state={presentation.iconState}
         aria-busy={presentation.busy}
@@ -194,7 +196,19 @@ export function ComposerSendActions({
           iconState={presentation.iconState}
           size={16}
         />
-      </IconButton>
+      </button>
     </>
   );
+}
+
+export function ConversationComposerSendActions({
+  conversationId,
+  acceptance,
+  ...props
+}: Omit<React.ComponentProps<typeof ComposerSendActions>, "feedback"> & {
+  conversationId: string;
+  acceptance: MessageSendAcceptance | null;
+}): React.JSX.Element {
+  const feedback = useComposerSendFeedback(conversationId, acceptance);
+  return <ComposerSendActions {...props} feedback={feedback} />;
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState, type Ref } from "react";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import {
   checkMorphIcon,
@@ -21,9 +21,11 @@ import "./ComposerSendActions.css";
 function FollowUpAction({
   state,
   onSubmit,
+  buttonRef,
 }: {
   state: ComposerFollowUpState;
   onSubmit: () => Promise<void>;
+  buttonRef: Ref<HTMLButtonElement>;
 }): React.JSX.Element | null {
   if (state === "unavailable") {
     return (
@@ -42,6 +44,7 @@ function FollowUpAction({
   const iconState = pending ? "sending" : "send";
   return (
     <button
+      ref={buttonRef}
       type="button"
       className="secondary-button composer-follow-up-button"
       aria-label={pending ? "Sending follow-up" : "Send follow-up"}
@@ -147,6 +150,21 @@ export function ComposerSendActions({
   onStop: () => Promise<void>;
 }): React.JSX.Element {
   const [intent, setIntent] = useState(false);
+  const followUpRef = useRef<HTMLButtonElement>(null);
+  const primaryRef = useRef<HTMLButtonElement>(null);
+  const focusedElement = document.activeElement;
+  const focusedGroup = focusedElement?.closest(".composer-actions");
+  const focusedAction = focusedElement?.classList.contains("send-button")
+    ? "primary"
+    : focusedElement?.classList.contains("composer-follow-up-button")
+      ? "follow-up"
+      : null;
+  useLayoutEffect(() => {
+    const group = primaryRef.current?.closest<HTMLElement>(".composer-actions");
+    if (group !== focusedGroup || document.activeElement !== document.body) return;
+    if (focusedAction === "primary") primaryRef.current?.focus();
+    if (focusedAction === "follow-up") followUpRef.current?.focus();
+  }, [focusedAction, focusedGroup]);
   const followUpAccepted = feedback?.disposition === "follow-up";
   const primaryAccepted = primaryAction === "submitting"
     && feedback?.disposition === "new-turn";
@@ -162,12 +180,17 @@ export function ComposerSendActions({
       {showFollowUpStatus ? (
         <AcceptanceStatus kind="follow-up" />
       ) : (
-        <FollowUpAction state={followUpState} onSubmit={onSubmit} />
+        <FollowUpAction
+          state={followUpState}
+          onSubmit={onSubmit}
+          buttonRef={followUpRef}
+        />
       )}
       {showPrimaryStatus ? (
         <AcceptanceStatus kind="message" visuallyHidden={primaryAccepted} />
       ) : null}
       <button
+        ref={primaryRef}
         type="button"
         aria-label={presentation.label}
         title={presentation.label}

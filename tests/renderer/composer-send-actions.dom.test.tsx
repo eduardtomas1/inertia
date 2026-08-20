@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ComposerSendActions } from "../../src/renderer/src/components/composer/ComposerSendActions";
+import { ComposerSendActionsFallback } from "../../src/renderer/src/components/composer/ComposerSendActionsFallback";
 
 const idle = {
   followUpState: "hidden" as const,
@@ -13,6 +14,31 @@ const idle = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("composer morphing send actions", () => {
+  it.each([
+    ["Send message", "hidden", "send-ready"],
+    ["Stop agent", "hidden", "stop-ready"],
+    ["Send follow-up", "ready", "stop-ready"],
+  ] as const)(
+    "preserves focus on %s when the deferred action replaces its fallback",
+    (label, followUpState, primaryAction) => {
+      const props = { ...idle, followUpState, primaryAction };
+      const view = render(
+        <div className="composer-actions">
+          <ComposerSendActionsFallback {...props} />
+        </div>,
+      );
+      screen.getByRole("button", { name: label }).focus();
+
+      view.rerender(
+        <div className="composer-actions">
+          <ComposerSendActions {...props} />
+        </div>,
+      );
+
+      expect(screen.getByRole("button", { name: label })).toHaveFocus();
+    },
+  );
+
   it("keeps one primary control mounted across intent, send, and Stop states", () => {
     const view = render(
       <ComposerSendActions {...idle} primaryAction="send-ready" />,

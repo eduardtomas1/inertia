@@ -154,7 +154,7 @@ test("moves one live chat between a remembered native window and the main app", 
   await expect(popup.getByRole("group", { name: "Chat checkout context" }))
     .toHaveCount(0);
   await expect(popup.getByText("Context from Reviewed context")).toBeVisible();
-  await popup.getByRole("button", { name: "Copy answer" }).click();
+  await popup.getByRole("button", { name: "Copy final answer" }).click();
   const copiedAnswer = popup.getByRole("button", { name: "Answer copied" });
   await expect(copiedAnswer).toBeVisible();
   await expect(copiedAnswer.locator('[data-icon-state="copied"]')).toHaveCount(1);

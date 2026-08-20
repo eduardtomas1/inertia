@@ -434,11 +434,14 @@ interface ActiveRuntimeOwnedProcessRegistry {
   readonly runtimeGenerationId: string;
   readonly systemBootId: string;
   readonly claims: WeakMap<ChildProcess, ActiveRuntimeOwnedProcessClaim>;
+  readonly pendingReleaseConfirmations: Set<Promise<boolean>>;
 }
 
 interface ActiveRuntimeOwnedProcessClaim {
   readonly ownershipId: string;
   released: boolean;
+  releaseConfirmation: Promise<boolean> | null;
+  settleReleaseConfirmation: ((confirmed: boolean) => void) | null;
 }
 
 let activeRegistry: ActiveRuntimeOwnedProcessRegistry | null = null;
@@ -461,6 +464,7 @@ export function activateRuntimeOwnedProcessRegistry(
     runtimeGenerationId,
     systemBootId,
     claims: new WeakMap(),
+    pendingReleaseConfirmations: new Set(),
   };
   activeRegistry = registry;
   return () => {
@@ -479,10 +483,30 @@ function releaseIfGroupExited(
   registry: ActiveRuntimeOwnedProcessRegistry,
   claim: ActiveRuntimeOwnedProcessClaim,
   pid: number,
-): void {
+): Promise<boolean> {
+  if (claim.releaseConfirmation) return claim.releaseConfirmation;
+  if (claim.released) return Promise.resolve(true);
+  let settleConfirmation!: (confirmed: boolean) => void;
+  const confirmation = new Promise<boolean>((resolve) => {
+    settleConfirmation = resolve;
+  });
+  claim.releaseConfirmation = confirmation;
+  claim.settleReleaseConfirmation = settleConfirmation;
+  registry.pendingReleaseConfirmations.add(confirmation);
+  void confirmation.then(() => {
+    registry.pendingReleaseConfirmations.delete(confirmation);
+    claim.settleReleaseConfirmation = null;
+  });
   const deadlineAt = Date.now() + PROCESS_GROUP_EXIT_WAIT_MS;
   const poll = (): void => {
-    if (activeRegistry !== registry || claim.released) return;
+    if (activeRegistry !== registry) {
+      settleConfirmation(false);
+      return;
+    }
+    if (claim.released) {
+      settleConfirmation(true);
+      return;
+    }
     try {
       process.kill(-pid, 0);
     } catch (error) {
@@ -492,22 +516,28 @@ function releaseIfGroupExited(
         && "code" in error
         && error.code === "ESRCH"
       ) {
-        try { releaseActiveClaim(registry, claim); } catch {
+        try {
+          if (!releaseActiveClaim(registry, claim)) settleConfirmation(false);
+        } catch {
           // A removed test/runtime root cannot authorize further mutation.
+          settleConfirmation(false);
         }
         return;
       }
     }
     const remainingMs = Math.trunc(deadlineAt - Date.now());
-    if (remainingMs <= 0) return;
+    if (remainingMs <= 0) {
+      settleConfirmation(false);
+      return;
+    }
     const timer = setTimeout(
       poll,
       Math.max(1, Math.min(PROCESS_GROUP_EXIT_POLL_MS, remainingMs)),
     );
     timer.unref();
   };
-  const timer = setTimeout(poll, 0);
-  timer.unref();
+  poll();
+  return confirmation;
 }
 
 function releaseActiveClaim(
@@ -517,6 +547,7 @@ function releaseActiveClaim(
   if (claim.released) return true;
   if (!registry.journal.release(claim.ownershipId)) return false;
   claim.released = true;
+  claim.settleReleaseConfirmation?.(true);
   return true;
 }
 
@@ -544,10 +575,15 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
       child.pid ?? 0,
       process.pid,
     );
-    const claim = { ownershipId, released: false };
+    const claim: ActiveRuntimeOwnedProcessClaim = {
+      ownershipId,
+      released: false,
+      releaseConfirmation: null,
+      settleReleaseConfirmation: null,
+    };
     registry.claims.set(child, claim);
     child.once("close", () => {
-      releaseIfGroupExited(registry, claim, child.pid ?? 0);
+      void releaseIfGroupExited(registry, claim, child.pid ?? 0);
     });
   } catch (error) {
     hardStopUnclaimed(child);
@@ -601,12 +637,18 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
     throw error;
   }
   const confirmedOwned = owned;
-  const claim = { ownershipId, released: false };
+  const claim: ActiveRuntimeOwnedProcessClaim = {
+    ownershipId,
+    released: false,
+    releaseConfirmation: null,
+    settleReleaseConfirmation: null,
+  };
   return {
     process: confirmedOwned,
     confirmStopped: () => releaseActiveClaim(registry, claim),
-    releaseIfGroupExited: () =>
-      releaseIfGroupExited(registry, claim, confirmedOwned.pid),
+    releaseIfGroupExited: () => {
+      void releaseIfGroupExited(registry, claim, confirmedOwned.pid);
+    },
   };
 }
 
@@ -622,4 +664,16 @@ export function runtimeOwnedProcessCleanupConfirmed(): boolean {
     activeRegistry.runtimeGenerationId,
   );
   return records !== null && records.length === 0;
+}
+
+export async function awaitRuntimeOwnedProcessCleanupConfirmed(): Promise<boolean> {
+  const registry = activeRegistry;
+  if (!registry) return process.platform !== "linux";
+  while (activeRegistry === registry) {
+    const closing = [...registry.pendingReleaseConfirmations];
+    if (closing.length === 0) break;
+    await Promise.all(closing);
+  }
+  if (activeRegistry !== registry) return false;
+  return runtimeOwnedProcessCleanupConfirmed();
 }

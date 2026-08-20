@@ -22,6 +22,7 @@ import { RuntimeCleanupReceiptJournal } from "../../src/main/runtime-cleanup-rec
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import {
   activateRuntimeOwnedProcessRegistry,
+  awaitRuntimeOwnedProcessCleanupConfirmed,
   confirmRuntimeOwnedProcessStopped,
   readLinuxProcessIdentity,
   RuntimeOwnedProcessJournal,
@@ -249,8 +250,10 @@ describe.skipIf(process.platform !== "linux")(
       });
       try {
         owned.releaseIfGroupExited();
+        const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
         await vi.advanceTimersByTimeAsync(20);
 
+        await expect(cleanup).resolves.toBe(true);
         expect(probes).toBe(3);
         expect(kill.mock.calls.filter(([pid, signal]) =>
           pid === -owned.process.pid && signal === 0)).toHaveLength(3);
@@ -290,8 +293,10 @@ describe.skipIf(process.platform !== "linux")(
         });
         try {
           owned.releaseIfGroupExited();
+          const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
           await vi.advanceTimersByTimeAsync(2_000);
 
+          await expect(cleanup).resolves.toBe(false);
           expect(kill.mock.calls.filter(([pid, signal]) =>
             pid === -owned.process.pid && signal === 0).length).toBeGreaterThan(1);
           expect(journal.records(runtimeGenerationId)).toHaveLength(1);
@@ -323,20 +328,188 @@ describe.skipIf(process.platform !== "linux")(
       vi.useFakeTimers();
       const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
         if (pid === -owned.process.pid && signal === 0) {
+          return true;
+        }
+        return nativeKill(pid, signal);
+      });
+      try {
+        owned.releaseIfGroupExited();
+        expect(kill).toHaveBeenCalledTimes(1);
+        deactivate();
+        activate(replacementDirectory);
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(kill).toHaveBeenCalledTimes(1);
+        expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+        expect(new RuntimeOwnedProcessJournal(replacementDirectory)
+          .records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        kill.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it("observes immediate group exit before shutdown can overtake a timer", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const owned = spawnRuntimeOwnedPidProcess(() => {
+        const child = spawn(
+          process.execPath,
+          ["-e", "setInterval(() => undefined, 1000)"],
+          { detached: true, shell: false, stdio: "ignore" },
+        );
+        if (!child.pid) throw new Error("Missing child PID");
+        return child as ChildProcess & { readonly pid: number };
+      });
+      liveChildren.add(owned.process);
+      owned.process.once("close", () => liveChildren.delete(owned.process));
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      const nativeKill = process.kill;
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (pid === -owned.process.pid && signal === 0) {
           throw processError("ESRCH");
         }
         return nativeKill(pid, signal);
       });
       try {
         owned.releaseIfGroupExited();
-        deactivate();
-        activate(replacementDirectory);
-        await vi.advanceTimersByTimeAsync(2_000);
 
+        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+        expect(kill).toHaveBeenCalledWith(-owned.process.pid, 0);
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        kill.mockRestore();
+      }
+    });
+
+    it("retires a closed child before later close listeners run", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const child = longRunningChild();
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      const nativeKill = process.kill;
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (pid === -(child.pid ?? 0) && signal === 0) {
+          throw processError("ESRCH");
+        }
+        return nativeKill(pid, signal);
+      });
+      let recordsAtCallerClose: ReturnType<RuntimeOwnedProcessJournal["records"]>;
+      child.once("close", () => {
+        recordsAtCallerClose = journal.records(runtimeGenerationId);
+      });
+      try {
+        hardStop(child);
+        await closeOf(child);
+
+        expect(recordsAtCallerClose!).toEqual([]);
+        expect(kill).toHaveBeenCalledWith(-(child.pid ?? 0), 0);
+      } finally {
+        kill.mockRestore();
+      }
+    });
+
+    it("awaits closing claims that appear while an earlier one settles", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const createOwned = () => spawnRuntimeOwnedPidProcess(() => {
+        const child = spawn(
+          process.execPath,
+          ["-e", "setInterval(() => undefined, 1000)"],
+          { detached: true, shell: false, stdio: "ignore" },
+        );
+        if (!child.pid) throw new Error("Missing child PID");
+        liveChildren.add(child);
+        child.once("close", () => liveChildren.delete(child));
+        return child as ChildProcess & { readonly pid: number };
+      });
+      const first = createOwned();
+      const second = createOwned();
+      const probes = new Map<number, number>();
+      const nativeKill = process.kill;
+      vi.useFakeTimers();
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (typeof pid === "number" && pid < 0 && signal === 0) {
+          const processId = -pid;
+          const count = (probes.get(processId) ?? 0) + 1;
+          probes.set(processId, count);
+          if (processId === first.process.pid && count >= 2) {
+            throw processError("ESRCH");
+          }
+          if (processId === second.process.pid && count >= 3) {
+            throw processError("ESRCH");
+          }
+          return true;
+        }
+        return nativeKill(pid, signal);
+      });
+      try {
+        first.releaseIfGroupExited();
+        const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
+        second.releaseIfGroupExited();
+        await vi.advanceTimersByTimeAsync(20);
+
+        await expect(cleanup).resolves.toBe(true);
+        expect(probes.get(first.process.pid)).toBe(2);
+        expect(probes.get(second.process.pid)).toBe(3);
+      } finally {
+        kill.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it("fails closed immediately when an owned claim has not begun closing", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const owned = spawnRuntimeOwnedPidProcess(() => {
+        const child = spawn(
+          process.execPath,
+          ["-e", "setInterval(() => undefined, 1000)"],
+          { detached: true, shell: false, stdio: "ignore" },
+        );
+        if (!child.pid) throw new Error("Missing child PID");
+        return child as ChildProcess & { readonly pid: number };
+      });
+      liveChildren.add(owned.process);
+      owned.process.once("close", () => liveChildren.delete(owned.process));
+      const kill = vi.spyOn(process, "kill");
+      try {
+        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(false);
         expect(kill).not.toHaveBeenCalledWith(-owned.process.pid, 0);
-        expect(journal.records(runtimeGenerationId)).toHaveLength(1);
-        expect(new RuntimeOwnedProcessJournal(replacementDirectory)
-          .records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        kill.mockRestore();
+      }
+    });
+
+    it("memoizes close confirmation and lets manual settlement complete it", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const owned = spawnRuntimeOwnedPidProcess(() => {
+        const child = spawn(
+          process.execPath,
+          ["-e", "setInterval(() => undefined, 1000)"],
+          { detached: true, shell: false, stdio: "ignore" },
+        );
+        if (!child.pid) throw new Error("Missing child PID");
+        return child as ChildProcess & { readonly pid: number };
+      });
+      liveChildren.add(owned.process);
+      owned.process.once("close", () => liveChildren.delete(owned.process));
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      const nativeKill = process.kill;
+      vi.useFakeTimers();
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (pid === -owned.process.pid && signal === 0) return true;
+        return nativeKill(pid, signal);
+      });
+      try {
+        owned.releaseIfGroupExited();
+        owned.releaseIfGroupExited();
+        expect(owned.confirmStopped()).toBe(true);
+
+        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+        expect(kill).toHaveBeenCalledTimes(1);
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
       } finally {
         kill.mockRestore();
         vi.useRealTimers();

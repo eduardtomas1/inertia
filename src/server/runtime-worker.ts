@@ -18,7 +18,7 @@ import { RuntimeSecureFileBrokerClient } from "./runtime/secure-file-broker-clie
 import { completeRuntimeWorkerShutdown } from "./runtime-worker-shutdown.js";
 import {
   activateRuntimeOwnedProcessRegistry,
-  runtimeOwnedProcessCleanupConfirmed,
+  awaitRuntimeOwnedProcessCleanupConfirmed,
 } from "../node/runtime-owned-processes.js";
 
 let runtime: RunningRuntime | null = null;
@@ -88,7 +88,7 @@ async function finishShutdown(
       conversationAttachmentStore.close();
       secureFiles.close();
     },
-    ownedProcessCleanupConfirmed: runtimeOwnedProcessCleanupConfirmed,
+    ownedProcessCleanupConfirmed: awaitRuntimeOwnedProcessCleanupConfirmed,
     post,
     exit: (code) => process.exit(code),
   });

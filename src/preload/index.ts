@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppUpdateStatus,
   DesktopBridge,
+  DetachedChatDraftHandoff,
+  DetachedChatWindowSummary,
+  PendingDetachedChatDraft,
   PreviewStateUpdate,
   RuntimeConnection,
 } from "../shared/desktop.js";
@@ -45,6 +48,23 @@ const IPC = {
   clearBackendCredential: "inertia:clear-backend-credential",
   getBackendCredentialState: "inertia:get-backend-credential-state",
 } as const;
+const DETACHED_CHAT_IPC = {
+  getWindowContext: "inertia:window-context",
+  open: "inertia:detached-chat-open",
+  focus: "inertia:detached-chat-focus",
+  getWindows: "inertia:detached-chat-windows",
+  getPendingDrafts: "inertia:detached-chat-pending-drafts",
+  acknowledgeDraft: "inertia:detached-chat-acknowledge-draft",
+  windowsChanged: "inertia:detached-chat-windows-changed",
+  draftChanged: "inertia:detached-chat-draft-changed",
+  draftMirrored: "inertia:detached-chat-draft-mirrored",
+  persistDraft: "inertia:detached-chat-persist-draft",
+  mirrorDraft: "inertia:detached-chat-mirror-draft",
+  setAlwaysOnTop: "inertia:detached-chat-always-on-top",
+  retarget: "inertia:detached-chat-retarget",
+  dock: "inertia:detached-chat-dock",
+  close: "inertia:detached-chat-close",
+} as const;
 
 const threadNotificationActivations = new ThreadNotificationActivationBuffer();
 ipcRenderer.on(
@@ -57,6 +77,100 @@ ipcRenderer.on(
 );
 
 const bridge: DesktopBridge = Object.freeze({
+  getWindowContext: () =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.getWindowContext) as ReturnType<
+      DesktopBridge["getWindowContext"]
+    >,
+  openDetachedChat: (
+    request: Parameters<DesktopBridge["openDetachedChat"]>[0],
+  ) =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.open, request) as ReturnType<
+      DesktopBridge["openDetachedChat"]
+    >,
+  focusDetachedChat: (conversationId: string) =>
+    ipcRenderer.invoke(
+      DETACHED_CHAT_IPC.focus,
+      conversationId,
+    ) as ReturnType<DesktopBridge["focusDetachedChat"]>,
+  getDetachedChatWindows: () =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.getWindows) as ReturnType<
+      DesktopBridge["getDetachedChatWindows"]
+    >,
+  getPendingDetachedChatDrafts: () =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.getPendingDrafts) as ReturnType<
+      DesktopBridge["getPendingDetachedChatDrafts"]
+    >,
+  acknowledgeDetachedChatDraft: (
+    request: Parameters<DesktopBridge["acknowledgeDetachedChatDraft"]>[0],
+  ) =>
+    ipcRenderer.invoke(
+      DETACHED_CHAT_IPC.acknowledgeDraft,
+      request,
+    ) as ReturnType<DesktopBridge["acknowledgeDetachedChatDraft"]>,
+  onDetachedChatWindowsChanged: (
+    listener: Parameters<DesktopBridge["onDetachedChatWindowsChanged"]>[0],
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      windows: DetachedChatWindowSummary[],
+    ) => listener(windows);
+    ipcRenderer.on(DETACHED_CHAT_IPC.windowsChanged, handler);
+    return () => ipcRenderer.removeListener(
+      DETACHED_CHAT_IPC.windowsChanged,
+      handler,
+    );
+  },
+  onDetachedChatDraftChanged: (
+    listener: Parameters<DesktopBridge["onDetachedChatDraftChanged"]>[0],
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      handoff: PendingDetachedChatDraft,
+    ) => listener(handoff);
+    ipcRenderer.on(DETACHED_CHAT_IPC.draftChanged, handler);
+    return () => ipcRenderer.removeListener(
+      DETACHED_CHAT_IPC.draftChanged,
+      handler,
+    );
+  },
+  onDetachedChatDraftMirrored: (
+    listener: Parameters<DesktopBridge["onDetachedChatDraftMirrored"]>[0],
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      handoff: DetachedChatDraftHandoff,
+    ) => listener(handoff);
+    ipcRenderer.on(DETACHED_CHAT_IPC.draftMirrored, handler);
+    return () => ipcRenderer.removeListener(
+      DETACHED_CHAT_IPC.draftMirrored,
+      handler,
+    );
+  },
+  setDetachedChatAlwaysOnTop: (alwaysOnTop: boolean) =>
+    ipcRenderer.invoke(
+      DETACHED_CHAT_IPC.setAlwaysOnTop,
+      alwaysOnTop,
+    ) as ReturnType<DesktopBridge["setDetachedChatAlwaysOnTop"]>,
+  retargetDetachedChat: (
+    request: Parameters<DesktopBridge["retargetDetachedChat"]>[0],
+  ) =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.retarget, request) as ReturnType<
+      DesktopBridge["retargetDetachedChat"]
+    >,
+  dockDetachedChat: (draft: string) =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.dock, draft) as ReturnType<
+      DesktopBridge["dockDetachedChat"]
+    >,
+  closeDetachedChat: (draft: string) =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.close, draft) as ReturnType<
+      DesktopBridge["closeDetachedChat"]
+    >,
+  persistDetachedChatDraft: (draft: string) => {
+    return ipcRenderer.sendSync(DETACHED_CHAT_IPC.persistDraft, draft) === true;
+  },
+  mirrorDetachedChatDraft: (draft: string) => {
+    return ipcRenderer.sendSync(DETACHED_CHAT_IPC.mirrorDraft, draft) === true;
+  },
   getRuntimeConnection: () =>
     ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnection>,
   onRuntimeReady: (listener: () => void) => {

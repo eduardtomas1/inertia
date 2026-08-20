@@ -6,10 +6,7 @@ import type {
   PrivateConnectRuntimeRequest,
   PrivateConnectRuntimeResponse,
 } from "../shared/private-connect/runtime-contract";
-import type {
-  OpenProjectPathRequest,
-  RuntimeConnection,
-} from "../shared/desktop.js";
+import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
 import {
   parseRuntimeWorkerEvent,
   validSystemBootId,
@@ -34,7 +31,7 @@ import {
   runtimeSupervisorDefaults,
   unconfirmedRuntimeCleanupMessage,
 } from "./runtime-supervisor-values.js";
-import { runtimeConnection } from "./runtime-supervisor-connection.js";
+import { detachedRuntimeConnection, runtimeConnection } from "./runtime-supervisor-connection.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
@@ -218,19 +215,22 @@ export class RuntimeSupervisor {
     if (!priorRecovery) { this.spawnNext(); return; }
     this.phase = "starting"; this.emitState();
   }
-  connection(): RuntimeConnection {
+  connection(consumeRecoveryNotice = true): RuntimeConnection {
     const result = runtimeConnection({
       phase: this.phase,
       generation: this.generation,
       websocketUrl: this.websocketUrl,
       databaseRecoveryReport: this.databaseRecoveryReport,
-      databaseRecoveryNoticePending: this.databaseRecoveryNoticePending,
+      databaseRecoveryNoticePending: consumeRecoveryNotice && this.databaseRecoveryNoticePending,
       lastError: this.lastError,
     });
-    if (result.consumedRecoveryNotice) {
+    if (consumeRecoveryNotice && result.consumedRecoveryNotice) {
       this.databaseRecoveryNoticePending = false;
     }
     return result.connection;
+  }
+  detachedConnection(conversationId: string, clientId: string): RuntimeConnection {
+    return detachedRuntimeConnection(this.connection(false), conversationId, clientId);
   }
   resolveProjectPath(request: OpenProjectPathRequest): Promise<string> {
     const record = this.current;

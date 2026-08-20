@@ -1,4 +1,5 @@
 import type { ChatAttachmentMimeType } from "./attachments";
+import { MAX_CHAT_MESSAGE_CHARS } from "./diff-review";
 import {
   PRIVATE_CONNECT_GRANT_LIMITS,
   type PrivateConnectConversationGrant,
@@ -149,6 +150,46 @@ export interface DesktopNotificationRequest {
   kind: DesktopNotificationKind;
 }
 
+export const DETACHED_CHAT_WINDOW_LIMIT = 8;
+
+export interface DetachedChatWindowRequest {
+  conversationId: string;
+  title: string;
+}
+
+export interface DetachedChatWindowOpenRequest
+  extends DetachedChatWindowRequest {
+  draft: string;
+}
+
+export interface DetachedChatDraftHandoff {
+  conversationId: string;
+  draft: string;
+}
+
+export interface PendingDetachedChatDraft extends DetachedChatDraftHandoff {
+  handoffId: string;
+}
+
+export interface DetachedChatDraftAcknowledgement {
+  conversationId: string;
+  handoffId: string;
+}
+
+export interface DetachedChatWindowSummary {
+  conversationId: string;
+  alwaysOnTop: boolean;
+}
+
+export type DesktopWindowContext =
+  | { role: "main" }
+  | ({ role: "detached-chat"; draft: string } & DetachedChatWindowSummary);
+
+export interface DetachedChatWindowOpenResult
+  extends DetachedChatWindowSummary {
+  disposition: "opened" | "focused";
+}
+
 export interface AppProcessHealth {
   pid: number;
   cpuPercent: number;
@@ -182,6 +223,93 @@ export function parseDesktopNotificationRequest(
     )
   ) return null;
   return value as unknown as DesktopNotificationRequest;
+}
+
+export function parseDetachedChatWindowRequest(
+  value: unknown,
+): DetachedChatWindowRequest | null {
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 2
+    || !keys.every((key) => key === "conversationId" || key === "title")
+    || typeof value.conversationId !== "string"
+    || !UUID_PATTERN.test(value.conversationId)
+    || typeof value.title !== "string"
+  ) return null;
+  const title = value.title.trim();
+  if (
+    title.length === 0
+    || title.length > 120
+    || /[\0\r\n]/u.test(title)
+  ) return null;
+  return { conversationId: value.conversationId, title };
+}
+
+export function parseDetachedChatWindowOpenRequest(
+  value: unknown,
+): DetachedChatWindowOpenRequest | null {
+  if (!plainObject(value) || Object.keys(value).length !== 3) return null;
+  const request = parseDetachedChatWindowRequest({
+    conversationId: value.conversationId,
+    title: value.title,
+  });
+  if (
+    !request
+    || typeof value.draft !== "string"
+    || value.draft.length > MAX_CHAT_MESSAGE_CHARS
+  ) return null;
+  return { ...request, draft: value.draft };
+}
+
+export function parseDetachedChatDraftHandoff(
+  value: unknown,
+): DetachedChatDraftHandoff | null {
+  if (
+    !plainObject(value)
+    || Object.keys(value).length !== 2
+    || typeof value.conversationId !== "string"
+    || !UUID_PATTERN.test(value.conversationId)
+    || typeof value.draft !== "string"
+    || value.draft.length > MAX_CHAT_MESSAGE_CHARS
+  ) return null;
+  return {
+    conversationId: value.conversationId,
+    draft: value.draft,
+  };
+}
+
+export function parsePendingDetachedChatDraft(
+  value: unknown,
+): PendingDetachedChatDraft | null {
+  if (!plainObject(value) || Object.keys(value).length !== 3) return null;
+  const handoff = parseDetachedChatDraftHandoff({
+    conversationId: value.conversationId,
+    draft: value.draft,
+  });
+  if (
+    !handoff
+    || typeof value.handoffId !== "string"
+    || !UUID_PATTERN.test(value.handoffId)
+  ) return null;
+  return { ...handoff, handoffId: value.handoffId };
+}
+
+export function parseDetachedChatDraftAcknowledgement(
+  value: unknown,
+): DetachedChatDraftAcknowledgement | null {
+  if (
+    !plainObject(value)
+    || Object.keys(value).length !== 2
+    || typeof value.conversationId !== "string"
+    || !UUID_PATTERN.test(value.conversationId)
+    || typeof value.handoffId !== "string"
+    || !UUID_PATTERN.test(value.handoffId)
+  ) return null;
+  return {
+    conversationId: value.conversationId,
+    handoffId: value.handoffId,
+  };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -331,6 +459,45 @@ function plainObject(value: unknown): value is Record<string, unknown> {
 }
 
 export interface DesktopBridge {
+  /** Identifies the main workbench or one main-owned fixed-chat renderer. */
+  getWindowContext: () => Promise<DesktopWindowContext>;
+  /** Opens one native, fixed-conversation chat window or focuses its existing owner. */
+  openDetachedChat: (
+    request: DetachedChatWindowOpenRequest,
+  ) => Promise<DetachedChatWindowOpenResult>;
+  focusDetachedChat: (conversationId: string) => Promise<boolean>;
+  getDetachedChatWindows: () => Promise<DetachedChatWindowSummary[]>;
+  onDetachedChatWindowsChanged: (
+    listener: (windows: DetachedChatWindowSummary[]) => void,
+  ) => () => void;
+  /** Receives only the draft returned by its conversation-bound popup. */
+  onDetachedChatDraftChanged: (
+    listener: (handoff: PendingDetachedChatDraft) => void,
+  ) => () => void;
+  /** Mirrors active popup text into the persistent workbench draft owner. */
+  onDetachedChatDraftMirrored: (
+    listener: (handoff: DetachedChatDraftHandoff) => void,
+  ) => () => void;
+  /** Hydrates draft handoffs missed while the workbench renderer was unavailable. */
+  getPendingDetachedChatDrafts: () => Promise<PendingDetachedChatDraft[]>;
+  /** Removes only the exact pending handoff already written by the workbench. */
+  acknowledgeDetachedChatDraft: (
+    acknowledgement: DetachedChatDraftAcknowledgement,
+  ) => Promise<boolean>;
+  /** Detached-renderer-only controls; the main process validates sender ownership. */
+  setDetachedChatAlwaysOnTop: (
+    alwaysOnTop: boolean,
+  ) => Promise<DetachedChatWindowSummary>;
+  retargetDetachedChat: (
+    request: DetachedChatWindowRequest,
+  ) => Promise<DetachedChatWindowSummary>;
+  /** Explicitly returns the chat to the main workbench. Native close never docks it. */
+  dockDetachedChat: (draft: string) => Promise<void>;
+  closeDetachedChat: (draft: string) => Promise<void>;
+  /** Synchronously preserves the owned draft during native window teardown. */
+  persistDetachedChatDraft: (draft: string) => boolean;
+  /** Mirrors coalesced popup edits without performing a durable handoff. */
+  mirrorDetachedChatDraft: (draft: string) => boolean;
   getRuntimeConnection: () => Promise<RuntimeConnection>;
   /** Wakes a reconnect attempt without exposing the runtime URL capability. */
   onRuntimeReady: (listener: () => void) => () => void;

@@ -369,7 +369,7 @@ describe("RuntimeSupervisor", () => {
           unsupportedBackupsSkipped: 1,
         },
       });
-
+      expect(supervisor.connection(false)).toEqual({ websocketUrl: firstUrl });
       expect(supervisor.connection()).toEqual({
         websocketUrl: firstUrl,
         databaseRecoveryNotice: {

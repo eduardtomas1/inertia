@@ -175,6 +175,15 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("omits scratch-prompt storage controls when the window disables them", () => {
+    render(<Composer {...composerProps(conversation("detached-stash"), {
+      promptStashEnabled: false,
+    })} />);
+
+    expect(screen.queryByRole("button", { name: "Scratch prompts" }))
+      .not.toBeInTheDocument();
+  });
+
   it("inserts a visible skill invocation at the caret and sends transcript-faithful text", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => undefined);

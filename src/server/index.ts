@@ -50,13 +50,13 @@ import {
   providerSnapshot,
 } from "./runtime-snapshots";
 import { DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS } from "./review-summary";
-import {
-  IsolatedRunController,
-} from "./runtime/reviews/isolated-run-controller";
+import { IsolatedRunController } from "./runtime/reviews/isolated-run-controller";
 import {
   BackendProfileController,
 } from "./runtime/backends/backend-profile-controller";
 import { RuntimeSyncHub } from "./runtime/runtime-sync-hub";
+import type { RuntimeClientAuthority } from "./runtime/runtime-client-authority";
+import { createDetachedChatRuntimeSecurity } from "./runtime/detached-chat-runtime-security";
 import { SnapshotBroadcastCoalescer } from "./runtime/snapshot-broadcast-coalescer";
 import { WorkspaceRunController } from "./runtime/workspace-run-controller";
 import {
@@ -417,12 +417,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   const currentSnapshot = (sync: RuntimeSyncCursor = runtimeSync.cursor()): AppSnapshot => {
     const snapshot = store.shellSnapshot(providerInfo);
-    const approvalConversationIds = new Set(
-      [...pendingApprovals.values()].map(({ conversationId }) => conversationId),
-    );
-    const inputConversationIds = new Set(
-      [...pendingInputs.values()].map(({ conversationId }) => conversationId),
-    );
+    const approvalConversationIds = new Set([...pendingApprovals.values()].map(({ conversationId }) => conversationId));
+    const inputConversationIds = new Set([...pendingInputs.values()].map(({ conversationId }) => conversationId));
     return {
       ...snapshot,
       backendProfiles: backendProfileController.profiles(providerInfo),
@@ -437,6 +433,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       sync,
     };
   };
+  const detachedChatRuntimeSecurity = createDetachedChatRuntimeSecurity({ websocketPath, store, snapshot: currentSnapshot, pendingApprovals, pendingInputs });
   const broadcast = (event: RuntimeMutationEvent): void => {
     runtimeSync.broadcast(event);
   };
@@ -837,10 +834,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcastSnapshot: flushSnapshot,
     publicError,
   });
-  const dispatchCommand = async (
-    socket: WebSocket,
-    command: Parameters<typeof executeCommand>[1],
-  ): Promise<void> => {
+  const dispatchCommand = async (socket: WebSocket, command: Parameters<typeof executeCommand>[1], authority: RuntimeClientAuthority): Promise<void> => {
     if (closed) {
       send(socket, {
         type: "request.error",
@@ -849,6 +843,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
       return;
     }
+    const detachedAuthorizationError = detachedChatRuntimeSecurity.authorizationError(authority, command);
+    if (detachedAuthorizationError) { send(socket, detachedAuthorizationError); return; }
     if (updatePreparation.isAdmissionClosed()) {
       send(socket, {
         type: "request.error",
@@ -905,6 +901,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     terminals,
     isolatedRuns,
     dispatchCommand,
+    consumeDetachedCapability: (url) => detachedChatRuntimeSecurity.consumeCapability(url),
     beforeFreshSnapshot: () => turns.flushActiveStreamsForHydration(),
     currentSnapshot,
     approvals: () => pendingApprovals.values(),
@@ -922,6 +919,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
 
   const address = server.address();
   if (!address || typeof address === "string") { store.close(); throw new Error("Runtime did not receive a local port."); }
+  const websocketUrl = `ws://127.0.0.1:${address.port}${websocketPath}`; detachedChatRuntimeSecurity.activate(websocketUrl);
 
   // Reconcile durable pending artifacts only after the runtime can serve the
   // already-terminal turn snapshot. Restart recovery must not hold the app
@@ -1030,7 +1028,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         conversationAttachments,
         signal,
       ),
-    websocketUrl: `ws://127.0.0.1:${address.port}${websocketPath}`,
+    websocketUrl,
     databaseRecovery: store.databaseRecoveryReport(),
     prepareForUpdate: (operationId) => updatePreparation.prepare(operationId),
     releaseUpdatePreparation: (operationId) =>

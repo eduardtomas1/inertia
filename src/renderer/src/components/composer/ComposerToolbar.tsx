@@ -81,6 +81,7 @@ export interface ComposerToolbarProps {
   onChooseAttachments: () => Promise<void>;
   contextAvailable: boolean;
   contextCount: number;
+  conversationContextHandoffEnabled: boolean;
   onOpenContext: () => void;
   onRunAction: (action: ProjectAction) => void;
   skills: readonly AgentSkillSummary[];
@@ -90,6 +91,8 @@ export interface ComposerToolbarProps {
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onInsertSkill: (skill: AgentSkillSummary) => void;
   promptPresets: readonly PromptPreset[];
+  promptPresetsEnabled: boolean;
+  promptStashEnabled: boolean;
   currentPrompt: string;
   onApplyPromptPreset: (preset: PromptPreset) => Promise<boolean>;
   onPromptPresetCommand: PromptPresetCommandRunner;
@@ -115,6 +118,7 @@ export interface ComposerToolbarProps {
   onUpdateFastMode: (enabled: boolean) => Promise<void>;
   conversation: Conversation;
   checkoutBranch?: string | null;
+  showCheckoutContext: boolean;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -145,6 +149,7 @@ export function ComposerToolbar({
   onChooseAttachments,
   contextAvailable,
   contextCount,
+  conversationContextHandoffEnabled,
   onOpenContext,
   onRunAction,
   skills,
@@ -154,6 +159,8 @@ export function ComposerToolbar({
   onListSkills,
   onInsertSkill,
   promptPresets,
+  promptPresetsEnabled,
+  promptStashEnabled,
   currentPrompt,
   onApplyPromptPreset,
   onPromptPresetCommand,
@@ -176,6 +183,7 @@ export function ComposerToolbar({
   onUpdateFastMode,
   conversation,
   checkoutBranch,
+  showCheckoutContext,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -304,60 +312,66 @@ export function ComposerToolbar({
         >
           <Paperclip size={16} />
         </IconButton>
-        <IconButton
-          label={contextCount > 0
-            ? `Add chat context, ${contextCount} selected`
-            : "Add context from another chat"}
-          onClick={onOpenContext}
-          disabled={
-            disabled
-            || running
-            || primaryAction === "submitting"
-            || !contextAvailable
-            || contextCount >= 2
-          }
-          className={contextCount > 0 ? "has-context" : undefined}
-        >
-          <MessagesSquare size={16} />
-        </IconButton>
-        <Suspense fallback={null}>
-          <PromptPresetMenu
-            presets={promptPresets}
-            currentMessage={currentPrompt}
-            currentRoute={{
-              harnessId: conversation.modelSelection.harnessId,
-              backendProfileId: conversation.modelSelection.backendProfileId,
-              modelId: conversation.modelSelection.modelId,
-              reasoningEffort: conversation.modelSelection.reasoningEffort,
-              ...((selectedModel?.fastMode || selectedFastMode)
-                && routeSupportsNativeFastModeIdentity(
-                  conversation.modelSelection,
-                )
-                ? {
-                    fastMode: modelSelectionUsesFastMode(
-                      conversation.modelSelection,
-                    ),
-                  }
-                : {}),
-            }}
-            menuController={menuController}
-            onApply={onApplyPromptPreset}
-            onCommand={onPromptPresetCommand}
-          />
-        </Suspense>
-        <Suspense fallback={null}>
-          <PromptStashMenu
-            entries={promptStash}
-            canStash={canStashPrompt}
-            blockedReason={promptStashBlockedReason}
-            restoreBlockedReason={promptRestoreBlockedReason}
-            menuController={menuController}
-            onStash={onStashPrompt}
-            onRestore={onRestorePrompt}
-            onRemove={onRemoveStashedPrompt}
-            onSetRecurrence={onSetPromptRecurrence}
-          />
-        </Suspense>
+        {conversationContextHandoffEnabled && (
+          <IconButton
+            label={contextCount > 0
+              ? `Add chat context, ${contextCount} selected`
+              : "Add context from another chat"}
+            onClick={onOpenContext}
+            disabled={
+              disabled
+              || running
+              || primaryAction === "submitting"
+              || !contextAvailable
+              || contextCount >= 2
+            }
+            className={contextCount > 0 ? "has-context" : undefined}
+          >
+            <MessagesSquare size={16} />
+          </IconButton>
+        )}
+        {promptPresetsEnabled && (
+          <Suspense fallback={null}>
+            <PromptPresetMenu
+              presets={promptPresets}
+              currentMessage={currentPrompt}
+              currentRoute={{
+                harnessId: conversation.modelSelection.harnessId,
+                backendProfileId: conversation.modelSelection.backendProfileId,
+                modelId: conversation.modelSelection.modelId,
+                reasoningEffort: conversation.modelSelection.reasoningEffort,
+                ...((selectedModel?.fastMode || selectedFastMode)
+                  && routeSupportsNativeFastModeIdentity(
+                    conversation.modelSelection,
+                  )
+                  ? {
+                      fastMode: modelSelectionUsesFastMode(
+                        conversation.modelSelection,
+                      ),
+                    }
+                  : {}),
+              }}
+              menuController={menuController}
+              onApply={onApplyPromptPreset}
+              onCommand={onPromptPresetCommand}
+            />
+          </Suspense>
+        )}
+        {promptStashEnabled && (
+          <Suspense fallback={null}>
+            <PromptStashMenu
+              entries={promptStash}
+              canStash={canStashPrompt}
+              blockedReason={promptStashBlockedReason}
+              restoreBlockedReason={promptRestoreBlockedReason}
+              menuController={menuController}
+              onStash={onStashPrompt}
+              onRestore={onRestorePrompt}
+              onRemove={onRemoveStashedPrompt}
+              onSetRecurrence={onSetPromptRecurrence}
+            />
+          </Suspense>
+        )}
         <Suspense fallback={null}>
           <ComposerSkillsMenu
             skills={skills}
@@ -507,23 +521,25 @@ export function ComposerToolbar({
         )}
         </div>
       </div>
-      <div
-        className="composer-checkout-strip"
-        role="group"
-        aria-label="Chat checkout context"
-      >
-        <span className="composer-checkout-location">
-          <FolderGit2 size={12} aria-hidden="true" />
-          <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
-        </span>
-        <span
-          className="composer-checkout-branch"
-          title={visibleCheckoutBranch}
+      {showCheckoutContext && (
+        <div
+          className="composer-checkout-strip"
+          role="group"
+          aria-label="Chat checkout context"
         >
-          <GitBranch size={12} aria-hidden="true" />
-          <code translate="no">{visibleCheckoutBranch}</code>
-        </span>
-      </div>
+          <span className="composer-checkout-location">
+            <FolderGit2 size={12} aria-hidden="true" />
+            <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+          </span>
+          <span
+            className="composer-checkout-branch"
+            title={visibleCheckoutBranch}
+          >
+            <GitBranch size={12} aria-hidden="true" />
+            <code translate="no">{visibleCheckoutBranch}</code>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

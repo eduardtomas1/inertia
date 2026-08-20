@@ -12,6 +12,10 @@ import {
 import { ChatWorkspace } from "./ChatWorkspace";
 import { ConversationSplitView } from "./ConversationSplitView";
 import { ConversationDetailState } from "./ConversationDetailState";
+import {
+  DetachedConversationPlaceholder,
+  type DetachedConversationPlaceholderProps,
+} from "./DetachedConversationPlaceholder";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import type { SettingsViewProps } from "./SettingsView";
 import { LoadingMark } from "./ui";
@@ -89,6 +93,7 @@ export interface ConversationPaneScene {
 export interface WorkspaceSceneProps {
   view: "workspace" | "settings";
   settings: SettingsViewProps;
+  detachedChat?: DetachedConversationPlaceholderProps | null;
   detailState: ComponentProps<typeof ConversationDetailState> | null;
   chat: ComponentProps<typeof ChatWorkspace>;
   splitScene?: {
@@ -104,6 +109,8 @@ export interface WorkspaceSceneProps {
     onToggleSecondaryTools: () => void;
     onSwapPanes: () => void;
     onCloseSecondary: () => void;
+    onOpenPrimaryInWindow?: () => void;
+    onOpenSecondaryInWindow?: () => void;
   } | null;
   resizeHandle: ComponentProps<typeof PaneResizeHandle> | null;
   tools: WorkspaceToolScene | null;
@@ -161,6 +168,7 @@ function WorkspaceToolSurface({
 }
 
 function ConversationPane({
+  detachedChat = null,
   detailState,
   chat,
   resizeHandle,
@@ -168,6 +176,7 @@ function ConversationPane({
   owner,
 }: ConversationPaneScene & {
   owner: WorkspacePreviewOwner;
+  detachedChat?: DetachedConversationPlaceholderProps | null;
 }): JSX.Element {
   const containerRef = resizeHandle?.containerRef as
     | RefObject<HTMLDivElement | null>
@@ -184,7 +193,9 @@ function ConversationPane({
       style={style}
     >
       <div className="conversation-pane-chat">
-        {detailState
+        {detachedChat
+          ? <DetachedConversationPlaceholder {...detachedChat} />
+          : detailState
           ? <ConversationDetailState {...detailState} embedded />
           : <ChatWorkspace {...chat} embedded />}
       </div>
@@ -205,6 +216,7 @@ function ConversationPane({
 function WorkspaceSceneView({
   view,
   settings,
+  detachedChat = null,
   detailState,
   chat,
   splitScene = null,
@@ -223,6 +235,7 @@ function WorkspaceSceneView({
           primary={(
             <ConversationPane
               owner="primary"
+              detachedChat={detachedChat}
               detailState={detailState}
               chat={chat}
               resizeHandle={resizeHandle}
@@ -243,7 +256,13 @@ function WorkspaceSceneView({
           onToggleSecondaryTools={splitScene.onToggleSecondaryTools}
           onSwapPanes={splitScene.onSwapPanes}
           onCloseSecondary={splitScene.onCloseSecondary}
+          onOpenPrimaryInWindow={detachedChat?.windowOpen
+            ? undefined
+            : splitScene.onOpenPrimaryInWindow}
+          onOpenSecondaryInWindow={splitScene.onOpenSecondaryInWindow}
         />
+      ) : detachedChat ? (
+        <DetachedConversationPlaceholder {...detachedChat} />
       ) : detailState ? (
         <ConversationDetailState {...detailState} />
       ) : (

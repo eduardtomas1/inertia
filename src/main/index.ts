@@ -76,6 +76,8 @@ import {
   finishPrivilegedExit,
 } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
+import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
+import * as detachedChatClose from "./detached-chat-close-coordinator.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
 import { packageSmokeEnvironment } from "./package-smoke-environment.js";
@@ -150,6 +152,7 @@ let runtimeDiagnostics: RuntimeDiagnostics | null = null;
 let appUpdateService: AppUpdateService | null = null;
 let appUpdateInstallCoordinator: AppUpdateInstallCoordinator | null = null;
 let credentialVault: CredentialVault | null = null;
+let detachedChatMain: DetachedChatMain | null = null;
 let trustedRendererUrl = "";
 let privilegedCleanup: Promise<boolean> | null = null;
 let packageSmokeFilePath: string | null = null;
@@ -332,7 +335,9 @@ function isTrustedRendererLocation(candidate: string): boolean {
       actual.protocol === expected.protocol &&
       actual.hostname === expected.hostname &&
       actual.port === expected.port &&
-      actual.pathname === expected.pathname
+      actual.pathname === expected.pathname &&
+      actual.search === expected.search &&
+      actual.hash === expected.hash
     );
   } catch {
     return false;
@@ -340,29 +345,29 @@ function isTrustedRendererLocation(candidate: string): boolean {
 }
 
 function assertTrustedIpc(event: IpcMainInvokeEvent, argumentCount: number, expectedArguments = 0): void {
-  const frame = event.senderFrame;
+  if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
+  detachedChatMain.assertMainIpc(event, argumentCount, expectedArguments);
+}
 
-  if (
-    argumentCount !== expectedArguments ||
-    !mainWindow ||
-    event.sender !== mainWindow.webContents ||
-    !frame ||
-    frame !== event.sender.mainFrame ||
-    !isTrustedRendererLocation(frame.url)
-  ) {
-    throw new Error("Rejected untrusted renderer request");
-  }
+function assertTrustedChatIpc(event: IpcMainInvokeEvent, argumentCount: number, expectedArguments = 0) {
+  if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
+  return detachedChatMain.assertTrustedChatIpc(event, argumentCount, expectedArguments);
 }
 
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
-    assertTrustedIpc(event, args.length);
+    const context = assertTrustedChatIpc(event, args.length);
 
     if (!runtimeSupervisor) {
       throw new Error("The local runtime is not available");
     }
 
-    return runtimeSupervisor.connection();
+    return context.role === "main"
+      ? runtimeSupervisor.connection(true)
+      : runtimeSupervisor.detachedConnection(
+          context.conversationId,
+          `web-contents:${event.sender.id}`,
+        );
   });
 
   ipcMain.handle(IPC.selectDirectory, async (event, ...args) => {
@@ -480,7 +485,7 @@ function registerIpcHandlers(): void {
     return { copied: true, eventCount: report.eventCount };
   });
 
-  registerClipboardIpc(IPC.copyText, assertTrustedIpc);
+  registerClipboardIpc(IPC.copyText, assertTrustedChatIpc);
 
   ipcMain.handle(IPC.checkAppUpdate, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
@@ -513,12 +518,12 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.selectAttachments, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
+    if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
+    const ownerWindow = detachedChatMain.windowForTrustedChatIpc(event, args.length, 1);
     const mode = parseAttachmentPickerMode(args[0]);
     if (!mode) throw new Error("Invalid attachment picker mode.");
-    if (!mainWindow) return [];
     const picker = attachmentPickerConfiguration(mode);
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await dialog.showOpenDialog(ownerWindow, {
       title: picker.title,
       buttonLabel: "Attach",
       filters: [{
@@ -637,7 +642,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.importAttachments, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
+    assertTrustedChatIpc(event, args.length, 1);
     const [value] = args;
     if (!Array.isArray(value) || value.length > MAX_CHAT_ATTACHMENTS) {
       throw new Error("Invalid attachments.");
@@ -651,13 +656,13 @@ function registerIpcHandlers(): void {
       finish: IPC.finishAttachmentHandoff,
       release: IPC.releaseAttachment,
     },
-    assertTrusted: assertTrustedIpc,
+    assertTrusted: assertTrustedChatIpc,
     registry: attachmentRegistry,
     supervisor: () => runtimeSupervisor,
   });
 
   ipcMain.handle(IPC.openAttachmentExternally, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
+    assertTrustedChatIpc(event, args.length, 1);
     const [value] = args;
     if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
       throw new Error("Invalid attachment.");
@@ -670,9 +675,12 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.openProjectPath, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
+    const context = assertTrustedChatIpc(event, args.length, 1);
     const request = parseOpenProjectPathRequest(args[0]);
     if (!request) throw new Error("Invalid project path request");
+    if (context.role === "detached-chat" && request.conversationId !== context.conversationId) {
+      throw new Error("Detached chats can open files only for their owned conversation");
+    }
     if (!runtimeSupervisor) throw new Error("The local runtime is not available");
     const path = await runtimeSupervisor.resolveProjectPath(request);
     if (request.action === "reveal") {
@@ -683,7 +691,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.openExternal, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
+    assertTrustedChatIpc(event, args.length, 1);
     const [value] = args;
     const url = safeHttpUrl(value);
     await shell.openExternal(url.toString());
@@ -693,6 +701,7 @@ function registerIpcHandlers(): void {
     assertTrustedIpc(event, args.length, 1);
     const request = parseDesktopNotificationRequest(args[0]);
     if (!request) throw new Error("Invalid desktop notification request");
+    if (detachedChatMain?.isFocusedForNotification(request.conversationId)) return false;
     if (!Notification.isSupported()) return false;
     const copy = {
       completed: ["Inertia finished", "A coding task completed."],
@@ -703,6 +712,7 @@ function registerIpcHandlers(): void {
     const [title, body] = copy[request.kind];
     const notification = new Notification({ title, body });
     notification.once("click", () => {
+      if (detachedChatMain?.focusForNotification(request.conversationId)) return;
       void activateThreadNotification(request.conversationId, {
         channel: IPC.threadNotificationActivated,
         currentWindow: () => mainWindow,
@@ -755,7 +765,9 @@ function registerIpcHandlers(): void {
     if (!isWindowThemePreference(preference)) throw new Error("Invalid theme preference");
     windowThemePreference = preference;
     nativeTheme.themeSource = preference;
-    mainWindow?.setBackgroundColor(resolveWindowBackground(preference, nativeTheme.shouldUseDarkColors));
+    const backgroundColor = resolveWindowBackground(preference, nativeTheme.shouldUseDarkColors);
+    mainWindow?.setBackgroundColor(backgroundColor);
+    detachedChatMain?.setBackgroundColor(backgroundColor);
     try {
       writeWindowThemePreference(windowAppearancePath(), preference);
     } catch {
@@ -806,6 +818,25 @@ async function createMainWindow(): Promise<void> {
   if (!existsSync(iconPath)) throw new Error(`The required Inertia window icon is missing: ${iconPath}`);
   windowThemePreference = readWindowThemePreference(windowAppearancePath());
   nativeTheme.themeSource = windowThemePreference;
+  const backgroundColor = resolveWindowBackground(
+    windowThemePreference,
+    nativeTheme.shouldUseDarkColors,
+  );
+  detachedChatMain ??= createDetachedChatMain({
+    mainWindow: () => mainWindow,
+    rendererUrl: trustedRendererUrl, userDataDirectory: app.getPath("userData"),
+    iconPath, backgroundColor,
+    registerRendererProtocol: (session, conversationId) => registerAppProtocol({
+      attachmentRegistry: () => importedAttachments,
+      conversationAttachments: () => conversationAttachments,
+      runtimeSupervisor: () => runtimeSupervisor,
+      workspaceImageConversationId: conversationId,
+    }, session.protocol),
+    onDock: (conversationId) => activateThreadNotification(conversationId, {
+      channel: IPC.threadNotificationActivated,
+      currentWindow: () => mainWindow, createWindow,
+    }),
+  });
   const savedWindow = readWindowState();
   const window = new BrowserWindow({
     title: "Inertia",
@@ -815,7 +846,7 @@ async function createMainWindow(): Promise<void> {
     minWidth: 760,
     minHeight: 600,
     show: false,
-    backgroundColor: resolveWindowBackground(windowThemePreference, nativeTheme.shouldUseDarkColors),
+    backgroundColor,
     autoHideMenuBar: true,
     icon: iconPath,
     ...(process.platform === "darwin"
@@ -836,6 +867,7 @@ async function createMainWindow(): Promise<void> {
   });
 
   mainWindow = window;
+  detachedChatMain.registerIpc();
 
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event, url) => {
@@ -856,7 +888,7 @@ async function createMainWindow(): Promise<void> {
   hardenDesktopSession(window.webContents.session);
 
   window.once("ready-to-show", () => window.show());
-  window.on("close", () => saveWindowState(window));
+  detachedChatClose.coordinateMainWindowClose(window, detachedChatMain, saveWindowState);
   window.on("closed", () => {
     previewBroker.close();
     if (mainWindow === window) {
@@ -909,31 +941,30 @@ function finishQuitAfterCleanup(): void {
 function runPrivilegedCleanup(): Promise<boolean> {
   if (privilegedCleanup) return privilegedCleanup;
   if (mainWindow) saveWindowState(mainWindow);
-  previewBroker.close();
-  runtimeDiagnostics?.record("app.stop");
-  const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost;
-  privateConnectHost = null;
-  const cleanup = cleanupPrivilegedOwners({
-    runtime: supervisorToStop,
-    privateConnect: privateConnectHostToStop,
-    onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
-    onRuntimeError: (error) => {
-      runtimeDiagnostics?.record("runtime.failure", {
-        phase: "stopping", message: error instanceof Error
-          ? error.message : "The local runtime could not stop cleanly.",
-      });
-      console.error("Failed to stop the local runtime", error);
-    },
-    onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
-    disposeTemporaryAttachments: disposeImportedAttachments,
-    onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
-    onUnconfirmedRuntimeExit: () => console.warn(
-      "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
-    ),
-    closeDurableAttachments: async () => {
-      const retainedAttachments = conversationAttachments; conversationAttachments = null;
-      await closeConversationAttachmentAccess(retainedAttachments);
-    },
+  const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectHost = null;
+  const cleanup = detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain).then(async () => {
+    previewBroker.close(); runtimeDiagnostics?.record("app.stop");
+    return await cleanupPrivilegedOwners({
+      runtime: supervisorToStop, privateConnect: privateConnectHostToStop,
+      onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
+      onRuntimeError: (error) => {
+        runtimeDiagnostics?.record("runtime.failure", {
+          phase: "stopping", message: error instanceof Error
+            ? error.message : "The local runtime could not stop cleanly.",
+        });
+        console.error("Failed to stop the local runtime", error);
+      },
+      onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
+      disposeTemporaryAttachments: disposeImportedAttachments,
+      onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
+      onUnconfirmedRuntimeExit: () => console.warn(
+        "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
+      ),
+      closeDurableAttachments: async () => {
+        const retainedAttachments = conversationAttachments; conversationAttachments = null;
+        await closeConversationAttachmentAccess(retainedAttachments);
+      },
+    });
   });
   privilegedCleanup = cleanup;
   return cleanup;
@@ -968,9 +999,9 @@ async function bootstrap(): Promise<void> {
   });
   nativeTheme.on("updated", () => {
     if (windowThemePreference !== "system") return;
-    mainWindow?.setBackgroundColor(
-      resolveWindowBackground(windowThemePreference, nativeTheme.shouldUseDarkColors),
-    );
+    const backgroundColor = resolveWindowBackground(windowThemePreference, nativeTheme.shouldUseDarkColors);
+    mainWindow?.setBackgroundColor(backgroundColor);
+    detachedChatMain?.setBackgroundColor(backgroundColor);
   });
   const dataDirectory = runtimeBootstrap.runtimeDataPath(process.env.INERTIA_DATA_DIR, app.getPath("userData"));
   runtimeDataDirectory = dataDirectory;
@@ -1097,6 +1128,7 @@ async function bootstrap(): Promise<void> {
         && !mainWindow.isDestroyed()
       ) {
         mainWindow.webContents.send(IPC.runtimeReady);
+        detachedChatMain?.sendToDetached(IPC.runtimeReady);
       }
       if (snapshot.phase === "restarting" && snapshot.lastError) {
         console.error("The local runtime stopped; restart scheduled", snapshot.lastError);

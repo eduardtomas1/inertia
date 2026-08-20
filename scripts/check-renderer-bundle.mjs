@@ -4,12 +4,15 @@ import { resolve } from "node:path";
 const outputDirectory = resolve("out/renderer");
 const assetDirectory = resolve(outputDirectory, "assets");
 const kibibyte = 1024;
-// The core and entry-CSS ceilings had each been consumed to within a kibibyte,
-// which blocked ordinary renderer work rather than catching regressions. Both
-// keep a few percent of working room; all other ceilings remain unchanged.
+// Route closures include their statically imported dependencies. Keeping the
+// bootstrap and both window surfaces separate makes a detached chat regression
+// visible even when Rollup moves shared modules between chunks.
 const budgets = {
-  entryJavaScript: 700 * kibibyte,
+  entryJavaScript: 205 * kibibyte,
+  mainWorkbenchFirstLoadJavaScript: 700 * kibibyte,
+  detachedChatFirstLoadJavaScript: 535 * kibibyte,
   entryCss: 340 * kibibyte,
+  detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
   deferredMarkdownJavaScript: 440 * kibibyte,
@@ -17,8 +20,9 @@ const budgets = {
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   deferredAttachmentPreviewJavaScript: 12 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
-  // The rare failure dossier has its own strict deferred ceiling below, while
-  // its conditional loader remains inside the existing shared core ceiling.
+  detachedChatJavaScript: 16 * kibibyte,
+  // Rare deferred surfaces have strict ceilings below, while their shared
+  // dependencies remain inside the existing core ceiling.
   coreJavaScript: 1_940 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
@@ -102,6 +106,15 @@ const deferredAttachmentPreviewJavaScript = assetNames.find(
 const deferredSpreadsheetJavaScript = assetNames.find(
   (name) => /^xlsx-.*\.js$/u.test(name),
 );
+const mainWorkbenchJavaScript = assetNames.find(
+  (name) => /^App-.*\.js$/u.test(name),
+);
+const detachedChatJavaScript = assetNames.find(
+  (name) => /^DetachedChatApp-.*\.js$/u.test(name),
+);
+const detachedChatCss = assetNames.find(
+  (name) => /^DetachedChatApp-.*\.css$/u.test(name),
+);
 const deferredPdfWorker = assetNames.find(
   (name) => /^pdf\.worker\.min-.*\.mjs$/u.test(name),
 );
@@ -135,11 +148,42 @@ if (!deferredAttachmentPreviewJavaScript || !deferredSpreadsheetJavaScript) {
     "Renderer bundle check could not find the deferred attachment preview chunks.",
   );
 }
+if (!mainWorkbenchJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred main workbench surface.",
+  );
+}
+if (!detachedChatJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the detached-chat surface.",
+  );
+}
+if (!detachedChatCss) {
+  throw new Error(
+    "Renderer bundle check could not find the detached-chat stylesheet.",
+  );
+}
 
-const entryJavaScriptBytes = await assetBytes(entryJavaScript);
 const entryCssBytes = await assetBytes(entryCss);
+const detachedChatCssBytes = await assetBytes(`assets/${detachedChatCss}`);
 const entryJavaScriptName = entryJavaScript.replace(/^assets\//u, "");
 const entryJavaScriptClosure = await javaScriptClosure(entryJavaScriptName);
+const mainWorkbenchJavaScriptClosure = await javaScriptClosure(
+  mainWorkbenchJavaScript,
+);
+const detachedChatJavaScriptClosure = await javaScriptClosure(
+  detachedChatJavaScript,
+);
+if (mainWorkbenchJavaScriptClosure.has(detachedChatJavaScript)) {
+  throw new Error(
+    "Renderer bundle check found the detached-chat surface in the main workbench route.",
+  );
+}
+if (detachedChatJavaScriptClosure.has(mainWorkbenchJavaScript)) {
+  throw new Error(
+    "Renderer bundle check found the main workbench surface in the detached-chat route.",
+  );
+}
 const filesJavaScriptClosure = await javaScriptClosure(filesJavaScript);
 const markdownJavaScriptClosure = await javaScriptClosure(
   deferredMarkdownJavaScript,
@@ -147,17 +191,24 @@ const markdownJavaScriptClosure = await javaScriptClosure(
 const transcriptJavaScriptClosure = await javaScriptClosure(
   transcriptJavaScript,
 );
+const entryJavaScriptBytes = await closureBytes(entryJavaScriptClosure);
+const mainWorkbenchFirstLoadJavaScriptBytes = await closureBytes(
+  mainWorkbenchJavaScriptClosure,
+);
+const detachedChatFirstLoadJavaScriptBytes = await closureBytes(
+  detachedChatJavaScriptClosure,
+);
 const filesFirstLoadJavaScriptBytes = await closureBytes(
   filesJavaScriptClosure,
-  entryJavaScriptClosure,
+  mainWorkbenchJavaScriptClosure,
 );
 const deferredMarkdownJavaScriptBytes = await closureBytes(
   markdownJavaScriptClosure,
-  entryJavaScriptClosure,
+  mainWorkbenchJavaScriptClosure,
 );
 const transcriptJavaScriptBytes = await closureBytes(
   transcriptJavaScriptClosure,
-  entryJavaScriptClosure,
+  mainWorkbenchJavaScriptClosure,
 );
 const settingsJavaScriptBytes = await assetBytes(
   `assets/${settingsJavaScript}`,
@@ -177,6 +228,10 @@ const deferredAttachmentPreviewJavaScriptBytes = await assetBytes(
 const deferredSpreadsheetJavaScriptBytes = await assetBytes(
   `assets/${deferredSpreadsheetJavaScript}`,
 );
+const detachedChatJavaScriptBytes = await closureBytes(
+  detachedChatJavaScriptClosure,
+  mainWorkbenchJavaScriptClosure,
+);
 const javaScriptSizes = await Promise.all(
   assetNames
     .filter((name) => name.endsWith(".js"))
@@ -191,10 +246,14 @@ const coreJavaScriptBytes =
   - deferredPdfJavaScriptBytes
   - deferredFailureDiagnosticsJavaScriptBytes
   - deferredAttachmentPreviewJavaScriptBytes
-  - deferredSpreadsheetJavaScriptBytes;
+  - deferredSpreadsheetJavaScriptBytes
+  - detachedChatJavaScriptBytes;
 const measurements = {
   entryJavaScript: entryJavaScriptBytes,
+  mainWorkbenchFirstLoadJavaScript: mainWorkbenchFirstLoadJavaScriptBytes,
+  detachedChatFirstLoadJavaScript: detachedChatFirstLoadJavaScriptBytes,
   entryCss: entryCssBytes,
+  detachedChatCss: detachedChatCssBytes,
   settingsJavaScript: settingsJavaScriptBytes,
   filesFirstLoadJavaScript: filesFirstLoadJavaScriptBytes,
   deferredMarkdownJavaScript: deferredMarkdownJavaScriptBytes,
@@ -204,6 +263,7 @@ const measurements = {
   deferredAttachmentPreviewJavaScript:
     deferredAttachmentPreviewJavaScriptBytes,
   deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,
+  detachedChatJavaScript: detachedChatJavaScriptBytes,
   coreJavaScript: coreJavaScriptBytes,
   deferredPdfJavaScript: deferredPdfJavaScriptBytes,
   deferredPdfWorker: deferredPdfWorkerBytes,

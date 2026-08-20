@@ -1089,6 +1089,10 @@ describe("server event provider identity boundary", () => {
         ...provider,
         id,
         models: [{ ...provider.models[0], fastMode: expectedFastMode }],
+        agentThreadManagement: {
+          state: "supported",
+          detail: "Audited runtime capability.",
+        },
       }))).toMatchObject({
         type: "snapshot.updated",
       });
@@ -1103,6 +1107,7 @@ describe("server event provider identity boundary", () => {
     ["oversized Fast description", { ...provider, models: [{ ...provider.models[0], fastMode: { ...provider.models[0].fastMode, description: "x".repeat(501) } }] }],
     ["undeclared Fast metadata", { ...provider, models: [{ ...provider.models[0], fastMode: { ...provider.models[0].fastMode, apiKey: "never-cross-ipc" } }] }],
     ["rate-limit IDs", { ...provider, rateLimits: [provider.rateLimits[0], { ...provider.rateLimits[0] }] }],
+    ["chat-tool capability", { ...provider, agentThreadManagement: { state: "invented", detail: "Unsafe" } }],
   ])("rejects duplicate or malformed %s", (_label, malformed) => {
     expect(() => parseServerEvent(snapshotEvent(malformed))).toThrow("Malformed server event");
   });

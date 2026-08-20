@@ -24,6 +24,16 @@ function migrateFixtureInPlace(databasePath: string): void {
   }
 }
 
+function dropUnreleasedAgentThreadManagement(
+  database: Database.Database,
+): void {
+  database.exec(`
+    DROP TABLE IF EXISTS agent_thread_operations;
+    DROP TABLE IF EXISTS agent_managed_conversations;
+    DELETE FROM schema_migrations WHERE version = 60;
+  `);
+}
+
 async function createStore(options: { withProject?: boolean } = {}): Promise<{ directory: string; databasePath: string; workspacePath: string; store: RuntimeStore }> {
   if (!storeTemplateDatabasePath) {
     throw new Error("The RuntimeStore test database template is unavailable.");
@@ -147,6 +157,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       DELETE FROM schema_migrations
       WHERE version >= 56
     `).run();
+    dropUnreleasedAgentThreadManagement(previousSchema);
     previousSchema.close();
 
     const upgraded = new RuntimeStore(databasePath, workspacePath);
@@ -1161,6 +1172,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     beforeInterfaceScale.exec("ALTER TABLE app_state DROP COLUMN usage_display_mode");
     beforeInterfaceScale.exec("ALTER TABLE app_state DROP COLUMN interface_scale");
     beforeInterfaceScale.prepare("DELETE FROM schema_migrations WHERE version >= 14").run();
+    dropUnreleasedAgentThreadManagement(beforeInterfaceScale);
     beforeInterfaceScale.close();
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
@@ -2320,6 +2332,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     `);
     legacy.exec("DROP TABLE provider_metadata_scoped_cache");
     legacy.prepare("DELETE FROM schema_migrations WHERE version >= 26").run();
+    dropUnreleasedAgentThreadManagement(legacy);
     legacy.prepare(`
       INSERT INTO provider_metadata_cache (
         provider_id, executable, version, auth_state,

@@ -768,6 +768,10 @@ export class TurnController {
       );
       active.providerRunStarted = true;
       const result = this.providers.run(active.providerInput, {
+        hostTools: this.hooks.hostToolsForTurn?.({
+          conversation: active.conversation,
+          turn: active.turn,
+        }),
         onStarted: () => {
           if (active.settled || this.closing) {
             this.providers.cancel(active.conversation.id);

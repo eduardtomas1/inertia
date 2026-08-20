@@ -16,6 +16,10 @@ import {
   type CodexSubagentUpdate,
 } from "./app-server-subagents";
 import {
+  CodexHostToolRuntime,
+  isHostToolApprovalId,
+} from "./app-server-host-tools";
+import {
   parseCodexGoalClearedNotification,
   parseCodexGoalUpdatedNotification,
 } from "./goals";
@@ -158,6 +162,7 @@ export class CodexAppServerEvents {
   private pendingGoalMutations = 0;
   private pendingGoalActivations = 0;
   private readonly subagents: CodexSubagentLifecycle;
+  private readonly hostTools: CodexHostToolRuntime;
 
   constructor(private readonly host: CodexAppServerEventHost) {
     this.subagentDrainTimeoutMs = codexSubagentDrainTimeoutMs(
@@ -179,6 +184,18 @@ export class CodexAppServerEvents {
         this.subagentProjection.get(providerAgentId),
       rejectMalformed: (message) => this.rejectMalformedSubagent(message),
     });
+    this.hostTools = new CodexHostToolRuntime({
+      options: host.options,
+      isSettled: host.isSettled,
+      providerThreadId: host.providerThreadId,
+      activeTurnId: host.activeTurnId,
+      reserveServerRequest: (id) => this.reserveServerRequest(id),
+      releaseServerRequest: (id) => {
+        this.pendingServerRequestIds.delete(rpcRequestKey(id));
+      },
+      writeMessage: host.writeMessage,
+      cancel: host.cancel,
+    });
   }
 
   dispose(): void {
@@ -195,6 +212,7 @@ export class CodexAppServerEvents {
     this.liveSubagentIds.clear();
     this.completedTurnIds.clear();
     this.subagents.dispose();
+    this.hostTools.settle("cancel");
   }
 
   cancelPendingParentCompletion(): boolean {
@@ -271,6 +289,7 @@ export class CodexAppServerEvents {
   }
 
   settleInteractions(): void {
+    this.hostTools.settle("cancel");
     for (const { rpcId: id, request, protocol } of
       this.pendingApprovals.values()) {
       this.host.writeMessage({
@@ -296,6 +315,9 @@ export class CodexAppServerEvents {
     requestId: string,
     decision: AgentApprovalDecision,
   ): boolean {
+    if (isHostToolApprovalId(requestId)) {
+      return this.hostTools.respondToApproval(requestId, decision);
+    }
     const pending = this.pendingApprovals.get(requestId);
     if (
       !pending
@@ -368,7 +390,12 @@ export class CodexAppServerEvents {
       this.emitActivity("system", "failed", message);
       // Do not emit a second response with the duplicate id. Cancellation
       // settles the original request exactly once before closing transport.
+      this.hostTools.settle("cancel");
       this.host.cancel();
+      return;
+    }
+    if (method === "item/tool/call") {
+      this.hostTools.handle(id, params);
       return;
     }
     const parsedApproval = parseCodexApprovalRequest(method, params);
@@ -385,6 +412,13 @@ export class CodexAppServerEvents {
         return;
       }
       const { request: approval } = parsedApproval;
+      if (isHostToolApprovalId(approval.requestId)) {
+        const message = "Codex reused a reserved Inertia approval identity.";
+        this.host.writeMessage({ id, error: { code: -32602, message } });
+        this.host.setLastError(message);
+        this.host.cancel();
+        return;
+      }
       if (approval.availableDecisions.length === 0) {
         const message =
           "Codex offered no approval decision supported by this client.";

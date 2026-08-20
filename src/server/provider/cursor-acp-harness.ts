@@ -44,6 +44,13 @@ import { isSafeApprovalDisplayText } from "./approval-display";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { providerProcessInvocation } from "./process";
 import { cursorAgentCommandArgs } from "./cursor-command";
+import { ProviderHostToolRuntime } from "./host-tool-runtime";
+import {
+  createProviderHostToolMcpSession,
+  type ProviderHostToolMcpConnection,
+} from "./host-tool-mcp-http";
+import { cursorHostMcpServers } from "./host-tool-mcp-config";
+import { redactHostToolPayload } from "./host-tool-redaction";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -155,6 +162,28 @@ function startCursorRun(
       status?: ToolCallStatus | null;
     }
   >();
+  const hostToolRuntime = options.hostTools && options.input.turnId
+    ? new ProviderHostToolRuntime({
+        bridge: options.hostTools,
+        conversationId,
+        turnId: options.input.turnId,
+        cwd: options.input.cwd,
+        onApproval: (request) => emitter.rich({ type: "approval", request }),
+        onApprovalResolved: (requestId, decision) => {
+          emitter.rich({ type: "approval-resolved", requestId, decision });
+        },
+      })
+    : undefined;
+  const hostMcpSession = hostToolRuntime
+    ? createProviderHostToolMcpSession(hostToolRuntime)
+    : undefined;
+  let hostMcpConnection: ProviderHostToolMcpConnection | undefined;
+  const redactHostMcpPayload = <T>(value: T): T => hostMcpConnection
+    ? redactHostToolPayload(value, [
+        hostMcpConnection.bearerToken,
+        hostMcpConnection.url,
+      ])
+    : value;
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
 
@@ -192,19 +221,20 @@ function startCursorRun(
       return await cursorPermission(params, signal, options, emitter.rich, approvals);
     })
     .onNotification(acp.methods.client.session.update, ({ params }) => {
-      if (!sessionId || params.sessionId !== sessionId) return;
+      const safeParams = redactHostMcpPayload(params);
+      if (!sessionId || safeParams.sessionId !== sessionId) return;
       if (
         acceptsCommandAdvertisement
-        && params.update.sessionUpdate === "available_commands_update"
+        && safeParams.update.sessionUpdate === "available_commands_update"
       ) {
         availableCommandNames = new Set(
-          params.update.availableCommands.slice(0, MAX_AVAILABLE_COMMANDS).map(({ name }) =>
+          safeParams.update.availableCommands.slice(0, MAX_AVAILABLE_COMMANDS).map(({ name }) =>
             name.replace(/^\//u, "").toLowerCase()),
         );
         resolveCommandAdvertisement();
       }
       handleCursorUpdate(
-        params,
+        safeParams,
         resultText,
         emitter,
         supportsImages,
@@ -301,6 +331,13 @@ function startCursorRun(
     });
     validateCursorInitialize(initialized);
     supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
+    hostMcpConnection = await hostMcpSession?.start();
+    const hostMcpServers = hostMcpConnection
+      ? cursorHostMcpServers(
+          hostMcpConnection,
+          initialized.agentCapabilities?.mcpCapabilities?.http === true,
+        )
+      : [];
     const cursorLogin = initialized.authMethods?.find((method) => method.id === "cursor_login");
     if (cursorLogin) await context.request(acp.methods.agent.authenticate, { methodId: cursorLogin.id });
 
@@ -311,18 +348,21 @@ function startCursorRun(
       const loadRequest = context.request(acp.methods.agent.session.load, {
         sessionId: options.input.sessionId,
         cwd: options.input.cwd,
-        mcpServers: [],
+        mcpServers: hostMcpServers,
       });
       // The requested session ID is known before the connection starts, so a
       // same-session notification received before this request could be stale.
       // Only advertisements delivered after the resume request is on the wire
       // can prove the capabilities of the resumed session.
       acceptsCommandAdvertisement = true;
-      const loaded = await loadRequest;
+      const loaded = redactHostMcpPayload(await loadRequest);
       modes = loaded?.modes;
       configOptions = loaded?.configOptions;
     } else {
-      const created = await context.request(acp.methods.agent.session.new, { cwd: options.input.cwd, mcpServers: [] });
+      const created = redactHostMcpPayload(await context.request(acp.methods.agent.session.new, {
+        cwd: options.input.cwd,
+        mcpServers: hostMcpServers,
+      }));
       sessionId = created.sessionId;
       emitter.session(sessionId);
       modes = created.modes;
@@ -379,12 +419,24 @@ function startCursorRun(
   }).catch((error: unknown) => {
     requestProcessTermination(true);
     if (cancelRequested) return finish("cancelled");
-    const diagnostic = stderr.toString().trim();
-    const message = safeError(error, diagnostic ? `Cursor ACP stopped: ${diagnostic}` : "Cursor ACP stopped unexpectedly.");
+    const redactHostMcp = (value: string): string => redactHostMcpPayload(value);
+    const diagnostic = redactHostMcp(stderr.toString().trim());
+    const message = redactHostMcp(safeError(
+      error,
+      diagnostic ? `Cursor ACP stopped: ${diagnostic}` : "Cursor ACP stopped unexpectedly.",
+    ));
     return finish("failed", message);
   });
   const result = providerResult.then(async (outcome): Promise<ProviderRunResult> => {
     cancelPending();
+    hostToolRuntime?.settle();
+    try {
+      await hostMcpSession?.close();
+    } catch {
+      const error = "Cursor Inertia chat tools could not be cleaned up.";
+      emitter.status("failed", error);
+      return { ...outcome, status: "failed", error, cleanupConfirmed: false };
+    }
     try {
       // ACP has already produced its terminal response, so no graceful wait
       // window remains useful. Reuse any earlier cancellation request.
@@ -427,6 +479,8 @@ function startCursorRun(
   const cancel = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    hostToolRuntime?.settle();
+    void hostMcpSession?.close().catch(() => requestProcessTermination(true));
     emitter.status("cancelling");
     cancelPending();
     if (!force && sessionId && activeContext) {
@@ -444,7 +498,13 @@ function startCursorRun(
     providerId: "cursor",
     result,
     cancel,
-    extension: { kind: "cursor-acp", respondToApproval: settleApproval, respondToInput: settleInput },
+    extension: {
+      kind: "cursor-acp",
+      respondToApproval: (requestId, decision) =>
+        hostToolRuntime?.respondToApproval(requestId, decision)
+        || settleApproval(requestId, decision),
+      respondToInput: settleInput,
+    },
   };
 }
 

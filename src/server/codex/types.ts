@@ -14,6 +14,7 @@ import type {
   ProviderGoalMutation,
   ProviderRunFailure,
   ProviderSteerInput,
+  ProviderHostToolBridge,
 } from "../provider/contracts";
 import type { ProcessTreeTerminator } from "../process-lifecycle";
 
@@ -48,6 +49,10 @@ export interface CodexAppServerOptions {
   >[];
   planMode: boolean;
   access: "supervised" | "auto-edit" | "full";
+  /** Exact-run Inertia tools; advertised only on new provider threads. */
+  hostTools?: ProviderHostToolBridge;
+  /** Test seam that may shorten, but never extend, host-tool approval expiry. */
+  hostToolApprovalTimeoutMs?: number;
   /** Testable bound for one JSON-RPC response; defaults to 30 seconds. */
   rpcTimeoutMs?: number;
   /**

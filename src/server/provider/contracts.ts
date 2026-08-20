@@ -1,3 +1,5 @@
+import type { ZodType } from "zod";
+
 import type {
   AgentGoalStatus,
   ContinuationIdentity,
@@ -14,6 +16,7 @@ import type {
 import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe";
 import type {
   AgentApprovalDecision,
+  AgentApprovalPermissionRoot,
   AgentApprovalRequest,
   AgentInputRequest,
   AgentPlanStep,
@@ -331,6 +334,48 @@ export interface ProviderRunCallbacks {
   onUsage?: (event: ProviderUsageEvent) => void;
   onMetadata?: (event: ProviderMetadataEvent) => void;
   onSubagent?: (event: ProviderSubagentEvent) => void;
+  /** Process-local, exact-turn authority for audited Inertia host tools. */
+  hostTools?: ProviderHostToolBridge;
+}
+
+export interface ProviderHostToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Readonly<Record<string, unknown>>;
+  /** Process-local validator used by in-process provider tool transports. */
+  inputValidator?: ZodType<Record<string, unknown>>;
+  readOnly: boolean;
+}
+
+export interface ProviderHostToolApprovalRequest {
+  title: string;
+  detail: string;
+  reason: string;
+  permissionRoots: AgentApprovalPermissionRoot[];
+}
+
+export interface ProviderHostToolCall {
+  providerThreadId: string;
+  providerTurnId: string;
+  toolCallId: string;
+  tool: string;
+  arguments: unknown;
+  signal: AbortSignal;
+  requestApproval(
+    request: ProviderHostToolApprovalRequest,
+  ): Promise<AgentApprovalDecision>;
+}
+
+export interface ProviderHostToolResult {
+  success: boolean;
+  /** Bounded model-visible JSON or plain text. */
+  text: string;
+}
+
+/** Owned by one exact active Inertia run; never persisted or provider-authored. */
+export interface ProviderHostToolBridge {
+  readonly definitions: readonly ProviderHostToolDefinition[];
+  invoke(call: ProviderHostToolCall): Promise<ProviderHostToolResult>;
 }
 
 export interface ProviderRunResult {

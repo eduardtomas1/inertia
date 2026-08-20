@@ -646,6 +646,7 @@ export class ProviderManager {
             ? { harnessConfiguration: launchOptions.harnessConfiguration }
             : {}),
           callbacks: providerCallbacksFromHarness(compatibilityEmitter),
+          ...(callbacks.hostTools ? { hostTools: callbacks.hostTools } : {}),
         });
       } finally {
         releaseLaunch();

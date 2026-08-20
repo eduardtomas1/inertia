@@ -15,6 +15,7 @@ import type {
   ProviderMetadataEvent,
   ProviderRunInput,
   ProviderRunResult,
+  ProviderHostToolBridge,
   ProviderSteerInput,
   ProviderSessionEvent,
   ProviderStatusEvent,
@@ -237,6 +238,7 @@ export interface AgentHarnessStartOptions {
   environment: NodeJS.ProcessEnv;
   harnessConfiguration?: ProviderHarnessLaunchConfiguration;
   callbacks?: AgentHarnessCallbacks;
+  hostTools?: ProviderHostToolBridge;
 }
 
 export interface CodexAppServerRunExtension {

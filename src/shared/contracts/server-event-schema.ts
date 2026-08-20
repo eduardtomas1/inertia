@@ -335,6 +335,7 @@ function providerInfo(value: unknown): boolean {
     && record(value.metadataState)
     && providerMetadataField(value.metadataState.models)
     && providerMetadataField(value.metadataState.rateLimits)
+    && (value.agentThreadManagement === undefined || (record(value.agentThreadManagement) && oneOf(value.agentThreadManagement, "state", ["supported", "unavailable"] as const) && stringField(value.agentThreadManagement, "detail")))
     && (value.maintenance === undefined
       || (providerMaintenanceStatus(value.maintenance)
         && record(value.maintenance)

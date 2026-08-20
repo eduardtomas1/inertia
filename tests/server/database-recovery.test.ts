@@ -1115,6 +1115,8 @@ describe("database backup and startup recovery", () => {
     );
     const released = new Database(backupPath);
     released.exec(`
+      DROP TABLE agent_thread_operations;
+      DROP TABLE agent_managed_conversations;
       DROP TABLE recovery_import_journals;
       DROP TABLE recovery_import_receipts;
       DROP TABLE message_content_chunks;
@@ -1146,7 +1148,7 @@ describe("database backup and startup recovery", () => {
     upgraded.close();
   });
 
-  it("restores the released V0.0.6 fixture through schema 59 without losing data", () => {
+  it("restores the released V0.0.6 fixture through the current schema without losing data", () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
     const paths = databaseRecoveryPaths(databasePath);
@@ -1187,7 +1189,9 @@ describe("database backup and startup recovery", () => {
     ).all()).toEqual(messagesBefore);
     expect((upgraded.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(59);
+    ).get() as { version: number }).version).toBe(
+      CURRENT_DATABASE_SCHEMA_VERSION,
+    );
     expect((upgraded.prepare(
       "SELECT color_theme AS colorTheme FROM app_state WHERE id = 1",
     ).get() as { colorTheme: string }).colorTheme).toBe("inertia");
@@ -1235,6 +1239,8 @@ describe("database backup and startup recovery", () => {
       size: 8,
     }]), message.id);
     schema55.exec(`
+      DROP TABLE agent_thread_operations;
+      DROP TABLE agent_managed_conversations;
       DROP INDEX agent_turns_usage_dashboard_completed_idx;
       DELETE FROM schema_migrations WHERE version >= 56;
     `);
@@ -1297,6 +1303,8 @@ describe("database backup and startup recovery", () => {
     for (const backup of [older, newer]) {
       const schema56 = new Database(join(paths.backupsDirectory, backup.filename));
       schema56.exec(`
+        DROP TABLE agent_thread_operations;
+        DROP TABLE agent_managed_conversations;
         DROP INDEX agent_turns_usage_dashboard_completed_idx;
         DELETE FROM schema_migrations WHERE version >= 57;
       `);

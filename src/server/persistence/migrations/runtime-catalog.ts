@@ -14,12 +14,10 @@ import {
 import { legacyModelSelection } from "../codecs";
 import type { AgentTurnRow, ConversationRow } from "../rows";
 import { sanitizePersistedAttachmentCapabilities } from "./attachment-capabilities";
-import {
-  createRuntimeMigrationCatalog,
-  type DatabaseMigrationDefinition,
-} from "./catalog";
+import { createRuntimeMigrationCatalog, type DatabaseMigrationDefinition } from "./catalog";
 import { conversationWorktreeOwnershipMigration } from "./conversation-worktree-ownership";
 import { persistColorTheme } from "./color-theme";
+import { persistAgentThreadManagement } from "./agent-thread-management";
 import { durableDataMigrationDefinitions } from "./durable-data";
 import { protectCancellingDuoDeletion, protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
@@ -1225,7 +1223,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           WHERE usage_start_json IS NOT NULL;
         `,
       },
-      persistColorTheme,
+      persistColorTheme, persistAgentThreadManagement,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

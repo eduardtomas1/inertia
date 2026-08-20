@@ -16,6 +16,21 @@ function emptyMetadataState(): ProviderInfo["metadataState"] {
   return { models: missing(), rateLimits: missing() };
 }
 
+function agentThreadManagement(
+  providerId: ProviderInfo["id"],
+): NonNullable<ProviderInfo["agentThreadManagement"]> {
+  const transport = {
+    codex: "Codex dynamic tools",
+    claude: "Claude's in-process tool server",
+    cursor: "Cursor's scoped MCP session",
+    opencode: "OpenCode's scoped MCP session",
+  }[providerId];
+  return {
+    state: "supported",
+    detail: `${transport} can use approved Inertia tools to create and manage top-level chats in this project.`,
+  };
+}
+
 export function initialProviderSnapshots(
   executionEnabled = true,
   cached: Partial<Record<ProviderInfo["id"], Pick<ProviderInfo, "models" | "rateLimits" | "metadataState">>> = {},
@@ -34,6 +49,7 @@ export function initialProviderSnapshots(
     models: cached[provider.id]?.models ?? [],
     rateLimits: cached[provider.id]?.rateLimits ?? [],
     metadataState: cached[provider.id]?.metadataState ?? emptyMetadataState(),
+    agentThreadManagement: agentThreadManagement(provider.id),
   }));
 }
 
@@ -55,6 +71,7 @@ export function providerSnapshot(
     models: metadata.models,
     rateLimits: metadata.rateLimits,
     metadataState: metadata.metadataState,
+    agentThreadManagement: agentThreadManagement(detection.provider.id),
   };
 }
 

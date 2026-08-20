@@ -188,6 +188,9 @@ describe("runtime boundary helpers", () => {
     const providers = initialProviderSnapshots(true);
     expect(providers.map(({ id }) => id)).toEqual(["codex", "claude", "cursor", "opencode"]);
     expect(providers.every(({ canRun, installState, authState }) => !canRun && installState === "checking" && authState === "checking")).toBe(true);
+    expect(providers.every(
+      ({ agentThreadManagement }) => agentThreadManagement?.state === "supported",
+    )).toBe(true);
   });
 
   it("preserves cached selector metadata while discovery is checking and after a failed refresh", () => {

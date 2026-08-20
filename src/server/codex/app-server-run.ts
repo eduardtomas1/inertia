@@ -891,6 +891,10 @@ export async function openCodexTurn({
   let opened: JsonObject;
   if (options.sessionId) {
     try {
+      // The audited App Server protocol persists thread/start dynamic tools in
+      // its rollout/state DB and exposes no registration field on resume.
+      // Unreleased v60 clears pre-registration Codex session identities once,
+      // so every persisted session reaching this path already owns the tools.
       opened = await request("thread/resume", {
         threadId: options.sessionId,
         excludeTurns: true,
@@ -902,7 +906,18 @@ export async function openCodexTurn({
       throw new Error(staleProviderSessionDecision().reason);
     }
   } else {
-    opened = await request("thread/start", threadConfig);
+    opened = await request("thread/start", {
+      ...threadConfig,
+      ...(options.hostTools
+        ? {
+            dynamicTools: options.hostTools.definitions.map((definition) => ({
+              name: definition.name,
+              description: definition.description,
+              inputSchema: definition.inputSchema,
+            })),
+          }
+        : {}),
+    });
   }
 
   const thread = objectValue(opened.thread);

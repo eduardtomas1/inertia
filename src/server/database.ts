@@ -25,18 +25,13 @@ import {
   type TurnGitArtifact,
   type WorkspaceRun,
 } from "../shared/contracts";
-import {
-  type ModelBackendDefault,
-  type PersistedModelBackendProfile,
-} from "../shared/backend-profile-settings";
+import type { ModelBackendDefault, PersistedModelBackendProfile } from "../shared/backend-profile-settings";
 import type { BackendCompatibilityProbeResult } from "../shared/backend-probe";
 import type { PersistedProviderMetadata } from "./provider/metadata";
 import type { SanitizedTurnExecutionManifest } from "./runtime/turns/request-context";
 import { BackendProfileRepository } from "./persistence/backend-profile-repository";
-import {
-  AgentWorkflowRepository,
-  type NativeAgentGoalMergeResult,
-} from "./persistence/agent-workflow-repository";
+import { AgentThreadManagementRepository } from "./persistence/agent-thread-management-repository";
+import { AgentWorkflowRepository, type NativeAgentGoalMergeResult } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import { ConversationWorktreeRepository } from "./persistence/conversation-worktree-repository";
 import {
@@ -126,6 +121,7 @@ export class RuntimeStore {
   private readonly recoveryReport: DatabaseRecoveryReport;
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
+  readonly agentThreadManagement: AgentThreadManagementRepository;
   private readonly conversationRepository: ConversationRepository;
   readonly conversationWorktrees: ConversationWorktreeRepository;
   private readonly executionLedgerRepository: ExecutionLedgerRepository;
@@ -183,6 +179,7 @@ export class RuntimeStore {
       requireConversation: (conversationId) =>
         this.requireConversation(conversationId),
     });
+    this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
@@ -269,6 +266,7 @@ export class RuntimeStore {
       this.database.pragma("mmap_size = 268435456");
       this.database.pragma("temp_store = MEMORY");
       migrateRuntimeDatabase(this.database);
+      this.agentThreadManagement.recoverInterrupted();
       this.projectRepository.enrollMissingPaths();
       reconcileRecoveryImportJournal(this.database);
       this.initializeState();

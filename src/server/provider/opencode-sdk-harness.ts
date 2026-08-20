@@ -1,14 +1,11 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  type Agent,
   type Event,
   type Model,
   type OpencodeClient,
-  type PermissionRuleset,
   type Provider,
   type QuestionInfo,
 } from "@opencode-ai/sdk/v2";
@@ -29,7 +26,6 @@ import {
 import type { ProviderRunResult } from "./contracts";
 import type {
   AgentApprovalDecision,
-  AgentPlanStep,
 } from "./interactions";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
@@ -65,8 +61,24 @@ import {
   type OpenCodeEventState,
   type OpenCodeUsageState,
 } from "./opencode-event-projection";
+import {
+  createOpenCodeHostTools,
+  openCodePermissions,
+} from "./opencode-host-tools";
+import {
+  bounded,
+  errorMessage,
+  finite,
+  imageMime,
+  jsonSummary,
+  objectValue,
+  resolveOpenCodeAgent,
+  safeError,
+  serverDiagnostic,
+  stringValue,
+  todoStep,
+} from "./opencode-harness-values";
 const MAX_EVENT_BYTES = 1024 * 1024;
-const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_PENDING_INTERACTIONS = 64;
@@ -96,7 +108,6 @@ export const OPENCODE_SDK_CAPABILITIES = {
     modelMetadata: "server-config",
   },
 } as const satisfies OpenCodeSdkHarnessCapabilities;
-
 interface PendingApproval { nativeId: string; settled: boolean }
 interface PendingInput { nativeId: string; questions: QuestionInfo[]; settled: boolean }
 interface OpenCodePromptLifecycle {
@@ -274,6 +285,16 @@ function startOpenCodeRun(
     observed: false,
     activityObserved: false,
   };
+  const hostTools = createOpenCodeHostTools({
+    bridge: options.hostTools,
+    conversationId,
+    turnId: options.input.turnId,
+    cwd: options.input.cwd,
+    onApproval: (request) => emitter.rich({ type: "approval", request }),
+    onApprovalResolved: (requestId, decision) => {
+      emitter.rich({ type: "approval-resolved", requestId, decision });
+    },
+  });
   const pendingFollowUps = new Set<Promise<boolean>>();
   let sessionId = options.input.sessionId;
   let client: OpencodeClient | undefined;
@@ -298,6 +319,7 @@ function startOpenCodeRun(
     runDeadlineTimer = undefined;
     eventInactivityTimer = undefined;
   };
+  const redactHostMcp = (value: string): string => hostTools?.redact(value) ?? value;
   const failDeadline = (message: string): void => {
     if (cancelRequested || terminalError) return;
     terminalError = message;
@@ -407,7 +429,9 @@ function startOpenCodeRun(
         eventAbort.signal,
       );
 
-      const [providerData, agents] = await initialize(
+      if (hostTools) await hostTools.install(client, initialize);
+
+      const [providerResponse, agentResponse] = await initialize(
         "provider and agent discovery",
         async (signal) => await Promise.all([
           client!.provider.list(
@@ -420,6 +444,14 @@ function startOpenCodeRun(
           ),
         ]),
       );
+      const providerData = {
+        ...providerResponse,
+        data: hostTools?.redactPayload(providerResponse.data) ?? providerResponse.data,
+      };
+      const agents = {
+        ...agentResponse,
+        data: hostTools?.redactPayload(agentResponse.data) ?? agentResponse.data,
+      };
       const discoveredModels = openCodeModels(
         providerData.data.all,
         providerData.data.default,
@@ -499,7 +531,7 @@ function startOpenCodeRun(
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
         onActivity: armEventInactivityDeadline,
         onEvent: (event) => handleOpenCodeEvent(
-          event,
+          hostTools?.redactPayload(event) ?? event,
           options,
           client!,
           text,
@@ -578,13 +610,26 @@ function startOpenCodeRun(
         ? { status: "cancelled" }
         : {
             status: "failed",
-            error: terminalError ?? safeError(error, serverDiagnostic(serverOutput)),
+            error: terminalError ?? redactHostMcp(safeError(
+              error,
+              redactHostMcp(serverDiagnostic(serverOutput)),
+            )),
           };
     }
     acceptingFollowUps = false;
+    hostTools?.settle();
     await Promise.allSettled(pendingFollowUps);
     clearDeadlineTimers();
     if (cancelForceTimer) clearTimeout(cancelForceTimer);
+    try {
+      await hostTools?.cleanup(client);
+    } catch (error) {
+      cleanupConfirmed = false;
+      outcome = {
+        status: "failed",
+        error: safeError(error, "OpenCode Inertia chat tools could not be cleaned up."),
+      };
+    }
     eventAbort.abort();
     rejectPending();
     if (child) {
@@ -624,6 +669,10 @@ function startOpenCodeRun(
   cancelOwnedRun = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    hostTools?.settle();
+    void hostTools?.revoke().catch(() => {
+      eventAbort.abort();
+    });
     acceptingFollowUps = false;
     clearDeadlineTimers();
     emitter.status("cancelling");
@@ -661,7 +710,9 @@ function startOpenCodeRun(
     cancel: cancelOwnedRun,
     extension: {
       kind: "opencode-sdk",
-      respondToApproval: settleApproval,
+      respondToApproval: (requestId, decision) =>
+        hostTools?.respondToApproval(requestId, decision)
+        || settleApproval(requestId, decision),
       respondToInput: settleInput,
       steer: async (input) => {
         const activeClient = client;
@@ -1148,30 +1199,6 @@ function findOpenCodeModel(providerId: string, modelId: string, providers: Provi
   return providers.find((provider) => provider.id === providerId)?.models[modelId];
 }
 
-function resolveOpenCodeAgent(mode: "build" | "plan", agents: Agent[]): Agent | undefined {
-  if (mode === "build") return undefined;
-  const agent = agents.find((candidate) => candidate.name === "plan" && candidate.mode !== "subagent");
-  if (!agent) throw new Error("OpenCode does not advertise its native plan agent.");
-  return agent;
-}
-
-function openCodePermissions(access: "full" | "supervised" | "auto-edit"): PermissionRuleset {
-  if (access === "full") return [{ permission: "*", pattern: "*", action: "allow" }];
-  return [
-    { permission: "*", pattern: "*", action: "ask" },
-    ...(access === "auto-edit" ? [{ permission: "edit", pattern: "*", action: "allow" } as const] : []),
-    { permission: "question", pattern: "*", action: "allow" },
-  ];
-}
-
-function todoStep(value: unknown): AgentPlanStep[] {
-  const todo = objectValue(value);
-  const content = stringValue(todo?.content);
-  if (!content) return [];
-  const status = todo?.status === "completed" ? "completed" : todo?.status === "in_progress" ? "inProgress" : "pending";
-  return [{ step: bounded(content), status }];
-}
-
 function openCodeEventSessionId(event: Event): string | undefined {
   const properties = event.properties as Record<string, unknown>;
   const info = objectValue(properties.info);
@@ -1220,21 +1247,3 @@ function isOpenCodeRunActivityEvent(
     || event.type === "session.next.tool.success"
     || event.type === "session.next.tool.failed";
 }
-
-function imageMime(path: string): string {
-  switch (extname(path).toLowerCase()) {
-    case ".jpg": case ".jpeg": return "image/jpeg";
-    case ".png": return "image/png";
-    case ".gif": return "image/gif";
-    case ".webp": return "image/webp";
-    default: throw new Error(`OpenCode does not support the attached image type: ${extname(path) || "unknown"}.`);
-  }
-}
-function bounded(value: string): string { return value.slice(0, MAX_EVENT_TEXT_CHARS); }
-function objectValue(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
-function stringValue(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 ? value : undefined; }
-function finite(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null; }
-function jsonSummary(value: unknown): string { try { return value === undefined ? "" : JSON.stringify(value); } catch { return ""; } }
-function errorMessage(error: Record<string, unknown>): string { return stringValue(objectValue(error.data)?.message) ?? stringValue(error.message) ?? stringValue(error.name) ?? "OpenCode reported an error."; }
-function safeError(error: unknown, fallback: string): string { return error instanceof Error && error.message ? bounded(error.message) : fallback; }
-function serverDiagnostic(output: CappedProviderBuffer): string { const value = output.toString().trim(); return value ? bounded(`OpenCode server stopped: ${value}`) : "OpenCode server stopped unexpectedly."; }

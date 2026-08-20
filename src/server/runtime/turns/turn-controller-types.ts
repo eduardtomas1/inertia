@@ -23,6 +23,7 @@ import type {
   ProviderGoalMutation,
   ProviderGoalSnapshot,
   ProviderMetadataEvent,
+  ProviderHostToolBridge,
   ProviderRunCallbacks,
   ProviderRunInput,
   ProviderRunResult,
@@ -131,6 +132,11 @@ export interface TurnControllerHooks {
    */
   broadcastConversationShell?(conversationId: string): void;
   providerInfo(): readonly ProviderInfo[];
+  /** Exact-turn host authority; absent means the selected harness gets no tools. */
+  hostToolsForTurn?(input: {
+    conversation: Conversation;
+    turn: AgentTurn;
+  }): ProviderHostToolBridge | undefined;
   applyProviderMetadata?(event: ProviderMetadataEvent): void;
   onNativeGoalSynchronized?(input: {
     conversationId: string;

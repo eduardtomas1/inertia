@@ -138,6 +138,7 @@ function startCodexRun(
         : {}),
       goalContinuationExpected:
         options.input.goalContinuationExpected === true,
+      ...(options.hostTools ? { hostTools: options.hostTools } : {}),
       planMode: options.input.interactionMode === "plan",
       access: options.input.access,
       onText: emitter.text,

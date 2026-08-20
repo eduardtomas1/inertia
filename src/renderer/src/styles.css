@@ -4885,6 +4885,7 @@ button.environment-row:focus-visible,
 }
 
 @container (max-width: 900px) {
+  .composer-tools > .composer-action-control,
   .composer-options > .composer-action-control {
     display: none;
   }

@@ -122,7 +122,9 @@ describe("composer input and control zones", () => {
     expect(toolbarSource).toContain("<MessagesSquare");
     expect(toolbarSource).toContain("composer-pill composer-action-control");
     expect(toolbarSource).toContain('? "is-active"');
-    expect(css).toMatch(/@container \(max-width:\s*720px\)[^{]*\{[\s\S]*?\.composer-action-control,[\s\S]*?display:\s*none/u);
+    expect(css).toMatch(
+      /@container \(max-width:\s*900px\)\s*\{[\s\S]*?\.composer-tools > \.composer-action-control,[\s\S]*?\.composer-options > \.composer-action-control\s*\{[^}]*display:\s*none/su,
+    );
   });
 
   it("integrates previews and notices without nested card surfaces", () => {

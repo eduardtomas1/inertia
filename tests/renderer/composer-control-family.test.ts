@@ -157,7 +157,7 @@ describe("composer setting control family", () => {
     expect(compactRule).not.toContain(".composer-usage {\n    display: none");
     expect(compactRule).not.toContain(".send-button {\n    display: none");
     expect(css).toMatch(
-      /@container \(max-width:\s*900px\)\s*\{[\s\S]*?\.composer-options > \.composer-action-control\s*\{[^}]*display:\s*none/su,
+      /@container \(max-width:\s*900px\)\s*\{[\s\S]*?\.composer-tools > \.composer-action-control,[\s\S]*?\.composer-options > \.composer-action-control\s*\{[^}]*display:\s*none/su,
     );
     expect(moreMenuSource).toContain('aria-label="More composer options"');
     expect(moreMenuSource).toContain('aria-haspopup="menu"');

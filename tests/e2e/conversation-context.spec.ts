@@ -117,7 +117,7 @@ test("chooses, previews, and preserves bounded cross-chat provenance", async ({
   });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText(
-    "Token-like secrets are redacted as a safeguard, not a guarantee. Review every excerpt before sharing.",
+    "Redaction is a safeguard, not a guarantee. Review every excerpt.",
   )).toBeVisible();
   await expect(dialog.getByText(
     "Carry only this reviewed retry decision into the implementation chat.",
@@ -159,7 +159,7 @@ test("chooses, previews, and preserves bounded cross-chat provenance", async ({
 
   await page.emulateMedia({ forcedColors: "active" });
   await expect(dialog).toBeVisible();
-  expect(await dialog.locator(".context-excerpt").first().evaluate((element) =>
+  expect(await dialog.locator(".c-x").first().evaluate((element) =>
     getComputedStyle(element).borderTopStyle)).not.toBe("none");
   await page.emulateMedia({ forcedColors: "none" });
 

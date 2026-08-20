@@ -176,8 +176,8 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await expect(profileRail.locator(".backend-profile-rail-item").filter({
     hasText: /^OpenAI/u,
   }).locator(".backend-profile-dot")).toHaveClass(/is-ready/u);
-  await expect(profileRail.locator(".backend-profile-rail-item").filter({
-    hasText: /^Kimi/u,
+  await expect(profileRail.getByRole("button", {
+    name: "Kimi api.kimi.com",
   }).locator(".backend-profile-dot")).not.toHaveClass(/is-ready/u);
   await profileRail.getByText("Kimi", { exact: true }).click();
   await expect(page.getByText("Backend credential", { exact: true })).toBeVisible();

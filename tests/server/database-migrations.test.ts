@@ -1587,7 +1587,7 @@ describe("runtime migration catalog", () => {
         `);
       }
       unreceipted.prepare(
-        "DELETE FROM schema_migrations WHERE version = 61",
+        "DELETE FROM schema_migrations WHERE version >= 61",
       ).run();
       unreceipted.close();
 
@@ -1844,6 +1844,7 @@ describe("runtime migration catalog", () => {
       { version: 59 },
       { version: 60 },
       { version: 61 },
+      { version: 62 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

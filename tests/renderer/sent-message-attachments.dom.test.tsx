@@ -67,7 +67,7 @@ describe("sent message attachments", () => {
 
     trigger.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("dialog", { name: image.name }))
+    expect(await screen.findByRole("dialog", { name: image.name }))
       .toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole("button", {

@@ -4,7 +4,12 @@ import {
   Image as ImageIcon,
   ImageOff,
 } from "lucide-react";
-import { useCallback, useEffect, useId, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useState,
+} from "react";
 
 import type { ChatAttachment } from "@shared/contracts";
 import {
@@ -107,31 +112,18 @@ export function SentMessageAttachmentList({
             <li
               className="sent-attachment"
               data-request-context-kind={kind}
-              data-attachment-preview={previewKind ?? "unavailable"}
+              data-attachment-preview={previewKind}
               key={attachment.id}
             >
-              {previewKind
-                ? (
-                    <button
-                      type="button"
-                      className="sent-attachment-open"
-                      aria-label={`Preview attachment ${attachment.name}`}
-                      aria-describedby={metadataId}
-                      onClick={() => setPreviewAttachment(attachment)}
-                    >
-                      {copy}
-                    </button>
-                  )
-                : (
-                    <div
-                      className="sent-attachment-open is-metadata-only"
-                      role="group"
-                      aria-label={`Attached file ${attachment.name}`}
-                      aria-describedby={metadataId}
-                    >
-                      {copy}
-                    </div>
-                  )}
+              <button
+                type="button"
+                className="sent-attachment-open"
+                aria-label={`Preview attachment ${attachment.name}`}
+                aria-describedby={metadataId}
+                onClick={() => setPreviewAttachment(attachment)}
+              >
+                {copy}
+              </button>
             </li>
           );
         })}

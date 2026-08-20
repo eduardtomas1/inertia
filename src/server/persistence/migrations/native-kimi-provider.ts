@@ -12,7 +12,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
   foreignKeys: "off",
   up: (database) => {
     database.exec(`
-    CREATE TABLE provider_metadata_cache_v61 (
+    CREATE TABLE provider_metadata_cache_v62 (
       provider_id TEXT PRIMARY KEY
         CHECK (provider_id IN ('codex', 'claude', 'cursor', 'kimi', 'opencode')),
       executable TEXT CHECK (executable IS NULL OR length(executable) <= 4096),
@@ -45,7 +45,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       rate_limits_stale INTEGER NOT NULL DEFAULT 0
         CHECK (rate_limits_stale IN (0, 1))
     );
-    INSERT INTO provider_metadata_cache_v61 (
+    INSERT INTO provider_metadata_cache_v62 (
       provider_id, executable, version, auth_state,
       models_json, models_updated_at, models_last_attempted_at,
       models_provenance, models_stale, rate_limits_json,
@@ -60,9 +60,9 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       rate_limits_provenance, rate_limits_stale
     FROM provider_metadata_cache;
     DROP TABLE provider_metadata_cache;
-    ALTER TABLE provider_metadata_cache_v61 RENAME TO provider_metadata_cache;
+    ALTER TABLE provider_metadata_cache_v62 RENAME TO provider_metadata_cache;
 
-    CREATE TABLE diff_review_summaries_v61 (
+    CREATE TABLE diff_review_summaries_v62 (
       conversation_id TEXT PRIMARY KEY
         REFERENCES conversations(id) ON DELETE CASCADE,
       fingerprint TEXT NOT NULL CHECK (length(fingerprint) IN (8, 64)),
@@ -74,7 +74,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       summary_json TEXT
         CHECK (summary_json IS NULL OR length(summary_json) <= 524288)
     );
-    INSERT INTO diff_review_summaries_v61 (
+    INSERT INTO diff_review_summaries_v62 (
       conversation_id, fingerprint, provider_id, overall, files_json,
       generated_at, summary_json
     )
@@ -83,9 +83,9 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       generated_at, summary_json
     FROM diff_review_summaries;
     DROP TABLE diff_review_summaries;
-    ALTER TABLE diff_review_summaries_v61 RENAME TO diff_review_summaries;
+    ALTER TABLE diff_review_summaries_v62 RENAME TO diff_review_summaries;
 
-    CREATE TABLE provider_metadata_scoped_cache_v61 (
+    CREATE TABLE provider_metadata_scoped_cache_v62 (
       scope_key TEXT PRIMARY KEY CHECK (length(scope_key) BETWEEN 2 AND 8192),
       provider_id TEXT NOT NULL CHECK (
         provider_id IN ('codex', 'claude', 'cursor', 'kimi', 'opencode')
@@ -131,7 +131,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       rate_limits_stale INTEGER NOT NULL DEFAULT 0
         CHECK (rate_limits_stale IN (0, 1))
     );
-    INSERT INTO provider_metadata_scoped_cache_v61 (
+    INSERT INTO provider_metadata_scoped_cache_v62 (
       scope_key, provider_id, harness_id, backend_profile_id, model_id,
       executable, version, backend_configuration_revision, auth_state,
       models_json, models_updated_at, models_last_attempted_at,
@@ -148,7 +148,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       rate_limits_provenance, rate_limits_stale
     FROM provider_metadata_scoped_cache;
     DROP TABLE provider_metadata_scoped_cache;
-    ALTER TABLE provider_metadata_scoped_cache_v61
+    ALTER TABLE provider_metadata_scoped_cache_v62
       RENAME TO provider_metadata_scoped_cache;
     CREATE INDEX provider_metadata_scoped_identity_idx
       ON provider_metadata_scoped_cache(
@@ -159,7 +159,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
     DROP TRIGGER IF EXISTS paired_launches_conversation_delete;
     DROP TRIGGER IF EXISTS paired_launches_project_delete;
 
-    CREATE TABLE agent_turns_v61 (
+    CREATE TABLE agent_turns_v62 (
       id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
       conversation_id TEXT NOT NULL
         REFERENCES conversations(id) ON DELETE CASCADE,
@@ -248,7 +248,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       ),
       CHECK (created_at <= updated_at)
     );
-    INSERT INTO agent_turns_v61 (
+    INSERT INTO agent_turns_v62 (
       id, conversation_id, run_id, user_message_id,
       terminal_assistant_message_id, provider_id, harness_id,
       backend_profile_id, model, model_alias, reasoning_effort,
@@ -271,7 +271,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       continuation_identity_json
     FROM agent_turns;
     DROP TABLE agent_turns;
-    ALTER TABLE agent_turns_v61 RENAME TO agent_turns;
+    ALTER TABLE agent_turns_v62 RENAME TO agent_turns;
     CREATE INDEX agent_turns_conversation_requested_idx
       ON agent_turns(conversation_id, requested_at ASC, id ASC);
     CREATE INDEX agent_turns_status_requested_idx
@@ -281,7 +281,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
     CREATE INDEX agent_turns_usage_dashboard_completed_idx
       ON agent_turns(association, completed_at ASC, id ASC);
 
-    CREATE TABLE subagent_traces_v61 (
+    CREATE TABLE subagent_traces_v62 (
       id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
       conversation_id TEXT NOT NULL
         REFERENCES conversations(id) ON DELETE CASCADE,
@@ -298,7 +298,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
         OR length(provider_agent_id) BETWEEN 1 AND 1000
       ),
       parent_trace_id TEXT
-        REFERENCES subagent_traces_v61(id) ON DELETE SET NULL,
+        REFERENCES subagent_traces_v62(id) ON DELETE SET NULL,
       parent_provider_agent_id TEXT CHECK (
         parent_provider_agent_id IS NULL
         OR length(parent_provider_agent_id) BETWEEN 1 AND 1000
@@ -340,7 +340,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       CHECK (provider_task_id IS NOT NULL OR provider_agent_id IS NOT NULL),
       CHECK (created_at <= updated_at)
     );
-    INSERT INTO subagent_traces_v61 (
+    INSERT INTO subagent_traces_v62 (
       id, conversation_id, run_id, turn_id, provider_id,
       provider_task_id, provider_agent_id, parent_trace_id,
       parent_provider_agent_id, parent_provider_tool_use_id,
@@ -357,7 +357,7 @@ export const nativeKimiProviderMigration: DatabaseMigrationDefinition = {
       updated_at, is_live
     FROM subagent_traces;
     DROP TABLE subagent_traces;
-    ALTER TABLE subagent_traces_v61 RENAME TO subagent_traces;
+    ALTER TABLE subagent_traces_v62 RENAME TO subagent_traces;
     CREATE INDEX subagent_traces_turn_order_idx
       ON subagent_traces(turn_id, created_at ASC, sequence ASC, id ASC);
     CREATE UNIQUE INDEX subagent_traces_task_identity_idx

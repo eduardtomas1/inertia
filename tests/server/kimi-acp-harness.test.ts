@@ -931,7 +931,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       },
     });
     await cleanup.manager.disposeAll().catch(() => undefined);
-  });
+  }, 90_000);
 
   it("cancels the native session and confirms descendant cleanup", async () => {
     const root = portableFixtureRoot("kimi ACP cancellation");

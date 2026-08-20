@@ -36,7 +36,7 @@ describe("attachment preview dialog", () => {
 
     await user.click(trigger);
 
-    const dialog = screen.getByRole("dialog", { name: "preview.png" });
+    const dialog = await screen.findByRole("dialog", { name: "preview.png" });
     expect(opened).toHaveBeenCalledOnce();
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(screen.getByRole("img", { name: "preview.png" }))

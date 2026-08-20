@@ -53,7 +53,7 @@ export function mergeComposerAttachments(
 export function formatAttachmentSize(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`;
   if (bytes < 1_024 * 1_024) {
-    return `${Math.max(0.1, bytes / 1_024).toFixed(1)} KB`;
+    return `${(bytes / 1_024).toFixed(1)} KB`;
   }
   return `${(bytes / (1_024 * 1_024)).toFixed(1)} MB`;
 }
@@ -66,7 +66,7 @@ export type AttachmentPreviewKind =
 
 export function attachmentPreviewKind(
   attachment: Pick<ChatAttachment, "mimeType">,
-): AttachmentPreviewKind | null {
+): AttachmentPreviewKind {
   if (chatAttachmentKind(attachment.mimeType) === "image") return "image";
   if (attachment.mimeType === "application/pdf") return "pdf";
   if (
@@ -76,7 +76,6 @@ export function attachmentPreviewKind(
   return "text";
 }
 
-export function attachmentPreviewUrl(attachment: ChatAttachment): string | null {
-  if (!attachmentPreviewKind(attachment)) return null;
+export function attachmentPreviewUrl(attachment: ChatAttachment): string {
   return `inertia://bundle/attachment-preview/${encodeURIComponent(attachment.id)}`;
 }

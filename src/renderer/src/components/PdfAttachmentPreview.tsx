@@ -4,21 +4,38 @@ import {
   useRef,
   useState,
 } from "react";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
-
-import { pdfCanvasLayout } from "../utils/pdfCanvasLayout";
+import type {
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  PageViewport,
+  getDocument,
+} from "pdfjs-dist";
 
 interface PdfAttachmentPreviewProps {
   source: string;
   title: string;
   onFailure: () => void;
+  loadAttachment: (source: string) => Promise<{
+    bytes: Uint8Array;
+    getDocument: typeof getDocument;
+  }>;
+  prepareCanvas: (
+    canvas: HTMLCanvasElement,
+    page: PDFPageProxy,
+    stageWidth: number,
+  ) => {
+    context: CanvasRenderingContext2D;
+    viewport: PageViewport;
+  };
 }
 
 export function PdfAttachmentPreview({
   source,
   title,
   onFailure,
+  loadAttachment,
+  prepareCanvas,
 }: PdfAttachmentPreviewProps): React.JSX.Element {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -44,14 +61,7 @@ export function PdfAttachmentPreview({
     let cancelled = false;
     setRendering(true);
     void (async () => {
-      const [{ getDocument, GlobalWorkerOptions }, response] =
-        await Promise.all([
-          import("pdfjs-dist"),
-          fetch(source, { cache: "no-store", credentials: "omit" }),
-        ]);
-      if (!response.ok) throw new Error("The PDF preview is unavailable.");
-      GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      const { bytes, getDocument } = await loadAttachment(source);
       if (cancelled) return;
       const task = getDocument({
         data: bytes,
@@ -78,7 +88,7 @@ export function PdfAttachmentPreview({
       taskRef.current = null;
       if (task) void task.destroy();
     };
-  }, [onFailure, source]);
+  }, [loadAttachment, onFailure, source]);
 
   useEffect(() => {
     const document = documentRef.current;
@@ -89,26 +99,11 @@ export function PdfAttachmentPreview({
     renderRef.current?.cancel();
     void document.getPage(pageNumber).then(async (page) => {
       if (cancelled) return;
-      const baseline = page.getViewport({ scale: 1 });
-      const layout = pdfCanvasLayout({
-        pageWidth: baseline.width,
-        pageHeight: baseline.height,
-        stageWidth,
-        pixelRatio: window.devicePixelRatio,
-      });
-      const renderViewport = page.getViewport({
-        scale: layout.renderScale,
-      });
-      canvas.width = layout.canvasWidth;
-      canvas.height = layout.canvasHeight;
-      canvas.style.width = `${layout.displayWidth}px`;
-      canvas.style.height = `${layout.displayHeight}px`;
-      const context = canvas.getContext("2d", { alpha: false });
-      if (!context) throw new Error("Canvas is unavailable.");
+      const { context, viewport } = prepareCanvas(canvas, page, stageWidth);
       const render = page.render({
         canvas,
         canvasContext: context,
-        viewport: renderViewport,
+        viewport,
       });
       renderRef.current = render;
       await render.promise;
@@ -123,7 +118,7 @@ export function PdfAttachmentPreview({
       cancelled = true;
       renderRef.current?.cancel();
     };
-  }, [onFailure, pageCount, pageNumber, stageWidth]);
+  }, [onFailure, pageCount, pageNumber, prepareCanvas, stageWidth]);
 
   return (
     <div ref={stageRef} className="pdf-attachment-preview">

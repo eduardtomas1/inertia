@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-
 import {
   expectComposerEndsAtDock,
   expectComposerReadinessContained,
@@ -476,9 +475,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       exact: true,
     })).toBeVisible();
     await expect(attachmentList.getByText(
-      `PDF document · ${(await stat(attachmentDocumentPath)).size} B`, {
-        exact: true,
-      },
+      `PDF document · ${(await stat(attachmentDocumentPath)).size} B`, { exact: true },
     )).toBeVisible();
     await expect(dock.getByText(
       "Document preview is available, but this route cannot read documents. Remove it before sending.",

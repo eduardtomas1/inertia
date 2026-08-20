@@ -716,7 +716,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       activityId: "tool-image",
       phase: "completed",
       label: "Generated image: Provider architecture",
-      detail: "Output: <workspace>/generated.png\nReferences: <workspace>/reference.png",
+      detail: `Output: ${join("<workspace>", "generated.png")}\nReferences: ${join("<workspace>", "reference.png")}`,
     }));
     expect(subagents).toEqual([expect.objectContaining({
       providerTaskId: "tool-subagent",

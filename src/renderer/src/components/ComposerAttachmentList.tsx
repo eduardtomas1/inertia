@@ -52,7 +52,7 @@ export function ComposerAttachmentList({
                 {previewKind === "image"
                   ? (
                       <img
-                        src={previewUrl ?? undefined}
+                        src={previewUrl}
                         alt=""
                       />
                     )
@@ -76,23 +76,15 @@ export function ComposerAttachmentList({
               data-attachment-kind={kind}
               key={attachment.id}
             >
-              {previewKind
-                ? (
-                    <button
-                      type="button"
-                      className="composer-attachment-open"
-                      data-preview-source={previewUrl ?? undefined}
-                      aria-label={`Preview attachment ${attachment.name}`}
-                      onClick={() => setPreviewAttachment(attachment)}
-                    >
-                      {content}
-                    </button>
-                  )
-                : (
-                    <span className="composer-attachment-open is-unavailable">
-                      {content}
-                    </span>
-                  )}
+              <button
+                type="button"
+                className="composer-attachment-open"
+                data-preview-source={previewUrl}
+                aria-label={`Preview attachment ${attachment.name}`}
+                onClick={() => setPreviewAttachment(attachment)}
+              >
+                {content}
+              </button>
               <button
                 type="button"
                 className="composer-attachment-remove"

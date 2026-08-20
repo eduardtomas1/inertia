@@ -67,7 +67,7 @@ function pairedDeletionTriggers(
   `).all() as Array<{ name: string; sql: string }>;
 }
 
-function copyPopulatedRowsToV60(
+function copyPopulatedRowsToV61(
   database: Database.Database,
   populatedDatabasePath: string,
 ): void {
@@ -86,7 +86,7 @@ function copyPopulatedRowsToV60(
   expect(database.pragma("foreign_key_check")).toEqual([]);
 }
 
-async function populatedV60Fixture(): Promise<{
+async function populatedV61Fixture(): Promise<{
   databasePath: string;
   conversationId: string;
   turnId: string;
@@ -95,7 +95,7 @@ async function populatedV60Fixture(): Promise<{
   const workspacePath = join(directory, "workspace");
   await mkdir(workspacePath);
   const databasePath = join(directory, "inertia.sqlite");
-  const populatedDatabasePath = join(directory, "populated-v61.sqlite");
+  const populatedDatabasePath = join(directory, "populated-v62.sqlite");
   const store = new RuntimeStore(populatedDatabasePath, workspacePath, {
     recoverInterruptedRuns: false,
   });
@@ -231,11 +231,11 @@ async function populatedV60Fixture(): Promise<{
   populatedDatabase.close();
 
   const database = new Database(databasePath);
-  migrateRuntimeDatabase(database, 60);
-  copyPopulatedRowsToV60(database, populatedDatabasePath);
+  migrateRuntimeDatabase(database, 61);
+  copyPopulatedRowsToV61(database, populatedDatabasePath);
   expect((database.prepare(
     "SELECT MAX(version) AS version FROM schema_migrations",
-  ).get() as { version: number }).version).toBe(60);
+  ).get() as { version: number }).version).toBe(61);
   for (const table of REBUILT_TABLES) {
     const sql = (database.prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -255,7 +255,7 @@ describe.sequential("native Kimi provider migration", () => {
   });
 
   it("preserves all rebuilt rows, indexes, foreign keys, and latest deletion guards", async () => {
-    const fixture = await populatedV60Fixture();
+    const fixture = await populatedV61Fixture();
     const rollbackPath = join(
       await temporaryDirectory(),
       "rollback.sqlite",
@@ -272,7 +272,7 @@ describe.sequential("native Kimi provider migration", () => {
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect((database.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(61);
+    ).get() as { version: number }).version).toBe(62);
 
     const indexes = (database.prepare(`
       SELECT name FROM sqlite_master
@@ -324,7 +324,7 @@ describe.sequential("native Kimi provider migration", () => {
     expect(() => migrateRuntimeDatabase(rollback)).toThrow(DatabaseMigrationError);
     expect((rollback.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(60);
+    ).get() as { version: number }).version).toBe(61);
     expect(rollback.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(rollback.pragma("foreign_key_check")).toHaveLength(1);
     expect(rowsByTable(rollback)).toEqual(rollbackRows);

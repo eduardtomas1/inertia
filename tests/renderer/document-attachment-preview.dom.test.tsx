@@ -144,7 +144,7 @@ describe("document attachment previews", () => {
     });
 
     await user.click(trigger);
-    const close = screen.getByRole("button", {
+    const close = await screen.findByRole("button", {
       name: "Close preview of forecast.xlsx",
     });
     await waitFor(() => expect(close).toHaveFocus());

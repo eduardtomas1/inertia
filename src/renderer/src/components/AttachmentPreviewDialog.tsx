@@ -1,32 +1,10 @@
-import { ExternalLink, FileSpreadsheet, FileText, X } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useId,
-  lazy,
-  Suspense,
-  useRef,
-  useState,
-} from "react";
-import { createPortal } from "react-dom";
+import { lazy, Suspense } from "react";
 
 import type { ChatAttachment } from "@shared/contracts";
-import { chatAttachmentTypeLabel } from "@shared/attachments";
-import {
-  attachmentPreviewKind,
-  attachmentPreviewUrl,
-  formatAttachmentSize,
-} from "../utils/composerAttachments";
-import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import {
-  focusModalOnAnimationFrame,
-  trapModalFocus,
-} from "../utils/modalFocus";
-import { PdfAttachmentPreview } from "./PdfAttachmentPreview";
 
-const DocumentAttachmentPreview = lazy(async () => ({
+const DeferredAttachmentPreviewDialog = lazy(async () => ({
   default: (await import("./DocumentAttachmentPreview"))
-    .DocumentAttachmentPreview,
+    .AttachmentPreviewDialog,
 }));
 
 type AttachmentPreviewDialogProps = {
@@ -34,157 +12,12 @@ type AttachmentPreviewDialogProps = {
   onClose: () => void;
 };
 
-export function AttachmentPreviewDialog({
-  attachment,
-  onClose,
-}: AttachmentPreviewDialogProps): React.JSX.Element | null {
-  const titleId = useId();
-  const descriptionId = useId();
-  const closeRef = useRef<HTMLButtonElement>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [opening, setOpening] = useState(false);
-  const [openFailed, setOpenFailed] = useState(false);
-  const previewKind = attachmentPreviewKind(attachment);
-  const previewUrl = attachmentPreviewUrl(attachment);
-  const markLoadFailed = useCallback(() => setLoadFailed(true), []);
-  useNativePreviewSuspension(Boolean(previewKind && previewUrl));
-
-  useEffect(() => {
-    const restoreFocus = focusModalOnAnimationFrame(
-      () => closeRef.current?.focus(),
-    );
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    document.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      document.removeEventListener("keydown", closeOnEscape, true);
-      restoreFocus();
-    };
-  }, [onClose]);
-
-  if (!previewKind || !previewUrl) return null;
-
-  return createPortal(
-    <div
-      className="attachment-preview-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        className="attachment-preview-dialog"
-        data-preview-kind={previewKind}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        onKeyDown={(event) => trapModalFocus(event, event.currentTarget)}
-      >
-        <header className="attachment-preview-header">
-          <span className="attachment-preview-identity">
-            {previewKind === "spreadsheet"
-              ? <FileSpreadsheet size={16} aria-hidden="true" />
-              : previewKind !== "image"
-                ? <FileText size={16} aria-hidden="true" />
-                : null}
-            <span>
-              <strong id={titleId}>{attachment.name}</strong>
-              <small id={descriptionId}>
-                {chatAttachmentTypeLabel(attachment.mimeType)}
-                {" · "}
-                {formatAttachmentSize(attachment.size)}
-              </small>
-            </span>
-          </span>
-          <button
-            ref={closeRef}
-            type="button"
-            className="attachment-preview-close"
-            aria-label={`Close preview of ${attachment.name}`}
-            onClick={onClose}
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </header>
-        <div className="attachment-preview-stage" data-load-failed={loadFailed}>
-          {loadFailed
-            ? (
-                <div className="attachment-preview-unavailable" role="alert">
-                  <FileText size={28} aria-hidden="true" />
-                  <strong>Preview unavailable</strong>
-                  <span>
-                    The secure preview could not be displayed. Re-add the file
-                    if it changed after upload.
-                  </span>
-                </div>
-              )
-            : previewKind === "image"
-              ? (
-                  <img
-                    src={previewUrl}
-                    alt={attachment.name}
-                    onError={markLoadFailed}
-                  />
-                )
-              : previewKind === "pdf"
-                ? (
-                  <PdfAttachmentPreview
-                    source={previewUrl}
-                    title={attachment.name}
-                    onFailure={markLoadFailed}
-                  />
-                  )
-                : (
-                    <Suspense fallback={(
-                      <div className="document-attachment-preview-loading" role="status">
-                        <span>Preparing secure preview…</span>
-                      </div>
-                    )}>
-                      <DocumentAttachmentPreview
-                        source={previewUrl}
-                        title={attachment.name}
-                        mimeType={attachment.mimeType}
-                        onFailure={markLoadFailed}
-                      />
-                    </Suspense>
-                  )}
-        </div>
-        {previewKind === "pdf" && (
-          <footer className="attachment-preview-footer">
-            <span>
-              If the embedded viewer is unavailable, open this validated copy
-              in your default PDF app.
-            </span>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={opening}
-              onClick={() => {
-                if (opening) return;
-                setOpenFailed(false);
-                setOpening(true);
-                void window.inertia.openAttachmentExternally(attachment.id)
-                  .catch(() => setOpenFailed(true))
-                  .finally(() => setOpening(false));
-              }}
-            >
-              <ExternalLink size={14} aria-hidden="true" />
-              <span>{opening ? "Opening…" : "Open in PDF app"}</span>
-            </button>
-            {openFailed && (
-              <span className="attachment-preview-open-error" role="alert">
-                The validated copy could not be opened.
-              </span>
-            )}
-          </footer>
-        )}
-      </section>
-    </div>,
-    document.body,
+export function AttachmentPreviewDialog(
+  props: AttachmentPreviewDialogProps,
+): React.JSX.Element {
+  return (
+    <Suspense fallback={null}>
+      <DeferredAttachmentPreviewDialog {...props} />
+    </Suspense>
   );
 }

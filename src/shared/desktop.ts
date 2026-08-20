@@ -14,6 +14,15 @@ export interface RuntimeConnection {
   databaseRecoveryNotice?: DatabaseRecoveryStartupNotice;
 }
 
+export interface RuntimeConnectionUnavailable {
+  unavailable: true;
+  message: string;
+}
+
+export type RuntimeConnectionResult =
+  | RuntimeConnection
+  | RuntimeConnectionUnavailable;
+
 export interface DatabaseRecoveryStartupNotice {
   id: string;
   outcome: "restored" | "created-empty";
@@ -331,7 +340,7 @@ function plainObject(value: unknown): value is Record<string, unknown> {
 }
 
 export interface DesktopBridge {
-  getRuntimeConnection: () => Promise<RuntimeConnection>;
+  getRuntimeConnection: () => Promise<RuntimeConnectionResult>;
   /** Wakes a reconnect attempt without exposing the runtime URL capability. */
   onRuntimeReady: (listener: () => void) => () => void;
   selectDirectory: () => Promise<string | null>;

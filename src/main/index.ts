@@ -31,6 +31,7 @@ import {
   type AppHealthSnapshot, type AppProcessHealth,
   parseAttachmentPickerMode, parseDesktopNotificationRequest,
   parseOpenProjectPathRequest,
+  type RuntimeConnectionUnavailable,
 } from "../shared/desktop.js";
 import { safeHttpUrl } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
@@ -354,15 +355,33 @@ function assertTrustedIpc(event: IpcMainInvokeEvent, argumentCount: number, expe
   }
 }
 
+function runtimeConnectionUnavailable(message: string): RuntimeConnectionUnavailable {
+  return { unavailable: true, message };
+}
+
+function isTransientRuntimeConnectionError(error: unknown): error is Error {
+  return error instanceof Error && (
+    error.message.startsWith("The local service is starting.")
+    || error.message.startsWith("The local service is restarting.")
+  );
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     assertTrustedIpc(event, args.length);
 
     if (!runtimeSupervisor) {
-      throw new Error("The local runtime is not available");
+      return runtimeConnectionUnavailable("The local runtime is not available.");
     }
 
-    return runtimeSupervisor.connection();
+    try {
+      return runtimeSupervisor.connection();
+    } catch (error) {
+      if (isTransientRuntimeConnectionError(error)) {
+        return runtimeConnectionUnavailable(error.message);
+      }
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC.selectDirectory, async (event, ...args) => {

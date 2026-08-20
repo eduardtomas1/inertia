@@ -3,7 +3,7 @@ import type {
   AppUpdateStatus,
   DesktopBridge,
   PreviewStateUpdate,
-  RuntimeConnection,
+  RuntimeConnectionResult,
 } from "../shared/desktop.js";
 import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
 import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
@@ -58,7 +58,7 @@ ipcRenderer.on(
 
 const bridge: DesktopBridge = Object.freeze({
   getRuntimeConnection: () =>
-    ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnection>,
+    ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnectionResult>,
   onRuntimeReady: (listener: () => void) => {
     const handler = () => listener();
     ipcRenderer.on(IPC.runtimeReady, handler);

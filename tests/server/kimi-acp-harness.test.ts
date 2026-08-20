@@ -30,9 +30,10 @@ import {
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-// Node protects process.stdout with a no-op _destroy. Restore the pipe-backed
-// Socket implementation and close the separately retained fd so Windows and
-// POSIX both deliver EOF while the fixture process remains alive.
+// Node protects process.stdout with a no-op _destroy. POSIX uv_pipe_open owns
+// fd 1, so restoring the pipe-backed Socket implementation delivers EOF while
+// the fixture remains alive. Windows deliberately duplicates stdio handles
+// and refuses to close fd 0-2; its fixture must flush and exit instead.
 const CLOSE_NODE_STDOUT_TRANSPORT_SOURCE = `
 const stdoutFd = process.stdout.fd;
 const realStdoutDestroy = Object.getPrototypeOf(process.stdout)._destroy;
@@ -105,38 +106,50 @@ describe.sequential("Kimi ACP harness", () => {
     await Promise.all(roots.splice(0).map(removePortableFixture));
   });
 
-  it("closes the inherited Node stdout pipe while the fixture process remains owned", async () => {
-    const root = portableFixtureRoot("Kimi ACP stdout close");
-    roots.push(root);
-    const command = portableNodeExecutable(root, "kimi");
-    writeNodeSubcommand(root, "acp", `
+  it(
+    "delivers EOF with the platform-supported stdout lifecycle",
+    async () => {
+      const root = portableFixtureRoot("Kimi ACP stdout close");
+      roots.push(root);
+      const command = portableNodeExecutable(root, "kimi");
+      writeNodeSubcommand(root, "acp", process.platform === "win32" ? `
+process.stdout.end("ready\\n", () => process.exit(0));
+` : `
 process.stdout.write("ready\\n", () => {
   ${CLOSE_NODE_STDOUT_TRANSPORT_SOURCE}
 });
 setInterval(() => {}, 1000);
 `);
-    const child = spawn(command, ["acp"], {
-      cwd: root,
-      detached: process.platform !== "win32",
-      shell: false,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const output: Buffer[] = [];
-    let stdoutEnded = false;
-    child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
-    child.stdout.once("end", () => {
-      stdoutEnded = true;
-    });
-    try {
-      await waitFor("the fixture's inherited stdout pipe to close", () => stdoutEnded);
-      expect(Buffer.concat(output).toString("utf8")).toBe("ready\n");
-      expect(child.exitCode).toBeNull();
-      expect(child.signalCode).toBeNull();
-    } finally {
-      expect(await terminateProcessTreeAndWait(child, true)).toBe(true);
-    }
-  });
+      const child = spawn(command, ["acp"], {
+        cwd: root,
+        detached: process.platform !== "win32",
+        shell: false,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const output: Buffer[] = [];
+      let stdoutEnded = false;
+      child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
+      child.stdout.once("end", () => {
+        stdoutEnded = true;
+      });
+      try {
+        await waitFor("the fixture's inherited stdout pipe to close", () => stdoutEnded);
+        expect(Buffer.concat(output).toString("utf8")).toBe("ready\n");
+        if (process.platform === "win32") {
+          await waitFor("the flushed Windows fixture to exit", () => child.exitCode !== null);
+          expect(child.exitCode).toBe(0);
+        } else {
+          expect(child.exitCode).toBeNull();
+          expect(child.signalCode).toBeNull();
+        }
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          expect(await terminateProcessTreeAndWait(child, true)).toBe(true);
+        }
+      }
+    },
+  );
 
   it("uses shell-free native ACP and rejects the incompatible legacy CLI path", () => {
     expect(kimiAcpProcessInvocation("/usr/local/bin/kimi", {}, "linux"))
@@ -909,16 +922,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     agentInfo: { name: "Kimi Code CLI", version: "test" },
   } });
   if (message.method === "session/new") {
-    ${CLOSE_NODE_STDOUT_TRANSPORT_SOURCE}
-    setInterval(() => {}, 1000);
+    ${process.platform === "win32"
+      ? "process.stdout.end(() => process.exit(0));"
+      : `${CLOSE_NODE_STDOUT_TRANSPORT_SOURCE}\n    setInterval(() => {}, 1000);`}
   }
 });
 `);
     expect(transport.result).toMatchObject({
       status: "failed",
       failure: {
-        reason: "transport-closed",
-        terminalEvent: "transport/closed",
+        reason: process.platform === "win32" ? "process-exit" : "transport-closed",
+        terminalEvent: process.platform === "win32" ? "process/exit" : "transport/closed",
       },
     });
 

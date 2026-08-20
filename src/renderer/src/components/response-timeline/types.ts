@@ -72,6 +72,7 @@ export interface ResponseTimelineProps {
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ) => void;
   onStop: () => void;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;

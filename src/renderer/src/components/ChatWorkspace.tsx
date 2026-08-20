@@ -193,6 +193,7 @@ type ChatWorkspaceProps = {
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ) => void;
   onClearPromptContext?: () => void;
   onLatestContentVisibilityChange?: (visible: boolean) => void;

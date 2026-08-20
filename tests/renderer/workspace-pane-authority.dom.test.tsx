@@ -508,6 +508,91 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.filePreview).toBeNull();
   });
 
+  it("does not let a stale Markdown heading request follow a newer file", async () => {
+    const fileResolvers = new Map<
+      string,
+      (event: ServerEvent) => void
+    >();
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "project.actions") {
+        return Promise.resolve(result({
+          kind: "project.actions",
+          actions: [],
+        }));
+      }
+      if (command.type !== "workspace.file.read") {
+        return Promise.reject(new Error("Unexpected command"));
+      }
+      return new Promise((resolve) => {
+        fileResolvers.set(command.payload.path, resolve);
+      });
+    });
+    const hook = renderHook(() => useWorkspaceFiles({
+      project: alpha,
+      conversation: alphaChat,
+      enabled: true,
+      loadOnMount: false,
+      online: true,
+      request,
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.selectWorkspaceFile(
+      "docs/guide.md",
+      undefined,
+      false,
+      "details",
+    ));
+    await waitFor(() => {
+      expect(hook.result.current.selectedMarkdownHeading).toMatchObject({
+        path: "docs/guide.md",
+        headingId: "details",
+      });
+    });
+
+    act(() => hook.result.current.selectWorkspaceFile("README.md"));
+    await waitFor(() => {
+      expect(hook.result.current.selectedFile).toBe("README.md");
+      expect(hook.result.current.selectedMarkdownHeading).toBeNull();
+    });
+
+    await act(async () => {
+      fileResolvers.get("docs/guide.md")?.(result({
+        kind: "workspace.file",
+        usedFallback: false,
+        file: {
+          path: "docs/guide.md",
+          content: "# Guide\n\n## Details\n",
+          truncated: false,
+          language: "markdown",
+          contentDigest: "a".repeat(64),
+          modifiedAt: "2026-08-20T07:00:00.000Z",
+        },
+      }));
+      await Promise.resolve();
+    });
+    expect(hook.result.current.selectedFile).toBe("README.md");
+    expect(hook.result.current.selectedMarkdownHeading).toBeNull();
+
+    await act(async () => {
+      fileResolvers.get("README.md")?.(result({
+        kind: "workspace.file",
+        usedFallback: false,
+        file: {
+          path: "README.md",
+          content: "# Readme\n",
+          truncated: false,
+          language: "markdown",
+          contentDigest: "b".repeat(64),
+          modifiedAt: "2026-08-20T07:00:00.000Z",
+        },
+      }));
+      await Promise.resolve();
+    });
+    expect(hook.result.current.filePreview?.path).toBe("README.md");
+    expect(hook.result.current.selectedMarkdownHeading).toBeNull();
+  });
+
   it("opens literal colon filenames before retrying a Codex source location", async () => {
     const requests: Array<{ path: string; fallbackPath?: string }> = [];
     let literalExists = true;

@@ -13,12 +13,14 @@ import {
   workspaceFileWriteCommand,
   type WorkspaceFileWriteIdentity,
 } from "../../utils/workspaceFileWrite";
+import type { MarkdownHeadingRequest } from "../../utils/markdownHeading";
 import { readWorkspaceFileSelection } from "./readWorkspaceFileSelection";
 
 type SelectWorkspaceFileOptions = readonly [
   path: string,
   requestedLocation: WorkspaceFileLocation | undefined,
   literalPath: boolean,
+  headingId: string | undefined,
   request: (command: CommandWithoutId) => Promise<ServerEvent>,
   projectId: string,
   conversationId: string | undefined,
@@ -28,6 +30,9 @@ type SelectWorkspaceFileOptions = readonly [
   setSelectedFile: Dispatch<SetStateAction<string | null>>,
   setSelectedFileLocation: Dispatch<
     SetStateAction<WorkspaceFileLocation | null>
+  >,
+  setSelectedMarkdownHeading: Dispatch<
+    SetStateAction<MarkdownHeadingRequest | null>
   >,
   setFilePreview: Dispatch<SetStateAction<WorkspaceFilePreview | null>>,
   setFilePreviewError: Dispatch<SetStateAction<string | null>>,
@@ -39,6 +44,7 @@ export async function selectWorkspaceFile([
   path,
   requestedLocation,
   literalPath,
+  headingId,
   request,
   projectId,
   conversationId,
@@ -47,6 +53,7 @@ export async function selectWorkspaceFile([
   generationRef,
   setSelectedFile,
   setSelectedFileLocation,
+  setSelectedMarkdownHeading,
   setFilePreview,
   setFilePreviewError,
   setFilePreviewLoading,
@@ -56,6 +63,9 @@ export async function selectWorkspaceFile([
   const generation = ++generationRef.current;
   setSelectedFile(path);
   setSelectedFileLocation(null);
+  setSelectedMarkdownHeading(headingId
+    ? { path, headingId, requestId: generation }
+    : null);
   setFilePreview(null);
   setFilePreviewError(null);
   setFilePreviewLoading(true);
@@ -74,6 +84,13 @@ export async function selectWorkspaceFile([
     ) {
       setSelectedFile(file.path);
       setSelectedFileLocation(location);
+      if (headingId) {
+        setSelectedMarkdownHeading({
+          path: file.path,
+          headingId,
+          requestId: generation,
+        });
+      }
       setFilePreview(file);
     }
   } catch (error) {

@@ -7,6 +7,7 @@ interface WorkspaceEntryActions {
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ) => void;
   isCurrent?: () => boolean;
 }
@@ -16,6 +17,7 @@ export async function openWorkspaceEntry(
   actions: WorkspaceEntryActions,
   location?: WorkspaceFileLocation,
   literalPath?: boolean,
+  headingId?: string,
 ): Promise<"directory" | "file" | "stale"> {
   const isCurrent = actions.isCurrent ?? (() => true);
   if (!isCurrent()) return "stale";
@@ -23,7 +25,8 @@ export async function openWorkspaceEntry(
     await actions.inspectDirectory(path);
   } catch {
     if (!isCurrent()) return "stale";
-    actions.openFile(path, location, literalPath);
+    if (headingId) actions.openFile(path, location, literalPath, headingId);
+    else actions.openFile(path, location, literalPath);
     return "file";
   }
   if (!isCurrent()) return "stale";
@@ -35,6 +38,7 @@ type OpenWorkspaceFileOptions = readonly [
   path: string,
   location: WorkspaceFileLocation | undefined,
   literalPath: boolean | undefined,
+  headingId: string | undefined,
   authorityRef: { current: string },
   authority: string,
   inspectDirectory: (options: { directory: string }) => Promise<unknown>,
@@ -44,6 +48,7 @@ type OpenWorkspaceFileOptions = readonly [
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ) => void,
   setActiveTool: (tool: "files") => void,
 ];
@@ -52,6 +57,7 @@ export async function openWorkspaceFile([
   path,
   location,
   literalPath,
+  headingId,
   authorityRef,
   authority,
   inspectDirectory,
@@ -71,9 +77,9 @@ export async function openWorkspaceFile([
         relativePath: directory,
         action: "reveal",
       }),
-    openFile: (file, fileLocation, exactPath) => {
-      openFile(file, fileLocation, exactPath);
+    openFile: (file, fileLocation, exactPath, fileHeadingId) => {
+      openFile(file, fileLocation, exactPath, fileHeadingId);
       setActiveTool("files");
     },
-  }, location, literalPath);
+  }, location, literalPath, headingId);
 }

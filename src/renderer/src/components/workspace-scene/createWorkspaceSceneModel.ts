@@ -761,6 +761,7 @@ export function createWorkspaceSceneModel({
         preview: workspaceTools.filePreview,
         selectedPath: workspaceTools.selectedFile,
         selectedLocation: workspaceTools.selectedFileLocation,
+        selectedMarkdownHeading: workspaceTools.selectedMarkdownHeading,
         projectRoot: conversation?.worktreePath ?? project.normalizedPath,
         projectId: project.id,
         conversationId: conversation?.id,

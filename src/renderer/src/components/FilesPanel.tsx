@@ -1,4 +1,5 @@
 import {
+  Component,
   lazy,
   Suspense,
   useCallback,
@@ -6,7 +7,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import clsx from "clsx";
 import {
@@ -38,7 +41,10 @@ import {
   type WorkspaceTreeRow,
 } from "../utils/workspaceTree";
 import { highlightedSourceLines } from "../utils/sourceHighlighting";
-import { markdownHeadingDomId } from "../utils/markdownHeading";
+import {
+  markdownHeadingDomId,
+  type MarkdownHeadingRequest,
+} from "../utils/markdownHeading";
 import {
   workspaceFileLocationLabel,
   type WorkspaceFileLocation,
@@ -46,9 +52,69 @@ import {
 import { IconButton, LoadingMark } from "./ui";
 import { FileEditorDialog } from "./FileEditorDialog";
 
-const ResponseMarkdown = lazy(async () => ({
-  default: (await import("./ResponseMarkdown")).ResponseMarkdown,
-}));
+type ResponseMarkdownComponent =
+  typeof import("./ResponseMarkdown")["ResponseMarkdown"];
+type ResponseMarkdownLoader = (attempt: number) => Promise<{
+  ResponseMarkdown: ResponseMarkdownComponent;
+}>;
+
+const loadResponseMarkdown: ResponseMarkdownLoader = (_attempt) =>
+  import("./ResponseMarkdown");
+
+class MarkdownPreviewErrorBoundary extends Component<{
+  children: ReactNode;
+  fallback: ReactNode;
+}, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  render(): ReactNode {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+export function MarkdownPreviewSurface({
+  loader = loadResponseMarkdown,
+  loadingFallback,
+  onShowSource,
+  ...markdownProps
+}: ComponentProps<ResponseMarkdownComponent> & {
+  loader?: ResponseMarkdownLoader;
+  loadingFallback: ReactNode;
+  onShowSource: () => void;
+}): React.JSX.Element {
+  const [attempt, setAttempt] = useState(0);
+  const Renderer = useMemo(() => lazy(async () => ({
+    default: (await loader(attempt)).ResponseMarkdown,
+  })), [attempt, loader]);
+  const failure = (
+    <div className="file-preview-markdown-failure" role="alert">
+      <AlertCircle size={20} aria-hidden="true" />
+      <strong>Markdown preview couldn&apos;t load</strong>
+      <span>The source is still available.</span>
+      <div>
+        <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+          <RefreshCw size={12} aria-hidden="true" />
+          Retry
+        </button>
+        <button type="button" onClick={onShowSource}>
+          <Code2 size={12} aria-hidden="true" />
+          Source
+        </button>
+      </div>
+    </div>
+  );
+  return (
+    <MarkdownPreviewErrorBoundary key={attempt} fallback={failure}>
+      <Suspense fallback={loadingFallback}>
+        <Renderer {...markdownProps} />
+      </Suspense>
+    </MarkdownPreviewErrorBoundary>
+  );
+}
 
 export interface WorkspaceEntriesPage {
   directory: string;
@@ -64,6 +130,7 @@ export type FilesPanelProps = {
   projectId: string;
   conversationId?: string;
   selectedLocation?: WorkspaceFileLocation | null;
+  selectedMarkdownHeading?: MarkdownHeadingRequest | null;
   loading?: boolean;
   previewLoading?: boolean;
   error?: string | null;
@@ -73,11 +140,13 @@ export type FilesPanelProps = {
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ) => void;
   onOpenWorkspaceEntry?: (
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ) => void;
   onLoadEntries: (request: {
     directory?: string;
@@ -214,6 +283,7 @@ export function FilesPanel({
   projectId,
   conversationId,
   selectedLocation = null,
+  selectedMarkdownHeading = null,
   loading = false,
   previewLoading = false,
   error = null,
@@ -248,6 +318,7 @@ export function FilesPanel({
     path: string;
     id: string;
   } | null>(null);
+  const consumedMarkdownHeadingRef = useRef<string | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const previewLineRefs = useRef(new Map<number, HTMLSpanElement>());
   const previewCodeRef = useRef<HTMLPreElement>(null);
@@ -306,6 +377,51 @@ export function FilesPanel({
     [preview, previewLanguage, renderedMarkdownPreview],
   );
   const previewPath = preview?.path ?? null;
+  const selectedMarkdownHeadingIdentity = selectedMarkdownHeading
+    ? [
+        selectedMarkdownHeading.requestId,
+        selectedMarkdownHeading.path,
+        selectedMarkdownHeading.headingId,
+      ].join("\0")
+    : null;
+  const requestedMarkdownHeading = useMemo(() => (
+    pendingMarkdownHeading ?? (
+      selectedMarkdownHeading
+      && selectedMarkdownHeadingIdentity
+        !== consumedMarkdownHeadingRef.current
+        ? {
+            path: selectedMarkdownHeading.path,
+            id: selectedMarkdownHeading.headingId,
+          }
+        : null
+    )
+  ), [
+    pendingMarkdownHeading,
+    selectedMarkdownHeading,
+    selectedMarkdownHeadingIdentity,
+  ]);
+
+  useEffect(() => {
+    if (
+      !selectedMarkdownHeadingIdentity
+      || selectedMarkdownHeadingIdentity === consumedMarkdownHeadingRef.current
+      || selectedMarkdownHeading?.path !== previewPath
+      || !markdownPreview
+      || markdownPreviewBlockedReason !== null
+    ) return;
+    setPreviewViewState((current) => (
+      current.identity === previewViewIdentity && current.view === "preview"
+        ? current
+        : { identity: previewViewIdentity, view: "preview" }
+    ));
+  }, [
+    markdownPreview,
+    markdownPreviewBlockedReason,
+    previewPath,
+    previewViewIdentity,
+    selectedMarkdownHeading,
+    selectedMarkdownHeadingIdentity,
+  ]);
 
   const openMarkdownEntry = useCallback((
     path: string,
@@ -313,19 +429,20 @@ export function FilesPanel({
     literalPath?: boolean,
     headingId?: string,
   ): void => {
-    if (headingId) {
+    if (headingId && previewPath === path) {
       setPendingMarkdownHeading({ path, id: headingId });
-      if (previewPath === path) return;
-    } else {
-      setPendingMarkdownHeading(null);
+      return;
     }
-    (onOpenWorkspaceEntry ?? onSelectFile)(path, location, literalPath);
+    setPendingMarkdownHeading(null);
+    const openEntry = onOpenWorkspaceEntry ?? onSelectFile;
+    if (headingId) openEntry(path, location, literalPath, headingId);
+    else openEntry(path, location, literalPath);
   }, [onOpenWorkspaceEntry, onSelectFile, previewPath]);
 
   useEffect(() => {
     if (
-      !pendingMarkdownHeading
-      || pendingMarkdownHeading.path !== previewPath
+      !requestedMarkdownHeading
+      || requestedMarkdownHeading.path !== previewPath
       || !renderedMarkdownPreview
     ) return;
     const container = previewMarkdownRef.current;
@@ -334,17 +451,24 @@ export function FilesPanel({
     const reveal = (): boolean => {
       const heading = [...container.querySelectorAll<HTMLElement>("[id]")]
         .find(({ id }) => id === markdownHeadingDomId(
-          pendingMarkdownHeading.id,
+          requestedMarkdownHeading.id,
         ));
       if (!heading) return false;
       heading.scrollIntoView({ block: "start", inline: "nearest" });
       heading.tabIndex = -1;
       heading.focus({ preventScroll: true });
       setPendingMarkdownHeading((current) =>
-        current?.path === pendingMarkdownHeading.path
-          && current.id === pendingMarkdownHeading.id
+        current?.path === requestedMarkdownHeading.path
+          && current.id === requestedMarkdownHeading.id
           ? null
           : current);
+      if (
+        selectedMarkdownHeadingIdentity
+        && selectedMarkdownHeading?.path === requestedMarkdownHeading.path
+        && selectedMarkdownHeading.headingId === requestedMarkdownHeading.id
+      ) {
+        consumedMarkdownHeadingRef.current = selectedMarkdownHeadingIdentity;
+      }
       return true;
     };
     const scheduleReveal = (): void => {
@@ -363,7 +487,13 @@ export function FilesPanel({
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [pendingMarkdownHeading, previewPath, renderedMarkdownPreview]);
+  }, [
+    previewPath,
+    renderedMarkdownPreview,
+    requestedMarkdownHeading,
+    selectedMarkdownHeading,
+    selectedMarkdownHeadingIdentity,
+  ]);
 
   useEffect(() => {
     if (!previewPath || !selectedLocation || renderedMarkdownPreview) return;
@@ -911,23 +1041,26 @@ export function FilesPanel({
                   tabIndex={0}
                   aria-label={`Rendered preview of ${preview.path}`}
                 >
-                  <Suspense fallback={(
-                    <div className="panel-loading" role="status">
-                      <LoadingMark label="Rendering Markdown" />
-                      <span>Rendering Markdown…</span>
-                    </div>
-                  )}>
-                    <ResponseMarkdown
-                      key={previewViewIdentity}
-                      content={preview.content}
-                      projectRoot={projectRoot}
-                      projectId={projectId}
-                      conversationId={conversationId}
-                      markdownBasePath={workspaceParentPath(preview.path)}
-                      defaultCodeWrap
-                      onOpenProjectFile={openMarkdownEntry}
-                    />
-                  </Suspense>
+                  <MarkdownPreviewSurface
+                    key={previewViewIdentity}
+                    content={preview.content}
+                    projectRoot={projectRoot}
+                    projectId={projectId}
+                    conversationId={conversationId}
+                    markdownBasePath={workspaceParentPath(preview.path)}
+                    defaultCodeWrap
+                    onOpenProjectFile={openMarkdownEntry}
+                    onShowSource={() => setPreviewViewState({
+                      identity: previewViewIdentity,
+                      view: "source",
+                    })}
+                    loadingFallback={(
+                      <div className="panel-loading" role="status">
+                        <LoadingMark label="Rendering Markdown" />
+                        <span>Rendering Markdown…</span>
+                      </div>
+                    )}
+                  />
                 </div>
               ) : (
                 <pre ref={previewCodeRef} className="file-preview-code" tabIndex={0} aria-label={`Contents of ${preview.path}`}>

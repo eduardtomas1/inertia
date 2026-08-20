@@ -25,6 +25,9 @@ const MAX_RECORD_BYTES = 768;
 const SCHEMA_VERSION = 1;
 const PROCESS_GROUP_EXIT_WAIT_MS = 1_000;
 const PROCESS_GROUP_EXIT_POLL_MS = 10;
+const PID_PROCESS_GROUP_SETTLE_WAIT_MS = 100;
+const PID_PROCESS_GROUP_SETTLE_POLL_MS = 1;
+const PID_PROCESS_GROUP_SETTLE_SIGNAL = new Int32Array(new SharedArrayBuffer(4));
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface LinuxProcessIdentity {
@@ -479,6 +482,174 @@ function hardStopUnclaimed(child: Pick<ChildProcess, "pid" | "kill">): void {
   try { child.kill("SIGKILL"); } catch { /* The child may be gone. */ }
 }
 
+function exactPendingClaim(
+  registry: ActiveRuntimeOwnedProcessRegistry,
+  ownershipId: string,
+): boolean {
+  const records = registry.journal.records(registry.runtimeGenerationId);
+  if (!records) return false;
+  const matching = records.filter((record) =>
+    record.ownershipId === ownershipId);
+  return matching.length === 1
+    && matching[0]?.state === "pending"
+    && matching[0].runtimeGenerationId === registry.runtimeGenerationId
+    && matching[0].systemBootId === registry.systemBootId;
+}
+
+function defaultSettleWait(durationMs: number): void {
+  Atomics.wait(
+    PID_PROCESS_GROUP_SETTLE_SIGNAL,
+    0,
+    0,
+    durationMs,
+  );
+}
+
+interface RuntimeOwnedPidProcessOptions {
+  readonly now?: () => number;
+  readonly wait?: (durationMs: number) => void;
+  readonly readIdentity?: (pid: number) => LinuxProcessIdentity | null;
+  readonly processCanExecute?: (pid: number) => boolean | null;
+}
+
+function claimPidProcessAfterGroupSettle(
+  registry: ActiveRuntimeOwnedProcessRegistry,
+  ownershipId: string,
+  pid: number,
+  options: RuntimeOwnedPidProcessOptions,
+): RuntimeOwnedProcessClaim {
+  const now = options.now ?? Date.now;
+  const wait = options.wait ?? defaultSettleWait;
+  const readIdentity = options.readIdentity ?? readLinuxProcessIdentity;
+  const deadlineAt = now() + PID_PROCESS_GROUP_SETTLE_WAIT_MS;
+  while (true) {
+    if (!exactPendingClaim(registry, ownershipId)) {
+      throw new Error("The spawned process ownership intent changed.");
+    }
+    const identity = readIdentity(pid);
+    if (
+      !identity
+      || identity.pid !== pid
+      || identity.parentPid !== process.pid
+    ) throw new Error("The spawned process identity could not be proven.");
+    if (identity.processGroupId === pid) {
+      try {
+        return registry.journal.claim(
+          ownershipId,
+          registry.runtimeGenerationId,
+          registry.systemBootId,
+          pid,
+          process.pid,
+        );
+      } catch (error) {
+        if (!exactPendingClaim(registry, ownershipId)) throw error;
+        const current = readIdentity(pid);
+        if (
+          !current
+          || current.pid !== pid
+          || current.parentPid !== process.pid
+          || current.processGroupId === pid
+        ) throw error;
+      }
+    }
+    const remainingMs = Math.trunc(deadlineAt - now());
+    if (remainingMs <= 0) {
+      throw new Error("The spawned process group identity did not settle.");
+    }
+    wait(Math.max(
+      1,
+      Math.min(PID_PROCESS_GROUP_SETTLE_POLL_MS, remainingMs),
+    ));
+  }
+}
+
+function linuxProcessCanExecute(pid: number): boolean | null {
+  if (!validPid(pid)) return null;
+  let stat: string;
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+  } catch (error) {
+    if (
+      error
+      && typeof error === "object"
+      && "code" in error
+      && (error.code === "ENOENT" || error.code === "ESRCH")
+    ) return false;
+    return null;
+  }
+  const closingName = stat.lastIndexOf(")");
+  if (closingName < 2) return null;
+  const state = stat.slice(closingName + 1).trimStart()[0];
+  if (!state || !/^[A-Za-z]$/u.test(state)) return null;
+  return state !== "Z" && state !== "X" && state !== "x";
+}
+
+function exactProcessGroupAbsent(pid: number): boolean | null {
+  try {
+    process.kill(-pid, 0);
+    return false;
+  } catch (error) {
+    return error
+      && typeof error === "object"
+      && "code" in error
+      && error.code === "ESRCH"
+      ? true
+      : null;
+  }
+}
+
+function releaseFailedPidClaimIfStopped(
+  registry: ActiveRuntimeOwnedProcessRegistry,
+  claim: ActiveRuntimeOwnedProcessClaim,
+  pid: number,
+  processCanExecute: (pid: number) => boolean | null,
+): Promise<boolean> {
+  if (claim.releaseConfirmation) return claim.releaseConfirmation;
+  let settleConfirmation!: (confirmed: boolean) => void;
+  const confirmation = new Promise<boolean>((resolve) => {
+    settleConfirmation = resolve;
+  });
+  claim.releaseConfirmation = confirmation;
+  claim.settleReleaseConfirmation = settleConfirmation;
+  registry.pendingReleaseConfirmations.add(confirmation);
+  void confirmation.then(() => {
+    registry.pendingReleaseConfirmations.delete(confirmation);
+    claim.settleReleaseConfirmation = null;
+  });
+  const deadlineAt = Date.now() + PROCESS_GROUP_EXIT_WAIT_MS;
+  const poll = (): void => {
+    if (
+      activeRegistry !== registry
+      || claim.released
+      || !exactPendingClaim(registry, claim.ownershipId)
+    ) {
+      settleConfirmation(claim.released);
+      return;
+    }
+    const executable = processCanExecute(pid);
+    if (executable === false && exactProcessGroupAbsent(pid) === true) {
+      try {
+        settleConfirmation(releaseActiveClaim(registry, claim));
+      } catch {
+        settleConfirmation(false);
+      }
+      return;
+    }
+    const remainingMs = Math.trunc(deadlineAt - Date.now());
+    if (remainingMs <= 0) {
+      settleConfirmation(false);
+      return;
+    }
+    const timer = setTimeout(
+      poll,
+      Math.max(1, Math.min(PROCESS_GROUP_EXIT_POLL_MS, remainingMs)),
+    );
+    timer.unref();
+  };
+  poll();
+  return confirmation;
+}
+
 function releaseIfGroupExited(
   registry: ActiveRuntimeOwnedProcessRegistry,
   claim: ActiveRuntimeOwnedProcessClaim,
@@ -600,6 +771,7 @@ export interface RuntimeOwnedPidProcess<T> {
 
 export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
   spawnProcess: () => T,
+  options: RuntimeOwnedPidProcessOptions = {},
 ): RuntimeOwnedPidProcess<T> {
   const registry = activeRegistry;
   if (!registry) {
@@ -613,15 +785,20 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
     registry.runtimeGenerationId,
     registry.systemBootId,
   );
+  const claim: ActiveRuntimeOwnedProcessClaim = {
+    ownershipId,
+    released: false,
+    releaseConfirmation: null,
+    settleReleaseConfirmation: null,
+  };
   let owned: T | null = null;
   try {
     owned = spawnProcess();
-    registry.journal.claim(
+    claimPidProcessAfterGroupSettle(
+      registry,
       ownershipId,
-      registry.runtimeGenerationId,
-      registry.systemBootId,
       owned.pid,
-      process.pid,
+      options,
     );
   } catch (error) {
     if (owned) {
@@ -633,16 +810,16 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
           return true;
         },
       });
+      void releaseFailedPidClaimIfStopped(
+        registry,
+        claim,
+        failedOwned.pid,
+        options.processCanExecute ?? linuxProcessCanExecute,
+      );
     } else registry.journal.release(ownershipId);
     throw error;
   }
   const confirmedOwned = owned;
-  const claim: ActiveRuntimeOwnedProcessClaim = {
-    ownershipId,
-    released: false,
-    releaseConfirmation: null,
-    settleReleaseConfirmation: null,
-  };
   return {
     process: confirmedOwned,
     confirmStopped: () => releaseActiveClaim(registry, claim),

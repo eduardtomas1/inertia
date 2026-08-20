@@ -89,6 +89,27 @@ function longRunningChild(): ChildProcess {
   return child;
 }
 
+function rawLongRunningPidChild(): ChildProcess & { readonly pid: number } {
+  const child = spawn(
+    process.execPath,
+    ["-e", "setInterval(() => undefined, 1000)"],
+    { detached: true, shell: false, stdio: "ignore" },
+  );
+  if (!child.pid) throw new Error("Missing child PID");
+  liveChildren.add(child);
+  child.once("close", () => liveChildren.delete(child));
+  return child as ChildProcess & { readonly pid: number };
+}
+
+function preGroupIdentity(pid: number) {
+  const identity = readLinuxProcessIdentity(pid);
+  if (!identity) throw new Error("Missing child identity");
+  return {
+    ...identity,
+    processGroupId: pid === 2 ? 3 : pid - 1,
+  };
+}
+
 function closeOf(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return Promise.resolve();
@@ -219,6 +240,213 @@ describe.skipIf(process.platform !== "linux")(
       expect(owned.confirmStopped()).toBe(true);
       expect(journal.records(runtimeGenerationId)).toEqual([]);
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);
+    });
+
+    it("yields through a pre-setsid PID group transition before exposure", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      let elapsedMs = 0;
+      let identityReads = 0;
+      const waits: number[] = [];
+      const owned = spawnRuntimeOwnedPidProcess(
+        rawLongRunningPidChild,
+        {
+          now: () => elapsedMs,
+          wait: (durationMs) => {
+            waits.push(durationMs);
+            elapsedMs += durationMs;
+          },
+          readIdentity: (pid) => {
+            identityReads += 1;
+            return identityReads <= 2
+              ? preGroupIdentity(pid)
+              : readLinuxProcessIdentity(pid);
+          },
+        },
+      );
+      const journal = new RuntimeOwnedProcessJournal(directory);
+
+      expect(waits).toEqual([1, 1]);
+      expect(elapsedMs).toBe(2);
+      expect(journal.records(runtimeGenerationId)).toMatchObject([{
+        state: "owned",
+        process: { pid: owned.process.pid, processGroupId: owned.process.pid },
+      }]);
+      hardStop(owned.process);
+      await closeOf(owned.process);
+      expect(owned.confirmStopped()).toBe(true);
+    });
+
+    it.each([
+      ["pid", (pid: number) => ({ ...preGroupIdentity(pid), pid: pid + 1 })],
+      ["parent", (pid: number) => ({
+        ...preGroupIdentity(pid),
+        parentPid: process.pid + 1,
+      })],
+    ] as const)("rejects an exact %s mismatch before claiming a PID-backed child", async (
+      _mismatch,
+      identity,
+    ) => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      let child!: ChildProcess & { readonly pid: number };
+      vi.useFakeTimers();
+      try {
+        expect(() => spawnRuntimeOwnedPidProcess(
+          () => {
+            child = rawLongRunningPidChild();
+            return child;
+          },
+          {
+            readIdentity: identity,
+            processCanExecute: () => null,
+          },
+        )).toThrow("identity could not be proven");
+        const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        await expect(cleanup).resolves.toBe(false);
+        expect(new RuntimeOwnedProcessJournal(directory)
+          .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+      } finally {
+        vi.useRealTimers();
+        await closeOf(child);
+      }
+    });
+
+    it.each(["present", "eperm"] as const)(
+      "keeps a failed PID claim pending while its exact group is %s",
+      async (groupState) => {
+        const directory = temporaryDirectory();
+        activate(directory);
+        let child!: ChildProcess & { readonly pid: number };
+        let elapsedMs = 0;
+        const nativeKill = process.kill;
+        vi.useFakeTimers();
+        const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+          if (child && pid === -child.pid && signal === 0) {
+            if (groupState === "eperm") throw processError("EPERM");
+            return true;
+          }
+          return nativeKill(pid, signal);
+        });
+        try {
+          expect(() => spawnRuntimeOwnedPidProcess(
+            () => {
+              child = rawLongRunningPidChild();
+              return child;
+            },
+            {
+              now: () => elapsedMs,
+              wait: (durationMs) => {
+                elapsedMs += durationMs;
+              },
+              readIdentity: preGroupIdentity,
+              processCanExecute: () => false,
+            },
+          )).toThrow("group identity did not settle");
+          const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
+          await vi.advanceTimersByTimeAsync(1_000);
+
+          await expect(cleanup).resolves.toBe(false);
+          expect(new RuntimeOwnedProcessJournal(directory)
+            .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+        } finally {
+          kill.mockRestore();
+          vi.useRealTimers();
+          await closeOf(child);
+        }
+      },
+    );
+
+    it("does not retire a failed PID claim before its direct child stops", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      let child!: ChildProcess & { readonly pid: number };
+      let elapsedMs = 0;
+      let executionProbes = 0;
+      const nativeKill = process.kill;
+      vi.useFakeTimers();
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (child && pid === -child.pid && signal === 0) {
+          throw processError("ESRCH");
+        }
+        return nativeKill(pid, signal);
+      });
+      try {
+        expect(() => spawnRuntimeOwnedPidProcess(
+          () => {
+            child = rawLongRunningPidChild();
+            return child;
+          },
+          {
+            now: () => elapsedMs,
+            wait: (durationMs) => {
+              elapsedMs += durationMs;
+            },
+            readIdentity: preGroupIdentity,
+            processCanExecute: () => {
+              executionProbes += 1;
+              return executionProbes < 3;
+            },
+          },
+        )).toThrow("group identity did not settle");
+        const journal = new RuntimeOwnedProcessJournal(directory);
+        const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
+
+        expect(journal.records(runtimeGenerationId)).toMatchObject([{
+          state: "pending",
+        }]);
+        expect(kill).not.toHaveBeenCalledWith(-child.pid, 0);
+        await vi.advanceTimersByTimeAsync(10);
+        expect(journal.records(runtimeGenerationId)).toMatchObject([{
+          state: "pending",
+        }]);
+        await vi.advanceTimersByTimeAsync(10);
+
+        await expect(cleanup).resolves.toBe(true);
+        expect(kill).toHaveBeenCalledWith(-child.pid, 0);
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        kill.mockRestore();
+        vi.useRealTimers();
+        await closeOf(child);
+      }
+    });
+
+    it("retires a journal claim failure only after exact stopped proof", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      let child!: ChildProcess & { readonly pid: number };
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      const claim = vi.spyOn(RuntimeOwnedProcessJournal.prototype, "claim")
+        .mockImplementationOnce(() => {
+          throw new Error("The spawned process ownership could not be persisted.");
+        });
+      const nativeKill = process.kill;
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (child && pid === -child.pid && signal === 0) {
+          throw processError("ESRCH");
+        }
+        return nativeKill(pid, signal);
+      });
+      try {
+        expect(() => spawnRuntimeOwnedPidProcess(
+          () => {
+            child = rawLongRunningPidChild();
+            return child;
+          },
+          { processCanExecute: () => false },
+        )).toThrow("could not be persisted");
+
+        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+        expect(claim).toHaveBeenCalledTimes(1);
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        claim.mockRestore();
+        kill.mockRestore();
+        await closeOf(child);
+      }
     });
 
     it("polls the exact process group until ESRCH before retiring its claim", async () => {

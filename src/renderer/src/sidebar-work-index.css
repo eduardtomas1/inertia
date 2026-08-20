@@ -44,8 +44,26 @@
 .activity-thread.status-failed .activity-thread-state-mark { color: var(--status-failed); }
 .activity-thread.status-completed .activity-thread-state-mark { color: var(--status-completed); }
 
-.activity-thread.status-working .activity-thread-state-mark {
-  animation: breathe-ring 1.8s ease-in-out infinite;
+/* The previous animation drove this element's own box-shadow, which replaced
+   the 1.5px sidebar-bg separator above and let the badge merge into the
+   provider icon while working. The waves now ride on pseudo-elements, so the
+   separator survives. */
+.activity-thread.status-working .activity-thread-state-mark::before,
+.activity-thread.status-working .activity-thread-state-mark::after {
+  /* This badge overlaps the provider icon inside a 42px row, so its wave
+     travels less far than the standalone status dots. */
+  --thread-ripple-reach: 1.9;
+  position: absolute;
+  inset: 0;
+  border: 1.25px solid currentcolor;
+  border-radius: 50%;
+  content: "";
+  animation: thread-working-ripple var(--thread-ripple-duration)
+    var(--thread-ripple-ease) infinite;
+}
+
+.activity-thread.status-working .activity-thread-state-mark::after {
+  animation-delay: calc(var(--thread-ripple-duration) / -2);
 }
 
 .activity-thread-trailing {

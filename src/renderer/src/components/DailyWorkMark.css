@@ -1,26 +1,29 @@
 .daily-work-mark {
   display: block;
   flex: 0 0 auto;
-  overflow: visible;
   color: inherit;
   fill: none;
   shape-rendering: geometricPrecision;
 }
 
+/* Matching Lucide's stroke in user units keeps the mark optically identical to
+   the Usage and Settings icons at every size the app renders it. */
 .daily-work-mark > path {
-  vector-effect: non-scaling-stroke;
   stroke: currentcolor;
-  stroke-width: 1.65;
+  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.daily-work-mark-time {
-  color: var(--daily-work-mark-highlight, var(--blue));
+/* Matching the base rule's specificity so the dot keeps its heavier stroke:
+   `.daily-work-mark > path` would otherwise win and render it at width 2. */
+.daily-work-mark > .daily-work-mark-today {
+  color: var(--daily-work-mark-highlight, var(--accent));
+  stroke-width: 3.2;
 }
 
 @media (forced-colors: active) {
-  .daily-work-mark-time {
+  .daily-work-mark > .daily-work-mark-today {
     color: CanvasText;
   }
 }

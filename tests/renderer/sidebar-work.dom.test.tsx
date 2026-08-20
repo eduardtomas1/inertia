@@ -116,6 +116,7 @@ function renderSidebar(
     projects?: Project[];
     sidebarMode?: AppSnapshot["settings"]["sidebarMode"];
     splitConversationId?: string | null;
+    dailyWorkOpen?: boolean;
   } = {},
 ) {
   const onSnoozeConversation = vi.fn();
@@ -138,6 +139,7 @@ function renderSidebar(
     onCreateConversation: vi.fn(),
     onOpenMultiSpawn: vi.fn(),
     onOpenDailyWork,
+    dailyWorkOpen: options.dailyWorkOpen ?? false,
     onRenameConversation: vi.fn(),
     onPinConversation: vi.fn(),
     onSnoozeConversation,
@@ -289,9 +291,20 @@ describe("compact Work sidebar", () => {
     expect(mark).toHaveAttribute("aria-hidden", "true");
     expect(mark).toHaveAttribute("focusable", "false");
     expect(mark).toHaveAttribute("width", "16");
+    expect(dailyWork).toHaveAttribute("aria-haspopup", "dialog");
+    expect(dailyWork).toHaveAttribute("aria-expanded", "false");
+    expect(dailyWork.className).not.toContain("is-open");
     fireEvent.click(dailyWork);
     expect(view.onOpenDailyWork).toHaveBeenCalledTimes(1);
     expect(view.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the Daily work destination while its dialog is open", () => {
+    renderSidebar([], vi.fn(), [], { dailyWorkOpen: true });
+
+    const dailyWork = screen.getByRole("button", { name: "Daily work" });
+    expect(dailyWork).toHaveAttribute("aria-expanded", "true");
+    expect(dailyWork.className).toContain("is-open");
   });
 
   it("shows chronological rows with provider, project, repository, and branch metadata", () => {

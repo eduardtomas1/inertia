@@ -29,6 +29,7 @@ The useful changes in each Inertia release, in plain language.
 
 - Version 0.0.40 is prepared and reviewed on a dedicated release PR. Release-candidate PRs run the same complete Windows `npm run check` gate used by an exact tag, in addition to the existing Windows shards and Linux/macOS platform matrix, so the tag is no longer the first full Windows proof.
 - The contended Windows generated-PDF cleanup fixture now warms its native canvas dependency before starting the product deadline, preserving the exact second-page cancellation assertion without confusing dependency cold start with product behavior.
+- When a fast Linux child exits between spawn and exact ownership claim, Inertia now retires the fail-closed pending record only after proving both its PID and process group are gone. Short provider probes can no longer leave a clean runtime generation permanently blocked from recovery.
 - Architecture and both lint layers, all TypeScript projects, more than 4,200 unit and integration tests, 430 portable provider contracts, real Electron scenarios, production builds, audits, renderer budgets, package smoke, Electron fuses, screenshots, and exact-head release gates protect the release.
 
 ## 0.0.39 — 2026-08-19

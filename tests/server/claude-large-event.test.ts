@@ -245,7 +245,9 @@ describe("Claude Agent SDK large event boundary", () => {
       bytes: 2,
       kind: "pdf",
     }))).not.toThrow();
-  });
+  // V8 coverage instruments the intentional 16.5/64 MiB boundary scans. The
+  // exact CI case took 15.916s, so bound only this CPU-heavy test explicitly.
+  }, 30_000);
 
   it("keeps malformed, mismatched, unknown, and non-media data on strict bounds", () => {
     const wrongMime = claudeReadMediaResult({ base64: "YQ==", bytes: 1 }) as unknown as {

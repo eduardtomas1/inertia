@@ -32,6 +32,26 @@ export interface DatabaseRecoveryStartupNotice {
   unsupportedBackupsSkipped: number;
 }
 
+export interface InertiaReleaseInfo {
+  tag: string;
+  name: string | null;
+  url: string | null;
+  createdAt: string;
+  releasedAt: string | null;
+  description: string | null;
+}
+
+export interface SendDiscordReleaseInfoRequest {
+  webhookUrl: string;
+  repositoryUrl: string;
+  previousRelease: InertiaReleaseInfo;
+  release: InertiaReleaseInfo;
+}
+
+export interface ListInertiaReleasesRequest {
+  repositoryUrl: string;
+}
+
 export interface DatabaseRecoveryImportSummary {
   projects: number;
   conversations: number;
@@ -364,6 +384,14 @@ export interface DesktopBridge {
   installAppUpdate: () => Promise<AppUpdateStatus>;
   /** Receives sanitized authoritative updater snapshots. */
   onAppUpdateStatus: (listener: (status: AppUpdateStatus) => void) => () => void;
+  /** Lists public Inertia module releases ordered by creation date. */
+  listInertiaReleases: (
+    request: ListInertiaReleasesRequest,
+  ) => Promise<InertiaReleaseInfo[]>;
+  /** Sends one selected release announcement through a Discord incoming webhook. */
+  sendDiscordReleaseInfo: (
+    request: SendDiscordReleaseInfoRequest,
+  ) => Promise<{ sent: true }>;
   selectAttachments: (
     mode?: AttachmentPickerMode,
   ) => Promise<DesktopAttachment[]>;

@@ -8233,8 +8233,10 @@ button.environment-row:focus-visible,
 .commit-dialog h2 { margin: 1px 0 4px; font-size: 13px; }
 .commit-dialog header p { margin: 0; color: var(--text-muted); font-size: 8.5px; }
 .commit-dialog > label { display: flex; flex-direction: column; gap: 7px; margin-top: 20px; color: var(--text-soft); font-size: 9px; font-weight: 600; }
-.commit-dialog > label input { height: 39px; padding: 0 11px; border: 1px solid var(--border); border-radius: 10px; outline: 0; background: var(--surface); font-size: 10px; font-weight: 450; }
-.commit-dialog > label input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
+.commit-dialog > label input,
+.commit-dialog > label select { height: 39px; padding: 0 11px; border: 1px solid var(--border); border-radius: 10px; outline: 0; background: var(--surface); font-size: 10px; font-weight: 450; }
+.commit-dialog > label input:focus,
+.commit-dialog > label select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
 .pull-request-dialog { width: min(520px, 100%); }
 .pull-request-dialog > label textarea { min-height: 130px; resize: vertical; padding: 10px 11px; border: 1px solid var(--border); border-radius: 10px; outline: 0; color: var(--text); background: var(--surface); font: inherit; font-weight: 450; line-height: 1.5; }
 .pull-request-dialog > label textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
@@ -8244,6 +8246,7 @@ button.environment-row:focus-visible,
 .pull-request-draft small { color: var(--text-muted); font-weight: 450; }
 .commit-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 16px; }
 .commit-dialog .primary-button { margin: 0; }
+.release-info-status { margin-top: 12px; }
 .commit-path-heading { display: flex; align-items: center; gap: 5px; margin-top: 14px; color: var(--text-muted); font-size: 8px; }
 .commit-path-heading span { flex: 1; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; }
 .commit-path-heading button { padding: 4px 6px; border-radius: 5px; color: var(--accent-strong); background: var(--accent-soft); font-size: 8px; }
@@ -8985,6 +8988,9 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .codex-binary-path > div { display: flex; flex: 0 0 auto; gap: 8px; }
 .runtime-log-setting { align-items: flex-start; margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--border); }
 .runtime-log-setting small { max-width: 620px; overflow: visible; line-height: 1.5; white-space: normal; }
+.discord-release-model-settings {
+  margin-top: 14px;
+}
 .app-health-setting > span > strong { display: inline-flex; align-items: center; gap: 6px; }
 .app-health-grid { display: grid; grid-template-columns: repeat(4, minmax(72px, 1fr)); gap: 8px; margin-top: 8px; max-width: 620px; }
 .app-health-grid > span { display: flex; flex-direction: column; gap: 2px; padding: 8px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-strong); }

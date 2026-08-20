@@ -216,6 +216,121 @@ describe("Settings composite updates", () => {
     expect(reasoning).toHaveDisplayValue("Xhigh");
   });
 
+  it("saves the Discord release repository and webhook URLs", () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getPlatform: () => "darwin",
+        listInertiaReleases: vi.fn(async () => []),
+      },
+    });
+    const onUpdate = vi.fn(async () => undefined);
+    render(<SettingsView
+      {...settingsProps(onUpdate)}
+      providers={[codexWithModels(), provider("claude", "Claude")]}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Discord" }));
+    const repository = screen.getByLabelText("Discord release repository URL");
+    expect(repository).toHaveValue("");
+
+    fireEvent.change(repository, {
+      target: {
+        value: "https://github.com/eduardtomas1/inertia",
+      },
+    });
+
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      discordReleaseRepositoryUrl: "https://github.com/eduardtomas1/inertia",
+    });
+
+    const webhook = screen.getByLabelText("Discord webhook URL");
+    expect(webhook).toHaveValue("");
+
+    fireEvent.change(webhook, {
+      target: {
+        value: "https://discord.com/api/webhooks/test/token",
+      },
+    });
+
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      discordWebhookUrl: "https://discord.com/api/webhooks/test/token",
+    });
+
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "codex:gpt-5.6-sol" },
+    });
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      discordReleaseProvider: "codex",
+      discordReleaseModel: "gpt-5.6-sol",
+      discordReleaseReasoningEffort: "low",
+    });
+
+    fireEvent.change(screen.getByLabelText("Reasoning"), {
+      target: { value: "xhigh" },
+    });
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      discordReleaseReasoningEffort: "xhigh",
+    });
+    expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled();
+  });
+
+  it("sends the latest release info to Discord", async () => {
+    const previousRelease = {
+      tag: "v0.0.40",
+      name: "Inertia 0.0.40",
+      url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.40",
+      createdAt: "2030-01-02T03:04:05.000Z",
+      releasedAt: "2030-01-02T04:04:05.000Z",
+      description: "Previous release notes",
+    };
+    const release = {
+      tag: "v0.0.41",
+      name: "Inertia 0.0.41",
+      url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.41",
+      createdAt: "2030-01-03T03:04:05.000Z",
+      releasedAt: "2030-01-03T04:04:05.000Z",
+      description: "Release notes",
+    };
+    const sendDiscordReleaseInfo = vi.fn(async () => ({ sent: true as const }));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getPlatform: () => "darwin",
+        listInertiaReleases: vi.fn(async () => [release, previousRelease]),
+        sendDiscordReleaseInfo,
+      },
+    });
+    render(<SettingsView
+      {...settingsProps(vi.fn(async () => undefined))}
+      providers={[codexWithModels(), provider("claude", "Claude")]}
+      settings={{
+        ...defaultSettings,
+        discordReleaseRepositoryUrl: "https://github.com/eduardtomas1/inertia",
+        discordReleaseModel: "gpt-5.6-sol",
+        discordReleaseReasoningEffort: "xhigh",
+        discordWebhookUrl: "https://discord.com/api/webhooks/test/token",
+      }}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Discord" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() =>
+      expect(window.inertia.listInertiaReleases).toHaveBeenCalledWith({
+        repositoryUrl: "https://github.com/eduardtomas1/inertia",
+      }));
+    await waitFor(() =>
+      expect(sendDiscordReleaseInfo).toHaveBeenCalledWith({
+        webhookUrl: "https://discord.com/api/webhooks/test/token",
+        repositoryUrl: "https://github.com/eduardtomas1/inertia",
+        previousRelease,
+        release,
+      }));
+    expect(await screen.findByText("Release info sent to Discord."))
+      .toHaveAttribute("role", "status");
+  });
+
   it("preserves a dirty alias through an equivalent snapshot refresh", () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,

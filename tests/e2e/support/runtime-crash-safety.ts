@@ -56,6 +56,16 @@ function procState(pid: number): { state: string | null; errorCode: string | nul
   }
 }
 
+async function runtimeWebsocketUrl(page: AppFixture["page"]): Promise<string> {
+  return await page.evaluate(async () => {
+    const connection = await window.inertia.getRuntimeConnection();
+    if ("unavailable" in connection) {
+      throw new Error(connection.message);
+    }
+    return connection.websocketUrl;
+  });
+}
+
 export async function expectRuntimeCrashRecovery(
   app: AppFixture,
   testInfo?: TestInfo,
@@ -72,8 +82,7 @@ export async function expectRuntimeCrashRecovery(
     ? new RuntimeGenerationLeaseJournal(dataDirectory).all().find((lease) =>
       lease.runtimeGenerationId.endsWith(`:${before.generation}`)) ?? null
     : null;
-  const beforeUrl = await page.evaluate(() =>
-    window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
+  const beforeUrl = await runtimeWebsocketUrl(page);
   await expect(page.locator(".app-shell")).toHaveAttribute(
     "data-runtime-generation",
     /^[0-9a-f-]{36}$/iu,
@@ -289,8 +298,7 @@ export async function expectRuntimeCrashRecovery(
   }, { timeout: 10_000 }).toBe(true);
   const after = await runtimeSnapshot();
   const replacementReadyObservation = runtimeObservation(after);
-  const afterUrl = await page.evaluate(() =>
-    window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
+  const afterUrl = await runtimeWebsocketUrl(page);
   expect(after.generation).toBeGreaterThan(before.generation);
   expect(after.pid).not.toBe(before.pid);
   expect(afterUrl).not.toBe(beforeUrl);

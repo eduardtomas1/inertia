@@ -58,6 +58,10 @@ import {
   openConversationAttachments,
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
+import {
+  listInertiaReleases,
+  sendDiscordReleaseInfo,
+} from "./inertia-releases.js";
 import { resolveAppUpdateCapability } from "./app-update-capability.js";
 import { AppUpdateInstallCoordinator } from "./app-update-install.js";
 import { loadElectronAppUpdater } from "./electron-app-updater.js";
@@ -109,6 +113,8 @@ const IPC = {
   cancelAppUpdateDownload: "inertia:cancel-app-update-download",
   installAppUpdate: "inertia:install-app-update",
   appUpdateStatus: "inertia:app-update-status",
+  listInertiaReleases: "inertia:list-inertia-releases",
+  sendDiscordReleaseInfo: "inertia:send-discord-release-info",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
@@ -497,6 +503,22 @@ function registerIpcHandlers(): void {
     clipboard.writeText(report.text);
     diagnostics.record("report.copy");
     return { copied: true, eventCount: report.eventCount };
+  });
+
+  ipcMain.handle(IPC.listInertiaReleases, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    return await listInertiaReleases(
+      net.fetch as typeof globalThis.fetch,
+      args[0],
+    );
+  });
+
+  ipcMain.handle(IPC.sendDiscordReleaseInfo, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    return await sendDiscordReleaseInfo(
+      net.fetch as typeof globalThis.fetch,
+      args[0],
+    );
   });
 
   registerClipboardIpc(IPC.copyText, assertTrustedIpc);

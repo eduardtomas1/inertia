@@ -38,7 +38,10 @@ import {
   type ProviderMaintenanceProviderId,
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
-import type { AppHealthSnapshot, AppUpdateStatus } from "@shared/desktop";
+import type {
+  AppHealthSnapshot,
+  AppUpdateStatus,
+} from "@shared/desktop";
 import { INERTIA_VERSION } from "@shared/version";
 import {
   APP_SHORTCUT_KEYS,
@@ -112,13 +115,22 @@ export type SettingsViewProps = {
   onClearBackendDefault: (projectId: string | null) => Promise<void>;
 };
 
-type SettingsSection = "general" | "providers" | "backends" | "connections" | "source" | "keybindings" | "archive";
+type SettingsSection =
+  | "general"
+  | "providers"
+  | "backends"
+  | "connections"
+  | "discord"
+  | "source"
+  | "keybindings"
+  | "archive";
 
 const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> = [
   { id: "general", label: "General", icon: PanelLeft },
   { id: "providers", label: "Providers", icon: Bot },
   { id: "backends", label: "Model backends", icon: ServerCog },
   { id: "connections", label: "Connections & devices", icon: Laptop },
+  { id: "discord", label: "Discord", icon: Bot },
   { id: "source", label: "Source control", icon: GitCompareArrows },
   { id: "keybindings", label: "Keybindings", icon: Keyboard },
   { id: "archive", label: "Archive & data", icon: ArchiveRestore },
@@ -249,6 +261,9 @@ export function SettingsView({
   const [appHealth, setAppHealth] = useState<AppHealthSnapshot | null>(null);
   const [healthStatus, setHealthStatus] = useState<string | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
+  const [releaseInfoLoading, setReleaseInfoLoading] = useState(false);
+  const [releaseInfoError, setReleaseInfoError] = useState<string | null>(null);
+  const [releaseInfoStatus, setReleaseInfoStatus] = useState<string | null>(null);
   const [providerIdentityLabelsDraft, setProviderIdentityLabelsDraft] = useState(
     () => settings.providerIdentityLabels,
   );
@@ -312,6 +327,15 @@ export function SettingsView({
     : "Provider default";
   const modelDefaultReasoningLabel = modelDefaultReasoning?.label
     ?? effectiveDefaultModel?.defaultReasoningEffort;
+  const discordReleaseProvider = providers.find(
+    ({ id }) => id === settings.discordReleaseProvider,
+  );
+  const effectiveDiscordReleaseModel = discordReleaseProvider?.models.find(
+    ({ id }) => id === settings.discordReleaseModel,
+  ) ?? discordReleaseProvider?.models.find(({ isDefault }) => isDefault)
+    ?? discordReleaseProvider?.models[0];
+  const discordReleaseReasoningOptions =
+    effectiveDiscordReleaseModel?.reasoningOptions ?? [];
   const primaryModifier = window.inertia.getPlatform() === "darwin" ? "⌘" : "Ctrl";
   const archivedByProvider = useMemo(() => new Map(providers.map((provider) => [provider.id, provider.label])), [providers]);
   useEffect(() => {
@@ -431,7 +455,43 @@ export function SettingsView({
       setRecoveryOperation(null);
     }
   };
-
+  const generateReleaseInfo = async (): Promise<void> => {
+    if (releaseInfoLoading) return;
+    const repositoryUrl = settings.discordReleaseRepositoryUrl.trim();
+    const webhookUrl = settings.discordWebhookUrl.trim();
+    if (!repositoryUrl) {
+      setReleaseInfoError("Add a release repository URL before generating.");
+      setReleaseInfoStatus(null);
+      return;
+    }
+    if (!webhookUrl) {
+      setReleaseInfoError("Add a Discord webhook URL before generating.");
+      setReleaseInfoStatus(null);
+      return;
+    }
+    setReleaseInfoLoading(true);
+    setReleaseInfoError(null);
+    setReleaseInfoStatus(null);
+    try {
+      const releases = await window.inertia.listInertiaReleases({ repositoryUrl });
+      const [release, previousRelease] = releases;
+      if (!release || !previousRelease) {
+        setReleaseInfoError("At least two releases are required to build the comparison.");
+        return;
+      }
+      await window.inertia.sendDiscordReleaseInfo({
+        webhookUrl,
+        repositoryUrl,
+        previousRelease,
+        release,
+      });
+      setReleaseInfoStatus("Release info sent to Discord.");
+    } catch {
+      setReleaseInfoError("The release info could not be sent to Discord.");
+    } finally {
+      setReleaseInfoLoading(false);
+    }
+  };
   return (
     <main
       ref={rootRef}
@@ -744,6 +804,115 @@ export function SettingsView({
           ConnectionsAndDevicesSettings ? (
             <ConnectionsAndDevicesSettings projects={projects} />
           ) : <SettingsSectionFallback />
+        )}
+
+        {section === "discord" && (
+          <section className="settings-card" aria-labelledby="discord-heading">
+            <div className="settings-card-heading">
+              <div><Bot size={18} /></div>
+              <span>
+                <h3 id="discord-heading">Discord</h3>
+                <p>Prepare release details before publishing them to Discord.</p>
+              </span>
+            </div>
+            <label className="provider-identity-alias">
+              <span>
+                <strong>Repository URL</strong>
+                <small>Public GitHub or GitLab repository used to find releases.</small>
+              </span>
+              <input
+                aria-label="Discord release repository URL"
+                disabled={disabled}
+                maxLength={500}
+                placeholder="https://github.com/org/repo"
+                type="url"
+                value={settings.discordReleaseRepositoryUrl}
+                onChange={(event) => onUpdate({ discordReleaseRepositoryUrl: event.target.value })}
+              />
+            </label>
+            <label className="provider-identity-alias">
+              <span>
+                <strong>Webhook URL</strong>
+                <small>Incoming Discord webhook used for release announcements.</small>
+              </span>
+              <input
+                aria-label="Discord webhook URL"
+                disabled={disabled}
+                maxLength={500}
+                placeholder="https://discord.com/api/webhooks/..."
+                type="url"
+                value={settings.discordWebhookUrl}
+                onChange={(event) => onUpdate({ discordWebhookUrl: event.target.value })}
+              />
+            </label>
+            <div className="settings-form-grid discord-release-model-settings">
+              <label>
+                <span>Model</span>
+                <select
+                  value={`${settings.discordReleaseProvider}:${settings.discordReleaseModel}`}
+                  disabled={disabled || providers.length === 0}
+                  onChange={(event) => {
+                    const [providerId, modelId = ""] = event.target.value.split(":");
+                    const provider = providers.find(
+                      ({ id }) => id === providerId,
+                    );
+                    const model = provider?.models.find(
+                      ({ id }) => id === modelId,
+                    );
+                    onUpdate({
+                      discordReleaseProvider: providerId as ProviderId,
+                      discordReleaseModel: modelId,
+                      discordReleaseReasoningEffort:
+                        model?.defaultReasoningEffort ?? "",
+                    });
+                  }}
+                >
+                  {providers.map((provider) => (
+                    <optgroup label={provider.label} key={provider.id}>
+                      <option value={`${provider.id}:`}>Provider default</option>
+                      {provider.models.map((model) => (
+                        <option value={`${provider.id}:${model.id}`} key={model.id}>
+                          {model.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Reasoning</span>
+                <select
+                  value={settings.discordReleaseReasoningEffort}
+                  disabled={disabled || discordReleaseReasoningOptions.length === 0}
+                  onChange={(event) =>
+                    onUpdate({
+                      discordReleaseReasoningEffort: event.target.value,
+                    })}
+                >
+                  <option value="">Model default</option>
+                  {discordReleaseReasoningOptions.map((option) => (
+                    <option value={option.value} key={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="codex-binary-path runtime-log-setting">
+              <span>
+                <strong>Release info</strong>
+                <small>Generate Discord-ready change analysis for the latest release.</small>
+              </span>
+              <div>
+                <button type="button" className="primary-button" disabled={disabled || releaseInfoLoading} onClick={() => { void generateReleaseInfo(); }}>
+                  <RefreshCw size={14} />
+                  {releaseInfoLoading ? "Sending..." : "Generate"}
+                </button>
+              </div>
+            </div>
+            {releaseInfoError && <p className="settings-card-note release-info-status" role="status">{releaseInfoError}</p>}
+            {releaseInfoStatus && <p className="settings-card-note release-info-status" role="status">{releaseInfoStatus}</p>}
+          </section>
         )}
 
         {section === "source" && (

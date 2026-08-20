@@ -1226,6 +1226,58 @@ export function migrateRuntimeDatabase(database: Database.Database, maximumVersi
       persistAgentThreadManagement,
       conversationContextPacketsMigration,
       nativeKimiProviderMigration,
+      {
+        name: "PersistDiscordReleaseWebhookUrl",
+        up: (database) => {
+          const columns = database.prepare("PRAGMA table_info(app_state)")
+            .all() as Array<{ name: string }>;
+          if (columns.some(({ name }) => name === "discord_webhook_url")) {
+            return;
+          }
+          database.exec(`
+            ALTER TABLE app_state
+              ADD COLUMN discord_webhook_url TEXT NOT NULL DEFAULT ''
+              CHECK (length(discord_webhook_url) <= 500);
+          `);
+        },
+      },
+      {
+        name: "PersistDiscordReleaseRepositoryUrl",
+        up: (database) => {
+          const columns = database.prepare("PRAGMA table_info(app_state)")
+            .all() as Array<{ name: string }>;
+          if (columns.some(({ name }) => name === "discord_release_repository_url")) {
+            return;
+          }
+          database.exec(`
+            ALTER TABLE app_state
+              ADD COLUMN discord_release_repository_url TEXT NOT NULL DEFAULT ''
+              CHECK (length(discord_release_repository_url) <= 500);
+          `);
+        },
+      },
+      {
+        name: "PersistDiscordReleaseAnalysisModel",
+        up: (database) => {
+          const columns = database.prepare("PRAGMA table_info(app_state)")
+            .all() as Array<{ name: string }>;
+          const names = new Set(columns.map(({ name }) => name));
+          const additions = [
+            names.has("discord_release_provider")
+              ? null
+              : "ADD COLUMN discord_release_provider TEXT NOT NULL DEFAULT 'codex'",
+            names.has("discord_release_model")
+              ? null
+              : "ADD COLUMN discord_release_model TEXT NOT NULL DEFAULT '' CHECK (length(discord_release_model) <= 160)",
+            names.has("discord_release_reasoning_effort")
+              ? null
+              : "ADD COLUMN discord_release_reasoning_effort TEXT NOT NULL DEFAULT '' CHECK (length(discord_release_reasoning_effort) <= 40)",
+          ].filter((sql): sql is string => sql !== null);
+          for (const addition of additions) {
+            database.exec(`ALTER TABLE app_state ${addition};`);
+          }
+        },
+      },
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

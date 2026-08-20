@@ -23,6 +23,8 @@ const IPC = {
   cancelAppUpdateDownload: "inertia:cancel-app-update-download",
   installAppUpdate: "inertia:install-app-update",
   appUpdateStatus: "inertia:app-update-status",
+  listInertiaReleases: "inertia:list-inertia-releases",
+  sendDiscordReleaseInfo: "inertia:send-discord-release-info",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
@@ -106,6 +108,18 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.on(IPC.appUpdateStatus, handler);
     return () => ipcRenderer.removeListener(IPC.appUpdateStatus, handler);
   },
+  listInertiaReleases: (
+    request: Parameters<DesktopBridge["listInertiaReleases"]>[0],
+  ) =>
+    ipcRenderer.invoke(IPC.listInertiaReleases, request) as ReturnType<
+      DesktopBridge["listInertiaReleases"]
+    >,
+  sendDiscordReleaseInfo: (
+    request: Parameters<DesktopBridge["sendDiscordReleaseInfo"]>[0],
+  ) =>
+    ipcRenderer.invoke(IPC.sendDiscordReleaseInfo, request) as ReturnType<
+      DesktopBridge["sendDiscordReleaseInfo"]
+    >,
   selectAttachments: (mode: Parameters<DesktopBridge["selectAttachments"]>[0]) => ipcRenderer.invoke(IPC.selectAttachments, mode) as ReturnType<DesktopBridge["selectAttachments"]>,
   importAttachments: (files: Parameters<DesktopBridge["importAttachments"]>[0]) => ipcRenderer.invoke(IPC.importAttachments, files) as ReturnType<DesktopBridge["importAttachments"]>,
   prepareAttachmentHandoff: (request: Parameters<DesktopBridge["prepareAttachmentHandoff"]>[0]) =>

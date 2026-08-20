@@ -9,8 +9,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   FilesPanel,
+  MarkdownPreviewSurface,
   MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS,
 } from "../../src/renderer/src/components/FilesPanel";
+import { ResponseMarkdown } from "../../src/renderer/src/components/ResponseMarkdown";
 
 const FILES_PROJECT = {
   projectRoot: "/work/project",
@@ -29,6 +31,39 @@ function markdownPreview(content: string, path = "docs/README.md") {
 }
 
 describe("FilesPanel Markdown preview", () => {
+  it("contains a lazy renderer failure and retries without losing source access", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(
+      () => undefined,
+    );
+    const loader = vi.fn()
+      .mockRejectedValueOnce(new Error("stale Markdown chunk"))
+      .mockResolvedValue({ ResponseMarkdown });
+    const onShowSource = vi.fn();
+    render(
+      <MarkdownPreviewSurface
+        loader={loader}
+        loadingFallback={<span>Rendering Markdown…</span>}
+        onShowSource={onShowSource}
+        content="# Recovered preview"
+        projectRoot="/work/project"
+        projectId={FILES_PROJECT.projectId}
+        defaultCodeWrap
+      />,
+    );
+
+    const failure = await screen.findByRole("alert");
+    expect(failure).toHaveTextContent("Markdown preview couldn't load");
+    fireEvent.click(screen.getByRole("button", { name: "Source" }));
+    expect(onShowSource).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("heading", {
+      name: "Recovered preview",
+    })).toBeInTheDocument();
+    expect(loader).toHaveBeenCalledTimes(2);
+    consoleError.mockRestore();
+  });
+
   it("renders safe GFM by default and opens relative project links", async () => {
     const onSelectFile = vi.fn();
     const onOpenWorkspaceEntry = vi.fn();
@@ -265,17 +300,51 @@ describe("FilesPanel Markdown preview", () => {
       "docs/guide.md",
       undefined,
       undefined,
+      "cafe\u0301",
     );
     view.rerender(
       <FilesPanel
         {...props}
         preview={markdownPreview("# Cafe\u0301", "docs/guide.md")}
         selectedPath="docs/guide.md"
+        selectedMarkdownHeading={{
+          path: "docs/guide.md",
+          headingId: "cafe\u0301",
+          requestId: 1,
+        }}
       />,
     );
     const heading = await screen.findByRole("heading", { name: "Cafe\u0301" });
     expect(heading).toHaveAttribute("id", "user-content-cafe\u0301");
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
     expect(heading).toHaveFocus();
+
+    const sourceView = screen.getByRole("button", { name: "Source" });
+    sourceView.focus();
+    fireEvent.click(sourceView);
+
+    view.rerender(
+      <FilesPanel
+        {...props}
+        preview={markdownPreview("# Cafe\u0301", "docs/guide.md")}
+        selectedPath="docs/guide.md"
+        selectedMarkdownHeading={{
+          path: "docs/guide.md",
+          headingId: "cafe\u0301",
+          requestId: 2,
+        }}
+      />,
+    );
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("heading", { name: "Cafe\u0301" })).toHaveFocus();
+    const previewView = screen.getByRole("button", { name: "Preview" });
+    expect(previewView).toHaveAttribute("aria-pressed", "true");
+
+    sourceView.focus();
+    fireEvent.click(sourceView);
+    previewView.focus();
+    fireEvent.click(previewView);
+    expect(previewView).toHaveFocus();
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
   });
 });

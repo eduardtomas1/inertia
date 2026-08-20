@@ -16,6 +16,7 @@ import {
   workspaceFileWriteFitsRuntimeFrame,
   type WorkspaceFileWriteIdentity,
 } from "../../utils/workspaceFileWrite";
+import type { MarkdownHeadingRequest } from "../../utils/markdownHeading";
 import { useWorkspaceMentions } from "./useWorkspaceMentions";
 
 type WorkspaceEntriesResult = Extract<
@@ -51,6 +52,8 @@ export function useWorkspaceFiles({
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [selectedFileLocation, setSelectedFileLocation] =
     useState<WorkspaceFileLocation | null>(null);
+  const [selectedMarkdownHeading, setSelectedMarkdownHeading] =
+    useState<MarkdownHeadingRequest | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
   const [filePreviewLoading, setFilePreviewLoading] = useState(false);
@@ -148,6 +151,7 @@ export function useWorkspaceFiles({
     setFilePreview(null);
     setSelectedFile(null);
     setSelectedFileLocation(null);
+    setSelectedMarkdownHeading(null);
     setProjectActions([]);
     setFilesError(null);
     setFilePreviewError(null);
@@ -196,6 +200,7 @@ export function useWorkspaceFiles({
     path: string,
     requestedLocation?: WorkspaceFileLocation,
     literalPath = false,
+    headingId?: string,
   ) => {
     if (!project) return;
     void loadWorkspaceFileActions().then(
@@ -203,6 +208,7 @@ export function useWorkspaceFiles({
         path,
         requestedLocation,
         literalPath,
+        headingId,
         request,
         project.id,
         conversation?.id,
@@ -211,6 +217,7 @@ export function useWorkspaceFiles({
         filePreviewRequestGenerationRef,
         setSelectedFile,
         setSelectedFileLocation,
+        setSelectedMarkdownHeading,
         setFilePreview,
         setFilePreviewError,
         setFilePreviewLoading,
@@ -308,6 +315,7 @@ export function useWorkspaceFiles({
     filePreview,
     selectedFile,
     selectedFileLocation,
+    selectedMarkdownHeading,
     filesLoading,
     filesError,
     filePreviewLoading,

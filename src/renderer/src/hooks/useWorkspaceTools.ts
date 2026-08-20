@@ -78,6 +78,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
+    headingId?: string,
   ): void => {
     const projectId = options.project?.id;
     if (!projectId) return;
@@ -86,6 +87,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
         path,
         location,
         literalPath,
+        headingId,
         workspaceAuthorityRef,
         workspaceAuthority,
         requestWorkspaceEntries,

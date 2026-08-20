@@ -153,6 +153,37 @@ export async function expectRuntimeCrashRecovery(
   const marker = await page.evaluate(() =>
     Reflect.get(window, "__inertiaNoReloadMarker") as string);
 
+  if (process.platform === "linux") {
+    expect(priorLease).not.toBeNull();
+    const journal = new RuntimeOwnedProcessJournal(dataDirectory);
+    let stableSince: number | null = null;
+    await expect.poll(() => {
+      const records = journal.records(priorLease!.runtimeGenerationId);
+      const owned = records?.length === 1 && records[0]?.state === "owned"
+        ? records[0]
+        : null;
+      let exactLiveRoot = false;
+      try {
+        const identity = owned
+          ? readLinuxProcessIdentity(owned.process.pid)
+          : null;
+        exactLiveRoot = Boolean(
+          owned
+          && identity
+          && RuntimeOwnedProcessJournal.identityMatches(owned, identity),
+        );
+      } catch {
+        exactLiveRoot = false;
+      }
+      if (!exactLiveRoot) {
+        stableSince = null;
+        return false;
+      }
+      stableSince ??= Date.now();
+      return Date.now() - stableSince >= 250;
+    }, { timeout: 5_000, intervals: [25] }).toBe(true);
+  }
+
   const crashed = await electronApp.evaluate((_electron) => {
     const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
       crash: () => RuntimeTestSnapshot;

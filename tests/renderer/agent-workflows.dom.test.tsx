@@ -110,14 +110,11 @@ describe("useAgentWorkflows", () => {
     );
     await waitFor(() =>
       expect(hook.result.current.state?.skills).toEqual([availableSkill]));
-    act(() => hook.result.current.toggleSkill(availableSkill));
-    expect(hook.result.current.selectedSkillIds).toEqual(["skill-1"]);
     const requestCount = request.mock.calls.length;
 
     act(() => hook.rerender({ enabled: false }));
 
     expect(hook.result.current.state).toBeNull();
-    expect(hook.result.current.selectedSkillIds).toEqual([]);
     await act(async () => {
       await hook.result.current.setGoal({
         source: "codex-native",
@@ -232,7 +229,7 @@ describe("useAgentWorkflows", () => {
       emit = listener;
       return () => undefined;
     });
-    const hook = renderHook(() => useAgentWorkflows({
+    renderHook(() => useAgentWorkflows({
       conversationId: "conversation-1",
       routeIdentity: "codex-app-server\0thread-1",
       status: "online",
@@ -240,21 +237,9 @@ describe("useAgentWorkflows", () => {
       subscribe,
     }));
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
-    act(() => hook.result.current.toggleSkill(availableSkill));
-    expect(hook.result.current.selectedSkillIds).toEqual([
-      availableSkill.id,
-    ]);
-
     act(() => emit({ type: "server.welcome" } as ServerEvent));
 
-    expect(hook.result.current.selectedSkillIds).toEqual([
-      availableSkill.id,
-    ]);
-
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
-    expect(hook.result.current.selectedSkillIds).toEqual([
-      availableSkill.id,
-    ]);
     expect(request).toHaveBeenLastCalledWith({
       type: "agent.workflow.load",
       payload: {

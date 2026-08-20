@@ -2,6 +2,8 @@ import { lazy, Suspense } from "react";
 import {
   ChevronDown,
   Command,
+  FolderGit2,
+  GitBranch,
   MessagesSquare,
   Paperclip,
   Send,
@@ -71,12 +73,10 @@ export interface ComposerToolbarProps {
   onRunAction: (action: ProjectAction) => void;
   skills: readonly AgentSkillSummary[];
   skillsCapability: AgentWorkflowSkillsCapability | null;
-  selectedSkillIds: readonly string[];
   skillsLoading: boolean;
   skillsError: string | null;
   onListSkills: (forceReload?: boolean) => Promise<void>;
-  onToggleSkill: (skill: AgentSkillSummary) => void;
-  onClearSelectedSkills: () => void;
+  onInsertSkill: (skill: AgentSkillSummary) => void;
   promptPresets: readonly PromptPreset[];
   currentPrompt: string;
   onApplyPromptPreset: (preset: PromptPreset) => Promise<boolean>;
@@ -102,6 +102,7 @@ export interface ComposerToolbarProps {
   onUpdateReasoningEffort: (reasoningEffort: string) => Promise<void>;
   onUpdateFastMode: (enabled: boolean) => Promise<void>;
   conversation: Conversation;
+  checkoutBranch?: string | null;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -133,12 +134,10 @@ export function ComposerToolbar({
   onRunAction,
   skills,
   skillsCapability,
-  selectedSkillIds,
   skillsLoading,
   skillsError,
   onListSkills,
-  onToggleSkill,
-  onClearSelectedSkills,
+  onInsertSkill,
   promptPresets,
   currentPrompt,
   onApplyPromptPreset,
@@ -161,6 +160,7 @@ export function ComposerToolbar({
   onUpdateReasoningEffort,
   onUpdateFastMode,
   conversation,
+  checkoutBranch,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -193,11 +193,84 @@ export function ComposerToolbar({
       role="group"
       aria-label="Composer controls"
     >
-      <div
-        className="composer-tools"
-        role="group"
-        aria-label="Add context"
-      >
+      <div className="composer-primary-rail">
+        <div
+          className="composer-options"
+          role="group"
+          aria-label="Model and run settings"
+        >
+          <ModelChooser
+            routes={modelRoutes}
+            selectedRoute={selectedModelRoute}
+            disabled={disabled || running}
+            closeSignal={menu}
+            onOpenChange={(open) => {
+              if (open) dismissMenu("context-change");
+            }}
+            onSelect={onChooseModelRoute}
+          />
+          {conversationUpdateError ? (
+            <p
+              className="composer-control-error composer-route-control-error"
+              role="alert"
+              aria-live="assertive"
+            >
+              {conversationUpdateError}
+            </p>
+          ) : null}
+          <ComposerSettings
+            selectedModel={selectedModel}
+            selectedReasoning={selectedReasoning}
+            reasoningLabel={reasoningLabel}
+            selectedFastMode={selectedFastMode}
+            conversation={conversation}
+            disabled={disabled}
+            running={running}
+            menuController={menuController}
+            onUpdateReasoningEffort={onUpdateReasoningEffort}
+            onUpdateFastMode={onUpdateFastMode}
+            onUpdateConversation={onUpdateConversation}
+            conversationUpdatePending={conversationUpdatePending}
+          />
+          <Suspense fallback={null}>
+            <ComposerMoreMenu
+              actions={actions}
+              selectedModel={selectedModel}
+              selectedReasoning={selectedReasoning}
+              reasoningLabel={reasoningLabel}
+              selectedFastMode={selectedFastMode}
+              conversation={conversation}
+              disabled={disabled}
+              running={running}
+              menuController={menuController}
+              onRunAction={onRunAction}
+              onUpdateReasoningEffort={onUpdateReasoningEffort}
+              onUpdateFastMode={onUpdateFastMode}
+              onUpdateConversation={onUpdateConversation}
+              conversationUpdatePending={conversationUpdatePending}
+            />
+          </Suspense>
+          {selectedProvider?.agentThreadManagement && (
+            <span
+              className={clsx(
+                "composer-pill composer-action-control",
+                selectedProvider.agentThreadManagement.state === "supported"
+                  ? "is-active"
+                  : undefined,
+              )}
+              aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
+              title={selectedProvider.agentThreadManagement.detail}
+            >
+              <MessagesSquare size={13} aria-hidden="true" />
+              <span>Chat tools</span>
+            </span>
+          )}
+        </div>
+        <div
+          className="composer-tools"
+          role="group"
+          aria-label="Add context"
+        >
         <IconButton
           label={running ? "Attach follow-up images" : "Attach images or documents"}
           onClick={() => void onChooseAttachments()}
@@ -252,15 +325,13 @@ export function ComposerToolbar({
           <ComposerSkillsMenu
             skills={skills}
             capability={skillsCapability}
-            selectedSkillIds={selectedSkillIds}
             loading={skillsLoading}
             error={skillsError}
             disabled={disabled}
             running={running}
             menuController={menuController}
             onList={onListSkills}
-            onToggle={onToggleSkill}
-            onClear={onClearSelectedSkills}
+            onInsert={onInsertSkill}
           />
         </Suspense>
         {actions.length > 0 ? (
@@ -312,84 +383,12 @@ export function ComposerToolbar({
             )}
           </div>
         ) : null}
-      </div>
-      <div
-        className="composer-options"
-        role="group"
-        aria-label="Model and run settings"
-      >
-        <ModelChooser
-          routes={modelRoutes}
-          selectedRoute={selectedModelRoute}
-          disabled={disabled || running}
-          closeSignal={menu}
-          onOpenChange={(open) => {
-            if (open) dismissMenu("context-change");
-          }}
-          onSelect={onChooseModelRoute}
-        />
-        {conversationUpdateError ? (
-          <p
-            className="composer-control-error composer-route-control-error"
-            role="alert"
-            aria-live="assertive"
-          >
-            {conversationUpdateError}
-          </p>
-        ) : null}
-        <ComposerSettings
-          selectedModel={selectedModel}
-          selectedReasoning={selectedReasoning}
-          reasoningLabel={reasoningLabel}
-          selectedFastMode={selectedFastMode}
-          conversation={conversation}
-          disabled={disabled}
-          running={running}
-          menuController={menuController}
-          onUpdateReasoningEffort={onUpdateReasoningEffort}
-          onUpdateFastMode={onUpdateFastMode}
-          onUpdateConversation={onUpdateConversation}
-          conversationUpdatePending={conversationUpdatePending}
-        />
-        <Suspense fallback={null}>
-          <ComposerMoreMenu
-            actions={actions}
-            selectedModel={selectedModel}
-            selectedReasoning={selectedReasoning}
-            reasoningLabel={reasoningLabel}
-            selectedFastMode={selectedFastMode}
-            conversation={conversation}
-            disabled={disabled}
-            running={running}
-            menuController={menuController}
-            onRunAction={onRunAction}
-            onUpdateReasoningEffort={onUpdateReasoningEffort}
-            onUpdateFastMode={onUpdateFastMode}
-            onUpdateConversation={onUpdateConversation}
-            conversationUpdatePending={conversationUpdatePending}
-          />
-        </Suspense>
-        {selectedProvider?.agentThreadManagement && (
-          <span
-            className={clsx(
-              "composer-pill composer-action-control",
-              selectedProvider.agentThreadManagement.state === "supported"
-                ? "is-active"
-                : undefined,
-            )}
-            aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
-            title={selectedProvider.agentThreadManagement.detail}
-          >
-            <MessagesSquare size={13} aria-hidden="true" />
-            <span>Chat tools</span>
-          </span>
-        )}
-      </div>
-      <div
-        className="composer-actions"
-        role="group"
-        aria-label="Usage and message actions"
-      >
+        </div>
+        <div
+          className="composer-actions"
+          role="group"
+          aria-label="Usage and message actions"
+        >
         {selectedProvider ? (
           <UsageIndicator
             usage={usage}
@@ -469,6 +468,26 @@ export function ComposerToolbar({
             <Send size={16} />
           </IconButton>
         )}
+        </div>
+      </div>
+      <div
+        className="composer-checkout-strip"
+        role="group"
+        aria-label="Chat checkout context"
+      >
+        <span className="composer-checkout-location">
+          <FolderGit2 size={12} aria-hidden="true" />
+          <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+        </span>
+        <span
+          className="composer-checkout-branch"
+          title={conversation.branch ?? checkoutBranch ?? "Detached HEAD"}
+        >
+          <GitBranch size={12} aria-hidden="true" />
+          <code translate="no">
+            {conversation.branch ?? checkoutBranch ?? "Detached HEAD"}
+          </code>
+        </span>
       </div>
     </div>
   );

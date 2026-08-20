@@ -352,7 +352,7 @@ export default function App(): React.JSX.Element {
   const sendMessageWithWorkspaceAuthority = useCallback((
     ...args: Parameters<typeof sendMessageToConversation>
   ): ReturnType<typeof sendMessageToConversation> => {
-    const activate = args[5] !== false;
+    const activate = args[4] !== false;
     if (!activate) return sendMessageToConversation(...args);
     conversationSelectionGenerationRef.current += 1;
     return enqueueWorkspaceAuthority(
@@ -818,8 +818,6 @@ export default function App(): React.JSX.Element {
         return await compactConversationById(conversation.id, instruction);
       },
       listSkills: agentWorkflows.listSkills,
-      toggleSkill: agentWorkflows.toggleSkill,
-      clearSelectedSkills: agentWorkflows.clearSelectedSkills,
       setGoal: agentWorkflows.setGoal,
       clearGoal: agentWorkflows.clearGoal,
       respondToApproval,

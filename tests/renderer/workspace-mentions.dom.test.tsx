@@ -182,13 +182,10 @@ describe("useWorkspaceMentions", () => {
           usageDisplayMode="compact"
           skills={[]}
           skillsCapability={null}
-          selectedSkillIds={[]}
           skillsLoading={false}
           skillsError={null}
           onSend={async () => undefined}
           onListSkills={async () => undefined}
-          onToggleSkill={() => undefined}
-          onClearSelectedSkills={() => undefined}
           onUpdateConversation={() => Promise.resolve()}
           onCreateConversationForSelection={async () => undefined}
           onChooseAttachments={async () => []}

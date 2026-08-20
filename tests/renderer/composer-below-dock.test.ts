@@ -64,7 +64,7 @@ describe("composer below-dock cleanup", () => {
       expect(inputSource, marker).toContain(marker);
     }
     expect(inputSource).not.toContain("composer-attachment-boundary");
-    expect(inputSource).toContain('? "Add a follow-up while the agent works…"');
+    expect(inputSource).toContain('? "Add a follow-up or attach images…"');
     expect(toolbarSource).toContain('className="secondary-button composer-follow-up-button"');
     expect(toolbarSource).toContain('className="composer-follow-up-unavailable"');
     expect(toolbarSource).toContain("<UsageIndicator");

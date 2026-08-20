@@ -18,10 +18,11 @@ import { normalizeIdentityPath } from "../project-identity";
 import type { ProviderManager } from "../providers";
 import type { ProviderGoalSnapshot } from "../provider/contracts";
 import { RuntimeRequestError } from "../runtime-errors";
+import { mentionedSkillNames } from "./agent-skill-invocation";
 
 const MAX_SKILLS = 128;
 const SKILL_CAPABILITY_TTL_MS = 30 * 60 * 1_000;
-const CODEX_SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
+const SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
 const NATIVE_GOAL_REFRESH_WARNING =
   "Codex native goal could not be refreshed. Showing saved goal data; local goals and skills remain available.";
 
@@ -908,7 +909,9 @@ export class AgentWorkflowController {
         (raw) => {
           const name = boundedDisplayString(raw.name, 160);
           const description = boundedDisplayString(raw.description, 1_000);
-          if (!name || !description) return null;
+          if (!name || !SKILL_NAME_PATTERN.test(name) || !description) {
+            return null;
+          }
           const identityKey =
             `${conversationId}\0${routeKey}\0claude\0${name}`;
           return {
@@ -983,7 +986,7 @@ export class AgentWorkflowController {
         const scope = skillScope(skill?.scope);
         if (
           !name
-          || !CODEX_SKILL_NAME_PATTERN.test(name)
+          || !SKILL_NAME_PATTERN.test(name)
           || !path
           || !isAbsoluteSkillPath(path)
           || !description
@@ -1044,47 +1047,66 @@ export class AgentWorkflowController {
 
   async resolveSkills(
     conversationId: string,
-    skillIds: readonly string[],
+    content: string,
   ): Promise<ProviderSkillInput[]> {
-    return (await this.resolveTurnSkills(conversationId, skillIds)).inputs;
+    return (await this.resolveTurnSkills(conversationId, content)).inputs;
   }
 
   async resolveTurnSkills(
     conversationId: string,
-    skillIds: readonly string[],
+    content: string,
   ): Promise<{
     inputs: ProviderSkillInput[];
     routeKey: string | null;
   }> {
     this.pruneSkills();
-    const unique = [...new Set(skillIds)];
-    if (unique.length > 8) {
-      throw new RuntimeRequestError(
-        "Select at most eight skills for one turn.",
-      );
-    }
-    if (unique.length === 0) {
+    if (!content.includes("$")) {
       return { inputs: [], routeKey: null };
     }
-    await this.listSkills(conversationId, true);
     const conversation = this.store.conversation(conversationId);
     const routeKey = this.skillRouteKey(
       conversation,
       this.store.conversationPath(conversationId),
     );
-    const inputs = unique.map((id) => {
-      const capability = this.skills.get(id);
-      if (
-        !capability
-        || capability.summary.conversationId !== conversationId
-        || capability.routeKey !== routeKey
-        || !capability.summary.enabled
-      ) {
+    const cachedSummaries = [...this.skills.values()]
+      .filter((capability) =>
+        capability.summary.conversationId === conversationId
+        && capability.routeKey === routeKey
+        && capability.summary.enabled)
+      .map(({ summary }) => summary);
+    const cachedNames = mentionedSkillNames(
+      content,
+      cachedSummaries.map(({ name }) => name),
+    );
+    if (cachedNames.length === 0) {
+      // A dollar sign is ordinary prompt content unless it exactly names a
+      // capability already discovered for this route. This avoids putting
+      // currency and shell snippets on the provider discovery hot path. The
+      // visible token still reaches providers that interpret it natively.
+      return { inputs: [], routeKey: null };
+    }
+    // Revalidate through the provider's normal cache without forcing a costly
+    // filesystem/control-plane refresh for every invocation.
+    await this.listSkills(conversationId, false);
+    if (cachedNames.length > 8) {
+      throw new RuntimeRequestError(
+        "Invoke at most eight skills in one message.",
+      );
+    }
+    const inputs = cachedNames.map((name) => {
+      const matches = [...this.skills.values()].filter((capability) =>
+        capability.summary.conversationId === conversationId
+        && capability.routeKey === routeKey
+        && capability.summary.enabled
+        && capability.summary.name === name);
+      if (matches.length !== 1) {
         throw new RuntimeRequestError(
-          "A selected skill is no longer available. Refresh skills and try again.",
+          matches.length === 0
+            ? `The invoked skill $${name} is no longer available. Refresh skills and try again.`
+            : `The invoked skill $${name} is ambiguous for this provider route.`,
         );
       }
-      return capability.providerInput;
+      return matches[0]!.providerInput;
     });
     return { inputs, routeKey };
   }

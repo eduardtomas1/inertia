@@ -47,7 +47,7 @@ test("keeps Environment available while an isolated draft worktree materializes"
       name: "Add your first project",
     }).click();
     await expect(app.page.getByRole("heading", {
-      name: "What should we work on?",
+      name: /^What should we build in .+\?$/u,
       level: 3,
     })).toBeVisible();
 

@@ -96,7 +96,6 @@ interface SplitWorkspaceActions
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
     activate?: boolean,
   ) => Promise<MessageSendAcceptance | null>;
   compactConversation: (
@@ -347,7 +346,6 @@ export function useSplitWorkspaceScene({
       content: string,
       attachments: ChatAttachment[],
       context?: TurnRequestContext,
-      skillIds?: readonly string[],
     ) => {
       if (!splitConversation) return null;
       return await actions.sendMessageToConversation(
@@ -355,7 +353,6 @@ export function useSplitWorkspaceScene({
         content,
         attachments,
         context,
-        skillIds,
         false,
       );
     },
@@ -369,8 +366,6 @@ export function useSplitWorkspaceScene({
       );
     },
     listSkills: workflow.listSkills,
-    toggleSkill: workflow.toggleSkill,
-    clearSelectedSkills: workflow.clearSelectedSkills,
     setGoal: workflow.setGoal,
     clearGoal: workflow.clearGoal,
     updateConversation: async (

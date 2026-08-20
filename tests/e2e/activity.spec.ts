@@ -32,8 +32,8 @@ const measureComposerRail = async (composer: Locator): Promise<{
 }> => composer.evaluate((dock) => {
   const toolbar = dock.querySelector<HTMLElement>(".composer-toolbar");
   const groups = [
-    dock.querySelector<HTMLElement>(".composer-tools"),
     dock.querySelector<HTMLElement>(".composer-options"),
+    dock.querySelector<HTMLElement>(".composer-tools"),
     dock.querySelector<HTMLElement>(".composer-actions"),
   ].flatMap((group) => group ? [group.getBoundingClientRect()] : []);
   const toolbarBounds = toolbar?.getBoundingClientRect();
@@ -542,7 +542,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     await expect(textbox).toBeEnabled();
     await expect(textbox).toHaveAttribute(
       "placeholder",
-      "Add a follow-up while the agent works…",
+      "Add a follow-up or attach images…",
     );
     const evidenceRow = delegatedWork.getByRole("listitem", {
       name: /Evidence Scout, Checking the provider lifecycle and exact task identity\., Claude · Agent SDK, Running/u,
@@ -646,11 +646,9 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     expect(expandedRailGeometry.groupsContained).toBe(true);
     expect(Math.min(...expandedRailGeometry.groupGaps)).toBeGreaterThanOrEqual(7);
     expect(expandedRailGeometry.attachmentBeforeMessage).toBe(true);
-    if (expandedRailGeometry.dockWidth <= 842) {
-      await expect(compactMore).toBeVisible();
-      await expect(composer.getByRole("group", { name: "Composer settings" }))
-        .toBeHidden();
-    }
+    await expect(compactMore).toBeHidden();
+    await expect(composer.getByRole("group", { name: "Composer settings" }))
+      .toBeVisible();
     await expectNoViewportOverflow();
     const attachmentComposerScreenshot = testInfo.outputPath("composer-working-attachment-expanded-933x800.png");
     await page.screenshot({ animations: "disabled", path: attachmentComposerScreenshot });

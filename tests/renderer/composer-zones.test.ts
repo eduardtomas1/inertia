@@ -97,7 +97,10 @@ describe("composer input and control zones", () => {
       /\.composer-input-zone\s*\{[^}]*display:\s*grid;[^}]*gap:\s*calc\(var\(--composer-zone-gap\) \+ var\(--composer-density-spacing-adjustment\)\);[^}]*padding:[^}]*var\(--composer-input-padding-inline\)/su,
     );
     expect(css).toMatch(
-      /\.composer-toolbar\s*\{[^}]*padding:[^}]*var\(--composer-control-padding-inline\);[^}]*border-top:\s*1px solid var\(--composer-zone-separator\)/su,
+      /\.composer-primary-rail\s*\{[^}]*padding:[^}]*var\(--composer-control-padding-inline\)/su,
+    );
+    expect(css).toMatch(
+      /\.composer-toolbar\s*\{[^}]*border-top:\s*1px solid var\(--composer-zone-separator\)/su,
     );
     expect(css).toMatch(
       /\.composer-toolbar \.icon-button,[\s\S]*?\.composer-toolbar \.usage-popover-trigger\s*\{[^}]*height:\s*var\(--composer-control-height\);[^}]*min-height:\s*var\(--composer-control-height\)/su,
@@ -109,7 +112,7 @@ describe("composer input and control zones", () => {
       /@media \(max-width:\s*1180px\)[\s\S]*?\.access-control\s*\{[^}]*display:\s*none/su,
     );
     expect(css).toMatch(
-      /@container \(max-width:\s*840px\)[\s\S]*?\.composer-setting-family\s*\{[^}]*display:\s*none[\s\S]*?\.composer-more-control\s*\{[^}]*display:\s*block/su,
+      /@container \(max-width:\s*820px\)[\s\S]*?\.composer-setting-family\s*\{[^}]*display:\s*none[\s\S]*?\.composer-more-control\s*\{[^}]*display:\s*block/su,
     );
   });
 

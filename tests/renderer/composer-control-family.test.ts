@@ -26,6 +26,13 @@ const css = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
+const skillCss = readFileSync(
+  new URL(
+    "../../src/renderer/src/components/composer/ComposerSkillsMenu.css",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("composer setting control family", () => {
   it("groups reasoning, speed, access, and mode as compact value triggers", () => {
@@ -118,25 +125,28 @@ describe("composer setting control family", () => {
       /\.composer-setting-popover button\[aria-checked="true"\]\s*\{[^}]*background:\s*color-mix/su,
     );
     expect(css).toMatch(
-      /\.composer-options,[\s\S]*?\.composer-actions\s*\{[^}]*justify-self:\s*end;[^}]*justify-content:\s*flex-end;[^}]*border-left:\s*1px solid var\(--composer-zone-separator\)/su,
+      /\.composer-options\s*\{[^}]*justify-self:\s*start;[^}]*justify-content:\s*flex-start/su,
     );
     expect(css).toMatch(
+      /\.composer-actions\s*\{[^}]*justify-self:\s*end;[^}]*justify-content:\s*flex-end;[^}]*border-left:\s*1px solid var\(--composer-zone-separator\)/su,
+    );
+    expect(skillCss).toMatch(
       /\.composer-skills-popover\s*\{[^}]*right:\s*auto;[^}]*left:\s*8px;[^}]*width:\s*min\([^}]*calc\(100% - 16px\)[^}]*calc\(100cqw - 16px\)[^}]*max-width:\s*min\([^}]*calc\(100% - 16px\)[^}]*calc\(100cqw - 16px\)/su,
     );
-    expect(css).toMatch(
+    expect(skillCss).toMatch(
       /\.composer-skills-control\s*\{[^}]*position:\s*static/su,
     );
     expect(css).toMatch(
       /\.composer-more-layer\s*\{[^}]*right:\s*0/su,
     );
     expect(css).toMatch(
-      /@container \(max-width:\s*840px\)[\s\S]*?\.composer-options > \.composer-more-control\s*\{[^}]*display:\s*block;[^}]*position:\s*static/su,
+      /@container \(max-width:\s*820px\)[\s\S]*?\.composer-options > \.composer-more-control\s*\{[^}]*display:\s*block;[^}]*position:\s*static/su,
     );
   });
 
   it("moves the whole low-priority family into one More control at the container threshold", () => {
     const compactRule = css.match(
-      /@container \(max-width:\s*840px\)\s*\{(?<body>[\s\S]*?)\n\}/u,
+      /@container \(max-width:\s*820px\)\s*\{(?<body>[\s\S]*?)\n\}/u,
     )?.groups?.body ?? "";
 
     expect(compactRule).toContain(".composer-setting-family");

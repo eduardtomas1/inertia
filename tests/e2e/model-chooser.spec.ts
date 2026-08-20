@@ -69,7 +69,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     await expect(addProject).toBeEnabled();
     await addProject.click();
     await expect(page.getByRole("heading", {
-      name: "What should we work on?",
+      name: /^What should we build in .+\?$/u,
       level: 3,
     })).toBeVisible();
     const newChat = page.getByRole("complementary", {

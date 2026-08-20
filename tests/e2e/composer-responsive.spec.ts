@@ -67,7 +67,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(addProject).toBeEnabled();
     await addProject.click();
     await expect(page.getByRole("heading", {
-      name: "What should we work on?",
+      name: /^What should we build in .+\?$/u,
       level: 3,
     })).toBeVisible();
     await page.getByRole("complementary", {
@@ -82,15 +82,21 @@ test("keeps the composer as one cohesive dock across themes and responsive split
   const originalStore = new RuntimeStore(databasePath, workspaceDirectory, {
     recoverInterruptedRuns: false,
   });
-  const originalSettings = originalStore.shellSnapshot().settings;
+  const originalSnapshot = originalStore.shellSnapshot();
+  const originalSettings = originalSnapshot.settings;
+  const originalProject = originalSnapshot.projects.find(
+    ({ id }) => id === originalSnapshot.activeProjectId,
+  );
   originalStore.close();
+  if (!originalProject) throw new Error("Composer project fixture is unavailable.");
   const navigation = page.getByRole("complementary", {
     name: "Project navigation",
     exact: true,
   });
-  const workspacePanel = page.locator(".workspace-panel");
   const navigationWasVisible = await navigation.isVisible();
-  const workspacePanelWasVisible = await workspacePanel.isVisible();
+  const workspacePanelWasVisible = await page.locator(
+    ".workspace-panel:visible",
+  ).count() > 0;
 
   const updateAppearance = (
     theme: "light" | "dark",
@@ -103,16 +109,29 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     store.updateSettings({ theme, interfaceScale, responseDensity });
     store.close();
   };
+  const updateProjectName = (name: string): void => {
+    const store = new RuntimeStore(databasePath, workspaceDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    store.updateProject(originalProject.id, { name });
+    store.close();
+  };
   const setWorkspaceTools = async (open: boolean): Promise<void> => {
-    const panelIsVisible = await workspacePanel.isVisible();
+    const visiblePanel = page.locator(".workspace-panel:visible").first();
+    const panelIsVisible = await visiblePanel.count() > 0;
     if (panelIsVisible === open) return;
     if (open) {
-      await page.getByRole("button", { name: "Open workspace tools" }).click();
-      await expect(workspacePanel).toBeVisible();
+      await page.locator(
+        'button[aria-label="Open workspace tools"]:visible',
+      ).first().click();
+      await expect(page.locator(".workspace-panel:visible").first())
+        .toBeVisible();
       return;
     }
-    await page.getByRole("button", { name: "Close workspace tools" }).first().click();
-    await expect(workspacePanel).toBeHidden();
+    await page.locator(
+      'button[aria-label="Close workspace tools"]:visible',
+    ).first().click();
+    await expect(page.locator(".workspace-panel:visible")).toHaveCount(0);
   };
   const capture = async (label: string): Promise<void> => {
     const screenshot = testInfo.outputPath(`${label}.png`);
@@ -133,6 +152,65 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await page.reload();
     const textbox = page.getByRole("textbox", { name: "Message" });
     await expect(textbox).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: "What should we build in Inertia?",
+      level: 3,
+    })).toBeVisible();
+    await expect(page.locator(".empty-thread-icon")).toHaveCount(0);
+    await expect(page.getByText(
+      "Describe the outcome you want. The details can take shape together.",
+      { exact: true },
+    )).toHaveCount(0);
+    await setWorkspaceTools(false);
+
+    const longProjectName =
+      "A deliberately long project identity that still wraps safely inside the canvas";
+    updateProjectName(longProjectName);
+    await page.reload();
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await setWorkspaceTools(false);
+    const longHeading = page.getByRole("heading", {
+      name: `What should we build in ${longProjectName}?`,
+      level: 3,
+    });
+    await expect(longHeading).toBeVisible();
+    const longHeadingGeometry = await longHeading.evaluate((heading) => {
+      const bounds = heading.getBoundingClientRect();
+      const transcript = heading.closest<HTMLElement>(".message-scroll")
+        ?.getBoundingClientRect();
+      const projectName = heading.querySelector<HTMLElement>(
+        ".empty-thread-project",
+      );
+      const headingStyle = getComputedStyle(heading);
+      const projectStyle = projectName ? getComputedStyle(projectName) : null;
+      return {
+        contained: Boolean(
+          transcript
+          && bounds.left >= transcript.left - 1
+          && bounds.right <= transcript.right + 1
+        ),
+        fits: heading.scrollWidth <= heading.clientWidth + 1,
+        fontSize: Number.parseFloat(headingStyle.fontSize),
+        wraps: bounds.height > Number.parseFloat(headingStyle.lineHeight) * 1.5,
+        projectDecoration: projectStyle?.textDecorationLine ?? "",
+        projectDecorationStyle: projectStyle?.textDecorationStyle ?? "",
+      };
+    });
+    expect(longHeadingGeometry).toMatchObject({
+      contained: true,
+      fits: true,
+      wraps: true,
+      projectDecoration: "underline",
+      projectDecorationStyle: "dotted",
+    });
+    expect(longHeadingGeometry.fontSize).toBeGreaterThanOrEqual(26);
+    expect(longHeadingGeometry.fontSize).toBeLessThanOrEqual(34);
+    updateProjectName(originalProject.name);
+    await page.reload();
+    await expect(page.getByRole("heading", {
+      name: `What should we build in ${originalProject.name}?`,
+      level: 3,
+    })).toBeVisible();
     await setWorkspaceTools(false);
 
     const dock = page.getByRole("region", { name: "Message composer" });
@@ -233,8 +311,11 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         toolbarBorderTop: toolbarStyle?.borderTopWidth,
         toolbarBackground: toolbarStyle?.backgroundColor,
         toolbarGroups: [...(toolbarElement?.querySelectorAll<HTMLElement>(
-          ":scope > .composer-tools, :scope > .composer-options, :scope > .composer-actions",
+          ":scope > .composer-primary-rail > .composer-options, :scope > .composer-primary-rail > .composer-tools, :scope > .composer-primary-rail > .composer-actions",
         ) ?? [])].map((group) => group.className.replace("composer-", "")),
+        checkoutText: toolbarElement
+          ?.querySelector<HTMLElement>(".composer-checkout-strip")
+          ?.innerText ?? "",
         textareaBorder: textareaStyle?.borderTopWidth,
         textareaBackground: textareaStyle?.backgroundColor,
         controlHeightDelta: visibleControlHeights.length > 0
@@ -261,7 +342,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.toolbarBorderTop).toBe("1px");
     expect(wideGeometry.toolbarBackground)
       .not.toBe(wideGeometry.textareaBackground);
-    expect(wideGeometry.toolbarGroups).toEqual(["tools", "options", "actions"]);
+    expect(wideGeometry.toolbarGroups).toEqual(["options", "tools", "actions"]);
+    expect(wideGeometry.checkoutText).toContain("Current checkout");
+    expect(wideGeometry.checkoutText).toContain("master");
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);
@@ -770,6 +853,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       interfaceScale: originalSettings.interfaceScale,
       responseDensity: originalSettings.responseDensity,
     });
+    cleanup.updateProject(originalProject.id, { name: originalProject.name });
     cleanup.close();
     await resizeWindow(1440, 920);
     await page.reload();

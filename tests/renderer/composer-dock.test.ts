@@ -91,10 +91,10 @@ describe("cohesive composer dock", () => {
     expect(settingsSource.indexOf("composer-access-control"))
       .toBeLessThan(settingsSource.indexOf("composer-mode-control"));
     expect(css).toMatch(
-      /@container \(max-width:\s*840px\)\s*\{[\s\S]*?\.composer-action-control,[\s\S]*?\.composer-setting-family\s*\{[^}]*display:\s*none/su,
+      /@container \(max-width:\s*820px\)\s*\{[\s\S]*?\.composer-action-control,[\s\S]*?\.composer-setting-family\s*\{[^}]*display:\s*none/su,
     );
     expect(css).toMatch(
-      /@container \(max-width:\s*840px\)\s*\{[\s\S]*?\.composer-more-control\s*\{[^}]*display:\s*block/su,
+      /@container \(max-width:\s*820px\)\s*\{[\s\S]*?\.composer-more-control\s*\{[^}]*display:\s*block/su,
     );
     expect(css).toMatch(
       /\.composer-tools,[\s\S]*?\.composer-options,[\s\S]*?\.composer-actions\s*\{[^}]*min-width:\s*0;[^}]*gap:\s*3px/su,
@@ -138,7 +138,7 @@ describe("cohesive composer dock", () => {
 
   it("retains multiline, attachment, route, mention, slash, and keyboard behavior", () => {
     expect(css).toMatch(
-      /\.composer textarea\s*\{[^}]*min-height:\s*52px;[^}]*max-height:\s*176px;[^}]*resize:\s*none;[^}]*overflow-y:\s*auto/su,
+      /\.composer textarea\s*\{[^}]*min-height:\s*76px;[^}]*max-height:\s*176px;[^}]*resize:\s*none;[^}]*overflow-y:\s*auto/su,
     );
     expect(css).not.toMatch(
       /\.composer textarea\s*\{[^}]*transition:\s*height/su,

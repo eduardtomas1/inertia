@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AgentSkillSummary,
   ChatAttachment,
   Conversation,
   ProviderInfo,
@@ -145,13 +146,10 @@ function composerProps(
     usageDisplayMode: "compact",
     skills: [],
     skillsCapability: null,
-    selectedSkillIds: [],
     skillsLoading: false,
     skillsError: null,
     onSend: async () => undefined,
     onListSkills: async () => undefined,
-    onToggleSkill: () => undefined,
-    onClearSelectedSkills: () => undefined,
     onUpdateConversation: () => Promise.resolve(),
     onCreateConversationForSelection: async () => undefined,
     onChooseAttachments: async () => [],
@@ -177,6 +175,47 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("inserts a visible skill invocation at the caret and sends transcript-faithful text", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => undefined);
+    const selectedSkill: AgentSkillSummary = {
+      id: "skill-security-review",
+      conversationId: "conversation-skill",
+      name: "security-review",
+      description: "Review the repository security posture.",
+      shortDescription: "Review security posture",
+      scope: "repo",
+      enabled: true,
+      source: "codex-native",
+    };
+    render(<Composer {...composerProps(conversation("conversation-skill"), {
+      skills: [selectedSkill],
+      skillsCapability: {
+        kind: "codex-native",
+        available: true,
+        label: "Codex skills",
+      },
+      onSend,
+    })} />);
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+    await user.type(textbox, "Please $sec");
+    await user.click(await screen.findByRole("button", {
+      name: "Insert a codex skills invocation",
+    }));
+    await user.click(await screen.findByRole("menuitem", {
+      name: /\$security-review/u,
+    }));
+
+    expect(textbox).toHaveValue("Please $security-review ");
+    expect(textbox).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      "Please $security-review",
+      [],
+      undefined,
+    ));
+  });
+
   it("presents a two-tier editor and keyboard-navigable grouped control rail", async () => {
     const current = conversation("composer-two-tier-control-rail");
     render(<Composer {...composerProps(current)} />);
@@ -451,7 +490,6 @@ describe("composer asynchronous ownership", () => {
       "Please inspect the attached image.",
       [selected],
       undefined,
-      [],
     ));
     await waitFor(() => expect(screen.queryByText("follow-up-reference.png"))
       .not.toBeInTheDocument());

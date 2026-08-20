@@ -26,6 +26,7 @@ import {
   AgentWorkflowController,
   parseCodexGoal,
 } from "../../src/server/runtime/agent-workflow-controller";
+import { mentionedSkillNames } from "../../src/server/runtime/agent-skill-invocation";
 
 function conversation(update: Partial<Conversation> = {}): Conversation {
   return {
@@ -218,6 +219,27 @@ function providerGoal(threadId = "thread-1"): Record<string, unknown> {
 }
 
 describe("AgentWorkflowController", () => {
+  it("recognizes exact skill tokens in textual order without prefix collisions", () => {
+    expect(mentionedSkillNames(
+      "$review then $security-review and $review again",
+      ["security-review", "review"],
+    )).toEqual(["review", "security-review"]);
+    expect(mentionedSkillNames(
+      "\\$review $review-extra x$review",
+      ["review"],
+    )).toEqual([]);
+  });
+
+  it("does not discover skills for ordinary dollar content", async () => {
+    const runtime = harness();
+
+    await expect(runtime.controller.resolveSkills(
+      "conversation-1",
+      "The budget is $12.50 and PATH contains $HOME.",
+    )).resolves.toEqual([]);
+    expect(controlRequest).not.toHaveBeenCalled();
+  });
+
   it("requires the exact native provider thread when parsing a goal", () => {
     expect(parseCodexGoal(
       "conversation-1",
@@ -1109,7 +1131,7 @@ describe("AgentWorkflowController", () => {
     expect(summary).not.toHaveProperty("path");
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
+      "$review Please inspect this change.",
     )).resolves.toEqual([{
       source: "codex-native",
       name: "review",
@@ -1156,7 +1178,7 @@ describe("AgentWorkflowController", () => {
       expect(second?.id).toBe(first?.id);
       await expect(runtime.controller.resolveSkills(
         "conversation-1",
-        [second!.id],
+        "$review Please inspect this change.",
       )).resolves.toEqual([{
         source: "codex-native",
         name: "review",
@@ -1298,9 +1320,9 @@ describe("AgentWorkflowController", () => {
       .toEqual(expect.objectContaining({ truncated: true }));
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
+      "$review Please inspect this change.",
     )).rejects.toThrow(
-      "A selected skill is no longer available. Refresh skills and try again.",
+      "The invoked skill $review is no longer available. Refresh skills and try again.",
     );
     expect(runtime.controller.state("conversation-1").skills)
       .not.toEqual(expect.arrayContaining([
@@ -1335,16 +1357,16 @@ describe("AgentWorkflowController", () => {
       }],
     });
     const runtime = harness();
-    const [summary] = await runtime.controller.listSkills(
+    await runtime.controller.listSkills(
       "conversation-1",
       false,
     );
 
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
+      "$review Please inspect this change.",
     )).rejects.toThrow(
-      "A selected skill is no longer available. Refresh skills and try again.",
+      "The invoked skill $review is no longer available. Refresh skills and try again.",
     );
     expect(runtime.controller.state("conversation-1")).toEqual(
       expect.objectContaining({
@@ -1354,7 +1376,7 @@ describe("AgentWorkflowController", () => {
     );
   });
 
-  it("force-revalidates an opaque skill immediately before provider use", async () => {
+  it("revalidates a mentioned skill without forcing provider reload", async () => {
     const skillPath = "/workspace/project/.codex/skills/review/SKILL.md";
     controlRequest.mockResolvedValueOnce({
       data: [{
@@ -1376,14 +1398,14 @@ describe("AgentWorkflowController", () => {
       }],
     });
     const runtime = harness();
-    const [summary] = await runtime.controller.listSkills(
+    await runtime.controller.listSkills(
       "conversation-1",
       false,
     );
 
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
+      "$review Please inspect this change.",
     )).rejects.toThrow("no longer available");
     expect(runtime.controller.state("conversation-1").skills).toEqual([]);
   });
@@ -1463,7 +1485,7 @@ describe("AgentWorkflowController", () => {
     expect(summary).not.toHaveProperty("path");
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
+      "$security-review src/server",
     )).resolves.toEqual([{
       source: "claude-native",
       name: "security-review",

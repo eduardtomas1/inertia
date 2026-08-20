@@ -23,6 +23,7 @@ import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation
 import {
   activateRuntimeOwnedProcessRegistry,
   confirmRuntimeOwnedProcessStopped,
+  readLinuxProcessIdentity,
   RuntimeOwnedProcessJournal,
   spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
@@ -45,6 +46,20 @@ function activate(directory: string): void {
 
 function processError(code: string): Error & { code: string } {
   return Object.assign(new Error(code), { code });
+}
+
+function linuxProcessStat(
+  pid: number,
+  parentPid: number | string,
+  processGroupId: number,
+  startTimeTicks = "123456",
+): string {
+  const fields = Array.from({ length: 20 }, () => "1");
+  fields[0] = "S";
+  fields[1] = String(parentPid);
+  fields[2] = String(processGroupId);
+  fields[19] = startTimeTicks;
+  return `${pid} (runtime owned process) ${fields.join(" ")}`;
 }
 
 function deactivate(): void {
@@ -99,6 +114,26 @@ afterEach(async () => {
 describe.skipIf(process.platform !== "linux")(
   "runtime owned process recovery",
   () => {
+    it("reads an exact process identity after Linux reparents it to PID 1", () => {
+      expect(readLinuxProcessIdentity(4_242, () =>
+        linuxProcessStat(4_242, 1, 4_242, "987654"))).toEqual({
+        pid: 4_242,
+        parentPid: 1,
+        processGroupId: 4_242,
+        startTimeTicks: "987654",
+      });
+    });
+
+    it.each([0, -1, "1.5", "not-a-pid"])(
+      "rejects invalid Linux parent PID %s",
+      (parentPid) => {
+        expect(() => readLinuxProcessIdentity(4_242, () =>
+          linuxProcessStat(4_242, parentPid, 4_242))).toThrow(
+          "The owned process identity is invalid.",
+        );
+      },
+    );
+
     it("persists a minimal exact capability before recovering its owned group", async () => {
       const directory = temporaryDirectory();
       activate(directory);
@@ -407,6 +442,41 @@ describe.skipIf(process.platform !== "linux")(
       expect(forceKill).not.toHaveBeenCalled();
       expect(kill).not.toHaveBeenCalled();
       expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+      hardStop(child);
+    });
+
+    it("recovers an exact owned root after Linux reparents it to PID 1", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const child = longRunningChild();
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      const record = journal.records(runtimeGenerationId)?.[0];
+      if (!record || record.state !== "owned") throw new Error("Missing claim");
+      const forceKill = vi.fn(async () => true);
+      deactivate();
+
+      const recovery = recoverRuntimeOwnedProcesses(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        {
+          deadlineAt: Date.now() + 2_000,
+          forceKill,
+          readIdentity: (pid) => readLinuxProcessIdentity(pid, () =>
+            linuxProcessStat(
+              record.process.pid,
+              1,
+              record.process.processGroupId,
+              record.process.startTimeTicks,
+            )),
+        },
+      );
+
+      await expect(recovery).resolves.toBe(true);
+      expect(forceKill).toHaveBeenCalledWith(record.process.pid, expect.objectContaining({
+        rootProcessGroup: true,
+      }));
+      expect(journal.records(runtimeGenerationId)).toEqual([]);
       hardStop(child);
     });
 

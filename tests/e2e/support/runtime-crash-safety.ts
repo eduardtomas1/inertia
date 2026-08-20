@@ -1,8 +1,15 @@
-import { expect } from "@playwright/test";
+import { expect, type TestInfo } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 
+import { readSystemBootId } from "../../../src/main/system-boot-id";
+import { RuntimeGenerationLeaseJournal } from "../../../src/node/runtime-generation-leases";
+import {
+  readLinuxProcessIdentity,
+  RuntimeOwnedProcessJournal,
+} from "../../../src/node/runtime-owned-processes";
 import {
   processExists,
   type AppFixture,
@@ -13,13 +20,58 @@ import {
   selectWorkspaceTool,
 } from "./workspace-tools";
 
-export async function expectRuntimeCrashRecovery(app: AppFixture): Promise<void> {
+interface RuntimeObservation {
+  readonly observedAt: string;
+  readonly generation: number;
+  readonly phase: string;
+  readonly pid: number | null;
+}
+
+function runtimeObservation(snapshot: RuntimeTestSnapshot): RuntimeObservation {
+  return {
+    observedAt: new Date().toISOString(),
+    generation: snapshot.generation,
+    phase: snapshot.phase,
+    pid: snapshot.pid,
+  };
+}
+
+function procState(pid: number): { state: string | null; errorCode: string | null } {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const closingName = stat.lastIndexOf(")");
+    const state = closingName >= 2
+      ? stat.slice(closingName + 1).trimStart()[0] ?? null
+      : null;
+    return state && /^[A-Za-z]$/u.test(state)
+      ? { state, errorCode: null }
+      : { state: null, errorCode: "INVALID" };
+  } catch (error) {
+    return {
+      state: null,
+      errorCode: error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : "UNKNOWN",
+    };
+  }
+}
+
+export async function expectRuntimeCrashRecovery(
+  app: AppFixture,
+  testInfo?: TestInfo,
+): Promise<void> {
   const { electronApp, page, runtimeSnapshot, testDirectory } = app;
   await expect.poll(
     async () => (await runtimeSnapshot()).phase,
     { timeout: 15_000 },
   ).toBe("ready");
   const before = await runtimeSnapshot();
+  const beforeObservation = runtimeObservation(before);
+  const dataDirectory = join(testDirectory, "data");
+  const priorLease = process.platform === "linux"
+    ? new RuntimeGenerationLeaseJournal(dataDirectory).all().find((lease) =>
+      lease.runtimeGenerationId.endsWith(`:${before.generation}`)) ?? null
+    : null;
   const beforeUrl = await page.evaluate(() =>
     window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
   await expect(page.locator(".app-shell")).toHaveAttribute(
@@ -108,6 +160,7 @@ export async function expectRuntimeCrashRecovery(app: AppFixture): Promise<void>
     if (!runtime) throw new Error("The test runtime supervisor is unavailable");
     return runtime.crash();
   });
+  const crashReturnedObservation = runtimeObservation(crashed);
   expect(crashed.pid).toBe(before.pid);
 
   await expect.poll(async () => {
@@ -115,6 +168,7 @@ export async function expectRuntimeCrashRecovery(app: AppFixture): Promise<void>
     return current.phase === "ready" && current.generation > before.generation;
   }, { timeout: 10_000 }).toBe(true);
   const after = await runtimeSnapshot();
+  const replacementReadyObservation = runtimeObservation(after);
   const afterUrl = await page.evaluate(() =>
     window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
   expect(after.generation).toBeGreaterThan(before.generation);
@@ -169,6 +223,61 @@ export async function expectRuntimeCrashRecovery(app: AppFixture): Promise<void>
     return;
   }
   await expect(newChat).toBeEnabled();
+  if (
+    testInfo
+    && priorLease
+    && await safetyAlert.isVisible().catch(() => false)
+  ) {
+    const systemBootId = readSystemBootId();
+    const records = new RuntimeOwnedProcessJournal(dataDirectory)
+      .records(priorLease.runtimeGenerationId);
+    const claims = (records ?? []).map((record) => {
+      if (record.state === "pending") {
+        return {
+          state: record.state,
+          ownershipId: record.ownershipId,
+          bootMatch: record.systemBootId === systemBootId,
+          process: null,
+          currentIdentity: null,
+          currentIdentityErrorCode: null,
+          proc: null,
+        };
+      }
+      let currentIdentity = null;
+      let currentIdentityErrorCode: string | null = null;
+      try {
+        currentIdentity = readLinuxProcessIdentity(record.process.pid);
+      } catch (error) {
+        currentIdentityErrorCode = error
+          && typeof error === "object"
+          && "code" in error
+          ? String(error.code)
+          : "UNKNOWN";
+      }
+      return {
+        state: record.state,
+        ownershipId: record.ownershipId,
+        bootMatch: record.systemBootId === systemBootId,
+        process: record.process,
+        currentIdentity,
+        currentIdentityErrorCode,
+        proc: procState(record.process.pid),
+      };
+    });
+    await testInfo.attach("runtime-owned-process-recovery-diagnostic", {
+      body: Buffer.from(JSON.stringify({
+        priorGenerationId: priorLease.runtimeGenerationId,
+        observations: {
+          before: beforeObservation,
+          crashReturned: crashReturnedObservation,
+          replacementReady: replacementReadyObservation,
+        },
+        recordsReadable: records !== null,
+        claims,
+      }, null, 2), "utf8"),
+      contentType: "application/json",
+    });
+  }
   await expect(interruptedNotice).toBeVisible();
   await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
   await expect.poll(() => terminal.getAttribute("data-terminal-id"))

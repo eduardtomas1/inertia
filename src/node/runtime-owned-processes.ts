@@ -83,6 +83,10 @@ function validPid(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 1;
 }
 
+function validParentPid(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 1;
+}
+
 function validTicks(value: unknown): value is string {
   return typeof value === "string" && /^[1-9][0-9]{0,30}$/u.test(value);
 }
@@ -158,7 +162,8 @@ function parseRecord(bytes: Buffer): RuntimeOwnedProcessRecord | null {
 
 export function readLinuxProcessIdentity(
   pid: number,
-  readFile: typeof readFileSync = readFileSync,
+  readFile: (path: string, encoding: "utf8") => string = (path, encoding) =>
+    readFileSync(path, encoding),
 ): LinuxProcessIdentity | null {
   if (process.platform !== "linux" || !validPid(pid)) return null;
   let stat: string;
@@ -185,7 +190,7 @@ export function readLinuxProcessIdentity(
   const startTimeTicks = fields[19];
   if (
     parsedPid !== pid
-    || !validPid(parentPid)
+    || !validParentPid(parentPid)
     || !validPid(processGroupId)
     || !validTicks(startTimeTicks)
   ) throw new Error("The owned process identity is invalid.");

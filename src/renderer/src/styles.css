@@ -676,12 +676,16 @@ textarea {
 }
 
 .sidebar-destination:hover,
-.sidebar-destination.is-active {
+.sidebar-destination.is-active,
+.sidebar-destination.is-open {
   color: var(--text);
   background: color-mix(in srgb, var(--surface-hover) 82%, transparent);
 }
 
-.sidebar-destination.is-active {
+/* Daily work opens a dialog rather than navigating, so it carries the same
+   weight as a current destination while that dialog is on screen. */
+.sidebar-destination.is-active,
+.sidebar-destination.is-open {
   font-weight: 620;
 }
 
@@ -1067,6 +1071,8 @@ textarea {
 }
 
 .sidebar-footer {
+  display: grid;
+  gap: 2px;
   padding-top: 9px;
   border-top: 1px solid var(--border);
 }

@@ -458,6 +458,7 @@ export function AppLayout({
             onCreateConversation={sidebarActions.createConversation}
             onOpenMultiSpawn={sidebarActions.openMultiSpawn}
             onOpenDailyWork={sidebarActions.openDailyWork}
+            dailyWorkOpen={dailyWorkOpen}
             onRenameConversation={sidebarActions.renameConversation}
             onPinConversation={sidebarActions.pinConversation}
             onSnoozeConversation={sidebarActions.snoozeConversation}

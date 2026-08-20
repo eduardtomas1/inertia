@@ -89,6 +89,7 @@ type SidebarProps = {
   onCreateConversation: (project: Project) => void;
   onOpenMultiSpawn: () => void;
   onOpenDailyWork: () => void;
+  dailyWorkOpen: boolean;
   onRenameConversation: (conversation: Conversation, title: string) => void;
   onPinConversation: (conversation: Conversation, pinned: boolean) => void;
   onSnoozeConversation: (conversation: Conversation, until: string | null) => void;
@@ -175,6 +176,7 @@ function SidebarView({
   onCreateConversation,
   onOpenMultiSpawn,
   onOpenDailyWork,
+  dailyWorkOpen,
   onRenameConversation,
   onPinConversation,
   onSnoozeConversation,
@@ -1222,7 +1224,7 @@ function SidebarView({
         </div>
 
         <div className="sidebar-footer">
-          <button type="button" className="sidebar-destination" onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
+          <button type="button" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
             <DailyWorkMark size={16} /><span>Daily work</span>
           </button>
           <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>

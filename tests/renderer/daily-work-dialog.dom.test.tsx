@@ -131,7 +131,10 @@ describe("DailyWorkDialog", () => {
     expect(mark).toHaveAttribute("focusable", "false");
     expect(mark).toHaveAttribute("viewBox", "0 0 24 24");
     expect(mark).toHaveAttribute("width", "19");
-    expect(mark?.querySelectorAll(".daily-work-mark-time")).toHaveLength(1);
+    // One marked day inside the frame, and no second metaphor competing with
+    // it at the 16px size the sidebar renders.
+    expect(mark?.querySelectorAll(".daily-work-mark-today")).toHaveLength(1);
+    expect(mark?.querySelectorAll("path")).toHaveLength(3);
     await waitFor(() => expect(view.request).toHaveBeenCalledTimes(1));
     const command = view.request.mock.calls[0]?.[0];
     expect(command).toMatchObject({ type: "daily.work.get" });

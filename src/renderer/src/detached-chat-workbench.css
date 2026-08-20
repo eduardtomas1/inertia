@@ -1,0 +1,86 @@
+/* Main-workbench presentation for native detached-chat ownership. Loading this
+   with the lazy App route keeps popup-only and workbench-only CSS separated. */
+.conversation-menu {
+  width: min(188px, calc(100vw - 24px));
+}
+
+.detached-chat-header-button.is-open {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--interactive-border));
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 46%, var(--surface-strong));
+}
+
+.app-startup-loading {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  place-items: center;
+  color: var(--text-muted);
+  background: var(--app-bg);
+}
+
+.detached-conversation-placeholder {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  padding: clamp(28px, 7vw, 72px);
+  text-align: center;
+}
+
+.detached-conversation-symbol {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  margin-bottom: 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 16px;
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface-strong));
+  box-shadow: var(--shadow-soft), var(--glass-inset);
+}
+
+.detached-conversation-eyebrow {
+  color: var(--accent-strong);
+  font-size: var(--ui-font-micro);
+  font-weight: 720;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.detached-conversation-placeholder h2 {
+  max-width: 560px;
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(20px, 2.7vw, 30px);
+  font-weight: 650;
+  letter-spacing: -.035em;
+  line-height: 1.1;
+}
+
+.detached-conversation-placeholder p {
+  max-width: 490px;
+  margin: 0 0 5px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.65;
+}
+
+.conversation-row.is-detached,
+.activity-thread.is-detached:not(.is-active) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--status-working) 7%, transparent);
+}
+
+.conversation-split-mark,
+.conversation-detached-mark {
+  flex: 0 0 auto;
+  color: var(--accent-strong);
+}
+
+.conversation-detached-mark {
+  filter: drop-shadow(
+    0 0 4px color-mix(in srgb, var(--accent) 18%, transparent)
+  );
+}

@@ -361,7 +361,7 @@ describe("composer detachment ownership", () => {
       name: "Message",
     }), { target: { value: "Keep this exact attachment draft" } });
     fireEvent.click(within(attachmentRegion).getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     await within(attachmentRegion).findByText("pending.png");
 

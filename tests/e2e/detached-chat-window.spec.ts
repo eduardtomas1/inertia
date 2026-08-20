@@ -192,7 +192,7 @@ test("moves one live chat between a remembered native window and the main app", 
     }));
   }, attachmentImagePath);
   await popup.getByRole("button", {
-    name: "Attach images or documents",
+    name: "Attach images, documents, or spreadsheets",
   }).click();
   const attachments = popup.getByRole("list", { name: "Attachments" });
   await expect(attachments.getByText("preview.png", { exact: true }))

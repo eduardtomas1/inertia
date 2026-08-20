@@ -13,6 +13,7 @@ import {
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
+import "./detached-chat-workbench.css";
 import { AppLayout } from "./components/AppLayout";
 import { LoadingMark } from "./components/ui";
 import type { WorkspaceSceneProps } from "./components/WorkspaceScene";

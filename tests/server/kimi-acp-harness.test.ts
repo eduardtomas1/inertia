@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -28,6 +29,18 @@ import {
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
+
+// Node protects process.stdout with a no-op _destroy. Restore the pipe-backed
+// Socket implementation and close the separately retained fd so Windows and
+// POSIX both deliver EOF while the fixture process remains alive.
+const CLOSE_NODE_STDOUT_TRANSPORT_SOURCE = `
+const stdoutFd = process.stdout.fd;
+const realStdoutDestroy = Object.getPrototypeOf(process.stdout)._destroy;
+if (typeof realStdoutDestroy !== "function") throw new Error("Node stdout is not a pipe-backed Socket.");
+process.stdout._destroy = realStdoutDestroy;
+process.stdout.destroy();
+require("node:fs").closeSync(stdoutFd);
+`;
 
 const hostTools: ProviderHostToolBridge = {
   definitions: [{
@@ -90,6 +103,39 @@ describe.sequential("Kimi ACP harness", () => {
   afterEach(async () => {
     while (registryDeactivators.length > 0) registryDeactivators.pop()?.();
     await Promise.all(roots.splice(0).map(removePortableFixture));
+  });
+
+  it("closes the inherited Node stdout pipe while the fixture process remains owned", async () => {
+    const root = portableFixtureRoot("Kimi ACP stdout close");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "kimi");
+    writeNodeSubcommand(root, "acp", `
+process.stdout.write("ready\\n", () => {
+  ${CLOSE_NODE_STDOUT_TRANSPORT_SOURCE}
+});
+setInterval(() => {}, 1000);
+`);
+    const child = spawn(command, ["acp"], {
+      cwd: root,
+      detached: process.platform !== "win32",
+      shell: false,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const output: Buffer[] = [];
+    let stdoutEnded = false;
+    child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
+    child.stdout.once("end", () => {
+      stdoutEnded = true;
+    });
+    try {
+      await waitFor("the fixture's inherited stdout pipe to close", () => stdoutEnded);
+      expect(Buffer.concat(output).toString("utf8")).toBe("ready\n");
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      expect(await terminateProcessTreeAndWait(child, true)).toBe(true);
+    }
   });
 
   it("uses shell-free native ACP and rejects the incompatible legacy CLI path", () => {
@@ -853,7 +899,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
 
     const transport = await runFailure("kimi ACP transport", `
-const fs = require("node:fs");
 const readline = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
@@ -864,7 +909,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     agentInfo: { name: "Kimi Code CLI", version: "test" },
   } });
   if (message.method === "session/new") {
-    fs.closeSync(process.stdout.fd);
+    ${CLOSE_NODE_STDOUT_TRANSPORT_SOURCE}
     setInterval(() => {}, 1000);
   }
 });

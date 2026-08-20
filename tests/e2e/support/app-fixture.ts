@@ -8,10 +8,11 @@ import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../../src/server/database";
+import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import {
   expectNoViewportOverflow as expectPageNoViewportOverflow,
 } from "./layout-assertions";
@@ -57,6 +58,7 @@ interface AppFixtureOptions {
   seedSecondProject?: boolean;
   codexAppServerSource?: string;
   codexResumeSource?: string;
+  claudeAuthSource?: string;
   beforeLaunch?: (fixture: {
     testDirectory: string;
     workspaceDirectory: string;
@@ -313,6 +315,7 @@ export async function createAppFixture(
     join(tmpdir(), `inertia-${options.name}-`),
   );
   const workspace = await createWorkspace(testDirectory);
+  let providerBinDirectory: string | null = null;
   const secondWorkspaceDirectory = options.seedSecondProject
     ? await createSecondWorkspace(testDirectory)
     : null;
@@ -353,6 +356,23 @@ export async function createAppFixture(
         ]),
     );
   }
+  if (options.claudeAuthSource) {
+    providerBinDirectory = join(testDirectory, "provider-bin");
+    await mkdir(providerBinDirectory, { recursive: true });
+    portableNodeExecutable(providerBinDirectory, "claude");
+    await Promise.all([
+      writeFile(
+        join(workspace.workspaceDirectory, "auth"),
+        options.claudeAuthSource,
+        "utf8",
+      ),
+      writeFile(
+        join(workspace.workspaceDirectory, ".git", "info", "exclude"),
+        "auth\n",
+        { encoding: "utf8", flag: "a" },
+      ),
+    ]);
+  }
   if (options.initialState === "conversation") {
     await mkdir(join(testDirectory, "data"), { recursive: true });
     seedConversation(
@@ -388,6 +408,13 @@ export async function createAppFixture(
       NODE_ENV: "test",
       INERTIA_DATA_DIR: join(testDirectory, "data"),
       INERTIA_WORKSPACE_DIR: workspace.workspaceDirectory,
+      ...(providerBinDirectory
+        ? {
+            PATH: [providerBinDirectory, process.env.PATH ?? ""]
+              .filter(Boolean)
+              .join(delimiter),
+          }
+        : {}),
       ...(options.codexAppServerSource
         ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
         : {}),

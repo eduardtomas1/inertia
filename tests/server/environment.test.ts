@@ -217,6 +217,30 @@ describe.sequential("provider environment discovery", () => {
     );
   });
 
+  it("keeps desktop-session launch authority out of provider children", () => {
+    const environment = providerChildEnvironment("claude", {
+      PATH: "/usr/bin:/bin",
+      HOME: "/home/fixture",
+      DISPLAY: ":0",
+      WAYLAND_DISPLAY: "wayland-0",
+      XDG_RUNTIME_DIR: "/run/user/1000",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+      BROWSER: "/tmp/provider-controlled-browser",
+      ANTHROPIC_API_KEY: "anthropic-secret",
+    });
+
+    expect(environment).toMatchObject({
+      PATH: "/usr/bin:/bin",
+      HOME: "/home/fixture",
+      ANTHROPIC_API_KEY: "anthropic-secret",
+    });
+    expect(environment).not.toHaveProperty("DISPLAY");
+    expect(environment).not.toHaveProperty("WAYLAND_DISPLAY");
+    expect(environment).not.toHaveProperty("XDG_RUNTIME_DIR");
+    expect(environment).not.toHaveProperty("DBUS_SESSION_BUS_ADDRESS");
+    expect(environment).not.toHaveProperty("BROWSER");
+  });
+
   it("builds credential-free installation probe environments", () => {
     const environment = credentialFreeProviderEnvironment({
       PATH: "/usr/bin:/bin",

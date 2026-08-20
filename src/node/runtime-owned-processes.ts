@@ -23,6 +23,8 @@ const MAX_CLAIMS = 256;
 const MAX_SESSIONS = 32;
 const MAX_RECORD_BYTES = 768;
 const SCHEMA_VERSION = 1;
+const PROCESS_GROUP_EXIT_WAIT_MS = 1_000;
+const PROCESS_GROUP_EXIT_POLL_MS = 10;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface LinuxProcessIdentity {
@@ -473,8 +475,9 @@ function releaseIfGroupExited(
   claim: ActiveRuntimeOwnedProcessClaim,
   pid: number,
 ): void {
-  setImmediate(() => {
-    if (activeRegistry !== registry) return;
+  const deadlineAt = Date.now() + PROCESS_GROUP_EXIT_WAIT_MS;
+  const poll = (): void => {
+    if (activeRegistry !== registry || claim.released) return;
     try {
       process.kill(-pid, 0);
     } catch (error) {
@@ -487,9 +490,19 @@ function releaseIfGroupExited(
         try { releaseActiveClaim(registry, claim); } catch {
           // A removed test/runtime root cannot authorize further mutation.
         }
+        return;
       }
     }
-  });
+    const remainingMs = Math.trunc(deadlineAt - Date.now());
+    if (remainingMs <= 0) return;
+    const timer = setTimeout(
+      poll,
+      Math.max(1, Math.min(PROCESS_GROUP_EXIT_POLL_MS, remainingMs)),
+    );
+    timer.unref();
+  };
+  const timer = setTimeout(poll, 0);
+  timer.unref();
 }
 
 function releaseActiveClaim(

@@ -24,7 +24,7 @@ interface RuntimeTreeDependencies {
 
 export const runtimeDescendantPids = posixDescendantPids;
 
-type LinuxProcessState = "live" | "zombie" | "missing" | "unknown";
+type LinuxProcessState = "live" | "non-executing" | "missing" | "unknown";
 
 function linuxProcessState(
   pid: number,
@@ -44,7 +44,9 @@ function linuxProcessState(
   const closingName = stat.lastIndexOf(")");
   if (closingName < 2) return "unknown";
   const state = stat.slice(closingName + 1).trimStart()[0];
-  if (state === "Z") return "zombie";
+  if (state === "Z" || state === "X" || state === "x") {
+    return "non-executing";
+  }
   return state && /^[A-Za-z]$/u.test(state) ? "live" : "unknown";
 }
 
@@ -69,10 +71,11 @@ async function waitForDescendantsExit(
     for (const pid of remaining) {
       if (platform === "linux") {
         const state = linuxProcessState(pid, readFile);
-        // A zombie has no executable address space and cannot create or retain
-        // descendants. It may remain signal-visible until an external parent
-        // reaps it, which must not turn confirmed cleanup into a reboot.
-        if (state === "missing" || state === "zombie") {
+        // Linux documents Z as zombie and X/x as dead. None has executable
+        // address space or can create or retain descendants, but each may
+        // remain signal-visible while an external parent or the kernel reaps
+        // it. That must not turn confirmed post-kill cleanup into a reboot.
+        if (state === "missing" || state === "non-executing") {
           remaining.delete(pid);
           continue;
         }

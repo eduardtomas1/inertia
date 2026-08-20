@@ -43,6 +43,10 @@ function activate(directory: string): void {
   if (deactivate) deactivators.push(deactivate);
 }
 
+function processError(code: string): Error & { code: string } {
+  return Object.assign(new Error(code), { code });
+}
+
 function deactivate(): void {
   deactivators.pop()?.();
 }
@@ -179,6 +183,129 @@ describe.skipIf(process.platform !== "linux")(
       expect(owned.confirmStopped()).toBe(true);
       expect(journal.records(runtimeGenerationId)).toEqual([]);
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);
+    });
+
+    it("polls the exact process group until ESRCH before retiring its claim", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const owned = spawnRuntimeOwnedPidProcess(() => {
+        const child = spawn(
+          process.execPath,
+          ["-e", "setInterval(() => undefined, 1000)"],
+          { detached: true, shell: false, stdio: "ignore" },
+        );
+        if (!child.pid) throw new Error("Missing child PID");
+        return child as ChildProcess & { readonly pid: number };
+      });
+      liveChildren.add(owned.process);
+      owned.process.once("close", () => liveChildren.delete(owned.process));
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      const nativeKill = process.kill;
+      let probes = 0;
+
+      vi.useFakeTimers();
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (pid === -owned.process.pid && signal === 0) {
+          probes += 1;
+          if (probes >= 3) throw processError("ESRCH");
+          return true;
+        }
+        return nativeKill(pid, signal);
+      });
+      try {
+        owned.releaseIfGroupExited();
+        await vi.advanceTimersByTimeAsync(20);
+
+        expect(probes).toBe(3);
+        expect(kill.mock.calls.filter(([pid, signal]) =>
+          pid === -owned.process.pid && signal === 0)).toHaveLength(3);
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        kill.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it.each(["present", "eperm"] as const)(
+      "keeps a %s process group claim after the bounded exit poll",
+      async (outcome) => {
+        const directory = temporaryDirectory();
+        activate(directory);
+        const owned = spawnRuntimeOwnedPidProcess(() => {
+          const child = spawn(
+            process.execPath,
+            ["-e", "setInterval(() => undefined, 1000)"],
+            { detached: true, shell: false, stdio: "ignore" },
+          );
+          if (!child.pid) throw new Error("Missing child PID");
+          return child as ChildProcess & { readonly pid: number };
+        });
+        liveChildren.add(owned.process);
+        owned.process.once("close", () => liveChildren.delete(owned.process));
+        const journal = new RuntimeOwnedProcessJournal(directory);
+        const nativeKill = process.kill;
+
+        vi.useFakeTimers();
+        const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+          if (pid === -owned.process.pid && signal === 0) {
+            if (outcome === "eperm") throw processError("EPERM");
+            return true;
+          }
+          return nativeKill(pid, signal);
+        });
+        try {
+          owned.releaseIfGroupExited();
+          await vi.advanceTimersByTimeAsync(2_000);
+
+          expect(kill.mock.calls.filter(([pid, signal]) =>
+            pid === -owned.process.pid && signal === 0).length).toBeGreaterThan(1);
+          expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+        } finally {
+          kill.mockRestore();
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it("does not retire a claim after the active registry is replaced", async () => {
+      const directory = temporaryDirectory();
+      const replacementDirectory = temporaryDirectory();
+      activate(directory);
+      const owned = spawnRuntimeOwnedPidProcess(() => {
+        const child = spawn(
+          process.execPath,
+          ["-e", "setInterval(() => undefined, 1000)"],
+          { detached: true, shell: false, stdio: "ignore" },
+        );
+        if (!child.pid) throw new Error("Missing child PID");
+        return child as ChildProcess & { readonly pid: number };
+      });
+      liveChildren.add(owned.process);
+      owned.process.once("close", () => liveChildren.delete(owned.process));
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      const nativeKill = process.kill;
+
+      vi.useFakeTimers();
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (pid === -owned.process.pid && signal === 0) {
+          throw processError("ESRCH");
+        }
+        return nativeKill(pid, signal);
+      });
+      try {
+        owned.releaseIfGroupExited();
+        deactivate();
+        activate(replacementDirectory);
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(kill).not.toHaveBeenCalledWith(-owned.process.pid, 0);
+        expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+        expect(new RuntimeOwnedProcessJournal(replacementDirectory)
+          .records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        kill.mockRestore();
+        vi.useRealTimers();
+      }
     });
 
     it("keeps a crash between spawn intent and identity fail-closed", async () => {

@@ -149,22 +149,25 @@ describe("runtime process-tree termination", () => {
     })).resolves.toBe(false);
   });
 
-  it("confirms a post-kill Linux zombie without waiting for external reaping", async () => {
-    const kill = vi.fn(() => true as const);
-    const spawnProcessSync = vi.fn(() => ({
-      stdout: "100 1 S\n",
-      status: 0,
-    }));
+  it.each(["Z", "X", "x"])(
+    "confirms a post-kill Linux %s state without waiting for external reaping",
+    async (state) => {
+      const kill = vi.fn(() => true as const);
+      const spawnProcessSync = vi.fn(() => ({
+        stdout: "100 1 S\n",
+        status: 0,
+      }));
 
-    await expect(forceKillRuntimeProcessTree(100, {
-      platform: "linux",
-      kill,
-      readFile: () => processStat(100, "Z"),
-      spawnProcessSync: spawnProcessSync as never,
-    })).resolves.toBe(true);
+      await expect(forceKillRuntimeProcessTree(100, {
+        platform: "linux",
+        kill,
+        readFile: () => processStat(100, state),
+        spawnProcessSync: spawnProcessSync as never,
+      })).resolves.toBe(true);
 
-    expect(kill).not.toHaveBeenCalledWith(100, 0);
-  });
+      expect(kill).not.toHaveBeenCalledWith(100, 0);
+    },
+  );
 
   it("keeps non-ESRCH Linux exit probes unconfirmed", async () => {
     vi.useFakeTimers();
@@ -181,6 +184,31 @@ describe("runtime process-tree termination", () => {
         platform: "linux",
         kill,
         readFile: () => { throw processError("EPERM"); },
+        spawnProcessSync: vi.fn(() => ({
+          stdout: "100 1 S\n",
+          status: 0,
+        })) as never,
+        deadlineAt,
+      });
+
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(termination).resolves.toBe(false);
+      expect(kill).toHaveBeenCalledWith(100, 0);
+      expect(Date.now()).toBe(deadlineAt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps an unknown Linux process state unconfirmed", async () => {
+    vi.useFakeTimers();
+    try {
+      const kill = vi.fn(() => true as const);
+      const deadlineAt = Date.now() + 20;
+      const termination = forceKillRuntimeProcessTree(100, {
+        platform: "linux",
+        kill,
+        readFile: () => processStat(100, "?"),
         spawnProcessSync: vi.fn(() => ({
           stdout: "100 1 S\n",
           status: 0,

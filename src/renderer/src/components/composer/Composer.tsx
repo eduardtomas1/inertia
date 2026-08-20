@@ -1,15 +1,8 @@
-import {
-  lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState,
-} from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import type {
-  ChatAttachment,
-  ConversationContextPacketSummary,
-  PromptPreset,
-} from "@shared/contracts";
+import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
-import { MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN } from "../../../../shared/conversation-context";
 import { fastModeProviderValue, legacyProviderIdForHarness,
   routeSupportsNativeFastModeIdentity, withModelSelectionFastMode,
 } from "../../../../shared/model-routing";
@@ -54,27 +47,15 @@ import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
-import type { ConversationContextDialogResult } from "../conversation-context/types";
+import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
  * the entry chunk. Loading it on demand keeps the picker and its list rendering
  * out of first paint.
  */
-const ChatResumeControl = lazy(async () => ({
-  default: (await import("../ChatResumeControl")).ChatResumeControl,
-}));
-const ChatGoalControl = lazy(async () => ({
-  default: (await import("../ChatGoalControl")).ChatGoalControl,
-}));
-const ConversationContextDialog = lazy(async () => ({
-  default: (await import("../conversation-context/ConversationContextDialog"))
-    .ConversationContextDialog,
-}));
-const ConversationContextPacketStrip = lazy(async () => ({
-  default: (await import("../conversation-context/ConversationContextPacketStrip"))
-    .ConversationContextPacketStrip,
-}));
+const ChatResumeControl = lazy(async () => ({ default: (await import("../ChatResumeControl")).ChatResumeControl }));
+const ChatGoalControl = lazy(async () => ({ default: (await import("../ChatGoalControl")).ChatGoalControl }));
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // The first non-empty edit is synchronous. During uninterrupted typing, a
 // force-terminated renderer can lose at most this much newer draft history;
@@ -104,9 +85,8 @@ export const Composer = memo(function Composer({
   skillsLoading,
   skillsError,
   promptContext,
-  contextSources = [],
-  contextPackets = [],
-  onConversationContextCommand,
+  contextSources = [], contextPackets = [],
+  agentContextRequest = null, onConversationContextCommand,
   previewContextUrl,
   providerIdentityLabels,
   goal,
@@ -148,14 +128,12 @@ export const Composer = memo(function Composer({
   const draftPersistenceTimerRef = useRef<number | null>(null);
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [visibleContextPackets, setVisibleContextPackets] = useState<
-    ConversationContextPacketSummary[]
-  >(() => [...contextPackets]);
-  const [contextDialog, setContextDialog] = useState<
-    | { kind: "create" }
-    | { kind: "preview"; packetId: string }
-    | null
-  >(null);
+  const conversationContext = useComposerConversationContext({
+    conversationId: conversation.id,
+    contextPackets,
+    onCommand: onConversationContextCommand,
+  });
+  const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -190,7 +168,7 @@ export const Composer = memo(function Composer({
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null);
-  useNativePreviewSuspension(contextDialog !== null);
+  useNativePreviewSuspension(conversationContext.dialog !== null || agentContextRequest !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);
@@ -206,43 +184,6 @@ export const Composer = memo(function Composer({
   }, []);
 
   conversationIdRef.current = conversation.id;
-
-  useEffect(() => {
-    setVisibleContextPackets([...contextPackets]);
-    setContextDialog(null);
-  }, [contextPackets, conversation.id]);
-
-  const draftContextPackets = visibleContextPackets.filter(
-    ({ consumedMessageId }) => consumedMessageId === null,
-  );
-  const contextPacketIds = draftContextPackets.map(({ id }) => id);
-
-  const handleContextResult = useCallback((
-    result: ConversationContextDialogResult,
-  ): void => {
-    if (result.kind === "created") {
-      const { excerpts: _excerpts, ...summary } = result.packet;
-      setVisibleContextPackets((current) => [
-        ...current.filter(({ id }) => id !== summary.id),
-        summary,
-      ]);
-      return;
-    }
-    setVisibleContextPackets((current) =>
-      current.filter(({ id }) => id !== result.packetId));
-  }, []);
-
-  const removeContextPacket = useCallback(async (packetId: string) => {
-    if (!onConversationContextCommand) return;
-    await onConversationContextCommand("conversation.context.remove", {
-      type: "conversation.context.remove",
-      payload: {
-        packetId,
-        targetConversationId: conversation.id,
-      },
-    });
-    handleContextResult({ kind: "removed", packetId });
-  }, [conversation.id, handleContextResult, onConversationContextCommand]);
 
   const flushDraftPersistence = useCallback((): void => {
     if (draftPersistenceTimerRef.current !== null) {
@@ -618,7 +559,6 @@ export const Composer = memo(function Composer({
     const submittedDraft = message;
     const submittedPromptContext = promptContext;
     const submittedPreviewUrl = selectedPreviewUrlRef.current;
-    const submittedContextPacketIds = [...contextPacketIds];
     const submittedRevision =
       editorRevisionsRef.current.get(submittedConversationId) ?? 0;
     const submissionSequence = submissionSequenceRef.current + 1;
@@ -664,11 +604,6 @@ export const Composer = memo(function Composer({
         !mountedRef.current
         || conversationIdRef.current !== submittedConversationId
       ) return;
-      if (submittedContextPacketIds.length > 0) {
-        setVisibleContextPackets((current) => current.filter(
-          ({ id }) => !submittedContextPacketIds.includes(id),
-        ));
-      }
       if (editorUnchanged) {
         draftValueRef.current = "";
         setMessage("");
@@ -1152,21 +1087,10 @@ export const Composer = memo(function Composer({
             />
           </Suspense>
         )}
-        {draftContextPackets.length > 0 && (
-          <Suspense fallback={null}>
-            <ConversationContextPacketStrip
-              packets={draftContextPackets}
-              disabled={submissionPending || running}
-              onPreview={(packetId) => setContextDialog({
-                kind: "preview",
-                packetId,
-              })}
-              onRemove={(packetId) => {
-                void removeContextPacket(packetId).catch(() => undefined);
-              }}
-            />
-          </Suspense>
-        )}
+        <ComposerConversationContextStrip
+          controller={conversationContext}
+          disabled={submissionPending || running}
+        />
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
@@ -1260,14 +1184,11 @@ export const Composer = memo(function Composer({
           running={running}
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}
-          contextAvailable={Boolean(
-            onConversationContextCommand
-            && contextSources.length > 0
-            && draftContextPackets.length
-              < MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
+          {...composerConversationContextToolbarProps(
+            conversationContext,
+            contextSources.length,
+            Boolean(onConversationContextCommand),
           )}
-          contextCount={draftContextPackets.length}
-          onOpenContext={() => setContextDialog({ kind: "create" })}
           onRunAction={onRunAction}
           skills={skills}
           skillsCapability={skillsCapability}
@@ -1332,22 +1253,13 @@ export const Composer = memo(function Composer({
           onSubmit={submit}
           onStop={stop}
         />
-        {contextDialog && onConversationContextCommand && (
-          <Suspense fallback={null}>
-            <ConversationContextDialog
-              targetConversationId={conversation.id}
-              sources={contextSources}
-              previewPacketId={contextDialog.kind === "preview"
-                ? contextDialog.packetId
-                : null}
-              onCommand={onConversationContextCommand}
-              onResult={handleContextResult}
-              onClose={() => {
-                setContextDialog(null);
-              }}
-            />
-          </Suspense>
-        )}
+        <ComposerConversationContextDialog
+          controller={conversationContext}
+          targetConversationId={conversation.id}
+          sources={contextSources}
+          agentRequest={agentContextRequest}
+          onCommand={onConversationContextCommand}
+        />
       </section>
     </div>
   );

@@ -695,9 +695,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   agentThreads = createAgentThreadRuntime({
-    store, providers, backendProfileController, workspaceRuns, dataDirectory,
-    turns, providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
-    broadcastConversationShell,
+    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
+    broadcastConversationShell, pendingInputs, broadcast,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
@@ -753,6 +752,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         publicError,
         send,
         creation: agentThreads.creation,
+        contextRequests: agentThreads.contextRequests,
       }),
       createTurnInteractionCommandHandler({
         store, conversationAttachments,
@@ -1001,7 +1001,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     }, conversationId, content),
     respondToInput: (conversationId, inputRequestId, answers) => {
       const pending = pendingInputs.get(inputRequestId);
-      if (!pending || pending.conversationId !== conversationId || pending.questions.some((question) => question.isSecret)) return false;
+      if (!pending || pending.conversationContextRequest || pending.conversationId !== conversationId || pending.questions.some((question) => question.isSecret)) return false;
       const expected = new Map(pending.questions.map((question) => [question.id, question]));
       for (const [questionId, values] of Object.entries(answers)) {
         const question = expected.get(questionId);

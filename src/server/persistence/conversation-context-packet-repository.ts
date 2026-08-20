@@ -14,6 +14,8 @@ import {
   type ConversationContextPacket,
   type ConversationContextPacketSummary,
   type ConversationContextSourceTranscript,
+  type ChatAttachment,
+  type ChatMessage,
   type MaterializedConversationContext,
   type MessageSendAcceptance,
 } from "../../shared/contracts";
@@ -21,6 +23,7 @@ import { normalizeIdentityPath } from "../project-identity";
 import { boundedSubagentText } from "../provider/subagent-trace";
 import type { ConversationRow, MessageRow, ProjectRow } from "./rows";
 import { MESSAGE_PROJECTION_COLUMNS } from "./stream-text-storage";
+import type { CreateMessageOptions } from "./types";
 
 interface ConversationContextPacketRow {
   id: string;
@@ -55,11 +58,66 @@ export interface CreateConversationContextPacketInput {
   acknowledgedWorkspaceDifference: boolean;
 }
 
+export type AgentConversationContextRequestStatus =
+  | "selection-pending"
+  | "completed"
+  | "denied"
+  | "cancelled"
+  | "expired"
+  | "interrupted"
+  | "failed";
+
+export interface AgentConversationContextRequestRecord {
+  id: string;
+  targetConversationId: string;
+  targetTurnId: string;
+  targetUserMessageId: string;
+  targetRunId: string;
+  sourceHarnessId: string;
+  requestedSourceConversationId: string | null;
+  selectedSourceConversationId: string | null;
+  toolCallIdHash: string;
+  requestFingerprint: string;
+  status: AgentConversationContextRequestStatus;
+  packetId: string | null;
+  resultJson: string | null;
+  failureMessage: string | null;
+  createdAt: string;
+  expiresAt: string;
+  updatedAt: string;
+}
+
+interface AgentConversationContextRequestRow {
+  id: string;
+  target_conversation_id: string;
+  target_turn_id: string;
+  target_user_message_id: string;
+  target_run_id: string;
+  source_harness_id: string;
+  requested_source_conversation_id: string | null;
+  selected_source_conversation_id: string | null;
+  tool_call_id_hash: string;
+  request_fingerprint: string;
+  status: AgentConversationContextRequestStatus;
+  packet_id: string | null;
+  result_json: string | null;
+  failure_message: string | null;
+  created_at: string;
+  expires_at: string;
+  updated_at: string;
+}
+
 interface ConversationContextPacketPersistenceContext {
   database: Database.Database;
   conversationPath(conversationId: string): string;
   requireConversation(conversationId: string): ConversationRow;
   requireProject(projectId: string): ProjectRow;
+  createUserMessage(
+    conversationId: string,
+    content: string,
+    attachments: ChatAttachment[],
+    options?: CreateMessageOptions,
+  ): ChatMessage;
 }
 
 function byteLength(value: string): number {
@@ -206,6 +264,30 @@ function summaryFromPacket(
   return summary;
 }
 
+function agentRequestFromRow(
+  row: AgentConversationContextRequestRow,
+): AgentConversationContextRequestRecord {
+  return {
+    id: row.id,
+    targetConversationId: row.target_conversation_id,
+    targetTurnId: row.target_turn_id,
+    targetUserMessageId: row.target_user_message_id,
+    targetRunId: row.target_run_id,
+    sourceHarnessId: row.source_harness_id,
+    requestedSourceConversationId: row.requested_source_conversation_id,
+    selectedSourceConversationId: row.selected_source_conversation_id,
+    toolCallIdHash: row.tool_call_id_hash,
+    requestFingerprint: row.request_fingerprint,
+    status: row.status,
+    packetId: row.packet_id,
+    resultJson: row.result_json,
+    failureMessage: row.failure_message,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function workspaceLabel(conversation: ConversationRow): string {
   if (conversation.worktree_path) {
     return conversation.branch
@@ -275,6 +357,43 @@ export class ConversationContextPacketRepository {
   ) {}
 
   create(input: CreateConversationContextPacketInput): ConversationContextPacket {
+    return this.insert(input, null);
+  }
+
+  createUserMessageWithPackets(input: {
+    conversationId: string;
+    content: string;
+    attachments: ChatAttachment[];
+    packetIds: readonly string[];
+    requestId: string;
+    options?: CreateMessageOptions;
+  }): ChatMessage {
+    return this.context.database.transaction(() => {
+      const message = this.context.createUserMessage(
+        input.conversationId,
+        input.content,
+        input.attachments,
+        input.options,
+      );
+      claimConversationContextPackets(this.context.database, {
+        packetIds: input.packetIds,
+        targetConversationId: input.conversationId,
+        messageId: message.id,
+        requestId: input.requestId,
+        consumedAt: message.createdAt,
+      });
+      return message;
+    })();
+  }
+
+  private insert(
+    input: CreateConversationContextPacketInput,
+    consumption: {
+      messageId: string;
+      requestId: string;
+      consumedAt: string;
+    } | null,
+  ): ConversationContextPacket {
     if (input.sourceConversationId === input.targetConversationId) {
       throw new Error("Choose another chat as the context source.");
     }
@@ -307,15 +426,17 @@ export class ConversationContextPacketRepository {
         "Confirm that this context comes from a different project or worktree.",
       );
     }
-    const draftCount = this.context.database.prepare(`
-      SELECT COUNT(*) AS count
-      FROM conversation_context_packets
-      WHERE target_conversation_id = ? AND consumed_message_id IS NULL
-    `).get(target.id) as { count: number };
-    if (draftCount.count >= MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) {
-      throw new Error(
-        "Send or remove one of the chat context packets already attached to this draft.",
-      );
+    if (!consumption) {
+      const draftCount = this.context.database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM conversation_context_packets
+        WHERE target_conversation_id = ? AND consumed_message_id IS NULL
+      `).get(target.id) as { count: number };
+      if (draftCount.count >= MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) {
+        throw new Error(
+          "Send or remove one of the chat context packets already attached to this draft.",
+        );
+      }
     }
     const placeholders = messageIds.map(() => "?").join(", ");
     const rows = this.context.database.prepare(`
@@ -351,7 +472,7 @@ export class ConversationContextPacketRepository {
           MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
         ).text || null
       : null;
-    const now = new Date().toISOString();
+    const now = consumption?.consumedAt ?? new Date().toISOString();
     const id = randomUUID();
     const excerptsJson = JSON.stringify(excerpts);
     const characterCount = excerpts.reduce(
@@ -366,7 +487,7 @@ export class ConversationContextPacketRepository {
         source_workspace_label, target_workspace_label, workspace_relation,
         note, excerpts_json, message_count, character_count, created_at,
         consumed_message_id, consumed_request_id, consumed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       source.id,
@@ -383,8 +504,187 @@ export class ConversationContextPacketRepository {
       excerpts.length,
       characterCount,
       now,
+      consumption?.messageId ?? null,
+      consumption?.requestId ?? null,
+      consumption?.consumedAt ?? null,
     );
     return this.get(id, target.id);
+  }
+
+  recoverInterruptedAgentRequests(now = new Date().toISOString()): number {
+    return this.context.database.prepare(`
+      UPDATE agent_context_requests
+      SET status = 'interrupted',
+          failure_message = 'The host restarted before context selection settled.',
+          updated_at = ?
+      WHERE status = 'selection-pending'
+    `).run(now).changes;
+  }
+
+  agentRequest(id: string): AgentConversationContextRequestRecord | null {
+    const row = this.context.database.prepare(`
+      SELECT * FROM agent_context_requests WHERE id = ?
+    `).get(id) as AgentConversationContextRequestRow | undefined;
+    return row ? agentRequestFromRow(row) : null;
+  }
+
+  reserveAgentRequest(input: {
+    id: string;
+    targetConversationId: string;
+    targetTurnId: string;
+    targetUserMessageId: string;
+    targetRunId: string;
+    sourceHarnessId: string;
+    requestedSourceConversationId: string | null;
+    toolCallIdHash: string;
+    requestFingerprint: string;
+    now: string;
+    expiresAt: string;
+  }): { kind: "reserved" | "replay" | "conflict" | "limit";
+    request: AgentConversationContextRequestRecord | null } {
+    return this.context.database.transaction(() => {
+      const existingRow = this.context.database.prepare(`
+        SELECT * FROM agent_context_requests
+        WHERE target_turn_id = ? AND tool_call_id_hash = ?
+      `).get(input.targetTurnId, input.toolCallIdHash) as
+        | AgentConversationContextRequestRow
+        | undefined;
+      if (existingRow) {
+        const existing = agentRequestFromRow(existingRow);
+        return {
+          kind: existing.requestFingerprint === input.requestFingerprint
+            ? "replay" as const
+            : "conflict" as const,
+          request: existing,
+        };
+      }
+      const pending = this.context.database.prepare(`
+        SELECT COUNT(*) AS count FROM agent_context_requests
+        WHERE target_turn_id = ?
+      `).get(input.targetTurnId) as { count: number };
+      if (pending.count >= 4) return { kind: "limit" as const, request: null };
+      this.context.requireConversation(input.targetConversationId);
+      if (input.requestedSourceConversationId) {
+        this.context.requireConversation(input.requestedSourceConversationId);
+        if (input.requestedSourceConversationId === input.targetConversationId) {
+          throw new Error("Choose another chat as the context source.");
+        }
+      }
+      const turnIdentity = this.context.database.prepare(`
+        SELECT 1
+        FROM agent_turns turn
+        JOIN messages message ON message.id = turn.user_message_id
+        WHERE turn.id = ?
+          AND turn.conversation_id = ?
+          AND turn.user_message_id = ?
+          AND turn.run_id = ?
+          AND message.conversation_id = turn.conversation_id
+          AND message.role = 'user'
+      `).get(
+        input.targetTurnId,
+        input.targetConversationId,
+        input.targetUserMessageId,
+        input.targetRunId,
+      );
+      if (!turnIdentity) {
+        throw new Error("The context request no longer matches its target turn.");
+      }
+      this.context.database.prepare(`
+        INSERT INTO agent_context_requests (
+          id, target_conversation_id, target_turn_id, target_user_message_id,
+          target_run_id, source_harness_id, requested_source_conversation_id,
+          selected_source_conversation_id, tool_call_id_hash,
+          request_fingerprint, status, packet_id, result_json,
+          failure_message, created_at, expires_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'selection-pending',
+          NULL, NULL, NULL, ?, ?, ?)
+      `).run(
+        input.id,
+        input.targetConversationId,
+        input.targetTurnId,
+        input.targetUserMessageId,
+        input.targetRunId,
+        input.sourceHarnessId,
+        input.requestedSourceConversationId,
+        input.toolCallIdHash,
+        input.requestFingerprint,
+        input.now,
+        input.expiresAt,
+        input.now,
+      );
+      return { kind: "reserved" as const, request: this.agentRequest(input.id)! };
+    })();
+  }
+
+  finishAgentRequest(
+    id: string,
+    status: Exclude<AgentConversationContextRequestStatus, "selection-pending" | "completed">,
+    failureMessage: string,
+    now: string,
+  ): void {
+    const result = this.context.database.prepare(`
+      UPDATE agent_context_requests
+      SET status = ?, failure_message = ?, updated_at = ?
+      WHERE id = ? AND status = 'selection-pending'
+    `).run(status, failureMessage.slice(0, 1_000), now, id);
+    if (result.changes !== 1) {
+      throw new Error("The context request no longer owns its pending state.");
+    }
+  }
+
+  completeAgentRequest(input: CreateConversationContextPacketInput & {
+    requestId: string;
+    targetTurnId: string;
+    targetRunId: string;
+    targetUserMessageId: string;
+    toolCallIdHash: string;
+    completedAt: string;
+  }): { packet: ConversationContextPacket; resultJson: string } {
+    return this.context.database.transaction(() => {
+      const request = this.agentRequest(input.requestId);
+      if (
+        !request
+        || request.status !== "selection-pending"
+        || request.targetConversationId !== input.targetConversationId
+        || request.targetTurnId !== input.targetTurnId
+        || request.targetRunId !== input.targetRunId
+        || request.targetUserMessageId !== input.targetUserMessageId
+        || request.toolCallIdHash !== input.toolCallIdHash
+        || (
+          request.requestedSourceConversationId !== null
+          && request.requestedSourceConversationId !== input.sourceConversationId
+        )
+      ) {
+        throw new Error("The approved context request no longer owns this operation.");
+      }
+      const packet = this.insert(input, {
+        messageId: input.targetUserMessageId,
+        requestId: input.requestId,
+        consumedAt: input.completedAt,
+      });
+      const resultJson = JSON.stringify({
+        context: JSON.parse(this.materializePacket(packet).content),
+      });
+      if (byteLength(resultJson) > 32 * 1024) {
+        throw new Error("The selected context exceeds the host-tool result limit.");
+      }
+      const updated = this.context.database.prepare(`
+        UPDATE agent_context_requests
+        SET status = 'completed', selected_source_conversation_id = ?,
+          packet_id = ?, result_json = ?, failure_message = NULL, updated_at = ?
+        WHERE id = ? AND status = 'selection-pending'
+      `).run(
+        input.sourceConversationId,
+        packet.id,
+        resultJson,
+        input.completedAt,
+        input.requestId,
+      );
+      if (updated.changes !== 1) {
+        throw new Error("The context request completion lost its pending authority.");
+      }
+      return { packet, resultJson };
+    })();
   }
 
   targetConversationIdsForSource(sourceConversationId: string): string[] {
@@ -505,28 +805,34 @@ export class ConversationContextPacketRepository {
       if (packet.consumedMessageId) {
         throw new Error("A selected chat context has already been sent.");
       }
-      const content = JSON.stringify({
-        version: 1,
-        kind: "inertia-conversation-context",
-        packetId: packet.id,
-        source: {
-          conversationId: packet.sourceConversationId,
-          conversationTitle: packet.sourceConversationTitle,
-          projectId: packet.sourceProjectId,
-          projectName: packet.sourceProjectName,
-          workspaceLabel: packet.sourceWorkspaceLabel,
-          capturedAt: packet.createdAt,
-        },
-        relationToTarget: packet.workspaceRelation,
-        note: packet.note,
-        excerpts: packet.excerpts,
-      });
-      return {
-        packetId: packet.id,
-        label: `Chat context · ${packet.sourceConversationTitle} · ${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}`,
-        content,
-      };
+      return this.materializePacket(packet);
     });
+  }
+
+  private materializePacket(
+    packet: ConversationContextPacket,
+  ): MaterializedConversationContext {
+    const content = JSON.stringify({
+      version: 1,
+      kind: "inertia-conversation-context",
+      packetId: packet.id,
+      source: {
+        conversationId: packet.sourceConversationId,
+        conversationTitle: packet.sourceConversationTitle,
+        projectId: packet.sourceProjectId,
+        projectName: packet.sourceProjectName,
+        workspaceLabel: packet.sourceWorkspaceLabel,
+        capturedAt: packet.createdAt,
+      },
+      relationToTarget: packet.workspaceRelation,
+      note: packet.note,
+      excerpts: packet.excerpts,
+    });
+    return {
+      packetId: packet.id,
+      label: `Chat context · ${packet.sourceConversationTitle} · ${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}`,
+      content,
+    };
   }
 
   replayAcceptance(

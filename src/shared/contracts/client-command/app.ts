@@ -44,6 +44,26 @@ const duoComparisonSchema = conversationCreatePayloadSchema.omit({
   activate: z.literal(false).optional(),
 }).strict();
 
+const conversationContextSourceFields = {
+  sourceConversationId: z.string().uuid(),
+  targetConversationId: z.string().uuid(),
+};
+const conversationContextSelectionFields = {
+  ...conversationContextSourceFields,
+  sourceMessageIds: z.array(z.string().uuid())
+    .min(1)
+    .max(MAX_CONVERSATION_CONTEXT_MESSAGES)
+    .refine((ids) => new Set(ids).size === ids.length),
+  note: z.string().trim().min(1).max(MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
+    .refine(
+      (value) => new TextEncoder().encode(value).byteLength
+        <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
+      "Context note exceeds its UTF-8 byte limit.",
+    )
+    .optional(),
+  acknowledgedWorkspaceDifference: z.boolean(),
+};
+
 export const appCommandSchemas = [
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
   z.strictObject({
@@ -212,30 +232,37 @@ export const appCommandSchemas = [
   z.strictObject({
     ...requestBase,
     type: z.literal("conversation.context.source.load"),
+    payload: z.strictObject(conversationContextSourceFields),
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.agent.source.load"),
     payload: z.strictObject({
+      contextRequestId: z.string().uuid(),
       sourceConversationId: z.string().uuid(),
       targetConversationId: z.string().uuid(),
     }),
   }),
   z.strictObject({
     ...requestBase,
+    type: z.literal("conversation.context.agent.respond"),
+    payload: z.discriminatedUnion("decision", [
+      z.strictObject({
+        decision: z.literal("cancel"),
+        contextRequestId: z.string().uuid(),
+        targetConversationId: z.string().uuid(),
+      }),
+      z.strictObject({
+        decision: z.literal("select"),
+        contextRequestId: z.string().uuid(),
+        ...conversationContextSelectionFields,
+      }),
+    ]),
+  }),
+  z.strictObject({
+    ...requestBase,
     type: z.literal("conversation.context.create"),
-    payload: z.strictObject({
-      sourceConversationId: z.string().uuid(),
-      targetConversationId: z.string().uuid(),
-      sourceMessageIds: z.array(z.string().uuid())
-        .min(1)
-        .max(MAX_CONVERSATION_CONTEXT_MESSAGES)
-        .refine((ids) => new Set(ids).size === ids.length),
-      note: z.string().trim().min(1).max(MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
-        .refine(
-          (value) => new TextEncoder().encode(value).byteLength
-            <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
-          "Context note exceeds its UTF-8 byte limit.",
-        )
-        .optional(),
-      acknowledgedWorkspaceDifference: z.boolean(),
-    }),
+    payload: z.strictObject(conversationContextSelectionFields),
   }),
   z.strictObject({
     ...requestBase,

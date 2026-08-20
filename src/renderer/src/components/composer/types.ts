@@ -2,6 +2,7 @@ import type {
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
   AgentTurn,
+  AgentConversationContextRequest,
   ChatAttachment,
   Conversation,
   ConversationContextPacketSummary,
@@ -48,6 +49,7 @@ export interface ComposerProps {
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];
+  agentContextRequest?: AgentConversationContextRequest | null;
   onConversationContextCommand?: ConversationContextCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;

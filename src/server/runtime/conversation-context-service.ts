@@ -5,6 +5,10 @@ import type {
 } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type { ConversationContextReplay } from "../persistence/conversation-context-packet-repository";
+import type {
+  ConversationContextAuthorizationScope,
+  ConversationContextSelection,
+} from "./conversation-context-request-coordinator";
 
 export interface ConversationContextPacketCreationRequest {
   sourceConversationId: string;
@@ -14,21 +18,15 @@ export interface ConversationContextPacketCreationRequest {
   acknowledgedWorkspaceDifference: boolean;
 }
 
-export interface ConversationContextAuthorizationScope {
-  sourceConversationId: string;
-  targetConversationId: string;
-  sourceMessageIds: readonly string[];
-}
-
 export interface ConversationContextAuthorizationVerifier {
   /**
    * The host owns the receipt and its verification. Implementations should use
    * one-shot process-local objects (for example a WeakSet), never IPC strings.
    */
-  isAuthorized(
-    receipt: object,
+  consume(
+    receipt: unknown,
     scope: ConversationContextAuthorizationScope,
-  ): boolean;
+  ): ConversationContextSelection | null;
 }
 
 /**
@@ -38,28 +36,35 @@ export interface ConversationContextAuthorizationVerifier {
  */
 export function createConversationContextPacketFromAuthorizedAgent(
   store: RuntimeStore,
-  request: ConversationContextPacketCreationRequest & {
+  request: ConversationContextAuthorizationScope & {
     authorizationReceipt: unknown;
+    targetUserMessageId: string;
+    completedAt: string;
   },
   verifier: ConversationContextAuthorizationVerifier,
-): ConversationContextPacket {
-  const { authorizationReceipt } = request;
-  if (
-    (typeof authorizationReceipt !== "object" || authorizationReceipt === null)
-    || !verifier.isAuthorized(authorizationReceipt, {
-      sourceConversationId: request.sourceConversationId,
-      targetConversationId: request.targetConversationId,
-      sourceMessageIds: request.sourceMessageIds,
-    })
-  ) {
+): { packet: ConversationContextPacket; resultJson: string } {
+  const selection = verifier.consume(request.authorizationReceipt, {
+    contextRequestId: request.contextRequestId,
+    targetConversationId: request.targetConversationId,
+    targetTurnId: request.targetTurnId,
+    targetRunId: request.targetRunId,
+    toolCallIdHash: request.toolCallIdHash,
+  });
+  if (!selection) {
     throw new Error("Agent-requested chat context requires explicit user confirmation.");
   }
-  return store.contextPackets.create({
-    sourceConversationId: request.sourceConversationId,
+  return store.contextPackets.completeAgentRequest({
+    requestId: request.contextRequestId,
+    targetTurnId: request.targetTurnId,
+    targetRunId: request.targetRunId,
+    targetUserMessageId: request.targetUserMessageId,
+    toolCallIdHash: request.toolCallIdHash,
+    completedAt: request.completedAt,
+    sourceConversationId: selection.sourceConversationId,
     targetConversationId: request.targetConversationId,
-    sourceMessageIds: request.sourceMessageIds,
-    note: request.note,
-    acknowledgedWorkspaceDifference: request.acknowledgedWorkspaceDifference,
+    sourceMessageIds: selection.sourceMessageIds,
+    note: selection.note,
+    acknowledgedWorkspaceDifference: selection.acknowledgedWorkspaceDifference,
   });
 }
 

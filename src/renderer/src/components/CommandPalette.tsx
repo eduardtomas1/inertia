@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { trapModalFocus } from "../utils/modalFocus";
 import { IconButton } from "./ui";
 
 type CommandPaletteProps = {
@@ -44,13 +45,6 @@ function filterItems(items: PaletteItem[], query: string): PaletteItem[] {
     .sort((left, right) => right.rank - left.rank)
     .slice(0, needle ? 18 : 14)
     .map(({ item }) => item);
-}
-
-function paletteFocusableElements(root: HTMLElement): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(
-    "input:not(:disabled), button:not(:disabled), [href], "
-      + "[tabindex]:not([tabindex='-1'])",
-  )].filter((element) => !element.hasAttribute("hidden"));
 }
 
 export function CommandPalette({ open, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
@@ -108,18 +102,7 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
         aria-modal="true"
         aria-label="Search Inertia"
         onKeyDown={(event) => {
-          if (event.key !== "Tab") return;
-          const focusable = paletteFocusableElements(event.currentTarget);
-          const first = focusable[0];
-          const last = focusable.at(-1);
-          if (!first || !last) return;
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
+          trapModalFocus(event, event.currentTarget);
         }}
       >
         <div className="palette-search">

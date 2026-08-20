@@ -1224,8 +1224,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           WHERE usage_start_json IS NOT NULL;
         `,
       },
-      persistColorTheme,
-      persistAgentThreadManagement,
+      persistColorTheme, persistAgentThreadManagement,
       conversationContextPacketsMigration,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(

@@ -281,39 +281,7 @@ export function createWorkspaceSceneModel({
   const snapshotConversations = connection.snapshot?.conversations ?? [];
   const projectById = new Map(snapshotProjects.map((entry) => [entry.id, entry]));
   const activeDirectory = terminalResumeDirectory(conversation, project);
-  const contextSources = persistedConversation && activeDirectory
-    ? [...snapshotConversations]
-        .filter((candidate) => (
-          candidate.id !== persistedConversation.id
-        ))
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-        .flatMap((candidate) => {
-          const candidateProject = projectById.get(candidate.projectId);
-          if (!candidateProject) return [];
-          const candidateDirectory = workspaceDirectoryIdentity(
-            candidate.worktreePath ?? candidateProject.normalizedPath,
-          );
-          return [{
-            conversationId: candidate.id,
-            conversationTitle: candidate.title,
-            projectId: candidate.projectId,
-            projectName: candidateProject.name,
-            workspaceLabel: candidate.worktreePath
-              ? candidate.branch
-                ? `Isolated worktree · ${candidate.branch}`
-                : "Isolated worktree"
-              : candidate.branch
-                ? `Project checkout · ${candidate.branch}`
-                : "Project checkout",
-            workspaceRelation: candidateDirectory === activeDirectory
-              ? "same-workspace" as const
-              : "different-workspace" as const,
-            archived: candidate.archivedAt !== null,
-            updatedAt: candidate.updatedAt,
-          }];
-        })
-    : [];
-  const terminalResumeOptions = activeDirectory
+  const conversationOptions = activeDirectory
     ? [...snapshotConversations]
         .sort((left, right) => {
           if (left.id === persistedConversation?.id) return -1;
@@ -323,11 +291,33 @@ export function createWorkspaceSceneModel({
         .flatMap((candidate) => {
           const candidateProject = projectById.get(candidate.projectId);
           if (!candidateProject) return [];
-          const candidateDirectory = workspaceDirectoryIdentity(
-            candidate.worktreePath ?? candidateProject.normalizedPath,
-          );
-          if (candidateDirectory !== activeDirectory) return [];
           return [{
+            conversation: candidate,
+            project: candidateProject,
+            directory: workspaceDirectoryIdentity(
+              candidate.worktreePath ?? candidateProject.normalizedPath,
+            ),
+          }];
+        })
+    : [];
+  const contextSources = persistedConversation
+    ? conversationOptions
+        .filter(({ conversation: candidate }) => (
+          candidate.id !== persistedConversation.id
+        ))
+        .map(({ conversation: candidate, project: candidateProject, directory }) => ({
+            conversationId: candidate.id,
+            conversationTitle: candidate.title,
+            projectName: candidateProject.name,
+            workspaceRelation: directory === activeDirectory
+              ? "same-workspace" as const
+              : "different-workspace" as const,
+            archived: candidate.archivedAt !== null,
+          }))
+    : [];
+  const terminalResumeOptions = conversationOptions
+        .filter(({ directory }) => directory === activeDirectory)
+        .map(({ conversation: candidate, project: candidateProject }) => ({
             projectId: candidateProject.id,
             projectName: candidateProject.name,
             conversationId: candidate.id,
@@ -338,9 +328,7 @@ export function createWorkspaceSceneModel({
                 ({ id }) => id === candidate.providerId,
               ),
             ),
-          }];
-        })
-    : [];
+          }));
   const {
     activeTool,
     setActiveTool,

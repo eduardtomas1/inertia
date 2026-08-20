@@ -28,6 +28,8 @@ function dropUnreleasedAgentThreadManagement(
   database: Database.Database,
 ): void {
   database.exec(`
+    DROP TRIGGER IF EXISTS conversation_context_packets_discard_source_drafts;
+    DROP TABLE IF EXISTS agent_context_requests;
     DROP TABLE IF EXISTS conversation_context_packets;
     DROP TABLE IF EXISTS agent_thread_operations;
     DROP TABLE IF EXISTS agent_managed_conversations;

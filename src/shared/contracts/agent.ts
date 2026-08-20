@@ -16,7 +16,10 @@ import type {
   AgentTurnAssociation,
   AgentTurnStatus,
 } from "../turn-lifecycle";
-import type { MaterializedConversationContext } from "../conversation-context";
+import type {
+  AgentConversationContextRequest,
+  MaterializedConversationContext,
+} from "../conversation-context";
 
 export {
   AGENT_TURN_STATUSES,
@@ -332,6 +335,8 @@ export interface AgentInputRequest {
   turnId: string;
   questions: AgentInputQuestion[];
   autoResolutionMs: number | null;
+  /** Host-owned chooser; mutually exclusive with provider-authored questions. */
+  conversationContextRequest?: AgentConversationContextRequest;
 }
 
 export interface AgentPlanStep {

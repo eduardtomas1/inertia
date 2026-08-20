@@ -14,6 +14,7 @@ import {
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
 import { unreviewedCommitHunks } from "../lib/commitReview";
+import { trapModalFocus } from "../utils/modalFocus";
 import { IconButton, LoadingMark } from "./ui";
 
 export type CommitDialogProps = {
@@ -263,18 +264,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
         aria-modal="true"
         aria-labelledby="commit-dialog-title"
         onKeyDown={(event) => {
-          if (event.key !== "Tab") return;
-          const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')];
-          const first = focusable[0];
-          const last = focusable.at(-1);
-          if (!first || !last) return;
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
+          trapModalFocus(event, event.currentTarget);
         }}
       >
         <header><span className="dialog-icon"><GitCommitHorizontal size={18} /></span><div><h2 id="commit-dialog-title">Commit changes</h2><p>{status?.files.length ?? 0} files · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></p></div><IconButton label="Close commit dialog" onClick={onClose} disabled={locked}><X size={16} /></IconButton></header>

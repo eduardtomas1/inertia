@@ -94,6 +94,48 @@ describe("conversation context contract boundary", () => {
       },
     }).success).toBe(false);
   });
+
+  it("accepts only question-free host context chooser requests", () => {
+    const requestId = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+    const turnId = crypto.randomUUID();
+    const contextRequest = {
+      type: "agent.input.requested",
+      request: {
+        id: requestId,
+        providerId: "codex",
+        conversationId,
+        runId: "run-context",
+        turnId,
+        questions: [],
+        autoResolutionMs: 300_000,
+        conversationContextRequest: {
+          requestId,
+          targetConversationId: conversationId,
+          targetTurnId: turnId,
+          requestedSourceConversationId: null,
+          createdAt: "2026-08-20T10:00:00.000Z",
+          expiresAt: "2026-08-20T10:05:00.000Z",
+        },
+      },
+    };
+    expect(serverEventSchema.safeParse(contextRequest).success).toBe(true);
+    expect(serverEventSchema.safeParse({
+      ...contextRequest,
+      request: {
+        ...contextRequest.request,
+        questions: [{
+          id: "question",
+          header: "Context",
+          question: "Which message?",
+          isOther: false,
+          isSecret: false,
+          allowMultiple: false,
+          options: [],
+        }],
+      },
+    }).success).toBe(false);
+  });
 });
 
 describe("client command contract", () => {
@@ -206,6 +248,43 @@ describe("client command contract", () => {
     expect(clientCommandSchema.safeParse({
       ...base,
       payload: { ...base.payload, note: "🔐".repeat(300) },
+    }).success).toBe(false);
+  });
+
+  it("keeps agent context authority request-bound and message IDs renderer-owned", () => {
+    const contextRequestId = crypto.randomUUID();
+    const targetConversationId = crypto.randomUUID();
+    const sourceConversationId = crypto.randomUUID();
+    expect(clientCommandSchema.safeParse({
+      type: "conversation.context.agent.source.load",
+      requestId: crypto.randomUUID(),
+      payload: {
+        contextRequestId,
+        targetConversationId,
+        sourceConversationId,
+      },
+    }).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      type: "conversation.context.agent.respond",
+      requestId: crypto.randomUUID(),
+      payload: {
+        decision: "select",
+        contextRequestId,
+        targetConversationId,
+        sourceConversationId,
+        sourceMessageIds: [crypto.randomUUID()],
+        acknowledgedWorkspaceDifference: true,
+      },
+    }).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      type: "conversation.context.agent.respond",
+      requestId: crypto.randomUUID(),
+      payload: {
+        decision: "cancel",
+        contextRequestId,
+        targetConversationId,
+        sourceMessageIds: [crypto.randomUUID()],
+      },
     }).success).toBe(false);
   });
 

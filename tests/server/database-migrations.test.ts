@@ -74,6 +74,8 @@ function dropUnreleasedAgentThreadManagement(
   database: Database.Database,
 ): void {
   database.exec(`
+    DROP TRIGGER IF EXISTS conversation_context_packets_discard_source_drafts;
+    DROP TABLE IF EXISTS agent_context_requests;
     DROP TABLE IF EXISTS conversation_context_packets;
     DROP TABLE IF EXISTS agent_thread_operations;
     DROP TABLE IF EXISTS agent_managed_conversations;
@@ -1578,6 +1580,8 @@ describe("runtime migration catalog", () => {
       const unreceipted = new Database(databasePath);
       if (shape === "partial") {
         unreceipted.exec(`
+          DROP TRIGGER conversation_context_packets_discard_source_drafts;
+          DROP TABLE agent_context_requests;
           DROP TABLE conversation_context_packets;
           CREATE TABLE conversation_context_packets (id TEXT PRIMARY KEY);
         `);

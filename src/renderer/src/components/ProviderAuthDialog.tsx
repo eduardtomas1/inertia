@@ -21,6 +21,7 @@ import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { ProviderAuthBrowserUrlDetector } from "../utils/providerAuthBrowser";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
+import { trapModalFocus } from "../utils/modalFocus";
 import { IconButton, LoadingMark } from "./ui";
 import "./ProviderAuthDialog.css";
 
@@ -254,13 +255,7 @@ export function ProviderAuthDialog({
         closeDialog();
         return;
       }
-      if (event.key !== "Tab" || !dialog) return;
-      const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')];
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable.at(-1) as HTMLElement;
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      if (dialog) trapModalFocus(event, dialog);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {

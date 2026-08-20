@@ -35,6 +35,9 @@ import {
   type RuntimeCommandHandler,
 } from "./command-router";
 import { ConversationContextService } from "../conversation-context-service";
+import type {
+  ConversationContextRequestCoordinator,
+} from "../conversation-context-request-coordinator";
 
 type ConversationUpdatePayload = Extract<
   Parameters<RuntimeCommandHandler>[1],
@@ -96,6 +99,7 @@ export interface ConversationCommandDependencies {
     afterIsolatedWorktreeCreate?: () => void | Promise<void>;
   };
   creation?: ConversationCreationService;
+  contextRequests?: ConversationContextRequestCoordinator;
 }
 
 export function createConversationCommandHandler(
@@ -109,6 +113,8 @@ export function createConversationCommandHandler(
     "conversation.detail.load",
     "conversation.detail.subscription",
     "conversation.context.source.load",
+    "conversation.context.agent.source.load",
+    "conversation.context.agent.respond",
     "conversation.context.create",
     "conversation.context.load",
     "conversation.context.remove",
@@ -223,6 +229,59 @@ export function createConversationCommandHandler(
               targetConversationId,
             ),
           },
+        });
+        return "handled";
+      }
+      case "conversation.context.agent.source.load": {
+        const {
+          contextRequestId,
+          sourceConversationId,
+          targetConversationId,
+        } = command.payload;
+        if (!dependencies.contextRequests?.sourceAllowed(
+          contextRequestId,
+          targetConversationId,
+          sourceConversationId,
+        )) {
+          throw new RuntimeRequestError(
+            "That context source is not authorized for this pending chooser.",
+          );
+        }
+        const service = new ConversationContextService(dependencies.store);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "conversation.context.source",
+            source: service.sourceTranscript(
+              sourceConversationId,
+              targetConversationId,
+            ),
+          },
+        });
+        return "handled";
+      }
+      case "conversation.context.agent.respond": {
+        const { contextRequestId, targetConversationId } = command.payload;
+        const accepted = dependencies.contextRequests?.respond({
+          requestId: contextRequestId,
+          targetConversationId,
+          selection: command.payload.decision === "select" ? {
+            sourceConversationId: command.payload.sourceConversationId,
+            sourceMessageIds: command.payload.sourceMessageIds,
+            note: command.payload.note,
+            acknowledgedWorkspaceDifference:
+              command.payload.acknowledgedWorkspaceDifference,
+          } : null,
+        }) ?? false;
+        if (!accepted) {
+          throw new RuntimeRequestError(
+            "That context chooser is no longer pending for this chat.",
+          );
+        }
+        dependencies.send(socket, {
+          type: "request.ok",
+          requestId: command.requestId,
         });
         return "handled";
       }
@@ -590,6 +649,7 @@ export function createConversationCommandHandler(
             .map(({ id }) => id);
           const contextTargetConversationIds = dependencies.store.contextPackets
             .targetConversationIdsForSource(finalConversation.id);
+          dependencies.contextRequests?.cancelForSource(finalConversation.id);
           dependencies.store.deleteConversation(
             finalConversation.id,
           );

@@ -109,5 +109,72 @@ export const conversationContextPacketsMigration: DatabaseMigrationDefinition = 
     BEGIN
       SELECT RAISE(ABORT, 'conversation context draft limit reached');
     END;
+
+    CREATE TABLE agent_context_requests (
+      id TEXT PRIMARY KEY CHECK (length(id) = 36),
+      target_conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE
+        CHECK (length(target_conversation_id) = 36),
+      target_turn_id TEXT NOT NULL
+        REFERENCES agent_turns(id) ON DELETE CASCADE
+        CHECK (length(target_turn_id) BETWEEN 1 AND 200),
+      target_user_message_id TEXT NOT NULL
+        REFERENCES messages(id) ON DELETE CASCADE
+        CHECK (length(target_user_message_id) BETWEEN 1 AND 200),
+      target_run_id TEXT NOT NULL CHECK (length(target_run_id) BETWEEN 1 AND 200),
+      source_harness_id TEXT NOT NULL
+        CHECK (
+          length(source_harness_id) BETWEEN 1 AND 64
+          AND source_harness_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+        ),
+      requested_source_conversation_id TEXT CHECK (
+          requested_source_conversation_id IS NULL
+          OR length(requested_source_conversation_id) = 36
+        ),
+      selected_source_conversation_id TEXT CHECK (
+        selected_source_conversation_id IS NULL
+        OR length(selected_source_conversation_id) = 36
+      ),
+      tool_call_id_hash TEXT NOT NULL CHECK (length(tool_call_id_hash) = 64),
+      request_fingerprint TEXT NOT NULL CHECK (length(request_fingerprint) = 64),
+      status TEXT NOT NULL CHECK (status IN (
+        'selection-pending', 'completed', 'denied', 'cancelled',
+        'expired', 'interrupted', 'failed'
+      )),
+      packet_id TEXT UNIQUE
+        REFERENCES conversation_context_packets(id) ON DELETE SET NULL,
+      result_json TEXT CHECK (
+        result_json IS NULL OR length(CAST(result_json AS BLOB)) <= 32768
+      ),
+      failure_message TEXT CHECK (
+        failure_message IS NULL OR length(failure_message) <= 1000
+      ),
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(target_turn_id, tool_call_id_hash),
+      CHECK (
+        requested_source_conversation_id IS NULL
+        OR requested_source_conversation_id <> target_conversation_id
+      ),
+      CHECK (
+        (status = 'completed'
+          AND packet_id IS NOT NULL
+          AND result_json IS NOT NULL
+          AND selected_source_conversation_id IS NOT NULL)
+        OR
+        (status <> 'completed'
+          AND packet_id IS NULL
+          AND result_json IS NULL
+          AND selected_source_conversation_id IS NULL)
+      )
+    );
+    CREATE INDEX agent_context_requests_target_status_idx
+      ON agent_context_requests(
+        target_conversation_id,
+        status,
+        created_at ASC,
+        id ASC
+      );
   `,
 };

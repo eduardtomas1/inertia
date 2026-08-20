@@ -6,6 +6,7 @@ import { ConversationContextDialog } from "../../src/renderer/src/components/con
 import type {
   ConversationContextPacket,
   ConversationContextSourceTranscript,
+  ServerEvent,
 } from "../../src/shared/contracts";
 
 const sourceConversationId = "11111111-1111-4111-8111-111111111111";
@@ -59,12 +60,16 @@ function packet(
   };
 }
 
-function result(value: object): object {
+function result(value: object): ServerEvent {
   return {
     type: "request.result",
     requestId: crypto.randomUUID(),
     result: value,
-  };
+  } as ServerEvent;
+}
+
+function ok(): ServerEvent {
+  return { type: "request.ok", requestId: crypto.randomUUID() };
 }
 
 beforeEach(() => {
@@ -84,7 +89,6 @@ afterEach(() => {
 describe("ConversationContextDialog", () => {
   it("previews the exact selected excerpt and creates a bounded packet", async () => {
     const user = userEvent.setup();
-    const onResult = vi.fn();
     const onClose = vi.fn();
     const onCommand = vi.fn(async (key: string, command: {
       payload: Record<string, unknown>;
@@ -101,15 +105,11 @@ describe("ConversationContextDialog", () => {
       sources={[{
         conversationId: sourceConversationId,
         conversationTitle: source.conversationTitle,
-        projectId: source.projectId,
         projectName: source.projectName,
-        workspaceLabel: source.workspaceLabel,
         workspaceRelation: "same-workspace",
         archived: false,
-        updatedAt: createdAt,
       }]}
       onCommand={onCommand}
-      onResult={onResult}
       onClose={onClose}
     />);
 
@@ -128,10 +128,7 @@ describe("ConversationContextDialog", () => {
     expect(attach).toBeEnabled();
     await user.click(attach);
 
-    await waitFor(() => expect(onResult).toHaveBeenCalledWith({
-      kind: "created",
-      packet: packet("same-workspace"),
-    }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(onCommand).toHaveBeenLastCalledWith(
       "conversation.context.create",
       expect.objectContaining({
@@ -164,15 +161,11 @@ describe("ConversationContextDialog", () => {
       sources={[{
         conversationId: sourceConversationId,
         conversationTitle: source.conversationTitle,
-        projectId: source.projectId,
         projectName: source.projectName,
-        workspaceLabel: source.workspaceLabel,
         workspaceRelation: "different-workspace",
         archived: false,
-        updatedAt: createdAt,
       }]}
       onCommand={onCommand}
-      onResult={vi.fn()}
       onClose={onClose}
     />);
 
@@ -191,5 +184,98 @@ describe("ConversationContextDialog", () => {
     expect(attach).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("locks a provider-suggested source and submits only the user's exact selection", async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn(async (key: string) =>
+      key === "conversation.context.agent.source.load"
+        ? result({ kind: "conversation.context.source", source })
+        : ok());
+    render(<ConversationContextDialog
+      targetConversationId={targetConversationId}
+      sources={[{
+        conversationId: sourceConversationId,
+        conversationTitle: source.conversationTitle,
+        projectName: source.projectName,
+        workspaceRelation: "same-workspace",
+        archived: false,
+      }]}
+      agentRequest={{
+        requestId: packetId,
+        targetConversationId,
+        targetTurnId: "77777777-7777-4777-8777-777777777777",
+        requestedSourceConversationId: sourceConversationId,
+        createdAt,
+        expiresAt: "2026-08-19T09:05:00.000Z",
+      }}
+      onCommand={onCommand}
+      onClose={vi.fn()}
+    />);
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Agent requested chat context",
+    });
+    expect(within(dialog).queryByRole("searchbox")).not.toBeInTheDocument();
+    await user.click(await within(dialog).findByRole("button", {
+      name: /Keep provider identity separate/u,
+    }));
+    await user.click(within(dialog).getByRole("button", {
+      name: "Share with agent",
+    }));
+    await waitFor(() => expect(onCommand).toHaveBeenLastCalledWith(
+      "conversation.context.agent.respond",
+      expect.objectContaining({
+        payload: {
+          decision: "select",
+          contextRequestId: packetId,
+          sourceConversationId,
+          targetConversationId,
+          sourceMessageIds: [sourceMessageId],
+          acknowledgedWorkspaceDifference: false,
+        },
+      }),
+    ));
+  });
+
+  it("treats Escape as an explicit cancellation of an agent request", async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn(async (key: string) =>
+      key === "conversation.context.agent.source.load"
+        ? result({ kind: "conversation.context.source", source })
+        : ok());
+    render(<ConversationContextDialog
+      targetConversationId={targetConversationId}
+      sources={[{
+        conversationId: sourceConversationId,
+        conversationTitle: source.conversationTitle,
+        projectName: source.projectName,
+        workspaceRelation: "same-workspace",
+        archived: false,
+      }]}
+      agentRequest={{
+        requestId: packetId,
+        targetConversationId,
+        targetTurnId: "77777777-7777-4777-8777-777777777777",
+        requestedSourceConversationId: null,
+        createdAt,
+        expiresAt: "2026-08-19T09:05:00.000Z",
+      }}
+      onCommand={onCommand}
+      onClose={vi.fn()}
+    />);
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(onCommand).toHaveBeenCalledWith(
+      "conversation.context.agent.respond",
+      {
+        type: "conversation.context.agent.respond",
+        payload: {
+          decision: "cancel",
+          contextRequestId: packetId,
+          targetConversationId,
+        },
+      },
+    ));
   });
 });

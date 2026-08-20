@@ -56,6 +56,16 @@ export interface ConversationContextSourceTranscript {
   messages: ConversationContextExcerpt[];
 }
 
+/** Renderer-safe prompt for a host-owned, user-selected context disclosure. */
+export interface AgentConversationContextRequest {
+  requestId: string;
+  targetConversationId: string;
+  targetTurnId: string;
+  requestedSourceConversationId: string | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
 /**
  * Privileged materialization carried only after opaque packet IDs have been
  * checked against the destination conversation. Renderers never author this

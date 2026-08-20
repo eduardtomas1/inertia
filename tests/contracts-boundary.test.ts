@@ -76,6 +76,8 @@ describe("shared contracts boundary", () => {
       "conversation.detail.load",
       "conversation.detail.subscription",
       "conversation.context.source.load",
+      "conversation.context.agent.source.load",
+      "conversation.context.agent.respond",
       "conversation.context.create",
       "conversation.context.load",
       "conversation.context.remove",

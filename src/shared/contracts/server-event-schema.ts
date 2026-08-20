@@ -1,30 +1,18 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
-import {
-  conversationDetailCollectionsCoherent,
-  modelRouteIdentityCoherent,
-  pullRequestCapabilityStateCoherent,
-  runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent,
-} from "./server-event-discriminants";
+import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
 import { APP_SHORTCUT_KEYS, DEFAULT_APP_KEYBINDINGS } from "../keybindings";
 import { continuationIdentitySchema, modelSelectionSchema } from "../model-routing";
-import {
-  modelBackendDefaultSchema,
-  modelBackendProfileDetailSchema,
-  modelBackendProfileViewSchema,
-} from "../backend-profile-settings";
+import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
 import { CHAT_ATTACHMENT_MIME_TYPES } from "../attachments";
 import { AGENT_TURN_STATUSES } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
-import {
-  DUO_COMPARISON_STATES,
-  DUO_DISPATCH_STATES,
-  DUO_LAUNCH_STATES,
-} from "./duo";
+import { DUO_COMPARISON_STATES, DUO_DISPATCH_STATES, DUO_LAUNCH_STATES } from "./duo";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { usageDashboardSchema } from "./usage-dashboard-schema";
 import { dailyWorkDashboardSchema } from "./daily-work-schema";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { COLOR_THEME_IDS } from "./app";
+import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 type UnknownRecord = Record<string, unknown>;
 
 function record(value: unknown): value is UnknownRecord {
@@ -39,7 +27,6 @@ function nonemptyStringField(value: UnknownRecord, key: string): boolean {
 function nullableStringField(value: UnknownRecord, key: string): boolean {
   return value[key] === null || stringField(value, key);
 }
-
 function booleanField(value: UnknownRecord, key: string): boolean {
   return typeof value[key] === "boolean";
 }
@@ -47,7 +34,6 @@ function booleanField(value: UnknownRecord, key: string): boolean {
 function numberField(value: UnknownRecord, key: string): boolean {
   return typeof value[key] === "number" && Number.isFinite(value[key]);
 }
-
 function integerField(value: UnknownRecord, key: string): boolean {
   return Number.isSafeInteger(value[key]);
 }
@@ -55,7 +41,6 @@ function integerField(value: UnknownRecord, key: string): boolean {
 function nullableNumberField(value: UnknownRecord, key: string): boolean {
   return value[key] === null || numberField(value, key);
 }
-
 function optionalStringField(value: UnknownRecord, key: string): boolean {
   return value[key] === undefined || stringField(value, key);
 }
@@ -63,7 +48,6 @@ function optionalStringField(value: UnknownRecord, key: string): boolean {
 function optionalNullableStringField(value: UnknownRecord, key: string): boolean {
   return value[key] === undefined || nullableStringField(value, key);
 }
-
 function optionalBooleanField(value: UnknownRecord, key: string): boolean {
   return value[key] === undefined || booleanField(value, key);
 }
@@ -75,7 +59,6 @@ function oneOf(value: UnknownRecord, key: string, options: readonly string[]): b
 function providerId(value: UnknownRecord, key: string): boolean {
   return oneOf(value, key, ["codex", "claude", "cursor", "opencode"]);
 }
-
 function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownRecord {
   return record(value) && keys.every((key) => stringField(value, key));
 }
@@ -87,7 +70,6 @@ function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean
 function uniqueRecordField(values: unknown[], key: string): boolean {
   return new Set(values.map((value) => (value as UnknownRecord)[key])).size === values.length;
 }
-
 function modelSelection(value: unknown): boolean {
   return modelSelectionSchema.safeParse(value).success;
 }
@@ -95,7 +77,6 @@ function modelSelection(value: unknown): boolean {
 function continuationIdentity(value: unknown): boolean {
   return continuationIdentitySchema.safeParse(value).success;
 }
-
 function backendProfile(value: unknown, detail = false): boolean {
   return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)
     .safeParse(value).success;
@@ -104,7 +85,6 @@ function backendProfile(value: unknown, detail = false): boolean {
 function backendDefault(value: unknown): boolean {
   return modelBackendDefaultSchema.safeParse(value).success;
 }
-
 function syncCursor(value: unknown): boolean {
   return recordWithStrings(value, "runtimeGeneration")
     && (value.runtimeGeneration as string).length > 0
@@ -118,7 +98,6 @@ function attachment(value: unknown): boolean {
     && numberField(value, "size")
     && Number(value.size) >= 0;
 }
-
 function chatMessage(value: unknown): boolean {
   return recordWithStrings(value, "id", "conversationId", "role", "content", "createdAt")
     && nullableStringField(value, "turnId")
@@ -500,27 +479,42 @@ function approvalRequest(value: unknown): boolean {
       entry === "approve" || entry === "deny" || entry === "cancel");
 }
 
+function conversationContextExcerpt(value: unknown): boolean {
+  return recordWithStrings(value, "sourceMessageId", "role", "content", "createdAt") && nullableStringField(value, "sourceTurnId")
+    && oneOf(value, "role", ["user", "assistant"]) && booleanField(value, "truncated") && (value.content as string).length > 0
+    && new TextEncoder().encode(value.content as string).byteLength <= MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
+}
+function conversationContextPacketSummary(value: unknown): boolean {
+  return recordWithStrings(value, "id", "sourceConversationId", "targetConversationId", "sourceProjectId", "targetProjectId", "sourceConversationTitle", "sourceProjectName", "sourceWorkspaceLabel", "targetWorkspaceLabel", "workspaceRelation", "createdAt", "sourceState")
+    && oneOf(value, "workspaceRelation", ["same-workspace", "different-workspace"]) && oneOf(value, "sourceState", ["available", "deleted"])
+    && nullableStringField(value, "note") && (value.note === null || new TextEncoder().encode(value.note as string).byteLength <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
+    && nullableStringField(value, "consumedMessageId") && nullableStringField(value, "consumedAt")
+    && integerField(value, "messageCount") && Number(value.messageCount) >= 1 && Number(value.messageCount) <= MAX_CONVERSATION_CONTEXT_MESSAGES
+    && integerField(value, "characterCount") && Number(value.characterCount) >= 1 && Number(value.characterCount) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES;
+}
+function conversationContextPacket(value: unknown): boolean {
+  if (!conversationContextPacketSummary(value) || !record(value) || !arrayOf(value.excerpts, conversationContextExcerpt)
+    || (value.excerpts as unknown[]).length !== value.messageCount || !uniqueRecordField(value.excerpts as unknown[], "sourceMessageId")) return false;
+  const excerpts = value.excerpts as UnknownRecord[];
+  return excerpts.reduce((total, excerpt) => total + new TextEncoder().encode(excerpt.content as string).byteLength, 0) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
+    && excerpts.reduce((total, excerpt) => total + (excerpt.content as string).length, 0) === value.characterCount;
+}
+function conversationContextSource(value: unknown): boolean {
+  return recordWithStrings(value, "conversationId", "projectId", "conversationTitle", "projectName", "workspaceLabel", "targetConversationId", "targetProjectId", "targetWorkspaceLabel", "workspaceRelation")
+    && oneOf(value, "workspaceRelation", ["same-workspace", "different-workspace"]) && arrayOf(value.messages, conversationContextExcerpt)
+    && (value.messages as unknown[]).length <= MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES && uniqueRecordField(value.messages as unknown[], "sourceMessageId");
+}
 function inputRequest(value: unknown): boolean {
-  return recordWithStrings(
-    value,
-    "id",
-    "providerId",
-    "conversationId",
-    "runId",
-    "turnId",
-  )
-    && providerId(value, "providerId")
-    && nullableNumberField(value, "autoResolutionMs")
-    && arrayOf(value.questions, (question) =>
-      recordWithStrings(question, "id", "header", "question")
-      && booleanField(question, "isOther")
-      && booleanField(question, "isSecret")
-      && booleanField(question, "allowMultiple")
-      && arrayOf(question.options, (option) =>
-        recordWithStrings(option, "id", "label", "description")))
-    && uniqueRecordField(value.questions as unknown[], "id")
-    && (value.questions as UnknownRecord[]).every((question) =>
-      uniqueRecordField(question.options as unknown[], "id"));
+  if (!recordWithStrings(value, "id", "providerId", "conversationId", "runId", "turnId") || !providerId(value, "providerId")
+    || !nullableNumberField(value, "autoResolutionMs") || !arrayOf(value.questions, (question) => recordWithStrings(question, "id", "header", "question")
+      && booleanField(question, "isOther") && booleanField(question, "isSecret") && booleanField(question, "allowMultiple")
+      && arrayOf(question.options, (option) => recordWithStrings(option, "id", "label", "description")) && uniqueRecordField(question.options as unknown[], "id"))
+    || !uniqueRecordField(value.questions as unknown[], "id")) return false;
+  const context = value.conversationContextRequest;
+  return context === undefined || (recordWithStrings(context, "requestId", "targetConversationId", "targetTurnId", "createdAt", "expiresAt")
+    && nullableStringField(context, "requestedSourceConversationId") && context.requestId === value.id && context.targetConversationId === value.conversationId
+    && context.targetTurnId === value.turnId && context.requestedSourceConversationId !== context.targetConversationId
+    && Number.isFinite(Date.parse(context.createdAt as string)) && Date.parse(context.expiresAt as string) > Date.parse(context.createdAt as string) && (value.questions as unknown[]).length === 0);
 }
 
 function agentPlan(value: unknown): boolean {
@@ -1041,105 +1035,6 @@ function conversationDetail(
     && (value.contextPackets === undefined
       || arrayOf(value.contextPackets, conversationContextPacketSummary))
     && conversationDetailCollectionsCoherent(value, conversationId);
-}
-
-function conversationContextExcerpt(value: unknown): boolean {
-  return record(value)
-    && recordWithStrings(
-      value,
-      "sourceMessageId",
-      "role",
-      "content",
-      "createdAt",
-    )
-    && nullableStringField(value, "sourceTurnId")
-    && oneOf(value, "role", ["user", "assistant"])
-    && booleanField(value, "truncated")
-    && (value.content as string).length > 0
-    && new TextEncoder().encode(value.content as string).byteLength <= 4 * 1024;
-}
-
-function conversationContextPacketSummary(value: unknown): boolean {
-  return record(value)
-    && recordWithStrings(
-      value,
-      "id",
-      "sourceConversationId",
-      "targetConversationId",
-      "sourceProjectId",
-      "targetProjectId",
-      "sourceConversationTitle",
-      "sourceProjectName",
-      "sourceWorkspaceLabel",
-      "targetWorkspaceLabel",
-      "workspaceRelation",
-      "createdAt",
-      "sourceState",
-    )
-    && oneOf(value, "workspaceRelation", [
-      "same-workspace",
-      "different-workspace",
-    ])
-    && oneOf(value, "sourceState", ["available", "deleted"])
-    && nullableStringField(value, "note")
-    && (
-      value.note === null
-      || new TextEncoder().encode(value.note as string).byteLength <= 1024
-    )
-    && nullableStringField(value, "consumedMessageId")
-    && nullableStringField(value, "consumedAt")
-    && typeof value.messageCount === "number"
-    && Number.isSafeInteger(value.messageCount)
-    && value.messageCount >= 1
-    && value.messageCount <= 12
-    && typeof value.characterCount === "number"
-    && Number.isSafeInteger(value.characterCount)
-    && value.characterCount >= 1
-    && value.characterCount <= 12 * 1024;
-}
-
-function conversationContextPacket(value: unknown): boolean {
-  if (
-    !conversationContextPacketSummary(value)
-    || !record(value)
-    || !arrayOf(value.excerpts, conversationContextExcerpt)
-    || (value.excerpts as unknown[]).length !== value.messageCount
-    || !uniqueRecordField(value.excerpts as unknown[], "sourceMessageId")
-  ) return false;
-  const excerpts = value.excerpts as UnknownRecord[];
-  return excerpts.reduce(
-    (total, excerpt) => total + new TextEncoder().encode(
-      excerpt.content as string,
-    ).byteLength,
-    0,
-  ) <= 12 * 1024
-    && excerpts.reduce(
-      (total, excerpt) => total + (excerpt.content as string).length,
-      0,
-    ) === value.characterCount;
-}
-
-function conversationContextSource(value: unknown): boolean {
-  return record(value)
-    && recordWithStrings(
-      value,
-      "conversationId",
-      "projectId",
-      "conversationTitle",
-      "projectName",
-      "workspaceLabel",
-      "targetConversationId",
-      "targetProjectId",
-      "targetWorkspaceLabel",
-      "workspaceRelation",
-    )
-    && oneOf(value, "workspaceRelation", [
-      "same-workspace",
-      "different-workspace",
-    ])
-    && arrayOf(value.messages, conversationContextExcerpt)
-    && (value.messages as unknown[]).length <= 80
-    && uniqueRecordField(value.messages as unknown[], "sourceMessageId");
 }
 
 function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {

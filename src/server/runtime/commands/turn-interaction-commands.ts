@@ -646,14 +646,14 @@ export function createTurnInteractionCommandHandler(
             }
             generatedAttachmentPaths = [];
             if (contextPacketIds.length > 0) {
-              dependencies.store.createMessageWithContextPackets(
-                conversation.id,
-                command.payload.content,
+              dependencies.store.contextPackets.createUserMessageWithPackets({
+                conversationId: conversation.id,
+                content: command.payload.content,
                 attachments,
-                contextPacketIds,
-                command.requestId,
-                { activateConversation: command.payload.activate },
-              );
+                packetIds: contextPacketIds,
+                requestId: command.requestId,
+                options: { activateConversation: command.payload.activate },
+              });
             } else {
               dependencies.store.createMessage(
                 conversation.id,

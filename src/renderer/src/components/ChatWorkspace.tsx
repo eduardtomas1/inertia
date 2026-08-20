@@ -84,7 +84,6 @@ import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
 }));
-
 const READER_INTENT_GUARD_MS = 750;
 const EMPTY_PROMPT_PRESETS: readonly PromptPreset[] = [];
 const EMPTY_CONTEXT_SOURCES: readonly ConversationContextSourceOption[] = [];
@@ -380,7 +379,13 @@ export function ChatWorkspace({
     inputRequests,
     conversationId,
   );
-  const pendingInputRequest = ownedInputRequests.at(-1) ?? null;
+  const agentContextRequest = [...ownedInputRequests].reverse().find(
+    (request) => request.conversationContextRequest !== undefined,
+  )?.conversationContextRequest ?? null;
+  const visibleInputRequests = ownedInputRequests.filter(
+    (request) => request.conversationContextRequest === undefined,
+  );
+  const pendingInputRequest = visibleInputRequests.at(-1) ?? null;
   const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${streamingText.length}:${streamingReasoning.length}:${ownedApprovals.length}:${ownedInputRequests.length}`;
 
   const clearReaderIntent = useCallback((): void => {
@@ -742,7 +747,7 @@ export function ChatWorkspace({
                 ? undefined
                 : terminalProjections}
               approvals={ownedApprovals}
-              inputRequests={ownedInputRequests}
+              inputRequests={visibleInputRequests}
               providerIdentityLabels={providerIdentityLabels}
               showTimestamps={showTimestamps}
               showThinking={showThinking}
@@ -827,6 +832,7 @@ export function ChatWorkspace({
           promptContext={promptContext}
           contextSources={contextSources}
           contextPackets={contextPackets}
+          agentContextRequest={agentContextRequest}
           onConversationContextCommand={onConversationContextCommand}
           previewContextUrl={previewContextUrl}
           providerIdentityLabels={providerIdentityLabels}

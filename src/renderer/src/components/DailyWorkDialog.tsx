@@ -9,7 +9,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import type {
   DailyWorkDashboard,
@@ -23,6 +22,7 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
 import { formatCompact, formatCount, formatDuration } from "../lib/usageFormat";
+import { trapModalFocus } from "../utils/modalFocus";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { ProviderMark } from "./ProviderMark";
 import { IconButton, LoadingMark } from "./ui";
@@ -146,23 +146,6 @@ function ProviderSummary({
   );
 }
 
-function trapFocus(event: ReactKeyboardEvent<HTMLElement>): void {
-  if (event.key !== "Tab") return;
-  const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>(
-    'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-  )];
-  const first = focusable[0];
-  const last = focusable.at(-1);
-  if (!first || !last) return;
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
-
 export function DailyWorkDialog({
   status,
   request,
@@ -242,7 +225,7 @@ export function DailyWorkDialog({
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         aria-busy={loading}
-        onKeyDown={trapFocus}
+        onKeyDown={(event) => trapModalFocus(event, event.currentTarget)}
       >
         <header className="daily-work-header">
           <span className="daily-work-header-icon" aria-hidden="true">

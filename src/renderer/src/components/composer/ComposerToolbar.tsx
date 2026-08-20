@@ -6,7 +6,6 @@ import {
   GitBranch,
   MessagesSquare,
   Paperclip,
-  MessagesSquare,
   Send,
   Square,
   Wrench,

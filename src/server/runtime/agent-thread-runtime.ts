@@ -1,4 +1,8 @@
-import type { ProviderInfo } from "../../shared/contracts";
+import type {
+  AgentInputRequest,
+  ProviderInfo,
+  RuntimeMutationEvent,
+} from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type { ProviderManager } from "../providers";
 import { AgentThreadManager } from "./agent-thread-manager";
@@ -8,6 +12,9 @@ import {
 } from "./conversation-creation-service";
 import type { TurnController } from "./turns/turn-controller";
 import type { WorkspaceRunController } from "./workspace-run-controller";
+import {
+  ConversationContextRequestCoordinator,
+} from "./conversation-context-request-coordinator";
 
 interface AgentThreadRuntimeDependencies {
   store: RuntimeStore;
@@ -16,14 +23,17 @@ interface AgentThreadRuntimeDependencies {
   workspaceRuns: Pick<WorkspaceRunController<never>, "trackSourceControl">;
   dataDirectory: string;
   turns: TurnController;
+  pendingInputs: Map<string, AgentInputRequest>;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;
+  broadcast(event: RuntimeMutationEvent): void;
 }
 
 export interface AgentThreadRuntime {
   creation: ConversationCreationService;
   manager: AgentThreadManager;
+  contextRequests: ConversationContextRequestCoordinator;
 }
 
 /** Compose the one privileged creation path shared by UI and agent tools. */
@@ -31,8 +41,18 @@ export function createAgentThreadRuntime(
   dependencies: AgentThreadRuntimeDependencies,
 ): AgentThreadRuntime {
   const creation = new ConversationCreationService(dependencies);
+  const contextRequests = new ConversationContextRequestCoordinator({
+    pendingInputs: dependencies.pendingInputs,
+    broadcast: dependencies.broadcast,
+    broadcastConversationShell: dependencies.broadcastConversationShell,
+  });
   return {
     creation,
-    manager: new AgentThreadManager({ ...dependencies, creation }),
+    contextRequests,
+    manager: new AgentThreadManager({
+      ...dependencies,
+      contextRequests,
+      creation,
+    }),
   };
 }

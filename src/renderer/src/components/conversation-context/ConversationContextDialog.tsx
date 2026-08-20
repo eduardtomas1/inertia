@@ -8,48 +8,32 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
-  ArrowLeft,
-  Check,
-  CircleAlert,
-  Link2,
   MessagesSquare,
   ShieldCheck,
   X,
 } from "lucide-react";
 import type {
+  AgentConversationContextRequest,
   ConversationContextExcerpt,
   ConversationContextPacket,
   ConversationContextSourceTranscript,
-  ServerEvent,
 } from "@shared/contracts";
 import {
   MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
+  MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
   MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
 } from "@shared/conversation-context";
-import { formatClockTime } from "../../lib/format";
+import { resultEvent } from "../../lib/runtimeCommands";
+import { trapModalFocus } from "../../utils/modalFocus";
 import type {
   ConversationContextCommandRunner,
-  ConversationContextDialogResult,
   ConversationContextSourceOption,
 } from "./types";
 import "./ConversationContextDialog.css";
 
-function requestResult(value: unknown): Extract<ServerEvent, {
-  type: "request.result";
-}>["result"] {
-  if (
-    !value
-    || typeof value !== "object"
-    || !("type" in value)
-    || value.type !== "request.result"
-    || !("result" in value)
-  ) {
-    throw new Error("The local service returned an unexpected context response.");
-  }
-  return value.result as Extract<ServerEvent, {
-    type: "request.result";
-  }>["result"];
+function failureMessage(failure: unknown, fallback: string): string {
+  return failure instanceof Error ? failure.message : fallback;
 }
 
 function selectedPreview(
@@ -60,7 +44,7 @@ function selectedPreview(
     selectedIds.has(sourceMessageId));
   if (selected.length === 0) return [];
   const budget = Math.min(
-    4 * 1024,
+    MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
     Math.floor(MAX_CONVERSATION_CONTEXT_TOTAL_BYTES / selected.length),
   );
   return selected.map((message) => {
@@ -103,7 +87,6 @@ function ExcerptList({
           <>
             <span className="context-excerpt-meta">
               <strong>{excerpt.role === "user" ? "You" : "Agent"}</strong>
-              <time dateTime={excerpt.createdAt}>{formatClockTime(excerpt.createdAt)}</time>
               {excerpt.truncated && <em>bounded excerpt</em>}
             </span>
             <span className="context-excerpt-copy">{excerpt.content}</span>
@@ -118,7 +101,7 @@ function ExcerptList({
             onClick={() => onToggle?.(excerpt.sourceMessageId)}
           >
             <span className="context-excerpt-check" aria-hidden="true">
-              {selected ? <Check size={12} /> : null}
+              {selected ? "✓" : null}
             </span>
             <span>{copy}</span>
           </button>
@@ -143,13 +126,12 @@ function PacketPreview({ packet }: {
       </div>
       {packet.sourceState === "deleted" && (
         <p className="context-dialog-warning" role="status">
-          <CircleAlert size={14} />
           The source chat was deleted. This is the immutable excerpt that was sent.
         </p>
       )}
       {packet.workspaceRelation === "different-workspace" && (
         <p className="context-dialog-boundary">
-          <Link2 size={14} /> Context came from a different project or worktree.
+          <ShieldCheck size={14} /> Context came from a different project or worktree.
         </p>
       )}
       {packet.note && <blockquote>{packet.note}</blockquote>}
@@ -162,22 +144,23 @@ export function ConversationContextDialog({
   targetConversationId,
   sources,
   previewPacketId = null,
+  agentRequest = null,
   onCommand,
-  onResult,
   onClose,
 }: {
   targetConversationId: string;
   sources: readonly ConversationContextSourceOption[];
   previewPacketId?: string | null;
+  agentRequest?: AgentConversationContextRequest | null;
   onCommand: ConversationContextCommandRunner;
-  onResult: (result: ConversationContextDialogResult) => void;
   onClose: () => void;
 }): React.JSX.Element {
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
+  const lockedSourceId = agentRequest?.requestedSourceConversationId ?? null;
   const [sourceId, setSourceId] = useState<string | null>(
-    sources[0]?.conversationId ?? null,
+    lockedSourceId ?? sources[0]?.conversationId ?? null,
   );
   const [sourceQuery, setSourceQuery] = useState("");
   const deferredSourceQuery = useDeferredValue(sourceQuery.trim().toLocaleLowerCase());
@@ -192,11 +175,14 @@ export function ConversationContextDialog({
   const selectedSource = sources.find(({ conversationId }) =>
     conversationId === sourceId) ?? null;
   const matchingSources = useMemo(() => sources.filter((option) => (
+    (!lockedSourceId || option.conversationId === lockedSourceId)
+    && (
     !deferredSourceQuery
     || `${option.conversationTitle}\n${option.projectName}`
       .toLocaleLowerCase()
       .includes(deferredSourceQuery)
-  )), [deferredSourceQuery, sources]);
+    )
+  )), [deferredSourceQuery, lockedSourceId, sources]);
   const visibleSources = matchingSources.slice(0, 100);
   const previewExcerpts = useMemo(() => selectedPreview(
     source?.messages ?? [],
@@ -224,27 +210,10 @@ export function ConversationContextDialog({
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      void closeDialog();
       return;
     }
-    if (event.key !== "Tab") return;
-    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
-    ) ?? [])].filter((element) => element.getClientRects().length > 0);
-    if (focusable.length === 0) {
-      event.preventDefault();
-      dialogRef.current?.focus();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first?.focus();
-    }
+    trapModalFocus(event, event.currentTarget, true);
   };
 
   useEffect(() => {
@@ -257,15 +226,16 @@ export function ConversationContextDialog({
         payload: { packetId: previewPacketId, targetConversationId },
       }).then((event) => {
         if (cancelled) return;
-        const result = requestResult(event);
+        const result = resultEvent(event).result;
         if (result.kind !== "conversation.context.packet") {
           throw new Error("The saved chat context could not be identified.");
         }
         setPacket(result.packet);
       }).catch((failure: unknown) => {
-        if (!cancelled) setError(failure instanceof Error
-          ? failure.message
-          : "The saved chat context could not be loaded.");
+        if (!cancelled) setError(failureMessage(
+          failure,
+          "The saved chat context could not be loaded.",
+        ));
       }).finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -281,15 +251,22 @@ export function ConversationContextDialog({
     setSource(null);
     setSelectedIds(new Set());
     setAcknowledged(false);
-    void onCommand("conversation.context.source.load", {
-      type: "conversation.context.source.load",
-      payload: {
-        sourceConversationId: sourceId,
-        targetConversationId,
-      },
-    }).then((event) => {
+    const sourcePayload = { sourceConversationId: sourceId, targetConversationId };
+    const sourceRequest = agentRequest
+      ? onCommand("conversation.context.agent.source.load", {
+        type: "conversation.context.agent.source.load" as const,
+        payload: {
+          contextRequestId: agentRequest.requestId,
+          ...sourcePayload,
+        },
+      })
+      : onCommand("conversation.context.source.load", {
+        type: "conversation.context.source.load" as const,
+        payload: sourcePayload,
+      });
+    void sourceRequest.then((event) => {
       if (cancelled) return;
-      const result = requestResult(event);
+      const result = resultEvent(event).result;
       if (result.kind !== "conversation.context.source") {
         throw new Error("The source transcript could not be identified.");
       }
@@ -298,14 +275,15 @@ export function ConversationContextDialog({
       }
       setSource(result.source);
     }).catch((failure: unknown) => {
-      if (!cancelled) setError(failure instanceof Error
-        ? failure.message
-        : "The source chat could not be loaded.");
+      if (!cancelled) setError(failureMessage(
+        failure,
+        "The source chat could not be loaded.",
+      ));
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [onCommand, previewPacketId, sourceId, targetConversationId]);
+  }, [agentRequest, onCommand, previewPacketId, sourceId, targetConversationId]);
 
   const toggleMessage = (messageId: string): void => {
     setSelectedIds((current) => {
@@ -323,28 +301,62 @@ export function ConversationContextDialog({
     ) return;
     setSaving(true);
     setError(null);
+    let agentSelectionSubmitted = false;
     try {
+      const selection = {
+        sourceConversationId: sourceId,
+        targetConversationId,
+        sourceMessageIds: [...selectedIds],
+        ...(note.trim() ? { note: note.trim() } : {}),
+        acknowledgedWorkspaceDifference: acknowledged,
+      };
+      if (agentRequest) {
+        await onCommand("conversation.context.agent.respond", {
+          type: "conversation.context.agent.respond",
+          payload: {
+            decision: "select",
+            contextRequestId: agentRequest.requestId,
+            ...selection,
+          },
+        });
+        agentSelectionSubmitted = true;
+        return;
+      }
       const event = await onCommand("conversation.context.create", {
         type: "conversation.context.create",
-        payload: {
-          sourceConversationId: sourceId,
-          targetConversationId,
-          sourceMessageIds: [...selectedIds],
-          ...(note.trim() ? { note: note.trim() } : {}),
-          acknowledgedWorkspaceDifference: acknowledged,
-        },
+        payload: selection,
       });
-      const result = requestResult(event);
+      const result = resultEvent(event).result;
       if (result.kind !== "conversation.context.packet") {
         throw new Error("The created chat context could not be identified.");
       }
-      onResult({ kind: "created", packet: result.packet });
       onClose();
     } catch (failure) {
-      setError(failure instanceof Error
-        ? failure.message
-        : "The chat context could not be created.");
+      setError(failureMessage(failure, "The chat context could not be created."));
     } finally {
+      if (!agentSelectionSubmitted) setSaving(false);
+    }
+  };
+
+  const closeDialog = async (): Promise<void> => {
+    if (saving) return;
+    if (!agentRequest) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onCommand("conversation.context.agent.respond", {
+        type: "conversation.context.agent.respond",
+        payload: {
+          decision: "cancel",
+          contextRequestId: agentRequest.requestId,
+          targetConversationId,
+        },
+      });
+    } catch (failure) {
+      setError(failureMessage(failure, "The context request could not be cancelled."));
       setSaving(false);
     }
   };
@@ -354,7 +366,7 @@ export function ConversationContextDialog({
       className="conversation-context-backdrop"
       role="presentation"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) void closeDialog();
       }}
     >
       <section
@@ -372,13 +384,19 @@ export function ConversationContextDialog({
           </span>
           <span>
             <strong id={titleId}>
-              {previewPacketId ? "Shared chat context" : "Bring context from another chat"}
+              {previewPacketId
+                ? "Shared chat context"
+                : agentRequest
+                  ? "Agent requested chat context"
+                  : "Bring context from another chat"}
             </strong>
             <small>{previewPacketId
               ? "The exact bounded excerpt attached to this request"
+              : agentRequest
+                ? "You choose the exact messages this running agent can receive"
               : "Choose only the messages this agent should receive"}</small>
           </span>
-          <button ref={closeRef} type="button" aria-label="Close chat context" onClick={onClose}>
+          <button ref={closeRef} type="button" aria-label="Close chat context" onClick={() => void closeDialog()}>
             <X size={16} />
           </button>
         </header>
@@ -396,7 +414,7 @@ export function ConversationContextDialog({
           >
             <aside aria-label="Source chats">
               <div className="context-dialog-section-label">Source chat</div>
-              <label className="context-dialog-source-search">
+              {!lockedSourceId && <label className="context-dialog-source-search">
                 <span className="sr-only">Search chats</span>
                 <input
                   type="search"
@@ -404,19 +422,21 @@ export function ConversationContextDialog({
                   placeholder="Search chats"
                   onChange={(event) => setSourceQuery(event.target.value)}
                 />
-              </label>
+              </label>}
               {visibleSources.map((option) => (
                 <button
                   type="button"
                   key={option.conversationId}
                   aria-current={option.conversationId === sourceId ? "true" : undefined}
-                  onClick={() => setSourceId(option.conversationId)}
+                  onClick={() => {
+                    if (!lockedSourceId) setSourceId(option.conversationId);
+                  }}
                 >
                   <span>
                     <strong>{option.conversationTitle}</strong>
                     <small>{option.projectName}{option.archived ? " · Archived" : ""}</small>
                   </span>
-                  {option.workspaceRelation === "different-workspace" && <Link2 size={12} />}
+                  {option.workspaceRelation === "different-workspace" && <ShieldCheck size={12} />}
                 </button>
               ))}
               {visibleSources.length === 0 && (
@@ -430,8 +450,8 @@ export function ConversationContextDialog({
             </aside>
             <main>
               <div className="context-dialog-main-header">
-                <button type="button" className="context-dialog-mobile-back" onClick={() => setSourceId(null)}>
-                  <ArrowLeft size={14} /> Chats
+                <button type="button" className="context-dialog-mobile-back" disabled={Boolean(lockedSourceId)} onClick={() => setSourceId(null)}>
+                  ← Chats
                 </button>
                 <span>
                   <strong>{source?.conversationTitle ?? selectedSource?.conversationTitle ?? "Select a source"}</strong>
@@ -491,7 +511,7 @@ export function ConversationContextDialog({
         {!previewPacketId && (
           <footer>
             <span>{error && <em role="alert">{error}</em>}</span>
-            <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
+            <button type="button" className="secondary-button" disabled={saving} onClick={() => void closeDialog()}>Cancel</button>
             <button
               type="button"
               className="primary-button"
@@ -504,7 +524,11 @@ export function ConversationContextDialog({
               }
               onClick={() => void createPacket()}
             >
-              <Link2 size={14} /> {saving ? "Sharing…" : "Attach context"}
+              <MessagesSquare size={14} /> {saving
+                ? "Sharing…"
+                : agentRequest
+                  ? "Share with agent"
+                  : "Attach context"}
             </button>
           </footer>
         )}

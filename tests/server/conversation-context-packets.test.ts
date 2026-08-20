@@ -137,29 +137,88 @@ describe("conversation context packets", () => {
   it("does not treat an arbitrary confirmation string as agent authority", () => {
     const { store, sourceId, targetId } = fixture();
     const sourceMessage = store.createMessage(sourceId, "Approved decision", "user");
-    const liveReceipts = new WeakSet<object>();
+    const targetTurn = store.beginAgentTurn({
+      id: randomUUID(),
+      conversationId: targetId,
+      runId: randomUUID(),
+      content: "Request context",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    }).turn;
+    const contextRequestId = randomUUID();
+    const toolCallIdHash = "a".repeat(64);
+    store.contextPackets.reserveAgentRequest({
+      id: contextRequestId,
+      targetConversationId: targetId,
+      targetTurnId: targetTurn.id,
+      targetUserMessageId: targetTurn.userMessageId,
+      targetRunId: targetTurn.runId,
+      sourceHarnessId: targetTurn.harnessId,
+      requestedSourceConversationId: sourceId,
+      toolCallIdHash,
+      requestFingerprint: "b".repeat(64),
+      now: "2026-08-19T10:00:00.000Z",
+      expiresAt: "2026-08-19T10:05:00.000Z",
+    });
+    const liveReceipts = new WeakMap<object, {
+      sourceConversationId: string;
+      sourceMessageIds: string[];
+      acknowledgedWorkspaceDifference: boolean;
+    }>();
     const verifier = {
-      isAuthorized: (receipt: object): boolean => liveReceipts.has(receipt),
+      consume: (receipt: unknown) => {
+        if (typeof receipt !== "object" || receipt === null) return null;
+        const selection = liveReceipts.get(receipt) ?? null;
+        liveReceipts.delete(receipt);
+        return selection;
+      },
     };
 
     expect(() => createConversationContextPacketFromAuthorizedAgent(store, {
-      sourceConversationId: sourceId,
+      contextRequestId,
       targetConversationId: targetId,
-      sourceMessageIds: [sourceMessage.id],
-      acknowledgedWorkspaceDifference: false,
+      targetTurnId: targetTurn.id,
+      targetRunId: targetTurn.runId,
+      targetUserMessageId: targetTurn.userMessageId,
+      toolCallIdHash,
+      completedAt: "2026-08-19T10:01:00.000Z",
       authorizationReceipt: "looks-approved",
     }, verifier)).toThrow("explicit user confirmation");
     expect(store.conversationDetail(targetId)?.contextPackets).toEqual([]);
 
     const oneShotReceipt = {};
-    liveReceipts.add(oneShotReceipt);
-    expect(createConversationContextPacketFromAuthorizedAgent(store, {
+    liveReceipts.set(oneShotReceipt, {
       sourceConversationId: sourceId,
-      targetConversationId: targetId,
       sourceMessageIds: [sourceMessage.id],
       acknowledgedWorkspaceDifference: false,
+    });
+    expect(createConversationContextPacketFromAuthorizedAgent(store, {
+      contextRequestId,
+      targetConversationId: targetId,
+      targetTurnId: targetTurn.id,
+      targetRunId: targetTurn.runId,
+      targetUserMessageId: targetTurn.userMessageId,
+      toolCallIdHash,
+      completedAt: "2026-08-19T10:01:00.000Z",
       authorizationReceipt: oneShotReceipt,
-    }, verifier)).toMatchObject({ targetConversationId: targetId });
+    }, verifier).packet).toMatchObject({ targetConversationId: targetId });
+    expect(() => createConversationContextPacketFromAuthorizedAgent(store, {
+      contextRequestId,
+      targetConversationId: targetId,
+      targetTurnId: targetTurn.id,
+      targetRunId: targetTurn.runId,
+      targetUserMessageId: targetTurn.userMessageId,
+      toolCallIdHash,
+      completedAt: "2026-08-19T10:01:01.000Z",
+      authorizationReceipt: oneShotReceipt,
+    }, verifier)).toThrow("explicit user confirmation");
     store.close();
   });
 
@@ -182,6 +241,153 @@ describe("conversation context packets", () => {
     expect(packet.workspaceRelation).toBe("different-workspace");
     expect(packet.sourceWorkspaceLabel).toBe("Project checkout");
     expect(packet.targetWorkspaceLabel).toBe("Project checkout");
+    store.close();
+  });
+
+  it("preserves a locked source snapshot and fails closed if that source is deleted", () => {
+    const { store, sourceId, targetId } = fixture();
+    const sourceMessage = store.createMessage(sourceId, "Ephemeral decision", "user");
+    const targetTurn = store.beginAgentTurn({
+      id: randomUUID(),
+      conversationId: targetId,
+      runId: randomUUID(),
+      content: "Request context",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    }).turn;
+    const contextRequestId = randomUUID();
+    store.contextPackets.reserveAgentRequest({
+      id: contextRequestId,
+      targetConversationId: targetId,
+      targetTurnId: targetTurn.id,
+      targetUserMessageId: targetTurn.userMessageId,
+      targetRunId: targetTurn.runId,
+      sourceHarnessId: targetTurn.harnessId,
+      requestedSourceConversationId: sourceId,
+      toolCallIdHash: "c".repeat(64),
+      requestFingerprint: "d".repeat(64),
+      now: "2026-08-19T10:00:00.000Z",
+      expiresAt: "2026-08-19T10:05:00.000Z",
+    });
+
+    store.deleteConversation(sourceId);
+
+    expect(store.contextPackets.agentRequest(contextRequestId))
+      .toMatchObject({ requestedSourceConversationId: sourceId });
+    expect(() => store.contextPackets.completeAgentRequest({
+      requestId: contextRequestId,
+      targetConversationId: targetId,
+      targetTurnId: targetTurn.id,
+      targetUserMessageId: targetTurn.userMessageId,
+      targetRunId: targetTurn.runId,
+      sourceConversationId: sourceId,
+      sourceMessageIds: [sourceMessage.id],
+      acknowledgedWorkspaceDifference: false,
+      toolCallIdHash: "c".repeat(64),
+      completedAt: "2026-08-19T10:01:00.000Z",
+    })).toThrow();
+    expect(store.conversationDetail(targetId)?.contextPackets).toEqual([]);
+    store.close();
+  });
+
+  it("marks an unsettled agent context chooser interrupted after a host restart", () => {
+    const { store, databasePath, sourceId, targetId } = fixture();
+    const targetTurn = store.beginAgentTurn({
+      id: randomUUID(),
+      conversationId: targetId,
+      runId: randomUUID(),
+      content: "Request context",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    }).turn;
+    const contextRequestId = randomUUID();
+    store.contextPackets.reserveAgentRequest({
+      id: contextRequestId,
+      targetConversationId: targetId,
+      targetTurnId: targetTurn.id,
+      targetUserMessageId: targetTurn.userMessageId,
+      targetRunId: targetTurn.runId,
+      sourceHarnessId: targetTurn.harnessId,
+      requestedSourceConversationId: sourceId,
+      toolCallIdHash: "e".repeat(64),
+      requestFingerprint: "f".repeat(64),
+      now: "2026-08-19T10:00:00.000Z",
+      expiresAt: "2026-08-19T10:05:00.000Z",
+    });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, tmpdir(), {
+      recoverInterruptedRuns: false,
+    });
+    expect(reopened.contextPackets.agentRequest(contextRequestId)).toMatchObject({
+      status: "interrupted",
+      failureMessage: expect.stringContaining("restarted"),
+    });
+    reopened.close();
+  });
+
+  it("cascades a completed request and its packet when the target chat is deleted", () => {
+    const { store, sourceId, targetId } = fixture();
+    const sourceMessage = store.createMessage(sourceId, "Temporary target context", "user");
+    const targetTurn = store.beginAgentTurn({
+      id: randomUUID(),
+      conversationId: targetId,
+      runId: randomUUID(),
+      content: "Request context",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    }).turn;
+    const contextRequestId = randomUUID();
+    const toolCallIdHash = "9".repeat(64);
+    store.contextPackets.reserveAgentRequest({
+      id: contextRequestId,
+      targetConversationId: targetId,
+      targetTurnId: targetTurn.id,
+      targetUserMessageId: targetTurn.userMessageId,
+      targetRunId: targetTurn.runId,
+      sourceHarnessId: targetTurn.harnessId,
+      requestedSourceConversationId: sourceId,
+      toolCallIdHash,
+      requestFingerprint: "8".repeat(64),
+      now: "2026-08-19T10:00:00.000Z",
+      expiresAt: "2026-08-19T10:05:00.000Z",
+    });
+    store.contextPackets.completeAgentRequest({
+      requestId: contextRequestId,
+      targetConversationId: targetId,
+      targetTurnId: targetTurn.id,
+      targetUserMessageId: targetTurn.userMessageId,
+      targetRunId: targetTurn.runId,
+      sourceConversationId: sourceId,
+      sourceMessageIds: [sourceMessage.id],
+      acknowledgedWorkspaceDifference: false,
+      toolCallIdHash,
+      completedAt: "2026-08-19T10:01:00.000Z",
+    });
+
+    expect(() => store.deleteConversation(targetId)).not.toThrow();
+    expect(store.contextPackets.agentRequest(contextRequestId)).toBeNull();
     store.close();
   });
 
@@ -303,13 +509,13 @@ describe("conversation context packets", () => {
       acknowledgedWorkspaceDifference: false,
     });
     const requestId = randomUUID();
-    store.createMessageWithContextPackets(
-      targetId,
-      "Use this decision.",
-      [],
-      [packet.id],
+    store.contextPackets.createUserMessageWithPackets({
+      conversationId: targetId,
+      content: "Use this decision.",
+      attachments: [],
+      packetIds: [packet.id],
       requestId,
-    );
+    });
 
     expect(store.contextPackets.replayAcceptance(
       requestId,

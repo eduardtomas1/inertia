@@ -2,6 +2,7 @@ import type {
   AppSnapshot,
   ConversationShell,
   ConversationDetail,
+  ConversationContextPacketSummary,
   ProviderInfo,
 } from "../../shared/contracts";
 import {
@@ -53,7 +54,9 @@ import {
   REASONING_PROJECTION_COLUMNS,
 } from "./stream-text-storage";
 
-type SnapshotPersistenceContext = Pick<PersistenceContext, "database">;
+type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
+  contextPackets(conversationId: string): ConversationContextPacketSummary[];
+};
 
 export class SnapshotRepository {
   readonly promptPresets: PromptPresetRepository;
@@ -246,6 +249,7 @@ export class SnapshotRepository {
         WHERE conversation_id = ?
         ORDER BY created_at ASC
       `).all(conversationId) as DiffReviewNoteRow[]).map(reviewNoteFromRow),
+      contextPackets: this.context.contextPackets(conversationId),
     };
   }
 

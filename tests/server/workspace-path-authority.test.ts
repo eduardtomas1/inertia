@@ -144,6 +144,8 @@ function workspaceResolver(store: RuntimeStore) {
 
 function resetWorkspaceAuthorityMigration(database: Database.Database): void {
   database.exec(`
+    DROP TRIGGER conversation_context_packets_discard_source_drafts;
+    DROP TABLE agent_context_requests;
     DROP TABLE conversation_context_packets;
     DROP TABLE agent_thread_operations;
     DROP TABLE agent_managed_conversations;

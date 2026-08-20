@@ -16,6 +16,7 @@ import type {
   DetachedChatWindowOpenResult,
   DetachedChatWindowOpenRequest,
   DetachedChatWindowSummary,
+  DetachedChatDraftHandoff,
   PendingDetachedChatDraft,
 } from "../../src/shared/desktop";
 
@@ -50,6 +51,7 @@ function installDetachedChatBridge({
   acknowledgeDraft = vi.fn(async () => true),
   onWindowsChanged = vi.fn(() => vi.fn()),
   onDraftChanged = vi.fn(() => vi.fn()),
+  onDraftMirrored = vi.fn(() => vi.fn()),
   open = vi.fn(),
   focus = vi.fn(),
 }: {
@@ -65,6 +67,9 @@ function installDetachedChatBridge({
   onDraftChanged?: (
     listener: (handoff: PendingDetachedChatDraft) => void,
   ) => () => void;
+  onDraftMirrored?: (
+    listener: (handoff: DetachedChatDraftHandoff) => void,
+  ) => () => void;
   open?: (
     request: DetachedChatWindowOpenRequest,
   ) => Promise<DetachedChatWindowOpenResult>;
@@ -78,6 +83,7 @@ function installDetachedChatBridge({
       acknowledgeDetachedChatDraft: acknowledgeDraft,
       onDetachedChatWindowsChanged: onWindowsChanged,
       onDetachedChatDraftChanged: onDraftChanged,
+      onDetachedChatDraftMirrored: onDraftMirrored,
       openDetachedChat: open,
       focusDetachedChat: focus,
     },
@@ -143,9 +149,11 @@ describe("useDetachedChatWindows", () => {
   it("unsubscribes from lifecycle events when its owner unmounts", () => {
     const unsubscribeWindows = vi.fn();
     const unsubscribeDrafts = vi.fn();
+    const unsubscribeMirrors = vi.fn();
     installDetachedChatBridge({
       onWindowsChanged: vi.fn(() => unsubscribeWindows),
       onDraftChanged: vi.fn(() => unsubscribeDrafts),
+      onDraftMirrored: vi.fn(() => unsubscribeMirrors),
     });
 
     const hook = renderHook(() => useDetachedChatWindows());
@@ -153,6 +161,7 @@ describe("useDetachedChatWindows", () => {
 
     expect(unsubscribeWindows).toHaveBeenCalledOnce();
     expect(unsubscribeDrafts).toHaveBeenCalledOnce();
+    expect(unsubscribeMirrors).toHaveBeenCalledOnce();
   });
 
   it("stores and acknowledges the exact draft returned by its popup", async () => {
@@ -180,6 +189,29 @@ describe("useDetachedChatWindows", () => {
       conversationId: CONVERSATION_ID,
       handoffId: "33333333-3333-4333-8333-333333333333",
     }));
+  });
+
+  it("mirrors an active popup draft without acknowledging a handoff", () => {
+    let publishMirror: ((handoff: DetachedChatDraftHandoff) => void) | undefined;
+    const acknowledgeDraft = vi.fn(async () => true);
+    installDetachedChatBridge({
+      acknowledgeDraft,
+      onDraftMirrored: vi.fn((listener) => {
+        publishMirror = listener;
+        return vi.fn();
+      }),
+    });
+    renderHook(() => useDetachedChatWindows());
+
+    act(() => publishMirror?.({
+      conversationId: CONVERSATION_ID,
+      draft: "latest live popup edit",
+    }));
+
+    expect(window.localStorage.getItem(
+      `inertia:draft:${CONVERSATION_ID}`,
+    )).toBe("latest live popup edit");
+    expect(acknowledgeDraft).not.toHaveBeenCalled();
   });
 
   it("hydrates pending drafts before ready without overwriting a newer event", async () => {
@@ -222,6 +254,37 @@ describe("useDetachedChatWindows", () => {
     expect(acknowledgeDraft).not.toHaveBeenCalledWith(expect.objectContaining({
       handoffId: "55555555-5555-4555-8555-555555555555",
     }));
+  });
+
+  it("does not let an older pending snapshot overwrite a live mirror", async () => {
+    const pending = deferred<PendingDetachedChatDraft[]>();
+    let publishMirror: ((handoff: DetachedChatDraftHandoff) => void) | undefined;
+    installDetachedChatBridge({
+      getPendingDrafts: vi.fn(() => pending.promise),
+      onDraftMirrored: vi.fn((listener) => {
+        publishMirror = listener;
+        return vi.fn();
+      }),
+    });
+    const hook = renderHook(() => useDetachedChatWindows());
+
+    act(() => publishMirror?.({
+      conversationId: CONVERSATION_ID,
+      draft: "new live mirror",
+    }));
+    await act(async () => {
+      pending.resolve([{
+        conversationId: CONVERSATION_ID,
+        draft: "older durable handoff",
+        handoffId: "77777777-7777-4777-8777-777777777777",
+      }]);
+      await pending.promise;
+    });
+
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
+    expect(window.localStorage.getItem(
+      `inertia:draft:${CONVERSATION_ID}`,
+    )).toBe("new live mirror");
   });
 
   it("leaves a pending handoff unacknowledged when storage is unavailable", async () => {

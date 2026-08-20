@@ -109,6 +109,7 @@ export function detachedChatCommandRejection(
       const pending = resources.pendingInput(command.payload.requestId);
       return ownsExistingConversation(command.payload.conversationId)
         && pending?.conversationId === authority.conversationId
+        && !pending.conversationContextRequest
         ? null
         : REJECTION;
     }

@@ -330,6 +330,27 @@ describe("detached chat runtime authority", () => {
     })).not.toBeNull();
   });
 
+  it("keeps host-owned context requests outside generic input authority", () => {
+    const command = {
+      type: "agent.input.respond",
+      requestId: REQUEST,
+      payload: {
+        conversationId: CONVERSATION,
+        requestId: REQUEST,
+        answers: {},
+      },
+    } as ClientCommand;
+    expect(rejection(command)).toBeNull();
+    expect(detachedChatCommandRejection(authority, command, {
+      ...resources(),
+      pendingInput: () => ({
+        conversationId: CONVERSATION,
+        conversationContextRequest: {},
+      } as AgentInputRequest),
+    })).not.toBeNull();
+    expect(mainRejection(command)).toBeNull();
+  });
+
   it("permits only the popup's narrow global and route-supporting actions", () => {
     expect(rejection({
       type: "settings.update",

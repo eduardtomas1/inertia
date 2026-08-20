@@ -52,6 +52,7 @@ import {
   canStopSubagentTrace,
 } from "./utils/subagentDisclosure";
 import { requestComposerPrefill } from "./utils/composerPrefill";
+import { onComposerDraftPersisted } from "./utils/composerDraftPersistence";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import {
   goalControlsBusy,
@@ -76,6 +77,7 @@ interface DetachedChatAppProps {
 interface DetachedChatBeforeUnloadEvent {
   preventDefault(): void;
   returnValue: string;
+  stopImmediatePropagation(): void;
 }
 
 const DRAFT_PERSISTENCE_FAILURE =
@@ -91,6 +93,7 @@ export function preserveDetachedDraftBeforeUnload(
   const block = (reason: string): false => {
     event.preventDefault();
     event.returnValue = reason;
+    event.stopImmediatePropagation();
     onBlocked(reason);
     return false;
   };
@@ -178,6 +181,14 @@ export default function DetachedChatApp({
   useTheme(settings.theme, settings.colorTheme);
 
   useEffect(() => {
+    return onComposerDraftPersisted((persistence) => {
+      if (persistence.conversationId === conversationId) {
+        window.inertia.mirrorDetachedChatDraft(persistence.draft);
+      }
+    });
+  }, [conversationId]);
+
+  useEffect(() => {
     applyInterfaceScale(settings.interfaceScale);
   }, [settings.interfaceScale]);
 
@@ -190,10 +201,11 @@ export default function DetachedChatApp({
         setActionError,
       );
     };
-    window.addEventListener("beforeunload", persistBeforeNativeClose);
+    window.addEventListener("beforeunload", persistBeforeNativeClose, true);
     return () => window.removeEventListener(
       "beforeunload",
       persistBeforeNativeClose,
+      true,
     );
   }, [conversationId]);
 

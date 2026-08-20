@@ -66,7 +66,11 @@ const noOp = (): void => undefined;
 
 describe("detached chat leaf controls", () => {
   it("cancels native close while the composer owns transient state", () => {
-    const event = { preventDefault: vi.fn(), returnValue: "" };
+    const event = {
+      preventDefault: vi.fn(),
+      returnValue: "",
+      stopImmediatePropagation: vi.fn(),
+    };
     const persistDraft = vi.fn(() => true);
     const onBlocked = vi.fn();
 
@@ -83,13 +87,18 @@ describe("detached chat leaf controls", () => {
     )).toBe(false);
 
     expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
     expect(event.returnValue).toBe("Remove attachments first.");
     expect(persistDraft).not.toHaveBeenCalled();
     expect(onBlocked).toHaveBeenCalledWith("Remove attachments first.");
   });
 
   it("cancels native close when durable draft persistence is not confirmed", () => {
-    const event = { preventDefault: vi.fn(), returnValue: "" };
+    const event = {
+      preventDefault: vi.fn(),
+      returnValue: "",
+      stopImmediatePropagation: vi.fn(),
+    };
     const onBlocked = vi.fn();
 
     expect(preserveDetachedDraftBeforeUnload(
@@ -100,6 +109,7 @@ describe("detached chat leaf controls", () => {
     )).toBe(false);
 
     expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
     expect(event.returnValue).toContain("draft could not be preserved");
     expect(onBlocked).toHaveBeenCalledWith(event.returnValue);
   });

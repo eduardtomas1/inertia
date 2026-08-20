@@ -25,6 +25,7 @@ export function registerAppProtocol(options: {
   attachmentRegistry: () => AttachmentRegistry | null;
   conversationAttachments: () => ConversationAttachmentAccess | null;
   runtimeSupervisor: () => RuntimeSupervisor | null;
+  workspaceImageConversationId?: string;
 }, target: Pick<Protocol, "handle"> = protocol): void {
   const rendererRoot = fileURLToPath(new URL("../renderer/", import.meta.url));
   target.handle(APP_SCHEME, async (request) => {
@@ -53,6 +54,11 @@ export function registerAppProtocol(options: {
       }
       const workspaceImageRequest = parseWorkspaceImagePreviewUrl(url);
       if (workspaceImageRequest) {
+        if (
+          options.workspaceImageConversationId
+          && workspaceImageRequest.conversationId
+            !== options.workspaceImageConversationId
+        ) throw new Error();
         const runtimeSupervisor = options.runtimeSupervisor();
         if (!runtimeSupervisor) throw new Error();
         return await resolveWorkspaceImagePreviewResponse(

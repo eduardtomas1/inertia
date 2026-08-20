@@ -48,6 +48,7 @@ describe("detached chat preload", () => {
       "getRuntimeConnection",
       "getWindowContext",
       "importAttachments",
+      "mirrorDetachedChatDraft",
       "onRuntimeReady",
       "openAttachmentExternally",
       "openExternal",
@@ -68,6 +69,7 @@ describe("detached chat preload", () => {
       "acknowledgeDetachedChatDraft",
       "onDetachedChatWindowsChanged",
       "onDetachedChatDraftChanged",
+      "onDetachedChatDraftMirrored",
       "showThreadNotification",
       "checkAppUpdate",
       "exportRecoveryData",
@@ -105,6 +107,7 @@ describe("detached chat preload", () => {
     await bridge.dockDetachedChat("dock draft");
     await bridge.closeDetachedChat("close draft");
     expect(bridge.persistDetachedChatDraft("native-close draft")).toBe(true);
+    expect(bridge.mirrorDetachedChatDraft("live popup draft")).toBe(true);
     await bridge.getRuntimeConnection();
     await bridge.copyText("copy me");
     await bridge.selectAttachments("images");
@@ -136,6 +139,10 @@ describe("detached chat preload", () => {
     expect(electron.sendSync).toHaveBeenCalledWith(
       DETACHED_CHAT_IPC.persistDraft,
       "native-close draft",
+    );
+    expect(electron.sendSync).toHaveBeenCalledWith(
+      DETACHED_CHAT_IPC.mirrorDraft,
+      "live popup draft",
     );
     expect(bridge.getPlatform()).toBe(process.platform);
   });

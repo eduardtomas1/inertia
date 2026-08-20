@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
@@ -11,6 +12,10 @@ import {
 
 let app!: AppFixture;
 let page!: Page;
+let attachmentImagePath!: string;
+let conversationId!: string;
+let projectId!: string;
+let sourceConversationId!: string;
 
 test.beforeAll(async () => {
   app = await createAppFixture({
@@ -27,10 +32,20 @@ test.beforeAll(async () => {
       if (!snapshot.activeConversationId || !snapshot.activeProjectId) {
         throw new Error("Detached chat fixture requires an active chat.");
       }
+      conversationId = snapshot.activeConversationId;
+      projectId = snapshot.activeProjectId;
       const source = store.createConversation(
         snapshot.activeProjectId,
         "Reviewed context",
         { activate: false },
+      );
+      sourceConversationId = source.id;
+      writeFileSync(
+        join(workspaceDirectory, "chat-preview.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+          "base64",
+        ),
       );
       const sourceMessage = store.createMessage(
         source.id,
@@ -73,6 +88,7 @@ test.beforeAll(async () => {
     },
   });
   page = app.page;
+  attachmentImagePath = app.attachmentImagePath;
 });
 
 test.afterAll(async () => {
@@ -93,11 +109,15 @@ test("moves one live chat between a remembered native window and the main app", 
   const title = "detached-chat-window fixture";
   const draft = "Keep this exact draft while the view moves.";
   const popupDraft = `${draft} Updated inside the popup.`;
-  const dockedDraft = `${popupDraft} Returned explicitly.`;
+  const crashDraft = `${popupDraft} Mirrored before a renderer crash.`;
+  const dockedDraft = `${crashDraft} Returned explicitly.`;
   const restartDraft = `${dockedDraft} Preserved across restart.`;
   await page.getByRole("textbox", { name: "Message" }).fill(draft);
 
   const popup = await openDetachedWindow(title);
+  popup.on("dialog", (dialog) => {
+    void dialog.dismiss().catch(() => undefined);
+  });
   await expect(page.getByRole("region", {
     name: `Detached chat: ${title}`,
   })).toContainText("Chat window active");
@@ -124,6 +144,24 @@ test("moves one live chat between a remembered native window and the main app", 
   await expect(popup.getByRole("group", { name: "Chat checkout context" }))
     .toHaveCount(0);
   await expect(popup.getByText("Context from Reviewed context")).toBeVisible();
+  await expect.poll(() => popup.evaluate(async ({ own, foreign, project }) => {
+    const status = async (url: string): Promise<number> => {
+      try {
+        return (await fetch(url)).status;
+      } catch {
+        return 0;
+      }
+    };
+    return {
+      own: await status(own),
+      foreign: await status(foreign),
+      project: await status(project),
+    };
+  }, {
+    own: `inertia://bundle/workspace-image/${projectId}/${conversationId}/chat-preview.png`,
+    foreign: `inertia://bundle/workspace-image/${projectId}/${sourceConversationId}/chat-preview.png`,
+    project: `inertia://bundle/workspace-image/${projectId}/project/chat-preview.png`,
+  })).toEqual({ own: 200, foreign: 404, project: 404 });
 
   await popup.getByRole("button", { name: "Keep chat window on top" }).click();
   await expect.poll(() => app.electronApp.evaluate(
@@ -145,6 +183,34 @@ test("moves one live chat between a remembered native window and the main app", 
   );
   expect(rememberedBounds).toMatchObject({ width: 704, height: 668 });
   await popup.getByRole("textbox", { name: "Message" }).fill(popupDraft);
+
+  await app.electronApp.evaluate(({ dialog }, path) => {
+    Reflect.set(dialog, "showOpenDialog", async () => ({
+      canceled: false,
+      filePaths: [path],
+      bookmarks: [],
+    }));
+  }, attachmentImagePath);
+  await popup.getByRole("button", {
+    name: "Attach images or documents",
+  }).click();
+  const attachments = popup.getByRole("list", { name: "Attachments" });
+  await expect(attachments.getByText("preview.png", { exact: true }))
+    .toBeVisible();
+  await app.electronApp.evaluate(
+    ({ BrowserWindow }, expectedTitle) => BrowserWindow.getAllWindows()
+      .find((candidate) => candidate.getTitle().startsWith(expectedTitle))
+      ?.close(),
+    title,
+  );
+  await expect(attachments.getByText("preview.png", { exact: true }))
+    .toBeVisible();
+  await expect(popup.getByRole("alert")).toContainText(
+    "Send or remove attachments before moving this chat to a window.",
+  );
+  await attachments.getByRole("button", {
+    name: "Remove attachment preview.png",
+  }).click();
 
   await Promise.all([
     popup.waitForEvent("close"),
@@ -172,6 +238,25 @@ test("moves one live chat between a remembered native window and the main app", 
   await page.getByRole("button", { name: "Open chat here" }).click();
   await expect(page.getByRole("textbox", { name: "Message" }))
     .toHaveValue(popupDraft);
+
+  const crashPopup = await openDetachedWindow(title);
+  await crashPopup.getByRole("textbox", { name: "Message" }).fill(crashDraft);
+  await expect.poll(() => page.evaluate(
+    (id) => window.localStorage.getItem(`inertia:draft:${id}`),
+    conversationId,
+  )).toBe(crashDraft);
+  await app.electronApp.evaluate(
+    ({ BrowserWindow }, expectedTitle) => BrowserWindow.getAllWindows()
+      .find((candidate) => candidate.getTitle().startsWith(expectedTitle))
+      ?.webContents.forcefullyCrashRenderer(),
+    title,
+  );
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ BrowserWindow }) => BrowserWindow.getAllWindows().length,
+  )).toBe(1);
+  await page.getByRole("button", { name: "Open chat here" }).click();
+  await expect(page.getByRole("textbox", { name: "Message" }))
+    .toHaveValue(crashDraft);
 
   const reopened = await openDetachedWindow(title);
   await expect.poll(() => app.electronApp.evaluate(

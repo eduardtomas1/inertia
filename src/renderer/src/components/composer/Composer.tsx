@@ -45,6 +45,10 @@ import { ComposerConversationContextDialog, ComposerConversationContextStrip, co
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
 import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
+import {
+  clearPersistedComposerDraft,
+  persistComposerDraft,
+} from "../../utils/composerDraftPersistence";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -190,13 +194,7 @@ export const Composer = memo(function Composer({
     const pending = pendingDraftRef.current;
     pendingDraftRef.current = null;
     if (!pending) return;
-    try {
-      const key = `inertia:draft:${pending.conversationId}`;
-      if (pending.value) window.localStorage.setItem(key, pending.value);
-      else window.localStorage.removeItem(key);
-    } catch {
-      // Keep editing available when browser storage is unavailable.
-    }
+    persistComposerDraft(pending.conversationId, pending.value);
   }, []);
 
   const scheduleDraftPersistence = useCallback((
@@ -561,14 +559,7 @@ export const Composer = memo(function Composer({
           === (submittedPromptContext ?? null)
         && selectedPreviewUrlRef.current === submittedPreviewUrl;
       if (editorUnchanged) {
-        try {
-          const key = `inertia:draft:${submittedConversationId}`;
-          if (window.localStorage.getItem(key) === submittedDraft) {
-            window.localStorage.removeItem(key);
-          }
-        } catch {
-          // The accepted in-memory draft can still settle when storage is unavailable.
-        }
+        clearPersistedComposerDraft(submittedConversationId, submittedDraft);
       }
       if (
         !mountedRef.current

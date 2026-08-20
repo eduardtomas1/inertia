@@ -52,17 +52,24 @@ export function useDetachedChatWindows(): DetachedChatWindowsController {
     let disposed = false;
     let hydrating = true;
     const latestEvent = new Map<string, string>();
-    const accept = (handoff: Awaited<ReturnType<
-      typeof window.inertia.getPendingDetachedChatDrafts
-    >>[number]): void => {
-      if (disposed) return;
+    const latestMirror = new Map<string, string>();
+    const storeDraft = (handoff: {
+      conversationId: string;
+      draft: string;
+    }): boolean => {
       try {
         const key = `inertia:draft:${handoff.conversationId}`;
         if (handoff.draft) window.localStorage.setItem(key, handoff.draft);
         else window.localStorage.removeItem(key);
+        return true;
       } catch {
-        return;
+        return false;
       }
+    };
+    const accept = (handoff: Awaited<ReturnType<
+      typeof window.inertia.getPendingDetachedChatDrafts
+    >>[number]): void => {
+      if (disposed || !storeDraft(handoff)) return;
       void window.inertia.acknowledgeDetachedChatDraft({
         conversationId: handoff.conversationId,
         handoffId: handoff.handoffId,
@@ -72,10 +79,22 @@ export function useDetachedChatWindows(): DetachedChatWindowsController {
       if (hydrating) latestEvent.set(handoff.conversationId, handoff.handoffId);
       accept(handoff);
     });
+    const unsubscribeMirror = window.inertia.onDetachedChatDraftMirrored(
+      (handoff) => {
+        if (disposed) return;
+        if (hydrating) latestMirror.set(handoff.conversationId, handoff.draft);
+        storeDraft(handoff);
+      },
+    );
     void window.inertia.getPendingDetachedChatDrafts().then((pending) => {
       for (const handoff of pending) {
         const newerEvent = latestEvent.get(handoff.conversationId);
-        if (!newerEvent || newerEvent === handoff.handoffId) accept(handoff);
+        const mirrored = latestMirror.get(handoff.conversationId);
+        if (
+          (!newerEvent || newerEvent === handoff.handoffId)
+          && (!latestMirror.has(handoff.conversationId)
+            || mirrored === handoff.draft)
+        ) accept(handoff);
       }
     }).catch(() => undefined).finally(() => {
       hydrating = false;
@@ -84,6 +103,7 @@ export function useDetachedChatWindows(): DetachedChatWindowsController {
     return () => {
       disposed = true;
       unsubscribe();
+      unsubscribeMirror();
     };
   }, []);
 

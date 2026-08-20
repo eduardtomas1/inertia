@@ -5,6 +5,7 @@ import type { DesktopBridge } from "../../src/shared/desktop";
 const electron = vi.hoisted(() => ({
   exposeInMainWorld: vi.fn(),
   invoke: vi.fn(async () => []),
+  sendSync: vi.fn(() => true),
   on: vi.fn(),
   removeListener: vi.fn(),
 }));
@@ -13,6 +14,7 @@ vi.mock("electron", () => ({
   contextBridge: { exposeInMainWorld: electron.exposeInMainWorld },
   ipcRenderer: {
     invoke: electron.invoke,
+    sendSync: electron.sendSync,
     on: electron.on,
     removeListener: electron.removeListener,
   },
@@ -67,6 +69,26 @@ describe("preload attachment picker", () => {
     dispose();
     expect(electron.removeListener).toHaveBeenCalledWith(
       "inertia:detached-chat-draft-changed",
+      registration?.[1],
+    );
+  });
+
+  it("subscribes to live popup draft mirrors with exact listener cleanup", () => {
+    const listener = vi.fn();
+    const dispose = bridge.onDetachedChatDraftMirrored(listener);
+    const registration = electron.on.mock.calls.find(
+      ([channel]) => channel === "inertia:detached-chat-draft-mirrored",
+    );
+    const handoff = {
+      conversationId: "11111111-1111-4111-8111-111111111111",
+      draft: "live popup draft",
+    };
+
+    registration?.[1]({}, handoff);
+    expect(listener).toHaveBeenCalledWith(handoff);
+    dispose();
+    expect(electron.removeListener).toHaveBeenCalledWith(
+      "inertia:detached-chat-draft-mirrored",
       registration?.[1],
     );
   });

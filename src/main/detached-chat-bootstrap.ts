@@ -16,7 +16,10 @@ export interface DetachedChatBootstrapOptions {
   userDataDirectory: string;
   iconPath: string;
   backgroundColor: string;
-  registerRendererProtocol(session: Electron.Session): void;
+  registerRendererProtocol(
+    session: Electron.Session,
+    conversationId: string,
+  ): void;
   onDock(conversationId: string): void | Promise<void>;
 }
 

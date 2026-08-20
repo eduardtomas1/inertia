@@ -176,6 +176,7 @@ interface Fixture {
   popups: FakeBrowserWindow[];
   hardened: Session[];
   protocolSessions: Session[];
+  protocolConversationIds: string[];
   docked: ReturnType<typeof vi.fn>;
   coordinator: DetachedChatMain;
 }
@@ -191,6 +192,7 @@ function fixture(
   const popups: FakeBrowserWindow[] = [];
   const hardened: Session[] = [];
   const protocolSessions: Session[] = [];
+  const protocolConversationIds: string[] = [];
   const docked = vi.fn(onDock ?? (() => undefined));
   const coordinator = new DetachedChatMain({
     ipcMain: ipc,
@@ -204,8 +206,9 @@ function fixture(
       workArea: { x: 0, y: 0, width: 1920, height: 1080 },
     }],
     hardenSession: (session) => hardened.push(session),
-    registerRendererProtocol: (session) => {
+    registerRendererProtocol: (session, conversationId) => {
       protocolSessions.push(session);
+      protocolConversationIds.push(conversationId);
       if (protocolFailure) throw protocolFailure;
     },
     rendererUrl: RENDERER_URL,
@@ -224,6 +227,7 @@ function fixture(
     popups,
     hardened,
     protocolSessions,
+    protocolConversationIds,
     docked,
     coordinator,
   };
@@ -293,6 +297,7 @@ describe("detached chat main-process boundary", () => {
       expect(popup.loadedUrls).toEqual([RENDERER_URL]);
       expect(popup.loadedUrls[0]).not.toContain(FIRST_ID);
       expect(value.protocolSessions).toEqual([popup.webContents.session]);
+      expect(value.protocolConversationIds).toEqual([FIRST_ID]);
       expect(value.hardened).toEqual([popup.webContents.session]);
       expect(popup.webContents.windowOpenHandler?.()).toEqual({
         action: "deny",
@@ -555,7 +560,11 @@ describe("detached chat main-process boundary", () => {
       expect(await value.ipc.invoke(
         DETACHED_CHAT_IPC.getPendingDrafts,
         eventFor(value.main.webContents),
-      )).toEqual([]);
+      )).toEqual([expect.objectContaining({
+        conversationId: FIRST_ID,
+        draft: "newer popup draft",
+        handoffId: expect.not.stringMatching(newerPending!.handoffId),
+      })]);
 
       const rejectedEvent = eventFor(
         value.main.webContents,
@@ -577,6 +586,47 @@ describe("detached chat main-process boundary", () => {
         "subframe draft",
       );
       expect(subframeEvent.returnValue).toBe(false);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("recovers the latest mirrored draft after a popup renderer crash", async () => {
+    const value = fixture();
+    try {
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.open,
+        eventFor(value.main.webContents),
+        { conversationId: FIRST_ID, title: "First", draft: "initial" },
+      );
+      const popup = value.popups[0]!;
+      const mirrorEvent = eventFor(popup.webContents) as unknown as IpcMainEvent;
+      value.ipc.emit(
+        DETACHED_CHAT_IPC.mirrorDraft,
+        mirrorEvent,
+        "latest mirrored draft",
+      );
+
+      expect(mirrorEvent.returnValue).toBe(true);
+      expect(value.main.webContents.sent).toContainEqual({
+        channel: DETACHED_CHAT_IPC.draftMirrored,
+        args: [{
+          conversationId: FIRST_ID,
+          draft: "latest mirrored draft",
+        }],
+      });
+      popup.webContents.emit("render-process-gone");
+
+      expect(popup.destroyCalls).toBe(1);
+      expect(value.coordinator.summaries()).toEqual([]);
+      expect(await value.ipc.invoke(
+        DETACHED_CHAT_IPC.getPendingDrafts,
+        eventFor(value.main.webContents),
+      )).toEqual([expect.objectContaining({
+        conversationId: FIRST_ID,
+        draft: "latest mirrored draft",
+        handoffId: expect.any(String),
+      })]);
     } finally {
       await cleanup(value);
     }
@@ -647,9 +697,13 @@ describe("detached chat main-process boundary", () => {
       expect(value.ipc.handlers.size).toBe(10);
       expect(value.ipc.listeners.get(DETACHED_CHAT_IPC.persistDraft)?.size)
         .toBe(1);
+      expect(value.ipc.listeners.get(DETACHED_CHAT_IPC.mirrorDraft)?.size)
+        .toBe(1);
       await value.coordinator.shutdown();
       expect(value.ipc.handlers.size).toBe(0);
       expect(value.ipc.listeners.get(DETACHED_CHAT_IPC.persistDraft)?.size)
+        .toBe(0);
+      expect(value.ipc.listeners.get(DETACHED_CHAT_IPC.mirrorDraft)?.size)
         .toBe(0);
       value.coordinator.unregisterIpc();
     } finally {

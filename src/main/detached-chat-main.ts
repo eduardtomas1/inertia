@@ -17,6 +17,7 @@ import {
   parseDetachedChatWindowOpenRequest,
   parseDetachedChatWindowRequest,
   type DesktopWindowContext,
+  type PendingDetachedChatDraft,
   type DetachedChatWindowSummary,
 } from "../shared/desktop.js";
 import { DETACHED_CHAT_IPC } from "../shared/detached-chat-ipc.js";
@@ -59,7 +60,7 @@ export interface DetachedChatMainOptions {
   createBrowserWindow(options: BrowserWindowConstructorOptions): BrowserWindow;
   getDisplays(): readonly Pick<Display, "workArea">[];
   hardenSession(session: Session): void;
-  registerRendererProtocol(session: Session): void;
+  registerRendererProtocol(session: Session, conversationId: string): void;
   rendererUrl: string;
   preloadPath: string;
   statePath: string;
@@ -130,6 +131,17 @@ export class DetachedChatMain {
       event.returnValue = false;
     }
   };
+  readonly #mirrorDraftListener = (
+    event: IpcMainEvent,
+    ...args: unknown[]
+  ): void => {
+    try {
+      this.#mirrorDraftForEvent(event, args);
+      event.returnValue = true;
+    } catch {
+      event.returnValue = false;
+    }
+  };
 
   constructor(options: DetachedChatMainOptions) {
     if (!isAbsolute(options.preloadPath)) {
@@ -150,6 +162,7 @@ export class DetachedChatMain {
       getDisplays: () => options.getDisplays(),
       state: new DetachedChatWindowStateStore(options.statePath),
       onWindowsChanged: (windows) => this.#broadcastWindows(windows),
+      onRendererGone: (id) => this.#persistDraftAfterRendererCrash(id),
     });
   }
 
@@ -202,7 +215,7 @@ export class DetachedChatMain {
       DETACHED_CHAT_IPC.getPendingDrafts,
       (event, ...args) => {
         this.assertMainIpc(event, args.length);
-        return this.#pendingDrafts.snapshot();
+        return this.#draftSnapshot();
       },
     );
     this.#options.ipcMain.handle(
@@ -256,6 +269,10 @@ export class DetachedChatMain {
       DETACHED_CHAT_IPC.persistDraft,
       this.#persistDraftListener,
     );
+    this.#options.ipcMain.on(
+      DETACHED_CHAT_IPC.mirrorDraft,
+      this.#mirrorDraftListener,
+    );
 
     return () => this.unregisterIpc();
   }
@@ -267,7 +284,9 @@ export class DetachedChatMain {
       if (
         channel !== DETACHED_CHAT_IPC.windowsChanged
         && channel !== DETACHED_CHAT_IPC.draftChanged
+        && channel !== DETACHED_CHAT_IPC.draftMirrored
         && channel !== DETACHED_CHAT_IPC.persistDraft
+        && channel !== DETACHED_CHAT_IPC.mirrorDraft
       ) {
         this.#options.ipcMain.removeHandler(channel);
       }
@@ -275,6 +294,10 @@ export class DetachedChatMain {
     this.#options.ipcMain.removeListener(
       DETACHED_CHAT_IPC.persistDraft,
       this.#persistDraftListener,
+    );
+    this.#options.ipcMain.removeListener(
+      DETACHED_CHAT_IPC.mirrorDraft,
+      this.#mirrorDraftListener,
     );
   }
 
@@ -452,7 +475,10 @@ export class DetachedChatMain {
       event.preventDefault();
     });
     try {
-      this.#options.registerRendererProtocol(window.webContents.session);
+      this.#options.registerRendererProtocol(
+        window.webContents.session,
+        input.request.conversationId,
+      );
       this.#options.hardenSession(window.webContents.session);
     } catch (error) {
       window.destroy();
@@ -509,13 +535,66 @@ export class DetachedChatMain {
       draft: args[0],
     });
     if (!handoff) throw new Error("Invalid detached-chat draft handoff");
+    this.#persistDraftHandoff(handoff);
+    return { ...context, draft: handoff.draft };
+  }
+
+  #mirrorDraftForEvent(
+    event: IpcMainEvent,
+    args: unknown[],
+  ): void {
+    const context = this.#assertDetachedIpc(
+      event as unknown as IpcMainInvokeEvent,
+      args.length,
+      1,
+    );
+    const handoff = parseDetachedChatDraftHandoff({
+      conversationId: context.conversationId,
+      draft: args[0],
+    });
+    if (!handoff) throw new Error("Invalid detached-chat draft mirror");
+    this.#drafts.set(handoff.conversationId, handoff.draft);
+    const main = this.#options.mainWindow();
+    if (liveWindow(main) && !main.webContents.isDestroyed()) {
+      main.webContents.send(DETACHED_CHAT_IPC.draftMirrored, handoff);
+    }
+  }
+
+  #persistDraftHandoff(handoff: {
+    conversationId: string;
+    draft: string;
+  }): void {
     const pending = this.#pendingDrafts.put(handoff);
     this.#drafts.set(handoff.conversationId, handoff.draft);
     const main = this.#options.mainWindow();
     if (liveWindow(main) && !main.webContents.isDestroyed()) {
       main.webContents.send(DETACHED_CHAT_IPC.draftChanged, pending);
     }
-    return { ...context, draft: handoff.draft };
+  }
+
+  #persistDraftAfterRendererCrash(conversationId: string): void {
+    const draft = this.#drafts.get(conversationId);
+    if (draft === undefined) return;
+    this.#persistDraftHandoff({ conversationId, draft });
+  }
+
+  #draftSnapshot(): PendingDetachedChatDraft[] {
+    const pending = this.#pendingDrafts.snapshot();
+    const pendingByConversation = new Map(
+      pending.map((entry) => [entry.conversationId, entry]),
+    );
+    const active = new Set(this.#drafts.keys());
+    return [
+      ...pending.filter(
+        ({ conversationId }) => !active.has(conversationId),
+      ),
+      ...[...this.#drafts].map(([conversationId, draft]) => {
+        const durable = pendingByConversation.get(conversationId);
+        return durable?.draft === draft
+          ? durable
+          : { conversationId, draft, handoffId: randomUUID() };
+      }),
+    ];
   }
 
   #broadcastWindows(windows: DetachedChatWindowSummary[]): void {

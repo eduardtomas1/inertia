@@ -826,10 +826,11 @@ async function createMainWindow(): Promise<void> {
     mainWindow: () => mainWindow,
     rendererUrl: trustedRendererUrl, userDataDirectory: app.getPath("userData"),
     iconPath, backgroundColor,
-    registerRendererProtocol: (session) => registerAppProtocol({
+    registerRendererProtocol: (session, conversationId) => registerAppProtocol({
       attachmentRegistry: () => importedAttachments,
       conversationAttachments: () => conversationAttachments,
       runtimeSupervisor: () => runtimeSupervisor,
+      workspaceImageConversationId: conversationId,
     }, session.protocol),
     onDock: (conversationId) => activateThreadNotification(conversationId, {
       channel: IPC.threadNotificationActivated,

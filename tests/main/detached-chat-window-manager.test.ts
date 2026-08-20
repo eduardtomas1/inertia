@@ -104,11 +104,13 @@ interface ManagerFixture {
   windows: FakeBrowserWindow[];
   inputs: DetachedChatWindowFactoryInput[];
   changed: ReturnType<typeof vi.fn>;
+  rendererGone: ReturnType<typeof vi.fn>;
 }
 
 function managerFixture(options: {
   directory?: string;
   loadWindow?: (window: BrowserWindow) => Promise<void>;
+  onRendererGone?: (conversationId: string) => void;
 } = {}): ManagerFixture {
   const directory = options.directory
     ?? mkdtempSync(join(tmpdir(), "inertia-detached-manager-"));
@@ -118,6 +120,7 @@ function managerFixture(options: {
   const windows: FakeBrowserWindow[] = [];
   const inputs: DetachedChatWindowFactoryInput[] = [];
   const changed = vi.fn();
+  const rendererGone = vi.fn(options.onRendererGone ?? (() => undefined));
   const manager = new DetachedChatWindowManager({
     createWindow: (input) => {
       inputs.push(input);
@@ -136,8 +139,9 @@ function managerFixture(options: {
     }],
     state,
     onWindowsChanged: changed,
+    onRendererGone: rendererGone,
   });
-  return { directory, manager, state, windows, inputs, changed };
+  return { directory, manager, state, windows, inputs, changed, rendererGone };
 }
 
 afterEach(() => {
@@ -358,6 +362,28 @@ describe("detached chat window manager", () => {
       await vi.advanceTimersByTimeAsync(50);
       await closing;
       expect(stuck.destroyCalls).toBe(1);
+      expect(fixture.manager.summary()).toEqual([]);
+    } finally {
+      await fixture.manager.closeAll();
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers crash handling after a renderer cancels native close", async () => {
+    const fixture = managerFixture();
+    try {
+      await fixture.manager.open({
+        conversationId: conversationId(1),
+        title: "Blocked close",
+      });
+      const window = fixture.windows[0]!;
+      window.preventClose = true;
+      window.close();
+      window.contents.emit("will-prevent-unload");
+      window.contents.emit("render-process-gone");
+
+      expect(fixture.rendererGone).toHaveBeenCalledWith(conversationId(1));
+      expect(window.destroyCalls).toBe(1);
       expect(fixture.manager.summary()).toEqual([]);
     } finally {
       await fixture.manager.closeAll();

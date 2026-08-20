@@ -228,6 +228,11 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     await capture("composer-send-submitting-light-compact-1440x920");
     await expect(composer.getByRole("button", { name: "Send message" }))
       .toBeVisible({ timeout: 5_000 });
+    const acceptedStatus = composer.getByRole("status")
+      .filter({ hasText: "Message accepted." });
+    await expect(acceptedStatus).toBeVisible();
+    await expect(acceptedStatus.locator('[data-icon-state="accepted"]'))
+      .toHaveCount(1);
 
     const darkIdleStore = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,

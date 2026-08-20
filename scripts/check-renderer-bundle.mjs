@@ -258,7 +258,12 @@ const morphingIconFeedbackJavaScriptClosure = await javaScriptClosure(
 );
 const morphingIconFeedbackJavaScriptBytes = await closureBytes(
   morphingIconFeedbackJavaScriptClosure,
-  new Set([...entryJavaScriptClosure, morphiconsJavaScript]),
+  new Set([
+    ...entryJavaScriptClosure,
+    ...mainWorkbenchJavaScriptClosure,
+    ...detachedChatJavaScriptClosure,
+    morphiconsJavaScript,
+  ]),
 );
 const javaScriptSizes = await Promise.all(
   assetNames

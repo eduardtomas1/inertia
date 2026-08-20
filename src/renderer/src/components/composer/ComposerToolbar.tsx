@@ -46,6 +46,7 @@ import {
   ComposerSettings,
   type ComposerSettingsModel,
 } from "./ComposerSettings";
+import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { PromptPresetCommandRunner } from "./types";
 import type { PromptStashEntry } from "../../utils/promptStash";
@@ -63,17 +64,6 @@ const ComposerSendActions = lazy(async () => ({
   default: (await import("./ComposerSendActions")).ConversationComposerSendActions,
 }));
 
-function ComposerSendActionsFallback(): React.JSX.Element {
-  return (
-    <IconButton
-      label="Loading message action"
-      className="send-button"
-      disabled
-    >
-      <span aria-hidden="true">…</span>
-    </IconButton>
-  );
-}
 const ComposerMoreMenu = lazy(async () => ({
   default: (await import("./ComposerMoreMenu")).ComposerMoreMenu,
 }));
@@ -475,7 +465,14 @@ export function ComposerToolbar({
           />
         ) : null}
         <Suspense
-          fallback={<ComposerSendActionsFallback />}
+          fallback={(
+            <ComposerSendActionsFallback
+              followUpState={followUpState}
+              primaryAction={primaryAction}
+              onSubmit={onSubmit}
+              onStop={onStop}
+            />
+          )}
         >
           <ComposerSendActions
             conversationId={conversation.id}

@@ -151,7 +151,11 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
     const request = "Keep this delayed answer anchored.";
     const composer = page.getByRole("region", { name: "Message composer" });
     await composer.getByRole("textbox", { name: "Message" }).fill(request);
-    await composer.getByRole("button", { name: "Send message" }).click();
+    await Promise.all([
+      expect(composer.locator('[data-icon-state="accepted"]'))
+        .not.toHaveCount(0),
+      composer.getByRole("button", { name: "Send message" }).click(),
+    ]);
     const acceptedRow = page.locator("[data-turn-id]").filter({
       has: page.getByText(request, { exact: true }),
     });

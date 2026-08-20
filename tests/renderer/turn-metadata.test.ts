@@ -320,6 +320,7 @@ describe("final-answer turn metadata", () => {
     const withTimestamp = renderTimeline(agentTurn(), true);
 
     expect(withoutTimestamp).toContain('aria-label="Copy final answer"');
+    expect(withoutTimestamp).toContain('data-icon-state="copy"');
     expect(withoutTimestamp).toContain("<span>Copy</span>");
     expect(withoutTimestamp).not.toContain("<span>Copy answer</span>");
     expect(withoutTimestamp).not.toContain("<time");

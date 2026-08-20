@@ -21,6 +21,8 @@ const budgets = {
   deferredAttachmentPreviewJavaScript: 12 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
+  morphiconsJavaScript: 20 * kibibyte,
+  morphingIconFeedbackJavaScript: 8 * kibibyte,
   // Rare deferred surfaces have strict ceilings below, while their shared
   // dependencies remain inside the existing core ceiling.
   coreJavaScript: 1_940 * kibibyte,
@@ -115,6 +117,12 @@ const detachedChatJavaScript = assetNames.find(
 const detachedChatCss = assetNames.find(
   (name) => /^DetachedChatApp-.*\.css$/u.test(name),
 );
+const morphiconsJavaScript = assetNames.find(
+  (name) => /^morphicons-.*\.js$/u.test(name),
+);
+const morphingIconFeedbackJavaScript = assetNames.find(
+  (name) => /^ComposerSendActions-.*\.js$/u.test(name),
+);
 const deferredPdfWorker = assetNames.find(
   (name) => /^pdf\.worker\.min-.*\.mjs$/u.test(name),
 );
@@ -161,6 +169,16 @@ if (!detachedChatJavaScript) {
 if (!detachedChatCss) {
   throw new Error(
     "Renderer bundle check could not find the detached-chat stylesheet.",
+  );
+}
+if (!morphiconsJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the isolated Morphicons chunk.",
+  );
+}
+if (!morphingIconFeedbackJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the isolated morphing icon feedback chunk.",
   );
 }
 
@@ -232,6 +250,21 @@ const detachedChatJavaScriptBytes = await closureBytes(
   detachedChatJavaScriptClosure,
   mainWorkbenchJavaScriptClosure,
 );
+const morphiconsJavaScriptBytes = await assetBytes(
+  `assets/${morphiconsJavaScript}`,
+);
+const morphingIconFeedbackJavaScriptClosure = await javaScriptClosure(
+  morphingIconFeedbackJavaScript,
+);
+const morphingIconFeedbackJavaScriptBytes = await closureBytes(
+  morphingIconFeedbackJavaScriptClosure,
+  new Set([
+    ...entryJavaScriptClosure,
+    ...mainWorkbenchJavaScriptClosure,
+    ...detachedChatJavaScriptClosure,
+    morphiconsJavaScript,
+  ]),
+);
 const javaScriptSizes = await Promise.all(
   assetNames
     .filter((name) => name.endsWith(".js"))
@@ -247,7 +280,11 @@ const coreJavaScriptBytes =
   - deferredFailureDiagnosticsJavaScriptBytes
   - deferredAttachmentPreviewJavaScriptBytes
   - deferredSpreadsheetJavaScriptBytes
-  - detachedChatJavaScriptBytes;
+  - detachedChatJavaScriptBytes
+  // The dependency and feature adapter each have strict ceilings above, so do
+  // not charge the same isolated bytes to multiple independent budgets.
+  - morphiconsJavaScriptBytes
+  - morphingIconFeedbackJavaScriptBytes;
 const measurements = {
   entryJavaScript: entryJavaScriptBytes,
   mainWorkbenchFirstLoadJavaScript: mainWorkbenchFirstLoadJavaScriptBytes,
@@ -264,6 +301,8 @@ const measurements = {
     deferredAttachmentPreviewJavaScriptBytes,
   deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,
+  morphiconsJavaScript: morphiconsJavaScriptBytes,
+  morphingIconFeedbackJavaScript: morphingIconFeedbackJavaScriptBytes,
   coreJavaScript: coreJavaScriptBytes,
   deferredPdfJavaScript: deferredPdfJavaScriptBytes,
   deferredPdfWorker: deferredPdfWorkerBytes,

@@ -23,6 +23,7 @@ vi.mock("../../src/renderer/src/hooks/useNativePreviewSuspension", () => ({
 }));
 
 const composerRenderCount = vi.hoisted(() => ({ value: 0 }));
+const composerSendResult = vi.hoisted(() => ({ value: undefined as unknown }));
 const timelineCallbacks = new Map<
   string,
   (event: FinalAnswerAutoScrollEvent) => void
@@ -39,7 +40,10 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
       onSend,
       running,
     }: {
-      onSend(content: string, attachments: []): Promise<void>;
+      onSend(
+        content: string,
+        attachments: [],
+      ): Promise<TranscriptMessageSendAcceptance | null | void>;
       running: boolean;
     }): React.JSX.Element {
       composerRenderCount.value += 1;
@@ -50,7 +54,11 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
           </span>
           <button
             type="button"
-            onClick={() => void onSend("Materialize this draft", [])}
+            onClick={() => {
+              void onSend("Materialize this draft", []).then((result) => {
+                composerSendResult.value = result;
+              });
+            }}
           >
             Send materialized draft
           </button>
@@ -285,6 +293,7 @@ function workspaceProps(
 beforeEach(() => {
   timelineLifecycle.mounts = 0;
   timelineLifecycle.unmounts = 0;
+  composerSendResult.value = undefined;
 });
 
 afterEach(() => {
@@ -569,6 +578,7 @@ describe("draft turn anchoring", () => {
       await Promise.resolve();
     });
     expect(onSendMessage).toHaveBeenCalledOnce();
+    expect(composerSendResult.value).toEqual(acceptance);
     expect(screen.getByTestId("turn-anchor-projection")).toHaveTextContent(
       "none",
     );

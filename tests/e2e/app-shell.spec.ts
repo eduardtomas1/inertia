@@ -152,6 +152,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
       "data-composer-action-state",
       "send-disabled",
     );
+    await expect(disabledSend).toHaveAttribute("data-motion-state", "send");
     const disabledStyle = await disabledSend.evaluate((button) => {
       const style = getComputedStyle(button);
       return {
@@ -213,7 +214,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     await expect(textbox).toBeFocused();
     expect(await textbox.evaluate((element) =>
       (element as HTMLTextAreaElement).readOnly)).toBe(true);
-    await expect(composer.locator(".loading-mark")).toHaveCount(1);
+    await expect(submitting.locator('[data-icon-state="sending"]')).toHaveCount(1);
     await expectComposerEndsAtDock(composer);
     expect(await composer.locator(".usage-context-ring").evaluateAll((rings) =>
       rings.reduce((count, ring) =>
@@ -244,6 +245,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     const darkComposer = page.getByRole("region", { name: "Message composer" });
     const darkSend = darkComposer.getByRole("button", { name: "Send message" });
     await expect(darkSend).toBeVisible();
+    await expect(darkSend).toHaveAttribute("data-motion-state", "send");
     const darkSendGeometry = await darkSend.evaluate((button) => {
       const bounds = button.getBoundingClientRect();
       return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
@@ -270,7 +272,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     await expect(runningComposer.getByRole("button", { name: "Send message" }))
       .toHaveCount(0);
     await expect(runningComposer.locator(".loading-mark")).toHaveCount(0);
-    await expect(stop.locator("rect")).toHaveCount(1);
+    await expect(stop.locator('[data-icon-state="stop"]')).toHaveCount(1);
     const stopGeometry = await stop.evaluate((button) => {
       const bounds = button.getBoundingClientRect();
       const style = getComputedStyle(button);

@@ -5,9 +5,7 @@ import {
   useState,
 } from "react";
 import {
-  Check,
   ChevronDown,
-  Copy,
 } from "lucide-react";
 import type {
   AgentTurn,
@@ -25,6 +23,8 @@ import {
   type TurnGitArtifactSummary,
 } from "../../utils/responseTimeline";
 import { shouldShowChangedFilesSummary } from "./changedFiles";
+import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
+import { checkMorphIcon, copyMorphIcon } from "../motion/lucideMorphData";
 
 function useCopyAction(): [boolean, (content: string) => Promise<void>] {
   const [copied, setCopied] = useState(false);
@@ -41,7 +41,7 @@ function useCopyAction(): [boolean, (content: string) => Promise<void>] {
   return [copied, copy];
 }
 
-function CopyAnswerButton({
+export function CopyAnswerButton({
   content,
   ariaLabel = "Copy answer",
 }: {
@@ -51,16 +51,25 @@ function CopyAnswerButton({
   const [copied, copy] = useCopyAction();
   const copiedAriaLabel = `${ariaLabel.replace(/^Copy\s+/u, "")} copied`;
   return (
-    <button
-      type="button"
-      className="turn-action"
-      title={copied ? "Answer copied" : ariaLabel}
-      aria-label={copied ? copiedAriaLabel : ariaLabel}
-      onClick={() => void copy(content)}
-    >
-      {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
-      <span>{copied ? "Copied" : "Copy"}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        className="turn-action"
+        title={copied ? "Answer copied" : ariaLabel}
+        aria-label={copied ? copiedAriaLabel : ariaLabel}
+        onClick={() => void copy(content)}
+      >
+        <InertiaMorphIcon
+          icon={copied ? checkMorphIcon : copyMorphIcon}
+          iconState={copied ? "copied" : "copy"}
+          size={12}
+        />
+        <span>{copied ? "Copied" : "Copy"}</span>
+      </button>
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {copied ? "Answer copied." : ""}
+      </span>
+    </>
   );
 }
 

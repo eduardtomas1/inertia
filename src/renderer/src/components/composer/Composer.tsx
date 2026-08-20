@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import type { ChatAttachment, PromptPreset } from "@shared/contracts";
+import type { ChatAttachment, MessageSendAcceptance, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import { fastModeProviderValue, legacyProviderIdForHarness,
@@ -163,6 +163,7 @@ export const Composer = memo(function Composer({
   const [commandSurface, setCommandSurface] = useState<"goal" | "resume" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
+  const [sendAcceptance, setSendAcceptance] = useState<MessageSendAcceptance | null>(null);
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null);
   useNativePreviewSuspension(conversationContext.dialog !== null || agentContextRequest !== null);
@@ -517,10 +518,8 @@ export const Composer = memo(function Composer({
           selectedPreviewUrlRef.current,
           contextPacketIds,
         );
-    if (
-      (!canSend && followUpState !== "ready")
-      || submittingRef.current
-    ) return;
+    if ((!canSend && followUpState !== "ready") || submittingRef.current) return;
+    setSendAcceptance(null);
     flushDraftPersistence();
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
@@ -542,7 +541,7 @@ export const Composer = memo(function Composer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      await onSend(
+      const acceptance = await onSend(
         running ? request.visibleContent || attachmentFallback : request.visibleContent,
         submittedAttachments,
         request.context,
@@ -561,10 +560,10 @@ export const Composer = memo(function Composer({
       if (editorUnchanged) {
         clearPersistedComposerDraft(submittedConversationId, submittedDraft);
       }
-      if (
-        !mountedRef.current
-        || conversationIdRef.current !== submittedConversationId
-      ) return;
+      if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
+      setSendAcceptance(
+        acceptance?.conversationId === submittedConversationId ? acceptance : null,
+      );
       if (editorUnchanged) {
         draftValueRef.current = "";
         setMessage("");
@@ -1214,6 +1213,7 @@ export const Composer = memo(function Composer({
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           followUpState={followUpState}
           primaryAction={primaryAction}
+          sendAcceptance={sendAcceptance}
           onSubmit={submit}
           onStop={stop}
         />

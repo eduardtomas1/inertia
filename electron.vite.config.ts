@@ -78,6 +78,9 @@ export default defineConfig({
           },
           manualChunks(id) {
             const normalizedId = id.replaceAll("\\", "/");
+            if (normalizedId.includes("/node_modules/morphicons/")) {
+              return "morphicons";
+            }
             if (normalizedId.endsWith(
               "/src/renderer/src/utils/terminalTurnProjection.ts",
             )) return "terminal-turn-projection";

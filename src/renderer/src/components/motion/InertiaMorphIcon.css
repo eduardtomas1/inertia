@@ -1,0 +1,12 @@
+.inertia-morph-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  line-height: 0;
+  place-items: center;
+  transform-origin: center;
+}
+
+.inertia-morph-icon > svg {
+  display: block;
+  overflow: visible;
+}

@@ -7,6 +7,7 @@ import type {
   Conversation,
   ConversationContextPacketSummary,
   ConversationLatestTurnSummary,
+  MessageSendAcceptance,
   ModelBackendProfileView,
   ModelSelection,
   ProjectAction,
@@ -62,7 +63,7 @@ export interface ComposerProps {
     message: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-  ) => Promise<void>;
+  ) => Promise<MessageSendAcceptance | null | void>;
   onCompact?: (instruction?: string) => Promise<{
     message: string;
     instructionForwarded: boolean;

@@ -1,10 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import type {
-  ChatAttachment,
-  MessageSendAcceptance,
-  PromptPreset,
-} from "@shared/contracts";
+import type { ChatAttachment, MessageSendAcceptance, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import { fastModeProviderValue, legacyProviderIdForHarness,
@@ -522,10 +518,7 @@ export const Composer = memo(function Composer({
           selectedPreviewUrlRef.current,
           contextPacketIds,
         );
-    if (
-      (!canSend && followUpState !== "ready")
-      || submittingRef.current
-    ) return;
+    if ((!canSend && followUpState !== "ready") || submittingRef.current) return;
     setSendAcceptance(null);
     flushDraftPersistence();
     const submittedAttachments = [...attachmentsRef.current];
@@ -567,14 +560,9 @@ export const Composer = memo(function Composer({
       if (editorUnchanged) {
         clearPersistedComposerDraft(submittedConversationId, submittedDraft);
       }
-      if (
-        !mountedRef.current
-        || conversationIdRef.current !== submittedConversationId
-      ) return;
+      if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
       setSendAcceptance(
-        acceptance?.conversationId === submittedConversationId
-          ? acceptance
-          : null,
+        acceptance?.conversationId === submittedConversationId ? acceptance : null,
       );
       if (editorUnchanged) {
         draftValueRef.current = "";

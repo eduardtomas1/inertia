@@ -24,6 +24,8 @@ const IPC = {
 // require Rollup's relative shared chunks at runtime.
 const DETACHED_CHAT_IPC = {
   getWindowContext: "inertia:window-context",
+  persistDraft: "inertia:detached-chat-persist-draft",
+  mirrorDraft: "inertia:detached-chat-mirror-draft",
   setAlwaysOnTop: "inertia:detached-chat-always-on-top",
   retarget: "inertia:detached-chat-retarget",
   dock: "inertia:detached-chat-dock",
@@ -46,14 +48,26 @@ const bridge = Object.freeze({
     DETACHED_CHAT_IPC.retarget,
     request,
   ) as ReturnType<DesktopBridge["retargetDetachedChat"]>,
-  dockDetachedChat: () =>
-    ipcRenderer.invoke(DETACHED_CHAT_IPC.dock) as ReturnType<
+  dockDetachedChat: (draft: string) =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.dock, draft) as ReturnType<
       DesktopBridge["dockDetachedChat"]
     >,
-  closeDetachedChat: () =>
-    ipcRenderer.invoke(DETACHED_CHAT_IPC.close) as ReturnType<
+  closeDetachedChat: (draft: string) =>
+    ipcRenderer.invoke(DETACHED_CHAT_IPC.close, draft) as ReturnType<
       DesktopBridge["closeDetachedChat"]
     >,
+  persistDetachedChatDraft: (draft: string) => {
+    return ipcRenderer.sendSync(
+      DETACHED_CHAT_IPC.persistDraft,
+      typeof draft === "string" ? draft : "",
+    ) === true;
+  },
+  mirrorDetachedChatDraft: (draft: string) => {
+    return ipcRenderer.sendSync(
+      DETACHED_CHAT_IPC.mirrorDraft,
+      typeof draft === "string" ? draft : "",
+    ) === true;
+  },
   getRuntimeConnection: () =>
     ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnection>,
   onRuntimeReady: (listener: () => void) => {

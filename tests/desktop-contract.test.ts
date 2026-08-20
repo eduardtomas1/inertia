@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseAttachmentPickerMode,
+  parseDetachedChatDraftAcknowledgement,
+  parseDetachedChatDraftHandoff,
+  parseDetachedChatWindowOpenRequest,
   parseDetachedChatWindowRequest,
   parseOpenProjectPathRequest,
+  parsePendingDetachedChatDraft,
   parsePrivateConnectDeviceUpdateRequest,
   parsePrivateConnectPairingApprovalRequest,
 } from "../src/shared/desktop";
@@ -15,6 +19,7 @@ import {
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
+const handoffId = "33333333-3333-4333-8333-333333333333";
 
 describe("desktop detached-chat contract", () => {
   it("accepts one exact conversation identity and a bounded display title", () => {
@@ -33,6 +38,61 @@ describe("desktop detached-chat contract", () => {
       { conversationId, title: "Chat", activate: true },
     ]) {
       expect(parseDetachedChatWindowRequest(request)).toBeNull();
+    }
+  });
+
+  it("accepts only bounded drafts bound to an exact detached conversation", () => {
+    const open = {
+      conversationId,
+      title: "Keep the runtime running",
+      draft: "Exact pending text",
+    };
+    expect(parseDetachedChatWindowOpenRequest(open)).toEqual(open);
+    expect(parseDetachedChatDraftHandoff({
+      conversationId,
+      draft: open.draft,
+    })).toEqual({ conversationId, draft: open.draft });
+
+    for (const value of [
+      { ...open, draft: "x".repeat(20_001) },
+      { ...open, draft: 42 },
+      { ...open, extra: true },
+    ]) {
+      expect(parseDetachedChatWindowOpenRequest(value)).toBeNull();
+    }
+    expect(parseDetachedChatDraftHandoff({
+      conversationId: "not-a-uuid",
+      draft: open.draft,
+    })).toBeNull();
+  });
+
+  it("accepts only exact pending handoffs and acknowledgements", () => {
+    const pending = {
+      conversationId,
+      draft: "Latest pending text",
+      handoffId,
+    };
+    expect(parsePendingDetachedChatDraft(pending)).toEqual(pending);
+    expect(parseDetachedChatDraftAcknowledgement({
+      conversationId,
+      handoffId,
+    })).toEqual({ conversationId, handoffId });
+
+    for (const value of [
+      { ...pending, injected: true },
+      { ...pending, conversationId: "not-a-uuid" },
+      { ...pending, handoffId: "not-a-uuid" },
+      { ...pending, draft: "x".repeat(20_001) },
+    ]) {
+      expect(parsePendingDetachedChatDraft(value)).toBeNull();
+    }
+    for (const value of [
+      { conversationId, handoffId, injected: true },
+      { conversationId: "not-a-uuid", handoffId },
+      { conversationId, handoffId: "not-a-uuid" },
+      { conversationId, handoffId: 42 },
+    ]) {
+      expect(parseDetachedChatDraftAcknowledgement(value)).toBeNull();
     }
   });
 });

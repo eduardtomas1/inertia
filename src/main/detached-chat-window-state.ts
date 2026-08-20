@@ -1,10 +1,9 @@
-import {
-  lstatSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-
 import type { Rectangle } from "electron";
+
+import {
+  readSecureAtomicState,
+  writeSecureAtomicState,
+} from "./secure-atomic-state.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -13,7 +12,6 @@ const STATE_VERSION = 1;
 const MAX_STATE_BYTES = 64 * 1024;
 const MAX_SAVED_WINDOWS = 64;
 const MIN_VISIBLE_EDGE = 80;
-
 export const DETACHED_CHAT_DEFAULT_BOUNDS = Object.freeze({
   width: 640,
   height: 780,
@@ -207,10 +205,11 @@ export class DetachedChatWindowStateStore {
           bounds,
         })),
       };
-      writeFileSync(this.path, JSON.stringify(snapshot), {
-        encoding: "utf8",
-        mode: 0o600,
-      });
+      writeSecureAtomicState(
+        this.path,
+        JSON.stringify(snapshot),
+        MAX_STATE_BYTES,
+      );
     } catch {
       // Window bounds are cosmetic and must never block close or shutdown.
     }
@@ -228,14 +227,10 @@ export class DetachedChatWindowStateStore {
 
   #read(): DetachedChatWindowStateSnapshot {
     try {
-      const metadata = lstatSync(this.path);
-      if (
-        !metadata.isFile()
-        || metadata.isSymbolicLink()
-        || metadata.size > MAX_STATE_BYTES
-      ) return { version: STATE_VERSION, windows: [] };
+      const content = readSecureAtomicState(this.path, MAX_STATE_BYTES);
+      if (content === null) return { version: STATE_VERSION, windows: [] };
       return parseDetachedChatWindowState(
-        JSON.parse(readFileSync(this.path, "utf8")),
+        JSON.parse(content),
       );
     } catch {
       return { version: STATE_VERSION, windows: [] };

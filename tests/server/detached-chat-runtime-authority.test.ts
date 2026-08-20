@@ -133,6 +133,10 @@ function rejection(command: ClientCommand): string | null {
   return detachedChatCommandRejection(authority, command, resources());
 }
 
+function mainRejection(command: ClientCommand): string | null {
+  return detachedChatCommandRejection({ kind: "main" }, command, resources());
+}
+
 describe("detached chat runtime authority", () => {
   it("projects a welcome snapshot to one chat without global mutation state", () => {
     const projected = projectDetachedChatSnapshot(snapshot(), CONVERSATION);
@@ -215,6 +219,22 @@ describe("detached chat runtime authority", () => {
       },
     });
     expect(rejection(message(false))).toBeNull();
+    expect(rejection({
+      ...message(false),
+      payload: {
+        ...message(false).payload,
+        context: { conversationContextPacketIds: [] },
+      },
+    })).toBeNull();
+    const contextualMessage: ClientCommand = {
+      ...message(false),
+      payload: {
+        ...message(false).payload,
+        context: { conversationContextPacketIds: [REQUEST] },
+      },
+    };
+    expect(rejection(contextualMessage)).not.toBeNull();
+    expect(mainRejection(contextualMessage)).toBeNull();
     expect(rejection(message(true))).not.toBeNull();
     expect(rejection(message())).not.toBeNull();
     expect(rejection({
@@ -224,6 +244,67 @@ describe("detached chat runtime authority", () => {
         conversationId: OTHER_CONVERSATION,
       },
     } as ClientCommand)).not.toBeNull();
+  });
+
+  it("keeps every conversation-context command outside detached authority", () => {
+    const commands: ClientCommand[] = [
+      {
+        type: "conversation.context.source.load",
+        requestId: REQUEST,
+        payload: {
+          sourceConversationId: OTHER_CONVERSATION,
+          targetConversationId: CONVERSATION,
+        },
+      },
+      {
+        type: "conversation.context.agent.source.load",
+        requestId: REQUEST,
+        payload: {
+          contextRequestId: REQUEST,
+          sourceConversationId: OTHER_CONVERSATION,
+          targetConversationId: CONVERSATION,
+        },
+      },
+      {
+        type: "conversation.context.agent.respond",
+        requestId: REQUEST,
+        payload: {
+          decision: "cancel",
+          contextRequestId: REQUEST,
+          targetConversationId: CONVERSATION,
+        },
+      },
+      {
+        type: "conversation.context.create",
+        requestId: REQUEST,
+        payload: {
+          sourceConversationId: OTHER_CONVERSATION,
+          targetConversationId: CONVERSATION,
+          sourceMessageIds: [REQUEST],
+          acknowledgedWorkspaceDifference: true,
+        },
+      },
+      {
+        type: "conversation.context.load",
+        requestId: REQUEST,
+        payload: {
+          packetId: REQUEST,
+          targetConversationId: CONVERSATION,
+        },
+      },
+      {
+        type: "conversation.context.remove",
+        requestId: REQUEST,
+        payload: {
+          packetId: REQUEST,
+          targetConversationId: CONVERSATION,
+        },
+      },
+    ];
+
+    expect(commands.map(rejection)).toEqual(commands.map(() =>
+      "That request is unavailable in a detached chat."));
+    expect(commands.map(mainRejection)).toEqual(commands.map(() => null));
   });
 
   it("binds indirect resource identities to the owned conversation", () => {

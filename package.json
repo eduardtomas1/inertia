@@ -192,6 +192,7 @@
     "oxlint": "^1.78.0",
     "oxlint-tsgolint": "7.0.2001",
     "tailwindcss": "^4.3.3",
+    "terser": "5.43.1",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
     "vitest": "^4.1.10",

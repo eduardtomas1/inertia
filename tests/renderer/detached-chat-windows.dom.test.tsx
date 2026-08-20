@@ -14,8 +14,9 @@ import { DetachedConversationPlaceholder } from "../../src/renderer/src/componen
 import { useDetachedChatWindows } from "../../src/renderer/src/hooks/useDetachedChatWindows";
 import type {
   DetachedChatWindowOpenResult,
-  DetachedChatWindowRequest,
+  DetachedChatWindowOpenRequest,
   DetachedChatWindowSummary,
+  PendingDetachedChatDraft,
 } from "../../src/shared/desktop";
 
 const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
@@ -45,16 +46,27 @@ function deferred<Value>(): Deferred<Value> {
 
 function installDetachedChatBridge({
   getWindows = vi.fn(async () => []),
+  getPendingDrafts = vi.fn(async () => []),
+  acknowledgeDraft = vi.fn(async () => true),
   onWindowsChanged = vi.fn(() => vi.fn()),
+  onDraftChanged = vi.fn(() => vi.fn()),
   open = vi.fn(),
   focus = vi.fn(),
 }: {
   getWindows?: () => Promise<DetachedChatWindowSummary[]>;
+  getPendingDrafts?: () => Promise<PendingDetachedChatDraft[]>;
+  acknowledgeDraft?: (request: {
+    conversationId: string;
+    handoffId: string;
+  }) => Promise<boolean>;
   onWindowsChanged?: (
     listener: (windows: DetachedChatWindowSummary[]) => void,
   ) => () => void;
+  onDraftChanged?: (
+    listener: (handoff: PendingDetachedChatDraft) => void,
+  ) => () => void;
   open?: (
-    request: DetachedChatWindowRequest,
+    request: DetachedChatWindowOpenRequest,
   ) => Promise<DetachedChatWindowOpenResult>;
   focus?: (conversationId: string) => Promise<boolean>;
 } = {}): void {
@@ -62,7 +74,10 @@ function installDetachedChatBridge({
     configurable: true,
     value: {
       getDetachedChatWindows: getWindows,
+      getPendingDetachedChatDrafts: getPendingDrafts,
+      acknowledgeDetachedChatDraft: acknowledgeDraft,
       onDetachedChatWindowsChanged: onWindowsChanged,
+      onDetachedChatDraftChanged: onDraftChanged,
       openDetachedChat: open,
       focusDetachedChat: focus,
     },
@@ -70,7 +85,9 @@ function installDetachedChatBridge({
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   Reflect.deleteProperty(window, "inertia");
+  window.localStorage.clear();
 });
 
 describe("useDetachedChatWindows", () => {
@@ -94,7 +111,7 @@ describe("useDetachedChatWindows", () => {
 
     expect(callOrder).toEqual(["subscribe", "snapshot"]);
     act(() => publish?.([lifecycleWindow]));
-    expect(hook.result.current.ready).toBe(true);
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
     expect(hook.result.current.windows).toEqual([lifecycleWindow]);
 
     await act(async () => {
@@ -124,21 +141,114 @@ describe("useDetachedChatWindows", () => {
   });
 
   it("unsubscribes from lifecycle events when its owner unmounts", () => {
-    const unsubscribe = vi.fn();
+    const unsubscribeWindows = vi.fn();
+    const unsubscribeDrafts = vi.fn();
     installDetachedChatBridge({
-      onWindowsChanged: vi.fn(() => unsubscribe),
+      onWindowsChanged: vi.fn(() => unsubscribeWindows),
+      onDraftChanged: vi.fn(() => unsubscribeDrafts),
     });
 
     const hook = renderHook(() => useDetachedChatWindows());
     hook.unmount();
 
-    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(unsubscribeWindows).toHaveBeenCalledOnce();
+    expect(unsubscribeDrafts).toHaveBeenCalledOnce();
+  });
+
+  it("stores and acknowledges the exact draft returned by its popup", async () => {
+    let publishDraft: ((handoff: PendingDetachedChatDraft) => void) | undefined;
+    const acknowledgeDraft = vi.fn(async () => true);
+    installDetachedChatBridge({
+      acknowledgeDraft,
+      onDraftChanged: vi.fn((listener) => {
+        publishDraft = listener;
+        return vi.fn();
+      }),
+    });
+    renderHook(() => useDetachedChatWindows());
+
+    act(() => publishDraft?.({
+      conversationId: CONVERSATION_ID,
+      draft: "returned without loss",
+      handoffId: "33333333-3333-4333-8333-333333333333",
+    }));
+
+    expect(window.localStorage.getItem(
+      `inertia:draft:${CONVERSATION_ID}`,
+    )).toBe("returned without loss");
+    await waitFor(() => expect(acknowledgeDraft).toHaveBeenCalledWith({
+      conversationId: CONVERSATION_ID,
+      handoffId: "33333333-3333-4333-8333-333333333333",
+    }));
+  });
+
+  it("hydrates pending drafts before ready without overwriting a newer event", async () => {
+    const pending = deferred<PendingDetachedChatDraft[]>();
+    const acknowledgeDraft = vi.fn(async () => true);
+    let publishDraft: ((handoff: PendingDetachedChatDraft) => void) | undefined;
+    installDetachedChatBridge({
+      getPendingDrafts: vi.fn(() => pending.promise),
+      acknowledgeDraft,
+      onDraftChanged: vi.fn((listener) => {
+        publishDraft = listener;
+        return vi.fn();
+      }),
+    });
+    const hook = renderHook(() => useDetachedChatWindows());
+    expect(hook.result.current.ready).toBe(false);
+
+    act(() => publishDraft?.({
+      conversationId: CONVERSATION_ID,
+      draft: "newer event draft",
+      handoffId: "44444444-4444-4444-8444-444444444444",
+    }));
+    await act(async () => {
+      pending.resolve([{
+        conversationId: CONVERSATION_ID,
+        draft: "stale snapshot draft",
+        handoffId: "55555555-5555-4555-8555-555555555555",
+      }]);
+      await pending.promise;
+    });
+
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
+    expect(window.localStorage.getItem(
+      `inertia:draft:${CONVERSATION_ID}`,
+    )).toBe("newer event draft");
+    expect(acknowledgeDraft).toHaveBeenCalledWith({
+      conversationId: CONVERSATION_ID,
+      handoffId: "44444444-4444-4444-8444-444444444444",
+    });
+    expect(acknowledgeDraft).not.toHaveBeenCalledWith(expect.objectContaining({
+      handoffId: "55555555-5555-4555-8555-555555555555",
+    }));
+  });
+
+  it("leaves a pending handoff unacknowledged when storage is unavailable", async () => {
+    const acknowledgeDraft = vi.fn(async () => true);
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    installDetachedChatBridge({
+      acknowledgeDraft,
+      getPendingDrafts: vi.fn(async () => [{
+        conversationId: CONVERSATION_ID,
+        draft: "retry after reload",
+        handoffId: "66666666-6666-4666-8666-666666666666",
+      }]),
+    });
+
+    const hook = renderHook(() => useDetachedChatWindows());
+
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
+    expect(acknowledgeDraft).not.toHaveBeenCalled();
   });
 
   it("forwards open and focus requests to the desktop bridge", async () => {
-    const request: DetachedChatWindowRequest = {
+    const request: DetachedChatWindowOpenRequest = {
       conversationId: CONVERSATION_ID,
       title: "Detached ownership",
+      draft: "exact draft",
     };
     const opened: DetachedChatWindowOpenResult = {
       conversationId: CONVERSATION_ID,

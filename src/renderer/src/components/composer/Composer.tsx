@@ -26,10 +26,8 @@ import {
   advanceRecurringPrompt,
   persistPromptStashUpdate,
   PROMPT_STASH_CHANGED_EVENT,
-  PROMPT_STASH_STORAGE_KEY,
   promptStashRouteMatches,
   promptStashRestoreBlockedReason,
-  readPromptStash,
   removePromptStashEntry,
   setPromptStashRecurrence,
   type PromptStashEntry,
@@ -46,6 +44,7 @@ import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
 import { useComposerPrefill } from "./useComposerPrefill";
+import { useComposerPromptStash } from "./useComposerPromptStash";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -81,9 +80,8 @@ export const Composer = memo(function Composer({
   usageDisplayMode,
   skills,
   skillsCapability,
-  skillsLoading,
-  skillsError,
-  promptContext,
+  skillsLoading, skillsError,
+  conversationContextHandoffEnabled = true, promptContext,
   contextSources = [], contextPackets = [],
   agentContextRequest = null, onConversationContextCommand,
   previewContextUrl,
@@ -91,8 +89,8 @@ export const Composer = memo(function Composer({
   goal,
   onSend,
   onCompact = unavailableCompaction,
-  onListSkills,
-  promptPresets = [], promptPresetsEnabled = true,
+  onListSkills, promptPresets = [], promptPresetsEnabled = true,
+  promptStashEnabled = true,
   onPromptPresetCommand = ignorePromptPresetMutation,
   onUpdateConversation,
   onCreateConversationForSelection,
@@ -116,8 +114,8 @@ export const Composer = memo(function Composer({
   const [message, setMessage] = useState(
     () => window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "",
   );
-  const [promptStash, setPromptStash] = useState(
-    () => readPromptStash(window.localStorage),
+  const [promptStash, setPromptStash] = useComposerPromptStash(
+    promptStashEnabled,
   );
   const draftValueRef = useRef(message);
   const pendingDraftRef = useRef<{
@@ -127,7 +125,7 @@ export const Composer = memo(function Composer({
   const draftPersistenceTimerRef = useRef<number | null>(null);
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, onCommand: onConversationContextCommand });
+  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -240,8 +238,10 @@ export const Composer = memo(function Composer({
   useComposerDetachmentOwnership({
     conversationId: conversation.id,
     flushDraftPersistence,
+    readDraft: () => draftValueRef.current,
     readState: () => ({
       attachmentCount: attachmentsRef.current.length,
+      conversationContextPending: conversationContextHandoffEnabled && (conversationContext.draftContextPackets.length > 0 || conversationContext.dialog !== null || agentContextRequest !== null),
       fileReferenceCount: fileReferences.length,
       mutationInFlight: submittingRef.current
         || stoppingRef.current
@@ -271,23 +271,6 @@ export const Composer = memo(function Composer({
     textareaRef,
   });
 
-  useEffect(() => {
-    const refreshPromptStash = (): void => {
-      setPromptStash(readPromptStash(window.localStorage));
-    };
-    const refreshFromStorage = (event: StorageEvent): void => {
-      if (event.key === PROMPT_STASH_STORAGE_KEY) refreshPromptStash();
-    };
-    window.addEventListener(PROMPT_STASH_CHANGED_EVENT, refreshPromptStash);
-    window.addEventListener("storage", refreshFromStorage);
-    return () => {
-      window.removeEventListener(
-        PROMPT_STASH_CHANGED_EVENT,
-        refreshPromptStash,
-      );
-      window.removeEventListener("storage", refreshFromStorage);
-    };
-  }, []);
   releaseAttachmentRef.current = onReleaseAttachment;
 
   useEffect(() => {
@@ -928,6 +911,7 @@ export const Composer = memo(function Composer({
   const updatePromptStash = (
     update: (current: readonly PromptStashEntry[]) => PromptStashEntry[],
   ): boolean => {
+    if (!promptStashEnabled) return false;
     const next = persistPromptStashUpdate(
       window.localStorage,
       promptStash,
@@ -1080,7 +1064,7 @@ export const Composer = memo(function Composer({
             />
           </Suspense>
         )}
-        <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />
+        {conversationContextHandoffEnabled && <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />}
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
@@ -1174,7 +1158,7 @@ export const Composer = memo(function Composer({
           running={running}
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}
-          {...composerConversationContextToolbarProps(conversationContext, contextSources.length, Boolean(onConversationContextCommand))}
+          {...composerConversationContextToolbarProps(conversationContext, contextSources.length, Boolean(onConversationContextCommand), conversationContextHandoffEnabled)}
           onRunAction={onRunAction}
           skills={skills}
           skillsCapability={skillsCapability}
@@ -1184,6 +1168,7 @@ export const Composer = memo(function Composer({
           onInsertSkill={insertSkill}
           promptPresets={promptPresets}
           promptPresetsEnabled={promptPresetsEnabled}
+          promptStashEnabled={promptStashEnabled}
           currentPrompt={message}
           onApplyPromptPreset={applyPromptPreset}
           onPromptPresetCommand={onPromptPresetCommand}
@@ -1241,7 +1226,7 @@ export const Composer = memo(function Composer({
           onSubmit={submit}
           onStop={stop}
         />
-        <ComposerConversationContextDialog controller={conversationContext} targetConversationId={conversation.id} sources={contextSources} agentRequest={agentContextRequest} onCommand={onConversationContextCommand} />
+        {conversationContextHandoffEnabled && <ComposerConversationContextDialog controller={conversationContext} targetConversationId={conversation.id} sources={contextSources} agentRequest={agentContextRequest} onCommand={onConversationContextCommand} />}
       </section>
     </div>
   );

@@ -39,8 +39,10 @@ class FakeBrowserWindow extends EventEmitter {
   maximized = false;
   fullscreen = false;
   alwaysOnTop = false;
+  preventClose = false;
   title = "";
   closeCalls = 0;
+  destroyCalls = 0;
   restoreCalls = 0;
   bounds: Rectangle;
   normalBounds: Rectangle;
@@ -75,14 +77,23 @@ class FakeBrowserWindow extends EventEmitter {
   close(): void {
     if (this.destroyed) return;
     this.closeCalls += 1;
-    this.emit("close");
+    const event = {
+      defaultPrevented: false,
+      preventDefault(): void { this.defaultPrevented = true; },
+    };
+    this.emit("close", event);
+    if (this.preventClose || event.defaultPrevented) return;
     this.destroyed = true;
     this.contents.destroyed = true;
     this.emit("closed");
   }
 
   destroy(): void {
-    this.close();
+    if (this.destroyed) return;
+    this.destroyCalls += 1;
+    this.destroyed = true;
+    this.contents.destroyed = true;
+    this.emit("closed");
   }
 }
 
@@ -169,7 +180,7 @@ describe("detached chat window manager", () => {
       })).rejects.toThrow("No more than 8 detached chats");
       expect(fixture.manager.summary()).toHaveLength(8);
     } finally {
-      fixture.manager.closeAll();
+      await fixture.manager.closeAll();
       rmSync(fixture.directory, { recursive: true, force: true });
     }
   });
@@ -219,7 +230,7 @@ describe("detached chat window manager", () => {
       expect(fixture.manager.summary().map(({ conversationId }) => conversationId))
         .toEqual([conversationId(2)]);
     } finally {
-      fixture.manager.closeAll();
+      await fixture.manager.closeAll();
       rmSync(fixture.directory, { recursive: true, force: true });
     }
   });
@@ -241,7 +252,7 @@ describe("detached chat window manager", () => {
       window.normalBounds = { ...window.bounds };
       window.fullscreen = true;
       window.bounds = { x: 0, y: 0, width: 1920, height: 1080 };
-      fixture.manager.closeAll();
+      await fixture.manager.closeAll();
 
       const restored = managerFixture({ directory: fixture.directory });
       expect(restored.manager.summary()).toEqual([]);
@@ -252,7 +263,7 @@ describe("detached chat window manager", () => {
         width: 710,
         height: 830,
       });
-      restored.manager.closeAll();
+      await restored.manager.closeAll();
     } finally {
       rmSync(fixture.directory, { recursive: true, force: true });
     }
@@ -281,7 +292,7 @@ describe("detached chat window manager", () => {
       expect(fixture.manager.summary()).toEqual([]);
       expect(fixture.windows[0]!.destroyed).toBe(true);
     } finally {
-      fixture.manager.closeAll();
+      await fixture.manager.closeAll();
       rmSync(fixture.directory, { recursive: true, force: true });
     }
   });
@@ -312,7 +323,44 @@ describe("detached chat window manager", () => {
         args: ["dark"],
       });
     } finally {
-      fixture.manager.closeAll();
+      await fixture.manager.closeAll();
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("closes renderers gracefully and destroys only after the timeout", async () => {
+    vi.useFakeTimers();
+    const fixture = managerFixture();
+    try {
+      await fixture.manager.open({
+        conversationId: conversationId(1),
+        title: "Graceful chat",
+      });
+      await fixture.manager.open({
+        conversationId: conversationId(2),
+        title: "Stuck chat",
+      });
+      const graceful = fixture.windows[0]!;
+      const stuck = fixture.windows[1]!;
+      stuck.preventClose = true;
+
+      const closing = fixture.manager.closeAll(50);
+      expect(fixture.manager.closeAll(50)).toBe(closing);
+      expect(graceful.closeCalls).toBe(1);
+      expect(graceful.destroyCalls).toBe(0);
+      expect(stuck.closeCalls).toBe(1);
+      expect(stuck.destroyed).toBe(false);
+      await expect(fixture.manager.open({
+        conversationId: conversationId(3),
+        title: "Too late",
+      })).rejects.toThrow("windows are closing");
+
+      await vi.advanceTimersByTimeAsync(50);
+      await closing;
+      expect(stuck.destroyCalls).toBe(1);
+      expect(fixture.manager.summary()).toEqual([]);
+    } finally {
+      await fixture.manager.closeAll();
       rmSync(fixture.directory, { recursive: true, force: true });
     }
   });

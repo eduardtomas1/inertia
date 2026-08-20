@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import {
+  MessagesSquare,
   PanelTopOpen,
   Pin,
   PinOff,
@@ -26,6 +27,7 @@ import type { DesktopWindowContext } from "@shared/desktop";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
+import "./detached-chat.css";
 import { ConversationDetailState } from "./components/ConversationDetailState";
 import { IconButton, LoadingMark } from "./components/ui";
 import {
@@ -71,14 +73,84 @@ interface DetachedChatAppProps {
   initialWindowContext: DetachedWindowContext;
 }
 
+interface DetachedChatBeforeUnloadEvent {
+  preventDefault(): void;
+  returnValue: string;
+}
+
+const DRAFT_PERSISTENCE_FAILURE =
+  "This window stayed open because its draft could not be preserved.";
+
+/** Keeps native close fail-closed around popup-only composer ownership. */
+export function preserveDetachedDraftBeforeUnload(
+  event: DetachedChatBeforeUnloadEvent,
+  preparation: ReturnType<typeof prepareComposerDetachment>,
+  persistDraft: (draft: string) => boolean,
+  onBlocked: (reason: string) => void,
+): boolean {
+  const block = (reason: string): false => {
+    event.preventDefault();
+    event.returnValue = reason;
+    onBlocked(reason);
+    return false;
+  };
+  if (preparation.status === "blocked") {
+    return block(preparation.reason);
+  }
+  try {
+    if (!persistDraft(preparation.draft)) {
+      return block(DRAFT_PERSISTENCE_FAILURE);
+    }
+  } catch {
+    return block(DRAFT_PERSISTENCE_FAILURE);
+  }
+  return true;
+}
+
 function publicError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+export function DetachedContextHandoffNotice({
+  onReturnToMain,
+}: {
+  onReturnToMain: () => void;
+}): React.JSX.Element {
+  return (
+    <div
+      className="pending-input-notice detached-chat-context-handoff"
+      role="status"
+      aria-live="polite"
+    >
+      <MessagesSquare size={15} aria-hidden="true" />
+      <span>
+        <strong>Agent requested chat context</strong>
+        <small>Review this request in the main window.</small>
+      </span>
+      <button type="button" onClick={onReturnToMain}>
+        <PanelTopOpen size={13} aria-hidden="true" />
+        Return to main
+      </button>
+    </div>
+  );
 }
 
 export default function DetachedChatApp({
   initialWindowContext,
 }: DetachedChatAppProps): React.JSX.Element {
-  const [windowContext, setWindowContext] = useState(initialWindowContext);
+  const [windowContext, setWindowContext] = useState(() => {
+    try {
+      const key = `inertia:draft:${initialWindowContext.conversationId}`;
+      if (initialWindowContext.draft) {
+        window.localStorage.setItem(key, initialWindowContext.draft);
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      // The privileged draft handoff still protects explicit close and dock.
+    }
+    return initialWindowContext;
+  });
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [latestContentVisible, setLatestContentVisible] = useState(false);
@@ -108,6 +180,22 @@ export default function DetachedChatApp({
   useEffect(() => {
     applyInterfaceScale(settings.interfaceScale);
   }, [settings.interfaceScale]);
+
+  useEffect(() => {
+    const persistBeforeNativeClose = (event: BeforeUnloadEvent): void => {
+      preserveDetachedDraftBeforeUnload(
+        event,
+        prepareComposerDetachment(conversationId),
+        (draft) => window.inertia.persistDetachedChatDraft(draft),
+        setActionError,
+      );
+    };
+    window.addEventListener("beforeunload", persistBeforeNativeClose);
+    return () => window.removeEventListener(
+      "beforeunload",
+      persistBeforeNativeClose,
+    );
+  }, [conversationId]);
 
   const projection = useStableController(useConversationProjection({
     snapshot: connection.snapshot,
@@ -185,7 +273,7 @@ export default function DetachedChatApp({
       setActionError(preparation.reason);
       return;
     }
-    void window.inertia.dockDetachedChat().catch((error: unknown) => {
+    void window.inertia.dockDetachedChat(preparation.draft).catch((error: unknown) => {
       setActionError(publicError(
         error,
         "This chat could not be returned to the main window.",
@@ -199,7 +287,7 @@ export default function DetachedChatApp({
       setActionError(preparation.reason);
       return;
     }
-    void window.inertia.closeDetachedChat().catch((error: unknown) => {
+    void window.inertia.closeDetachedChat(preparation.draft).catch((error: unknown) => {
       setActionError(publicError(error, "This window could not be closed."));
     });
   }, [conversationId]);
@@ -387,6 +475,9 @@ export default function DetachedChatApp({
     conversation
     && (!detailState || detailState.state === "loading"),
   );
+  const contextHandoffPending = projection.pendingInputs.some(
+    ({ conversationContextRequest }) => conversationContextRequest !== undefined,
+  );
   const visibleConversation = projection.detail?.conversation ?? conversation;
   const statusLabel = connection.status === "online"
     ? conversation?.status === "running"
@@ -436,6 +527,9 @@ export default function DetachedChatApp({
       </header>
 
       <div className="detached-chat-content">
+        {contextHandoffPending && (
+          <DetachedContextHandoffNotice onReturnToMain={dockInMain} />
+        )}
         {unavailableDetail ? (
           <ConversationDetailState
             embedded
@@ -480,6 +574,8 @@ export default function DetachedChatApp({
             skillsLoading={workflow.loading}
             skillsError={workflow.error}
             promptPresetsEnabled={false}
+            promptStashEnabled={false}
+            conversationContextHandoffEnabled={false}
             goal={{
               workflow: workflowState,
               executionStatus,
@@ -507,6 +603,7 @@ export default function DetachedChatApp({
             showChangedFileSummaries={settings.showChangedFileSummaries}
             autoScrollToFinalAnswer={settings.autoScrollToFinalAnswer}
             promptContext={null}
+            contextPackets={projection.detail?.contextPackets ?? []}
             previewContextUrl={null}
             providerIdentityLabels={settings.providerIdentityLabels}
             loading={false}

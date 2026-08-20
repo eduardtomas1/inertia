@@ -48,6 +48,8 @@ export interface ComposerProps {
   skillsLoading: boolean;
   skillsError: string | null;
   promptPresetsEnabled?: boolean;
+  promptStashEnabled?: boolean;
+  conversationContextHandoffEnabled?: boolean;
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];

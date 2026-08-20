@@ -665,6 +665,7 @@ export default function App(): React.JSX.Element {
     })).then(() => detachedChats.open({
       conversationId: nextConversation.id,
       title: nextConversation.title.trim() || "Untitled chat",
+      draft: preparation.draft,
     })).catch((error: unknown) => {
       if (!wasSuppressed) {
         setSuppressedMainConversationIds((current) => {

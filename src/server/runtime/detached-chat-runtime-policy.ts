@@ -67,8 +67,16 @@ export function detachedChatCommandRejection(
     case "message.send":
       return ownsExistingConversation(command.payload.conversationId)
         && command.payload.activate === false
+        && !command.payload.context?.conversationContextPacketIds?.length
         ? null
         : REJECTION;
+    case "conversation.context.source.load":
+    case "conversation.context.agent.source.load":
+    case "conversation.context.agent.respond":
+    case "conversation.context.create":
+    case "conversation.context.load":
+    case "conversation.context.remove":
+      return REJECTION;
     case "conversation.update":
       return ownsExistingConversation(command.payload.conversationId)
         && onlyKeys(command.payload, [

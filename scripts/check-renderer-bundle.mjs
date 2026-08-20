@@ -12,6 +12,7 @@ const budgets = {
   mainWorkbenchFirstLoadJavaScript: 700 * kibibyte,
   detachedChatFirstLoadJavaScript: 535 * kibibyte,
   entryCss: 340 * kibibyte,
+  detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
   deferredMarkdownJavaScript: 440 * kibibyte,
@@ -111,6 +112,9 @@ const mainWorkbenchJavaScript = assetNames.find(
 const detachedChatJavaScript = assetNames.find(
   (name) => /^DetachedChatApp-.*\.js$/u.test(name),
 );
+const detachedChatCss = assetNames.find(
+  (name) => /^DetachedChatApp-.*\.css$/u.test(name),
+);
 const deferredPdfWorker = assetNames.find(
   (name) => /^pdf\.worker\.min-.*\.mjs$/u.test(name),
 );
@@ -154,8 +158,14 @@ if (!detachedChatJavaScript) {
     "Renderer bundle check could not find the detached-chat surface.",
   );
 }
+if (!detachedChatCss) {
+  throw new Error(
+    "Renderer bundle check could not find the detached-chat stylesheet.",
+  );
+}
 
 const entryCssBytes = await assetBytes(entryCss);
+const detachedChatCssBytes = await assetBytes(`assets/${detachedChatCss}`);
 const entryJavaScriptName = entryJavaScript.replace(/^assets\//u, "");
 const entryJavaScriptClosure = await javaScriptClosure(entryJavaScriptName);
 const mainWorkbenchJavaScriptClosure = await javaScriptClosure(
@@ -243,6 +253,7 @@ const measurements = {
   mainWorkbenchFirstLoadJavaScript: mainWorkbenchFirstLoadJavaScriptBytes,
   detachedChatFirstLoadJavaScript: detachedChatFirstLoadJavaScriptBytes,
   entryCss: entryCssBytes,
+  detachedChatCss: detachedChatCssBytes,
   settingsJavaScript: settingsJavaScriptBytes,
   filesFirstLoadJavaScript: filesFirstLoadJavaScriptBytes,
   deferredMarkdownJavaScript: deferredMarkdownJavaScriptBytes,

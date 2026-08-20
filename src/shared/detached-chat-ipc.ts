@@ -6,6 +6,12 @@ export const DETACHED_CHAT_IPC = {
   focus: "inertia:detached-chat-focus",
   getWindows: "inertia:detached-chat-windows",
   windowsChanged: "inertia:detached-chat-windows-changed",
+  draftChanged: "inertia:detached-chat-draft-changed",
+  draftMirrored: "inertia:detached-chat-draft-mirrored",
+  getPendingDrafts: "inertia:detached-chat-pending-drafts",
+  acknowledgeDraft: "inertia:detached-chat-acknowledge-draft",
+  persistDraft: "inertia:detached-chat-persist-draft",
+  mirrorDraft: "inertia:detached-chat-mirror-draft",
   setAlwaysOnTop: "inertia:detached-chat-always-on-top",
   retarget: "inertia:detached-chat-retarget",
   dock: "inertia:detached-chat-dock",
@@ -19,6 +25,8 @@ export type DetachedChatBridge = Pick<
   | "retargetDetachedChat"
   | "dockDetachedChat"
   | "closeDetachedChat"
+  | "persistDetachedChatDraft"
+  | "mirrorDetachedChatDraft"
   | "getRuntimeConnection"
   | "onRuntimeReady"
   | "copyText"

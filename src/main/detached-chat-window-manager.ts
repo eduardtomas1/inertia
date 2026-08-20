@@ -30,6 +30,7 @@ export interface DetachedChatWindowManagerOptions {
   getDisplays(): readonly DetachedChatDisplay[];
   state: DetachedChatWindowStateStore;
   onWindowsChanged?(windows: DetachedChatWindowSummary[]): void;
+  onRendererGone?(conversationId: string): void;
   formatTitle?(title: string): string;
   saveDelayMs?: number;
 }
@@ -53,6 +54,7 @@ export class DetachedChatWindowManager {
   readonly #bySender = new Map<WebContents, DetachedChatWindowRecord>();
   readonly #options: DetachedChatWindowManagerOptions;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
+  #closeAllOperation: Promise<void> | null = null;
 
   constructor(options: DetachedChatWindowManagerOptions) {
     this.#options = options;
@@ -61,6 +63,9 @@ export class DetachedChatWindowManager {
   async open(
     request: DetachedChatWindowRequest,
   ): Promise<DetachedChatWindowOpenResult> {
+    if (this.#closeAllOperation) {
+      throw new Error("Detached chat windows are closing.");
+    }
     const existing = this.#byConversation.get(request.conversationId);
     if (existing) {
       existing.request = { ...request };
@@ -174,7 +179,9 @@ export class DetachedChatWindowManager {
     return this.windowForSender(sender) !== null;
   }
 
-  contextForSender(sender: WebContents): DesktopWindowContext {
+  contextForSender(
+    sender: WebContents,
+  ): Omit<Extract<DesktopWindowContext, { role: "detached-chat" }>, "draft"> {
     const record = this.#requireSender(sender);
     return { role: "detached-chat", ...this.#recordSummary(record) };
   }
@@ -222,14 +229,29 @@ export class DetachedChatWindowManager {
     return true;
   }
 
-  closeAll(): void {
+  closeAll(closeTimeoutMs = 1_500): Promise<void> {
+    if (this.#closeAllOperation) return this.#closeAllOperation;
+    const operation = this.#closeAll(closeTimeoutMs);
+    let tracked!: Promise<void>;
+    tracked = operation.finally(() => {
+      if (this.#closeAllOperation === tracked) this.#closeAllOperation = null;
+    });
+    this.#closeAllOperation = tracked;
+    return tracked;
+  }
+
+  async #closeAll(closeTimeoutMs: number): Promise<void> {
+    if (!Number.isFinite(closeTimeoutMs) || closeTimeoutMs < 0) {
+      throw new Error("Invalid detached-chat close timeout");
+    }
     this.#cancelScheduledSave();
     const records = [...this.#byConversation.values()];
     for (const record of records) this.#rememberBounds(record);
     this.#options.state.flush();
-    for (const record of records) {
-      if (!record.window.isDestroyed()) record.window.destroy();
-    }
+    await Promise.all(records.map((record) => this.#closeGracefully(
+      record,
+      closeTimeoutMs,
+    )));
   }
 
   sendToAll(channel: string, ...args: unknown[]): void {
@@ -262,6 +284,11 @@ export class DetachedChatWindowManager {
       this.#rememberBounds(record);
       this.#options.state.flush();
     });
+    record.contents.on("will-prevent-unload", () => {
+      if (this.#ownsRecord(record) && !record.window.isDestroyed()) {
+        record.closing = false;
+      }
+    });
     record.window.once("closed", () => {
       if (!record.loaded) {
         this.#rejectReady(
@@ -279,7 +306,51 @@ export class DetachedChatWindowManager {
       ) {
         // A renderer crash has no beforeunload work to preserve. Destroying
         // avoids recursively entering close while Electron tears it down.
+        try {
+          this.#options.onRendererGone?.(record.request.conversationId);
+        } catch {
+          // A crashed renderer cannot be retained when recovery persistence fails.
+        }
         record.window.destroy();
+      }
+    });
+  }
+
+  #closeGracefully(
+    record: DetachedChatWindowRecord,
+    closeTimeoutMs: number,
+  ): Promise<void> {
+    const window = record.window;
+    if (window.isDestroyed()) return Promise.resolve();
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      window.once("closed", finish);
+      timer = setTimeout(() => {
+        try {
+          if (!window.isDestroyed()) window.destroy();
+        } catch {
+          // Shutdown proceeds after the bounded attempt.
+        } finally {
+          finish();
+        }
+      }, closeTimeoutMs);
+      try {
+        window.close();
+      } catch {
+        try {
+          if (!window.isDestroyed()) window.destroy();
+        } catch {
+          // Shutdown proceeds after the bounded attempt.
+        } finally {
+          finish();
+        }
       }
     });
   }

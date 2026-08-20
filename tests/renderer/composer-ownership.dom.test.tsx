@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ChatAttachment,
   Conversation,
+  ConversationContextPacketSummary,
   ProviderInfo,
 } from "../../src/shared/contracts";
 import {
@@ -95,6 +96,31 @@ function attachment(id: string): ChatAttachment {
   };
 }
 
+function contextPacket(
+  current: Conversation,
+  consumedMessageId: string | null,
+): ConversationContextPacketSummary {
+  return {
+    id: "33333333-3333-4333-8333-333333333333",
+    sourceConversationId: "44444444-4444-4444-8444-444444444444",
+    targetConversationId: current.id,
+    sourceProjectId: "55555555-5555-4555-8555-555555555555",
+    targetProjectId: current.projectId,
+    sourceConversationTitle: "Reviewed context",
+    sourceProjectName: "Inertia",
+    sourceWorkspaceLabel: "Project checkout · main",
+    targetWorkspaceLabel: "Project checkout · main",
+    workspaceRelation: "same-workspace",
+    note: null,
+    messageCount: 1,
+    characterCount: 42,
+    createdAt: current.createdAt,
+    consumedMessageId,
+    consumedAt: consumedMessageId ? current.updatedAt : null,
+    sourceState: "available",
+  };
+}
+
 function composerProps(
   current: Conversation,
   overrides: Partial<React.ComponentProps<typeof Composer>> = {},
@@ -154,12 +180,30 @@ describe("composer detachment ownership", () => {
     fireEvent.change(input, { target: { value: "an exact pending draft" } });
     expect(window.localStorage.getItem(`inertia:draft:${current.id}`)).toBe("a");
 
-    expect(prepareComposerDetachment(current.id)).toEqual({ status: "ready" });
+    expect(prepareComposerDetachment(current.id)).toEqual({
+      status: "ready",
+      draft: "an exact pending draft",
+    });
     expect(window.localStorage.getItem(`inertia:draft:${current.id}`))
       .toBe("an exact pending draft");
 
     view.unmount();
-    expect(prepareComposerDetachment(current.id)).toEqual({ status: "ready" });
+    expect(prepareComposerDetachment(current.id)).toEqual({
+      status: "ready",
+      draft: "an exact pending draft",
+    });
+  });
+
+  it("returns a persisted draft when its composer is not mounted", () => {
+    window.localStorage.setItem(
+      "inertia:draft:inactive-chat",
+      "draft from an inactive sidebar chat",
+    );
+
+    expect(prepareComposerDetachment("inactive-chat")).toEqual({
+      status: "ready",
+      draft: "draft from an inactive sidebar chat",
+    });
   });
 
   it("does not let stale ownership cleanup remove a replacement", () => {
@@ -167,11 +211,13 @@ describe("composer detachment ownership", () => {
       status: "blocked",
       blocker: "attachments",
       reason: "first",
+      draft: "first draft",
     }));
     const secondCleanup = registerComposerOwnership("replacement", () => ({
       status: "blocked",
       blocker: "prompt-context",
       reason: "replacement",
+      draft: "replacement draft",
     }));
 
     firstCleanup();
@@ -179,10 +225,11 @@ describe("composer detachment ownership", () => {
       status: "blocked",
       blocker: "prompt-context",
       reason: "replacement",
+      draft: "replacement draft",
     });
 
     secondCleanup();
-    expect(prepareComposerDetachment("replacement")).toEqual({ status: "ready" });
+    expect(prepareComposerDetachment("replacement")).toEqual({ status: "ready", draft: "" });
   });
 
   it("reports context blockers for the owning conversation", () => {
@@ -210,12 +257,80 @@ describe("composer detachment ownership", () => {
       status: "blocked",
       blocker: "prompt-context",
       reason: "Remove the selected diff or review context before moving this chat to a window.",
+      draft: "",
     });
     expect(prepareComposerDetachment(previewOwner.id)).toEqual({
       status: "blocked",
       blocker: "preview-context",
       reason: "Remove the selected preview before moving this chat to a window.",
+      draft: "",
     });
+  });
+
+  it("blocks unsent chat context while allowing consumed provenance to move", () => {
+    const draftOwner = conversation("draft-context-owner");
+    const historyOwner = conversation("sent-context-owner");
+    render(
+      <>
+        <Composer {...composerProps(draftOwner, {
+          contextPackets: [contextPacket(draftOwner, null)],
+        })} />
+        <Composer {...composerProps(historyOwner, {
+          contextPackets: [contextPacket(historyOwner, "sent-message")],
+        })} />
+      </>,
+    );
+
+    expect(prepareComposerDetachment(draftOwner.id)).toEqual({
+      status: "blocked",
+      blocker: "conversation-context",
+      reason: "Send or remove shared chat context before moving this chat to a window.",
+      draft: "",
+    });
+    expect(prepareComposerDetachment(historyOwner.id)).toEqual({ status: "ready", draft: "" });
+  });
+
+  it("removes handoff UI and opaque packet submission from chat-only composers", async () => {
+    const current = conversation("chat-only-context-owner");
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      conversationContextHandoffEnabled: false,
+      contextPackets: [contextPacket(current, null)],
+      contextSources: [{
+        conversationId: "44444444-4444-4444-8444-444444444444",
+        conversationTitle: "Reviewed context",
+        projectName: "Inertia",
+        workspaceRelation: "same-workspace",
+        archived: false,
+      }],
+      onConversationContextCommand: vi.fn(async () => ({
+        type: "request.ok" as const,
+        requestId: crypto.randomUUID(),
+      })),
+      onSend,
+    })} />);
+
+    expect(screen.queryByRole("button", {
+      name: "Add context from another chat",
+    })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: /From Reviewed context/u,
+    })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Keep this popup scoped to its current chat." },
+    });
+    expect(prepareComposerDetachment(current.id)).toEqual({
+      status: "ready",
+      draft: "Keep this popup scoped to its current chat.",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(onSend).toHaveBeenCalledWith(
+      "Keep this popup scoped to its current chat.",
+      [],
+      undefined,
+    );
   });
 
   it("reports attachment and file-reference blockers without losing the text draft", async () => {
@@ -261,6 +376,7 @@ describe("composer detachment ownership", () => {
       status: "blocked",
       blocker: "attachments",
       reason: "Send or remove attachments before moving this chat to a window.",
+      draft: "Keep this exact attachment draft",
     });
     expect(window.localStorage.getItem(`inertia:draft:${attachmentOwner.id}`))
       .toBe("Keep this exact attachment draft");
@@ -268,6 +384,7 @@ describe("composer detachment ownership", () => {
       status: "blocked",
       blocker: "file-references",
       reason: "Remove file references before moving this chat to a window.",
+      draft: "@src/index.ts ",
     });
   });
 
@@ -288,6 +405,7 @@ describe("composer detachment ownership", () => {
       status: "blocked",
       blocker: "mutation-in-flight",
       reason: "Wait for the current composer action to finish before moving this chat to a window.",
+      draft: "Send before moving",
     });
 
     await act(async () => finishSend());
@@ -370,6 +488,7 @@ describe("composer detachment ownership", () => {
       status: "blocked",
       blocker: "pending-model-route",
       reason: "Finish or cancel the pending model change before moving this chat to a window.",
+      draft: "",
     });
   });
 });

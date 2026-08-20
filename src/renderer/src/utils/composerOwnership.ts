@@ -4,14 +4,16 @@ export type ComposerDetachmentBlocker =
   | "attachments"
   | "file-references"
   | "prompt-context"
-  | "preview-context";
+  | "preview-context"
+  | "conversation-context";
 
 export type ComposerDetachmentPreparation =
-  | { readonly status: "ready" }
+  | { readonly status: "ready"; readonly draft: string }
   | {
       readonly status: "blocked";
       readonly blocker: ComposerDetachmentBlocker;
       readonly reason: string;
+      readonly draft: string;
     };
 
 export type ComposerDetachmentPrepare = () => ComposerDetachmentPreparation;
@@ -24,6 +26,14 @@ interface ComposerOwner {
 // tracks the composer mounted in this window without creating cross-window
 // ownership or lifecycle coupling.
 const composerOwners = new Map<string, ComposerOwner>();
+
+function persistedDraft(conversationId: string): string {
+  try {
+    return window.localStorage.getItem(`inertia:draft:${conversationId}`) ?? "";
+  } catch {
+    return "";
+  }
+}
 
 export function registerComposerOwnership(
   conversationId: string,
@@ -44,5 +54,9 @@ export function registerComposerOwnership(
 export function prepareComposerDetachment(
   conversationId: string,
 ): ComposerDetachmentPreparation {
-  return composerOwners.get(conversationId)?.prepare() ?? { status: "ready" };
+  const owner = composerOwners.get(conversationId);
+  return owner?.prepare() ?? {
+    status: "ready",
+    draft: persistedDraft(conversationId),
+  };
 }

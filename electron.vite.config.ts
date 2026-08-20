@@ -53,7 +53,12 @@ export default defineConfig({
     },
     build: {
       target: "chrome150",
-      minify: "esbuild",
+      minify: "terser",
+      terserOptions: {
+        compress: {
+          passes: 2,
+        },
+      },
       sourcemap: false,
       cssCodeSplit: true,
       chunkSizeWarningLimit: 850,

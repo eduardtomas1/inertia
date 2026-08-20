@@ -76,10 +76,8 @@ import {
   finishPrivilegedExit,
 } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
-import {
-  createDetachedChatMain,
-  type DetachedChatMain,
-} from "./detached-chat-bootstrap.js";
+import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
+import * as detachedChatClose from "./detached-chat-close-coordinator.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
 import { packageSmokeEnvironment } from "./package-smoke-environment.js";
@@ -826,8 +824,13 @@ async function createMainWindow(): Promise<void> {
   );
   detachedChatMain ??= createDetachedChatMain({
     mainWindow: () => mainWindow,
-    rendererUrl: trustedRendererUrl,
-    userDataDirectory: app.getPath("userData"), iconPath, backgroundColor,
+    rendererUrl: trustedRendererUrl, userDataDirectory: app.getPath("userData"),
+    iconPath, backgroundColor,
+    registerRendererProtocol: (session) => registerAppProtocol({
+      attachmentRegistry: () => importedAttachments,
+      conversationAttachments: () => conversationAttachments,
+      runtimeSupervisor: () => runtimeSupervisor,
+    }, session.protocol),
     onDock: (conversationId) => activateThreadNotification(conversationId, {
       channel: IPC.threadNotificationActivated,
       currentWindow: () => mainWindow, createWindow,
@@ -884,10 +887,7 @@ async function createMainWindow(): Promise<void> {
   hardenDesktopSession(window.webContents.session);
 
   window.once("ready-to-show", () => window.show());
-  window.on("close", () => {
-    saveWindowState(window);
-    detachedChatMain?.closeAll();
-  });
+  detachedChatClose.coordinateMainWindowClose(window, detachedChatMain, saveWindowState);
   window.on("closed", () => {
     previewBroker.close();
     if (mainWindow === window) {
@@ -940,32 +940,30 @@ function finishQuitAfterCleanup(): void {
 function runPrivilegedCleanup(): Promise<boolean> {
   if (privilegedCleanup) return privilegedCleanup;
   if (mainWindow) saveWindowState(mainWindow);
-  detachedChatMain?.closeAll();
-  previewBroker.close();
-  runtimeDiagnostics?.record("app.stop");
-  const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost;
-  privateConnectHost = null;
-  const cleanup = cleanupPrivilegedOwners({
-    runtime: supervisorToStop,
-    privateConnect: privateConnectHostToStop,
-    onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
-    onRuntimeError: (error) => {
-      runtimeDiagnostics?.record("runtime.failure", {
-        phase: "stopping", message: error instanceof Error
-          ? error.message : "The local runtime could not stop cleanly.",
-      });
-      console.error("Failed to stop the local runtime", error);
-    },
-    onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
-    disposeTemporaryAttachments: disposeImportedAttachments,
-    onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
-    onUnconfirmedRuntimeExit: () => console.warn(
-      "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
-    ),
-    closeDurableAttachments: async () => {
-      const retainedAttachments = conversationAttachments; conversationAttachments = null;
-      await closeConversationAttachmentAccess(retainedAttachments);
-    },
+  const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectHost = null;
+  const cleanup = detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain).then(async () => {
+    previewBroker.close(); runtimeDiagnostics?.record("app.stop");
+    return await cleanupPrivilegedOwners({
+      runtime: supervisorToStop, privateConnect: privateConnectHostToStop,
+      onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
+      onRuntimeError: (error) => {
+        runtimeDiagnostics?.record("runtime.failure", {
+          phase: "stopping", message: error instanceof Error
+            ? error.message : "The local runtime could not stop cleanly.",
+        });
+        console.error("Failed to stop the local runtime", error);
+      },
+      onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
+      disposeTemporaryAttachments: disposeImportedAttachments,
+      onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
+      onUnconfirmedRuntimeExit: () => console.warn(
+        "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
+      ),
+      closeDurableAttachments: async () => {
+        const retainedAttachments = conversationAttachments; conversationAttachments = null;
+        await closeConversationAttachmentAccess(retainedAttachments);
+      },
+    });
   });
   privilegedCleanup = cleanup;
   return cleanup;

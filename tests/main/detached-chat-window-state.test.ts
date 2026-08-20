@@ -1,7 +1,11 @@
 import {
   mkdtempSync,
+  lstatSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -144,4 +148,70 @@ describe("detached chat window state", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it.runIf(process.platform !== "win32")(
+    "refuses a symlink target without modifying its destination",
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), "inertia-detached-state-"));
+      const path = join(directory, "detached-chat-window-state.json");
+      const destination = join(directory, "user-notes.txt");
+      try {
+        writeFileSync(destination, "keep this exact content", { mode: 0o600 });
+        symlinkSync(destination, path);
+        const store = new DetachedChatWindowStateStore(path);
+        store.remember(firstConversation, {
+          x: 100,
+          y: 120,
+          width: 620,
+          height: 760,
+        });
+
+        store.flush();
+
+        expect(readFileSync(destination, "utf8")).toBe(
+          "keep this exact content",
+        );
+        expect(lstatSync(path).isSymbolicLink()).toBe(true);
+        expect(readdirSync(directory).sort()).toEqual([
+          "detached-chat-window-state.json",
+          "user-notes.txt",
+        ]);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "publishes a restrictive file without leaving transaction artifacts",
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), "inertia-detached-state-"));
+      const path = join(directory, "detached-chat-window-state.json");
+      try {
+        const store = new DetachedChatWindowStateStore(path);
+        store.remember(firstConversation, {
+          x: 100,
+          y: 120,
+          width: 620,
+          height: 760,
+        });
+        store.flush();
+        store.remember(secondConversation, {
+          x: 300,
+          y: 200,
+          width: 720,
+          height: 820,
+        });
+        store.flush();
+
+        expect(statSync(path).mode & 0o777).toBe(0o600);
+        expect(readdirSync(directory)).toEqual([
+          "detached-chat-window-state.json",
+        ]);
+        expect(JSON.parse(readFileSync(path, "utf8")).windows).toHaveLength(2);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });

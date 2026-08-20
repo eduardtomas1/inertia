@@ -9,6 +9,7 @@ import {
 const electron = vi.hoisted(() => ({
   exposeInMainWorld: vi.fn(),
   invoke: vi.fn(async () => undefined),
+  sendSync: vi.fn(() => true),
   on: vi.fn(),
   removeListener: vi.fn(),
 }));
@@ -17,6 +18,7 @@ vi.mock("electron", () => ({
   contextBridge: { exposeInMainWorld: electron.exposeInMainWorld },
   ipcRenderer: {
     invoke: electron.invoke,
+    sendSync: electron.sendSync,
     on: electron.on,
     removeListener: electron.removeListener,
   },
@@ -50,6 +52,7 @@ describe("detached chat preload", () => {
       "openAttachmentExternally",
       "openExternal",
       "openProjectPath",
+      "persistDetachedChatDraft",
       "prepareAttachmentHandoff",
       "releaseAttachment",
       "retargetDetachedChat",
@@ -61,7 +64,10 @@ describe("detached chat preload", () => {
       "openDetachedChat",
       "focusDetachedChat",
       "getDetachedChatWindows",
+      "getPendingDetachedChatDrafts",
+      "acknowledgeDetachedChatDraft",
       "onDetachedChatWindowsChanged",
+      "onDetachedChatDraftChanged",
       "showThreadNotification",
       "checkAppUpdate",
       "exportRecoveryData",
@@ -96,8 +102,9 @@ describe("detached chat preload", () => {
     await bridge.getWindowContext();
     await bridge.setDetachedChatAlwaysOnTop(true);
     await bridge.retargetDetachedChat(request);
-    await bridge.dockDetachedChat();
-    await bridge.closeDetachedChat();
+    await bridge.dockDetachedChat("dock draft");
+    await bridge.closeDetachedChat("close draft");
+    expect(bridge.persistDetachedChatDraft("native-close draft")).toBe(true);
     await bridge.getRuntimeConnection();
     await bridge.copyText("copy me");
     await bridge.selectAttachments("images");
@@ -113,8 +120,8 @@ describe("detached chat preload", () => {
       [DETACHED_CHAT_IPC.getWindowContext],
       [DETACHED_CHAT_IPC.setAlwaysOnTop, true],
       [DETACHED_CHAT_IPC.retarget, request],
-      [DETACHED_CHAT_IPC.dock],
-      [DETACHED_CHAT_IPC.close],
+      [DETACHED_CHAT_IPC.dock, "dock draft"],
+      [DETACHED_CHAT_IPC.close, "close draft"],
       ["inertia:runtime-connection"],
       ["inertia:copy-text", "copy me"],
       ["inertia:select-attachments", "images"],
@@ -126,7 +133,17 @@ describe("detached chat preload", () => {
       ["inertia:open-project-path", projectPath],
       ["inertia:open-external", "https://example.com/"],
     ]);
+    expect(electron.sendSync).toHaveBeenCalledWith(
+      DETACHED_CHAT_IPC.persistDraft,
+      "native-close draft",
+    );
     expect(bridge.getPlatform()).toBe(process.platform);
+  });
+
+  it("reports a rejected synchronous native-close handoff", () => {
+    electron.sendSync.mockReturnValueOnce(false);
+
+    expect(bridge.persistDetachedChatDraft("unconfirmed draft")).toBe(false);
   });
 
   it("subscribes to runtime readiness and removes the exact listener", () => {

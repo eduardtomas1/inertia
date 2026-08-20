@@ -38,13 +38,15 @@ export interface ComposerConversationContextController {
 export function composerConversationContextToolbarProps(
   controller: ComposerConversationContextController,
   sourceCount: number,
-  enabled: boolean,
+  commandEnabled: boolean,
+  handoffEnabled: boolean,
 ) {
   return {
-    contextAvailable: enabled && sourceCount > 0
+    contextAvailable: handoffEnabled && commandEnabled && sourceCount > 0
       && controller.draftContextPackets.length
         < MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
     contextCount: controller.draftContextPackets.length,
+    conversationContextHandoffEnabled: handoffEnabled,
     onOpenContext: controller.openCreate,
   };
 }
@@ -52,24 +54,29 @@ export function composerConversationContextToolbarProps(
 export function useComposerConversationContext(input: {
   conversationId: string;
   contextPackets: readonly ConversationContextPacketSummary[];
+  enabled: boolean;
   onCommand?: ConversationContextCommandRunner;
 }): ComposerConversationContextController {
-  const { contextPackets, conversationId, onCommand } = input;
+  const { contextPackets, conversationId, enabled, onCommand } = input;
   const [dialog, setDialog] = useState<ContextDialogState>(null);
 
   useEffect(() => {
     setDialog(null);
-  }, [conversationId]);
+  }, [conversationId, enabled]);
 
-  const draftContextPackets = useMemo(() => contextPackets.filter(
-    ({ consumedMessageId }) => consumedMessageId === null,
-  ), [contextPackets]);
+  const draftContextPackets = useMemo(
+    () => enabled
+      ? contextPackets.filter(({ consumedMessageId }) =>
+          consumedMessageId === null)
+      : [],
+    [contextPackets, enabled],
+  );
   const contextPacketIds = useMemo(
     () => draftContextPackets.map(({ id }) => id),
     [draftContextPackets],
   );
   const remove = async (packetId: string): Promise<void> => {
-    if (!onCommand) return;
+    if (!enabled || !onCommand) return;
     await onCommand("conversation.context.remove", {
       type: "conversation.context.remove",
       payload: { packetId, targetConversationId: conversationId },
@@ -81,8 +88,12 @@ export function useComposerConversationContext(input: {
     draftContextPackets,
     dialog,
     closeDialog: () => setDialog(null),
-    openCreate: () => setDialog({ kind: "create" }),
-    openPreview: (packetId) => setDialog({ kind: "preview", packetId }),
+    openCreate: () => {
+      if (enabled) setDialog({ kind: "create" });
+    },
+    openPreview: (packetId) => {
+      if (enabled) setDialog({ kind: "preview", packetId });
+    },
     remove,
   };
 }

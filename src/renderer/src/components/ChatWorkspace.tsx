@@ -125,6 +125,8 @@ type ChatWorkspaceProps = {
   skillsError: string | null;
   promptPresets?: readonly PromptPreset[];
   promptPresetsEnabled?: boolean;
+  promptStashEnabled?: boolean;
+  conversationContextHandoffEnabled?: boolean;
   goal?: ChatGoalControlProps | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
@@ -233,6 +235,8 @@ export function ChatWorkspace({
   skillsError,
   promptPresets = EMPTY_PROMPT_PRESETS,
   promptPresetsEnabled = true,
+  promptStashEnabled = true,
+  conversationContextHandoffEnabled = true,
   goal,
   approvals,
   inputRequests,
@@ -834,6 +838,7 @@ export function ChatWorkspace({
           skillsLoading={skillsLoading}
           skillsError={skillsError}
           goal={goalControl}
+          conversationContextHandoffEnabled={conversationContextHandoffEnabled}
           promptContext={promptContext}
           contextSources={contextSources}
           contextPackets={contextPackets}
@@ -852,6 +857,7 @@ export function ChatWorkspace({
           onListSkills={onListSkills}
           promptPresets={promptPresets}
           promptPresetsEnabled={promptPresetsEnabled}
+          promptStashEnabled={promptStashEnabled}
           onPromptPresetCommand={onPromptPresetCommand}
           onUpdateConversation={onUpdateConversation}
           onCreateConversationForSelection={onCreateConversationForSelection}

@@ -42,7 +42,6 @@ import {
   focusModalOnAnimationFrame,
   trapModalFocus,
 } from "../utils/modalFocus";
-import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";

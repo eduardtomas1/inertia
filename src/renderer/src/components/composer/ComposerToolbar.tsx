@@ -81,6 +81,7 @@ export interface ComposerToolbarProps {
   onChooseAttachments: () => Promise<void>;
   contextAvailable: boolean;
   contextCount: number;
+  conversationContextHandoffEnabled: boolean;
   onOpenContext: () => void;
   onRunAction: (action: ProjectAction) => void;
   skills: readonly AgentSkillSummary[];
@@ -91,6 +92,7 @@ export interface ComposerToolbarProps {
   onInsertSkill: (skill: AgentSkillSummary) => void;
   promptPresets: readonly PromptPreset[];
   promptPresetsEnabled: boolean;
+  promptStashEnabled: boolean;
   currentPrompt: string;
   onApplyPromptPreset: (preset: PromptPreset) => Promise<boolean>;
   onPromptPresetCommand: PromptPresetCommandRunner;
@@ -147,6 +149,7 @@ export function ComposerToolbar({
   onChooseAttachments,
   contextAvailable,
   contextCount,
+  conversationContextHandoffEnabled,
   onOpenContext,
   onRunAction,
   skills,
@@ -157,6 +160,7 @@ export function ComposerToolbar({
   onInsertSkill,
   promptPresets,
   promptPresetsEnabled,
+  promptStashEnabled,
   currentPrompt,
   onApplyPromptPreset,
   onPromptPresetCommand,
@@ -308,22 +312,24 @@ export function ComposerToolbar({
         >
           <Paperclip size={16} />
         </IconButton>
-        <IconButton
-          label={contextCount > 0
-            ? `Add chat context, ${contextCount} selected`
-            : "Add context from another chat"}
-          onClick={onOpenContext}
-          disabled={
-            disabled
-            || running
-            || primaryAction === "submitting"
-            || !contextAvailable
-            || contextCount >= 2
-          }
-          className={contextCount > 0 ? "has-context" : undefined}
-        >
-          <MessagesSquare size={16} />
-        </IconButton>
+        {conversationContextHandoffEnabled && (
+          <IconButton
+            label={contextCount > 0
+              ? `Add chat context, ${contextCount} selected`
+              : "Add context from another chat"}
+            onClick={onOpenContext}
+            disabled={
+              disabled
+              || running
+              || primaryAction === "submitting"
+              || !contextAvailable
+              || contextCount >= 2
+            }
+            className={contextCount > 0 ? "has-context" : undefined}
+          >
+            <MessagesSquare size={16} />
+          </IconButton>
+        )}
         {promptPresetsEnabled && (
           <Suspense fallback={null}>
             <PromptPresetMenu
@@ -351,19 +357,21 @@ export function ComposerToolbar({
             />
           </Suspense>
         )}
-        <Suspense fallback={null}>
-          <PromptStashMenu
-            entries={promptStash}
-            canStash={canStashPrompt}
-            blockedReason={promptStashBlockedReason}
-            restoreBlockedReason={promptRestoreBlockedReason}
-            menuController={menuController}
-            onStash={onStashPrompt}
-            onRestore={onRestorePrompt}
-            onRemove={onRemoveStashedPrompt}
-            onSetRecurrence={onSetPromptRecurrence}
-          />
-        </Suspense>
+        {promptStashEnabled && (
+          <Suspense fallback={null}>
+            <PromptStashMenu
+              entries={promptStash}
+              canStash={canStashPrompt}
+              blockedReason={promptStashBlockedReason}
+              restoreBlockedReason={promptRestoreBlockedReason}
+              menuController={menuController}
+              onStash={onStashPrompt}
+              onRestore={onRestorePrompt}
+              onRemove={onRemoveStashedPrompt}
+              onSetRecurrence={onSetPromptRecurrence}
+            />
+          </Suspense>
+        )}
         <Suspense fallback={null}>
           <ComposerSkillsMenu
             skills={skills}

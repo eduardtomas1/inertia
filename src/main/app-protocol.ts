@@ -1,7 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { net, protocol } from "electron";
+import { net, protocol, type Protocol } from "electron";
 
 import { parseWorkspaceImagePreviewUrl } from "../shared/workspace-image-preview.js";
 import type { AttachmentRegistry } from "./attachment-registry.js";
@@ -25,9 +25,9 @@ export function registerAppProtocol(options: {
   attachmentRegistry: () => AttachmentRegistry | null;
   conversationAttachments: () => ConversationAttachmentAccess | null;
   runtimeSupervisor: () => RuntimeSupervisor | null;
-}): void {
+}, target: Pick<Protocol, "handle"> = protocol): void {
   const rendererRoot = fileURLToPath(new URL("../renderer/", import.meta.url));
-  protocol.handle(APP_SCHEME, async (request) => {
+  target.handle(APP_SCHEME, async (request) => {
     try {
       const url = new URL(request.url);
       if (

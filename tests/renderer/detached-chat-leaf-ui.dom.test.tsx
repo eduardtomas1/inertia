@@ -6,6 +6,10 @@ import { ConversationSplitView } from "../../src/renderer/src/components/Convers
 import { Sidebar } from "../../src/renderer/src/components/Sidebar";
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
 import {
+  DetachedContextHandoffNotice,
+  preserveDetachedDraftBeforeUnload,
+} from "../../src/renderer/src/DetachedChatApp";
+import {
   defaultSettings,
   type AppSnapshot,
   type ConversationShell,
@@ -61,6 +65,57 @@ const conversation: ConversationShell = {
 const noOp = (): void => undefined;
 
 describe("detached chat leaf controls", () => {
+  it("cancels native close while the composer owns transient state", () => {
+    const event = { preventDefault: vi.fn(), returnValue: "" };
+    const persistDraft = vi.fn(() => true);
+    const onBlocked = vi.fn();
+
+    expect(preserveDetachedDraftBeforeUnload(
+      event,
+      {
+        status: "blocked",
+        blocker: "attachments",
+        reason: "Remove attachments first.",
+        draft: "owned draft",
+      },
+      persistDraft,
+      onBlocked,
+    )).toBe(false);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.returnValue).toBe("Remove attachments first.");
+    expect(persistDraft).not.toHaveBeenCalled();
+    expect(onBlocked).toHaveBeenCalledWith("Remove attachments first.");
+  });
+
+  it("cancels native close when durable draft persistence is not confirmed", () => {
+    const event = { preventDefault: vi.fn(), returnValue: "" };
+    const onBlocked = vi.fn();
+
+    expect(preserveDetachedDraftBeforeUnload(
+      event,
+      { status: "ready", draft: "latest popup draft" },
+      () => false,
+      onBlocked,
+    )).toBe(false);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.returnValue).toContain("draft could not be preserved");
+    expect(onBlocked).toHaveBeenCalledWith(event.returnValue);
+  });
+
+  it("offers a dock-only handoff when the agent requests another chat", () => {
+    const onReturnToMain = vi.fn();
+    render(<DetachedContextHandoffNotice onReturnToMain={onReturnToMain} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Agent requested chat context",
+    );
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Return to main" }));
+    expect(onReturnToMain).toHaveBeenCalledOnce();
+  });
+
   it("focuses an existing window from the conversation menu and blocks split ownership", () => {
     const onOpenConversationInWindow = vi.fn();
     render(

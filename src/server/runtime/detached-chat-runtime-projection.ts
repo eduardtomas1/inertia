@@ -1,4 +1,5 @@
 import type {
+  AgentInputRequest,
   AppSettings,
   AppSnapshot,
   RuntimeSequencedFrame,
@@ -25,6 +26,27 @@ function projectedSettings(settings: AppSettings): AppSettings {
     confirmDestructiveActions: settings.confirmDestructiveActions,
     providerIdentityLabels: { ...settings.providerIdentityLabels },
     keybindings: { ...defaultSettings.keybindings },
+  };
+}
+
+/** Removes a foreign conversation identity from host-owned input prompts. */
+export function projectDetachedChatInputRequest(
+  request: AgentInputRequest,
+  conversationId: string,
+): AgentInputRequest {
+  const contextRequest = request.conversationContextRequest;
+  if (
+    !contextRequest?.requestedSourceConversationId
+    || contextRequest.requestedSourceConversationId === conversationId
+  ) {
+    return request;
+  }
+  return {
+    ...request,
+    conversationContextRequest: {
+      ...contextRequest,
+      requestedSourceConversationId: null,
+    },
   };
 }
 
@@ -103,6 +125,18 @@ export function projectRuntimeFrameForAuthority(
             },
           }
         : { type: "runtime.cursor", sync: frame.sync };
+    case "agent.input.requested": {
+      const request = projectDetachedChatInputRequest(
+        frame.event.request,
+        authority.conversationId,
+      );
+      return request === frame.event.request
+        ? frame
+        : {
+            ...frame,
+            event: { ...frame.event, request },
+          };
+    }
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":

@@ -14,6 +14,7 @@ import {
   type RuntimeResumeRequest,
 } from "../runtime-sequencing";
 import {
+  projectDetachedChatInputRequest,
   projectDetachedChatSnapshot,
   projectRuntimeFrameForAuthority,
 } from "./detached-chat-runtime-projection";
@@ -135,7 +136,15 @@ export class RuntimeSyncHub<Socket> {
           authority.kind === "detached-chat"
           && request.conversationId !== authority.conversationId
         ) continue;
-        this.send(socket, { type: "agent.input.requested", request });
+        this.send(socket, {
+          type: "agent.input.requested",
+          request: authority.kind === "detached-chat"
+            ? projectDetachedChatInputRequest(
+                request,
+                authority.conversationId,
+              )
+            : request,
+        });
       }
       for (const plan of hydration.plans) {
         if (

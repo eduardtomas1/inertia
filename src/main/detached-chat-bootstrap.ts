@@ -16,6 +16,7 @@ export interface DetachedChatBootstrapOptions {
   userDataDirectory: string;
   iconPath: string;
   backgroundColor: string;
+  registerRendererProtocol(session: Electron.Session): void;
   onDock(conversationId: string): void | Promise<void>;
 }
 
@@ -28,6 +29,7 @@ export function createDetachedChatMain(
     createBrowserWindow: (windowOptions) => new BrowserWindow(windowOptions),
     getDisplays: () => screen.getAllDisplays(),
     hardenSession: hardenDesktopSession,
+    registerRendererProtocol: options.registerRendererProtocol,
     rendererUrl: options.rendererUrl,
     preloadPath: fileURLToPath(
       new URL("../preload/detached-chat.cjs", import.meta.url),
@@ -35,6 +37,10 @@ export function createDetachedChatMain(
     statePath: join(
       options.userDataDirectory,
       "detached-chat-window-state.json",
+    ),
+    draftStatePath: join(
+      options.userDataDirectory,
+      "detached-chat-pending-drafts.json",
     ),
     iconPath: options.iconPath,
     backgroundColor: options.backgroundColor,

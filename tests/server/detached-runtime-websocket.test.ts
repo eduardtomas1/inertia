@@ -134,6 +134,25 @@ describe("detached runtime websocket", () => {
         },
       },
       {
+        type: "message.send",
+        requestId: randomUUID(),
+        payload: {
+          conversationId: conversationA.id,
+          content: "Do not attach another conversation's context",
+          attachments: [],
+          activate: false,
+          context: { conversationContextPacketIds: [randomUUID()] },
+        },
+      },
+      {
+        type: "conversation.context.source.load",
+        requestId: randomUUID(),
+        payload: {
+          sourceConversationId: conversationB.id,
+          targetConversationId: conversationA.id,
+        },
+      },
+      {
         type: "settings.update",
         requestId: randomUUID(),
         payload: { theme: "dark" },

@@ -7,6 +7,7 @@ import * as agentExports from "../src/shared/contracts/agent";
 import * as agentWorkflowExports from "../src/shared/contracts/agent-workflows";
 import * as appExports from "../src/shared/contracts/app";
 import * as clientCommandExports from "../src/shared/contracts/client-command";
+import * as conversationContextExports from "../src/shared/conversation-context";
 import * as duoExports from "../src/shared/contracts/duo";
 import * as eventExports from "../src/shared/contracts/events";
 import * as modelRoutingExports from "../src/shared/model-routing";
@@ -28,6 +29,7 @@ describe("shared contracts boundary", () => {
       ...agentWorkflowExports,
       ...appExports,
       ...clientCommandExports,
+      ...conversationContextExports,
       ...duoExports,
       ...eventExports,
       ...usageDashboardExports,
@@ -73,6 +75,12 @@ describe("shared contracts boundary", () => {
       "conversation.select",
       "conversation.detail.load",
       "conversation.detail.subscription",
+      "conversation.context.source.load",
+      "conversation.context.agent.source.load",
+      "conversation.context.agent.respond",
+      "conversation.context.create",
+      "conversation.context.load",
+      "conversation.context.remove",
       "conversation.update",
       "conversation.archive",
       "conversation.unarchive",

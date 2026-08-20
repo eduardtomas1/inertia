@@ -1,6 +1,4 @@
-import {
-  lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState,
-} from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
@@ -49,18 +47,15 @@ import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
+import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
  * the entry chunk. Loading it on demand keeps the picker and its list rendering
  * out of first paint.
  */
-const ChatResumeControl = lazy(async () => ({
-  default: (await import("../ChatResumeControl")).ChatResumeControl,
-}));
-const ChatGoalControl = lazy(async () => ({
-  default: (await import("../ChatGoalControl")).ChatGoalControl,
-}));
+const ChatResumeControl = lazy(async () => ({ default: (await import("../ChatResumeControl")).ChatResumeControl }));
+const ChatGoalControl = lazy(async () => ({ default: (await import("../ChatGoalControl")).ChatGoalControl }));
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // The first non-empty edit is synchronous. During uninterrupted typing, a
 // force-terminated renderer can lose at most this much newer draft history;
@@ -90,6 +85,8 @@ export const Composer = memo(function Composer({
   skillsLoading,
   skillsError,
   promptContext,
+  contextSources = [], contextPackets = [],
+  agentContextRequest = null, onConversationContextCommand,
   previewContextUrl,
   providerIdentityLabels,
   goal,
@@ -131,6 +128,8 @@ export const Composer = memo(function Composer({
   const draftPersistenceTimerRef = useRef<number | null>(null);
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, onCommand: onConversationContextCommand });
+  const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -165,6 +164,7 @@ export const Composer = memo(function Composer({
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null);
+  useNativePreviewSuspension(conversationContext.dialog !== null || agentContextRequest !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);
@@ -543,6 +543,7 @@ export const Composer = memo(function Composer({
           promptContext,
           fileReferences,
           selectedPreviewUrlRef.current,
+          contextPacketIds,
         );
     if (
       (!canSend && followUpState !== "ready")
@@ -740,10 +741,10 @@ export const Composer = memo(function Composer({
   const attachmentFallback = running
     ? "Please inspect the attached image."
     : "Please inspect the attached file.";
-  const composedLength = (message.trim() || (attachments.length > 0 ? attachmentFallback : selectedPreviewUrlRef.current ? "Please inspect the current preview." : "Please review the selected diff context.")).length;
+  const composedLength = (message.trim() || (attachments.length > 0 ? attachmentFallback : selectedPreviewUrlRef.current ? "Please inspect the current preview." : contextPacketIds.length > 0 ? "Please use the selected chat context." : "Please review the selected diff context.")).length;
   const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
-  const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected)
+  const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext) || previewContextSelected || contextPacketIds.length > 0)
     && messageFits
     && routeReadiness.ready
     && !disabled
@@ -761,7 +762,8 @@ export const Composer = memo(function Composer({
     blocked: attachments.length > 0
       || Boolean(promptContext)
       || previewContextSelected
-      || fileReferences.length > 0,
+      || fileReferences.length > 0
+      || contextPacketIds.length > 0,
     flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
     editorRevisions: editorRevisionsRef,
     draftValueRef, textareaRef, setMessage, setSubmitting, onCompact,
@@ -1033,8 +1035,9 @@ export const Composer = memo(function Composer({
     || Boolean(promptContext)
     || previewContextSelected
     || fileReferences.length > 0
+    || contextPacketIds.length > 0
   )
-    ? "Remove attachments, preview or diff context, and file references before transferring this text to a new chat."
+    ? "Remove attachments, shared chat context, preview or diff context, and file references before transferring this text to a new chat."
     : null;
 
   return (
@@ -1080,6 +1083,7 @@ export const Composer = memo(function Composer({
             />
           </Suspense>
         )}
+        <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
@@ -1173,6 +1177,7 @@ export const Composer = memo(function Composer({
           running={running}
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}
+          {...composerConversationContextToolbarProps(conversationContext, contextSources.length, Boolean(onConversationContextCommand))}
           onRunAction={onRunAction}
           skills={skills}
           skillsCapability={skillsCapability}
@@ -1237,6 +1242,7 @@ export const Composer = memo(function Composer({
           onSubmit={submit}
           onStop={stop}
         />
+        <ComposerConversationContextDialog controller={conversationContext} targetConversationId={conversation.id} sources={contextSources} agentRequest={agentContextRequest} onCommand={onConversationContextCommand} />
       </section>
     </div>
   );

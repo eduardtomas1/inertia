@@ -27,6 +27,10 @@ import {
   conversationCreatePayloadSchema,
 } from "./conversation-create";
 import { COLOR_THEME_IDS } from "../app";
+import {
+  MAX_CONVERSATION_CONTEXT_MESSAGES,
+  MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
+} from "../../conversation-context";
 
 const duoSideSchema = conversationCreatePayloadSchema.extend({
   activate: z.literal(false).optional(),
@@ -39,6 +43,26 @@ const duoComparisonSchema = conversationCreatePayloadSchema.omit({
 }).extend({
   activate: z.literal(false).optional(),
 }).strict();
+
+const conversationContextSourceFields = {
+  sourceConversationId: z.string().uuid(),
+  targetConversationId: z.string().uuid(),
+};
+const conversationContextSelectionFields = {
+  ...conversationContextSourceFields,
+  sourceMessageIds: z.array(z.string().uuid())
+    .min(1)
+    .max(MAX_CONVERSATION_CONTEXT_MESSAGES)
+    .refine((ids) => new Set(ids).size === ids.length),
+  note: z.string().trim().min(1).max(MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
+    .refine(
+      (value) => new TextEncoder().encode(value).byteLength
+        <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
+      "Context note exceeds its UTF-8 byte limit.",
+    )
+    .optional(),
+  acknowledgedWorkspaceDifference: z.boolean(),
+};
 
 export const appCommandSchemas = [
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
@@ -205,6 +229,57 @@ export const appCommandSchemas = [
       }).strict(),
     })
     .strict(),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.source.load"),
+    payload: z.strictObject(conversationContextSourceFields),
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.agent.source.load"),
+    payload: z.strictObject({
+      contextRequestId: z.string().uuid(),
+      sourceConversationId: z.string().uuid(),
+      targetConversationId: z.string().uuid(),
+    }),
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.agent.respond"),
+    payload: z.discriminatedUnion("decision", [
+      z.strictObject({
+        decision: z.literal("cancel"),
+        contextRequestId: z.string().uuid(),
+        targetConversationId: z.string().uuid(),
+      }),
+      z.strictObject({
+        decision: z.literal("select"),
+        contextRequestId: z.string().uuid(),
+        ...conversationContextSelectionFields,
+      }),
+    ]),
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.create"),
+    payload: z.strictObject(conversationContextSelectionFields),
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.load"),
+    payload: z.strictObject({
+      packetId: z.string().uuid(),
+      targetConversationId: z.string().uuid(),
+    }),
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.context.remove"),
+    payload: z.strictObject({
+      packetId: z.string().uuid(),
+      targetConversationId: z.string().uuid(),
+    }),
+  }),
   z
     .object({
       ...requestBase,

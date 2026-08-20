@@ -10,6 +10,7 @@ import type {
   ChatAttachment,
   ChatMessage,
   CheckpointSummary,
+  ConversationContextPacketSummary,
 } from "../../src/shared/contracts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
@@ -89,6 +90,7 @@ function renderRequest(
     checkpoint?: CheckpointSummary;
     checkpointRestoreDisabled?: boolean;
     internalInstruction?: string;
+    contextPackets?: ConversationContextPacketSummary[];
   } = {},
 ): string {
   const currentTurn = turn(options.checkpoint?.id ?? null);
@@ -108,6 +110,7 @@ function renderRequest(
           }]
         : []),
     ],
+    contextPackets: options.contextPackets,
     activities: [],
     reasonings: [],
     plans: [],
@@ -225,6 +228,35 @@ describe("Quiet Ledger user request layer", () => {
     expect(request).toContain("Please review the provider route.");
     expect(request).not.toContain(internalInstruction);
     expect(html).toContain(internalInstruction);
+  });
+
+  it("renders reloaded context provenance and states a deleted source truthfully", () => {
+    const html = renderRequest("Continue from the shared decision.", {
+      contextPackets: [{
+        id: "33333333-3333-4333-8333-333333333333",
+        sourceConversationId: "44444444-4444-4444-8444-444444444444",
+        targetConversationId: conversationId,
+        sourceProjectId: "55555555-5555-4555-8555-555555555555",
+        targetProjectId: "66666666-6666-4666-8666-666666666666",
+        sourceConversationTitle: "Architecture decisions",
+        sourceProjectName: "Inertia",
+        sourceWorkspaceLabel: "Project checkout · main",
+        targetWorkspaceLabel: "Project checkout · main",
+        workspaceRelation: "same-workspace",
+        note: null,
+        messageCount: 2,
+        characterCount: 128,
+        createdAt: requestedAt,
+        consumedMessageId: "user-1",
+        consumedAt: requestedAt,
+        sourceState: "deleted",
+      }],
+    });
+
+    expect(html).toContain('aria-label="Shared chat context"');
+    expect(html).toContain("Context from Architecture decisions");
+    expect(html).toContain("Source deleted · immutable sent excerpt");
+    expect(html).not.toContain("2 messages");
   });
 
   it("uses the shared width and radius tokens with intentional narrow behavior", () => {

@@ -10,6 +10,7 @@ import type {
   ChatMessage,
   CheckpointSummary,
   ConversationLatestTurnSummary,
+  ConversationContextPacketSummary,
   SubagentTrace,
 } from "@shared/contracts";
 import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
@@ -23,6 +24,7 @@ import type { TerminalTurnProjections } from "../../utils/terminalTurnProjection
 export interface ResponseTimelineProps {
   turns: AgentTurn[];
   messages: ChatMessage[];
+  contextPackets?: readonly ConversationContextPacketSummary[];
   activities: AgentActivity[];
   subagents?: SubagentTrace[];
   reasonings: AgentReasoning[];

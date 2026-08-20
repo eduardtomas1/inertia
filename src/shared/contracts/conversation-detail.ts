@@ -21,6 +21,7 @@ import type {
   DiffReviewSummary,
   TurnGitArtifact,
 } from "./git";
+import type { ConversationContextPacketSummary } from "../conversation-context";
 
 /**
  * Heavy state for one conversation. This is loaded independently from the
@@ -41,6 +42,8 @@ export interface ConversationDetail {
   reviewSummaries: DiffReviewSummary[];
   reviewStates: DiffReviewState[];
   reviewNotes: DiffReviewNote[];
+  /** Present on current local-runtime details; absent from legacy projections. */
+  contextPackets?: ConversationContextPacketSummary[];
 }
 
 export type ConversationDetailResult =

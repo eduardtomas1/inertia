@@ -172,6 +172,8 @@ export interface QueueTurnRequest {
   /** Server-derived only. Renderer commands never provide extracted document text. */
   documentContexts?: readonly DocumentAttachmentContext[];
   context?: TurnRequestContext;
+  /** Exact renderer request owning any context-packet claim. */
+  contextRequestId?: string;
   activateConversation?: boolean;
   /** Server-constructed only. Renderer command schemas never accept this. */
   internalInstructions?: readonly HiddenProviderInstruction[];

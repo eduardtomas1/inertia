@@ -235,6 +235,13 @@ export function resolveTurnRequest(
     attachments,
     activateConversation: request.activateConversation,
     executionContext: assembled.persistence,
+    ...(request.context?.conversationContextPacketIds?.length
+      ? {
+          conversationContextPacketIds:
+            request.context.conversationContextPacketIds,
+          contextRequestId: request.contextRequestId,
+        }
+      : {}),
     providerId: route.providerId,
     modelSelection,
     continuationIdentity: route.continuationIdentity,

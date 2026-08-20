@@ -23,6 +23,8 @@ import { providerTerminalResumeAvailability } from "@shared/provider-terminal-re
 
 import type { PlanPanel } from "../PlanPanel";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
+import type { ConversationContextSourceOption } from "../conversation-context/types";
+import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
 import type { useActivityActions } from "../../hooks/useActivityActions";
 import type { useAppUpdate } from "../../hooks/useAppUpdate";
 import type { useBackendProfiles } from "../../hooks/useBackendProfiles";
@@ -281,34 +283,47 @@ export function createWorkspaceSceneModel({
   const snapshotConversations = connection.snapshot?.conversations ?? [];
   const projectById = new Map(snapshotProjects.map((entry) => [entry.id, entry]));
   const activeDirectory = terminalResumeDirectory(conversation, project);
-  const terminalResumeOptions = activeDirectory
-    ? [...snapshotConversations]
-        .sort((left, right) => {
-          if (left.id === persistedConversation?.id) return -1;
-          if (right.id === persistedConversation?.id) return 1;
-          return right.updatedAt.localeCompare(left.updatedAt);
-        })
-        .flatMap((candidate) => {
-          const candidateProject = projectById.get(candidate.projectId);
-          if (!candidateProject) return [];
-          const candidateDirectory = workspaceDirectoryIdentity(
-            candidate.worktreePath ?? candidateProject.normalizedPath,
-          );
-          if (candidateDirectory !== activeDirectory) return [];
-          return [{
-            projectId: candidateProject.id,
-            projectName: candidateProject.name,
-            conversationId: candidate.id,
-            conversationTitle: candidate.title,
-            availability: providerTerminalResumeAvailability(
-              candidate,
-              connection.snapshot?.providers.find(
-                ({ id }) => id === candidate.providerId,
-              ),
+  const contextSources: ConversationContextSourceOption[] = [];
+  const terminalResumeOptions: ProviderTerminalResumeOption[] = [];
+  if (activeDirectory) {
+    const candidates = [...snapshotConversations].sort((left, right) => {
+      if (left.id === persistedConversation?.id) return -1;
+      if (right.id === persistedConversation?.id) return 1;
+      return right.updatedAt.localeCompare(left.updatedAt);
+    });
+    for (const candidate of candidates) {
+      const candidateProject = projectById.get(candidate.projectId);
+      if (!candidateProject) continue;
+      const sameWorkspace = workspaceDirectoryIdentity(
+        candidate.worktreePath ?? candidateProject.normalizedPath,
+      ) === activeDirectory;
+      if (persistedConversation && candidate.id !== persistedConversation.id) {
+        contextSources.push({
+          conversationId: candidate.id,
+          conversationTitle: candidate.title,
+          projectName: candidateProject.name,
+          workspaceRelation: sameWorkspace
+            ? "same-workspace"
+            : "different-workspace",
+          archived: candidate.archivedAt !== null,
+        });
+      }
+      if (sameWorkspace) {
+        terminalResumeOptions.push({
+          projectId: candidateProject.id,
+          projectName: candidateProject.name,
+          conversationId: candidate.id,
+          conversationTitle: candidate.title,
+          availability: providerTerminalResumeAvailability(
+            candidate,
+            connection.snapshot?.providers.find(
+              ({ id }) => id === candidate.providerId,
             ),
-          }];
-        })
-    : [];
+          ),
+        });
+      }
+    }
+  }
   const {
     activeTool,
     setActiveTool,
@@ -546,6 +561,9 @@ export function createWorkspaceSceneModel({
       showChangedFileSummaries: settings.showChangedFileSummaries,
       autoScrollToFinalAnswer: settings.autoScrollToFinalAnswer,
       promptContext: workspaceTools.pendingDiffContext,
+      contextSources,
+      contextPackets: detail?.contextPackets ?? [],
+      onConversationContextCommand: actions.run,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")

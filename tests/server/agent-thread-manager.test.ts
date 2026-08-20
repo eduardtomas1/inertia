@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
+import {
+  ConversationContextRequestCoordinator,
+} from "../../src/server/runtime/conversation-context-request-coordinator";
 import type { ProviderHostToolCall } from "../../src/server/provider/contracts";
 import type { AgentApprovalDecision } from "../../src/server/provider/interactions";
 
@@ -102,6 +105,12 @@ async function runtime() {
       activate: false,
     }),
   };
+  const pendingInputs = new Map();
+  const contextRequests = new ConversationContextRequestCoordinator({
+    pendingInputs,
+    broadcast: vi.fn(),
+    broadcastConversationShell: vi.fn(),
+  });
   const manager = new AgentThreadManager({
     store,
     providers: {
@@ -113,6 +122,7 @@ async function runtime() {
     } as never,
     creation: creation as never,
     turns: turns as never,
+    contextRequests,
     providerInfo: () => [{
       id: "codex",
       canRun: true,
@@ -120,6 +130,7 @@ async function runtime() {
     }] as never,
     broadcastSnapshot: vi.fn(),
     broadcastConversationShell: vi.fn(),
+    broadcast: vi.fn(),
     now: () => "2026-08-19T10:00:00.000Z",
   });
   let sourceTurnSequence = 1;
@@ -145,6 +156,8 @@ async function runtime() {
   return {
     beginSourceTurn,
     manager,
+    contextRequests,
+    pendingInputs,
     project,
     source,
     sourceTurn,
@@ -171,6 +184,7 @@ function call(
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(roots.splice(0).map((root) =>
     rm(root, { recursive: true, force: true })));
 });
@@ -214,6 +228,114 @@ describe("AgentThreadManager", () => {
       expect(result.text).not.toContain("SECRET TRANSCRIPT");
       expect(result.text).not.toContain(store.conversationPath(sibling.id));
       expect(result.text).not.toContain("providerSessionId");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("returns only the exact user-selected bounded context and replays it verbatim", async () => {
+    const {
+      contextRequests,
+      manager,
+      pendingInputs,
+      project,
+      source,
+      sourceTurn,
+      store,
+    } = await runtime();
+    try {
+      const sibling = store.createConversation(project.id, "Prior design", {
+        activate: false,
+      });
+      const selected = store.createMessage(
+        sibling.id,
+        "Use token sk-secret-value-123456789 only in this test.",
+        "assistant",
+      );
+      store.createMessage(sibling.id, "This must stay unselected.", "user");
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn })!;
+      expect(bridge.definitions.map(({ name }) => name))
+        .toContain("inertia_request_context");
+      const requestCall = call("inertia_request_context", {
+        sourceConversationId: sibling.id,
+      });
+      const resultPromise = bridge.invoke(requestCall);
+      const chooser = [...pendingInputs.values()][0];
+      expect(chooser?.conversationContextRequest).toMatchObject({
+        targetConversationId: source.id,
+        requestedSourceConversationId: sibling.id,
+      });
+      expect(contextRequests.respond({
+        requestId: chooser!.id,
+        targetConversationId: source.id,
+        selection: {
+          sourceConversationId: sibling.id,
+          sourceMessageIds: [selected.id],
+          acknowledgedWorkspaceDifference: false,
+        },
+      })).toBe(true);
+
+      const result = await resultPromise;
+      expect(result.success).toBe(true);
+      expect(result.text).toContain("[redacted]");
+      expect(result.text).not.toContain("sk-secret-value");
+      expect(result.text).not.toContain("This must stay unselected");
+      const durable = store.contextPackets.agentRequest(chooser!.id);
+      expect(durable).toMatchObject({
+        status: "completed",
+        targetTurnId: sourceTurn.id,
+        selectedSourceConversationId: sibling.id,
+      });
+      expect(store.contextPackets.get(durable!.packetId!, source.id))
+        .toMatchObject({ consumedMessageId: sourceTurn.userMessageId });
+
+      const replay = await bridge.invoke(call("inertia_request_context", {
+        sourceConversationId: sibling.id,
+      }));
+      expect(replay).toEqual(result);
+      expect(store.conversationDetail(source.id)?.contextPackets).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("interrupts a pending context chooser when its exact source turn settles", async () => {
+    const { manager, pendingInputs, source, sourceTurn, store } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn })!;
+      const resultPromise = bridge.invoke(call("inertia_request_context", {}));
+      const chooser = [...pendingInputs.values()][0]!;
+
+      await manager.onSourceTurnSettled({ ...sourceTurn, status: "failed" });
+
+      await expect(resultPromise).resolves.toMatchObject({ success: false });
+      expect(pendingInputs.size).toBe(0);
+      expect(store.contextPackets.agentRequest(chooser.id)).toMatchObject({
+        status: "interrupted",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("never accepts provider-authored message selection and durably expires silence", async () => {
+    const { manager, pendingInputs, source, sourceTurn, store } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn })!;
+      const forged = await bridge.invoke(call("inertia_request_context", {
+        sourceMessageIds: ["33333333-3333-4333-8333-333333333333"],
+      }));
+      expect(forged.success).toBe(false);
+      expect(pendingInputs.size).toBe(0);
+
+      vi.useFakeTimers();
+      const expiration = bridge.invoke(call("inertia_request_context", {}));
+      const chooser = [...pendingInputs.values()][0]!;
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await expect(expiration).resolves.toMatchObject({ success: false });
+      expect(store.contextPackets.agentRequest(chooser.id)).toMatchObject({
+        status: "expired",
+      });
     } finally {
       store.close();
     }

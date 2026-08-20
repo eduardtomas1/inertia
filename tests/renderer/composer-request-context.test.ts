@@ -91,4 +91,19 @@ describe("composer structured request context", () => {
       },
     });
   });
+
+  it("sends only opaque bounded packet identities for selected chat context", () => {
+    const packetId = "11111111-1111-4111-8111-111111111111";
+    expect(buildComposerTurnRequest(
+      "",
+      [],
+      null,
+      [],
+      null,
+      [packetId],
+    )).toEqual({
+      visibleContent: "Please use the selected chat context.",
+      context: { conversationContextPacketIds: [packetId] },
+    });
+  });
 });

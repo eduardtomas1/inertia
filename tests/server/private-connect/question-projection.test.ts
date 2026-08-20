@@ -44,7 +44,10 @@ function question(overrides: Partial<AgentInputQuestion> = {}): AgentInputQuesti
   };
 }
 
-function fixture(questions: AgentInputQuestion[]) {
+function fixture(
+  questions: AgentInputQuestion[],
+  contextChooser = false,
+) {
   const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-questions-"));
   directories.push(directory);
   const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
@@ -59,6 +62,16 @@ function fixture(questions: AgentInputQuestion[]) {
     turnId: "turn-1",
     questions,
     autoResolutionMs: null,
+    ...(contextChooser ? {
+      conversationContextRequest: {
+        requestId: INPUT_REQUEST_ID,
+        targetConversationId: conversation.id,
+        targetTurnId: "turn-1",
+        requestedSourceConversationId: null,
+        createdAt: "2026-08-20T10:00:00.000Z",
+        expiresAt: "2026-08-20T10:05:00.000Z",
+      },
+    } : {}),
   };
   const gateway = new PrivateConnectRuntimeGateway({
     shell: () => store.shellSnapshot(),
@@ -77,7 +90,7 @@ function fixture(questions: AgentInputQuestion[]) {
     grantVersion: 1,
     expiresAt: "2030-01-01T00:00:00.000Z",
   };
-  return { gateway, subject, conversation };
+  return { gateway, subject, conversation, project, store };
 }
 
 async function detailFor(questions: AgentInputQuestion[]) {
@@ -143,6 +156,36 @@ describe("Private Connect question projection", () => {
     if (!response.ok || response.result.kind !== "conversation") throw new Error("unexpected projection");
     expect(response.result.detail.questions).toEqual([]);
     expect(response.result.detail.inputRequestId).toBeNull();
+  });
+
+  it("omits local context choosers and context packets entirely", async () => {
+    const { gateway, subject, conversation, project, store } = fixture([], true);
+    const source = store.createConversation(project.id, "Private source");
+    const selected = store.createMessage(
+      source.id,
+      "Selected context must remain on the desktop.",
+      "user",
+    );
+    store.contextPackets.create({
+      sourceConversationId: source.id,
+      targetConversationId: conversation.id,
+      sourceMessageIds: [selected.id],
+      acknowledgedWorkspaceDifference: false,
+    });
+    const response = await gateway.request(subject, {
+      type: "conversation.get",
+      requestId: REQUEST_ID,
+      conversationId: conversation.id,
+    });
+    if (!response.ok || response.result.kind !== "conversation") {
+      throw new Error("unexpected projection");
+    }
+    expect(response.result.detail.questions).toEqual([]);
+    expect(response.result.detail.inputRequestId).toBeNull();
+    expect(response.result.detail.waitingForLocalAction).toBe(true);
+    expect(JSON.stringify(response)).not.toContain(INPUT_REQUEST_ID);
+    expect(JSON.stringify(response)).not.toContain("Selected context");
+    expect(JSON.stringify(response)).not.toContain("contextPackets");
   });
 });
 

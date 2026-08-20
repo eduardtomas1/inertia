@@ -131,6 +131,9 @@ export interface BeginAgentTurnInput
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
   executionContext?: PersistedTurnExecutionContext;
+  /** Opaque user-authorized chat context claimed atomically with this message. */
+  conversationContextPacketIds?: readonly string[];
+  contextRequestId?: string;
   requestedAt?: string;
 }
 

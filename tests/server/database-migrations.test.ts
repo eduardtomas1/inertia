@@ -74,9 +74,12 @@ function dropUnreleasedAgentThreadManagement(
   database: Database.Database,
 ): void {
   database.exec(`
+    DROP TRIGGER IF EXISTS conversation_context_packets_discard_source_drafts;
+    DROP TABLE IF EXISTS agent_context_requests;
+    DROP TABLE IF EXISTS conversation_context_packets;
     DROP TABLE IF EXISTS agent_thread_operations;
     DROP TABLE IF EXISTS agent_managed_conversations;
-    DELETE FROM schema_migrations WHERE version = 60;
+    DELETE FROM schema_migrations WHERE version >= 60;
   `);
 }
 
@@ -1562,6 +1565,50 @@ describe("runtime migration catalog", () => {
     });
     migrated.close();
   });
+  it.each(["complete", "partial"] as const)(
+    "fails closed when schema 61 finds an unreceipted %s context table",
+    async (shape) => {
+      const directory = await temporaryDirectory();
+      const databasePath = join(directory, `schema-61-${shape}.sqlite`);
+      const workspacePath = join(directory, "workspace");
+      await mkdir(workspacePath);
+      const store = new RuntimeStore(databasePath, workspacePath, {
+        recoverInterruptedRuns: false,
+      });
+      store.close();
+
+      const unreceipted = new Database(databasePath);
+      if (shape === "partial") {
+        unreceipted.exec(`
+          DROP TRIGGER conversation_context_packets_discard_source_drafts;
+          DROP TABLE agent_context_requests;
+          DROP TABLE conversation_context_packets;
+          CREATE TABLE conversation_context_packets (id TEXT PRIMARY KEY);
+        `);
+      }
+      unreceipted.prepare(
+        "DELETE FROM schema_migrations WHERE version = 61",
+      ).run();
+      unreceipted.close();
+
+      expect(() => migrateFixtureInPlace(databasePath)).toThrow(
+        /Database migration 61 \(PersistConversationContextPackets\) failed/iu,
+      );
+      const inspected = new Database(databasePath, { readonly: true });
+      expect((inspected.prepare(
+        "SELECT MAX(version) AS version FROM schema_migrations",
+      ).get() as { version: number }).version).toBe(60);
+      const columns = inspected.prepare(
+        "PRAGMA table_info(conversation_context_packets)",
+      ).all() as Array<{ name: string }>;
+      if (shape === "partial") {
+        expect(columns.map(({ name }) => name)).toEqual(["id"]);
+      } else {
+        expect(columns.map(({ name }) => name)).toContain("excerpts_json");
+      }
+      inspected.close();
+    },
+  );
 
   it("upgrades exact schema 56 with an indexed completed-turn range path without changing durable data", async () => {
     const directory = await temporaryDirectory();
@@ -1796,6 +1843,7 @@ describe("runtime migration catalog", () => {
       { version: 58 },
       { version: 59 },
       { version: 60 },
+      { version: 61 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

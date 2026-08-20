@@ -10,13 +10,11 @@ import { createPortal } from "react-dom";
 
 import type { WorkspaceFilePreview } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import {
+  focusModalOnAnimationFrame,
+  trapModalFocus,
+} from "../utils/modalFocus";
 import { LoadingMark } from "./ui";
-
-const FOCUSABLE_SELECTOR = [
-  "button:not([disabled])",
-  "textarea:not([disabled])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(", ");
 
 function normalizedEditorText(value: string): string {
   return value.replace(/\r\n?/gu, "\n");
@@ -73,14 +71,7 @@ export function FileEditorDialog({
   useNativePreviewSuspension(true);
 
   useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const frame = window.requestAnimationFrame(() => editorRef.current?.focus());
-    return () => {
-      window.cancelAnimationFrame(frame);
-      if (previous?.isConnected) previous.focus({ preventScroll: true });
-    };
+    return focusModalOnAnimationFrame(() => editorRef.current?.focus());
   }, []);
 
   const closeSafely = (): void => {
@@ -129,22 +120,7 @@ export function FileEditorDialog({
       void save();
       return;
     }
-    if (event.key !== "Tab") return;
-    const focusable = [
-      ...event.currentTarget.querySelectorAll<HTMLElement>(
-        FOCUSABLE_SELECTOR,
-      ),
-    ];
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (!first || !last) return;
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    trapModalFocus(event, event.currentTarget);
   };
 
   return createPortal(

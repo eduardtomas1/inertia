@@ -30,6 +30,8 @@ export function commandRefreshesConversationDetail(
   }
   return [
     "message.send",
+    "conversation.context.create",
+    "conversation.context.remove",
     "agent.subagent.stop",
     "agent.approval.respond",
     "agent.input.respond",

@@ -40,6 +40,10 @@ import clsx from "clsx";
 import type { AppSnapshot, Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
 import { formatRelativeTime } from "../lib/format";
 import { agentRequestProviderName } from "../utils/agentInput";
+import {
+  focusModalOnAnimationFrame,
+  trapModalFocus,
+} from "../utils/modalFocus";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
@@ -289,8 +293,7 @@ function SidebarView({
   useEffect(() => {
     if (!mobile || !open) return;
     const sidebar = sidebarRef.current;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const frame = window.requestAnimationFrame(() => (
+    const restoreFocus = focusModalOnAnimationFrame(() => (
       sidebar?.querySelector<HTMLElement>('[aria-label="Close navigation"]')?.focus({ preventScroll: true })
     ));
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -299,26 +302,12 @@ function SidebarView({
         onCloseRef.current();
         return;
       }
-      if (event.key !== "Tab" || !sidebar) return;
-      const focusable = [...sidebar.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      )];
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      if (sidebar) trapModalFocus(event, sidebar);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
-      window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown);
-      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      restoreFocus();
     };
   }, [mobile, open]);
 

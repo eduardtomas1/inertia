@@ -54,6 +54,10 @@ import type {
 } from "./workspace";
 import type { UsageDashboard } from "./usage-dashboard";
 import type { DailyWorkDashboard } from "./daily-work";
+import type {
+  ConversationContextPacket,
+  ConversationContextSourceTranscript,
+} from "../conversation-context";
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -157,6 +161,8 @@ export type ServerEvent =
         | { kind: "project.actions"; actions: ProjectAction[] }
         | { kind: "project.created"; projectId: string }
         | { kind: "conversation.created"; conversationId: string }
+        | { kind: "conversation.context.source"; source: ConversationContextSourceTranscript }
+        | { kind: "conversation.context.packet"; packet: ConversationContextPacket }
         | MessageSendAcceptance
         | ConversationCompactionResult
         | DuoPreparedResult

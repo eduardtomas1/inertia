@@ -13,6 +13,7 @@ import {
   type ProviderInfo,
   type RuntimeMutationEvent,
   type ServerEvent,
+  type TurnRequestContext,
 } from "../../../shared/contracts";
 import {
   CheckpointError,
@@ -44,6 +45,7 @@ import {
   messageSendPreparationDeadline,
   messageSendPreparationExpired,
 } from "./message-send-preparation";
+import { ConversationContextService } from "../conversation-context-service";
 
 export interface TurnInteractionCommandDependencies {
   store: RuntimeStore;
@@ -85,6 +87,40 @@ export function createTurnInteractionCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
+        const contextPacketIds =
+          command.payload.context?.conversationContextPacketIds ?? [];
+        let resolvedTurnContext: TurnRequestContext | undefined =
+          command.payload.context;
+        if (contextPacketIds.length > 0) {
+          const contextService = new ConversationContextService(
+            dependencies.store,
+          );
+          const replay = contextService.replayAcceptance(
+            command.requestId,
+            conversation.id,
+            contextPacketIds,
+          );
+          if (replay) {
+            dependencies.send(socket, replay.kind === "transcript-only"
+              ? {
+                  type: "request.ok",
+                  requestId: command.requestId,
+                }
+              : {
+                  type: "request.result",
+                  requestId: command.requestId,
+                  result: replay,
+                });
+            return "handled";
+          }
+          resolvedTurnContext = {
+            ...command.payload.context,
+            conversationContexts: contextService.materializeForTurn(
+              conversation.id,
+              contextPacketIds,
+            ),
+          };
+        }
         if (dependencies.providerTerminalResumes.isActive(conversation.id)) {
           throw new RuntimeRequestError(
             "End the resumed provider terminal for this chat before sending another message.",
@@ -579,7 +615,8 @@ export function createTurnInteractionCommandHandler(
                 generatedAttachmentPaths,
                 documentContexts: documentPreparation.contexts,
                 activateConversation: command.payload.activate,
-                context: command.payload.context,
+                context: resolvedTurnContext,
+                contextRequestId: command.requestId,
                 checkpointId,
                 skills: resolvedSkills.inputs,
               }, () => acceptRetainedAttachments())
@@ -608,15 +645,26 @@ export function createTurnInteractionCommandHandler(
               await dependencies.generatedAttachments.release(generatedAttachmentPaths);
             }
             generatedAttachmentPaths = [];
-            dependencies.store.createMessage(
-              conversation.id,
-              command.payload.content,
-              "user",
-              attachments,
-              null,
-              undefined,
-              { activateConversation: command.payload.activate },
-            );
+            if (contextPacketIds.length > 0) {
+              dependencies.store.contextPackets.createUserMessageWithPackets({
+                conversationId: conversation.id,
+                content: command.payload.content,
+                attachments,
+                packetIds: contextPacketIds,
+                requestId: command.requestId,
+                options: { activateConversation: command.payload.activate },
+              });
+            } else {
+              dependencies.store.createMessage(
+                conversation.id,
+                command.payload.content,
+                "user",
+                attachments,
+                null,
+                undefined,
+                { activateConversation: command.payload.activate },
+              );
+            }
             acceptRetainedAttachments();
             attachmentOwnershipAccepted = true;
             await dependencies.attachmentResolver?.releaseAll(

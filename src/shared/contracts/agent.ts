@@ -16,6 +16,10 @@ import type {
   AgentTurnAssociation,
   AgentTurnStatus,
 } from "../turn-lifecycle";
+import type {
+  AgentConversationContextRequest,
+  MaterializedConversationContext,
+} from "../conversation-context";
 
 export {
   AGENT_TURN_STATUSES,
@@ -81,6 +85,10 @@ export interface TurnRequestContext {
   terminalContexts?: TurnTerminalContext[];
   previewContexts?: TurnPreviewContext[];
   reviewNotes?: TurnReviewNoteContext[];
+  /** Opaque immutable packets explicitly selected by the user for this turn. */
+  conversationContextPacketIds?: string[];
+  /** Privileged runtime materialization. Renderer command schemas reject it. */
+  conversationContexts?: MaterializedConversationContext[];
 }
 
 export interface ChatAttachment {
@@ -327,6 +335,8 @@ export interface AgentInputRequest {
   turnId: string;
   questions: AgentInputQuestion[];
   autoResolutionMs: number | null;
+  /** Host-owned chooser; mutually exclusive with provider-authored questions. */
+  conversationContextRequest?: AgentConversationContextRequest;
 }
 
 export interface AgentPlanStep {

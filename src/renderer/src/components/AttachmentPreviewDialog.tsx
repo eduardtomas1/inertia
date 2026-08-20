@@ -5,7 +5,6 @@ import {
   useId,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
 
@@ -17,19 +16,16 @@ import {
   formatAttachmentSize,
 } from "../utils/composerAttachments";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import {
+  focusModalOnAnimationFrame,
+  trapModalFocus,
+} from "../utils/modalFocus";
 import { PdfAttachmentPreview } from "./PdfAttachmentPreview";
 
 type AttachmentPreviewDialogProps = {
   attachment: ChatAttachment;
   onClose: () => void;
 };
-
-const FOCUSABLE_SELECTOR = [
-  "button:not([disabled])",
-  "iframe",
-  "[href]",
-  '[tabindex]:not([tabindex="-1"])',
-].join(", ");
 
 export function AttachmentPreviewDialog({
   attachment,
@@ -47,10 +43,9 @@ export function AttachmentPreviewDialog({
   useNativePreviewSuspension(Boolean(previewKind && previewUrl));
 
   useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
+    const restoreFocus = focusModalOnAnimationFrame(
+      () => closeRef.current?.focus(),
+    );
     const closeOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -59,30 +54,12 @@ export function AttachmentPreviewDialog({
     };
     document.addEventListener("keydown", closeOnEscape, true);
     return () => {
-      window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", closeOnEscape, true);
-      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      restoreFocus();
     };
   }, [onClose]);
 
   if (!previewKind || !previewUrl) return null;
-
-  const trapFocus = (event: ReactKeyboardEvent<HTMLElement>): void => {
-    if (event.key !== "Tab") return;
-    const focusable = [
-      ...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-    ];
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (!first || !last) return;
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
 
   return createPortal(
     <div
@@ -99,7 +76,7 @@ export function AttachmentPreviewDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
-        onKeyDown={trapFocus}
+        onKeyDown={(event) => trapModalFocus(event, event.currentTarget)}
       >
         <header className="attachment-preview-header">
           <span className="attachment-preview-identity">

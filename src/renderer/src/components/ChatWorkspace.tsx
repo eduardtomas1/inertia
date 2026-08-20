@@ -35,6 +35,7 @@ import type {
   CheckpointSummary,
   ConversationLatestTurnSummary,
   Conversation,
+  ConversationContextPacketSummary,
   ModelBackendProfileView,
   ModelSelection,
   Project,
@@ -72,6 +73,10 @@ import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type { PromptPresetCommandRunner } from "./composer/types";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
+import type {
+  ConversationContextCommandRunner,
+  ConversationContextSourceOption,
+} from "./conversation-context/types";
 import type { FinalAnswerAutoScrollEvent } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
@@ -79,9 +84,10 @@ import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
 }));
-
 const READER_INTENT_GUARD_MS = 750;
 const EMPTY_PROMPT_PRESETS: readonly PromptPreset[] = [];
+const EMPTY_CONTEXT_SOURCES: readonly ConversationContextSourceOption[] = [];
+const EMPTY_CONTEXT_PACKETS: readonly ConversationContextPacketSummary[] = [];
 
 function recordsOwnedByConversation<T extends { conversationId: string }>(
   records: T[],
@@ -135,6 +141,9 @@ type ChatWorkspaceProps = {
   showChangedFileSummaries: boolean;
   autoScrollToFinalAnswer: boolean;
   promptContext?: string | null;
+  contextSources?: readonly ConversationContextSourceOption[];
+  contextPackets?: readonly ConversationContextPacketSummary[];
+  onConversationContextCommand?: ConversationContextCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
@@ -238,6 +247,9 @@ export function ChatWorkspace({
   showChangedFileSummaries,
   autoScrollToFinalAnswer,
   promptContext,
+  contextSources = EMPTY_CONTEXT_SOURCES,
+  contextPackets = EMPTY_CONTEXT_PACKETS,
+  onConversationContextCommand,
   previewContextUrl,
   providerIdentityLabels,
   loading,
@@ -367,7 +379,13 @@ export function ChatWorkspace({
     inputRequests,
     conversationId,
   );
-  const pendingInputRequest = ownedInputRequests.at(-1) ?? null;
+  const agentContextRequest = [...ownedInputRequests].reverse().find(
+    (request) => request.conversationContextRequest !== undefined,
+  )?.conversationContextRequest ?? null;
+  const visibleInputRequests = ownedInputRequests.filter(
+    (request) => request.conversationContextRequest === undefined,
+  );
+  const pendingInputRequest = visibleInputRequests.at(-1) ?? null;
   const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${streamingText.length}:${streamingReasoning.length}:${ownedApprovals.length}:${ownedInputRequests.length}`;
 
   const clearReaderIntent = useCallback((): void => {
@@ -708,6 +726,7 @@ export function ChatWorkspace({
             <ResponseTimeline
               turns={ownedTurns}
               messages={ownedMessages}
+              contextPackets={contextPackets}
               activities={ownedActivities}
               subagents={ownedSubagents}
               reasonings={ownedReasonings}
@@ -728,7 +747,7 @@ export function ChatWorkspace({
                 ? undefined
                 : terminalProjections}
               approvals={ownedApprovals}
-              inputRequests={ownedInputRequests}
+              inputRequests={visibleInputRequests}
               providerIdentityLabels={providerIdentityLabels}
               showTimestamps={showTimestamps}
               showThinking={showThinking}
@@ -811,6 +830,10 @@ export function ChatWorkspace({
           skillsError={skillsError}
           goal={goalControl}
           promptContext={promptContext}
+          contextSources={contextSources}
+          contextPackets={contextPackets}
+          agentContextRequest={agentContextRequest}
+          onConversationContextCommand={onConversationContextCommand}
           previewContextUrl={previewContextUrl}
           providerIdentityLabels={providerIdentityLabels}
           disabled={!conversation}

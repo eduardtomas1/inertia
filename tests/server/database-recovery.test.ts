@@ -1115,6 +1115,9 @@ describe("database backup and startup recovery", () => {
     );
     const released = new Database(backupPath);
     released.exec(`
+      DROP TRIGGER conversation_context_packets_discard_source_drafts;
+      DROP TABLE agent_context_requests;
+      DROP TABLE conversation_context_packets;
       DROP TABLE agent_thread_operations;
       DROP TABLE agent_managed_conversations;
       DROP TABLE recovery_import_journals;
@@ -1239,6 +1242,9 @@ describe("database backup and startup recovery", () => {
       size: 8,
     }]), message.id);
     schema55.exec(`
+      DROP TRIGGER conversation_context_packets_discard_source_drafts;
+      DROP TABLE agent_context_requests;
+      DROP TABLE conversation_context_packets;
       DROP TABLE agent_thread_operations;
       DROP TABLE agent_managed_conversations;
       DROP INDEX agent_turns_usage_dashboard_completed_idx;
@@ -1303,6 +1309,9 @@ describe("database backup and startup recovery", () => {
     for (const backup of [older, newer]) {
       const schema56 = new Database(join(paths.backupsDirectory, backup.filename));
       schema56.exec(`
+        DROP TRIGGER conversation_context_packets_discard_source_drafts;
+        DROP TABLE agent_context_requests;
+        DROP TABLE conversation_context_packets;
         DROP TABLE agent_thread_operations;
         DROP TABLE agent_managed_conversations;
         DROP INDEX agent_turns_usage_dashboard_completed_idx;

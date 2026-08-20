@@ -34,6 +34,10 @@ import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
 } from "./command-router";
+import { ConversationContextService } from "../conversation-context-service";
+import type {
+  ConversationContextRequestCoordinator,
+} from "../conversation-context-request-coordinator";
 
 type ConversationUpdatePayload = Extract<
   Parameters<RuntimeCommandHandler>[1],
@@ -95,6 +99,7 @@ export interface ConversationCommandDependencies {
     afterIsolatedWorktreeCreate?: () => void | Promise<void>;
   };
   creation?: ConversationCreationService;
+  contextRequests?: ConversationContextRequestCoordinator;
 }
 
 export function createConversationCommandHandler(
@@ -107,6 +112,12 @@ export function createConversationCommandHandler(
     "conversation.select",
     "conversation.detail.load",
     "conversation.detail.subscription",
+    "conversation.context.source.load",
+    "conversation.context.agent.source.load",
+    "conversation.context.agent.respond",
+    "conversation.context.create",
+    "conversation.context.load",
+    "conversation.context.remove",
     "conversation.update",
     "conversation.archive",
     "conversation.unarchive",
@@ -205,6 +216,120 @@ export function createConversationCommandHandler(
           requestId: command.requestId,
         });
         return "handled";
+      case "conversation.context.source.load": {
+        const { sourceConversationId, targetConversationId } = command.payload;
+        const service = new ConversationContextService(dependencies.store);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "conversation.context.source",
+            source: service.sourceTranscript(
+              sourceConversationId,
+              targetConversationId,
+            ),
+          },
+        });
+        return "handled";
+      }
+      case "conversation.context.agent.source.load": {
+        const {
+          contextRequestId,
+          sourceConversationId,
+          targetConversationId,
+        } = command.payload;
+        if (!dependencies.contextRequests?.sourceAllowed(
+          contextRequestId,
+          targetConversationId,
+          sourceConversationId,
+        )) {
+          throw new RuntimeRequestError(
+            "That context source is not authorized for this pending chooser.",
+          );
+        }
+        const service = new ConversationContextService(dependencies.store);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "conversation.context.source",
+            source: service.sourceTranscript(
+              sourceConversationId,
+              targetConversationId,
+            ),
+          },
+        });
+        return "handled";
+      }
+      case "conversation.context.agent.respond": {
+        const { contextRequestId, targetConversationId } = command.payload;
+        const accepted = dependencies.contextRequests?.respond({
+          requestId: contextRequestId,
+          targetConversationId,
+          selection: command.payload.decision === "select" ? {
+            sourceConversationId: command.payload.sourceConversationId,
+            sourceMessageIds: command.payload.sourceMessageIds,
+            note: command.payload.note,
+            acknowledgedWorkspaceDifference:
+              command.payload.acknowledgedWorkspaceDifference,
+          } : null,
+        }) ?? false;
+        if (!accepted) {
+          throw new RuntimeRequestError(
+            "That context chooser is no longer pending for this chat.",
+          );
+        }
+        dependencies.send(socket, {
+          type: "request.ok",
+          requestId: command.requestId,
+        });
+        return "handled";
+      }
+      case "conversation.context.create": {
+        const service = new ConversationContextService(dependencies.store);
+        const packet = service.createFromRenderer(command.payload);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "conversation.context.packet", packet },
+        });
+        dependencies.runtimeSync.broadcast({
+          type: "conversation.detail.invalidated",
+          conversationId: command.payload.targetConversationId,
+        });
+        return "handled";
+      }
+      case "conversation.context.load": {
+        const service = new ConversationContextService(dependencies.store);
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "conversation.context.packet",
+            packet: service.load(
+              command.payload.packetId,
+              command.payload.targetConversationId,
+            ),
+          },
+        });
+        return "handled";
+      }
+      case "conversation.context.remove": {
+        const service = new ConversationContextService(dependencies.store);
+        service.remove(
+          command.payload.packetId,
+          command.payload.targetConversationId,
+        );
+        dependencies.send(socket, {
+          type: "request.ok",
+          requestId: command.requestId,
+        });
+        dependencies.runtimeSync.broadcast({
+          type: "conversation.detail.invalidated",
+          conversationId: command.payload.targetConversationId,
+        });
+        return "handled";
+      }
       case "conversation.update": {
         const {
           conversationId,
@@ -522,9 +647,18 @@ export function createConversationCommandHandler(
           const attachmentIds = dependencies.store
             .attachments(finalConversation.id)
             .map(({ id }) => id);
+          const contextTargetConversationIds = dependencies.store.contextPackets
+            .targetConversationIdsForSource(finalConversation.id);
+          dependencies.contextRequests?.cancelForSource(finalConversation.id);
           dependencies.store.deleteConversation(
             finalConversation.id,
           );
+          for (const targetConversationId of contextTargetConversationIds) {
+            dependencies.runtimeSync.broadcast({
+              type: "conversation.detail.invalidated",
+              conversationId: targetConversationId,
+            });
+          }
           try {
             const referencedAttachmentIds = new Set(
               dependencies.store.attachments().map(({ id }) => id),

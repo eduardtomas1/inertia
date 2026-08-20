@@ -36,6 +36,7 @@ import {
   selectedModelSearchRoute,
   type ComposerModelRoute,
 } from "../utils/modelChooserRoutes";
+import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import {
   initialMultiSpawnDraft,
   projectsShareLocalCheckout,
@@ -107,13 +108,6 @@ function reasoningLabel(value: string): string {
       ? part[0]!.toLocaleUpperCase("en-US") + part.slice(1)
       : part)
     .join(" ");
-}
-
-function focusableElements(root: HTMLElement): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(
-    "button:not(:disabled), input:not(:disabled), select:not(:disabled), "
-      + "textarea:not(:disabled), [href], [tabindex]:not([tabindex='-1'])",
-  )].filter((element) => !element.hasAttribute("hidden"));
 }
 
 function MultiSpawnSideEditor({
@@ -407,9 +401,7 @@ export function MultiSpawnDialog({
   useEffect(() => {
     if (!open) return;
     restoreFocusRef.current = true;
-    const previous = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+    const restoreFocus = captureModalFocus();
     const frame = window.requestAnimationFrame(() => {
       const dialog = dialogRef.current;
       const active = document.activeElement;
@@ -423,9 +415,7 @@ export function MultiSpawnDialog({
     });
     return () => {
       window.cancelAnimationFrame(frame);
-      if (restoreFocusRef.current && previous?.isConnected) {
-        previous.focus({ preventScroll: true });
-      }
+      if (restoreFocusRef.current) restoreFocus();
     };
   }, [open]);
 
@@ -440,18 +430,7 @@ export function MultiSpawnDialog({
         if (!cancelling) onClose();
         return;
       }
-      if (event.key !== "Tab" || !dialogRef.current) return;
-      const focusable = focusableElements(dialogRef.current);
-      if (focusable.length === 0) return;
-      const first = focusable[0]!;
-      const last = focusable.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      if (dialogRef.current) trapModalFocus(event, dialogRef.current);
     };
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);

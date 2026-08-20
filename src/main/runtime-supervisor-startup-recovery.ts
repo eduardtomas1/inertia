@@ -13,7 +13,7 @@ export class RuntimeSupervisorStartupRecovery {
     receipts: RuntimeCleanupReceiptJournal;
   }) {}
 
-  begin(onFinished: () => void): Promise<boolean> | null {
+  begin(onFinished: (recovered: boolean) => void): Promise<boolean> | null {
     if (this.active) return this.active;
     const recovery = recoverPriorRuntimeGenerations({
       ...this.options,
@@ -22,10 +22,10 @@ export class RuntimeSupervisorStartupRecovery {
     if (!recovery) return null;
     const active = recovery.catch(() => false);
     this.active = active;
-    void active.then(() => {
+    void active.then((recovered) => {
       if (this.active !== active) return;
       this.active = null;
-      onFinished();
+      onFinished(recovered);
     });
     return active;
   }

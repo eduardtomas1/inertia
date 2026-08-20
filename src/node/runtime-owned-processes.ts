@@ -424,6 +424,27 @@ export class RuntimeOwnedProcessJournal {
     return removeLeaf(this.root, sessionName(runtimeGenerationId));
   }
 
+  clearPriorBootSessions(systemBootId: string): boolean {
+    if (process.platform !== "linux") return true;
+    if (!validSystemBootId(systemBootId)) return false;
+    if (systemBootId === "unavailable") return true;
+    let sessions: RuntimeOwnedProcessSession[];
+    try { sessions = readSessions(this.root); } catch { return false; }
+    const prior = sessions.filter((session) => (
+      session.systemBootId !== "unavailable"
+      && session.systemBootId !== systemBootId
+    ));
+    for (const session of prior) {
+      const records = this.records(session.runtimeGenerationId);
+      if (!records) return false;
+      for (const record of records) {
+        if (!this.release(record.ownershipId)) return false;
+      }
+      if (!this.finishSession(session.runtimeGenerationId)) return false;
+    }
+    return true;
+  }
+
   static identityMatches(
     claim: RuntimeOwnedProcessClaim,
     identity: LinuxProcessIdentity,
@@ -757,7 +778,8 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
       void releaseIfGroupExited(registry, claim, child.pid ?? 0);
     });
   } catch (error) {
-    hardStopUnclaimed(child);
+    if (child.pid === undefined) registry.journal.release(ownershipId);
+    else hardStopUnclaimed(child);
     throw error;
   }
   return child;

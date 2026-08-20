@@ -204,19 +204,19 @@ export class RuntimeSupervisor {
     });
     this.onStateChange = options.onStateChange;
   }
-  start(): void {
-    if (this.desiredRunning || this.restartBlocked) return;
-    this.desiredRunning = true;
-    this.clearShutdownTimers();
-    const priorRecovery = this.startupRecovery.begin(() => {
-      if (this.desiredRunning) this.spawnNext();
-    });
-    if (!priorRecovery) {
+  start(): void { if (this.desiredRunning || this.restartBlocked) return;
+    this.desiredRunning = true; this.clearShutdownTimers();
+    const priorRecovery = this.startupRecovery.begin((recovered) => { if (!this.desiredRunning) return;
+      if (!recovered) { this.desiredRunning = false; this.restartBlocked = true; this.phase = "stopped";
+        this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+          "A prior runtime generation still has unconfirmed process cleanup.",
+        );
+        this.emitState(); return;
+      }
       this.spawnNext();
-      return;
-    }
-    this.phase = "starting";
-    this.emitState();
+    });
+    if (!priorRecovery) { this.spawnNext(); return; }
+    this.phase = "starting"; this.emitState();
   }
   connection(): RuntimeConnection {
     const result = runtimeConnection({

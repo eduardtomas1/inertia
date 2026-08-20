@@ -214,6 +214,27 @@ describe.skipIf(process.platform !== "linux")(
         name.startsWith(".runtime-owned-process-session-"))).toBe(false);
     });
 
+    it("retires a spawn intent when no child PID was created", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const journal = new RuntimeOwnedProcessJournal(directory);
+
+      expect(() => spawnRuntimeOwnedProcess(() => {
+        const child = spawn(
+          "/inertia-missing-runtime-owned-process",
+          [],
+          { detached: true, shell: false, stdio: "ignore" },
+        );
+        child.once("error", () => undefined);
+        expect(child.pid).toBeUndefined();
+        return child;
+      })).toThrow();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(journal.records(runtimeGenerationId)).toEqual([]);
+      expect(journal.finishSession(runtimeGenerationId)).toBe(true);
+    });
+
     it("registers and idempotently retires a PID-backed process group", async () => {
       const directory = temporaryDirectory();
       activate(directory);

@@ -17,8 +17,25 @@ const inputSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerInputZone.tsx", import.meta.url),
   "utf8",
 );
-const toolbarSource = readFileSync(
-  new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
+const sendActionsSource = readFileSync(
+  new URL(
+    "../../src/renderer/src/components/composer/ComposerSendActions.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const morphIconSource = readFileSync(
+  new URL(
+    "../../src/renderer/src/components/motion/InertiaMorphIcon.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const sendActionsCss = readFileSync(
+  new URL(
+    "../../src/renderer/src/components/composer/ComposerSendActions.css",
+    import.meta.url,
+  ),
   "utf8",
 );
 const chatWorkspaceSource = readFileSync(
@@ -89,10 +106,11 @@ describe("composer Send and Stop", () => {
     expect(inputSource).toContain(
       "readOnly={submissionPending || followUpPending}",
     );
-    expect(toolbarSource).toContain('label="Send message"');
-    expect(toolbarSource).toContain('label="Sending message"');
-    expect(toolbarSource).toContain('"Stopping agent"');
-    expect(toolbarSource).toContain('"Stop agent"');
+    expect(sendActionsSource).toContain('label: "Send message"');
+    expect(sendActionsSource).toContain('label: "Sending message"');
+    expect(sendActionsSource).toContain('"Stopping agent"');
+    expect(sendActionsSource).toContain('"Stop agent"');
+    expect(sendActionsSource).toContain("onFocus={() => setIntent(true)}");
     expect(composerSource).toContain("aria-busy={");
     expect(composerSource).toContain("|| conversationUpdatePending");
     expect(composerSource).toContain("if (stoppingRef.current || !running) return;");
@@ -145,8 +163,8 @@ describe("composer Send and Stop", () => {
       submitting: false,
       sending: false,
     })).toBe("unavailable");
-    expect(toolbarSource).toContain('className="secondary-button composer-follow-up-button"');
-    expect(toolbarSource).toContain("Follow-up unavailable");
+    expect(sendActionsSource).toContain('className="secondary-button composer-follow-up-button"');
+    expect(sendActionsSource).toContain("Follow-up unavailable");
     const textarea = inputSource.slice(
       inputSource.indexOf("<textarea"),
       inputSource.indexOf("/>", inputSource.indexOf("<textarea")),
@@ -162,9 +180,13 @@ describe("composer Send and Stop", () => {
     expect(workspaceSceneModelSource).not.toContain(
       'sending: busyAction === "message.send" || busyAction === "review.summary.generate"',
     );
-    expect(toolbarSource.match(/<LoadingMark\b/gu)).toHaveLength(2);
-    expect(toolbarSource).toContain('<LoadingMark label="Sending follow-up" />');
-    expect(toolbarSource).toContain('<LoadingMark label="Sending message" />');
+    expect(sendActionsSource).toContain("loaderCircleMorphIcon");
+    expect(sendActionsSource).toContain('iconState: "sending"');
+    expect(sendActionsSource).toContain('label: "Message accepted"');
+    expect(sendActionsSource).toContain('"Follow-up accepted."');
+    expect(morphIconSource).toContain('reducedMotion="user"');
+    expect(sendActionsCss).toContain("prefers-reduced-motion: reduce");
+    expect(sendActionsCss).toContain("animation: none");
   });
 
   it("keeps equal circular geometry with calm theme-token states and no glow", () => {

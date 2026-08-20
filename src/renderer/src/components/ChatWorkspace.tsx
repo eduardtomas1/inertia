@@ -614,20 +614,21 @@ export function ChatWorkspace({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-  ): Promise<void> => {
+  ): Promise<TranscriptMessageSendAcceptance | null> => {
     const sourceConversationId = conversationId;
     const acceptance = await onSendMessage(
       content,
       attachments,
       context,
     );
-    if (!acceptance) return;
+    if (!acceptance) return null;
     clearReaderIntent();
     dispatchNavigation({
       type: "message.accepted",
       acceptance,
       sourceConversationId,
     });
+    return acceptance;
   }, [clearReaderIntent, conversationId, onSendMessage]);
 
   const turnAnchorId = activeNavigation.mode === "await-turn"

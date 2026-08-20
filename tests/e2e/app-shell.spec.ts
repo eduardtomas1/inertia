@@ -270,7 +270,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     await expect(runningComposer.getByRole("button", { name: "Send message" }))
       .toHaveCount(0);
     await expect(runningComposer.locator(".loading-mark")).toHaveCount(0);
-    await expect(stop.locator("rect")).toHaveCount(1);
+    await expect(stop.locator('[data-icon-state="stop"]')).toHaveCount(1);
     const stopGeometry = await stop.evaluate((button) => {
       const bounds = button.getBoundingClientRect();
       const style = getComputedStyle(button);

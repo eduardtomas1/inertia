@@ -6,8 +6,6 @@ import {
   GitBranch,
   MessagesSquare,
   Paperclip,
-  Send,
-  Square,
   Wrench,
 } from "lucide-react";
 import clsx from "clsx";
@@ -40,7 +38,7 @@ import {
   usageQuotaSourceForSelection,
 } from "../../utils/usageDisplay";
 import { ModelChooser } from "../ModelChooser";
-import { IconButton, LoadingMark } from "../ui";
+import { IconButton } from "../ui";
 import { UsageIndicator } from "../UsageIndicator";
 import { menuId } from "./config";
 import {
@@ -50,6 +48,8 @@ import {
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { PromptPresetCommandRunner } from "./types";
 import type { PromptStashEntry } from "../../utils/promptStash";
+import { ComposerSendActions } from "./ComposerSendActions";
+import type { ComposerSendFeedback } from "./useComposerSendFeedback";
 
 const PromptStashMenu = lazy(async () => ({
   default: (await import("./PromptStashMenu")).PromptStashMenu,
@@ -137,6 +137,7 @@ export interface ComposerToolbarProps {
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   followUpState: ComposerFollowUpState;
   primaryAction: ComposerPrimaryActionState;
+  sendFeedback: ComposerSendFeedback | null;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }
@@ -197,6 +198,7 @@ export function ComposerToolbar({
   onUsageDisplayModeChange,
   followUpState,
   primaryAction,
+  sendFeedback,
   onSubmit,
   onStop,
 }: ComposerToolbarProps): React.JSX.Element {
@@ -458,67 +460,13 @@ export function ComposerToolbar({
             onModeChange={onUsageDisplayModeChange}
           />
         ) : null}
-        {followUpState === "ready" || followUpState === "pending" ? (
-          <button
-            type="button"
-            className="secondary-button composer-follow-up-button"
-            aria-label={followUpState === "pending"
-              ? "Sending follow-up"
-              : "Send follow-up"}
-            aria-busy={followUpState === "pending"}
-            disabled={followUpState === "pending"}
-            onClick={() => void onSubmit()}
-          >
-            {followUpState === "pending"
-              ? <LoadingMark label="Sending follow-up" />
-              : <Send size={13} />}
-            <span>
-              {followUpState === "pending" ? "Sending…" : "Follow up"}
-            </span>
-          </button>
-        ) : followUpState === "unavailable" ? (
-          <small
-            className="composer-follow-up-unavailable"
-            role="status"
-            title="This active agent route cannot accept parent follow-ups."
-          >
-            Follow-up unavailable
-          </small>
-        ) : null}
-        {primaryAction === "stop-ready" || primaryAction === "stop-pending" ? (
-          <IconButton
-            label={primaryAction === "stop-pending"
-              ? "Stopping agent"
-              : "Stop agent"}
-            className="send-button stop-button"
-            data-composer-action-state={primaryAction}
-            aria-busy={primaryAction === "stop-pending"}
-            onClick={() => void onStop()}
-            disabled={primaryAction === "stop-pending"}
-          >
-            <Square size={13} fill="currentColor" />
-          </IconButton>
-        ) : primaryAction === "submitting" ? (
-          <IconButton
-            label="Sending message"
-            className="send-button send-button-loading"
-            data-composer-action-state={primaryAction}
-            aria-busy="true"
-            disabled
-          >
-            <LoadingMark label="Sending message" />
-          </IconButton>
-        ) : (
-          <IconButton
-            label="Send message"
-            className="send-button"
-            data-composer-action-state={primaryAction}
-            onClick={() => void onSubmit()}
-            disabled={primaryAction === "send-disabled"}
-          >
-            <Send size={16} />
-          </IconButton>
-        )}
+        <ComposerSendActions
+          followUpState={followUpState}
+          primaryAction={primaryAction}
+          feedback={sendFeedback}
+          onSubmit={onSubmit}
+          onStop={onStop}
+        />
         </div>
       </div>
       {showCheckoutContext && (

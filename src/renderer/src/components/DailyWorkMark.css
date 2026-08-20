@@ -15,13 +15,15 @@
   stroke-linejoin: round;
 }
 
-.daily-work-mark-today {
+/* Matching the base rule's specificity so the dot keeps its heavier stroke:
+   `.daily-work-mark > path` would otherwise win and render it at width 2. */
+.daily-work-mark > .daily-work-mark-today {
   color: var(--daily-work-mark-highlight, var(--accent));
   stroke-width: 3.2;
 }
 
 @media (forced-colors: active) {
-  .daily-work-mark-today {
+  .daily-work-mark > .daily-work-mark-today {
     color: CanvasText;
   }
 }

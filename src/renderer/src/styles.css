@@ -157,6 +157,8 @@
   --motion-fast: 90ms;
   --motion-base: 120ms;
   --motion-slow: 160ms;
+  --thread-ripple-duration: 2600ms;
+  --thread-ripple-ease: cubic-bezier(0.22, 0.55, 0.3, 1);
   --motion-ease: cubic-bezier(0.2, 0, 0, 1);
   /*
    * Compatibility aliases for established Quiet Ledger selectors. New work
@@ -1044,6 +1046,7 @@ textarea {
 }
 
 .thread-status-dot {
+  position: relative;
   width: 5px;
   height: 5px;
   flex: 0 0 auto;
@@ -1052,7 +1055,27 @@ textarea {
   opacity: .7;
 }
 
-.thread-status-dot.is-running { background: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); animation: breathe-ring 1.8s ease-in-out infinite; }
+.thread-status-dot.is-running::before,
+.thread-status-dot.is-running::after,
+.thread-status-dot.is-working::before,
+.thread-status-dot.is-working::after {
+  position: absolute;
+  inset: 0;
+  border: 1px solid currentcolor;
+  border-radius: 50%;
+  content: "";
+  animation: thread-working-ripple var(--thread-ripple-duration)
+    var(--thread-ripple-ease) infinite;
+}
+
+/* The negative delay starts the trailing wave mid-flight, so the pair is
+   already evenly spaced on the first frame instead of bunching up. */
+.thread-status-dot.is-running::after,
+.thread-status-dot.is-working::after {
+  animation-delay: calc(var(--thread-ripple-duration) / -2);
+}
+
+.thread-status-dot.is-running { background: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
 .thread-status-dot.is-completed { background: var(--blue); }
 .thread-status-dot.is-failed, .thread-status-dot.is-needs-input { background: var(--danger); }
 
@@ -1241,7 +1264,7 @@ textarea {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-completed) 12%, transparent);
 }
 
-.thread-status-dot.is-working { background: var(--status-working); color: var(--status-working); box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-working) 12%, transparent); animation: breathe-ring 1.8s ease-in-out infinite; }
+.thread-status-dot.is-working { background: var(--status-working); color: var(--status-working); box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-working) 12%, transparent); }
 .thread-status-dot.is-approval { background: var(--status-approval); }
 .thread-status-dot.is-input { background: var(--status-input); }
 .thread-status-dot.is-failed { background: var(--status-failed); }
@@ -1498,6 +1521,17 @@ textarea {
   .thread-status-dot.is-working {
     animation: none;
     transition: none;
+  }
+
+  /* The travelling waves are the whole effect, so they are removed outright
+     rather than parked at their first frame as a static ring. */
+  .thread-status-dot.is-running::before,
+  .thread-status-dot.is-running::after,
+  .thread-status-dot.is-working::before,
+  .thread-status-dot.is-working::after,
+  .activity-thread.status-working .activity-thread-state-mark::before,
+  .activity-thread.status-working .activity-thread-state-mark::after {
+    display: none;
   }
 }
 
@@ -2816,9 +2850,21 @@ button.environment-row:focus-visible,
 
 @keyframes pulse { 50% { opacity: 0.45; } }
 
-@keyframes breathe-ring {
-  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent); }
-  50% { box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 0%, transparent); }
+/* A working indicator should emanate, not throb. The wave only ever travels
+   outward and fades; a second copy runs half a period behind it so the motion
+   reads as continuous rather than as a heartbeat with a gap. Scale and opacity
+   stay on the compositor, where animating box-shadow spread repainted the ring
+   every frame. */
+@keyframes thread-working-ripple {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(var(--thread-ripple-reach, 2.4));
+  }
 }
 
 .agent-activity > span {
@@ -11224,7 +11270,15 @@ button.sent-attachment-open:focus-visible {
   .response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after,
 .app-shell[data-document-visible="false"]
   .response-turn.is-active .agent-activity.is-running svg,
-.app-shell[data-document-visible="false"] .thread-status-dot.is-working {
+.app-shell[data-document-visible="false"] .thread-status-dot.is-working,
+.app-shell[data-document-visible="false"] .thread-status-dot.is-running::before,
+.app-shell[data-document-visible="false"] .thread-status-dot.is-running::after,
+.app-shell[data-document-visible="false"] .thread-status-dot.is-working::before,
+.app-shell[data-document-visible="false"] .thread-status-dot.is-working::after,
+.app-shell[data-document-visible="false"]
+  .activity-thread.status-working .activity-thread-state-mark::before,
+.app-shell[data-document-visible="false"]
+  .activity-thread.status-working .activity-thread-state-mark::after {
   animation-play-state: paused;
 }
 

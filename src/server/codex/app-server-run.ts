@@ -891,6 +891,10 @@ export async function openCodexTurn({
   let opened: JsonObject;
   if (options.sessionId) {
     try {
+      // The audited App Server protocol persists thread/start dynamic tools in
+      // its rollout/state DB and exposes no registration field on resume.
+      // Unreleased v60 clears pre-registration Codex session identities once,
+      // so every persisted session reaching this path already owns the tools.
       opened = await request("thread/resume", {
         threadId: options.sessionId,
         excludeTurns: true,

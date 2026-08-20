@@ -6,6 +6,8 @@ function redactString(value: string, secrets: readonly string[]): string {
   return result;
 }
 
+const REDACTED_OVER_DEPTH = "[redacted:over-depth]";
+
 /**
  * Removes exact process-local bridge credentials before provider-controlled
  * payloads can become activity, transcript text, metadata, diagnostics, or
@@ -19,12 +21,16 @@ export function redactHostToolPayload<T>(
   if (secrets.length === 0) return value;
   const visit = (current: unknown, depth: number): unknown => {
     if (typeof current === "string") return redactString(current, secrets);
-    if (current === null || typeof current !== "object" || depth >= 32) return current;
+    if (current === null || typeof current !== "object") return current;
+    if (depth >= 32) return REDACTED_OVER_DEPTH;
     if (Array.isArray(current)) {
       return current.map((entry) => visit(entry, depth + 1));
     }
     return Object.fromEntries(
-      Object.entries(current).map(([key, entry]) => [key, visit(entry, depth + 1)]),
+      Object.entries(current).map(([key, entry]) => [
+        redactString(key, secrets),
+        visit(entry, depth + 1),
+      ]),
     );
   };
   return visit(value, 0) as T;

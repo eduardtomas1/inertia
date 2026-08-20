@@ -46,11 +46,13 @@ function cursorAgent(
   supportsHttp: boolean,
   leakPath?: string,
   echoPath?: string,
+  nestedLeak = false,
 ): string {
   const command = portableNodeExecutable(root, `cursor-host-${supportsHttp ? "http" : "stdio"}`);
   const subcommand = writeNodeSubcommand(root, "acp", `
 const fs=require("node:fs"),readline=require("node:readline");let secretToken,secretUrl;
 const send=value=>process.stdout.write(JSON.stringify(value)+"\\n");
+const deeplyNested=value=>{let result={type:"text",text:JSON.stringify(value)};for(let depth=0;depth<40;depth+=1)result={type:"tool_result",content:result};return result;};
 const capture=message=>{
  const server=message.params.mcpServers[0];
  if(!server){fs.writeFileSync(${JSON.stringify(capturePath)},JSON.stringify({method:message.method,count:0}));return;}
@@ -79,7 +81,7 @@ readline.createInterface({input:process.stdin}).on("line",line=>{
  if(message.method==="session/new"||message.method==="session/load"){
   capture(message);return send({jsonrpc:"2.0",id:message.id,result:{sessionId:"cursor-host-session",modes:{currentModeId:"build",availableModes:[{id:"build",name:"Build"}]},configOptions:[]}});
  }
- if(message.method==="session/prompt"){${echoPath ? `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"safe "+secretToken+" "+secretUrl}}}});send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"secret-tool",title:"Secret echo",kind:"execute",status:"failed",rawInput:{command:"echo "+secretToken},rawOutput:secretUrl}}});` : ""}${leakPath ? "return process.exit(7);" : "return send({jsonrpc:\"2.0\",id:message.id,result:{stopReason:\"end_turn\"}});"}}
+ if(message.method==="session/prompt"){${echoPath ? nestedLeak ? `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"nested-secret-tool",title:"Nested provider diagnostic",kind:"execute",status:"failed",rawInput:{command:"echo safe"},rawOutput:deeplyNested({token:secretToken,url:secretUrl})}}});` : `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"safe "+secretToken+" "+secretUrl}}}});send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"secret-tool",title:"Secret echo",kind:"execute",status:"failed",rawInput:{command:"echo "+secretToken},rawOutput:secretUrl}}});` : ""}${leakPath ? "return process.exit(7);" : "return send({jsonrpc:\"2.0\",id:message.id,result:{stopReason:\"end_turn\"}});"}}
 });
 `);
   execFileSync(process.execPath, ["--check", subcommand]);
@@ -92,11 +94,13 @@ function openCodeServer(
   failAfterMcp = false,
   leakPath?: string,
   echoPath?: string,
+  nestedLeak = false,
 ): string {
   const command = portableNodeExecutable(root, failAfterMcp ? "opencode-host-fail" : "opencode-host");
   writeNodeSubcommand(root, "serve", `
 const http=require("node:http"),fs=require("node:fs");
 let port=Number(process.argv.find(value=>value.startsWith("--port="))?.slice(7));
+const deeplyNested=value=>{let result={type:"text",text:JSON.stringify(value)};for(let depth=0;depth<40;depth+=1)result={type:"tool_result",content:result};return result;};
 const captured=[];let events,secretToken,secretUrl,sessionPermission;const sessionID="opencode-host-session";
 const save=()=>fs.writeFileSync(${JSON.stringify(capturePath)},JSON.stringify({port,captured,sessionPermission}));
 const json=(res,value,status=200)=>{res.writeHead(status,{"content-type":"application/json"});res.end(status===204?undefined:JSON.stringify(value));};
@@ -123,7 +127,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,"http://127
  if(url.pathname==="/session/"+sessionID)return json(res,session);
  if(req.method==="GET"&&url.pathname==="/event"){events=res;res.writeHead(200,{"content-type":"text/event-stream","cache-control":"no-cache",connection:"keep-alive"});return res.flushHeaders();}
  if(req.method==="POST"&&url.pathname==="/session/"+sessionID+"/prompt_async"){
-  captured.push({kind:"prompt"});save();json(res,undefined,204);setTimeout(()=>{send({type:"message.updated",properties:{sessionID,info:{id:"assistant",parentID:parsed.messageID,sessionID,role:"assistant"}}});${echoPath ? `send({type:"session.status",properties:{sessionID,status:{type:"retry",message:"retry "+secretToken+" "+secretUrl}}});` : ""}send({type:"message.part.updated",properties:{sessionID,part:{id:"text",sessionID,messageID:"assistant",type:"text",text:${echoPath ? `"Done "+secretToken+" "+secretUrl` : `"Done"`}}}});send({type:"session.idle",properties:{sessionID}});},10);return;
+  captured.push({kind:"prompt"});save();json(res,undefined,204);setTimeout(()=>{send({type:"message.updated",properties:{sessionID,info:{id:"assistant",parentID:parsed.messageID,sessionID,role:"assistant"}}});${echoPath ? nestedLeak ? `send({type:"session.next.tool.failed",properties:{sessionID,callID:"nested-secret-tool",tool:"fixture",error:deeplyNested({token:secretToken,url:secretUrl})}});` : `send({type:"session.status",properties:{sessionID,status:{type:"retry",message:"retry "+secretToken+" "+secretUrl}}});` : ""}send({type:"message.part.updated",properties:{sessionID,part:{id:"text",sessionID,messageID:"assistant",type:"text",text:${echoPath && !nestedLeak ? `"Done "+secretToken+" "+secretUrl` : `"Done"`}}}});send({type:"session.idle",properties:{sessionID}});},10);return;
  }
  return json(res,{});
 });});
@@ -455,6 +459,75 @@ describe.sequential("provider host-tool injection", () => {
     expect(result.status).toBe("completed");
     const exposed = [...visible, result.text].join("\n");
     expect(exposed).toContain("[redacted]");
+    expect(exposed).not.toContain(secret.token);
+    expect(exposed).not.toContain(secret.url);
+  });
+
+  it.each([
+    { provider: "cursor" as const, supportsHttp: true, label: "Cursor HTTP" },
+    { provider: "cursor" as const, supportsHttp: false, label: "Cursor stdio" },
+    { provider: "opencode" as const, supportsHttp: true, label: "OpenCode" },
+  ])("drops over-depth $label provider diagnostics before projection", async ({
+    provider,
+    supportsHttp,
+  }) => {
+    const root = portableFixtureRoot(`${provider} nested host diagnostic redaction`);
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const secretPath = join(root, "fixture-secret.json");
+    const manager = provider === "cursor"
+      ? new ProviderManager(
+          {
+            commands: {
+              cursor: cursorAgent(
+                root,
+                capturePath,
+                supportsHttp,
+                undefined,
+                secretPath,
+                true,
+              ),
+            },
+          },
+          new AgentHarnessRegistry([createCursorAcpHarness()]),
+        )
+      : new ProviderManager(
+          {
+            commands: {
+              opencode: openCodeServer(
+                root,
+                capturePath,
+                false,
+                undefined,
+                secretPath,
+                true,
+              ),
+            },
+          },
+          new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+        );
+    const visible: string[] = [];
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: provider,
+      conversationId: `${provider}-nested-redaction-${supportsHttp}`,
+      runId: "run-nested-redaction",
+      turnId: "turn-nested-redaction",
+      cwd: root,
+      prompt: "Project nested provider output",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      hostTools,
+      onText: (event) => visible.push(event.text),
+      onActivity: (event) => visible.push(JSON.stringify(event)),
+    });
+    const secret = JSON.parse(readFileSync(secretPath, "utf8")) as {
+      token: string;
+      url: string;
+    };
+    expect(result.status).toBe("completed");
+    const exposed = [...visible, result.text, result.error ?? ""].join("\n");
+    expect(exposed).toContain("[redacted:over-depth]");
     expect(exposed).not.toContain(secret.token);
     expect(exposed).not.toContain(secret.url);
   });

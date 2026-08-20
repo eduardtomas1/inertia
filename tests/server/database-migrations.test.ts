@@ -1485,6 +1485,84 @@ describe("runtime migration catalog", () => {
       .toThrow(/runtime schema catalog/iu);
   });
 
+  it("invalidates only pre-tool Codex sessions while preserving conversations", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "schema-59-codex-tools.sqlite");
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const store = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Tool registration", workspacePath);
+    const codex = store.createConversation(project.id, "Legacy Codex chat", {
+      providerId: "codex",
+    });
+    const claude = store.createConversation(project.id, "Existing Claude chat", {
+      providerId: "claude",
+    });
+    store.createMessage(codex.id, "Keep this exact visible request.");
+    store.createMessage(codex.id, "Keep this exact visible answer.", "assistant");
+    store.updateConversation(codex.id, {
+      providerSessionId: "legacy-codex-thread",
+    });
+    store.updateConversation(claude.id, {
+      providerSessionId: "existing-claude-session",
+    });
+    store.upsertAgentGoal({
+      conversationId: codex.id,
+      source: "codex-native",
+      providerSessionId: "legacy-codex-thread",
+      objective: "Legacy provider-owned goal",
+      status: "active",
+      tokenBudget: null,
+      tokensUsed: 10,
+      timeUsedSeconds: 5,
+      createdAt: "2026-08-19T10:00:00.000Z",
+      updatedAt: "2026-08-19T10:01:00.000Z",
+      synchronizedAt: "2026-08-19T10:01:00.000Z",
+    });
+    store.close();
+
+    const schema59 = new Database(databasePath);
+    dropUnreleasedAgentThreadManagement(schema59);
+    expect((schema59.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(59);
+    expect(schema59.prepare(`
+      SELECT provider_session_id FROM conversations WHERE id = ?
+    `).get(codex.id)).toEqual({ provider_session_id: "legacy-codex-thread" });
+    schema59.close();
+
+    migrateFixtureInPlace(databasePath);
+    migrateFixtureInPlace(databasePath);
+
+    const migrated = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    expect(migrated.conversation(codex.id)).toMatchObject({
+      id: codex.id,
+      title: "Legacy Codex chat",
+      providerSessionId: null,
+      continuationIdentity: null,
+    });
+    const retainedMessages = migrated.conversationDetail(codex.id)!.messages
+      .map(({ role, content }) => ({
+        role,
+        content,
+      }));
+    expect(retainedMessages).toHaveLength(2);
+    expect(retainedMessages).toEqual(expect.arrayContaining([
+      { role: "user", content: "Keep this exact visible request." },
+      { role: "assistant", content: "Keep this exact visible answer." },
+    ]));
+    expect(migrated.agentGoals(codex.id)).toEqual([]);
+    expect(migrated.conversation(claude.id)).toMatchObject({
+      providerSessionId: "existing-claude-session",
+      continuationIdentity: expect.any(Object),
+    });
+    migrated.close();
+  });
+
   it("upgrades exact schema 56 with an indexed completed-turn range path without changing durable data", async () => {
     const directory = await temporaryDirectory();
     const databasePath = join(directory, "schema-56-usage-index.sqlite");

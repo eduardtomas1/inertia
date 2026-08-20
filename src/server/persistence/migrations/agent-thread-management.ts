@@ -65,5 +65,20 @@ export const persistAgentThreadManagement: DatabaseMigrationDefinition = {
       ON agent_thread_operations(source_turn_id, created_at, id);
     CREATE INDEX agent_thread_operations_child_idx
       ON agent_thread_operations(child_conversation_id, created_at, id);
+
+    -- Codex App Server 0.114.0 accepts dynamic tools only on thread/start.
+    -- Sessions saved before this migration therefore cannot truthfully expose
+    -- the Inertia chat manager. Drop only that opaque provider identity so the
+    -- next turn starts a registered provider thread; the Inertia conversation,
+    -- visible transcript, turns, and configuration remain intact.
+    DELETE FROM agent_goals
+    WHERE source = 'codex-native'
+      AND conversation_id IN (
+        SELECT id FROM conversations
+        WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL
+      );
+    UPDATE conversations
+    SET provider_session_id = NULL, continuation_identity_json = NULL
+    WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;
   `,
 };

@@ -108,13 +108,19 @@ describe("Codex host-tool registration", () => {
       });
   });
 
-  it("does not claim to re-register tools on provider thread resume", async () => {
+  it("resumes a post-migration tool-enabled thread without unsupported fields", async () => {
     const harness = turnHarness("thread-existing");
     await harness.run();
 
+    expect(harness.calls.some(({ method }) => method === "thread/start"))
+      .toBe(false);
     const resumed = harness.calls.find(
       ({ method }) => method === "thread/resume",
     );
+    expect(resumed?.params).toMatchObject({ threadId: "thread-existing" });
+    // Codex App Server 0.114.0 exposes dynamicTools only on thread/start.
+    // Unreleased v60 invalidates sessions that predate registration, so every
+    // persisted session reaching this path was provisioned with the tools.
     expect(resumed?.params).not.toHaveProperty("dynamicTools");
   });
 });

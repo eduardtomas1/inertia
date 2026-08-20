@@ -460,6 +460,7 @@ export default function DetachedChatApp({
             embedded
             project={project}
             conversation={visibleConversation}
+            showCheckoutContext={false}
             latestTurnSummary={projection.latestTurnSummary}
             turns={projection.turns}
             messages={projection.messages}
@@ -476,7 +477,6 @@ export default function DetachedChatApp({
             usage={projection.usage}
             skills={workflowState?.skills ?? []}
             skillsCapability={workflowState?.skillsCapability ?? null}
-            selectedSkillIds={workflow.selectedSkillIds}
             skillsLoading={workflow.loading}
             skillsError={workflow.error}
             promptPresetsEnabled={false}
@@ -514,20 +514,17 @@ export default function DetachedChatApp({
             sending={runtimeActions.sendingConversationIds.has(conversationId)}
             onAddProject={dockInMain}
             onCreateConversation={dockInMain}
-            onSendMessage={(content, attachments, context, skillIds) =>
+            onSendMessage={(content, attachments, context) =>
               runtimeActions.sendMessageToConversation(
                 conversationId,
                 content,
                 attachments,
                 context,
-                skillIds,
                 false,
               )}
             onCompactConversation={(instruction) =>
               runtimeActions.compactConversation(conversationId, instruction)}
             onListSkills={workflow.listSkills}
-            onToggleSkill={workflow.toggleSkill}
-            onClearSelectedSkills={workflow.clearSelectedSkills}
             onRespondToApproval={respondToApproval}
             onRespondToInput={respondToInput}
             onUpdateConversation={updateConversation}

@@ -31,6 +31,7 @@ import type {
 export interface ComposerProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
+  showCheckoutContext?: boolean;
   providers: ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;

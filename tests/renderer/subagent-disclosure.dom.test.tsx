@@ -1,4 +1,5 @@
 import {
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -355,6 +356,40 @@ describe("delegated-agent timeline disclosure", () => {
     expect(screen.getByText(
       "1 delegated task · 1 working",
     ).closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("persists pointer activation before a native toggle can be interrupted", () => {
+    const view = render(
+      <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
+        subagents={[trace()]}
+        turns={[turn()]}
+        now={NOW}
+      />,
+    );
+    const summary = screen.getByText(
+      "1 delegated task · 1 working",
+    ).closest("summary")!;
+    const activation = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+
+    fireEvent(summary, activation);
+
+    expect(activation.defaultPrevented).toBe(true);
+    view.unmount();
+    render(
+      <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
+        subagents={[trace()]}
+        turns={[turn()]}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText(
+      "1 delegated task · 1 working",
+    ).closest("details")).toHaveAttribute("open");
   });
 
   it("keeps a user-opened roster open when live work settles into a reviewable failure", async () => {

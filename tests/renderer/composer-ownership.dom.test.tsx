@@ -111,13 +111,10 @@ function composerProps(
     usageDisplayMode: "compact",
     skills: [],
     skillsCapability: null,
-    selectedSkillIds: [],
     skillsLoading: false,
     skillsError: null,
     onSend: async () => undefined,
     onListSkills: async () => undefined,
-    onToggleSkill: () => undefined,
-    onClearSelectedSkills: () => undefined,
     onUpdateConversation: async () => undefined,
     onCreateConversationForSelection: async () => undefined,
     onChooseAttachments: async () => [],
@@ -173,14 +170,14 @@ describe("composer detachment ownership", () => {
     }));
     const secondCleanup = registerComposerOwnership("replacement", () => ({
       status: "blocked",
-      blocker: "selected-skills",
+      blocker: "prompt-context",
       reason: "replacement",
     }));
 
     firstCleanup();
     expect(prepareComposerDetachment("replacement")).toEqual({
       status: "blocked",
-      blocker: "selected-skills",
+      blocker: "prompt-context",
       reason: "replacement",
     });
 
@@ -188,10 +185,9 @@ describe("composer detachment ownership", () => {
     expect(prepareComposerDetachment("replacement")).toEqual({ status: "ready" });
   });
 
-  it("reports context and skill blockers for the owning conversation", () => {
+  it("reports context blockers for the owning conversation", () => {
     const diffOwner = conversation("diff-owner");
     const previewOwner = conversation("preview-owner");
-    const skillOwner = conversation("skill-owner");
     render(
       <>
         <section aria-label="Diff owner">
@@ -202,11 +198,6 @@ describe("composer detachment ownership", () => {
         <section aria-label="Preview owner">
           <Composer {...composerProps(previewOwner, {
             previewContextUrl: "http://127.0.0.1:4173/preview",
-          })} />
-        </section>
-        <section aria-label="Skill owner">
-          <Composer {...composerProps(skillOwner, {
-            selectedSkillIds: ["review"],
           })} />
         </section>
       </>,
@@ -224,11 +215,6 @@ describe("composer detachment ownership", () => {
       status: "blocked",
       blocker: "preview-context",
       reason: "Remove the selected preview before moving this chat to a window.",
-    });
-    expect(prepareComposerDetachment(skillOwner.id)).toEqual({
-      status: "blocked",
-      blocker: "selected-skills",
-      reason: "Clear selected skills before moving this chat to a window.",
     });
   });
 

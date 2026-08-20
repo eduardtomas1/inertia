@@ -104,6 +104,7 @@ type ChatWorkspaceProps = {
   project: Project | null;
   conversation: Conversation | null;
   checkoutBranch?: string | null;
+  showCheckoutContext?: boolean;
   latestTurnSummary: ConversationLatestTurnSummary | null;
   turns: AgentTurn[];
   messages: ChatMessage[];
@@ -211,6 +212,7 @@ export function ChatWorkspace({
   project,
   conversation,
   checkoutBranch = null,
+  showCheckoutContext = true,
   latestTurnSummary,
   turns,
   messages,
@@ -821,6 +823,7 @@ export function ChatWorkspace({
         <Composer
           conversation={conversation}
           checkoutBranch={checkoutBranch}
+          showCheckoutContext={showCheckoutContext}
           providers={providers}
           actions={actions}
           mentionResults={mentionResults}

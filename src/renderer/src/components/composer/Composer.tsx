@@ -39,16 +39,13 @@ import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps, PendingModelRoute } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
-import {
-  COMPOSER_PREFILL_EVENT,
-  type ComposerPrefillDetail,
-} from "../../utils/composerPrefill";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
+import { useComposerPrefill } from "./useComposerPrefill";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -70,6 +67,7 @@ const unavailableCompaction = (): Promise<never> => Promise.reject(new Error(
 export const Composer = memo(function Composer({
   conversation,
   checkoutBranch,
+  showCheckoutContext = true,
   providers,
   actions,
   disabled,
@@ -264,39 +262,14 @@ export const Composer = memo(function Composer({
     );
   };
 
-  useEffect(() => {
-    const prefill = (event: Event): void => {
-      const detail = (event as CustomEvent<ComposerPrefillDetail>).detail;
-      if (
-        !detail
-        || detail.conversationId !== conversationIdRef.current
-        || typeof detail.text !== "string"
-      ) return;
-      setMessage((current) => {
-        const skillPrefill = /^\$([A-Za-z0-9][A-Za-z0-9._:-]{0,159})\s*$/u
-          .exec(detail.text);
-        const next = skillPrefill?.[1]
-          ? insertComposerSkillToken(
-              current,
-              skillPrefill[1],
-              current.length,
-              current.length,
-            ).value
-          : current.trim()
-            ? `${current.trim()}\n\n${detail.text}`
-            : detail.text;
-        if (next !== current) {
-          markEditorChanged(conversationIdRef.current);
-          draftValueRef.current = next;
-          persistDraftChange(conversationIdRef.current, current, next);
-        }
-        return next;
-      });
-      window.requestAnimationFrame(() => textareaRef.current?.focus());
-    };
-    window.addEventListener(COMPOSER_PREFILL_EVENT, prefill);
-    return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, prefill);
-  }, [persistDraftChange]);
+  useComposerPrefill({
+    conversationIdRef,
+    draftValueRef,
+    markEditorChanged,
+    persistDraftChange,
+    setMessage,
+    textareaRef,
+  });
 
   useEffect(() => {
     const refreshPromptStash = (): void => {
@@ -1251,6 +1224,7 @@ export const Composer = memo(function Composer({
           onUpdateFastMode={updateFastMode}
           conversation={conversation}
           checkoutBranch={checkoutBranch}
+          showCheckoutContext={showCheckoutContext}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}
           conversationUpdateError={conversationUpdateError}

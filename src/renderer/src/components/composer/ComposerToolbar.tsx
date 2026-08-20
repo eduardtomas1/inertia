@@ -116,6 +116,7 @@ export interface ComposerToolbarProps {
   onUpdateFastMode: (enabled: boolean) => Promise<void>;
   conversation: Conversation;
   checkoutBranch?: string | null;
+  showCheckoutContext: boolean;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -178,6 +179,7 @@ export function ComposerToolbar({
   onUpdateFastMode,
   conversation,
   checkoutBranch,
+  showCheckoutContext,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -511,23 +513,25 @@ export function ComposerToolbar({
         )}
         </div>
       </div>
-      <div
-        className="composer-checkout-strip"
-        role="group"
-        aria-label="Chat checkout context"
-      >
-        <span className="composer-checkout-location">
-          <FolderGit2 size={12} aria-hidden="true" />
-          <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
-        </span>
-        <span
-          className="composer-checkout-branch"
-          title={visibleCheckoutBranch}
+      {showCheckoutContext && (
+        <div
+          className="composer-checkout-strip"
+          role="group"
+          aria-label="Chat checkout context"
         >
-          <GitBranch size={12} aria-hidden="true" />
-          <code translate="no">{visibleCheckoutBranch}</code>
-        </span>
-      </div>
+          <span className="composer-checkout-location">
+            <FolderGit2 size={12} aria-hidden="true" />
+            <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+          </span>
+          <span
+            className="composer-checkout-branch"
+            title={visibleCheckoutBranch}
+          >
+            <GitBranch size={12} aria-hidden="true" />
+            <code translate="no">{visibleCheckoutBranch}</code>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

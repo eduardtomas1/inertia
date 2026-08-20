@@ -51,6 +51,8 @@ test("moves one live chat between a remembered native window and the main app", 
     .toHaveCount(0);
   await expect(popup.getByRole("button", { name: /prompt presets/iu }))
     .toHaveCount(0);
+  await expect(popup.getByRole("group", { name: "Chat checkout context" }))
+    .toHaveCount(0);
 
   await popup.getByRole("button", { name: "Keep chat window on top" }).click();
   await expect.poll(() => app.electronApp.evaluate(

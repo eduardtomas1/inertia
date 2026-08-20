@@ -3,8 +3,13 @@ import { createHash } from "node:crypto";
 import { ProviderRunEventBudget } from "./io";
 
 export const MAX_CLAUDE_EVENT_MEDIA_BYTES = 20 * 1024 * 1024;
-export const MAX_CLAUDE_RUN_MEDIA_BYTES = 48 * 1024 * 1024;
-export const MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES = 128 * 1024 * 1024;
+export const MAX_CLAUDE_MEDIA_BURST_BYTES = 48 * 1024 * 1024;
+export const MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES = 128 * 1024 * 1024;
+export const CLAUDE_MEDIA_RUN_BUDGET_BURSTS = 8;
+export const MAX_CLAUDE_RUN_MEDIA_BYTES =
+  MAX_CLAUDE_MEDIA_BURST_BYTES * CLAUDE_MEDIA_RUN_BUDGET_BURSTS;
+export const MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES =
+  MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES * CLAUDE_MEDIA_RUN_BUDGET_BURSTS;
 export const CLAUDE_MEDIA_BUDGET_WINDOW_MS = 60_000;
 const MAX_CLAUDE_EVENT_MEDIA_ENCODED_CHARS =
   4 * Math.ceil(MAX_CLAUDE_EVENT_MEDIA_BYTES / 3);
@@ -304,10 +309,14 @@ export function projectClaudeSdkEventMedia(value: unknown): ClaudeMediaProjectio
 }
 
 export class ClaudeRunEventBudget {
-  private availableMediaBytes = MAX_CLAUDE_RUN_MEDIA_BYTES;
-  private availableMediaEncodedBytes = MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES;
+  private availableMediaBytes = MAX_CLAUDE_MEDIA_BURST_BYTES;
+  private availableMediaEncodedBytes = MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES;
+  private mediaBytes = 0;
+  private mediaEncodedBytes = 0;
   private readonly windowMs: number;
   private readonly now: () => number;
+  private readonly maxRunMediaBytes: number;
+  private readonly maxRunMediaEncodedBytes: number;
   private lastRefillAt: number;
 
   constructor(
@@ -315,11 +324,24 @@ export class ClaudeRunEventBudget {
     options: {
       windowMs?: number;
       now?: () => number;
+      maxRunMediaBytes?: number;
+      maxRunMediaEncodedBytes?: number;
     } = {},
   ) {
     this.windowMs = options.windowMs ?? CLAUDE_MEDIA_BUDGET_WINDOW_MS;
     this.now = options.now ?? Date.now;
-    if (!Number.isSafeInteger(this.windowMs) || this.windowMs < 1) {
+    this.maxRunMediaBytes = options.maxRunMediaBytes
+      ?? MAX_CLAUDE_RUN_MEDIA_BYTES;
+    this.maxRunMediaEncodedBytes = options.maxRunMediaEncodedBytes
+      ?? MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES;
+    if (
+      !Number.isSafeInteger(this.windowMs)
+      || this.windowMs < 1
+      || !Number.isSafeInteger(this.maxRunMediaBytes)
+      || this.maxRunMediaBytes < 1
+      || !Number.isSafeInteger(this.maxRunMediaEncodedBytes)
+      || this.maxRunMediaEncodedBytes < 1
+    ) {
       throw new Error("The Claude media event budget is invalid.");
     }
     this.lastRefillAt = this.now();
@@ -327,6 +349,15 @@ export class ClaudeRunEventBudget {
 
   observe(value: unknown): void {
     const projected = projectClaudeSdkEventMedia(value);
+    if (projected.mediaBytes > this.maxRunMediaBytes - this.mediaBytes) {
+      throw new Error("Claude exceeded the bounded media event budget for this run.");
+    }
+    if (
+      projected.mediaEncodedBytes
+      > this.maxRunMediaEncodedBytes - this.mediaEncodedBytes
+    ) {
+      throw new Error("Claude exceeded the bounded encoded-media event budget for this run.");
+    }
     this.refill();
     if (this.availableMediaBytes < projected.mediaBytes) {
       throw new Error("Claude exceeded the bounded media event rate for this run.");
@@ -340,6 +371,8 @@ export class ClaudeRunEventBudget {
       throw new Error("Claude exceeded the bounded encoded-media event rate for this run.");
     }
     this.events.observe(projected.value);
+    this.mediaBytes += projected.mediaBytes;
+    this.mediaEncodedBytes += projected.mediaEncodedBytes;
     this.availableMediaBytes -= projected.mediaBytes;
     this.availableMediaEncodedBytes -= projected.mediaEncodedBytes;
   }
@@ -351,13 +384,13 @@ export class ClaudeRunEventBudget {
     this.lastRefillAt = observedAt;
     const fraction = Math.min(1, elapsedMs / this.windowMs);
     this.availableMediaBytes = Math.min(
-      MAX_CLAUDE_RUN_MEDIA_BYTES,
-      this.availableMediaBytes + MAX_CLAUDE_RUN_MEDIA_BYTES * fraction,
+      MAX_CLAUDE_MEDIA_BURST_BYTES,
+      this.availableMediaBytes + MAX_CLAUDE_MEDIA_BURST_BYTES * fraction,
     );
     this.availableMediaEncodedBytes = Math.min(
-      MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES,
+      MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES,
       this.availableMediaEncodedBytes
-        + MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES * fraction,
+        + MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES * fraction,
     );
   }
 }

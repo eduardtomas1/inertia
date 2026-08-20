@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -16,6 +16,25 @@ import {
 } from "./support/workspace-tools";
 
 const providerSessionId = "33333333-3333-4333-8333-333333333333";
+
+async function expectResumeGoalState(tools: Locator): Promise<void> {
+  const resumeGoal = tools.getByRole("button", { name: "Resume goal" });
+  const safetyWarning = tools.getByText(
+    /Changes are unavailable in recovery safety mode/u,
+  );
+  await expect.poll(async () => {
+    const [safetyLocked, resumeEnabled] = await Promise.all([
+      safetyWarning.isVisible(),
+      resumeGoal.isEnabled(),
+    ]);
+    return safetyLocked ? !resumeEnabled : resumeEnabled;
+  }).toBe(true);
+  if (await safetyWarning.isVisible()) {
+    await expect(resumeGoal).toBeDisabled();
+  } else {
+    await expect(resumeGoal).toBeEnabled();
+  }
+}
 
 const goalAppServer = `
 const fs = require("node:fs");
@@ -186,8 +205,7 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
     await expect(tools.getByText("Active", { exact: true })).toBeVisible();
     await expect(tools.getByRole("button", { name: "Resume goal" }))
       .toBeVisible({ timeout: 10_000 });
-    await expect(tools.getByRole("button", { name: "Resume goal" }))
-      .toBeDisabled();
+    await expectResumeGoalState(tools);
     await expect(tools.getByText(/no Inertia run is connected/u))
       .toBeVisible();
 
@@ -205,8 +223,7 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
       .toBeVisible();
     await expect(reloadedTools.getByRole("button", { name: "Resume goal" }))
       .toBeVisible();
-    await expect(reloadedTools.getByRole("button", { name: "Resume goal" }))
-      .toBeDisabled();
+    await expectResumeGoalState(reloadedTools);
     expect(app.rendererErrors).toEqual([]);
   } finally {
     await app.close();

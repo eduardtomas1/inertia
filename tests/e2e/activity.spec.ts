@@ -495,6 +495,12 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     await expect(disclosure).not.toHaveAttribute("open");
     await disclosure.locator("summary").click();
     await expect(disclosure).toHaveAttribute("open");
+    const disclosurePreferenceKey =
+      `inertia:subagent-disclosure:v1:${encodeURIComponent(conversation.id)}:${encodeURIComponent(turn.id)}`;
+    await expect.poll(() => page.evaluate(
+      (key) => window.localStorage.getItem(key),
+      disclosurePreferenceKey,
+    )).not.toBeNull();
     await page.reload();
     await expect(page.getByRole("heading", {
       name: "Delegated agent trace fixture",

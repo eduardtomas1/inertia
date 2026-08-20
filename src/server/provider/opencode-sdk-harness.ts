@@ -57,6 +57,7 @@ import {
 import { OpenCodeRunOwnership } from "./opencode-run-ownership";
 import {
   handleOpenCodeEvent,
+  openCodeEventRequiresPromptAdmission,
   type OpenCodeFailureState,
   type OpenCodePendingApproval,
   type OpenCodePendingInput,
@@ -554,6 +555,9 @@ function startOpenCodeRun(
       const subscribed = await client.event.subscribe({ directory: options.input.cwd }, { signal: eventAbort.signal, throwOnError: true });
       armEventInactivityDeadline();
       const compacting = options.input.operation?.kind === "compact";
+      if (compacting) {
+        ownership.rejectPromptAdmission(promptLifecycle.messageId);
+      }
       const manualCompaction: OpenCodeManualCompactionProof = {
         initiatedAt: null,
         messageId: null,
@@ -561,7 +565,11 @@ function startOpenCodeRun(
       };
       let sessionIdleObserved = false;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
-        onEvent: (event) => {
+        onEvent: async (event) => {
+          if (openCodeEventRequiresPromptAdmission(event)) {
+            const admission = ownership.pendingPromptAdmission();
+            if (admission && !(await admission)) return;
+          }
           const safeEvent = hostTools?.redactPayload(event) ?? event;
           const ownershipSequence = ownership.eventSequence();
           handleOpenCodeEvent(
@@ -650,6 +658,9 @@ function startOpenCodeRun(
             ownership.acceptPrompt(promptLifecycle.messageId);
             armEventInactivityDeadline();
             return response;
+          }).catch((error) => {
+            ownership.rejectPromptAdmission(promptLifecycle.messageId);
+            throw error;
           });
       const completion = Promise.all([providerOperation, pump]);
       await Promise.race([providerOperation, completion, runInterrupted]);
@@ -692,6 +703,7 @@ function startOpenCodeRun(
           };
     }
     acceptingFollowUps = false;
+    ownership.rejectPendingAdmissions();
     hostTools?.settle();
     await Promise.allSettled(pendingFollowUps);
     clearDeadlineTimers();
@@ -794,6 +806,7 @@ function startOpenCodeRun(
   cancelOwnedRun = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    ownership.rejectPendingAdmissions();
     hostTools?.settle();
     void hostTools?.revoke().catch(() => {
       eventAbort.abort();
@@ -961,7 +974,7 @@ async function pumpOpenCodeEvents(
   stream: AsyncGenerator<Event>,
   sessionId: string,
   handlers: {
-    onEvent: (event: Event) => void;
+    onEvent: (event: Event) => void | Promise<void>;
     isDone: (event: Event) => boolean | Promise<boolean>;
   },
 ): Promise<void> {
@@ -975,7 +988,7 @@ async function pumpOpenCodeEvents(
     eventBudget.observe(event);
     const eventSessionId = openCodeEventSessionId(event);
     if (eventSessionId !== sessionId) continue;
-    handlers.onEvent(event);
+    await handlers.onEvent(event);
     if (await handlers.isDone(event)) return;
   }
   throw new Error("OpenCode closed its event stream before the session completed.");

@@ -24,6 +24,7 @@ type LifecycleScenario =
   | "resume"
   | "resume-rejected-steer"
   | "resume-stuck-steer"
+  | "early-permission-follow-up"
   | "idle-before-prompt-receipt"
   | "status-idle-before-prompt-receipt"
   | "idle-after-admission"
@@ -77,6 +78,8 @@ const scenario = ${JSON.stringify(scenario)};
 const captured = [];
 const sessionID = "opencode-lifecycle-session";
 let events;
+let followUpReceiptSent = false;
+let followUpPromptID;
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
 const session = { id: sessionID, slug: "fixture", projectID: "project", directory: ${JSON.stringify(root)}, title: "Fixture", version: "1.18.4", model: { id: "model-a", providerID: "fake" }, time: { created: Date.now(), updated: Date.now() } };
@@ -109,6 +112,14 @@ const server = http.createServer((req, res) => {
             ? { type: "session.status", properties: { sessionID, status: { type: "idle" } } }
             : { type: "session.idle", properties: { sessionID } });
         }, 75);
+        return;
+      }
+      if (scenario === "early-permission-follow-up") {
+        json(res, undefined, 204);
+        setTimeout(() => {
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "initial-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+          sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "initial-text", sessionID, messageID: "initial-assistant", type: "text", text: "Initial response" } } });
+        }, 5);
         return;
       }
       json(res, undefined, 204);
@@ -222,6 +233,21 @@ const server = http.createServer((req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/prompt") {
       if (scenario === "resume-stuck-steer") return;
+      if (scenario === "early-permission-follow-up") {
+        followUpPromptID = parsed.id;
+        sendEvent({ type: "permission.asked", properties: { id: "steer-early", sessionID, permission: "bash", patterns: ["npm test"], metadata: {} } });
+        return setTimeout(() => {
+          followUpReceiptSent = true;
+          json(res, { data: {
+            admittedSeq: 2,
+            id: parsed.id,
+            sessionID,
+            prompt: parsed.prompt,
+            delivery: parsed.delivery,
+            timeCreated: Date.now(),
+          } });
+        }, 50);
+      }
       setTimeout(() => json(res, { data: {
         admittedSeq: 2,
         id: parsed.id,
@@ -239,6 +265,13 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "session.idle", properties: { sessionID } });
       }, 75);
       return;
+    }
+    if (req.method === "POST" && url.pathname === "/permission/steer-early/reply") {
+      if (!followUpReceiptSent) return json(res, { error: "permission preceded steer receipt" }, 409);
+      json(res, true);
+      sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "follow-up-assistant", parentID: followUpPromptID, sessionID, role: "assistant" } } });
+      sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "follow-up-text", sessionID, messageID: "follow-up-assistant", type: "text", text: "Follow-up response" } } });
+      return sendEvent({ type: "session.idle", properties: { sessionID } });
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/compact") {
       json(res, undefined, 204);
@@ -328,8 +361,8 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && url.pathname === "/session/" + sessionID) return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
     if (req.method === "POST" && url.pathname.endsWith("/prompt_async")) {
-      json(res, undefined, 204);
-      return sendEvent({ type: "permission.asked", properties: { id: "deny-only", sessionID, permission: "bash", patterns: ["npm test"], metadata: {} } });
+      sendEvent({ type: "permission.asked", properties: { id: "deny-only", sessionID, permission: "bash", patterns: ["npm test"], metadata: {} } });
+      return setTimeout(() => json(res, undefined, 204), 50);
     }
     if (req.method === "POST" && url.pathname === "/permission/deny-only/reply") {
       json(res, true);
@@ -852,6 +885,61 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
           files: [{ uri: expect.stringMatching(/^file:/u), name: "follow-up.png" }],
         },
       });
+  });
+
+  it("waits for an exact follow-up receipt before replaying its early permission", async () => {
+    const root = portableFixtureRoot("OpenCode early follow-up permission");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "early-permission-follow-up"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let followUp: Promise<boolean> | null = null;
+    let approvals = 0;
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-early-follow-up-permission",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || followUp) return;
+        followUp = manager.steer(event.conversationId, {
+          content: "Run the focused check.",
+          imagePaths: [],
+        }, { runId: event.runId, turnId: event.turnId! });
+      },
+      onApproval: (event) => {
+        approvals += 1;
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "deny",
+        )).toBe(true);
+      },
+    })).resolves.toMatchObject({
+      status: "completed",
+      text: "Initial responseFollow-up response",
+    });
+    await expect(followUp).resolves.toBe(true);
+    expect(approvals).toBe(1);
+    const capture = readStableCapture<{
+      captured: Array<{ path: string; body?: Record<string, unknown> }>;
+    }>(capturePath);
+    expect(capture.captured.find(({ path }) =>
+      path === "/permission/steer-early/reply")?.body)
+      .toEqual({ reply: "reject" });
   });
 
   it.each([
@@ -1476,7 +1564,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(statuses.at(-1)).toBe("failed");
   });
 
-  it("denies one permission without aborting, then cancels the owned session and settles the turn", async () => {
+  it("replays an early permission after prompt receipt, then cancels the owned session", async () => {
     const root = portableFixtureRoot("OpenCode permission semantics");
     roots.push(root);
     const capturePath = join(root, "capture.json");

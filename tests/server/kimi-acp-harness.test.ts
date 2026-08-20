@@ -853,6 +853,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
 
     const transport = await runFailure("kimi ACP transport", `
+const fs = require("node:fs");
 const readline = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
@@ -863,7 +864,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     agentInfo: { name: "Kimi Code CLI", version: "test" },
   } });
   if (message.method === "session/new") {
-    process.stdout.end();
+    fs.closeSync(process.stdout.fd);
     setInterval(() => {}, 1000);
   }
 });

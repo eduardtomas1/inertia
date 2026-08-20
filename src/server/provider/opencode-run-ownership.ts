@@ -5,6 +5,24 @@ interface OwnedPrompt {
   kind: "initial" | "follow-up";
   accepted: boolean;
   workObserved: boolean;
+  admission: Promise<boolean>;
+  settleAdmission: (accepted: boolean) => void;
+  admissionSettled: boolean;
+}
+
+function ownedPrompt(kind: OwnedPrompt["kind"]): OwnedPrompt {
+  let settleAdmission!: (accepted: boolean) => void;
+  const admission = new Promise<boolean>((resolve) => {
+    settleAdmission = resolve;
+  });
+  return {
+    kind,
+    accepted: false,
+    workObserved: false,
+    admission,
+    settleAdmission,
+    admissionSettled: false,
+  };
 }
 
 /**
@@ -20,27 +38,20 @@ export class OpenCodeRunOwnership {
   private acceptedEventSequence = 0;
 
   constructor(initialPromptId: string) {
-    this.prompts.set(initialPromptId, {
-      kind: "initial",
-      accepted: false,
-      workObserved: false,
-    });
+    this.prompts.set(initialPromptId, ownedPrompt("initial"));
   }
 
   reserveFollowUp(promptId: string): boolean {
     if (this.prompts.has(promptId)) return true;
     if (this.prompts.size >= MAX_OWNED_PROMPTS) return false;
-    this.prompts.set(promptId, {
-      kind: "follow-up",
-      accepted: false,
-      workObserved: false,
-    });
+    this.prompts.set(promptId, ownedPrompt("follow-up"));
     return true;
   }
 
   rejectFollowUp(promptId: string): void {
     const prompt = this.prompts.get(promptId);
     if (!prompt || prompt.accepted || prompt.workObserved) return;
+    this.settleAdmission(prompt, false);
     this.prompts.delete(promptId);
     if (this.activePromptId === promptId) this.activePromptId = null;
   }
@@ -49,9 +60,29 @@ export class OpenCodeRunOwnership {
     const prompt = this.prompts.get(promptId);
     if (!prompt) return false;
     prompt.accepted = true;
+    this.settleAdmission(prompt, true);
     this.activePromptId = promptId;
     this.acceptedEventSequence += 1;
     return true;
+  }
+
+  rejectPromptAdmission(promptId: string): void {
+    const prompt = this.prompts.get(promptId);
+    if (prompt) this.settleAdmission(prompt, false);
+  }
+
+  pendingPromptAdmission(): Promise<boolean> | null {
+    let pending: OwnedPrompt | undefined;
+    for (const prompt of this.prompts.values()) {
+      if (!prompt.admissionSettled) pending = prompt;
+    }
+    return pending?.admission ?? null;
+  }
+
+  rejectPendingAdmissions(): void {
+    for (const prompt of this.prompts.values()) {
+      this.settleAdmission(prompt, false);
+    }
   }
 
   eventSequence(): number {
@@ -143,8 +174,15 @@ export class OpenCodeRunOwnership {
     if (!prompt) return false;
     prompt.accepted = true;
     prompt.workObserved = true;
+    this.settleAdmission(prompt, true);
     this.activePromptId = promptId;
     this.acceptedEventSequence += 1;
     return true;
+  }
+
+  private settleAdmission(prompt: OwnedPrompt, accepted: boolean): void {
+    if (prompt.admissionSettled) return;
+    prompt.admissionSettled = true;
+    prompt.settleAdmission(accepted);
   }
 }

@@ -326,7 +326,10 @@ describe("Claude Agent SDK large event boundary", () => {
       base64,
       bytes,
     }))).not.toThrow();
-  });
+  // V8 coverage instruments each scan of the intentional 48 MiB production
+  // boundary. This takes ~13s locally versus <1s without coverage, so keep the
+  // production-sized proof while bounding only this CPU-heavy test explicitly.
+  }, 30_000);
 
   it("cancels and releases an owned SDK process after accepted media", async () => {
     const root = portableFixtureRoot("Claude SDK media cancellation");

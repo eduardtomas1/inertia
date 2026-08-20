@@ -4,6 +4,33 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.40 — 2026-08-20
+
+### Chats can move, share context, and coordinate without sharing authority
+
+- Up to eight conversations can move into independent native windows with remembered bounds, taskbar presence, optional always-on-top, and an explicit return to the main workspace. Each chat keeps one interactive composer owner, drafts transfer only when they can be handed off losslessly, and closing a window leaves active agent work running.
+- A new cross-chat context chooser shares only the exact visible messages the user selects. Immutable bounded provenance survives reload, different workspaces require acknowledgement, and provider host actions can request context without browsing transcripts or choosing message IDs.
+- After one exact approval, Codex, Claude, Cursor, and OpenCode can use host-owned tools to list, inspect, create, dispatch, follow up, observe, stop, and archive independent top-level Inertia chats. Recursion, concurrency, payloads, access, project scope, and lifetime are bounded; credentials, provider sessions, paths, and transcripts remain outside the tool bridge.
+
+### Providers and rich files keep their exact lifecycle
+
+- Native Kimi Code joins the provider catalog with durable migration, managed model and thinking routes, MCP, resume, cancellation, process recovery, typed failures, and the genuine bundled Kimi mark, while existing Kimi-through-Claude profiles remain intact.
+- Codex App Server, Claude Agent SDK, Cursor ACP, and OpenCode SDK now share stricter run ownership, cumulative event and byte ceilings, transcript correction, cancellation, cleanup, and redaction behavior. Late or cross-run events remain inert instead of being projected into the wrong conversation.
+- Images, PDFs, text, Markdown, JSON, CSV, XLSX, and XLS attachments keep private sent-message previews after reload. PDF and spreadsheet work stays lazy and bounded, scanned PDF pages become provider images only within the shared limits, and unsupported or unsafe documents fail closed.
+- Linux runtime recovery journals the exact PID, original parent, process group, process start time, boot, and generation for every owned child. A crashed utility runtime can retire only proven matching descendants before normal work resumes; ambiguous identity remains quarantined.
+
+### Everyday controls are clearer and more truthful
+
+- New and active chats share the same responsive two-tier composer. Literal `$skill-name` tokens are the source of truth, checkout and branch information stays quiet, and Send, Stop, follow-up, and Copy feedback animates only after the corresponding authoritative acceptance or clipboard success.
+- Claude OAuth links open through the trusted desktop host without forwarding display state or provider-controlled browser commands. Markdown chat links retain heading targets through Files, and preview failures offer bounded Retry and Source recovery.
+- Daily Work uses a simpler day-card mark, announces its dialog state, and keeps reduced-motion-safe activity waves. Release publication can notify Discord with JSON-safe payload construction and a clean no-secret fallback.
+
+### Release confidence
+
+- Version 0.0.40 is prepared and reviewed on a dedicated release PR. Release-candidate PRs run the same complete Windows `npm run check` gate used by an exact tag, in addition to the existing Windows shards and Linux/macOS platform matrix, so the tag is no longer the first full Windows proof.
+- The contended Windows generated-PDF cleanup fixture now warms its native canvas dependency before starting the product deadline, preserving the exact second-page cancellation assertion without confusing dependency cold start with product behavior.
+- Architecture and both lint layers, all TypeScript projects, more than 4,200 unit and integration tests, 430 portable provider contracts, real Electron scenarios, production builds, audits, renderer budgets, package smoke, Electron fuses, screenshots, and exact-head release gates protect the release.
+
 ## 0.0.39 — 2026-08-19
 
 ### Provider work stays attributable from start to finish

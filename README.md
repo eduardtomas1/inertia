@@ -23,6 +23,8 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Work with streaming conversations, resumable sessions, native plans, agent questions, image, PDF, text, CSV, and Excel inputs, cancellation, and supervised approvals whenever the selected provider supports them; open goals and verified native sessions directly with `/goal` and `/resume`.
 - Launch a saved Duo from one shared prompt into two independently named chats, each with its own project, model route, reasoning, and access mode, with an optional independent third-model judgment.
 - Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
+- Move up to eight chats into independent native windows with remembered bounds, optional always-on-top, and an explicit return to the main workspace while their agent work continues.
+- Bring exact visible messages from another chat into the next request with a reviewable, bounded context packet whose source remains visible after reload.
 - Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
 - Save up to 30 reusable prompt presets, search and organize them, and insert one into the selected composer without sending it. Optional route binding stores only harness, backend, model, and reasoning identity—never attachments, chat context, endpoints, continuation state, or credentials.
 - Start from a compact Environment summary with Changes, worktree, branch, Git actions, validated local servers, provider context, repository, editor, sent attachments, and delegated work, while keeping the full workspace tools one click away.
@@ -38,6 +40,18 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 ![Choose an appearance and color theme in Inertia](docs/screenshots/inertia-theme-library.png)
 
 ![Two independent projects sharing a split Inertia workspace](docs/screenshots/inertia-split-workspace.png)
+
+### One focused chat, its own window
+
+Open a chat in a native window when it needs a separate screen or desktop space. The window keeps only that conversation, its transcript, and its one authoritative composer—no project sidebar or cross-chat controls. Text drafts move with the composer, while attachments, references, selected context, skills, route changes, and other transient state must be sent or removed before ownership can move. Closing the window leaves the chat and any active work alive; **Return chat to main window** docks it explicitly.
+
+![A focused Inertia chat in its own native window](docs/screenshots/inertia-detached-chat.png)
+
+### Share only the context you choose
+
+**Add context from another chat** opens a source-and-preview flow for selecting exact visible user or assistant messages. Inertia stores an immutable bounded packet with source provenance—not the source session, tools, reasoning, credentials, or an open-ended transcript—and shows it beside the request after sending. Different workspaces require an explicit acknowledgement because referenced files may not exist in the destination. Codex, Claude, Cursor, and OpenCode can request this same chooser through a provider-neutral host action, but the agent cannot browse chats or select the messages itself.
+
+![Choose exact messages to bring into another Inertia chat](docs/screenshots/inertia-context-handoff.png)
 
 ### Two perspectives, one prompt
 
@@ -120,7 +134,7 @@ Inertia does not estimate price from a model name or send usage to a hosted anal
 
 - Create, test, enable, and choose model backend profiles without mixing them into the agent harness that runs the conversation.
 - See when a supported provider CLI has an update and run the official update flow without leaving Inertia.
-- Use the built-in Kimi coding profile through the Claude harness, or define a compatible custom endpoint with explicit models and routing.
+- Use native Kimi Code, the built-in Kimi coding profile through the Claude harness, or a compatible custom endpoint with explicit models and routing.
 - Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
 - Choose whether Inertia opens on the compact Environment summary or the full workspace tools; fresh installs use Environment, and no decorative Ready label competes with its actionable rows.
 
@@ -138,7 +152,7 @@ See the [Private Connect guide](docs/PRIVATE_CONNECT.md), [security model](docs/
 
 ### Provider-native, local by default
 
-Inertia uses the coding tools and accounts already installed on your computer. Codex, Claude, Cursor, and OpenCode keep their own sessions, authentication, models, approvals, plans, reasoning, usage, and cancellation behavior; when a provider does not expose something, Inertia says so instead of imitating it.
+Inertia uses the coding tools and accounts already installed on your computer. Codex, Claude, Cursor, Kimi Code, and OpenCode keep their own sessions, authentication, models, approvals, plans, reasoning, usage, and cancellation behavior; when a provider does not expose something, Inertia says so instead of imitating it.
 
 Provider account credentials remain in each provider's own storage. Credentials added for custom model backends are encrypted through the operating system's secure credential storage; only non-secret profile settings live in Inertia's local database. Inertia stores workspace history and preferences locally, and its optional runtime diagnostics exclude prompts, source, token values, credentials, and connection capabilities.
 
@@ -146,7 +160,7 @@ Access mode is a real safety boundary. Supervised keeps the selected provider's 
 
 ### Get started
 
-Download the build for your platform, add a project, then open **Settings → Providers**. Inertia checks Codex, Claude, Cursor, and OpenCode locally and shows the exact Install, Connect, or Refresh action each route needs. Authentication stays in the provider's own official flow.
+Download the build for your platform, add a project, then open **Settings → Providers**. Inertia checks Codex, Claude, Cursor, Kimi Code, and OpenCode locally and shows the exact Install, Connect, or Refresh action each route needs. Authentication stays in the provider's own official flow.
 
 You only need one ready provider to begin. If none is available yet, projects, files, Git review, and terminals still work; agent runs remain disabled with a route-specific explanation instead of failing after you send a message.
 
@@ -177,15 +191,15 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.39
+### Version 0.0.40
 
-This release hardens the installed Codex, Claude, Cursor, and OpenCode lifecycle boundaries so delegated work, follow-ups, out-of-order provider events, cancellation, and process cleanup remain tied to the exact owning conversation and turn. Delegated-agent cards now carry readable names, roles, and missions, while their rosters remember an explicit open choice without expanding automatically.
+Chats can now move into independent native windows, bring exact reviewed messages from another conversation, and—after explicit approval—let Codex, Claude, Cursor, or OpenCode coordinate independent top-level Inertia chats through bounded host-owned tools. Drafts, context, ownership, access, and provider sessions remain tied to the exact conversation rather than being treated as shared.
 
-Failed runs gain a privacy-bounded diagnostic disclosure, the composer separates its writing plane from a keyboard-ordered control rail, visible background work keeps moving, and Daily Work gains a compact native day-ledger mark. Consolidated renderer subscriptions and styles restore enforced bundle headroom.
+Native Kimi Code joins the provider catalog, provider runtimes gain stricter lifecycle and cumulative-output boundaries, and sent images, PDFs, text, Markdown, JSON, CSV, and Excel workbooks retain private bounded previews. Linux can recover exact runtime-owned processes after a crash without guessing by name or workspace.
 
-Exact-tag publishing also retries GitHub's delayed draft visibility before verification and upload without relaxing the release workflow's no-replacement safeguards.
+The responsive composer, explicit skill tokens, Claude sign-in, Markdown navigation recovery, Daily Work state, and truthful Send, Stop, follow-up, and Copy feedback complete the visible pass. This version is prepared through a release PR whose Windows job runs the same full gate as the exact-tag workflow before a tag exists.
 
-Download [Inertia v0.0.39](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.39):
+Download [Inertia v0.0.40](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.40):
 
 | Platform | Download |
 | --- | --- |

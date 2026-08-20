@@ -229,7 +229,6 @@ function workspaceProps(
     usage: null,
     skills: [],
     skillsCapability: null,
-    selectedSkillIds: [],
     skillsLoading: false,
     skillsError: null,
     approvals: [],
@@ -254,8 +253,6 @@ function workspaceProps(
     onCreateConversation: () => undefined,
     onSendMessage,
     onListSkills: async () => undefined,
-    onToggleSkill: () => undefined,
-    onClearSelectedSkills: () => undefined,
     onRespondToApproval: async () => undefined,
     onRespondToInput: async () => undefined,
     onUpdateConversation: async () => undefined,
@@ -296,6 +293,49 @@ afterEach(() => {
 });
 
 describe("draft turn anchoring", () => {
+  it("uses a restrained project-aware prompt for an empty chat", () => {
+    const view = render(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-empty"), async () => null)}
+      />,
+    );
+
+    expect(screen.getByRole("heading", {
+      name: "What should we build in Anchor project?",
+      level: 3,
+    })).toBeVisible();
+    expect(document.querySelector(".empty-thread-project"))
+      .toHaveTextContent("Anchor project");
+    expect(document.querySelector(".empty-thread-icon")).toBeNull();
+    expect(screen.queryByText(
+      "Describe the outcome you want. The details can take shape together.",
+      { exact: true },
+    )).not.toBeInTheDocument();
+
+    view.rerender(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-empty"), async () => null)}
+        project={{ ...project, name: "  " }}
+      />,
+    );
+    expect(screen.getByRole("heading", {
+      name: "What should we build in this project?",
+      level: 3,
+    })).toBeVisible();
+
+    const longName = "A long project identity that must wrap without escaping the transcript canvas";
+    view.rerender(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-empty"), async () => null)}
+        project={{ ...project, name: longName }}
+      />,
+    );
+    expect(screen.getByRole("heading", {
+      name: `What should we build in ${longName}?`,
+      level: 3,
+    })).toBeVisible();
+  });
+
   it("keeps the timeline mounted behind an owner-correct detail-loading boundary", async () => {
     HTMLElement.prototype.scrollTo = vi.fn();
     const first = conversation("conversation-loading-first");

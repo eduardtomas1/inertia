@@ -9,7 +9,6 @@ import {
 import type {
   AgentGoalSource,
   AgentGoalStatus,
-  AgentSkillSummary,
   AgentWorkflowState,
   Conversation,
   Project,
@@ -23,7 +22,6 @@ export interface AgentWorkflowProjection {
   loading: boolean;
   mutating: boolean;
   error: string | null;
-  selectedSkillIds: readonly string[];
   refresh: (providerRefresh?: boolean) => Promise<void>;
   setGoal: (input: {
     source: AgentGoalSource;
@@ -33,8 +31,6 @@ export interface AgentWorkflowProjection {
   }) => Promise<void>;
   clearGoal: (source: AgentGoalSource) => Promise<void>;
   listSkills: (forceReload?: boolean) => Promise<void>;
-  toggleSkill: (skill: AgentSkillSummary) => void;
-  clearSelectedSkills: () => void;
 }
 
 export interface UseAgentWorkflowsOptions {
@@ -90,7 +86,6 @@ export function useAgentWorkflows({
   const [loading, setLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const generationRef = useRef(0);
   const activeConversationId = enabled ? conversationId : null;
   const activeConversationIdRef = useRef(activeConversationId);
@@ -141,11 +136,6 @@ export function useAgentWorkflows({
       ) return;
       setState(event.result.workflow);
       if (savedOnlyWarning) setError(savedOnlyWarning);
-      const available = new Set(
-        event.result.workflow.skills.map(({ id }) => id),
-      );
-      setSelectedSkillIds((current) =>
-        current.filter((id) => available.has(id)));
     } catch (loadError) {
       if (generation !== generationRef.current) return;
       setError(publicMessage(loadError));
@@ -167,7 +157,6 @@ export function useAgentWorkflows({
     if (identityChanged) {
       setState(null);
       setError(null);
-      setSelectedSkillIds([]);
     }
     if (activeConversationId && status === "online") {
       void load(true);
@@ -296,9 +285,6 @@ export function useAgentWorkflows({
         skillDiscovery,
         refreshedAt: new Date().toISOString(),
       } : current);
-      const available = new Set(listedSkills.map(({ id }) => id));
-      setSelectedSkillIds((current) =>
-        current.filter((id) => available.has(id)));
     } catch (listError) {
       if (generation !== generationRef.current) return;
       setError(publicMessage(listError));
@@ -308,47 +294,24 @@ export function useAgentWorkflows({
     }
   }, [activeConversationId, request]);
 
-  const toggleSkill = useCallback((skill: AgentSkillSummary): void => {
-    if (
-      skill.conversationId !== activeConversationId
-      || !skill.enabled
-    ) return;
-    setSelectedSkillIds((current) => current.includes(skill.id)
-      ? current.filter((id) => id !== skill.id)
-      : current.length < 8
-        ? [...current, skill.id]
-        : current);
-  }, [activeConversationId]);
-
-  const clearSelectedSkills = useCallback(
-    () => setSelectedSkillIds([]),
-    [],
-  );
-
   return useMemo(() => ({
     state: activeConversationId ? state : null,
     loading: activeConversationId ? loading : false,
     mutating: activeConversationId ? mutating : false,
     error: activeConversationId ? error : null,
-    selectedSkillIds: activeConversationId ? selectedSkillIds : [],
     refresh: load,
     setGoal,
     clearGoal,
     listSkills,
-    toggleSkill,
-    clearSelectedSkills,
   }), [
     activeConversationId,
     clearGoal,
-    clearSelectedSkills,
     error,
     listSkills,
     load,
     loading,
     mutating,
-    selectedSkillIds,
     setGoal,
     state,
-    toggleSkill,
   ]);
 }

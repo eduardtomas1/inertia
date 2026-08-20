@@ -34,13 +34,13 @@ describe("transcript and composer composition", () => {
     const large = cssBlock(css, ':root[data-interface-scale="large"]');
 
     expect(root).toContain("--final-answer-max-width: 760px");
-    expect(root).toContain("--composer-max-width: 780px");
+    expect(root).toContain("--composer-max-width: 860px");
     expect(compact).toContain("--final-answer-max-width: 720px");
-    expect(compact).toContain("--composer-max-width: 740px");
+    expect(compact).toContain("--composer-max-width: 760px");
     expect(comfortable).toContain("--final-answer-max-width: 780px");
-    expect(comfortable).toContain("--composer-max-width: 800px");
+    expect(comfortable).toContain("--composer-max-width: 900px");
     expect(large).toContain("--final-answer-max-width: 780px");
-    expect(large).toContain("--composer-max-width: 800px");
+    expect(large).toContain("--composer-max-width: 940px");
   });
 
   it("uses one editorial axis from work through answer, metadata, and changed files", () => {

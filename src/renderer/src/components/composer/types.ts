@@ -24,6 +24,7 @@ import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
 
 export interface ComposerProps {
   conversation: Conversation;
+  checkoutBranch?: string | null;
   providers: ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;
@@ -37,7 +38,6 @@ export interface ComposerProps {
   usageDisplayMode: UsageDisplayMode;
   skills: AgentSkillSummary[];
   skillsCapability: AgentWorkflowSkillsCapability | null;
-  selectedSkillIds: readonly string[];
   skillsLoading: boolean;
   skillsError: string | null;
   promptContext?: string | null;
@@ -48,15 +48,12 @@ export interface ComposerProps {
     message: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
   ) => Promise<void>;
   onCompact?: (instruction?: string) => Promise<{
     message: string;
     instructionForwarded: boolean;
   }>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
-  onToggleSkill: (skill: AgentSkillSummary) => void;
-  onClearSelectedSkills: () => void;
   promptPresets?: readonly PromptPreset[];
   onPromptPresetCommand?: PromptPresetCommandRunner;
   onUpdateConversation: (

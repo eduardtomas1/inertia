@@ -41,7 +41,6 @@ import { formatElapsed } from "../utils/responseTimeline";
 import { SubagentElapsed } from "./SubagentElapsed";
 import { SubagentStatusMark } from "./SubagentStatusMark";
 import { SubagentTraceDetails } from "./SubagentTraceDetails";
-import { MAX_SELECTED_SKILLS } from "./composer/config";
 import {
   MAX_GOAL_TOKEN_BUDGET,
   parseGoalTokenBudget,
@@ -64,14 +63,13 @@ export interface GoalPanelProps {
   plan: AgentPlan | null;
   subagents: readonly SubagentTrace[];
   turns: readonly AgentTurn[];
-  selectedSkillIds?: readonly string[];
   now?: number;
   busy?: boolean;
   error?: string | null;
   onRetry?: () => Promise<void>;
   onSetGoal?: (input: GoalPanelGoalInput) => Promise<void>;
   onClearGoal?: (goal: AgentGoal) => void | Promise<void>;
-  onToggleSkill?: (skill: AgentSkillSummary, selected: boolean) => void;
+  onInsertSkill?: (skill: AgentSkillSummary) => void;
   onRefreshSkills?: () => void;
   canFollowUpSubagent?: (trace: SubagentTrace) => boolean;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
@@ -489,19 +487,15 @@ function PlanRelationship({
 
 function SkillsSection({
   workflow,
-  selectedSkillIds,
-  onToggleSkill,
+  onInsertSkill,
   onRefreshSkills,
   headingId,
 }: {
   workflow: AgentWorkflowState;
-  selectedSkillIds: readonly string[];
-  onToggleSkill?: GoalPanelProps["onToggleSkill"];
+  onInsertSkill?: GoalPanelProps["onInsertSkill"];
   onRefreshSkills?: GoalPanelProps["onRefreshSkills"];
   headingId: string;
 }): React.JSX.Element {
-  const selected = useMemo(() => new Set(selectedSkillIds), [selectedSkillIds]);
-  const limitReached = selected.size >= MAX_SELECTED_SKILLS;
   return (
     <section className="goal-panel-section" aria-labelledby={headingId}>
       <header className="goal-panel-section-heading">
@@ -534,39 +528,27 @@ function SkillsSection({
         </div>
       ) : (
         <ul className="goal-panel-skills">
-          {workflow.skills.map((skill) => {
-            const isSelected = selected.has(skill.id);
-            const disabledByLimit = limitReached && !isSelected;
-            return (
+          {workflow.skills.map((skill) => (
               <li key={skill.id}>
                 <button
                   type="button"
-                  aria-pressed={isSelected}
-                  disabled={!skill.enabled || !onToggleSkill || disabledByLimit}
-                  title={disabledByLimit
-                    ? `Select at most ${MAX_SELECTED_SKILLS} skills for one turn.`
+                  disabled={!skill.enabled || !onInsertSkill}
+                  title={skill.enabled
+                    ? `Insert $${skill.name} in the composer`
                     : skill.description}
-                  onClick={() => onToggleSkill?.(skill, !isSelected)}
+                  onClick={() => onInsertSkill?.(skill)}
                 >
                   <span className="goal-panel-skill-copy">
-                    <strong>{skill.name}</strong>
+                    <strong><code translate="no">{`$${skill.name}`}</code></strong>
                     <small>{skill.shortDescription ?? skill.description}</small>
                   </span>
                   <span className="goal-panel-skill-meta">
                     {skill.scope}
-                    {isSelected && <Check size={11} aria-label="Selected" />}
                   </span>
                 </button>
               </li>
-            );
-          })}
+          ))}
         </ul>
-      )}
-      {limitReached && (
-        <p className="goal-panel-capability-note" role="status">
-          Maximum {MAX_SELECTED_SKILLS} skills selected for one turn. Clear or
-          deselect a skill before adding another.
-        </p>
       )}
       {workflow.skillDiscovery.truncated && (
         <p className="goal-panel-capability-note" role="status">
@@ -820,14 +802,13 @@ export function GoalPanel({
   plan,
   subagents,
   turns,
-  selectedSkillIds = [],
   now,
   busy = false,
   error = null,
   onRetry,
   onSetGoal,
   onClearGoal,
-  onToggleSkill,
+  onInsertSkill,
   onRefreshSkills,
   canFollowUpSubagent,
   onFollowUpSubagent,
@@ -988,8 +969,7 @@ export function GoalPanel({
         {workflow && (
           <SkillsSection
             workflow={workflow}
-            selectedSkillIds={selectedSkillIds}
-            onToggleSkill={onToggleSkill}
+            onInsertSkill={onInsertSkill}
             onRefreshSkills={onRefreshSkills}
             headingId={skillsHeadingId}
           />

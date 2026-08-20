@@ -1,11 +1,5 @@
-import {
-  useId,
-} from "react";
-import {
-  Check,
-  RefreshCw,
-  Sparkles,
-} from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { RefreshCw, Search, Sparkles } from "lucide-react";
 import clsx from "clsx";
 
 import type {
@@ -14,21 +8,19 @@ import type {
 } from "@shared/contracts";
 import { COMPOSER_LABELS } from "../../lib/interfaceLabels";
 import { composerSkillsReadiness } from "../../utils/composerToolReadiness";
-import { MAX_SELECTED_SKILLS } from "./config";
 import type { ComposerMenuController } from "./useComposerMenus";
+import "./ComposerSkillsMenu.css";
 
 export interface ComposerSkillsMenuProps {
   skills: readonly AgentSkillSummary[];
   capability: AgentWorkflowSkillsCapability | null;
-  selectedSkillIds: readonly string[];
   loading: boolean;
   error: string | null;
   disabled: boolean;
   running: boolean;
   menuController: ComposerMenuController;
   onList: (forceReload?: boolean) => Promise<void>;
-  onToggle: (skill: AgentSkillSummary) => void;
-  onClear: () => void;
+  onInsert: (skill: AgentSkillSummary) => void;
 }
 
 const SCOPE_LABELS = {
@@ -42,18 +34,19 @@ const SCOPE_LABELS = {
 export function ComposerSkillsMenu({
   skills,
   capability,
-  selectedSkillIds,
   loading,
   error,
   disabled,
   running,
   menuController,
   onList,
-  onToggle,
-  onClear,
+  onInsert,
 }: ComposerSkillsMenuProps): React.JSX.Element | null {
   const instanceId = useId();
   const popoverId = `${instanceId}-composer-skills-menu`;
+  const searchId = `${instanceId}-composer-skills-search`;
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
   const {
     menu,
     toggleMenu,
@@ -61,9 +54,20 @@ export function ComposerSkillsMenu({
     setMenuTrigger,
     setMenuPopover,
   } = menuController;
-  const selected = new Set(selectedSkillIds);
-  const selectedCount = selected.size;
-  const limitReached = selectedCount >= MAX_SELECTED_SKILLS;
+
+  const visibleSkills = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    if (!needle) return skills;
+    return skills.filter((skill) =>
+      `${skill.name} ${skill.shortDescription ?? skill.description}`
+        .toLocaleLowerCase()
+        .includes(needle));
+  }, [query, skills]);
+
+  useEffect(() => {
+    if (menu === "skills") return;
+    setQuery("");
+  }, [menu]);
 
   if (!capability) return null;
   const readiness = composerSkillsReadiness({
@@ -73,39 +77,37 @@ export function ComposerSkillsMenu({
     loading,
   });
 
-  const menuItems = (): HTMLButtonElement[] => [
+  const enabledItems = (): HTMLButtonElement[] => [
     ...(document.getElementById(popoverId)
       ?.querySelectorAll<HTMLButtonElement>(
-        '[role="menuitem"]:not(:disabled), [role="menuitemcheckbox"]:not(:disabled)',
+        '.composer-skills-list [role="menuitem"]:not(:disabled)',
       ) ?? []),
   ];
-  const focusMenuEdge = (edge: "first" | "last"): void => {
-    window.requestAnimationFrame(() => {
-      const items = menuItems();
-      (edge === "first" ? items[0] : items.at(-1))?.focus();
-    });
-  };
-  const openFromKeyboard = (edge: "first" | "last"): void => {
+  const open = (): void => {
     if (!readiness.interactive) return;
     if (menu !== "skills" && skills.length === 0 && !loading) {
       void onList(false).catch(() => undefined);
     }
     if (menu !== "skills") toggleMenu("skills");
-    focusMenuEdge(edge);
+    window.requestAnimationFrame(() => searchRef.current?.focus());
   };
-  const handleTriggerKeyDown = (
-    event: React.KeyboardEvent<HTMLButtonElement>,
-  ): void => {
-    if (!readiness.interactive) return;
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    event.preventDefault();
-    openFromKeyboard(event.key === "ArrowUp" ? "last" : "first");
+  const toggle = (): void => {
+    if (menu === "skills") {
+      toggleMenu("skills");
+      return;
+    }
+    open();
   };
-  const handleMenuKeyDown = (
+  const handlePopoverKeyDown = (
     event: React.KeyboardEvent<HTMLDivElement>,
   ): void => {
+    const items = enabledItems();
+    if (event.key === "ArrowDown" && event.target === searchRef.current) {
+      event.preventDefault();
+      items[0]?.focus();
+      return;
+    }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = menuItems();
     if (items.length === 0) return;
     event.preventDefault();
     const current = items.indexOf(document.activeElement as HTMLButtonElement);
@@ -113,8 +115,10 @@ export function ComposerSkillsMenu({
     else if (event.key === "End") items.at(-1)?.focus();
     else if (event.key === "ArrowDown") {
       items[(current + 1 + items.length) % items.length]?.focus();
+    } else if (current <= 0) {
+      searchRef.current?.focus();
     } else {
-      items[(current - 1 + items.length) % items.length]?.focus();
+      items[current - 1]?.focus();
     }
   };
 
@@ -126,35 +130,26 @@ export function ComposerSkillsMenu({
         className={clsx(
           "composer-pill",
           "composer-skills-trigger",
-          selectedCount > 0 && "has-selection",
           menu === "skills" && "is-active",
         )}
         aria-label={!readiness.interactive
           ? `${COMPOSER_LABELS.skills} unavailable: ${readiness.reason}`
-          : selectedCount > 0
-          ? `Skills, ${selectedCount} selected`
-          : `Select ${capability.label}`}
+          : `Insert a ${capability.label.toLocaleLowerCase()} invocation`}
         aria-haspopup={readiness.interactive ? "menu" : undefined}
         aria-controls={readiness.interactive ? popoverId : undefined}
         aria-expanded={readiness.interactive ? menu === "skills" : undefined}
         aria-disabled={!readiness.interactive}
         data-readiness={readiness.state}
-        title={readiness.reason ?? undefined}
-        onKeyDown={handleTriggerKeyDown}
-        onClick={() => {
-          if (!readiness.interactive) return;
-          const opening = menu !== "skills";
-          if (menu !== "skills" && skills.length === 0 && !loading) {
-            void onList(false).catch(() => undefined);
-          }
-          toggleMenu("skills");
-          if (opening) focusMenuEdge("first");
+        title={readiness.reason ?? "Insert a $skill-name invocation"}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+          event.preventDefault();
+          open();
         }}
+        onClick={toggle}
       >
         <Sparkles size={14} aria-hidden="true" />
-        <span>
-          {COMPOSER_LABELS.skills}{selectedCount > 0 ? ` ${selectedCount}` : ""}
-        </span>
+        <span>{COMPOSER_LABELS.skills}</span>
       </button>
       {readiness.interactive && menu === "skills" && (
         <div
@@ -162,17 +157,13 @@ export function ComposerSkillsMenu({
           id={popoverId}
           className="composer-popover composer-skills-popover"
           role="menu"
-          aria-label={capability.label}
-          onKeyDown={handleMenuKeyDown}
+          aria-label={`Insert ${capability.label}`}
+          onKeyDown={handlePopoverKeyDown}
         >
           <header>
             <span>
-              <strong>{capability.label}</strong>
-              <small>
-                {capability.kind === "codex-native"
-                  ? "Selected skills are attached to the next turn only."
-                  : "Selected skills are enabled for the next Claude turn only."}
-              </small>
+              <strong>Invoke a skill</strong>
+              <small>Inserts the provider’s exact <code>$skill-name</code> token.</small>
             </span>
             <button
               type="button"
@@ -186,9 +177,25 @@ export function ComposerSkillsMenu({
               <RefreshCw
                 size={14}
                 className={loading ? "is-spinning" : undefined}
+                aria-hidden="true"
               />
             </button>
           </header>
+          <label className="composer-skills-search" htmlFor={searchId}>
+            <Search size={13} aria-hidden="true" />
+            <input
+              ref={searchRef}
+              id={searchId}
+              name="composer-skill-search"
+              type="search"
+              aria-label="Find a skill"
+              value={query}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Find a skill…"
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+          </label>
           {error && <p className="composer-skills-error" role="alert">{error}</p>}
           {!error && loading && skills.length === 0 && (
             <p className="composer-skills-empty" role="status">
@@ -200,61 +207,39 @@ export function ComposerSkillsMenu({
               No enabled skills were reported for this project.
             </p>
           )}
+          {!error && skills.length > 0 && visibleSkills.length === 0 && (
+            <p className="composer-skills-empty">No skills match this search.</p>
+          )}
           <div className="composer-skills-list">
-            {skills.map((skill) => {
-              const checked = selected.has(skill.id);
-              const disabledByLimit = limitReached && !checked;
-              const disabledReason = disabledByLimit
-                ? `Select at most ${MAX_SELECTED_SKILLS} skills for one turn.`
-                : !skill.enabled
-                  ? `${skill.name} was reported unavailable for this project.`
-                  : null;
-              return (
-                <button
-                  type="button"
-                  role="menuitemcheckbox"
-                  aria-checked={checked}
-                  disabled={!skill.enabled || disabledByLimit}
-                  tabIndex={-1}
-                  key={skill.id}
-                  onClick={() => onToggle(skill)}
-                  title={disabledReason ?? skill.description}
-                >
-                  <span className="composer-skill-check" aria-hidden="true">
-                    {checked && <Check size={12} />}
-                  </span>
-                  <span>
-                    <strong>{skill.name}</strong>
-                    <small>
-                      {SCOPE_LABELS[skill.scope]}
-                      {" · "}
-                      {skill.shortDescription ?? skill.description}
-                    </small>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          {selectedCount > 0 && (
-            <footer>
-              <span role={limitReached ? "status" : undefined}>
-                {limitReached
-                  ? `Maximum ${MAX_SELECTED_SKILLS} skills selected`
-                  : `${selectedCount} selected for the next turn`}
-              </span>
+            {visibleSkills.map((skill) => (
               <button
                 type="button"
                 role="menuitem"
+                disabled={!skill.enabled}
                 tabIndex={-1}
+                key={skill.id}
                 onClick={() => {
-                  onClear();
-                  dismissMenu("selection");
+                  onInsert(skill);
+                  // Insertion hands focus back to the editor, so this action
+                  // must not run the menu's normal trigger-focus restoration.
+                  dismissMenu("context-change");
                 }}
+                title={skill.enabled
+                  ? `Insert $${skill.name}`
+                  : `${skill.name} is unavailable for this project.`}
               >
-                Clear
+                <code translate="no">{`$${skill.name}`}</code>
+                <span>
+                  <strong>{skill.name}</strong>
+                  <small>
+                    {SCOPE_LABELS[skill.scope]}
+                    {" · "}
+                    {skill.shortDescription ?? skill.description}
+                  </small>
+                </span>
               </button>
-            </footer>
-          )}
+            ))}
+          </div>
         </div>
       )}
     </div>

@@ -97,6 +97,7 @@ type ChatWorkspaceProps = {
   embedded?: boolean;
   project: Project | null;
   conversation: Conversation | null;
+  checkoutBranch?: string | null;
   latestTurnSummary: ConversationLatestTurnSummary | null;
   turns: AgentTurn[];
   messages: ChatMessage[];
@@ -113,7 +114,6 @@ type ChatWorkspaceProps = {
   usage: ThreadUsageSnapshot | null;
   skills: AgentSkillSummary[];
   skillsCapability: AgentWorkflowSkillsCapability | null;
-  selectedSkillIds: readonly string[];
   skillsLoading: boolean;
   skillsError: string | null;
   promptPresets?: readonly PromptPreset[];
@@ -146,15 +146,12 @@ type ChatWorkspaceProps = {
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
   ) => Promise<TranscriptMessageSendAcceptance | null>;
   onCompactConversation?: (instruction?: string) => Promise<{
     message: string;
     instructionForwarded: boolean;
   }>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
-  onToggleSkill: (skill: AgentSkillSummary) => void;
-  onClearSelectedSkills: () => void;
   onPromptPresetCommand?: PromptPresetCommandRunner;
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
@@ -203,6 +200,7 @@ export function ChatWorkspace({
   embedded = false,
   project,
   conversation,
+  checkoutBranch = null,
   latestTurnSummary,
   turns,
   messages,
@@ -219,7 +217,6 @@ export function ChatWorkspace({
   usage,
   skills,
   skillsCapability,
-  selectedSkillIds,
   skillsLoading,
   skillsError,
   promptPresets = EMPTY_PROMPT_PRESETS,
@@ -251,8 +248,6 @@ export function ChatWorkspace({
   onSendMessage,
   onCompactConversation,
   onListSkills,
-  onToggleSkill,
-  onClearSelectedSkills,
   onPromptPresetCommand,
   onRespondToApproval,
   onRespondToInput,
@@ -593,14 +588,12 @@ export function ChatWorkspace({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
   ): Promise<void> => {
     const sourceConversationId = conversationId;
     const acceptance = await onSendMessage(
       content,
       attachments,
       context,
-      skillIds,
     );
     if (!acceptance) return;
     clearReaderIntent();
@@ -672,6 +665,10 @@ export function ChatWorkspace({
     );
   }
 
+  const projectPromptName = project.name.trim();
+  const emptyThreadProject = projectPromptName || "this project";
+  const emptyThreadTitle = `What should we build in ${emptyThreadProject}?`;
+
   return (
     <Root
       className={clsx("chat-workspace", `response-density-${responseDensity}`)}
@@ -700,7 +697,12 @@ export function ChatWorkspace({
         <div ref={timelineRef} className="response-timeline">
           {detailLoading && <LoadingMark label="Loading conversation" />}
           {!detailLoading && ownedMessages.length === 0 && ownedTurns.length === 0 && (
-            <div className="empty-thread"><span className="empty-thread-icon"><Code2 size={20} /></span><h3>What should we work on?</h3><p>Describe the outcome you want. The details can take shape together.</p></div>
+            <div className="empty-thread">
+              <h3 aria-label={emptyThreadTitle}>
+                What should we build in{" "}
+                <span className="empty-thread-project">{emptyThreadProject}</span>?
+              </h3>
+            </div>
           )}
           <Suspense fallback={<LoadingMark label="Loading conversation" />}>
             <ResponseTimeline
@@ -797,6 +799,7 @@ export function ChatWorkspace({
         />
         <Composer
           conversation={conversation}
+          checkoutBranch={checkoutBranch}
           providers={providers}
           actions={actions}
           mentionResults={mentionResults}
@@ -804,7 +807,6 @@ export function ChatWorkspace({
           usageDisplayMode={usageDisplayMode}
           skills={skills}
           skillsCapability={skillsCapability}
-          selectedSkillIds={selectedSkillIds}
           skillsLoading={skillsLoading}
           skillsError={skillsError}
           goal={goalControl}
@@ -820,8 +822,6 @@ export function ChatWorkspace({
           onSend={sendMessage}
           {...(onCompactConversation ? { onCompact: onCompactConversation } : {})}
           onListSkills={onListSkills}
-          onToggleSkill={onToggleSkill}
-          onClearSelectedSkills={onClearSelectedSkills}
           promptPresets={promptPresets}
           onPromptPresetCommand={onPromptPresetCommand}
           onUpdateConversation={onUpdateConversation}

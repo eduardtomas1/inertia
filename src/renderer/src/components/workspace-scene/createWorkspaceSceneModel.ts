@@ -4,7 +4,6 @@ import type {
   AgentApprovalRequest,
   AgentGoalSource,
   AgentGoalStatus,
-  AgentSkillSummary,
   AgentWorkflowState,
   AgentInputRequest,
   AppSettings,
@@ -48,6 +47,7 @@ import {
 import { buildEnvironmentSummary } from "../../utils/environmentSummary";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
+import { requestComposerPrefill } from "../../utils/composerPrefill";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";
@@ -121,15 +121,12 @@ export interface WorkspaceSceneActions {
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
   ) => Promise<TranscriptMessageSendAcceptance | null>;
   compactConversation: (instruction?: string) => Promise<{
     message: string;
     instructionForwarded: boolean;
   }>;
   listSkills: (forceReload?: boolean) => Promise<void>;
-  toggleSkill: (skill: AgentSkillSummary) => void;
-  clearSelectedSkills: () => void;
   setGoal: (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -204,7 +201,6 @@ export interface WorkspaceSceneModelInput {
     loading: boolean;
     mutating: boolean;
     error: string | null;
-    selectedSkillIds: readonly string[];
     refresh: (providerRefresh?: boolean) => Promise<void>;
   };
   detailLoading: boolean;
@@ -499,6 +495,7 @@ export function createWorkspaceSceneModel({
     chat: {
       project,
       conversation: detail?.conversation ?? conversation,
+      checkoutBranch: workspaceTools.gitStatus?.branch ?? null,
       latestTurnSummary: visibleConversationLatestTurnSummary(
         persistedConversation,
         conversation,
@@ -519,7 +516,6 @@ export function createWorkspaceSceneModel({
       usage: projection.usage,
       skills: currentWorkflow?.skills ?? [],
       skillsCapability: currentWorkflow?.skillsCapability ?? null,
-      selectedSkillIds: workflow.selectedSkillIds,
       skillsLoading: workflow.loading,
       skillsError: workflow.error,
       promptPresets: connection.snapshot?.promptPresets ?? [],
@@ -561,8 +557,6 @@ export function createWorkspaceSceneModel({
       onSendMessage: actions.sendMessage,
       onCompactConversation: actions.compactConversation,
       onListSkills: actions.listSkills,
-      onToggleSkill: actions.toggleSkill,
-      onClearSelectedSkills: actions.clearSelectedSkills,
       onPromptPresetCommand: actions.run,
       onRespondToApproval: actions.respondToApproval,
       onRespondToInput: actions.respondToInput,
@@ -816,12 +810,18 @@ export function createWorkspaceSceneModel({
         plan: latestPlan,
         subagents: projection.subagents,
         turns: projection.turns,
-        selectedSkillIds: workflow.selectedSkillIds,
         busy: goalMutationControlsBusy,
         onRetry: () => workflow.refresh(true),
         onSetGoal: setGoal,
         onClearGoal: (goal) => clearGoal(goal.source),
-        onToggleSkill: (skill) => actions.toggleSkill(skill),
+        onInsertSkill: (skill) => {
+          if (!persistedConversation) return;
+          requestComposerPrefill({
+            conversationId: persistedConversation.id,
+            text: `$${skill.name} `,
+          });
+          setActiveTool(null);
+        },
         onRefreshSkills: () => {
           void actions.listSkills(true).catch((error) => setActionError(
             error instanceof Error

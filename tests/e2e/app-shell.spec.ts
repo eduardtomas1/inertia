@@ -62,7 +62,7 @@ test("starts without a demo and adds the first real project", async () => {
   }, workspaceDirectory);
   await page.getByRole("button", { name: "Add your first project" }).click();
   await expect(page.getByRole("heading", {
-    name: "What should we work on?",
+    name: /^What should we build in .+\?$/u,
     level: 3,
   })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();

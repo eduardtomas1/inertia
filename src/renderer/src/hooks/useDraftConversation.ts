@@ -91,7 +91,6 @@ export function useDraftConversation({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
     activate?: boolean,
   ) => Promise<MessageSendAcceptance | null>;
   persistedConversationId: string | null;
@@ -392,7 +391,6 @@ export function useDraftConversation({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
   ): Promise<TranscriptMessageSendAcceptance | null> => {
     const sendingDraft = draftRef.current;
     if (!sendingDraft) return null;
@@ -447,7 +445,6 @@ export function useDraftConversation({
         content,
         attachments,
         context,
-        skillIds,
         stillOwnsDraft,
       );
       if (!acceptance || acceptance.conversationId !== conversationId) {
@@ -518,7 +515,6 @@ export function useDraftConversation({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
   ): Promise<TranscriptMessageSendAcceptance | null> => {
     const current = draftRef.current;
     if (current?.materialized) {
@@ -538,7 +534,6 @@ export function useDraftConversation({
           content,
           attachments,
           context,
-          skillIds,
           true,
         );
         if (
@@ -619,10 +614,9 @@ export function useDraftConversation({
         content,
         attachments,
         context,
-        skillIds,
       );
     }
-    return await materializeAndSend(content, attachments, context, skillIds);
+    return await materializeAndSend(content, attachments, context);
   };
 
   const updateConversation = async (change: ConversationUpdate): Promise<void> => {

@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 
-import { RuntimeStore } from "../../src/server/database";
 import {
   expectComposerEndsAtDock,
   expectComposerReadinessContained,
@@ -10,7 +9,12 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
-
+import {
+  createComposerResponsiveHelpers,
+  fixtureCheckoutLabel,
+  inspectLongComposerHeading,
+  loadComposerResponsiveFixture,
+} from "./support/composer-responsive";
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
 let page!: AppFixture["page"];
@@ -67,7 +71,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(addProject).toBeEnabled();
     await addProject.click();
     await expect(page.getByRole("heading", {
-      name: "What should we work on?",
+      name: /^What should we build in .+\?$/u,
       level: 3,
     })).toBeVisible();
     await page.getByRole("complementary", {
@@ -79,74 +83,87 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   }
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
-  const originalStore = new RuntimeStore(databasePath, workspaceDirectory, {
-    recoverInterruptedRuns: false,
-  });
-  const originalSettings = originalStore.shellSnapshot().settings;
-  originalStore.close();
+  const expectedCheckoutLabel = await fixtureCheckoutLabel(workspaceDirectory);
+  const { originalProject, restore } = loadComposerResponsiveFixture(databasePath, workspaceDirectory);
   const navigation = page.getByRole("complementary", {
     name: "Project navigation",
     exact: true,
   });
-  const workspacePanel = page.locator(".workspace-panel");
   const navigationWasVisible = await navigation.isVisible();
-  const workspacePanelWasVisible = await workspacePanel.isVisible();
-
-  const updateAppearance = (
-    theme: "light" | "dark",
-    interfaceScale: "compact" | "large",
-    responseDensity: "compact" | "comfortable",
-  ): void => {
-    const store = new RuntimeStore(databasePath, workspaceDirectory, {
-      recoverInterruptedRuns: false,
-    });
-    store.updateSettings({ theme, interfaceScale, responseDensity });
-    store.close();
-  };
-  const setWorkspaceTools = async (open: boolean): Promise<void> => {
-    const panelIsVisible = await workspacePanel.isVisible();
-    if (panelIsVisible === open) return;
-    if (open) {
-      await page.getByRole("button", { name: "Open workspace tools" }).click();
-      await expect(workspacePanel).toBeVisible();
-      return;
-    }
-    await page.getByRole("button", { name: "Close workspace tools" }).first().click();
-    await expect(workspacePanel).toBeHidden();
-  };
-  const capture = async (label: string): Promise<void> => {
-    const screenshot = testInfo.outputPath(`${label}.png`);
-    await page.screenshot({
-      animations: "disabled",
-      path: screenshot,
-      scale: "device",
-    });
-    await testInfo.attach(label, {
-      path: screenshot,
-      contentType: "image/png",
-    });
-  };
-
+  const workspacePanelWasVisible = await page.locator(
+    ".workspace-panel:visible",
+  ).count() > 0;
+  const {
+    updateAppearance,
+    updateProjectName,
+    setWorkspaceTools,
+    capture,
+  } = createComposerResponsiveHelpers({
+    databasePath,
+    workspaceDirectory,
+    projectId: originalProject.id,
+    page,
+    testInfo,
+  });
   try {
-    updateAppearance("light", "compact", "compact");
+    updateAppearance("light", "default", "compact");
     await resizeWindow(1440, 920);
     await page.reload();
     const textbox = page.getByRole("textbox", { name: "Message" });
     await expect(textbox).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: "What should we build in Inertia?",
+      level: 3,
+    })).toBeVisible();
+    await expect(page.locator(".empty-thread-icon")).toHaveCount(0);
+    await expect(page.getByText(
+      "Describe the outcome you want. The details can take shape together.",
+      { exact: true },
+    )).toHaveCount(0);
+    await setWorkspaceTools(false);
+
+    const longProjectName =
+      "A deliberately long project identity that still wraps safely inside the canvas";
+    updateProjectName(longProjectName);
+    await page.reload();
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await setWorkspaceTools(false);
+    const longHeading = page.getByRole("heading", {
+      name: `What should we build in ${longProjectName}?`,
+      level: 3,
+    });
+    await expect(longHeading).toBeVisible();
+    const longHeadingGeometry = await inspectLongComposerHeading(longHeading);
+    expect(longHeadingGeometry).toMatchObject({
+      contained: true,
+      fits: true,
+      wraps: true,
+      projectDecoration: "underline",
+      projectDecorationStyle: "dotted",
+    });
+    expect(longHeadingGeometry.fontSize).toBeGreaterThanOrEqual(26);
+    expect(longHeadingGeometry.fontSize).toBeLessThanOrEqual(34);
+    updateProjectName(originalProject.name);
+    await page.reload();
+    await expect(page.getByRole("heading", {
+      name: `What should we build in ${originalProject.name}?`,
+      level: 3,
+    })).toBeVisible();
     await setWorkspaceTools(false);
 
     const dock = page.getByRole("region", { name: "Message composer" });
+    await expect(dock.getByRole("group", { name: "Chat checkout context" }))
+      .toContainText(expectedCheckoutLabel);
     await expectComposerEndsAtDock(dock);
     await expectComposerReadinessContained(dock);
     const model = dock.getByRole("button", { name: /^Choose model\./u });
     const usage = dock.getByRole("region", { name: "Usage and context" });
     const send = dock.getByRole("button", { name: "Send message" });
-
     await expect(dock).toHaveAttribute("aria-busy", "false");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await expect(page.locator("html")).toHaveAttribute(
       "data-interface-scale",
-      "compact",
+      "default",
     );
     await expect(page.locator(".chat-workspace")).toHaveClass(
       /response-density-compact/u,
@@ -233,8 +250,11 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         toolbarBorderTop: toolbarStyle?.borderTopWidth,
         toolbarBackground: toolbarStyle?.backgroundColor,
         toolbarGroups: [...(toolbarElement?.querySelectorAll<HTMLElement>(
-          ":scope > .composer-tools, :scope > .composer-options, :scope > .composer-actions",
+          ":scope > .composer-primary-rail > .composer-options, :scope > .composer-primary-rail > .composer-tools, :scope > .composer-primary-rail > .composer-actions",
         ) ?? [])].map((group) => group.className.replace("composer-", "")),
+        checkoutText: toolbarElement
+          ?.querySelector<HTMLElement>(".composer-checkout-strip")
+          ?.innerText ?? "",
         textareaBorder: textareaStyle?.borderTopWidth,
         textareaBackground: textareaStyle?.backgroundColor,
         controlHeightDelta: visibleControlHeights.length > 0
@@ -243,8 +263,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         optionMarkers,
       };
     });
-    expect(wideGeometry.width).toBeGreaterThanOrEqual(738);
-    expect(wideGeometry.width).toBeLessThanOrEqual(742);
+    expect(wideGeometry.width).toBeGreaterThanOrEqual(858);
+    expect(wideGeometry.width).toBeLessThanOrEqual(862);
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
@@ -256,12 +276,14 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.dockFits).toBe(true);
     expect(wideGeometry.toolbarFits).toBe(true);
     expect(wideGeometry.zoneOrder).toEqual(["input", "controls"]);
-    expect(wideGeometry.inputPaddingInline).toBe("12px");
-    expect(wideGeometry.inputPaddingBlock).toBe("8px");
+    expect(wideGeometry.inputPaddingInline).toBe("14px");
+    expect(wideGeometry.inputPaddingBlock).toBe("10px");
     expect(wideGeometry.toolbarBorderTop).toBe("1px");
     expect(wideGeometry.toolbarBackground)
       .not.toBe(wideGeometry.textareaBackground);
-    expect(wideGeometry.toolbarGroups).toEqual(["tools", "options", "actions"]);
+    expect(wideGeometry.toolbarGroups).toEqual(["options", "tools", "actions"]);
+    expect(wideGeometry.checkoutText).toContain("Current checkout");
+    expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);
@@ -414,7 +436,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await accessTrigger.click();
     await expect(page.getByRole("menu", { name: "Project access" }))
       .toBeVisible();
-    await capture("composer-controls-access-light-compact-1440x920");
+    await capture("composer-controls-access-light-default-1440x920");
     await page.keyboard.press("Escape");
 
     const initialTextareaHeight = await textbox.evaluate(
@@ -435,7 +457,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(grownTextareaHeight).toBeGreaterThan(initialTextareaHeight);
     expect(grownTextareaHeight).toBeLessThanOrEqual(176);
     await textbox.fill("");
-    await capture("composer-dock-light-compact-1440x920");
+    await capture("composer-dock-light-default-1440x920");
 
     await electronApp.evaluate(({ dialog }, paths) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({
@@ -493,8 +515,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     ]);
     expect(attachmentGeometry.thumbnailSizes).toHaveLength(2);
     for (const size of attachmentGeometry.thumbnailSizes) {
-      expect(size.width).toBeCloseTo(30, 2);
-      expect(size.height).toBeCloseTo(30, 2);
+      expect(size.width).toBeCloseTo(32, 2);
+      expect(size.height).toBeCloseTo(32, 2);
     }
     await capture("composer-zones-attachment-light-1440x920");
     await attachmentList.getByRole("button", {
@@ -762,15 +784,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     await capture("composer-zones-dark-narrow-760x680");
   } finally {
-    const cleanup = new RuntimeStore(databasePath, workspaceDirectory, {
-      recoverInterruptedRuns: false,
-    });
-    cleanup.updateSettings({
-      theme: originalSettings.theme,
-      interfaceScale: originalSettings.interfaceScale,
-      responseDensity: originalSettings.responseDensity,
-    });
-    cleanup.close();
+    restore();
     await resizeWindow(1440, 920);
     await page.reload();
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible({

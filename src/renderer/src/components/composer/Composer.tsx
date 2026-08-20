@@ -48,6 +48,7 @@ import {
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
+import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -72,6 +73,7 @@ const unavailableCompaction = (): Promise<never> => Promise.reject(new Error(
 
 export const Composer = memo(function Composer({
   conversation,
+  checkoutBranch,
   providers,
   actions,
   disabled,
@@ -85,7 +87,6 @@ export const Composer = memo(function Composer({
   usageDisplayMode,
   skills,
   skillsCapability,
-  selectedSkillIds,
   skillsLoading,
   skillsError,
   promptContext,
@@ -95,8 +96,6 @@ export const Composer = memo(function Composer({
   onSend,
   onCompact = unavailableCompaction,
   onListSkills,
-  onToggleSkill,
-  onClearSelectedSkills,
   promptPresets = [],
   onPromptPresetCommand = ignorePromptPresetMutation,
   onUpdateConversation,
@@ -256,9 +255,18 @@ export const Composer = memo(function Composer({
         || typeof detail.text !== "string"
       ) return;
       setMessage((current) => {
-        const next = current.trim()
-          ? `${current.trim()}\n\n${detail.text}`
-          : detail.text;
+        const skillPrefill = /^\$([A-Za-z0-9][A-Za-z0-9._:-]{0,159})\s*$/u
+          .exec(detail.text);
+        const next = skillPrefill?.[1]
+          ? insertComposerSkillToken(
+              current,
+              skillPrefill[1],
+              current.length,
+              current.length,
+            ).value
+          : current.trim()
+            ? `${current.trim()}\n\n${detail.text}`
+            : detail.text;
         if (next !== current) {
           markEditorChanged(conversationIdRef.current);
           draftValueRef.current = next;
@@ -565,7 +573,6 @@ export const Composer = memo(function Composer({
         running ? request.visibleContent || attachmentFallback : request.visibleContent,
         submittedAttachments,
         request.context,
-        running ? [] : selectedSkillIds,
       );
       const ownsSubmission =
         activeSubmissionsRef.current.get(submittedConversationId)
@@ -592,7 +599,6 @@ export const Composer = memo(function Composer({
         !mountedRef.current
         || conversationIdRef.current !== submittedConversationId
       ) return;
-      onClearSelectedSkills();
       if (editorUnchanged) {
         draftValueRef.current = "";
         setMessage("");
@@ -755,8 +761,7 @@ export const Composer = memo(function Composer({
     blocked: attachments.length > 0
       || Boolean(promptContext)
       || previewContextSelected
-      || fileReferences.length > 0
-      || selectedSkillIds.length > 0,
+      || fileReferences.length > 0,
     flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
     editorRevisions: editorRevisionsRef,
     draftValueRef, textareaRef, setMessage, setSubmitting, onCompact,
@@ -770,7 +775,6 @@ export const Composer = memo(function Composer({
       && !promptContext
       && !previewContextSelected
       && fileReferences.length === 0
-      && selectedSkillIds.length === 0
       && messageFits
       && !disabled,
     submitting,
@@ -998,6 +1002,23 @@ export const Composer = memo(function Composer({
     });
     return true;
   };
+  const insertSkill = (skill: (typeof skills)[number]): void => {
+    const textarea = textareaRef.current;
+    const insertion = insertComposerSkillToken(
+      message,
+      skill.name,
+      textarea?.selectionStart ?? message.length,
+      textarea?.selectionEnd ?? message.length,
+    );
+    if (insertion.inserted) updateMessage(insertion.value);
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(
+        insertion.selectionStart,
+        insertion.selectionEnd,
+      );
+    });
+  };
   const dismissPendingRoute = (): void => {
     setPendingRoute(null);
     setRouteCreationError(null);
@@ -1012,9 +1033,8 @@ export const Composer = memo(function Composer({
     || Boolean(promptContext)
     || previewContextSelected
     || fileReferences.length > 0
-    || selectedSkillIds.length > 0
   )
-    ? "Remove attachments, preview or diff context, file references, and selected skills before transferring this text to a new chat."
+    ? "Remove attachments, preview or diff context, and file references before transferring this text to a new chat."
     : null;
 
   return (
@@ -1156,12 +1176,10 @@ export const Composer = memo(function Composer({
           onRunAction={onRunAction}
           skills={skills}
           skillsCapability={skillsCapability}
-          selectedSkillIds={selectedSkillIds}
           skillsLoading={skillsLoading}
           skillsError={skillsError}
           onListSkills={onListSkills}
-          onToggleSkill={onToggleSkill}
-          onClearSelectedSkills={onClearSelectedSkills}
+          onInsertSkill={insertSkill}
           promptPresets={promptPresets}
           currentPrompt={message}
           onApplyPromptPreset={applyPromptPreset}
@@ -1202,6 +1220,7 @@ export const Composer = memo(function Composer({
           onUpdateReasoningEffort={updateReasoningEffort}
           onUpdateFastMode={updateFastMode}
           conversation={conversation}
+          checkoutBranch={checkoutBranch}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}
           conversationUpdateError={conversationUpdateError}

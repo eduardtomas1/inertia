@@ -17,7 +17,6 @@ export const agentCommandSchemas = [
           conversationId: z.string().uuid(),
           content: z.string().trim().min(1).max(20_000),
           attachments: attachmentsSchema,
-          skillIds: z.array(z.string().uuid()).max(8).optional(),
           activate: z.boolean().optional(),
           context: turnRequestContextSchema.optional(),
         })

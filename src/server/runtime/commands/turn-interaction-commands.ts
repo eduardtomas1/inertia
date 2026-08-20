@@ -91,12 +91,9 @@ export function createTurnInteractionCommandHandler(
           );
         }
         if (dependencies.turns.isActive(conversation.id)) {
-          if (
-            command.payload.context !== undefined
-            || (command.payload.skillIds?.length ?? 0) > 0
-          ) {
+          if (command.payload.context !== undefined) {
             throw new RuntimeRequestError(
-              "Follow-ups while the agent is working cannot add skills or workspace context.",
+              "Follow-ups while the agent is working cannot add workspace context.",
             );
           }
           const admission = dependencies.turns.acquireFollowUpAdmission(
@@ -407,7 +404,7 @@ export function createTurnInteractionCommandHandler(
           resolvedSkills = await awaitMessageSendPreparation(
             dependencies.workflows.resolveTurnSkills(
               conversation.id,
-              command.payload.skillIds ?? [],
+              command.payload.content,
             ),
             preparationDeadlineAt,
           );

@@ -394,8 +394,8 @@ export function ComposerInputZone({
           readOnly={submissionPending || followUpPending}
           aria-label="Message"
           placeholder={running
-            ? "Add a follow-up while the agent works…"
-            : "Ask Inertia to work with this project…"}
+            ? "Add a follow-up or attach images…"
+            : "Ask anything, @ tag files, $ use skills, or / for commands…"}
         />
         {!messageFits && (
           <p className="composer-limit-warning" role="alert">

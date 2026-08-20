@@ -10,12 +10,8 @@ import {
   ComposerSkillsMenu,
   type ComposerSkillsMenuProps,
 } from "../../src/renderer/src/components/composer/ComposerSkillsMenu";
-import {
-  useComposerMenus,
-} from "../../src/renderer/src/components/composer/useComposerMenus";
-import type {
-  AgentSkillSummary,
-} from "../../src/shared/contracts";
+import { useComposerMenus } from "../../src/renderer/src/components/composer/useComposerMenus";
+import type { AgentSkillSummary } from "../../src/shared/contracts";
 
 function skill(index: number): AgentSkillSummary {
   return {
@@ -44,14 +40,12 @@ const defaults: Omit<ComposerSkillsMenuProps, "menuController"> = {
     available: true,
     label: "Codex skills",
   },
-  selectedSkillIds: [],
   loading: false,
   error: null,
   disabled: false,
   running: false,
   onList: vi.fn(async () => undefined),
-  onToggle: vi.fn(),
-  onClear: vi.fn(),
+  onInsert: vi.fn(),
 };
 
 describe("ComposerSkillsMenu", () => {
@@ -75,22 +69,16 @@ describe("ComposerSkillsMenu", () => {
     expect(trigger).toHaveAttribute("aria-disabled", "true");
     expect(trigger).toHaveAttribute("data-readiness", "unavailable");
     expect(trigger).toHaveAttribute("title", reason);
-    trigger.focus();
-    expect(trigger).toHaveFocus();
     fireEvent.click(trigger);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("names the temporary reason when skills are blocked during a turn", () => {
+  it("names the temporary reason when insertion is blocked during a turn", () => {
     render(<Harness {...defaults} running />);
     const trigger = screen.getByRole("button", {
       name: /Skills unavailable: Skills can be changed after/u,
     });
     expect(trigger).toHaveAttribute("data-readiness", "blocked");
-    expect(trigger).toHaveAttribute(
-      "title",
-      "Skills can be changed after the current turn stops.",
-    );
   });
 
   it("uses instance-scoped popup relationships in split composers", () => {
@@ -101,7 +89,7 @@ describe("ComposerSkillsMenu", () => {
       </>,
     );
     const triggers = screen.getAllByRole("button", {
-      name: "Select Codex skills",
+      name: "Insert a codex skills invocation",
     });
     fireEvent.click(triggers[0]!);
     fireEvent.click(triggers[1]!);
@@ -114,65 +102,40 @@ describe("ComposerSkillsMenu", () => {
     }
   });
 
-  it("moves focus through every menu action with arrow, Home, and End keys", async () => {
-    render(<Harness {...defaults} selectedSkillIds={["skill-0"]} />);
+  it("searches, navigates, and inserts the exact canonical token", async () => {
+    const onInsert = vi.fn();
+    render(<Harness {...defaults} onInsert={onInsert} />);
     const trigger = screen.getByRole("button", {
-      name: "Skills, 1 selected",
+      name: "Insert a codex skills invocation",
     });
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    await waitFor(() =>
-      expect(screen.getByRole("menuitem", {
-        name: "Refresh Codex skills",
-      })).toHaveFocus());
-
-    fireEvent.keyDown(document.activeElement ?? trigger, { key: "ArrowDown" });
-    expect(screen.getByRole("menuitemcheckbox", {
-      name: /skill-0/i,
-    })).toHaveFocus();
-    fireEvent.keyDown(document.activeElement ?? trigger, { key: "End" });
-    expect(screen.getByRole("menuitem", { name: "Clear" })).toHaveFocus();
-    fireEvent.keyDown(document.activeElement ?? trigger, { key: "Home" });
-    expect(screen.getByRole("menuitem", {
-      name: "Refresh Codex skills",
-    })).toHaveFocus();
-    fireEvent.keyDown(document.activeElement ?? trigger, { key: "Escape" });
-    await waitFor(() => expect(trigger).toHaveFocus());
-    expect(screen.queryByRole("menu", { name: "Codex skills" }))
+    const search = screen.getByRole("searchbox", { name: /Find a skill/u });
+    await waitFor(() => expect(search).toHaveFocus());
+    fireEvent.change(search, { target: { value: "skill 1 summary" } });
+    expect(screen.queryByRole("menuitem", { name: /skill-0/i }))
       .not.toBeInTheDocument();
-  });
-
-  it("disables additional skills and explains the per-turn limit", () => {
-    const skills = Array.from({ length: 9 }, (_, index) => skill(index));
-    render(
-      <Harness
-        {...defaults}
-        skills={skills}
-        selectedSkillIds={skills.slice(0, 8).map(({ id }) => id)}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", {
-      name: "Skills, 8 selected",
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    const item = screen.getByRole("menuitem", { name: /\$skill-1/i });
+    expect(item).toHaveFocus();
+    fireEvent.click(item);
+    expect(onInsert).toHaveBeenCalledWith(expect.objectContaining({
+      name: "skill-1",
     }));
-
-    expect(screen.getByRole("menuitemcheckbox", {
-      name: /skill-8/i,
-    })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Maximum 8 skills selected",
-    );
+    expect(screen.queryByRole("menu", { name: "Insert Codex skills" }))
+      .not.toBeInTheDocument();
   });
 
   it("discovers skills when the empty menu opens from the keyboard", () => {
     const onList = vi.fn(async () => undefined);
     render(<Harness {...defaults} skills={[]} onList={onList} />);
     const trigger = screen.getByRole("button", {
-      name: "Select Codex skills",
+      name: "Insert a codex skills invocation",
     });
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
 
     expect(onList).toHaveBeenCalledWith(false);
-    expect(screen.getByRole("menu", { name: "Codex skills" }))
+    expect(screen.getByRole("menu", { name: "Insert Codex skills" }))
       .toBeInTheDocument();
   });
 });

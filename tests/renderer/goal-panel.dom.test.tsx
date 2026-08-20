@@ -252,7 +252,7 @@ describe("GoalPanel", () => {
     );
     expect(screen.getByText("Keep local evidence visible"))
       .toBeInTheDocument();
-    expect(screen.getByText("security-review")).toBeInTheDocument();
+    expect(screen.getByText("$security-review")).toBeInTheDocument();
   });
 
   it("creates, resumes, completes and clears only through explicit callbacks", async () => {
@@ -395,9 +395,9 @@ describe("GoalPanel", () => {
     });
   });
 
-  it("selects only enabled discovered skills through the supplied callback", async () => {
+  it("inserts only enabled discovered skills through the supplied callback", async () => {
     const user = userEvent.setup();
-    const onToggleSkill = vi.fn();
+    const onInsertSkill = vi.fn();
     renderPanel({
       workflow: workflow({
         skills: [
@@ -409,18 +409,16 @@ describe("GoalPanel", () => {
           }),
         ],
       }),
-      selectedSkillIds: ["skill-1"],
-      onToggleSkill,
+      onInsertSkill,
     });
 
-    const selected = screen.getByRole("button", {
+    const enabled = screen.getByRole("button", {
       name: /security-review/i,
     });
-    expect(selected).toHaveAttribute("aria-pressed", "true");
-    await user.click(selected);
-    expect(onToggleSkill).toHaveBeenCalledWith(
+    expect(enabled).toHaveAttribute("title", "Insert $security-review in the composer");
+    await user.click(enabled);
+    expect(onInsertSkill).toHaveBeenCalledWith(
       expect.objectContaining({ id: "skill-1" }),
-      false,
     );
     expect(screen.getByRole("button", {
       name: /disabled-skill/i,
@@ -646,21 +644,19 @@ describe("GoalPanel", () => {
     }));
   });
 
-  it("enforces and explains the eight-skill per-turn limit", () => {
+  it("keeps every discovered skill available for literal insertion", () => {
     const skills = Array.from({ length: 9 }, (_, index) => skill({
       id: `skill-${index}`,
       name: `skill-${index}`,
     }));
     renderPanel({
       workflow: workflow({ skills }),
-      selectedSkillIds: skills.slice(0, 8).map(({ id }) => id),
-      onToggleSkill: vi.fn(),
+      onInsertSkill: vi.fn(),
     });
 
-    expect(screen.getByRole("button", { name: /skill-8/i })).toBeDisabled();
-    expect(screen.getByText(/Maximum 8 skills selected/u)).toHaveTextContent(
-      "Maximum 8 skills selected for one turn.",
-    );
+    expect(screen.getByRole("button", { name: /skill-8/i })).toBeEnabled();
+    expect(screen.queryByText(/Maximum 8 skills selected/u))
+      .not.toBeInTheDocument();
   });
 
   it("keeps compact delegated work bounded while preserving ancestors", () => {

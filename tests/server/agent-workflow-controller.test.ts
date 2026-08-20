@@ -26,6 +26,10 @@ import {
   AgentWorkflowController,
   parseCodexGoal,
 } from "../../src/server/runtime/agent-workflow-controller";
+import {
+  containsPotentialSkillInvocation,
+  mentionedSkillNames,
+} from "../../src/server/runtime/agent-skill-invocation";
 
 function conversation(update: Partial<Conversation> = {}): Conversation {
   return {
@@ -217,7 +221,121 @@ function providerGoal(threadId = "thread-1"): Record<string, unknown> {
   };
 }
 
+function codexSkillResponse(name = "security-review"): Record<string, unknown> {
+  return {
+    data: [{
+      cwd: "/workspace/project",
+      skills: [{
+        name,
+        path: `/workspace/project/.codex/skills/${name}/SKILL.md`,
+        description: `Use ${name} for this project.`,
+        scope: "repo",
+        enabled: true,
+      }],
+      errors: [],
+    }],
+  };
+}
+
 describe("AgentWorkflowController", () => {
+  it("recognizes exact skill tokens in textual order without prefix collisions", () => {
+    expect(mentionedSkillNames(
+      "$review then $security-review and $review again",
+      ["security-review", "review"],
+    )).toEqual(["review", "security-review"]);
+    expect(mentionedSkillNames(
+      "\\$review $review-extra x$review",
+      ["review"],
+    )).toEqual([]);
+    expect(containsPotentialSkillInvocation(
+      "$security-review inspect the patch",
+    )).toBe(true);
+    expect(containsPotentialSkillInvocation(
+      "The budget is $12.50 and PATH contains $HOME.",
+    )).toBe(false);
+  });
+
+  it("does not discover skills for ordinary dollar content", async () => {
+    const runtime = harness();
+
+    await expect(runtime.controller.resolveSkills(
+      "conversation-1",
+      "The budget is $12.50 and PATH contains $HOME.",
+    )).resolves.toEqual([]);
+    expect(controlRequest).not.toHaveBeenCalled();
+  });
+
+  it("discovers a cold Codex skill token before starting the turn", async () => {
+    controlRequest.mockResolvedValue(codexSkillResponse());
+    const runtime = harness();
+    const callsBefore = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.resolveSkills(
+      "conversation-1",
+      "$security-review inspect the patch",
+    )).resolves.toEqual([{
+      source: "codex-native",
+      name: "security-review",
+      path: "/workspace/project/.codex/skills/security-review/SKILL.md",
+    }]);
+    expect(controlRequest).toHaveBeenCalledTimes(callsBefore + 1);
+    expect(controlRequest).toHaveBeenLastCalledWith("skills/list", {
+      cwds: ["/workspace/project"],
+      forceReload: false,
+    });
+  });
+
+  it("rediscovers an expired Codex capability before invoking it", async () => {
+    const now = new Date("2030-01-01T00:00:00.000Z");
+    controlRequest.mockResolvedValue(codexSkillResponse());
+    const runtime = harness({ now });
+    await runtime.controller.listSkills("conversation-1", false);
+    const callsBefore = controlRequest.mock.calls.length;
+    now.setMinutes(now.getMinutes() + 31);
+
+    await expect(runtime.controller.resolveSkills(
+      "conversation-1",
+      "$security-review inspect the patch",
+    )).resolves.toHaveLength(1);
+    expect(controlRequest).toHaveBeenCalledTimes(callsBefore + 1);
+  });
+
+  it("bounds discovery for an unknown skill-shaped token", async () => {
+    controlRequest.mockResolvedValue(codexSkillResponse("review"));
+    const runtime = harness();
+    const callsBefore = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.resolveSkills(
+      "conversation-1",
+      "$missing-skill remains visible",
+    )).resolves.toEqual([]);
+    await expect(runtime.controller.resolveSkills(
+      "conversation-1",
+      "$missing-skill remains visible",
+    )).resolves.toEqual([]);
+    expect(controlRequest).toHaveBeenCalledTimes(callsBefore + 1);
+  });
+
+  it("keeps unsupported routes discovery-free for literal skill tokens", async () => {
+    const runtime = harness({
+      current: conversation({
+        providerId: "cursor",
+        modelSelection: {
+          ...conversation().modelSelection,
+          harnessId: "cursor-agent",
+        },
+      }),
+    });
+    const controlCalls = controlRequest.mock.calls.length;
+
+    await expect(runtime.controller.resolveSkills(
+      "conversation-1",
+      "$security-review remains literal",
+    )).resolves.toEqual([]);
+    expect(controlRequest).toHaveBeenCalledTimes(controlCalls);
+    expect(runtime.providers.claudeSkills).not.toHaveBeenCalled();
+  });
+
   it("requires the exact native provider thread when parsing a goal", () => {
     expect(parseCodexGoal(
       "conversation-1",
@@ -1109,7 +1227,7 @@ describe("AgentWorkflowController", () => {
     expect(summary).not.toHaveProperty("path");
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
+      "$review Please inspect this change.",
     )).resolves.toEqual([{
       source: "codex-native",
       name: "review",
@@ -1156,7 +1274,7 @@ describe("AgentWorkflowController", () => {
       expect(second?.id).toBe(first?.id);
       await expect(runtime.controller.resolveSkills(
         "conversation-1",
-        [second!.id],
+        "$review Please inspect this change.",
       )).resolves.toEqual([{
         source: "codex-native",
         name: "review",
@@ -1298,9 +1416,9 @@ describe("AgentWorkflowController", () => {
       .toEqual(expect.objectContaining({ truncated: true }));
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
+      "$review Please inspect this change.",
     )).rejects.toThrow(
-      "A selected skill is no longer available. Refresh skills and try again.",
+      "The invoked skill $review is no longer available. Refresh skills and try again.",
     );
     expect(runtime.controller.state("conversation-1").skills)
       .not.toEqual(expect.arrayContaining([
@@ -1335,16 +1453,16 @@ describe("AgentWorkflowController", () => {
       }],
     });
     const runtime = harness();
-    const [summary] = await runtime.controller.listSkills(
+    await runtime.controller.listSkills(
       "conversation-1",
       false,
     );
 
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
+      "$review Please inspect this change.",
     )).rejects.toThrow(
-      "A selected skill is no longer available. Refresh skills and try again.",
+      "The invoked skill $review is no longer available. Refresh skills and try again.",
     );
     expect(runtime.controller.state("conversation-1")).toEqual(
       expect.objectContaining({
@@ -1354,7 +1472,7 @@ describe("AgentWorkflowController", () => {
     );
   });
 
-  it("force-revalidates an opaque skill immediately before provider use", async () => {
+  it("revalidates a mentioned skill without forcing provider reload", async () => {
     const skillPath = "/workspace/project/.codex/skills/review/SKILL.md";
     controlRequest.mockResolvedValueOnce({
       data: [{
@@ -1376,14 +1494,14 @@ describe("AgentWorkflowController", () => {
       }],
     });
     const runtime = harness();
-    const [summary] = await runtime.controller.listSkills(
+    await runtime.controller.listSkills(
       "conversation-1",
       false,
     );
 
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
+      "$review Please inspect this change.",
     )).rejects.toThrow("no longer available");
     expect(runtime.controller.state("conversation-1").skills).toEqual([]);
   });
@@ -1434,7 +1552,7 @@ describe("AgentWorkflowController", () => {
     });
   });
 
-  it("discovers and revalidates Claude SDK skills without exposing paths", async () => {
+  it("discovers and invokes a cold Claude SDK skill without exposing paths", async () => {
     const runtime = harness({
       current: conversation({
         providerId: "claude",
@@ -1451,24 +1569,53 @@ describe("AgentWorkflowController", () => {
       }],
     });
 
-    const [summary] = await runtime.controller.listSkills(
+    await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      false,
-    );
+      "$security-review src/server",
+    )).resolves.toEqual([{
+      source: "claude-native",
+      name: "security-review",
+      path: "/workspace/project/.claude/skills/security-review/SKILL.md",
+    }]);
+    const [summary] = runtime.controller.state("conversation-1").skills;
     expect(summary).toMatchObject({
       source: "claude-native",
       scope: "repo",
       shortDescription: "<scope>",
     });
     expect(summary).not.toHaveProperty("path");
+    expect(runtime.providers.claudeSkills).toHaveBeenCalledWith(
+      "/workspace/project",
+      false,
+    );
+  });
+
+  it("rediscovers an expired Claude SDK capability before invocation", async () => {
+    const now = new Date("2030-01-01T00:00:00.000Z");
+    const runtime = harness({
+      now,
+      current: conversation({
+        providerId: "claude",
+        providerSessionId: "claude-session",
+        modelSelection: {
+          ...conversation().modelSelection,
+          harnessId: "claude-agent-sdk",
+        },
+      }),
+      claudeSkills: [{
+        name: "security-review",
+        description: "Review the repository security posture.",
+        argumentHint: "<scope>",
+      }],
+    });
+    await runtime.controller.listSkills("conversation-1", false);
+    now.setMinutes(now.getMinutes() + 31);
+
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summary!.id],
-    )).resolves.toEqual([{
-      source: "claude-native",
-      name: "security-review",
-      path: "/workspace/project/.claude/skills/security-review/SKILL.md",
-    }]);
+      "$security-review src/server",
+    )).resolves.toHaveLength(1);
+    expect(runtime.providers.claudeSkills).toHaveBeenCalledTimes(2);
   });
 
   it("coalesces equivalent skill discovery and serializes a stronger reload", async () => {

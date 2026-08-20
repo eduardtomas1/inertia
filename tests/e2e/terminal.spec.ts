@@ -200,7 +200,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
     }, workspaceDirectory);
     await addProject.click();
     await expect(page.getByRole("heading", {
-      name: "What should we work on?",
+      name: /^What should we build in .+\?$/u,
       level: 3,
     }))
       .toBeVisible({ timeout: 15_000 });

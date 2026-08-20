@@ -31,7 +31,6 @@ export interface AppRuntimeActions {
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
     activate?: boolean,
   ) => Promise<MessageSendAcceptance | null>;
   compactConversation: (
@@ -110,7 +109,6 @@ export function useAppRuntimeActions(options: {
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-    skillIds?: readonly string[],
     activate = true,
   ): Promise<MessageSendAcceptance | null> => {
     setSendingConversationIds((current) =>
@@ -122,7 +120,6 @@ export function useAppRuntimeActions(options: {
         conversationId: targetConversationId,
         content,
         attachments,
-        ...(skillIds?.length ? { skillIds: [...skillIds] } : {}),
         activate,
         ...(context ? { context } : {}),
       },

@@ -667,7 +667,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       providerId: "codex",
       conversationId: "conversation-approve",
       cwd: fake.root,
-      prompt: "Work carefully",
+      prompt: "$security-review\n\nWork carefully",
       interactionMode: "build",
       access: "supervised",
       sessionId: "thread-existing",

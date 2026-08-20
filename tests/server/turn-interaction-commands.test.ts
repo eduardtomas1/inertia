@@ -129,7 +129,7 @@ function dependencies(options: {
   readiness?: ReturnType<typeof vi.fn>;
   resolveSkills?: Mock<(
     conversationId: string,
-    skillIds: readonly string[],
+    content: string,
   ) => Promise<ProviderSkillInput[]>>;
   assertTurnSkillsCurrent?: Mock<(
     conversationId: string,
@@ -240,13 +240,16 @@ function dependencies(options: {
     workflows: {
       resolveTurnSkills: vi.fn(async (
         selectedConversationId: string,
-        skillIds: readonly string[],
-      ) => ({
-        inputs: await (
+        content: string,
+      ) => {
+        const inputs = await (
           options.resolveSkills ?? vi.fn(() => [])
-        )(selectedConversationId, skillIds),
-        routeKey: skillIds.length > 0 ? "test-route" : null,
-      })),
+        )(selectedConversationId, content);
+        return {
+          inputs,
+          routeKey: inputs.length > 0 ? "test-route" : null,
+        };
+      }),
       assertTurnSkillsCurrent:
         options.assertTurnSkillsCurrent ?? vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["workflows"],
@@ -913,13 +916,16 @@ describe("message attachment ownership transfer", () => {
       resolveSkills,
     });
     const command = messageCommand();
-    command.payload.skillIds = ["skill-1"];
+    command.payload.content = "$review Please inspect this change.";
     const handler = createTurnInteractionCommandHandler(handlerDependencies);
 
     await expect(handler({} as never, command)).rejects.toThrow(
       "Selected skill is no longer available.",
     );
-    expect(resolveSkills).toHaveBeenCalledWith(conversationId, ["skill-1"]);
+    expect(resolveSkills).toHaveBeenCalledWith(
+      conversationId,
+      "$review Please inspect this change.",
+    );
     expect(handlerDependencies.store.conversationPath).not.toHaveBeenCalled();
     expect(queue).not.toHaveBeenCalled();
     expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
@@ -939,7 +945,7 @@ describe("message attachment ownership transfer", () => {
       resolveSkills,
     });
     const command = messageCommand();
-    command.payload.skillIds = ["skill-1"];
+    command.payload.content = "$review Please inspect this change.";
     const handler = createTurnInteractionCommandHandler(handlerDependencies);
 
     await expect(handler({} as never, command)).resolves.toBe("handled");
@@ -1053,6 +1059,46 @@ describe("message attachment ownership transfer", () => {
       .not.toHaveBeenCalled();
   });
 
+  it("preserves literal skill tokens in active follow-ups without claiming a new capability", async () => {
+    const handlerDependencies = dependencies({
+      queue: vi.fn(),
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
+    vi.mocked(handlerDependencies.turns.steer).mockImplementation(async (
+      _lease,
+      input,
+    ) => ({
+      id: "77777777-7777-4777-8777-777777777777",
+      conversationId,
+      turnId: "88888888-8888-4888-8888-888888888888",
+      role: "user",
+      content: input.content,
+      attachments: [],
+      createdAt: "2026-07-30T06:00:00.000Z",
+    }));
+    const command = messageCommand();
+    command.payload.content = "$security-review inspect the latest patch";
+    command.payload.attachments = [];
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      command,
+    )).resolves.toBe("handled");
+
+    expect(handlerDependencies.turns.steer).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        content: "$security-review inspect the latest patch",
+        imagePaths: [],
+      },
+      [],
+      expect.any(Function),
+    );
+    expect(handlerDependencies.workflows.resolveTurnSkills)
+      .not.toHaveBeenCalled();
+  });
+
   it("rolls back accepted durable images when follow-up persistence fails", async () => {
     const relinquishAll = vi.fn(async () => undefined);
     const handlerDependencies = dependencies({ queue: vi.fn(), relinquishAll });
@@ -1140,7 +1186,7 @@ describe("message attachment ownership transfer", () => {
         assertTurnSkillsCurrent,
       });
       const command = messageCommand();
-      command.payload.skillIds = ["skill-1"];
+      command.payload.content = "$review Please inspect this change.";
       const handler = createTurnInteractionCommandHandler(
         handlerDependencies,
       );

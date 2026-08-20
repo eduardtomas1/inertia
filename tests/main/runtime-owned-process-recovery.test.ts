@@ -235,6 +235,36 @@ describe.skipIf(process.platform !== "linux")(
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);
     });
 
+    it("retires a failed child claim only after its exact process group stops", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      const claim = vi.spyOn(RuntimeOwnedProcessJournal.prototype, "claim")
+        .mockImplementationOnce(() => {
+          throw new Error("The spawned process ownership could not be persisted.");
+        });
+      let child!: ChildProcess;
+      try {
+        expect(() => spawnRuntimeOwnedProcess(() => {
+          child = spawn(
+            process.execPath,
+            ["-e", "setInterval(() => undefined, 1000)"],
+            { detached: true, shell: false, stdio: "ignore" },
+          );
+          liveChildren.add(child);
+          child.once("close", () => liveChildren.delete(child));
+          return child;
+        })).toThrow("could not be persisted");
+
+        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+        expect(claim).toHaveBeenCalledTimes(1);
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        claim.mockRestore();
+        await closeOf(child);
+      }
+    });
+
     it("registers and idempotently retires a PID-backed process group", async () => {
       const directory = temporaryDirectory();
       activate(directory);

@@ -759,6 +759,12 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     registry.journal.release(ownershipId);
     throw error;
   }
+  const claim: ActiveRuntimeOwnedProcessClaim = {
+    ownershipId,
+    released: false,
+    releaseConfirmation: null,
+    settleReleaseConfirmation: null,
+  };
   try {
     registry.journal.claim(
       ownershipId,
@@ -767,19 +773,21 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
       child.pid ?? 0,
       process.pid,
     );
-    const claim: ActiveRuntimeOwnedProcessClaim = {
-      ownershipId,
-      released: false,
-      releaseConfirmation: null,
-      settleReleaseConfirmation: null,
-    };
     registry.claims.set(child, claim);
     child.once("close", () => {
       void releaseIfGroupExited(registry, claim, child.pid ?? 0);
     });
   } catch (error) {
     if (child.pid === undefined) registry.journal.release(ownershipId);
-    else hardStopUnclaimed(child);
+    else {
+      hardStopUnclaimed(child);
+      void releaseFailedPidClaimIfStopped(
+        registry,
+        claim,
+        child.pid,
+        linuxProcessCanExecute,
+      );
+    }
     throw error;
   }
   return child;

@@ -67,7 +67,7 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
-  it("shards the full Windows unit suite without restoring native fixture contention", async () => {
+  it("shards ordinary Windows units and runs the complete gate for release candidates", async () => {
     const workflow = await source(".github/workflows/ci.yml");
     const ordinaryCheck = workflowStep(
       workflow,
@@ -80,8 +80,21 @@ describe("cross-platform packaged behavior contract", () => {
       workflow,
       "Typecheck and build the Windows platform gate",
     );
-    expect(windowsPlatformCheck).toContain("if: runner.os == 'Windows'");
+    expect(windowsPlatformCheck).toContain("runner.os == 'Windows'");
+    expect(windowsPlatformCheck).toContain(
+      "!startsWith(github.head_ref, 'codex/release-')",
+    );
     expect(windowsPlatformCheck).toContain("run: npm run check:platform");
+
+    const windowsReleaseCheck = workflowStep(
+      workflow,
+      "Run the complete Windows release-candidate gate",
+    );
+    expect(windowsReleaseCheck).toContain("runner.os == 'Windows'");
+    expect(windowsReleaseCheck).toContain(
+      "startsWith(github.head_ref, 'codex/release-')",
+    );
+    expect(windowsReleaseCheck).toContain("run: npm run check");
 
     expect(workflow).toContain("name: Windows unit tests (${{ matrix.shard }}/2)");
     expect(workflow).toContain("timeout-minutes: 30");

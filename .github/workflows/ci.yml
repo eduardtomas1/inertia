@@ -65,8 +65,16 @@ jobs:
         run: npm run check
 
       - name: Typecheck and build the Windows platform gate
-        if: runner.os == 'Windows'
+        if: >-
+          runner.os == 'Windows'
+          && !startsWith(github.head_ref, 'codex/release-')
         run: npm run check:platform
+
+      - name: Run the complete Windows release-candidate gate
+        if: >-
+          runner.os == 'Windows'
+          && startsWith(github.head_ref, 'codex/release-')
+        run: npm run check
 
       - name: Run portable runtime and provider protocol suite
         run: npm run test:portable

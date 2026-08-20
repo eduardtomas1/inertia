@@ -27,7 +27,7 @@ export async function probeNativeBackend(
   signal: AbortSignal,
 ): Promise<ProbeObservation> {
   const protocol = request.profile.protocol;
-  if (protocol !== "cursor-managed" && protocol !== "opencode-native") {
+  if (protocol !== "cursor-managed" && protocol !== "kimi-managed" && protocol !== "opencode-native") {
     throw new BackendProbeError("unsupported-protocol", FIXED_FAILURE_MESSAGES["unsupported-protocol"]);
   }
   const adapter = dependencies.nativeAdapters?.[protocol];

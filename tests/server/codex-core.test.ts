@@ -487,7 +487,7 @@ describe("Codex protocol seams", () => {
     expect(exactFailure).not.toHaveBeenCalled();
   });
 
-  it("rejects max plus one, aggregate overflow, malformed UTF-8, and counts multibyte input", () => {
+  it("rejects max plus one, burst overflow, malformed UTF-8, and counts multibyte input", () => {
     const tooLargeFailure = vi.fn();
     const tooLarge = new JsonLineDecoder(
       CODEX_APP_SERVER_MAX_FRAME_BYTES,
@@ -497,12 +497,15 @@ describe("Codex protocol seams", () => {
     tooLarge.push(Buffer.alloc(CODEX_APP_SERVER_MAX_FRAME_BYTES + 1, 0x78));
     expect(tooLargeFailure).toHaveBeenCalledWith("line-overflow");
 
-    const aggregateFailure = vi.fn();
-    const aggregate = new JsonLineDecoder(32, vi.fn(), aggregateFailure, 10);
-    aggregate.push(Buffer.from("1234\n"));
-    aggregate.push(Buffer.from("56789\n"));
-    aggregate.push(Buffer.from("x"));
-    expect(aggregateFailure).toHaveBeenCalledWith("aggregate-overflow");
+    const burstFailure = vi.fn();
+    const burst = new JsonLineDecoder(8, vi.fn(), burstFailure, {
+      maxBytes: 10,
+      windowMs: 1_000,
+      now: () => 0,
+    });
+    burst.push(Buffer.from("1234\n"));
+    burst.push(Buffer.from("56789\n"));
+    expect(burstFailure).toHaveBeenCalledWith("rate-overflow");
 
     const multibyteLines: string[] = [];
     const multibyteFailure = vi.fn();
@@ -526,11 +529,49 @@ describe("Codex protocol seams", () => {
     expect(malformed).toHaveBeenCalledWith("malformed-utf8");
   });
 
-  it("delivers complete frames before aggregate overflow in the same stream chunk", () => {
+  it("does not turn healthy cumulative long-run output into an overflow", () => {
+    const lines: string[] = [];
+    const failure = vi.fn();
+    let now = 0;
+    const decoder = new JsonLineDecoder(
+      5,
+      (line) => lines.push(line),
+      failure,
+      { maxBytes: 10, windowMs: 1_000, now: () => now },
+    );
+
+    for (let index = 0; index < 100; index += 1) {
+      decoder.push(Buffer.from("data\n"));
+      now += 500;
+    }
+
+    expect(lines).toHaveLength(100);
+    expect(failure).not.toHaveBeenCalled();
+  });
+
+  it("keeps fragmented frame retention bounded by the frame limit", () => {
     const lines: string[] = [];
     const failure = vi.fn();
     const decoder = new JsonLineDecoder(
-      16,
+      4_096,
+      (line) => lines.push(line),
+      failure,
+    );
+
+    for (let index = 0; index < 4_096; index += 1) {
+      decoder.push(Buffer.from("x"));
+    }
+    decoder.end();
+
+    expect(lines).toEqual(["x".repeat(4_096)]);
+    expect(failure).not.toHaveBeenCalled();
+  });
+
+  it("delivers complete frames before burst overflow in the same stream chunk", () => {
+    const lines: string[] = [];
+    const failure = vi.fn();
+    const decoder = new JsonLineDecoder(
+      10,
       (line) => lines.push(line),
       failure,
       10,
@@ -540,6 +581,6 @@ describe("Codex protocol seams", () => {
 
     expect(lines).toEqual(["one", "two"]);
     expect(failure).toHaveBeenCalledOnce();
-    expect(failure).toHaveBeenCalledWith("aggregate-overflow");
+    expect(failure).toHaveBeenCalledWith("rate-overflow");
   });
 });

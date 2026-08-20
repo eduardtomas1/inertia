@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import { Readable, Transform, Writable, type TransformCallback } from "node:stream";
+import { Readable, Writable } from "node:stream";
 
 import * as acp from "@agentclientprotocol/sdk";
 import type {
@@ -33,10 +33,9 @@ import {
   type AgentHarnessStartOptions,
   type CursorAcpHarnessCapabilities,
 } from "./agent-harness";
-import type { ProviderRunResult } from "./contracts";
+import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
 import type {
   AgentApprovalDecision,
-  AgentInputRequest,
   AgentPlanStep,
 } from "./interactions";
 import { providerActivityDetailSections } from "./activity-detail";
@@ -49,16 +48,34 @@ import {
   createProviderHostToolMcpSession,
   type ProviderHostToolMcpConnection,
 } from "./host-tool-mcp-http";
-import { cursorHostMcpServers } from "./host-tool-mcp-config";
+import { acpHostMcpServers } from "./host-tool-mcp-config";
 import { redactHostToolPayload } from "./host-tool-redaction";
+import {
+  cursorPriorFailureDetail,
+  cursorRuntimeFailure,
+} from "./cursor-acp-failures";
+import { BoundedJsonLineTransform } from "./cursor-acp-framing";
+import {
+  cursorQuestions,
+  cursorTodoSteps,
+  parseCursorGenerateImageNotification,
+  parseCursorPlanRequest,
+  parseCursorQuestionRequest,
+  parseCursorTaskNotification,
+  parseCursorTodosRequest,
+} from "./cursor-acp-extensions";
+
+export {
+  parseCursorGenerateImageNotification,
+  parseCursorQuestionRequest,
+  parseCursorTaskNotification,
+};
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-const MAX_INPUT_QUESTIONS = 3;
-const MAX_INPUT_OPTIONS = 20;
 const MAX_PENDING_INTERACTIONS = 64;
 const MAX_TRACKED_TOOL_ACTIVITIES = 1_024;
 const MAX_AVAILABLE_COMMANDS = 256;
@@ -145,6 +162,8 @@ function startCursorRun(
   const inputs = new Map<string, PendingInput>();
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
+  let sessionReady = false;
+  let promptInFlight = false;
   let supportsImages = false;
   let availableCommandNames: Set<string> | null = null;
   let acceptsCommandAdvertisement = false;
@@ -153,6 +172,7 @@ function startCursorRun(
     resolveCommandAdvertisement = resolve;
   });
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
+  let subagentSequence = 0;
   const toolActivities = new Map<
     string,
     {
@@ -187,6 +207,9 @@ function startCursorRun(
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
 
+  const ownsActivePrompt = (): boolean =>
+    Boolean(sessionId) && sessionReady && promptInFlight && !cancelRequested;
+
   const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = approvals.get(requestId);
     if (!pending || pending.settled) return false;
@@ -217,12 +240,21 @@ function startCursorRun(
 
   const client = acp.client({ name: "Inertia" })
     .onRequest(acp.methods.client.session.requestPermission, async ({ params, signal }) => {
-      if (!sessionId || params.sessionId !== sessionId) return { outcome: { outcome: "cancelled" } };
-      return await cursorPermission(params, signal, options, emitter.rich, approvals);
+      if (!ownsActivePrompt() || params.sessionId !== sessionId) {
+        return { outcome: { outcome: "cancelled" } };
+      }
+      return await cursorPermission(
+        params,
+        redactHostMcpPayload(params),
+        signal,
+        options,
+        emitter.rich,
+        approvals,
+      );
     })
     .onNotification(acp.methods.client.session.update, ({ params }) => {
       const safeParams = redactHostMcpPayload(params);
-      if (!sessionId || safeParams.sessionId !== sessionId) return;
+      if (!sessionId || safeParams.sessionId !== sessionId || cancelRequested) return;
       if (
         acceptsCommandAdvertisement
         && safeParams.update.sessionUpdate === "available_commands_update"
@@ -233,6 +265,18 @@ function startCursorRun(
         );
         resolveCommandAdvertisement();
       }
+      if (
+        !sessionReady
+        && safeParams.update.sessionUpdate === "config_option_update"
+      ) {
+        emitCursorMetadata(
+          safeParams.update.configOptions,
+          supportsImages,
+          emitter.rich,
+        );
+        return;
+      }
+      if (!ownsActivePrompt()) return;
       handleCursorUpdate(
         safeParams,
         resultText,
@@ -242,8 +286,12 @@ function startCursorRun(
         toolActivities,
       );
     })
-    .onRequest("cursor/ask_question", parseCursorQuestionRequest, async ({ params, signal }) => {
-      if (cancelRequested) return { outcome: "cancelled" };
+    .onRequest("cursor/ask_question", (value) => value, async ({ params: rawParams, signal }) => {
+      if (!ownsActivePrompt()) return { outcome: "cancelled" };
+      const providerParams = parseCursorQuestionRequest(rawParams);
+      const params = parseCursorQuestionRequest(
+        redactHostMcpPayload(rawParams),
+      );
       const requestId = randomUUID();
       const request = cursorQuestions(requestId, params);
       const answers = await new Promise<Record<string, string[]>>((resolve) => {
@@ -254,28 +302,87 @@ function startCursorRun(
         signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
         emitter.rich({ type: "input", request });
       });
-      if (signal.aborted || cancelRequested) return { outcome: "cancelled" };
+      if (signal.aborted || !ownsActivePrompt()) return { outcome: "cancelled" };
       return {
         outcome: "answered",
-        answers: params.questions.map((question) => ({
-          questionId: question.id,
+        answers: params.questions.map((question, questionIndex) => ({
+          questionId: providerParams.questions[questionIndex]?.id
+            ?? question.id,
           selectedOptionIds: (answers[question.id] ?? []).flatMap((answer) => {
-            const option = question.options.find((candidate) => candidate.id === answer || candidate.label === answer);
+            const optionIndex = question.options.findIndex((candidate) =>
+              candidate.id === answer || candidate.label === answer);
             // Cursor's extension only names this field for option IDs. Current
             // agents also accept a raw value here for the native "Other"
             // answer; dropping it would falsely report that the user answered.
-            return [option?.id ?? answer];
+            return [providerParams.questions[questionIndex]?.options[optionIndex]
+              ?.id ?? answer];
           }),
         })),
       };
     })
-    .onRequest("cursor/create_plan", parseCursorPlanRequest, ({ params }) => {
+    .onRequest("cursor/create_plan", (value) => value, ({ params: rawParams }) => {
+      if (!ownsActivePrompt()) {
+        return { outcome: { outcome: "cancelled" } };
+      }
+      const params = parseCursorPlanRequest(redactHostMcpPayload(rawParams));
       emitter.rich({ type: "plan", explanation: params.plan, steps: cursorTodoSteps(params.todos, params.plan) });
-      return { accepted: true };
+      return { outcome: { outcome: "accepted" } };
     })
-    .onNotification("cursor/update_todos", parseCursorTodosRequest, ({ params }) => {
+    .onNotification("cursor/update_todos", (value) => value, ({ params: rawParams }) => {
+      if (!ownsActivePrompt()) return;
+      const params = parseCursorTodosRequest(redactHostMcpPayload(rawParams));
       emitter.rich({ type: "plan", explanation: null, steps: cursorTodoSteps(params.todos) });
-    });
+    })
+    .onNotification("cursor/task", (value) => value, ({ params: rawParams }) => {
+      if (!ownsActivePrompt()) return;
+      const params = parseCursorTaskNotification(
+        redactHostMcpPayload(rawParams),
+      );
+      subagentSequence += 1;
+      emitter.subagent({
+        sequence: subagentSequence,
+        providerTaskId: params.toolCallId,
+        providerAgentId: params.agentId ?? null,
+        parentProviderAgentId: null,
+        parentProviderToolUseId: null,
+        providerToolUseId: params.toolCallId,
+        providerRole: params.subagentType,
+        providerName: params.model ?? null,
+        providerStatus: "completed",
+        status: "completed",
+        isLive: false,
+        description: params.description,
+        progress: params.durationMs === undefined
+          ? null
+          : `Completed in ${params.durationMs} ms`,
+        result: null,
+      });
+    })
+    .onNotification(
+      "cursor/generate_image",
+      (value) => value,
+      ({ params: rawParams }) => {
+        if (!ownsActivePrompt()) return;
+        const params = parseCursorGenerateImageNotification(
+          redactHostMcpPayload(rawParams),
+        );
+        const detail = [
+          params.filePath ? `Output: ${params.filePath}` : null,
+          params.referenceImagePaths.length > 0
+            ? `References: ${params.referenceImagePaths.join(", ")}`
+            : null,
+        ].filter((value): value is string => value !== null).join("\n");
+        emitter.activity(
+          "tool",
+          "completed",
+          `Generated image: ${params.description}`,
+          {
+            activityId: params.toolCallId,
+            ...(detail ? { detail } : {}),
+          },
+        );
+      },
+    );
 
   emitter.status("starting");
   try {
@@ -333,7 +440,7 @@ function startCursorRun(
     supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
     hostMcpConnection = await hostMcpSession?.start();
     const hostMcpServers = hostMcpConnection
-      ? cursorHostMcpServers(
+      ? acpHostMcpServers(
           hostMcpConnection,
           initialized.agentCapabilities?.mcpCapabilities?.http === true,
         )
@@ -377,6 +484,7 @@ function startCursorRun(
       options.input.interactionMode,
       options.input.model,
       options.input.reasoningEffort,
+      redactHostMcpPayload,
     );
     emitCursorMetadata(configuredOptions, supportsImages, emitter.rich);
     if (options.input.operation?.kind === "compact") {
@@ -400,17 +508,33 @@ function startCursorRun(
       ? "/summarize"
       : options.input.prompt;
     const prompt = await cursorPrompt(providerPrompt, options.input.imagePaths ?? [], initialized);
+    if (cancelRequested) return finish("cancelled");
+    sessionReady = true;
     emitter.status("running");
     // ACP v1 has no separate compaction event. For Cursor, the bounded native
     // authority is the exact session/prompt response for `/summarize`, after
     // that same resumed session authoritatively advertised the command above.
     // Only end_turn is accepted below; every other stop reason fails closed.
-    const response = await context.request(acp.methods.agent.session.prompt, { sessionId, prompt });
+    promptInFlight = true;
+    const response = redactHostMcpPayload(await context.request(
+      acp.methods.agent.session.prompt,
+      { sessionId, prompt },
+    ).finally(() => {
+      promptInFlight = false;
+    }));
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter.rich);
     const outcome = cancelRequested || response.stopReason === "cancelled"
       ? finish("cancelled")
       : response.stopReason !== "end_turn"
-        ? finish("failed", `Cursor stopped with reason: ${response.stopReason}.`)
+        ? (() => {
+            const message = `Cursor stopped with reason: ${response.stopReason}.`;
+            return finish("failed", message, {
+              reason: "provider-error",
+              message,
+              phase: "turn",
+              terminalEvent: `session/prompt:${response.stopReason}`,
+            });
+          })()
         : finish("completed");
     // Arm owned termination before returning control to connectWith, which may
     // close/reap the ACP transport before the public-result continuation runs.
@@ -425,7 +549,11 @@ function startCursorRun(
       error,
       diagnostic ? `Cursor ACP stopped: ${diagnostic}` : "Cursor ACP stopped unexpectedly.",
     ));
-    return finish("failed", message);
+    return finish(
+      "failed",
+      message,
+      cursorRuntimeFailure(message, child),
+    );
   });
   const result = providerResult.then(async (outcome): Promise<ProviderRunResult> => {
     cancelPending();
@@ -443,6 +571,9 @@ function startCursorRun(
       await terminateOwnedProcessTree(true);
     } catch {
       const error = "Cursor ACP process tree could not be confirmed stopped.";
+      const priorFailure = outcome.failure
+        ? cursorPriorFailureDetail(outcome.failure, options.input.cwd)
+        : undefined;
       emitter.status("failed", error);
       return {
         ...outcome,
@@ -450,6 +581,13 @@ function startCursorRun(
         exitCode: child.exitCode,
         signal: child.signalCode,
         error,
+        failure: {
+          reason: "provider-error",
+          message: error,
+          phase: "cleanup",
+          terminalEvent: "process-tree/cleanup",
+          ...(priorFailure ? { technicalDetail: priorFailure } : {}),
+        },
         cleanupConfirmed: false,
       };
     }
@@ -461,7 +599,11 @@ function startCursorRun(
     };
   });
 
-  function finish(status: ProviderRunResult["status"], error?: string): ProviderRunResult {
+  function finish(
+    status: ProviderRunResult["status"],
+    error?: string,
+    failure?: ProviderRunFailure,
+  ): ProviderRunResult {
     return {
       providerId: "cursor",
       conversationId,
@@ -473,6 +615,7 @@ function startCursorRun(
       signal: child.signalCode,
       cleanupConfirmed: true,
       ...(error ? { error } : {}),
+      ...(failure ? { failure } : {}),
     };
   }
 
@@ -528,6 +671,7 @@ async function waitForCursorCommandAdvertisement(
 
 async function cursorPermission(
   params: RequestPermissionRequest,
+  displayParams: RequestPermissionRequest,
   signal: AbortSignal,
   options: AgentHarnessStartOptions,
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
@@ -541,7 +685,7 @@ async function cursorPermission(
   ) {
     return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } };
   }
-  if (!cursorPermissionDisplayIsSafe(params)) {
+  if (!cursorPermissionDisplayIsSafe(displayParams)) {
     return { outcome: { outcome: "cancelled" } };
   }
   const requestId = randomUUID();
@@ -567,8 +711,10 @@ async function cursorPermission(
           : fileMutation
             ? "file-change"
             : "permissions",
-        title: bounded(params.toolCall.title || "Cursor requested permission"),
-        detail: bounded(jsonSummary(params.toolCall.rawInput)),
+        title: bounded(
+          displayParams.toolCall.title || "Cursor requested permission",
+        ),
+        detail: bounded(jsonSummary(displayParams.toolCall.rawInput)),
         cwd: options.input.cwd,
         permissionRoots: [],
         availableDecisions: ["approve", "deny", "cancel"],
@@ -857,6 +1003,7 @@ async function configureCursorSession(
   interactionMode: "build" | "plan",
   model?: string,
   effort?: string,
+  redactResponse: <T>(value: T) => T = (value) => value,
 ): Promise<SessionConfigOption[]> {
   let authoritativeConfigOptions = configOptions;
   const wantedMode = interactionMode === "plan" ? /plan|architect/iu : /build|agent|code/iu;
@@ -865,7 +1012,7 @@ async function configureCursorSession(
   if (nativeMode && modes?.currentModeId !== nativeMode.id) {
     await context.request(acp.methods.agent.session.setMode, { sessionId, modeId: nativeMode.id });
   } else if (!nativeMode && configMode) {
-    const response = await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: configMode.id, value: configMode.value });
+    const response = redactResponse(await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: configMode.id, value: configMode.value }));
     authoritativeConfigOptions = response.configOptions;
   } else if (interactionMode === "plan" && !nativeMode) {
     throw new Error("This Cursor ACP server does not advertise a plan mode.");
@@ -873,13 +1020,13 @@ async function configureCursorSession(
   if (model) {
     const selected = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "model", model);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected model '${model}'.`);
-    const response = await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value });
+    const response = redactResponse(await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }));
     authoritativeConfigOptions = response.configOptions;
   }
   if (effort) {
     const selected = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "thought_level", effort);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected reasoning effort '${effort}'.`);
-    const response = await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value });
+    const response = redactResponse(await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }));
     authoritativeConfigOptions = response.configOptions;
   }
   return authoritativeConfigOptions;
@@ -947,150 +1094,9 @@ function emitCursorPromptUsage(
 }
 
 function tokenCount(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-interface CursorQuestionParams {
-  toolCallId: string;
-  title?: string;
-  questions: Array<{ id: string; prompt: string; options: Array<{ id: string; label: string }>; allowMultiple?: boolean }>;
-}
-interface CursorPlanParams { toolCallId: string; plan: string; todos: CursorTodo[] }
-interface CursorTodosParams { toolCallId: string; todos: CursorTodo[]; merge: boolean }
-interface CursorTodo { id?: string; content?: string; title?: string; status?: string }
-
-export function parseCursorQuestionRequest(value: unknown): CursorQuestionParams {
-  const record = requireObject(value, "Cursor question request");
-  const rawQuestions = requireArray(record.questions, "questions");
-  if (rawQuestions.length === 0) {
-    throw new Error("Cursor sent an empty question request.");
-  }
-  if (rawQuestions.length > MAX_INPUT_QUESTIONS) {
-    throw new Error(`Cursor sent more than ${MAX_INPUT_QUESTIONS} questions.`);
-  }
-  const questionIds = new Set<string>();
-  return {
-    toolCallId: requireString(record.toolCallId, "toolCallId"),
-    ...(typeof record.title === "string" ? { title: bounded(record.title) } : {}),
-    questions: rawQuestions.map((raw, questionIndex) => {
-      const question = requireObject(raw, "question");
-      const questionId = requireNativeId(question.id, "question.id", 120);
-      if (questionIds.has(questionId)) {
-        throw new Error(`Cursor sent duplicate question ID '${questionId}'.`);
-      }
-      questionIds.add(questionId);
-      const rawOptions = requireArray(question.options, "question.options");
-      if (rawOptions.length > MAX_INPUT_OPTIONS) {
-        throw new Error(`Cursor sent more than ${MAX_INPUT_OPTIONS} options for question ${questionIndex + 1}.`);
-      }
-      const optionIds = new Set<string>();
-      return {
-        id: questionId,
-        prompt: requireString(question.prompt, "question.prompt"),
-        options: rawOptions.map((rawOption) => {
-          const option = requireObject(rawOption, "question option");
-          const optionId = requireNativeId(option.id, "option.id", 160);
-          if (optionIds.has(optionId)) {
-            throw new Error(
-              `Cursor sent duplicate option ID '${optionId}' for question ${questionIndex + 1}.`,
-            );
-          }
-          optionIds.add(optionId);
-          return {
-            id: optionId,
-            label: requireString(option.label, "option.label"),
-          };
-        }),
-        ...(typeof question.allowMultiple === "boolean" ? { allowMultiple: question.allowMultiple } : {}),
-      };
-    }),
-  };
-}
-
-function parseCursorPlanRequest(value: unknown): CursorPlanParams {
-  const record = requireObject(value, "Cursor plan request");
-  return { toolCallId: requireString(record.toolCallId, "toolCallId"), plan: requireString(record.plan, "plan"), todos: parseTodos(record.todos) };
-}
-
-function parseCursorTodosRequest(value: unknown): CursorTodosParams {
-  const record = requireObject(value, "Cursor todo request");
-  if (typeof record.merge !== "boolean") throw new Error("Cursor todo request is missing merge.");
-  return { toolCallId: requireString(record.toolCallId, "toolCallId"), todos: parseTodos(record.todos), merge: record.merge };
-}
-
-function parseTodos(value: unknown): CursorTodo[] {
-  return requireArray(value, "todos").slice(0, 100).map((raw) => {
-    const todo = requireObject(raw, "todo");
-    return {
-      ...(typeof todo.id === "string" ? { id: bounded(todo.id) } : {}),
-      ...(typeof todo.content === "string" ? { content: bounded(todo.content) } : {}),
-      ...(typeof todo.title === "string" ? { title: bounded(todo.title) } : {}),
-      ...(typeof todo.status === "string" ? { status: todo.status } : {}),
-    };
-  });
-}
-
-function cursorQuestions(requestId: string, params: CursorQuestionParams): AgentInputRequest {
-  return {
-    requestId,
-    autoResolutionMs: null,
-    questions: params.questions.map((question) => ({
-      id: question.id,
-      header: bounded(params.title ?? "Question"),
-      question: bounded(question.prompt),
-      isOther: true,
-      isSecret: false,
-      allowMultiple: question.allowMultiple === true,
-      options: question.options.map((option) => ({
-        id: bounded(option.id),
-        label: bounded(option.label),
-        description: "",
-      })),
-    })),
-  };
-}
-
-function cursorTodoSteps(todos: CursorTodo[], fallback?: string): AgentPlanStep[] {
-  const steps = todos.flatMap((todo) => {
-    const step = todo.content?.trim() || todo.title?.trim();
-    if (!step) return [];
-    return [{ step: bounded(step), status: todo.status === "completed" ? "completed" as const : todo.status === "in_progress" || todo.status === "inProgress" ? "inProgress" as const : "pending" as const }];
-  });
-  return steps.length > 0 ? steps : fallback ? [{ step: bounded(fallback), status: "pending" }] : [];
-}
-
-class BoundedJsonLineTransform extends Transform {
-  private pending = Buffer.alloc(0);
-  constructor(
-    private readonly maxLineBytes: number,
-    private readonly eventBudget: ProviderRunEventBudget,
-  ) {
-    super();
-  }
-  override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
-    try {
-      this.pending = Buffer.concat([this.pending, chunk]);
-      if (this.pending.length > this.maxLineBytes && !this.pending.includes(0x0a)) throw new Error("Cursor ACP sent an oversized JSON-RPC frame.");
-      let newline: number;
-      while ((newline = this.pending.indexOf(0x0a)) >= 0) {
-        const line = this.pending.subarray(0, newline);
-        this.pending = this.pending.subarray(newline + 1);
-        this.validateAndPush(line);
-      }
-      callback();
-    } catch (error) { callback(error as Error); }
-  }
-  override _flush(callback: TransformCallback): void {
-    try { if (this.pending.length > 0) this.validateAndPush(this.pending); callback(); } catch (error) { callback(error as Error); }
-  }
-  private validateAndPush(line: Buffer): void {
-    if (line.length === 0) return;
-    if (line.length > this.maxLineBytes) throw new Error("Cursor ACP sent an oversized JSON-RPC frame.");
-    const parsed: unknown = JSON.parse(line.toString("utf8"));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Cursor ACP sent a malformed JSON-RPC frame.");
-    this.eventBudget.observeBytes(line.byteLength);
-    this.push(Buffer.concat([line, Buffer.from("\n")]));
-  }
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 function failedCursorRun(conversationId: string, message: string, emitter: ReturnType<typeof createAgentHarnessEmitter>): AgentHarnessRun {
@@ -1098,7 +1104,23 @@ function failedCursorRun(conversationId: string, message: string, emitter: Retur
   return {
     harnessId: "cursor-acp",
     providerId: "cursor",
-    result: Promise.resolve({ providerId: "cursor", conversationId, status: "failed", text: "", textTruncated: false, exitCode: null, signal: null, error: message, cleanupConfirmed: true }),
+    result: Promise.resolve({
+      providerId: "cursor",
+      conversationId,
+      status: "failed",
+      text: "",
+      textTruncated: false,
+      exitCode: null,
+      signal: null,
+      error: message,
+      failure: {
+        reason: "provider-error",
+        message,
+        phase: "startup",
+        terminalEvent: "process/spawn",
+      },
+      cleanupConfirmed: true,
+    }),
     cancel: () => {},
     extension: { kind: "cursor-acp", respondToApproval: () => false, respondToInput: () => false },
   };
@@ -1121,11 +1143,3 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
 }
 function safeError(error: unknown, fallback: string): string { return error instanceof Error && error.message ? bounded(error.message) : fallback; }
 function jsonSummary(value: unknown): string { try { return value === undefined ? "Cursor requested permission." : JSON.stringify(value); } catch { return "Cursor requested permission."; } }
-function requireObject(value: unknown, label: string): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object.`); return value as Record<string, unknown>; }
-function requireArray(value: unknown, label: string): unknown[] { if (!Array.isArray(value)) throw new Error(`${label} must be an array.`); return value; }
-function requireString(value: unknown, label: string): string { if (typeof value !== "string" || value.length === 0 || value.length > MAX_EVENT_TEXT_CHARS) throw new Error(`${label} must be a bounded non-empty string.`); return value; }
-function requireNativeId(value: unknown, label: string, maxLength: number): string {
-  const id = requireString(value, label);
-  if (id.length > maxLength) throw new Error(`${label} exceeds ${maxLength} characters.`);
-  return id;
-}

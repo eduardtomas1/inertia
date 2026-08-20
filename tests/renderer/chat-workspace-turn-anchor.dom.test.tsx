@@ -484,7 +484,7 @@ describe("draft turn anchoring", () => {
     expect(visible).not.toHaveBeenCalled();
   });
 
-  it.each(["codex", "claude", "cursor", "opencode"] as const)(
+  it.each(["codex", "claude", "cursor", "kimi", "opencode"] as const)(
     "marks %s ultra reasoning for the animated frame",
     (providerId) => {
       const ultra = conversation(

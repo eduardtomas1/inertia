@@ -87,7 +87,7 @@ export class TurnStreamCoalescer {
     if (this.disposed) return;
     this.cancelTimer();
     this.pending = value;
-    this.replacement = true;
+    this.replacement = value.length > 0;
   }
 
   flush(): boolean {

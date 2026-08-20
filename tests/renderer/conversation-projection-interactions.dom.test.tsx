@@ -1493,6 +1493,165 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.activities).toHaveLength(1);
   });
 
+  it("atomically replaces stale active-turn text with the durable canonical message", async () => {
+    const source = createEventSource();
+    const turn = runningTurn();
+    const userMessage: ChatMessage = {
+      id: turn.userMessageId,
+      conversationId: primaryId,
+      turnId: turn.id,
+      role: "user",
+      content: "Correct the response.",
+      attachments: [],
+      createdAt: "2026-07-28T12:00:30.000Z",
+    };
+    const staleFirst: ChatMessage = {
+      id: "stale-first",
+      conversationId: primaryId,
+      turnId: turn.id,
+      role: "assistant",
+      content: "Stale first segment.",
+      attachments: [],
+      createdAt: "2026-07-28T12:00:32.000Z",
+    };
+    const staleSecond: ChatMessage = {
+      ...staleFirst,
+      id: "stale-second",
+      content: "Stale second segment.",
+      createdAt: "2026-07-28T12:00:33.000Z",
+    };
+    const canonical: ChatMessage = {
+      ...staleSecond,
+      content: "Authoritative replacement.",
+    };
+    let authoritativeMessages = [userMessage, staleFirst, staleSecond];
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [turn],
+              turnGitArtifacts: [],
+              messages: authoritativeMessages,
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: turn.runId,
+      turnId: turn.id,
+      text: "Stale live suffix.",
+    });
+    expect(hook.result.current.streamingText).toBe("Stale live suffix.");
+
+    source.emit({
+      type: "agent.text.replaced",
+      conversationId: primaryId,
+      runId: turn.runId,
+      turnId: turn.id,
+      message: canonical,
+    });
+
+    expect(hook.result.current.streamingText).toBe("");
+    expect(hook.result.current.messages).toEqual([userMessage, canonical]);
+
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: turn.runId,
+      turnId: turn.id,
+      text: " Fresh suffix.",
+    });
+    expect(hook.result.current.streamingText).toBe(" Fresh suffix.");
+
+    authoritativeMessages = [userMessage, canonical];
+    source.emit({
+      type: "conversation.detail.invalidated",
+      conversationId: primaryId,
+    });
+    await waitFor(() => {
+      expect(request.mock.calls.filter(([command]) =>
+        command.type === "conversation.detail.load")).toHaveLength(2);
+      expect(hook.result.current.messages).toEqual([userMessage, canonical]);
+      expect(hook.result.current.streamingText).toBe(" Fresh suffix.");
+    });
+  });
+
+  it("does not clear a newer turn stream for a delayed older replacement", () => {
+    const source = createEventSource();
+    const hook = renderProjection(source, {
+      enabled: true,
+      targetConversationId: primaryId,
+    });
+    source.emit({
+      type: "agent.started",
+      conversationId: primaryId,
+      runId: "new-run",
+      turnId: "new-turn",
+    });
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: "new-run",
+      turnId: "new-turn",
+      text: "New turn text",
+    });
+    const olderCanonical: ChatMessage = {
+      id: "older-canonical",
+      conversationId: primaryId,
+      turnId: "older-turn",
+      role: "assistant",
+      content: "Corrected older answer",
+      attachments: [],
+      createdAt: "2026-07-28T12:00:00.000Z",
+    };
+
+    source.emit({
+      type: "agent.text.replaced",
+      conversationId: primaryId,
+      runId: "older-run",
+      turnId: "older-turn",
+      message: olderCanonical,
+    });
+
+    expect(hook.result.current.streamingText).toBe("New turn text");
+    expect(hook.result.current.messages).toContainEqual(olderCanonical);
+  });
+
   it("retains every unhydrated commentary segment until detail catches up", () => {
     const source = createEventSource();
     const hook = renderProjection(source, {

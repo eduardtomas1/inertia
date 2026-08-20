@@ -4,10 +4,8 @@ import { pathToFileURL } from "node:url";
 
 import {
   type Event,
-  type Model,
   type OpencodeClient,
   type Provider,
-  type QuestionInfo,
 } from "@opencode-ai/sdk/v2";
 
 import type { ProviderModel } from "../../shared/contracts";
@@ -23,21 +21,21 @@ import {
   type AgentHarnessStartOptions,
   type OpenCodeSdkHarnessCapabilities,
 } from "./agent-harness";
-import type { ProviderRunResult } from "./contracts";
+import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
 import type {
   AgentApprovalDecision,
 } from "./interactions";
-import { isSafeApprovalDisplayText } from "./approval-display";
+import {
+  sanitizeProviderActivityDetail,
+  sanitizeProviderFailureSummary,
+} from "./activity-detail";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import {
   createOwnedOpenCodeClient,
   ownedOpenCodeCredentials,
   ownedOpenCodeEnvironment,
-  openCodeInteractionId,
   openCodeOptionId,
-  openCodeQuestionPayload,
   openCodeQuestionId,
-  openCodeQuestions,
 } from "./opencode-boundary";
 import {
   openCodeCleanupFailureMessage,
@@ -48,47 +46,51 @@ import {
 } from "./opencode-owned-server";
 import {
   createOpenCodeEventState,
-  emitOpenCodeNextActivity,
-  emitOpenCodeUsage,
-  emitOpenCodeUsageSnapshot,
-  handleOpenCodeNextTextEvent,
-  handleOpenCodePart,
-  handleOpenCodePartDelta,
-  rememberOpenCodeMessageRole,
-  removeOpenCodeMessage,
-  removeOpenCodePart,
-  replayOpenCodeParts,
-  type OpenCodeEventState,
+  openCodeCanonicalResult,
+  settleOpenCodePromptOutput,
   type OpenCodeUsageState,
 } from "./opencode-event-projection";
 import {
   createOpenCodeHostTools,
   openCodePermissions,
 } from "./opencode-host-tools";
+import { OpenCodeRunOwnership } from "./opencode-run-ownership";
 import {
-  bounded,
-  errorMessage,
+  handleOpenCodeEvent,
+  openCodeEventRequiresPromptAdmission,
+  type OpenCodeFailureState,
+  type OpenCodePendingApproval,
+  type OpenCodePendingInput,
+  type OpenCodePromptLifecycle,
+} from "./opencode-sdk-events";
+import {
+  findOpenCodeModel,
   finite,
   imageMime,
-  jsonSummary,
+  isOpenCodeIdleEvent,
   objectValue,
+  openCodeEventSessionId,
+  openCodeRuntimeFailure,
   resolveOpenCodeAgent,
+  resolveOpenCodeModel,
   safeError,
   serverDiagnostic,
-  stringValue,
-  todoStep,
-} from "./opencode-harness-values";
+} from "./opencode-sdk-support";
+
+export {
+  openCodeApprovalDisplay,
+  resolveOpenCodeModel,
+} from "./opencode-sdk-support";
 const MAX_EVENT_BYTES = 1024 * 1024;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
-const MAX_PENDING_INTERACTIONS = 64;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_SERVER_OUTPUT_CHARS = 32 * 1024;
 const START_TIMEOUT_MS = 10_000;
 const INITIALIZATION_TIMEOUT_MS = 30_000;
 const METADATA_PROVIDER_TIMEOUT_MS = 10_000;
 const CANCEL_FORCE_MS = 2_000;
-const RUN_DEADLINE_MS = 4 * 60 * 60 * 1_000;
+const RUN_DEADLINE_MS = 24 * 60 * 60 * 1_000;
 const EVENT_INACTIVITY_DEADLINE_MS = 30 * 60 * 1_000;
 const MIN_DEADLINE_MS = 25;
 export const OPENCODE_SDK_CAPABILITIES = {
@@ -108,13 +110,7 @@ export const OPENCODE_SDK_CAPABILITIES = {
     modelMetadata: "server-config",
   },
 } as const satisfies OpenCodeSdkHarnessCapabilities;
-interface PendingApproval { nativeId: string; settled: boolean }
-interface PendingInput { nativeId: string; questions: QuestionInfo[]; settled: boolean }
-interface OpenCodePromptLifecycle {
-  messageId: string;
-  observed: boolean;
-  activityObserved: boolean;
-}
+
 interface OpenCodeManualCompactionProof {
   initiatedAt: number | null;
   messageId: string | null;
@@ -266,8 +262,8 @@ function startOpenCodeRun(
   );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const serverOutput = new CappedProviderBuffer(MAX_SERVER_OUTPUT_CHARS);
-  const approvals = new Map<string, PendingApproval>();
-  const inputs = new Map<string, PendingInput>();
+  const approvals = new Map<string, OpenCodePendingApproval>();
+  const inputs = new Map<string, OpenCodePendingInput>();
   const eventAbort = new AbortController();
   const emittedParts = new Map<string, string>();
   const usageState: OpenCodeUsageState = {
@@ -280,6 +276,7 @@ function startOpenCodeRun(
     compactsAutomatically: null,
   };
   const eventState = createOpenCodeEventState();
+  const failureState: OpenCodeFailureState = {};
   const promptLifecycle: OpenCodePromptLifecycle = {
     messageId: `msg_${randomUUID().replaceAll("-", "")}`,
     observed: false,
@@ -295,6 +292,7 @@ function startOpenCodeRun(
       emitter.rich({ type: "approval-resolved", requestId, decision });
     },
   });
+  const ownership = new OpenCodeRunOwnership(promptLifecycle.messageId);
   const pendingFollowUps = new Set<Promise<boolean>>();
   let sessionId = options.input.sessionId;
   let client: OpencodeClient | undefined;
@@ -319,10 +317,17 @@ function startOpenCodeRun(
     runDeadlineTimer = undefined;
     eventInactivityTimer = undefined;
   };
-  const redactHostMcp = (value: string): string => hostTools?.redact(value) ?? value;
-  const failDeadline = (message: string): void => {
+  const redactHostMcp = (value: string): string =>
+    hostTools?.redact(value) ?? value;
+  const failDeadline = (message: string, terminalEvent: string): void => {
     if (cancelRequested || terminalError) return;
     terminalError = message;
+    failureState.terminal = {
+      reason: "rpc-timeout",
+      message,
+      phase: "runtime",
+      terminalEvent,
+    };
     eventAbort.abort();
     interruptRun(new Error(message));
   };
@@ -330,12 +335,24 @@ function startOpenCodeRun(
     if (cancelRequested || terminalError) return;
     if (eventInactivityTimer) clearTimeout(eventInactivityTimer);
     eventInactivityTimer = setTimeout(() => {
-      failDeadline("OpenCode's event stream became inactive before the session completed.");
+      failDeadline(
+        "OpenCode's event stream became inactive before the session completed.",
+        "event/inactivity-deadline",
+      );
     }, deadlines.eventInactivityDeadlineMs);
     eventInactivityTimer.unref();
   };
   const failInteraction = (error: unknown): void => {
-    terminalError = safeError(error, "OpenCode could not deliver an interactive response.");
+    terminalError = redactHostMcp(
+      safeError(error, "OpenCode could not deliver an interactive response."),
+    );
+    failureState.terminal = openCodeRuntimeFailure(
+      terminalError,
+      terminalError,
+      "interaction/response",
+      undefined,
+      options.input.cwd,
+    );
     eventAbort.abort();
     interruptRun(new Error(terminalError));
   };
@@ -390,11 +407,18 @@ function startOpenCodeRun(
 
   emitter.status("starting");
   runDeadlineTimer = setTimeout(() => {
-    failDeadline("OpenCode exceeded the maximum run duration.");
+    failDeadline(
+      "OpenCode exceeded the maximum run duration.",
+      "run/deadline",
+    );
   }, deadlines.runDeadlineMs);
   runDeadlineTimer.unref();
   const result = (async (): Promise<ProviderRunResult> => {
-    let outcome: { status: ProviderRunResult["status"]; error?: string };
+    let outcome: {
+      status: ProviderRunResult["status"];
+      error?: string;
+      failure?: ProviderRunFailure;
+    };
     let cleanupConfirmed = true;
     try {
       const credentials = ownedOpenCodeCredentials(options.environment);
@@ -446,11 +470,13 @@ function startOpenCodeRun(
       );
       const providerData = {
         ...providerResponse,
-        data: hostTools?.redactPayload(providerResponse.data) ?? providerResponse.data,
+        data: hostTools?.redactPayload(providerResponse.data)
+          ?? providerResponse.data,
       };
       const agents = {
         ...agentResponse,
-        data: hostTools?.redactPayload(agentResponse.data) ?? agentResponse.data,
+        data: hostTools?.redactPayload(agentResponse.data)
+          ?? agentResponse.data,
       };
       const discoveredModels = openCodeModels(
         providerData.data.all,
@@ -499,6 +525,13 @@ function startOpenCodeRun(
             permission: openCodePermissions(options.input.access),
           }, { signal, throwOnError: true }),
         );
+        const safeSessionId = hostTools?.redactPayload(created.data.id)
+          ?? created.data.id;
+        if (safeSessionId !== created.data.id) {
+          throw new Error(
+            "OpenCode returned a session identity containing an Inertia bridge credential.",
+          );
+        }
         sessionId = created.data.id;
         emitter.session(created.data.id);
       }
@@ -522,6 +555,9 @@ function startOpenCodeRun(
       const subscribed = await client.event.subscribe({ directory: options.input.cwd }, { signal: eventAbort.signal, throwOnError: true });
       armEventInactivityDeadline();
       const compacting = options.input.operation?.kind === "compact";
+      if (compacting) {
+        ownership.rejectPromptAdmission(promptLifecycle.messageId);
+      }
       const manualCompaction: OpenCodeManualCompactionProof = {
         initiatedAt: null,
         messageId: null,
@@ -529,21 +565,35 @@ function startOpenCodeRun(
       };
       let sessionIdleObserved = false;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
-        onActivity: armEventInactivityDeadline,
-        onEvent: (event) => handleOpenCodeEvent(
-          hostTools?.redactPayload(event) ?? event,
-          options,
-          client!,
-          text,
-          emitter,
-          approvals,
-          inputs,
-          emittedParts,
-          usageState,
-          eventState,
-          promptLifecycle,
-          failInteraction,
-        ),
+        onEvent: async (event) => {
+          if (openCodeEventRequiresPromptAdmission(event)) {
+            const admission = ownership.pendingPromptAdmission();
+            if (admission && !(await admission)) return;
+          }
+          const safeEvent = hostTools?.redactPayload(event) ?? event;
+          const ownershipSequence = ownership.eventSequence();
+          handleOpenCodeEvent(
+            safeEvent,
+            options,
+            client!,
+            text,
+            emitter,
+            approvals,
+            inputs,
+            emittedParts,
+            usageState,
+            eventState,
+            promptLifecycle,
+            ownership,
+            failureState,
+            failInteraction,
+          );
+          if (
+            ownership.eventSequence() !== ownershipSequence
+            || event.type === "session.error"
+            || event.type === "session.deleted"
+          ) armEventInactivityDeadline();
+        },
         isDone: async (event) => {
           if (compacting) {
             return event.type === "session.error"
@@ -552,16 +602,33 @@ function startOpenCodeRun(
           if (event.type === "session.error") return true;
           if (!isOpenCodeIdleEvent(event)) return false;
           if (!promptLifecycle.observed || !promptLifecycle.activityObserved) return false;
-          sessionIdleObserved = true;
+          if (failureState.pending) {
+            terminalError = failureState.pending.message;
+            failureState.terminal = failureState.pending;
+            return true;
+          }
           acceptingFollowUps = false;
           const admissions = [...pendingFollowUps];
-          if (admissions.length === 0) return true;
-          const receipts = await Promise.allSettled(admissions);
-          const admitted = receipts.some((receipt) =>
-            receipt.status === "fulfilled" && receipt.value);
-          if (!admitted || cancelRequested || terminalError) return true;
-          acceptingFollowUps = true;
-          return false;
+          if (admissions.length > 0) {
+            await Promise.allSettled(admissions);
+          }
+          if (cancelRequested || terminalError) return true;
+          if (ownership.acceptedFollowUpsAwaitingWork()) {
+            acceptingFollowUps = true;
+            return false;
+          }
+          for (const promptId of ownership.workedPromptIds()) {
+            settleOpenCodePromptOutput(
+              promptId,
+              ownership.assistantIds(promptId),
+              emittedParts,
+              eventState,
+              usageState,
+            );
+            ownership.settlePrompt(promptId);
+          }
+          sessionIdleObserved = true;
+          return true;
         },
       });
       const providerOperation = compacting
@@ -588,7 +655,12 @@ function startOpenCodeRun(
             // successful prompt receipt is the earliest safe compatibility
             // boundary after which an idle event can belong to this run.
             promptLifecycle.observed = true;
+            ownership.acceptPrompt(promptLifecycle.messageId);
+            armEventInactivityDeadline();
             return response;
+          }).catch((error) => {
+            ownership.rejectPromptAdmission(promptLifecycle.messageId);
+            throw error;
           });
       const completion = Promise.all([providerOperation, pump]);
       await Promise.race([providerOperation, completion, runInterrupted]);
@@ -600,23 +672,38 @@ function startOpenCodeRun(
       outcome = cancelRequested
         ? { status: "cancelled" }
         : terminalError
-          ? { status: "failed", error: terminalError }
+          ? {
+              status: "failed",
+              error: terminalError,
+              ...(failureState.terminal
+                ? { failure: failureState.terminal }
+                : {}),
+            }
           : { status: "completed" };
     } catch (error) {
       if (error instanceof OpenCodeServerCleanupUnconfirmedError) {
         cleanupConfirmed = false;
       }
+      const rawError = redactHostMcp(terminalError ?? safeError(
+        error,
+        redactHostMcp(serverDiagnostic(serverOutput)),
+      ));
       outcome = cancelRequested
         ? { status: "cancelled" }
         : {
             status: "failed",
-            error: terminalError ?? redactHostMcp(safeError(
-              error,
-              redactHostMcp(serverDiagnostic(serverOutput)),
-            )),
+            error: rawError,
+            failure: failureState.terminal ?? openCodeRuntimeFailure(
+              rawError,
+              rawError,
+              "sdk/exception",
+              child,
+              options.input.cwd,
+            ),
           };
     }
     acceptingFollowUps = false;
+    ownership.rejectPendingAdmissions();
     hostTools?.settle();
     await Promise.allSettled(pendingFollowUps);
     clearDeadlineTimers();
@@ -625,9 +712,30 @@ function startOpenCodeRun(
       await hostTools?.cleanup(client);
     } catch (error) {
       cleanupConfirmed = false;
+      const rawCleanupError = redactHostMcp(safeError(
+        error,
+        "OpenCode Inertia chat tools could not be cleaned up.",
+      ));
+      const cleanupError = sanitizeProviderFailureSummary(
+        rawCleanupError,
+        "OpenCode Inertia chat tools could not be cleaned up.",
+        { workspaceRoot: options.input.cwd },
+      );
+      const cleanupDetail = sanitizeProviderActivityDetail(
+        rawCleanupError,
+        { workspaceRoot: options.input.cwd, maxChars: 16 * 1024 },
+      );
       outcome = {
+        ...outcome,
         status: "failed",
-        error: safeError(error, "OpenCode Inertia chat tools could not be cleaned up."),
+        error: cleanupError,
+        failure: {
+          reason: "provider-error",
+          message: cleanupError,
+          phase: "cleanup",
+          terminalEvent: "host-tools/cleanup",
+          ...(cleanupDetail ? { technicalDetail: cleanupDetail } : {}),
+        },
       };
     }
     eventAbort.abort();
@@ -637,31 +745,60 @@ function startOpenCodeRun(
         await terminateOwnedRun?.(true);
       } catch (error) {
         cleanupConfirmed = false;
+        const cleanupError = sanitizeProviderFailureSummary(
+          openCodeCleanupFailureMessage(outcome.error, error),
+          "OpenCode could not confirm process cleanup.",
+          { workspaceRoot: options.input.cwd },
+        );
+        const priorFailure = outcome.failure;
+        const cleanupDetail = sanitizeProviderActivityDetail(
+          [
+            priorFailure?.technicalDetail,
+            safeError(error, "OpenCode process-tree cleanup was not confirmed."),
+          ].filter((value): value is string => Boolean(value)).join("\n"),
+          { workspaceRoot: options.input.cwd, maxChars: 16 * 1024 },
+        );
         outcome = {
+          ...outcome,
           status: "failed",
-          error: openCodeCleanupFailureMessage(outcome.error, error),
+          error: cleanupError,
+          failure: {
+            reason: "provider-error",
+            message: cleanupError,
+            phase: "cleanup",
+            terminalEvent: "process-tree/cleanup",
+            ...(cleanupDetail ? { technicalDetail: cleanupDetail } : {}),
+          },
         };
       }
     }
-    return finish(outcome.status, outcome.error, cleanupConfirmed);
+    return finish(
+      outcome.status,
+      outcome.error,
+      outcome.failure,
+      cleanupConfirmed,
+    );
   })();
 
   function finish(
     status: ProviderRunResult["status"],
     error?: string,
+    failure?: ProviderRunFailure,
     cleanupConfirmed = true,
   ): ProviderRunResult {
+    const canonical = openCodeCanonicalResult(emittedParts, eventState);
     emitter.status(status, error);
     return {
       providerId: "opencode",
       conversationId,
       status,
       ...(sessionId ? { sessionId } : {}),
-      text: text.toString(),
-      textTruncated: text.truncated,
+      text: canonical.text,
+      textTruncated: canonical.truncated || text.truncated,
       exitCode: child?.exitCode ?? null,
       signal: child?.signalCode ?? null,
       ...(error ? { error } : {}),
+      ...(failure ? { failure } : {}),
       cleanupConfirmed,
     };
   }
@@ -669,6 +806,7 @@ function startOpenCodeRun(
   cancelOwnedRun = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    ownership.rejectPendingAdmissions();
     hostTools?.settle();
     void hostTools?.revoke().catch(() => {
       eventAbort.abort();
@@ -726,6 +864,7 @@ function startOpenCodeRun(
           || !text
         ) return false;
         const id = randomUUID();
+        if (!ownership.reserveFollowUp(id)) return false;
         const files = input.imagePaths.map((path) => ({
           uri: pathToFileURL(path).href,
           name: path.split(/[\\/]/u).at(-1),
@@ -746,14 +885,19 @@ function startOpenCodeRun(
               }, { signal, throwOnError: true }),
               eventAbort.signal,
             );
-            return exactOpenCodeSteerReceipt(
+            const accepted = exactOpenCodeSteerReceipt(
               response.data,
               id,
               activeSessionId,
               text,
               files.map(({ uri }) => uri),
             );
+            if (accepted) ownership.acceptPrompt(id);
+            if (accepted) armEventInactivityDeadline();
+            else ownership.rejectFollowUp(id);
+            return accepted;
           } catch {
+            ownership.rejectFollowUp(id);
             return false;
           }
         })();
@@ -830,8 +974,7 @@ async function pumpOpenCodeEvents(
   stream: AsyncGenerator<Event>,
   sessionId: string,
   handlers: {
-    onActivity: () => void;
-    onEvent: (event: Event) => void;
+    onEvent: (event: Event) => void | Promise<void>;
     isDone: (event: Event) => boolean | Promise<boolean>;
   },
 ): Promise<void> {
@@ -843,9 +986,9 @@ async function pumpOpenCodeEvents(
   );
   for await (const event of stream) {
     eventBudget.observe(event);
-    if (openCodeEventSessionId(event) !== sessionId) continue;
-    handlers.onActivity();
-    handlers.onEvent(event);
+    const eventSessionId = openCodeEventSessionId(event);
+    if (eventSessionId !== sessionId) continue;
+    await handlers.onEvent(event);
     if (await handlers.isDone(event)) return;
   }
   throw new Error("OpenCode closed its event stream before the session completed.");
@@ -891,359 +1034,4 @@ function shortenedTimeout(
     throw new Error(`OpenCode ${name} must be a positive integer.`);
   }
   return Math.max(MIN_DEADLINE_MS, Math.min(value, maximum));
-}
-
-function handleOpenCodeEvent(
-  event: Event,
-  options: AgentHarnessStartOptions,
-  client: OpencodeClient,
-  resultText: CappedProviderBuffer,
-  emitter: ReturnType<typeof createAgentHarnessEmitter>,
-  approvals: Map<string, PendingApproval>,
-  inputs: Map<string, PendingInput>,
-  emittedParts: Map<string, string>,
-  usageState: OpenCodeUsageState,
-  eventState: OpenCodeEventState,
-  promptLifecycle: OpenCodePromptLifecycle,
-  onFailure: (error: unknown) => void,
-): void {
-  const properties = event.properties as Record<string, unknown>;
-  if (
-    event.type === "session.next.prompt.admitted"
-    && stringValue(properties.messageID) === promptLifecycle.messageId
-  ) {
-    promptLifecycle.observed = true;
-  }
-  if (promptLifecycle.observed && isOpenCodeRunActivityEvent(event, properties)) {
-    promptLifecycle.activityObserved = true;
-  }
-  if (event.type === "message.updated") {
-    const info = objectValue(properties.info);
-    const messageId = stringValue(info?.id);
-    if (messageId) {
-      rememberOpenCodeMessageRole(
-        messageId,
-        info?.role === "assistant" ? "assistant" : "other",
-        eventState,
-      );
-      if (messageId === promptLifecycle.messageId) promptLifecycle.observed = true;
-      if (
-        info?.role === "assistant"
-        && stringValue(info.parentID) === promptLifecycle.messageId
-      ) {
-        promptLifecycle.observed = true;
-        promptLifecycle.activityObserved = true;
-      }
-    }
-    if (info?.role === "assistant" && messageId) {
-      const tokens = objectValue(info.tokens);
-      if (tokens) emitOpenCodeUsage(messageId, tokens, usageState, emitter.rich);
-      const error = objectValue(info.error);
-      if (error) emitter.activity("system", "failed", bounded(errorMessage(error)));
-      replayOpenCodeParts(
-        messageId,
-        emittedParts,
-        resultText,
-        emitter,
-        eventState,
-      );
-    }
-  } else if (event.type === "message.removed") {
-    const messageId = stringValue(properties.messageID);
-    if (messageId) removeOpenCodeMessage(messageId, emittedParts, eventState);
-  } else if (event.type === "message.part.updated") {
-    const part = objectValue(properties.part);
-    if (part) {
-      handleOpenCodePart(
-        part,
-        emittedParts,
-        resultText,
-        emitter,
-        usageState,
-        eventState,
-      );
-    }
-  } else if (event.type === "message.part.removed") {
-    const partId = stringValue(properties.partID);
-    if (partId) removeOpenCodePart(partId, emittedParts, eventState);
-  } else if (event.type === "message.part.delta") {
-    const partId = stringValue(properties.partID);
-    const messageId = stringValue(properties.messageID);
-    const delta = stringValue(properties.delta);
-    if (partId && messageId && delta) handleOpenCodePartDelta(
-      partId,
-      messageId,
-      delta,
-      emittedParts,
-      resultText,
-      emitter,
-      eventState,
-    );
-  } else if (
-    event.type === "session.next.text.started"
-    || event.type === "session.next.text.delta"
-    || event.type === "session.next.text.ended"
-  ) {
-    handleOpenCodeNextTextEvent(
-      event.type,
-      properties,
-      "text",
-      emittedParts,
-      resultText,
-      emitter,
-      eventState,
-    );
-  } else if (
-    event.type === "session.next.reasoning.started"
-    || event.type === "session.next.reasoning.delta"
-    || event.type === "session.next.reasoning.ended"
-  ) {
-    handleOpenCodeNextTextEvent(
-      event.type,
-      properties,
-      "reasoning",
-      emittedParts,
-      resultText,
-      emitter,
-      eventState,
-    );
-  } else if (event.type === "session.next.step.ended") {
-    const messageId = stringValue(properties.assistantMessageID);
-    const tokens = objectValue(properties.tokens);
-    if (messageId && tokens) emitOpenCodeUsage(messageId, tokens, usageState, emitter.rich);
-  } else if (event.type === "session.next.step.failed") {
-    const error = objectValue(properties.error);
-    emitter.activity(
-      "system",
-      "failed",
-      bounded(error ? errorMessage(error) : "OpenCode step failed."),
-    );
-  } else if (event.type === "session.next.retried") {
-    const error = objectValue(properties.error);
-    const attempt = finite(properties.attempt);
-    emitter.activity(
-      "system",
-      "info",
-      bounded(`OpenCode retried the model${attempt === null ? "" : ` (attempt ${attempt})`}`),
-      error ? { detail: bounded(errorMessage(error)) } : {},
-    );
-  } else if (
-    event.type === "session.next.shell.started"
-    || event.type === "session.next.shell.ended"
-    || event.type === "session.next.tool.called"
-    || event.type === "session.next.tool.progress"
-    || event.type === "session.next.tool.success"
-    || event.type === "session.next.tool.failed"
-  ) {
-    emitOpenCodeNextActivity(event.type, properties, emitter);
-  } else if (event.type === "todo.updated") {
-    const todos = Array.isArray(properties.todos) ? properties.todos : [];
-    emitter.rich({ type: "plan", explanation: null, steps: todos.flatMap(todoStep) });
-  } else if (event.type === "permission.asked" || event.type === "permission.v2.asked") {
-    const nativeId = openCodeInteractionId(properties.id, "permission");
-    const permission = stringValue(properties.permission) ?? stringValue(properties.action) ?? "tool";
-    if (options.input.access === "full" || (options.input.access === "auto-edit" && permission === "edit")) {
-      void client.permission.reply({ requestID: nativeId, reply: "once" }, { throwOnError: true }).catch(onFailure);
-      return;
-    }
-    const display = openCodeApprovalDisplay(properties, permission);
-    if (!display) {
-      void client.permission.reply(
-        { requestID: nativeId, reply: "reject" },
-        { throwOnError: true },
-      ).catch(onFailure);
-      return;
-    }
-    const { detail, resources, title } = display;
-    const requestId = randomUUID();
-    if (approvals.size >= MAX_PENDING_INTERACTIONS) {
-      throw new Error("OpenCode exceeded the bounded approval budget.");
-    }
-    approvals.set(requestId, { nativeId, settled: false });
-    emitter.rich({
-      type: "approval",
-      request: {
-        requestId,
-        kind: permission === "bash" ? "command" : permission === "edit" ? "file-change" : "permissions",
-        title: bounded(title),
-        detail: bounded(detail),
-        cwd: options.input.cwd,
-        permissionRoots: resources.map((path) => ({ path: bounded(path), access: "write" as const })).slice(0, 20),
-        availableDecisions: ["approve", "deny", "cancel"],
-      },
-    });
-  } else if (event.type === "permission.replied" || event.type === "permission.v2.replied") {
-    const nativeId = stringValue(properties.requestID);
-    if (nativeId) resolveOpenCodeApproval(nativeId, properties.reply, approvals, emitter);
-  } else if (event.type === "question.asked" || event.type === "question.v2.asked") {
-    const nativeId = openCodeInteractionId(properties.id, "question");
-    const questions = openCodeQuestionPayload(properties.questions);
-    const requestId = randomUUID();
-    if (inputs.size >= MAX_PENDING_INTERACTIONS) {
-      throw new Error("OpenCode exceeded the bounded question budget.");
-    }
-    inputs.set(requestId, { nativeId, questions, settled: false });
-    emitter.rich({ type: "input", request: openCodeQuestions(requestId, questions) });
-  } else if (
-    event.type === "question.replied"
-    || event.type === "question.v2.replied"
-    || event.type === "question.rejected"
-    || event.type === "question.v2.rejected"
-  ) {
-    const nativeId = stringValue(properties.requestID);
-    if (nativeId) resolveOpenCodeInput(nativeId, inputs, emitter);
-  } else if (event.type === "session.deleted") {
-    throw new Error("OpenCode deleted the active session before the run completed.");
-  } else if (event.type === "session.status") {
-    const status = objectValue(properties.status);
-    if (status?.type === "retry") {
-      emitter.activity(
-        "system",
-        "info",
-        bounded(stringValue(status.message) ?? "OpenCode is retrying the model"),
-      );
-    }
-  } else if (event.type === "session.error") {
-    const error = objectValue(properties.error);
-    const message = error ? errorMessage(error) : "OpenCode reported a session error.";
-    emitter.activity("system", "failed", bounded(message));
-    throw new Error(message);
-  } else if (
-    event.type === "session.compacted"
-    || event.type === "session.next.compaction.ended"
-  ) {
-    usageState.currentContextTokens = null;
-    emitOpenCodeUsageSnapshot(usageState, emitter.rich);
-    emitter.activity("system", "info", "OpenCode compacted the session context");
-  }
-}
-
-function resolveOpenCodeApproval(
-  nativeId: string,
-  reply: unknown,
-  approvals: Map<string, PendingApproval>,
-  emitter: ReturnType<typeof createAgentHarnessEmitter>,
-): void {
-  for (const [requestId, pending] of approvals) {
-    if (pending.nativeId !== nativeId) continue;
-    pending.settled = true;
-    approvals.delete(requestId);
-    emitter.rich({
-      type: "approval-resolved",
-      requestId,
-      decision: reply === "reject" ? "deny" : "approve",
-    });
-    return;
-  }
-}
-
-function resolveOpenCodeInput(
-  nativeId: string,
-  inputs: Map<string, PendingInput>,
-  emitter: ReturnType<typeof createAgentHarnessEmitter>,
-): void {
-  for (const [requestId, pending] of inputs) {
-    if (pending.nativeId !== nativeId) continue;
-    pending.settled = true;
-    inputs.delete(requestId);
-    emitter.rich({ type: "input-resolved", requestId });
-    return;
-  }
-}
-
-export function openCodeApprovalDisplay(
-  properties: Record<string, unknown>,
-  permission = stringValue(properties.permission)
-    ?? stringValue(properties.action)
-    ?? "tool",
-): { detail: string; resources: string[]; title: string } | null {
-  const patterns = Array.isArray(properties.patterns)
-    ? properties.patterns.filter((value): value is string =>
-        typeof value === "string")
-    : [];
-  const resources = Array.isArray(properties.resources)
-    ? properties.resources.filter((value): value is string =>
-        typeof value === "string")
-    : [];
-  const title = `OpenCode wants to use ${permission}`;
-  const detail = [...patterns, ...resources].join("\n")
-    || jsonSummary(properties.metadata);
-  return isSafeApprovalDisplayText(title)
-      && isSafeApprovalDisplayText(detail, true)
-      && resources.every((path) => isSafeApprovalDisplayText(path))
-    ? { detail, resources, title }
-    : null;
-}
-
-export function resolveOpenCodeModel(
-  selection: string | undefined,
-  providers: Provider[],
-  connectedProviderIds: readonly string[],
-): Model | undefined {
-  if (!selection) return undefined;
-  const slash = selection.indexOf("/");
-  if (slash <= 0 || slash === selection.length - 1) {
-    throw new Error(`OpenCode model '${selection}' must come from its native provider/model catalog.`);
-  }
-  const providerId = selection.slice(0, slash);
-  const modelId = selection.slice(slash + 1);
-  if (!connectedProviderIds.includes(providerId)) {
-    throw new Error(`OpenCode does not advertise the selected model '${selection}' from a connected provider.`);
-  }
-  const model = findOpenCodeModel(providerId, modelId, providers);
-  if (!model) throw new Error(`OpenCode does not advertise the selected model '${selection}'.`);
-  return model;
-}
-
-function findOpenCodeModel(providerId: string, modelId: string, providers: Provider[]): Model | undefined {
-  return providers.find((provider) => provider.id === providerId)?.models[modelId];
-}
-
-function openCodeEventSessionId(event: Event): string | undefined {
-  const properties = event.properties as Record<string, unknown>;
-  const info = objectValue(properties.info);
-  return stringValue(properties.sessionID)
-    ?? stringValue(info?.sessionID)
-    ?? (event.type === "session.created"
-      || event.type === "session.updated"
-      || event.type === "session.deleted"
-      ? stringValue(info?.id)
-      : undefined);
-}
-
-function isOpenCodeIdleEvent(event: Event): boolean {
-  if (event.type === "session.idle") return true;
-  if (event.type !== "session.status") return false;
-  return objectValue((event.properties as Record<string, unknown>).status)?.type === "idle";
-}
-
-function isOpenCodeRunActivityEvent(
-  event: Event,
-  properties: Record<string, unknown>,
-): boolean {
-  if (event.type === "message.updated") {
-    return objectValue(properties.info)?.role === "assistant";
-  }
-  return event.type === "message.part.updated"
-    || event.type === "message.part.delta"
-    || event.type === "permission.asked"
-    || event.type === "permission.v2.asked"
-    || event.type === "question.asked"
-    || event.type === "question.v2.asked"
-    || event.type === "todo.updated"
-    || event.type === "session.next.text.started"
-    || event.type === "session.next.text.delta"
-    || event.type === "session.next.text.ended"
-    || event.type === "session.next.reasoning.started"
-    || event.type === "session.next.reasoning.delta"
-    || event.type === "session.next.reasoning.ended"
-    || event.type === "session.next.shell.started"
-    || event.type === "session.next.shell.ended"
-    || event.type === "session.next.step.started"
-    || event.type === "session.next.step.ended"
-    || event.type === "session.next.step.failed"
-    || event.type === "session.next.tool.called"
-    || event.type === "session.next.tool.progress"
-    || event.type === "session.next.tool.success"
-    || event.type === "session.next.tool.failed";
 }

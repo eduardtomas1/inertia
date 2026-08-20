@@ -238,7 +238,7 @@ describe("composer asynchronous ownership", () => {
 
     fireEvent.change(input, { target: { value: "Keep every control reachable" } });
     const attach = within(toolbar).getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     });
     const presets = await within(toolbar).findByRole("button", {
       name: "Prompt presets",
@@ -1171,7 +1171,7 @@ describe("composer asynchronous ownership", () => {
     })} />);
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     view.rerender(<Composer {...composerProps(second, {
       onChooseAttachments: () => picked.promise,
@@ -1200,7 +1200,7 @@ describe("composer asynchronous ownership", () => {
     const view = render(<Composer {...composerProps(current, overrides)} />);
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     view.rerender(<Composer {...composerProps(current, {
       ...overrides,
@@ -1225,7 +1225,7 @@ describe("composer asynchronous ownership", () => {
     )} />);
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     await screen.findByText("held-before-reload.png");
     window.dispatchEvent(new Event("beforeunload"));
@@ -1334,7 +1334,7 @@ describe("composer asynchronous ownership", () => {
     const view = render(<Composer {...composerProps(first, overrides)} />);
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     await screen.findByText("submitted.png");
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
@@ -1350,7 +1350,7 @@ describe("composer asynchronous ownership", () => {
       target: { value: "Submitted draft" },
     });
     fireEvent.click(screen.getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     await screen.findByText("newer.png");
     await act(async () => sent.resolve());
@@ -1379,7 +1379,7 @@ describe("composer asynchronous ownership", () => {
     const view = render(<Composer {...composerProps(first, overrides)} />);
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     await screen.findByText("failed.png");
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
@@ -1392,7 +1392,7 @@ describe("composer asynchronous ownership", () => {
       target: { value: "Newer retry draft" },
     });
     fireEvent.click(screen.getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     await screen.findByText("newer.png");
     await act(async () => sent.reject(new Error("send failed")));
@@ -1428,7 +1428,7 @@ describe("composer asynchronous ownership", () => {
     const view = render(<Composer {...composerProps(first, overrides)} />);
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     await screen.findByText("retry.png");
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
@@ -1536,7 +1536,7 @@ describe("composer asynchronous ownership", () => {
     expect(readPromptStash(window.localStorage)).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Attach images or documents",
+      name: "Attach images, documents, or spreadsheets",
     }));
     await screen.findByText("kept.png");
     fireEvent.click(screen.getByRole("button", {

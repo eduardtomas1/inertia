@@ -5,7 +5,11 @@ import {
 import type { CodexAppServerOptions } from "./types";
 
 export const CODEX_APP_SERVER_MAX_FRAME_BYTES = 16 * 1024 * 1024;
-export const CODEX_APP_SERVER_MAX_PROTOCOL_BYTES = 256 * 1024 * 1024;
+export const CODEX_APP_SERVER_MAX_WINDOW_BYTES = 256 * 1024 * 1024;
+/** Retained compatibility name; this is now a refillable window, not a run cap. */
+export const CODEX_APP_SERVER_MAX_PROTOCOL_BYTES =
+  CODEX_APP_SERVER_MAX_WINDOW_BYTES;
+export const CODEX_APP_SERVER_PROTOCOL_WINDOW_MS = 60_000;
 export const CODEX_APP_SERVER_MAX_QUEUED_STDIN_BYTES = 32 * 1024 * 1024;
 export const MAX_CODEX_TEXT_CHARS = 4 * 1024 * 1024;
 export const MAX_CODEX_DIAGNOSTIC_CHARS = 32 * 1024;
@@ -68,11 +72,12 @@ export function codexGoalContinuationGraceMs(
 
 export function codexProtocolLimits(
   override: CodexAppServerOptions["protocolLimits"],
-): { maxFrameBytes: number; maxProtocolBytes: number } {
+): { maxFrameBytes: number; maxWindowBytes: number; windowMs: number } {
   if (!override) {
     return {
       maxFrameBytes: CODEX_APP_SERVER_MAX_FRAME_BYTES,
-      maxProtocolBytes: CODEX_APP_SERVER_MAX_PROTOCOL_BYTES,
+      maxWindowBytes: CODEX_APP_SERVER_MAX_WINDOW_BYTES,
+      windowMs: CODEX_APP_SERVER_PROTOCOL_WINDOW_MS,
     };
   }
   if (
@@ -83,7 +88,11 @@ export function codexProtocolLimits(
   ) {
     throw new Error("The Codex App Server protocol limits are invalid.");
   }
-  return override;
+  return {
+    maxFrameBytes: override.maxFrameBytes,
+    maxWindowBytes: override.maxProtocolBytes,
+    windowMs: CODEX_APP_SERVER_PROTOCOL_WINDOW_MS,
+  };
 }
 
 export function commandExecutionLabel(item: JsonObject): string {

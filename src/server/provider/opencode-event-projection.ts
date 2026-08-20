@@ -5,8 +5,10 @@ import { CappedProviderBuffer } from "./io";
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_TRACKED_MESSAGES = 2_048;
 const MAX_TRACKED_PARTS = 4_096;
+const MAX_ACTIVITY_LABEL_CHARS = 1_024;
 const MAX_PART_CHARS = 256 * 1024;
 const MAX_RETAINED_PART_CHARS = 8 * 1024 * 1024;
+const MAX_CANONICAL_TEXT_CHARS = 4 * 1024 * 1024;
 
 interface OpenCodeMessageUsage {
   total: number | null;
@@ -30,24 +32,36 @@ export interface OpenCodeUsageState {
 interface OpenCodeTrackedPart {
   messageId: string;
   type: "text" | "reasoning" | null;
-  snapshot: string;
+  /** Null means no authoritative snapshot is waiting to be projected. */
+  snapshot: string | null;
+}
+
+interface OpenCodeTrackedActivity {
+  kind: "command" | "tool";
+  label: string;
 }
 
 export interface OpenCodeEventState {
   retainedPartChars: number;
   bufferedPartChars: number;
+  settledText: string;
+  settledTextTruncated: boolean;
   messageRoles: Map<string, "assistant" | "other">;
   parts: Map<string, OpenCodeTrackedPart>;
   pendingDeltas: Map<string, string>;
+  activities: Map<string, OpenCodeTrackedActivity>;
 }
 
 export function createOpenCodeEventState(): OpenCodeEventState {
   return {
     retainedPartChars: 0,
     bufferedPartChars: 0,
+    settledText: "",
+    settledTextTruncated: false,
     messageRoles: new Map(),
     parts: new Map(),
     pendingDeltas: new Map(),
+    activities: new Map(),
   };
 }
 
@@ -100,7 +114,14 @@ export function handleOpenCodePart(
     (part.type === "text" || part.type === "reasoning")
     && typeof part.text === "string"
   ) {
-    rememberOpenCodePart(id, messageId, part.type, part.text, eventState);
+    rememberOpenCodePart(
+      id,
+      messageId,
+      part.type,
+      part.text,
+      eventState,
+      true,
+    );
     if (eventState.messageRoles.get(messageId) === "assistant") {
       replayOpenCodePart(id, emittedParts, resultText, emitter, eventState);
     }
@@ -152,11 +173,11 @@ export function handleOpenCodePartDelta(
     if (state.parts.size >= MAX_TRACKED_PARTS) {
       throw new Error("OpenCode exceeded the bounded part budget.");
     }
-    state.parts.set(partId, { messageId, type: null, snapshot: "" });
+    state.parts.set(partId, { messageId, type: null, snapshot: null });
   }
   const tracked = state.parts.get(partId)!;
   if (tracked.type && state.messageRoles.get(messageId) === "assistant") {
-    if (tracked.snapshot || state.pendingDeltas.has(partId)) {
+    if (tracked.snapshot !== null || state.pendingDeltas.has(partId)) {
       replayOpenCodePart(partId, emittedParts, resultText, emitter, state);
     }
     appendOpenCodePartText(
@@ -235,6 +256,7 @@ export function handleOpenCodeNextTextEvent(
     type,
     properties.text,
     state,
+    true,
   );
   replayOpenCodePart(partId, emittedParts, resultText, emitter, state);
 }
@@ -249,6 +271,7 @@ export function emitOpenCodeNextActivity(
     | "session.next.tool.failed",
   properties: Record<string, unknown>,
   emitter: AgentHarnessEmitter,
+  state: OpenCodeEventState,
 ): void {
   const callId = stringValue(properties.callID);
   const shell = eventType.startsWith("session.next.shell.");
@@ -258,9 +281,28 @@ export function emitOpenCodeNextActivity(
     : eventType.endsWith(".failed")
       ? "failed"
       : "started";
-  const label = shell
-    ? stringValue(properties.command) ?? "OpenCode shell"
-    : stringValue(properties.tool) ?? "OpenCode tool";
+  const explicitLabel = (shell
+    ? stringValue(properties.command)
+    : stringValue(properties.tool))?.slice(0, MAX_ACTIVITY_LABEL_CHARS);
+  const kind = shell ? "command" : "tool";
+  const retained = callId ? state.activities.get(callId) : undefined;
+  if (
+    callId
+    && explicitLabel
+    && retained
+    && (retained.kind !== kind || retained.label !== explicitLabel)
+  ) {
+    throw new Error("OpenCode changed a retained tool activity's identity.");
+  }
+  if (callId && explicitLabel && !retained) {
+    if (state.activities.size >= MAX_TRACKED_PARTS) {
+      throw new Error("OpenCode exceeded the bounded tool-activity budget.");
+    }
+    state.activities.set(callId, { kind, label: explicitLabel });
+  }
+  const label = explicitLabel
+    ?? retained?.label
+    ?? (shell ? "OpenCode shell" : "OpenCode tool");
   const detail = providerActivityDetailSections({
     ...(shell ? { command: properties.command } : {}),
     ...(phase === "failed"
@@ -272,22 +314,39 @@ export function emitOpenCodeNextActivity(
             ?? properties.structured,
         }),
   });
-  emitter.activity(shell ? "command" : "tool", phase, bounded(label), {
+  emitter.activity(kind, phase, bounded(label), {
     ...(callId ? { activityId: callId } : {}),
     ...(detail ? { detail } : {}),
   });
+  if (
+    callId
+    && (
+      eventType.endsWith(".ended")
+      || eventType.endsWith(".success")
+      || eventType.endsWith(".failed")
+    )
+  ) state.activities.delete(callId);
 }
 
 export function removeOpenCodeMessage(
   messageId: string,
   emittedParts: Map<string, string>,
   state: OpenCodeEventState,
+  emitter?: AgentHarnessEmitter,
 ): void {
+  let corrected = false;
   state.messageRoles.delete(messageId);
   for (const [partId, part] of state.parts) {
     if (part.messageId === messageId) {
-      removeOpenCodePart(partId, emittedParts, state);
+      corrected = removeOpenCodePartState(partId, emittedParts, state)
+        || corrected;
     }
+  }
+  if (corrected && emitter) {
+    emitter.textSnapshot(messageId, openCodeCanonicalResult(
+      emittedParts,
+      state,
+    ).text);
   }
 }
 
@@ -295,11 +354,26 @@ export function removeOpenCodePart(
   partId: string,
   emittedParts: Map<string, string>,
   state: OpenCodeEventState,
+  emitter?: AgentHarnessEmitter,
 ): void {
+  const corrected = removeOpenCodePartState(partId, emittedParts, state);
+  if (corrected && emitter) {
+    emitter.textSnapshot(partId, openCodeCanonicalResult(
+      emittedParts,
+      state,
+    ).text);
+  }
+}
+
+function removeOpenCodePartState(
+  partId: string,
+  emittedParts: Map<string, string>,
+  state: OpenCodeEventState,
+): boolean {
   const part = state.parts.get(partId);
   const pending = state.pendingDeltas.get(partId) ?? "";
   const emitted = emittedParts.get(partId) ?? "";
-  state.bufferedPartChars -= (part?.snapshot.length ?? 0) + pending.length;
+  state.bufferedPartChars -= (part?.snapshot?.length ?? 0) + pending.length;
   state.retainedPartChars -= emitted.length;
   state.parts.delete(partId);
   state.pendingDeltas.delete(partId);
@@ -308,6 +382,52 @@ export function removeOpenCodePart(
     state.retainedPartChars,
     state.bufferedPartChars,
   );
+  return part?.type === "text" && emitted.length > 0;
+}
+
+/**
+ * Folds finalized assistant output into one bounded prefix and releases all
+ * prompt-scoped correlation state. This makes limits concurrency bounds, not
+ * lifetime limits for long sessions with many sequential prompts.
+ */
+export function settleOpenCodePromptOutput(
+  promptId: string,
+  assistantIds: readonly string[],
+  emittedParts: Map<string, string>,
+  state: OpenCodeEventState,
+  usageState?: OpenCodeUsageState,
+): void {
+  const assistants = new Set(assistantIds);
+  for (const [partId, part] of state.parts) {
+    if (!assistants.has(part.messageId)) continue;
+    const emitted = emittedParts.get(partId) ?? "";
+    if (part.type === "text" && emitted) appendSettledText(emitted, state);
+    removeOpenCodePartState(partId, emittedParts, state);
+  }
+  for (const assistantId of assistants) {
+    state.messageRoles.delete(assistantId);
+    usageState?.messages.delete(assistantId);
+  }
+  state.messageRoles.delete(promptId);
+  // An idle boundary finalizes any provider activity that never received a
+  // terminal notification, allowing later calls to reuse bounded storage.
+  state.activities.clear();
+}
+
+export function openCodeCanonicalResult(
+  emittedParts: ReadonlyMap<string, string>,
+  state: OpenCodeEventState,
+): { text: string; truncated: boolean } {
+  let text = state.settledText;
+  let truncated = state.settledTextTruncated;
+  for (const [partId, part] of state.parts) {
+    if (part.type !== "text") continue;
+    const value = emittedParts.get(partId) ?? "";
+    const available = MAX_CANONICAL_TEXT_CHARS - text.length;
+    if (value.length > available) truncated = true;
+    if (available > 0) text += value.slice(0, available);
+  }
+  return { text, truncated };
 }
 
 export function emitOpenCodeUsage(
@@ -380,6 +500,7 @@ function rememberOpenCodePart(
   type: "text" | "reasoning",
   snapshot: string,
   state: OpenCodeEventState,
+  authoritative = false,
 ): void {
   const safeSnapshot = bounded(snapshot);
   if (safeSnapshot.length > MAX_PART_CHARS) {
@@ -392,11 +513,16 @@ function rememberOpenCodePart(
   if (!previous && state.parts.size >= MAX_TRACKED_PARTS) {
     throw new Error("OpenCode exceeded the bounded part budget.");
   }
+  const pending = authoritative
+    ? state.pendingDeltas.get(id) ?? ""
+    : "";
   const bufferedPartChars = state.bufferedPartChars
-    - (previous?.snapshot.length ?? 0)
+    - (previous?.snapshot?.length ?? 0)
+    - pending.length
     + safeSnapshot.length;
   assertOpenCodeRetainedBudget(state.retainedPartChars, bufferedPartChars);
   state.bufferedPartChars = bufferedPartChars;
+  if (authoritative) state.pendingDeltas.delete(id);
   state.parts.set(id, { messageId, type, snapshot: safeSnapshot });
 }
 
@@ -414,14 +540,17 @@ function replayOpenCodePart(
     || state.messageRoles.get(part.messageId) !== "assistant"
   ) return;
   const pending = state.pendingDeltas.get(partId) ?? "";
-  const snapshot = part.snapshot;
-  const next = snapshot && pending
-    ? snapshot.includes(pending) ? snapshot : `${snapshot}${pending}`
-    : snapshot || pending;
+  const snapshot = part.snapshot ?? "";
+  // Pending deltas here necessarily arrived after the retained snapshot.
+  // Authoritative snapshots discard older queued deltas in
+  // rememberOpenCodePart, so concatenation follows transport order instead of
+  // guessing based on repeated text content.
+  const next = `${snapshot}${pending}`;
   state.bufferedPartChars -= snapshot.length + pending.length;
   state.pendingDeltas.delete(partId);
-  state.parts.set(partId, { ...part, snapshot: "" });
-  if (next) {
+  const hadAuthoritativeSnapshot = part.snapshot !== null;
+  state.parts.set(partId, { ...part, snapshot: null });
+  if (next || hadAuthoritativeSnapshot) {
     appendOpenCodePartSnapshot(
       partId,
       part.type,
@@ -444,15 +573,24 @@ function appendOpenCodePartSnapshot(
   state: OpenCodeEventState,
 ): void {
   const previous = emittedParts.get(partId) ?? "";
-  if (previous && !next.startsWith(previous)) return;
-  const delta = next.slice(previous.length);
+  const extendsPrevious = next.startsWith(previous);
+  const delta = extendsPrevious ? next.slice(previous.length) : "";
   trackOpenCodePart(partId, previous, next, emittedParts, state);
   emittedParts.set(partId, next);
+  if (!extendsPrevious) {
+    if (type === "text") {
+      emitter.textSnapshot(
+        partId,
+        openCodeCanonicalResult(emittedParts, state).text,
+      );
+    }
+    return;
+  }
   if (!delta) return;
   if (type === "reasoning") {
     emitter.rich({ type: "reasoning-summary", text: delta });
   } else {
-    emitOpenCodeText(delta, resultText, emitter.text);
+    emitOpenCodeText(delta, partId, resultText, emitter.text);
   }
 }
 
@@ -472,7 +610,7 @@ function appendOpenCodePartText(
   if (type === "reasoning") {
     emitter.rich({ type: "reasoning-summary", text: delta });
   } else {
-    emitOpenCodeText(delta, resultText, emitter.text);
+    emitOpenCodeText(delta, partId, resultText, emitter.text);
   }
 }
 
@@ -515,12 +653,22 @@ function sumTokenParts(values: Array<number | null>): number | null {
 
 function emitOpenCodeText(
   value: string,
+  itemId: string,
   buffer: CappedProviderBuffer,
-  emit: (value: string) => void,
+  emit: (value: string, itemId?: string) => void,
 ): void {
   const safe = bounded(value);
   buffer.append(safe);
-  emit(safe);
+  emit(safe, itemId);
+}
+
+function appendSettledText(
+  value: string,
+  state: OpenCodeEventState,
+): void {
+  const available = MAX_CANONICAL_TEXT_CHARS - state.settledText.length;
+  if (value.length > available) state.settledTextTruncated = true;
+  if (available > 0) state.settledText += value.slice(0, available);
 }
 
 function bounded(value: string): string {

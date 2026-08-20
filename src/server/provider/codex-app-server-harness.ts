@@ -199,8 +199,10 @@ function startCodexRun(
           ? "This Codex App Server version does not support Full Access. Update Codex CLI and try again."
           : compatibilityError === "fast-mode-unsupported"
             ? "This Codex App Server version or selected model did not apply the requested response speed. Choose Standard, refresh models, or update Codex CLI."
-          : runtimeFailure?.reason === "protocol-overflow"
-              ? "Codex produced a protocol message that was too large to process safely."
+          : runtimeFailure?.reason === "codex-error"
+            ? runtimeFailure.message
+            : runtimeFailure?.reason === "protocol-overflow"
+              ? runtimeFailure.message
               : runtimeFailure?.reason === "malformed-protocol"
                 ? "Codex returned a malformed App Server message."
                 : runtimeFailure?.reason === "goal-continuation-timeout"

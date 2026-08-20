@@ -16,6 +16,11 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.
     name: "Cursor",
     command: "cursor-agent",
   },
+  kimi: {
+    id: "kimi",
+    name: "Kimi Code",
+    command: "kimi",
+  },
   opencode: {
     id: "opencode",
     name: "OpenCode",

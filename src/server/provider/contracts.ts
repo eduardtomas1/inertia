@@ -22,7 +22,7 @@ import type {
   AgentPlanStep,
 } from "./interactions";
 
-export const PROVIDER_IDS = ["codex", "claude", "cursor", "opencode"] as const;
+export const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode"] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderInteractionMode = "build" | "plan";
@@ -169,6 +169,19 @@ export interface ProviderEventBase {
 export interface ProviderTextEvent extends ProviderEventBase {
   type: "text";
   text: string;
+  /** Stable provider-owned identity for text that may later be corrected. */
+  itemId?: string;
+}
+
+/**
+ * Authoritative replacement for all assistant text emitted by this active
+ * turn so far. Providers emit this only after applying an identified item
+ * correction/removal to their own bounded ordered projection.
+ */
+export interface ProviderTextSnapshotEvent extends ProviderEventBase {
+  type: "text-snapshot";
+  itemId: string;
+  text: string;
 }
 
 export type ProviderActivityKind = "system" | "turn" | "tool" | "command" | "reasoning";
@@ -300,6 +313,7 @@ export interface ProviderSubagentEvent extends ProviderEventBase {
 
 export type ProviderEvent =
   | ProviderTextEvent
+  | ProviderTextSnapshotEvent
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
@@ -320,6 +334,7 @@ export interface ProviderRunCallbacks {
   onStarted?: () => void;
   onEvent?: (event: ProviderEvent) => void;
   onText?: (event: ProviderTextEvent) => void;
+  onTextSnapshot?: (event: ProviderTextSnapshotEvent) => void;
   onActivity?: (event: ProviderActivityEvent) => void;
   onStatus?: (event: ProviderStatusEvent) => void;
   onSession?: (event: ProviderSessionEvent) => void;

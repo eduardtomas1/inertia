@@ -1,4 +1,4 @@
-import { FileText, X } from "lucide-react";
+import { FileSpreadsheet, FileText, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type {
@@ -52,11 +52,13 @@ export function ComposerAttachmentList({
                 {previewKind === "image"
                   ? (
                       <img
-                        src={previewUrl ?? undefined}
+                        src={previewUrl}
                         alt=""
                       />
                     )
-                  : <FileText size={19} />}
+                  : previewKind === "spreadsheet"
+                    ? <FileSpreadsheet size={19} />
+                    : <FileText size={19} />}
               </span>
               <span className="composer-attachment-copy">
                 <strong>{attachment.name}</strong>
@@ -74,23 +76,15 @@ export function ComposerAttachmentList({
               data-attachment-kind={kind}
               key={attachment.id}
             >
-              {previewKind
-                ? (
-                    <button
-                      type="button"
-                      className="composer-attachment-open"
-                      data-preview-source={previewUrl ?? undefined}
-                      aria-label={`Preview attachment ${attachment.name}`}
-                      onClick={() => setPreviewAttachment(attachment)}
-                    >
-                      {content}
-                    </button>
-                  )
-                : (
-                    <span className="composer-attachment-open is-unavailable">
-                      {content}
-                    </span>
-                  )}
+              <button
+                type="button"
+                className="composer-attachment-open"
+                data-preview-source={previewUrl}
+                aria-label={`Preview attachment ${attachment.name}`}
+                onClick={() => setPreviewAttachment(attachment)}
+              >
+                {content}
+              </button>
               <button
                 type="button"
                 className="composer-attachment-remove"

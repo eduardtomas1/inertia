@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
+import * as XLSX from "xlsx";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatAttachment } from "../../src/shared/contracts";
@@ -147,6 +148,20 @@ function attachment(
     size: 1,
     ...update,
   };
+}
+
+function spreadsheetBytes(bookType: "xlsx" | "xls"): Uint8Array {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["Region", "Revenue"],
+      ["North", 1_200],
+      ["South", 980],
+    ]),
+    "Quarter 1",
+  );
+  return XLSX.write(workbook, { type: "buffer", bookType }) as Uint8Array;
 }
 
 const hostedWindowsCi =
@@ -302,6 +317,70 @@ describe("document attachment execution context", () => {
       attachmentId: text.id,
       label: "Document · brief.md",
       content: "# Brief\nUse this context.",
+      truncated: false,
+    }]);
+  });
+
+  it.each([
+    ["notes.txt", "text/plain", "Plain attachment context."],
+    ["brief.md", "text/markdown", "# Markdown attachment context"],
+    ["rows.csv", "text/csv", "name,value\nAlpha,42"],
+    ["data.json", "application/json", '{"safe":true}'],
+  ] as const)("carries bounded %s content into the shared provider prompt", async (
+    name,
+    mimeType,
+    content,
+  ) => {
+    const document = attachment({ name, mimeType });
+    const contexts = await documentAttachmentContexts([{
+      attachment: document,
+      bytes: Buffer.from(content, "utf8"),
+    }]);
+    const assembled = assembleTurnRequest({
+      cwd: process.cwd(),
+      visibleContent: "Inspect the attachment.",
+      attachments: [document],
+      documentContexts: contexts,
+    });
+
+    expect(contexts).toEqual([{
+      attachmentId: document.id,
+      label: `Document · ${name}`,
+      content,
+      truncated: false,
+    }]);
+    expect(assembled.executionPrompt).toContain(JSON.stringify(content));
+    expect(assembled.persistence.manifest).toMatchObject({
+      contextReferenceCount: 1,
+      imageCount: 0,
+    });
+  });
+
+  it.each([
+    [
+      "xlsx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ],
+    ["xls", "application/vnd.ms-excel"],
+  ] as const)("extracts bounded %s worksheet context for every provider", async (
+    extension,
+    mimeType,
+  ) => {
+    const bytes = spreadsheetBytes(extension);
+    const workbook = attachment({
+      name: `forecast.${extension}`,
+      mimeType,
+      size: bytes.byteLength,
+    });
+
+    await expect(documentAttachmentContexts([
+      { attachment: workbook, bytes },
+    ])).resolves.toEqual([{
+      attachmentId: workbook.id,
+      label: `Spreadsheet · forecast.${extension}`,
+      content: expect.stringMatching(
+        /\[Worksheet: Quarter 1\][\s\S]*Row\tA\tB[\s\S]*2\tNorth\t1200/u,
+      ),
       truncated: false,
     }]);
   });

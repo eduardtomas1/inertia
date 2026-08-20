@@ -10,7 +10,7 @@ import type {
 } from "../../src/server/provider/contracts";
 import { createProviderHostToolMcpSession } from "../../src/server/provider/host-tool-mcp-http";
 import {
-  cursorHostMcpServers,
+  acpHostMcpServers,
   openCodeHostMcpConfig,
 } from "../../src/server/provider/host-tool-mcp-config";
 import { ProviderHostToolRuntime } from "../../src/server/provider/host-tool-runtime";
@@ -118,13 +118,13 @@ describe("provider host-tool MCP transport", () => {
       url: "http://127.0.0.1:41234/mcp",
       bearerToken: "run-secret-token",
     };
-    expect(cursorHostMcpServers(connection, true)).toEqual([{
+    expect(acpHostMcpServers(connection, true)).toEqual([{
       type: "http",
       name: "inertia-chat-manager",
       url: connection.url,
       headers: [{ name: "Authorization", value: `Bearer ${connection.bearerToken}` }],
     }]);
-    const fallback = cursorHostMcpServers(connection, false)[0]!;
+    const fallback = acpHostMcpServers(connection, false)[0]!;
     expect(fallback).toMatchObject({
       name: "inertia-chat-manager",
       command: process.execPath,
@@ -300,7 +300,7 @@ describe("provider host-tool MCP transport", () => {
 
   it("lets Cursor's stdio proxy drain a valid in-flight request after stdin EOF", async () => {
     const { connection } = await started();
-    const fallback = cursorHostMcpServers(connection, false)[0]!;
+    const fallback = acpHostMcpServers(connection, false)[0]!;
     if (!("command" in fallback)) throw new Error("Expected Cursor's stdio fallback.");
     const child = spawn(fallback.command, fallback.args, {
       env: {

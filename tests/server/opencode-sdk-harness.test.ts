@@ -24,12 +24,16 @@ type LifecycleScenario =
   | "resume"
   | "resume-rejected-steer"
   | "resume-stuck-steer"
+  | "early-permission-follow-up"
   | "idle-before-prompt-receipt"
   | "status-idle-before-prompt-receipt"
   | "idle-after-admission"
   | "out-of-order-parts"
   | "out-of-order-buffer-overflow"
+  | "snapshot-ordering"
   | "next-events"
+  | "assistant-error"
+  | "unowned-session-error"
   | "external-interactions"
   | "session-deleted"
   | "message-role-mutation"
@@ -74,6 +78,8 @@ const scenario = ${JSON.stringify(scenario)};
 const captured = [];
 const sessionID = "opencode-lifecycle-session";
 let events;
+let followUpReceiptSent = false;
+let followUpPromptID;
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
 const session = { id: sessionID, slug: "fixture", projectID: "project", directory: ${JSON.stringify(root)}, title: "Fixture", version: "1.18.4", model: { id: "model-a", providerID: "fake" }, time: { created: Date.now(), updated: Date.now() } };
@@ -108,6 +114,14 @@ const server = http.createServer((req, res) => {
         }, 75);
         return;
       }
+      if (scenario === "early-permission-follow-up") {
+        json(res, undefined, 204);
+        setTimeout(() => {
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "initial-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+          sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "initial-text", sessionID, messageID: "initial-assistant", type: "text", text: "Initial response" } } });
+        }, 5);
+        return;
+      }
       json(res, undefined, 204);
       if (scenario === "idle-after-admission") {
         setTimeout(() => {
@@ -125,6 +139,7 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "ordered-text", sessionID, messageID: "ordered-assistant", type: "text", text: "Hello world" } } });
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "ordered-tool", sessionID, messageID: "ordered-assistant", type: "tool", callID: "ordered-call", tool: "read", state: { status: "completed", input: { path: "README.md" }, output: "ok", title: "Read file" } } } });
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "ordered-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "ordered-tool", sessionID, messageID: "ordered-assistant", type: "tool", callID: "ordered-call", tool: "read", state: { status: "completed", input: { path: "README.md" }, output: "ok", title: "Read file" } } } });
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "ordered-text", sessionID, messageID: "ordered-assistant", type: "text", text: "Hello world" } } });
         sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "ordered-assistant", partID: "ordered-text", field: "text", delta: "!" } });
         sendEvent({ type: "message.part.removed", properties: { sessionID, messageID: "ordered-assistant", partID: "ordered-text" } });
@@ -133,10 +148,27 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "session.status", properties: { sessionID, status: { type: "idle" } } });
       }, 10);
       if (scenario === "out-of-order-buffer-overflow") setTimeout(() => {
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "buffered-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
         sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "buffered-assistant", partID: "buffered-text", field: "text", delta: "x".repeat(256 * 1024 + 1) } });
+      }, 10);
+      if (scenario === "snapshot-ordering") setTimeout(() => {
+        sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "snapshot-assistant", partID: "snapshot-first", field: "text", delta: " stale delta" } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "snapshot-first", sessionID, messageID: "snapshot-assistant", type: "text", text: "Authoritative snapshot" } } });
+        sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "snapshot-assistant", partID: "snapshot-first", field: "metadata", delta: " must not leak" } });
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "snapshot-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "delta-second", sessionID, messageID: "snapshot-assistant", type: "text", text: " then snapshot" } } });
+        sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "snapshot-assistant", partID: "delta-second", field: "text", delta: " plus delta" } });
+        sendEvent({ type: "session.status", properties: { sessionID, status: { type: "idle" } } });
       }, 10);
       if (scenario === "next-events") setTimeout(() => {
         sendEvent({ type: "session.next.prompt.admitted", properties: { timestamp: Date.now(), sessionID, messageID: parsed.messageID, prompt: { text: "Continue", files: [] }, delivery: "queue" } });
+        sendEvent({ type: "session.next.step.started", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", agent: "review", model: { providerID: "fake", modelID: "model-a" } } });
+        sendEvent({ type: "session.next.agent.switched", properties: { timestamp: Date.now(), sessionID, messageID: "next-assistant", agent: "review" } });
+        sendEvent({ type: "session.next.model.switched", properties: { timestamp: Date.now(), sessionID, messageID: "next-assistant", model: { providerID: "fake", modelID: "model-a" } } });
+        sendEvent({ type: "session.next.step.failed", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", error: { type: "unknown", message: "Transient upstream failure" } } });
+        sendEvent({ type: "session.next.retried", properties: { timestamp: Date.now(), sessionID, attempt: 2, error: { message: "Transient upstream failure", statusCode: 503, isRetryable: true } } });
+        sendEvent({ type: "session.status", properties: { sessionID, status: { type: "retry", attempt: 2, message: "Waiting before retry", next: Date.now() + 1000 } } });
+        sendEvent({ type: "session.next.step.started", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", agent: "review", model: { providerID: "fake", modelID: "model-a" } } });
         sendEvent({ type: "session.next.text.started", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", textID: "next-text" } });
         sendEvent({ type: "session.next.text.delta", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", textID: "next-text", delta: "Next response" } });
         sendEvent({ type: "session.next.text.ended", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", textID: "next-text", text: "Next response" } });
@@ -145,9 +177,22 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "session.next.shell.started", properties: { timestamp: Date.now(), sessionID, messageID: "next-assistant", callID: "shell-call", command: "npm test" } });
         sendEvent({ type: "session.next.shell.ended", properties: { timestamp: Date.now(), sessionID, callID: "shell-call", output: "ok" } });
         sendEvent({ type: "session.next.tool.called", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", callID: "tool-call", tool: "read", input: { path: "README.md" }, provider: { executed: true } } });
+        sendEvent({ type: "session.next.tool.progress", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", callID: "tool-call", structured: {}, content: [{ type: "text", text: "Reading README.md" }] } });
         sendEvent({ type: "session.next.tool.success", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", callID: "tool-call", structured: {}, content: [], result: "done", provider: { executed: true } } });
         sendEvent({ type: "session.next.step.ended", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", finish: "stop", cost: 0, tokens: { input: 4, output: 2, reasoning: 1, cache: { read: 3, write: 0 } } } });
         sendEvent({ type: "session.status", properties: { sessionID, status: { type: "idle" } } });
+      }, 10);
+      if (scenario === "assistant-error") setTimeout(() => {
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "failed-assistant", parentID: parsed.messageID, sessionID, role: "assistant", error: { name: "ProviderAuthError", data: { providerID: "fake", message: "The selected OpenCode provider needs authentication." } } } } });
+        sendEvent({ type: "session.status", properties: { sessionID, status: { type: "idle" } } });
+      }, 10);
+      if (scenario === "unowned-session-error") setTimeout(() => {
+        sendEvent({ type: "session.error", properties: { error: { name: "APIError", data: { message: "OpenCode upstream request failed.", statusCode: 503, isRetryable: false } } } });
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "foreign-assistant", parentID: "foreign-prompt", sessionID, role: "assistant", error: { name: "APIError", data: { message: "Foreign assistant failed." } } } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "foreign-text", sessionID, messageID: "foreign-assistant", type: "text", text: "Must not leak" } } });
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "owned-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "owned-text", sessionID, messageID: "owned-assistant", type: "text", text: "Owned response" } } });
+        sendEvent({ type: "session.idle", properties: { sessionID } });
       }, 10);
       if (scenario === "external-interactions") setTimeout(() => {
         sendEvent({ type: "permission.v2.asked", properties: { id: "external-permission", sessionID, action: "edit", resources: ["src/app.ts"], metadata: {} } });
@@ -166,7 +211,7 @@ const server = http.createServer((req, res) => {
       }, 10);
       if (["resume", "resume-rejected-steer", "resume-stuck-steer"].includes(scenario)) setTimeout(() => {
         sendEvent({ type: "session.idle", properties: { sessionID: "stale-session" } });
-        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", parentID: parsed.messageID, sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "text", sessionID, messageID: "assistant", type: "text", text: "Resumed OpenCode response" } } });
         sendEvent({ type: "session.idle", properties: { sessionID } });
       }, 10);
@@ -174,7 +219,7 @@ const server = http.createServer((req, res) => {
       if (scenario === "utf8-oversized") setTimeout(() => sendEvent({ type: "message.updated", properties: { sessionID, payload: "é".repeat(600 * 1024) } }), 10);
       if (scenario === "event-flood") setTimeout(() => {
         for (let index = 0; index < 2050; index += 1) {
-          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant-" + index, sessionID, role: "assistant" } } });
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant-" + index, parentID: parsed.messageID, sessionID, role: "assistant" } } });
         }
         sendEvent({ type: "session.idle", properties: { sessionID } });
       }, 10);
@@ -188,6 +233,21 @@ const server = http.createServer((req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/prompt") {
       if (scenario === "resume-stuck-steer") return;
+      if (scenario === "early-permission-follow-up") {
+        followUpPromptID = parsed.id;
+        sendEvent({ type: "permission.asked", properties: { id: "steer-early", sessionID, permission: "bash", patterns: ["npm test"], metadata: {} } });
+        return setTimeout(() => {
+          followUpReceiptSent = true;
+          json(res, { data: {
+            admittedSeq: 2,
+            id: parsed.id,
+            sessionID,
+            prompt: parsed.prompt,
+            delivery: parsed.delivery,
+            timeCreated: Date.now(),
+          } });
+        }, 50);
+      }
       setTimeout(() => json(res, { data: {
         admittedSeq: 2,
         id: parsed.id,
@@ -197,11 +257,21 @@ const server = http.createServer((req, res) => {
         timeCreated: Date.now(),
       } }), 50);
       if (scenario === "resume") setTimeout(() => {
-        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "follow-up-assistant", sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+        sendEvent({ type: "session.idle", properties: { sessionID } });
+      }, 60);
+      if (scenario === "resume") setTimeout(() => {
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "follow-up-assistant", parentID: parsed.id, sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "follow-up-text", sessionID, messageID: "follow-up-assistant", type: "text", text: "Follow-up OpenCode response" } } });
         sendEvent({ type: "session.idle", properties: { sessionID } });
       }, 75);
       return;
+    }
+    if (req.method === "POST" && url.pathname === "/permission/steer-early/reply") {
+      if (!followUpReceiptSent) return json(res, { error: "permission preceded steer receipt" }, 409);
+      json(res, true);
+      sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "follow-up-assistant", parentID: followUpPromptID, sessionID, role: "assistant" } } });
+      sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "follow-up-text", sessionID, messageID: "follow-up-assistant", type: "text", text: "Follow-up response" } } });
+      return sendEvent({ type: "session.idle", properties: { sessionID } });
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/compact") {
       json(res, undefined, 204);
@@ -291,8 +361,8 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && url.pathname === "/session/" + sessionID) return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
     if (req.method === "POST" && url.pathname.endsWith("/prompt_async")) {
-      json(res, undefined, 204);
-      return sendEvent({ type: "permission.asked", properties: { id: "deny-only", sessionID, permission: "bash", patterns: ["npm test"], metadata: {} } });
+      sendEvent({ type: "permission.asked", properties: { id: "deny-only", sessionID, permission: "bash", patterns: ["npm test"], metadata: {} } });
+      return setTimeout(() => json(res, undefined, 204), 50);
     }
     if (req.method === "POST" && url.pathname === "/permission/deny-only/reply") {
       json(res, true);
@@ -471,6 +541,7 @@ const captured = [];
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(captured));
 const sessionID = "55555555-5555-4555-8555-555555555555";
 let events;
+let promptMessageID;
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
 const session = { id: sessionID, slug: "fake", projectID: "project", directory: ${JSON.stringify(root)}, title: "Fake", version: "1.18.4", model: { id: "model-a", providerID: "fake", variant: "high" }, time: { created: Date.now(), updated: Date.now() } };
 const model = { id: "model-a", providerID: "fake", api: { id: "fake", url: "http://fake", npm: "fake" }, name: "Model A", capabilities: { temperature: true, reasoning: true, attachment: true, toolcall: true, input: { text: true, audio: false, image: true, video: false, pdf: false }, output: { text: true, audio: false, image: false, video: false, pdf: false }, interleaved: true }, cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: 200000, output: 32000 }, status: "active", options: {}, headers: {}, release_date: "2026-01-01", variants: { high: {} } };
@@ -490,8 +561,9 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && url.pathname === "/session/" + sessionID) return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
+      promptMessageID = parsed.messageID;
       json(res, undefined, 204);
-      sendEvent({ id: "e1", type: "message.updated", properties: { sessionID, info: { id: "assistant-1", sessionID, role: "assistant", tokens: { input: 120, output: 30, reasoning: 5, cache: { read: 10, write: 0 } } } } });
+      sendEvent({ id: "e1", type: "message.updated", properties: { sessionID, info: { id: "assistant-1", parentID: parsed.messageID, sessionID, role: "assistant", tokens: { input: 120, output: 30, reasoning: 5, cache: { read: 10, write: 0 } } } } });
       return sendEvent({ id: "e2", type: "permission.asked", properties: { id: "permission-1", sessionID, permission: "bash", patterns: ["npm test"], metadata: {}, always: [] } });
     }
     if (req.method === "POST" && url.pathname === "/permission/permission-1/reply") {
@@ -504,8 +576,8 @@ const server = http.createServer((req, res) => {
       sendEvent({ id: "e5", type: "message.part.updated", properties: { sessionID, time: Date.now(), part: { id: "text-1", sessionID, messageID: "assistant-1", type: "text", text: "OpenCode response", time: { start: Date.now(), end: Date.now() } } } });
       sendEvent({ id: "e6", type: "message.part.updated", properties: { sessionID, time: Date.now(), part: { id: "tool-1", sessionID, messageID: "assistant-1", type: "tool", callID: "call-1", tool: "bash", state: { status: "completed", input: { command: "npm test" }, output: "ok", title: "Run tests", metadata: {}, time: { start: Date.now(), end: Date.now() } } } } });
       sendEvent({ id: "e7", type: "todo.updated", properties: { sessionID, todos: [{ content: "Inspect", status: "completed", priority: "high" }] } });
-      sendEvent({ id: "e8", type: "message.updated", properties: { sessionID, info: { id: "assistant-1", sessionID, role: "assistant", tokens: { total: 160, input: 125, output: 30, reasoning: 5, cache: { read: 10, write: 0 } } } } });
-      sendEvent({ id: "e9", type: "message.updated", properties: { sessionID, info: { id: "assistant-2", sessionID, role: "assistant", tokens: { total: 40, input: 30, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+      sendEvent({ id: "e8", type: "message.updated", properties: { sessionID, info: { id: "assistant-1", parentID: promptMessageID, sessionID, role: "assistant", tokens: { total: 160, input: 125, output: 30, reasoning: 5, cache: { read: 10, write: 0 } } } } });
+      sendEvent({ id: "e9", type: "message.updated", properties: { sessionID, info: { id: "assistant-2", parentID: promptMessageID, sessionID, role: "assistant", tokens: { total: 40, input: 30, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } } } });
       return sendEvent({ id: "e10", type: "session.idle", properties: { sessionID } });
     }
     if (req.method === "POST" && url.pathname.endsWith("/abort")) return json(res, true);
@@ -815,6 +887,61 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       });
   });
 
+  it("waits for an exact follow-up receipt before replaying its early permission", async () => {
+    const root = portableFixtureRoot("OpenCode early follow-up permission");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "early-permission-follow-up"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let followUp: Promise<boolean> | null = null;
+    let approvals = 0;
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-early-follow-up-permission",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || followUp) return;
+        followUp = manager.steer(event.conversationId, {
+          content: "Run the focused check.",
+          imagePaths: [],
+        }, { runId: event.runId, turnId: event.turnId! });
+      },
+      onApproval: (event) => {
+        approvals += 1;
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "deny",
+        )).toBe(true);
+      },
+    })).resolves.toMatchObject({
+      status: "completed",
+      text: "Initial responseFollow-up response",
+    });
+    await expect(followUp).resolves.toBe(true);
+    expect(approvals).toBe(1);
+    const capture = readStableCapture<{
+      captured: Array<{ path: string; body?: Record<string, unknown> }>;
+    }>(capturePath);
+    expect(capture.captured.find(({ path }) =>
+      path === "/permission/steer-early/reply")?.body)
+      .toEqual({ reply: "reject" });
+  });
+
   it.each([
     ["idle-before-prompt-receipt", "legacy session.idle"],
     ["status-idle-before-prompt-receipt", "session.status idle"],
@@ -892,7 +1019,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
-    const activities: Array<{ activityId?: string; phase: string }> = [];
+    const events: Array<Record<string, unknown>> = [];
 
     await expect(manager.run(nativeProviderRunInput({
       providerId: "opencode",
@@ -903,12 +1030,17 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       access: "supervised",
       sessionId: "opencode-lifecycle-session",
     }), {
-      onActivity: (event) => activities.push(event),
+      onEvent: (event) => events.push(event as unknown as Record<string, unknown>),
     })).resolves.toMatchObject({
       status: "completed",
-      text: "Hello world! Again",
+      text: " Again",
     });
-    expect(activities).toContainEqual(expect.objectContaining({
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "text-snapshot",
+      itemId: "ordered-text",
+      text: "",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
       activityId: "ordered-call",
       phase: "completed",
     }));
@@ -936,6 +1068,35 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     }))).resolves.toMatchObject({
       status: "failed",
       error: "OpenCode sent an oversized buffered message-part delta.",
+    });
+  });
+
+  it("uses authoritative part snapshots and only streams text-field deltas", async () => {
+    const root = portableFixtureRoot("OpenCode snapshot ordering");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "snapshot-ordering"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-snapshot-ordering",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "completed",
+      text: "Authoritative snapshot then snapshot plus delta",
     });
   });
 
@@ -971,6 +1132,37 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       kind: "command",
       phase: "completed",
       activityId: "shell-call",
+      label: "npm test",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      kind: "system",
+      phase: "info",
+      label: "OpenCode switched to the review agent",
+      activityId: "next-assistant",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      kind: "turn",
+      phase: "started",
+      label: "OpenCode started a review step",
+      activityId: "next-assistant",
+      detail: "Model: fake/model-a",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      kind: "system",
+      phase: "info",
+      label: "OpenCode retried the model (attempt 2)",
+      detail: "Transient upstream failure",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      kind: "tool",
+      phase: "started",
+      activityId: "tool-call",
+      label: "read",
+      detail: "Output:\nReading README.md",
     }));
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
@@ -987,6 +1179,72 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
         reasoningOutputTokens: 1,
       }),
     }));
+  });
+
+  it("turns an authoritative assistant error into a typed terminal failure", async () => {
+    const root = portableFixtureRoot("OpenCode assistant failure");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "assistant-error"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-assistant-error",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: "The selected OpenCode provider needs authentication.",
+      failure: {
+        reason: "provider-error",
+        message: "The selected OpenCode provider needs authentication.",
+        phase: "turn",
+        terminalEvent: "message.updated",
+        activityId: "failed-assistant",
+        technicalDetail: "Type: ProviderAuthError\nProvider: fake",
+      },
+    });
+  });
+
+  it("ignores unscoped and foreign failures until owned work completes", async () => {
+    const root = portableFixtureRoot("OpenCode unowned session failure");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "unowned-session-error"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-unowned-session-error",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "completed",
+      text: "Owned response",
+    });
   });
 
   it("settles externally answered v2 approvals and questions", async () => {
@@ -1279,7 +1537,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       })]),
     );
 
-    await expect(manager.run(nativeProviderRunInput({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-unconfirmed-cleanup",
       cwd: root,
@@ -1289,15 +1547,24 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       sessionId: "opencode-lifecycle-session",
     }), {
       onStatus: ({ status }) => statuses.push(status),
-    })).resolves.toMatchObject({
+    });
+    expect(result).toMatchObject({
       status: "failed",
       error: "OpenCode server process tree could not be confirmed stopped.",
+      cleanupConfirmed: false,
+      failure: {
+        reason: "provider-error",
+        message: "OpenCode server process tree could not be confirmed stopped.",
+        phase: "cleanup",
+        terminalEvent: "process-tree/cleanup",
+      },
     });
+    expect(result.failure?.message).toBe(result.error);
     expect(statuses).not.toContain("completed");
     expect(statuses.at(-1)).toBe("failed");
   });
 
-  it("denies one permission without aborting, then cancels the owned session and settles the turn", async () => {
+  it("replays an early permission after prompt receipt, then cancels the owned session", async () => {
     const root = portableFixtureRoot("OpenCode permission semantics");
     roots.push(root);
     const capturePath = join(root, "capture.json");
@@ -1471,6 +1738,11 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     }))).resolves.toMatchObject({
       status: "failed",
       error: expect.stringContaining("event stream became inactive"),
+      failure: {
+        reason: "rpc-timeout",
+        phase: "runtime",
+        terminalEvent: "event/inactivity-deadline",
+      },
     });
     const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
       port: number;
@@ -1555,6 +1827,11 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     }))).resolves.toMatchObject({
       status: "failed",
       error: expect.stringContaining("maximum run duration"),
+      failure: {
+        reason: "rpc-timeout",
+        phase: "runtime",
+        terminalEvent: "run/deadline",
+      },
     });
     const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
       port: number;
@@ -1584,7 +1861,11 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("oversized") });
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("oversized"),
+      failure: { reason: "protocol-overflow", phase: "runtime" },
+    });
 
     const utf8Root = portableFixtureRoot("OpenCode UTF-8 oversized");
     roots.push(utf8Root);
@@ -1653,7 +1934,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       access: "supervised",
     }))).resolves.toMatchObject({
       status: "failed",
-      error: expect.stringContaining("bounded message budget"),
+      error: expect.stringContaining("bounded owned-assistant budget"),
     });
     const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
       port: number;

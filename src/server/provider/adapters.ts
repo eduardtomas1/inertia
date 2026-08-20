@@ -306,7 +306,8 @@ export function normalizeProviderLine(
       return;
     }
 
-    case "cursor": {
+    case "cursor":
+    case "kimi": {
       if (type === "system" && event.subtype === "init") {
         emitActivity("system", "started", "Session initialized");
       }
@@ -434,6 +435,12 @@ export function buildProviderInvocation(input: ProviderRunInput, command: string
       if (input.sessionId) args.push("--resume", input.sessionId);
       args.push("--", imageContextPrompt(planPrompt, imagePaths));
       return { command, args };
+    }
+
+    case "kimi": {
+      throw new Error(
+        "Kimi Code requires its native ACP harness; legacy CLI invocation is unsupported.",
+      );
     }
 
     case "opencode": {

@@ -68,7 +68,9 @@ test("opens secure image and Linux-style clipboard PDF previews", async ({
       bookmarks: [],
     }));
   }, app.attachmentImagePath);
-  await page.getByRole("button", { name: "Attach images or documents" }).click();
+  await page.getByRole("button", {
+    name: "Attach images, documents, or spreadsheets",
+  }).click();
 
   const attachments = page.getByRole("list", { name: "Attachments" });
   const imageTrigger = attachments.getByRole("button", {

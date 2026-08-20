@@ -4,6 +4,7 @@ const PROVIDER_AUTH: Readonly<Record<ProviderId, { statusArgs: readonly string[]
   codex: { statusArgs: ["login", "status"], loginArgs: ["login"] },
   claude: { statusArgs: ["auth", "status", "--json"], loginArgs: ["auth", "login"] },
   cursor: { statusArgs: ["status"], loginArgs: ["login"] },
+  kimi: { statusArgs: ["provider", "list", "--json"], loginArgs: ["login"] },
   opencode: { statusArgs: ["auth", "list"], loginArgs: ["auth", "login"] },
 });
 

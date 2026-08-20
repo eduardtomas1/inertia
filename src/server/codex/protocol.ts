@@ -41,27 +41,62 @@ export class CappedTextBuffer {
 
 export type JsonLineDecoderFailure =
   | "line-overflow"
-  | "aggregate-overflow"
+  | "rate-overflow"
   | "malformed-utf8";
 
+export const JSON_LINE_DEFAULT_WINDOW_MS = 60_000;
+
+export interface JsonLineDecoderRateLimit {
+  /** Maximum burst capacity and bytes replenished over one window. */
+  maxBytes: number;
+  windowMs: number;
+  /** Monotonic test seam. Production uses the process monotonic clock. */
+  now?: () => number;
+}
+
 /**
- * Frames JSONL by UTF-8 bytes rather than JavaScript characters. Retained
- * memory is bounded to one frame and chunks are joined only when a complete
- * line is ready to parse.
+ * Frames JSONL by UTF-8 bytes rather than JavaScript characters. One growable
+ * frame buffer bounds retained memory independently of input fragmentation.
+ * The refillable byte budget rejects an unsafe burst without imposing a
+ * lifetime cap on healthy long-running sessions.
  */
 export class JsonLineDecoder {
   private readonly decoder = new TextDecoder("utf-8", { fatal: true });
-  private readonly chunks: Buffer[] = [];
+  private frame = Buffer.alloc(0);
   private lineBytes = 0;
-  private totalBytes = 0;
   private stopped = false;
+  private readonly rateLimit: JsonLineDecoderRateLimit | undefined;
+  private readonly now: () => number;
+  private availableBytes: number;
+  private lastRefillAt: number;
 
   constructor(
     private readonly maxLineBytes: number,
     private readonly onLine: (line: string) => void,
     private readonly onFailure: (failure: JsonLineDecoderFailure) => void,
-    private readonly maxTotalBytes = Number.MAX_SAFE_INTEGER,
-  ) {}
+    rateLimit?: number | JsonLineDecoderRateLimit,
+  ) {
+    this.rateLimit = typeof rateLimit === "number"
+      ? { maxBytes: rateLimit, windowMs: JSON_LINE_DEFAULT_WINDOW_MS }
+      : rateLimit;
+    if (!Number.isSafeInteger(maxLineBytes) || maxLineBytes < 1) {
+      throw new Error("The JSONL frame limit is invalid.");
+    }
+    if (
+      this.rateLimit
+      && (
+        !Number.isSafeInteger(this.rateLimit.maxBytes)
+        || this.rateLimit.maxBytes < maxLineBytes
+        || !Number.isSafeInteger(this.rateLimit.windowMs)
+        || this.rateLimit.windowMs < 1
+      )
+    ) {
+      throw new Error("The JSONL rate limit is invalid.");
+    }
+    this.now = this.rateLimit?.now ?? (() => performance.now());
+    this.availableBytes = this.rateLimit?.maxBytes ?? Number.MAX_SAFE_INTEGER;
+    this.lastRefillAt = this.now();
+  }
 
   push(chunk: Buffer): void {
     if (this.stopped || chunk.length === 0) return;
@@ -84,7 +119,7 @@ export class JsonLineDecoder {
 
   stop(): void {
     this.stopped = true;
-    this.chunks.length = 0;
+    this.frame = Buffer.alloc(0);
     this.lineBytes = 0;
   }
 
@@ -95,28 +130,50 @@ export class JsonLineDecoder {
       return false;
     }
     if (!this.consumeBytes(segment.length)) return false;
-    // Copy so a short retained segment cannot pin a much larger stream chunk.
-    this.chunks.push(Buffer.from(segment));
+    this.ensureFrameCapacity(this.lineBytes + segment.length);
+    segment.copy(this.frame, this.lineBytes);
     this.lineBytes += segment.length;
     return true;
   }
 
   private consumeBytes(count: number): boolean {
-    if (this.totalBytes + count > this.maxTotalBytes) {
-      this.fail("aggregate-overflow");
+    const rateLimit = this.rateLimit;
+    if (!rateLimit) return true;
+    const current = this.now();
+    const elapsedMs = Math.max(0, current - this.lastRefillAt);
+    this.lastRefillAt = current;
+    this.availableBytes = Math.min(
+      rateLimit.maxBytes,
+      this.availableBytes
+        + (elapsedMs * rateLimit.maxBytes / rateLimit.windowMs),
+    );
+    if (count > this.availableBytes) {
+      this.fail("rate-overflow");
       return false;
     }
-    this.totalBytes += count;
+    this.availableBytes -= count;
     return true;
+  }
+
+  private ensureFrameCapacity(requiredBytes: number): void {
+    if (this.frame.length >= requiredBytes) return;
+    let capacity = Math.max(1, this.frame.length);
+    while (capacity < requiredBytes) {
+      capacity = Math.min(
+        this.maxLineBytes,
+        Math.max(requiredBytes, capacity * 2),
+      );
+    }
+    const next = Buffer.allocUnsafe(capacity);
+    if (this.lineBytes > 0) {
+      this.frame.copy(next, 0, 0, this.lineBytes);
+    }
+    this.frame = next;
   }
 
   private emitLine(): void {
     if (this.stopped) return;
-    const bytes = this.chunks.length === 1
-      ? this.chunks[0]!
-      : Buffer.concat(this.chunks, this.lineBytes);
-    this.chunks.length = 0;
-    this.lineBytes = 0;
+    const bytes = this.frame.subarray(0, this.lineBytes);
     let line: string;
     try {
       line = this.decoder.decode(bytes).replace(/\r$/u, "").trimEnd();
@@ -124,6 +181,7 @@ export class JsonLineDecoder {
       this.fail("malformed-utf8");
       return;
     }
+    this.lineBytes = 0;
     if (line) this.onLine(line);
   }
 

@@ -5,7 +5,13 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import { ClaudePromptChannel } from "../../src/server/provider/claude-prompt-channel";
-import { ClaudeSubagentTraceTracker } from "../../src/server/provider/claude-subagent-trace";
+import {
+  ClaudeSubagentTraceTracker,
+  MAX_CLAUDE_IGNORED_TASK_IDS,
+  MAX_CLAUDE_LIVE_SUBAGENT_TASKS,
+  MAX_CLAUDE_PENDING_SUBAGENT_TOOLS,
+  MAX_CLAUDE_TERMINAL_SUBAGENT_TASKS,
+} from "../../src/server/provider/claude-subagent-trace";
 import type { AgentHarnessEmitter } from "../../src/server/provider/agent-harness";
 
 function sdkMessage(value: unknown): SDKMessage {
@@ -221,7 +227,7 @@ describe("Claude delegated-agent projection", () => {
       expect.objectContaining({
         providerTaskId: "workflow-task",
         status: "running",
-        progress: "Reviewing providers",
+        progress: "Reviewing providers · 10 tokens · 1 tool use · 5 ms",
       }),
       expect.objectContaining({
         providerTaskId: "workflow-task",
@@ -244,6 +250,77 @@ describe("Claude delegated-agent projection", () => {
     expect(updates).not.toContainEqual(expect.objectContaining({
       providerTaskId: "local-bash-task",
     }));
+  });
+
+  it("surfaces delegated tool heartbeats and retry progress on the owned trace", () => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => {
+      updates.push(event);
+    });
+    tracker.observe(sdkMessage({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [{
+          type: "tool_use",
+          id: "tool-retrying-agent",
+          name: "Agent",
+          input: {
+            subagent_type: "researcher",
+            description: "Inspect provider behavior",
+          },
+        }],
+      },
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-retrying-agent",
+      tool_use_id: "tool-retrying-agent",
+      description: "Inspect provider behavior",
+      subagent_type: "researcher",
+    }));
+    tracker.observe(sdkMessage({
+      type: "tool_progress",
+      task_id: "task-retrying-agent",
+      tool_use_id: "child-bash",
+      tool_name: "Bash",
+      parent_tool_use_id: "tool-retrying-agent",
+      elapsed_time_seconds: 30,
+    }));
+    tracker.observe(sdkMessage({
+      type: "tool_progress",
+      task_id: "task-retrying-agent",
+      tool_use_id: "child-bash",
+      tool_name: "Bash",
+      parent_tool_use_id: "tool-retrying-agent",
+      elapsed_time_seconds: 60,
+      subagent_retry: {
+        agent_id: "agent-retrying",
+        attempt: 2,
+        max_retries: 3,
+        retry_delay_ms: 1_000,
+        error_status: 529,
+        error_category: "overloaded",
+      },
+    }));
+
+    expect(updates).toEqual([
+      expect.objectContaining({
+        providerTaskId: "task-retrying-agent",
+        status: "spawned",
+      }),
+      expect.objectContaining({
+        providerTaskId: "task-retrying-agent",
+        status: "running",
+        progress: "Bash · 30 seconds elapsed",
+      }),
+      expect.objectContaining({
+        providerTaskId: "task-retrying-agent",
+        status: "running",
+        progress: "Retrying Bash · attempt 2/3 · in 1000 ms · after overloaded",
+      }),
+    ]);
   });
 
   it("preserves waiting, failed, and stopped provider states exactly", () => {
@@ -412,6 +489,116 @@ describe("Claude delegated-agent projection", () => {
       }),
     ]));
     expect(tracker.hasLiveTasks()).toBe(false);
+  });
+
+  it("reclaims tool, task, and ignored correlations across long sequential runs", () => {
+    const tracker = new ClaudeSubagentTraceTracker(() => undefined);
+    const sequentialTasks = MAX_CLAUDE_TERMINAL_SUBAGENT_TASKS * 3;
+    for (let index = 0; index < sequentialTasks; index += 1) {
+      tracker.observe(sdkMessage({
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: {
+          content: [{
+            type: "tool_use",
+            id: `sequential-tool-${index}`,
+            name: "Agent",
+            input: { subagent_type: "reviewer" },
+          }],
+        },
+      }));
+      tracker.observe(sdkMessage({
+        type: "system",
+        subtype: "task_started",
+        task_id: `sequential-task-${index}`,
+        tool_use_id: `sequential-tool-${index}`,
+        subagent_type: "reviewer",
+      }));
+      tracker.observe(sdkMessage({
+        type: "system",
+        subtype: "task_notification",
+        task_id: `sequential-task-${index}`,
+        status: "completed",
+      }));
+    }
+    for (let index = 0; index < MAX_CLAUDE_IGNORED_TASK_IDS * 2; index += 1) {
+      tracker.observe(sdkMessage({
+        type: "system",
+        subtype: "task_started",
+        task_id: `ignored-sequential-${index}`,
+        task_type: "local_bash",
+      }));
+      tracker.observe(sdkMessage({
+        type: "system",
+        subtype: "task_notification",
+        task_id: `ignored-sequential-${index}`,
+        status: "completed",
+      }));
+    }
+
+    expect(tracker.retainedStateCounts()).toEqual({
+      tools: 0,
+      tasks: MAX_CLAUDE_TERMINAL_SUBAGENT_TASKS,
+      taskByToolUse: MAX_CLAUDE_TERMINAL_SUBAGENT_TASKS,
+      ignoredTaskIds: 0,
+    });
+    expect(tracker.hasLiveTasks()).toBe(false);
+  });
+
+  it("fails closed when unfinished delegated trace state is flooded", () => {
+    const pendingTools = new ClaudeSubagentTraceTracker(() => undefined);
+    const toolMessage = (index: number) => sdkMessage({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [{
+          type: "tool_use",
+          id: `pending-tool-${index}`,
+          name: "Agent",
+          input: { subagent_type: "reviewer" },
+        }],
+      },
+    });
+    for (let index = 0; index < MAX_CLAUDE_PENDING_SUBAGENT_TOOLS; index += 1) {
+      pendingTools.observe(toolMessage(index));
+    }
+    expect(() => pendingTools.observe(
+      toolMessage(MAX_CLAUDE_PENDING_SUBAGENT_TOOLS),
+    )).toThrow("bounded pending-subagent trace state");
+    expect(pendingTools.retainedStateCounts().tools)
+      .toBe(MAX_CLAUDE_PENDING_SUBAGENT_TOOLS);
+
+    const liveTasks = new ClaudeSubagentTraceTracker(() => undefined);
+    const taskStarted = (index: number) => sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: `live-task-${index}`,
+      task_type: "local_agent",
+    });
+    for (let index = 0; index < MAX_CLAUDE_LIVE_SUBAGENT_TASKS; index += 1) {
+      liveTasks.observe(taskStarted(index));
+    }
+    expect(() => liveTasks.observe(
+      taskStarted(MAX_CLAUDE_LIVE_SUBAGENT_TASKS),
+    )).toThrow("bounded live-subagent trace state");
+    expect(liveTasks.retainedStateCounts().tasks)
+      .toBe(MAX_CLAUDE_LIVE_SUBAGENT_TASKS);
+
+    const ignoredTasks = new ClaudeSubagentTraceTracker(() => undefined);
+    const ignoredStarted = (index: number) => sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: `ignored-task-${index}`,
+      task_type: "local_bash",
+    });
+    for (let index = 0; index < MAX_CLAUDE_IGNORED_TASK_IDS; index += 1) {
+      ignoredTasks.observe(ignoredStarted(index));
+    }
+    expect(() => ignoredTasks.observe(
+      ignoredStarted(MAX_CLAUDE_IGNORED_TASK_IDS),
+    )).toThrow("bounded ignored-task trace state");
+    expect(ignoredTasks.retainedStateCounts().ignoredTaskIds)
+      .toBe(MAX_CLAUDE_IGNORED_TASK_IDS);
   });
 });
 

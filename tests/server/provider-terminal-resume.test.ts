@@ -25,6 +25,7 @@ const sessionIds: Readonly<Record<ProviderId, string>> = {
   codex: "019fe0c1-c6fc-79a1-bff4-92311f314da8",
   claude: "11111111-1111-4111-8111-111111111111",
   cursor: "22222222-2222-4222-8222-222222222222",
+  kimi: "kimi-session-33333333",
   opencode: "ses_01K4Z9-safe.session",
 };
 
@@ -153,6 +154,10 @@ describe("provider terminal resume mapping", () => {
       "--resume",
       sessionIds.cursor,
     ]);
+    expect(providerTerminalResumeArguments("kimi", sessionIds.kimi)).toEqual([
+      "--session",
+      sessionIds.kimi,
+    ]);
     expect(providerTerminalResumeArguments("opencode", sessionIds.opencode)).toEqual([
       "--session",
       sessionIds.opencode,
@@ -208,7 +213,7 @@ describe("provider terminal resume mapping", () => {
 
 describe("provider terminal resume availability", () => {
   it("exposes exact native sessions only when the installed CLI is ready", () => {
-    for (const providerId of ["codex", "claude", "cursor", "opencode"] as const) {
+    for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode"] as const) {
       expect(providerTerminalResumeAvailability(
         nativeConversation(providerId),
         readyProvider(providerId),

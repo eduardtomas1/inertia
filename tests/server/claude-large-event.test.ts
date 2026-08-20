@@ -12,8 +12,8 @@ import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-ag
 import {
   ClaudeRunEventBudget,
   MAX_CLAUDE_EVENT_MEDIA_BYTES,
-  MAX_CLAUDE_RUN_MEDIA_BYTES,
-  MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES,
+  MAX_CLAUDE_MEDIA_BURST_BYTES,
+  MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES,
   projectClaudeSdkEventMedia,
 } from "../../src/server/provider/claude-event-budget";
 import { ProviderRunEventBudget } from "../../src/server/provider/io";
@@ -190,7 +190,7 @@ describe("Claude Agent SDK large event boundary", () => {
     },
   );
 
-  it("enforces supported scale, per-event bytes, canonical base64, and source size", () => {
+  it("enforces payload bounds while treating source size as independent metadata", () => {
     const largeBytes = 16.5 * 1024 * 1024;
     const largeBase64 = Buffer.alloc(largeBytes, 0xa5).toString("base64");
     const large = projectClaudeSdkEventMedia(claudeReadMediaResult({
@@ -229,16 +229,25 @@ describe("Claude Agent SDK large event boundary", () => {
         bytes: originalSize,
       }))).toThrow("Claude sent malformed structured tool-result media.");
     }
-    expect(() => projectClaudeSdkEventMedia(claudeReadMediaResult({
+    expect(projectClaudeSdkEventMedia(claudeReadMediaResult({
       base64: "YQ==",
       bytes: MAX_CLAUDE_EVENT_MEDIA_BYTES + 1,
-    }))).toThrow("Claude sent oversized tool-result media.");
-    expect(() => projectClaudeSdkEventMedia(claudeReadMediaResult({
+    })).mediaBytes).toBe(1);
+    const transformedPdf = projectClaudeSdkEventMedia(claudeReadMediaResult({
       base64: "YQ==",
       bytes: 2,
       kind: "pdf",
-    }))).toThrow("Claude sent inconsistent tool-result media metadata.");
-  });
+    }));
+    expect(transformedPdf.mediaBytes).toBe(1);
+    expect(JSON.stringify(transformedPdf.value)).not.toContain("YQ==");
+    expect(() => claudeEventBudget().observe(claudeReadMediaResult({
+      base64: "YQ==",
+      bytes: 2,
+      kind: "pdf",
+    }))).not.toThrow();
+  // V8 coverage instruments the intentional 16.5/64 MiB boundary scans. The
+  // exact CI case took 15.916s, so bound only this CPU-heavy test explicitly.
+  }, 30_000);
 
   it("keeps malformed, mismatched, unknown, and non-media data on strict bounds", () => {
     const wrongMime = claudeReadMediaResult({ base64: "YQ==", bytes: 1 }) as unknown as {
@@ -285,20 +294,33 @@ describe("Claude Agent SDK large event boundary", () => {
     })).toThrow("Claude sent an oversized event.");
   });
 
-  it("accounts duplicate occurrences atomically and bounds aggregate media", () => {
+  it("accounts duplicate occurrences atomically across burst and run ceilings", () => {
+    let now = 0;
     const bytes = 15 * 1024 * 1024;
     const base64 = Buffer.alloc(bytes, 0x5a).toString("base64");
     const event = claudeReadMediaResult({ base64, bytes });
-    const budget = claudeEventBudget();
+    const budget = new ClaudeRunEventBudget(new ProviderRunEventBudget(
+      "Claude",
+      1024 * 1024,
+      8_192,
+      32 * 1024 * 1024,
+      { windowMs: 1_000, now: () => now },
+    ), {
+      windowMs: 1_000,
+      now: () => now,
+      maxRunMediaBytes: MAX_CLAUDE_MEDIA_BURST_BYTES + bytes,
+      maxRunMediaEncodedBytes:
+        MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES + base64.length * 2,
+    });
     expect(() => budget.observe({
       ...event as unknown as Record<string, unknown>,
       unrelated: "x".repeat(1024 * 1024),
     })).toThrow("Claude sent an oversized event.");
     for (let index = 0; index < 3; index += 1) budget.observe(event);
-    const remainingBytes = MAX_CLAUDE_RUN_MEDIA_BYTES - 3 * bytes;
+    const remainingBytes = MAX_CLAUDE_MEDIA_BURST_BYTES - 3 * bytes;
     const remainingBase64 = Buffer.alloc(remainingBytes, 0xa5).toString("base64");
     expect(3 * base64.length * 2 + remainingBase64.length * 2)
-      .toBe(MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES);
+      .toBe(MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES);
     budget.observe(claudeReadMediaResult({
       base64: remainingBase64,
       bytes: remainingBytes,
@@ -306,7 +328,63 @@ describe("Claude Agent SDK large event boundary", () => {
     expect(() => budget.observe(claudeReadMediaResult({
       base64: "YQ==",
       bytes: 1,
+    }))).toThrow("Claude exceeded the bounded media event rate for this run.");
+    now = 1_000;
+    expect(() => budget.observe(claudeReadMediaResult({
+      base64,
+      bytes,
+    }))).not.toThrow();
+    expect(() => budget.observe(claudeReadMediaResult({
+      base64: "YQ==",
+      bytes: 1,
     }))).toThrow("Claude exceeded the bounded media event budget for this run.");
+  // V8 coverage instruments each scan of the intentional 48 MiB production
+  // boundary. This takes ~13s locally versus <1s without coverage, so keep the
+  // production-sized proof while bounding only this CPU-heavy test explicitly.
+  }, 30_000);
+
+  it("retains decoded and encoded media ceilings across refill windows", () => {
+    let now = 0;
+    const createBudget = (maxRunMediaBytes: number, maxRunMediaEncodedBytes: number) =>
+      new ClaudeRunEventBudget(new ProviderRunEventBudget(
+        "Claude",
+        1024,
+        16,
+        16 * 1024,
+        { windowMs: 1_000, now: () => now },
+      ), {
+        windowMs: 1_000,
+        now: () => now,
+        maxRunMediaBytes,
+        maxRunMediaEncodedBytes,
+      });
+    const event = claudeReadMediaResult({ base64: "YQ==", bytes: 1 });
+
+    const decodedBudget = createBudget(2, 64);
+    decodedBudget.observe(event);
+    now = 1_000;
+    decodedBudget.observe(event);
+    now = 2_000;
+    expect(() => decodedBudget.observe(event)).toThrow(
+      "Claude exceeded the bounded media event budget for this run.",
+    );
+
+    now = 0;
+    const encodedBudget = createBudget(8, 16);
+    encodedBudget.observe(event);
+    now = 1_000;
+    encodedBudget.observe(event);
+    now = 2_000;
+    expect(() => encodedBudget.observe(event)).toThrow(
+      "Claude exceeded the bounded encoded-media event budget for this run.",
+    );
+
+    expect(() => createBudget(0, 16)).toThrow(
+      "The Claude media event budget is invalid.",
+    );
+    expect(() => createBudget(8, 0)).toThrow(
+      "The Claude media event budget is invalid.",
+    );
   });
 
   it("cancels and releases an owned SDK process after accepted media", async () => {
@@ -463,6 +541,7 @@ describe("Claude Agent SDK large event boundary", () => {
     })).resolves.toMatchObject({
       status: "failed",
       error: "Claude sent an oversized event.",
+      failure: { reason: "protocol-overflow" },
     });
     await expect(pendingPermission).resolves.toMatchObject({
       behavior: "deny",

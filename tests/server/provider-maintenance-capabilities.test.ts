@@ -136,4 +136,17 @@ describe("provider maintenance capabilities", () => {
       });
     },
   );
+
+  it("keeps Kimi's interactive upgrader instructions-only", async () => {
+    await expect(resolveProviderMaintenanceCapabilities(target({
+      providerId: "kimi",
+      executable: "/exact/kimi",
+    }))).resolves.toMatchObject({
+      providerId: "kimi",
+      packageName: "@moonshot-ai/kimi-code",
+      installMethod: "provider-managed",
+      updateAvailability: "instructions-only",
+      update: null,
+    });
+  });
 });

@@ -22,6 +22,11 @@ property of their respective owners.
   `9fdd4824d3c1e1c533a72359dd6c5f285ae9fc63`, files
   `packages/identity/mark-light.svg` and `packages/identity/mark.svg` (MIT
   repository license).
+- `kimi.svg`: Kimi Code icon from `MoonshotAI/kimi-code` at commit
+  `cfc335048378d3708666e11959c8d34507a1d659`, file
+  `apps/vscode/resources/kimi-icon.svg` (MIT repository license; local SHA-256
+  `39b9072b6d235732ecdc8e0aa39674bc64afaa09ff31f29ecc955d61dc4fdda5`).
+  The geometry is unchanged; comments and multiline formatting were removed.
 
 These assets are emitted into the packaged renderer for offline use; the
 application does not request vendor-hosted images at runtime. The imports use

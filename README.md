@@ -17,17 +17,17 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 
 ### The whole coding loop, without the noise
 
-- Connect locally installed Codex, Claude, Cursor, or OpenCode accounts without leaving the app.
+- Connect locally installed Codex, Claude, Cursor, Kimi Code, or OpenCode accounts without leaving the app.
 - Find models quickly through a searchable provider-aware palette, then save complete harness, backend, model, and reasoning routes as Favorites.
 - See provider-supplied thinking summaries, remaining context, and account usage through one compact context control.
-- Work with streaming conversations, resumable sessions, native plans, agent questions, image and document inputs, cancellation, and supervised approvals whenever the selected provider supports them; open goals and verified native sessions directly with `/goal` and `/resume`.
+- Work with streaming conversations, resumable sessions, native plans, agent questions, image, PDF, text, CSV, and Excel inputs, cancellation, and supervised approvals whenever the selected provider supports them; open goals and verified native sessions directly with `/goal` and `/resume`.
 - Launch a saved Duo from one shared prompt into two independently named chats, each with its own project, model route, reasoning, and access mode, with an optional independent third-model judgment.
 - Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
 - Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
 - Save up to 30 reusable prompt presets, search and organize them, and insert one into the selected composer without sending it. Optional route binding stores only harness, backend, model, and reasoning identity—never attachments, chat context, endpoints, continuation state, or credentials.
 - Start from a compact Environment summary with Changes, worktree, branch, Git actions, validated local servers, provider context, repository, editor, sent attachments, and delegated work, while keeping the full workspace tools one click away.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
-- Continue an eligible native Codex, Claude, Cursor, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle.
+- Continue an eligible native Codex, Claude, Cursor, Kimi Code, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle.
 - Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
 - Recover local history from validated rotating SQLite backups, or use explicit native-dialog export and import flows when manual recovery is required.
 - Open the optional Inertia Private Connect PWA through your private Tailscale network without exposing files, terminals, approvals, Git, provider settings, or Full Access to the browser.
@@ -67,7 +67,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
 - Provider updates and compact tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
 - The search-first Work sidebar groups recent, earlier, done, and snoozed tasks into compact rows with their genuine provider mark, repository, branch, status, and time.
-- Sent images and documents stay visible beside the message that owns them after sending, reload, and restart instead of disappearing from the transcript.
+- Sent images, documents, CSV files, and Excel workbooks stay visible beside the message that owns them after sending, reload, and restart; every accepted type has a private preview, with bounded worksheet tables for `.xlsx` and `.xls`.
 - Open project-file references from prose or fenced-code labels directly in Files, then edit supported text files in a focused dialog that refuses to overwrite content changed since it was opened.
 - Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
 - Codex-native goals and Inertia-local objectives keep their source visible. Native goals can start before the first ordinary message, continue across automatic turns, and resume truthfully after Stop or restart, while next-turn skills stay route-bound and never expose provider paths or contents.

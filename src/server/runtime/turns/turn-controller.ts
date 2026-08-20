@@ -23,6 +23,7 @@ import type {
 import type {
   ActiveTurn,
   FollowUpAdmissionLease,
+  ProviderStartAttempt,
   QueuedTurn,
   QueueTurnRequest,
   TurnControllerHooks,
@@ -32,6 +33,8 @@ import type {
 } from "./turn-controller-types";
 import {
   defaultTurnScheduler,
+  broadcastTurnConversationShell,
+  DEFAULT_TURN_MAX_LIFETIME_MS,
   DEFAULT_TURN_TIMEOUT_MS,
   normalizedProviderRunFailure,
   providerLabel,
@@ -51,20 +54,14 @@ import { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
 import { TurnProviderEventProjector } from "./turn-provider-event-projector";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
-import {
-  quarantineActiveDuoTurn,
-} from "../duo/duo-active-turn-quarantine";
+import { quarantineActiveDuoTurn } from "../duo/duo-active-turn-quarantine";
 import { hasActiveTurnCheckout, providerConversationIds } from "./turn-checkout-activity";
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
 import { providerFailureCause } from "./turn-provider-result";
 import { TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
-
-interface ProviderStartAttempt {
-  accepted: boolean;
-  started: Promise<boolean>;
-}
+import { TurnTimeoutCoordinator } from "./turn-timeout-coordinator";
 
 export type {
   QueuedTurn,
@@ -90,7 +87,6 @@ export class TurnController {
   private readonly scheduler: TurnTimerScheduler;
   private readonly clock: () => Date;
   private readonly id: () => string;
-  private readonly turnTimeoutMs: number;
   private readonly runtimeGenerationId: string;
   private readonly systemBootId: string;
   private readonly streams: TurnStreamProjection;
@@ -104,6 +100,7 @@ export class TurnController {
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
   private readonly providerRunOwnershipBarriers = new Map<string, Promise<void>>();
   private readonly followUps: TurnFollowUpCoordinator;
+  private readonly timeouts: TurnTimeoutCoordinator;
   private readonly nativeGoalMutations = new TurnNativeGoalMutationGate();
   private closing = false;
 
@@ -119,6 +116,7 @@ export class TurnController {
       clock?: () => Date;
       id?: () => string;
       turnTimeoutMs?: number;
+      turnMaxLifetimeMs?: number;
       runtimeGenerationId?: string;
       systemBootId?: string;
     } = {},
@@ -126,7 +124,11 @@ export class TurnController {
     this.scheduler = options.scheduler ?? defaultTurnScheduler();
     this.clock = options.clock ?? (() => new Date());
     this.id = options.id ?? randomUUID;
-    this.turnTimeoutMs = Math.max(1, options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
+    const turnTimeoutMs = Math.max(1, options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
+    const turnMaxLifetimeMs = Math.max(
+      turnTimeoutMs,
+      options.turnMaxLifetimeMs ?? DEFAULT_TURN_MAX_LIFETIME_MS,
+    );
     this.runtimeGenerationId = options.runtimeGenerationId ?? `${randomUUID()}:1`;
     this.systemBootId = options.systemBootId ?? `test:${randomUUID()}`;
     this.followUps = new TurnFollowUpCoordinator({
@@ -135,6 +137,16 @@ export class TurnController {
       now: () => this.now(),
       activeForConversation: (conversationId) =>
         this.activeByConversation.get(conversationId),
+    });
+    this.timeouts = new TurnTimeoutCoordinator({
+      scheduler: this.scheduler,
+      inactivityMs: turnTimeoutMs,
+      maxLifetimeMs: turnMaxLifetimeMs,
+      status: (active) => this.store.agentTurn(active.turn.id).status,
+      cancel: (active) => { this.providers.cancel(active.conversation.id); },
+      fail: (active, message) => {
+        this.settle(active, "failed", "turn-timeout", message);
+      },
     });
     this.activities = new TurnActivityProjection({
       store: this.store,
@@ -157,7 +169,7 @@ export class TurnController {
           active,
           "failed",
           "stream-persistence-failed",
-          this.publicError(error),
+          publicTurnError(error),
         );
       },
     });
@@ -457,7 +469,7 @@ export class TurnController {
           active,
           "failed",
           "stream-persistence-failed",
-          this.publicError(error),
+          publicTurnError(error),
         );
       }
     }
@@ -566,7 +578,7 @@ export class TurnController {
         );
       }
     } catch (error) {
-      this.settle(active, "failed", "checkpoint-association-failed", this.publicError(error));
+      this.settle(active, "failed", "checkpoint-association-failed", publicTurnError(error));
       throw error;
     }
 
@@ -700,12 +712,8 @@ export class TurnController {
       runId: active.turn.runId,
       turnId: active.turn.id,
     });
-    this.broadcastConversationShell(active);
-    active.timeoutTimer = this.scheduler.setTimeout(() => {
-      if (active.settled) return;
-      this.providers.cancel(active.conversation.id);
-      this.settle(active, "failed", "turn-timeout", "The agent turn timed out.");
-    }, this.turnTimeoutMs);
+    broadcastTurnConversationShell(this.hooks, active);
+    this.timeouts.start(active);
   }
 
   private async awaitProviderStartReady(active: ActiveTurn): Promise<boolean> {
@@ -778,6 +786,7 @@ export class TurnController {
             acknowledge(false);
             return;
           }
+          this.timeouts.activity(active);
           acknowledge(true);
           // App Server harness acceptance happens before initialize/thread open
           // and, for ordinary turns, before turn/start is acknowledged. Keep
@@ -787,7 +796,7 @@ export class TurnController {
             && this.store.agentTurn(active.turn.id).status === "starting"
           ) {
             if (this.transition(active, "running")) {
-              this.broadcastConversationShell(active);
+              broadcastTurnConversationShell(this.hooks, active);
             }
           }
         },
@@ -840,7 +849,7 @@ export class TurnController {
         this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
         active.providerRunStarted = false;
       }
-      this.settle(active, "failed", "turn-start-failed", this.publicError(error));
+      this.settle(active, "failed", "turn-start-failed", publicTurnError(error));
       return { accepted: false, started };
     }
     return { accepted: true, started };
@@ -1026,6 +1035,7 @@ export class TurnController {
     const active = this.activeByConversation.get(event.conversationId);
     if (!active || !this.accepts(active, event)) return false;
     try {
+      this.timeouts.activity(active);
       if (event.type === "text") {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
@@ -1034,7 +1044,7 @@ export class TurnController {
       return true;
     } catch (error) {
       this.providers.cancel(active.conversation.id);
-      this.settle(active, "failed", "stream-persistence-failed", this.publicError(error));
+      this.settle(active, "failed", "stream-persistence-failed", publicTurnError(error));
       return false;
     }
   }
@@ -1100,6 +1110,7 @@ export class TurnController {
       status,
       updatedAt: this.now(),
     });
+    this.timeouts.activity(active);
     return true;
   }
 
@@ -1220,14 +1231,6 @@ export class TurnController {
     this.activeByTurn.delete(active.turn.id);
   }
 
-  private broadcastConversationShell(active: ActiveTurn): void {
-    if (this.hooks.broadcastConversationShell) {
-      this.hooks.broadcastConversationShell(active.conversation.id);
-      return;
-    }
-    this.hooks.broadcastSnapshot();
-  }
-
   private track(value: void | Promise<void> | undefined): void {
     if (!value) return;
     const task = Promise.resolve(value)
@@ -1243,7 +1246,4 @@ export class TurnController {
     return this.clock().toISOString();
   }
 
-  private publicError(error: unknown): string {
-    return publicTurnError(error);
-  }
 }

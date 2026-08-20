@@ -125,6 +125,32 @@ async function createPreviewServer(): Promise<{
   return { server, url: `http://127.0.0.1:${address.port}/` };
 }
 
+function readableAttachmentPdf(): Buffer {
+  const stream = "BT /F1 12 Tf 72 720 Td (Inertia fixture PDF) Tj ET";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+      + "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let source = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(source, "ascii"));
+    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(source, "ascii");
+  source += `xref\n0 ${objects.length + 1}\n`;
+  source += "0000000000 65535 f \n";
+  source += offsets.map((offset) =>
+    `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+  source += `startxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(source, "ascii");
+}
+
 async function createWorkspace(testDirectory: string): Promise<{
   workspaceDirectory: string;
   attachmentImagePath: string;
@@ -145,7 +171,7 @@ async function createWorkspace(testDirectory: string): Promise<{
   );
   await writeFile(
     attachmentDocumentPath,
-    Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n", "ascii"),
+    readableAttachmentPdf(),
   );
   await writeFile(
     malformedAttachmentPath,

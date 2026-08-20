@@ -11,7 +11,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { providerEnvironment } from "../../src/server/environment";
-import { AgentHarnessRegistry, detectProvider, ProviderManager, type ProviderId } from "../../src/server/providers";
+import { AgentHarnessRegistry, detectProvider, ProviderManager } from "../../src/server/providers";
 import { providerFailureMessage } from "../../src/server/provider/adapters";
 import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
@@ -659,6 +659,63 @@ setInterval(() => {}, 1000);
     })).resolves.toMatchObject({ authState: "configured", canRun: true, statusMessage: "Configured" });
   });
 
+  it("admits an OAuth-only Kimi install for authoritative ACP authentication", async () => {
+    const executable = join(temporaryRoot(), "kimi");
+    const probes: string[][] = [];
+    await expect(detectProvider("kimi", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args) => {
+        probes.push([...args]);
+        return {
+          exitCode: 0,
+          output: args[0] === "--version"
+            ? "kimi 0.36.1"
+            : args[0] === "acp"
+              ? "Run Kimi Code as an Agent Client Protocol (ACP) server"
+              : JSON.stringify({ providers: {} }),
+          started: true,
+          timedOut: false,
+          cleanupConfirmed: true,
+        };
+      },
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "unknown",
+      canRun: true,
+      statusMessage: "Installed; Kimi ACP will verify sign-in when a session starts",
+    });
+    expect(probes).toEqual([
+      ["--version"],
+      ["acp", "--help"],
+      ["provider", "list", "--json"],
+    ]);
+  });
+
+  it("blocks Kimi when its credential probe explicitly requires login", async () => {
+    const executable = join(temporaryRoot(), "kimi");
+    await expect(detectProvider("kimi", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args) => ({
+        exitCode: args[0] === "provider" ? 1 : 0,
+        output: args[0] === "--version"
+          ? "kimi 0.36.1"
+          : args[0] === "acp"
+            ? "Run Kimi Code as an Agent Client Protocol (ACP) server"
+            : "Authentication required; please log in.",
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+      }),
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "unauthenticated",
+      canRun: false,
+      statusMessage: "Sign in required",
+    });
+  });
+
   it("accepts Cursor only after the executable advertises ACP", async () => {
     const readyRoot = temporaryRoot();
     const wrongRoot = temporaryRoot();
@@ -763,8 +820,14 @@ setInterval(() => {}, 1000);
     ]);
   });
 
-  it("normalizes streamed session output from the other provider adapters", async () => {
-    const fixtures: Array<{ providerId: ProviderId; lines: unknown[]; expectedText: string; sessionId: string }> = [
+  it("normalizes streamed session output from the legacy CLI provider adapters", async () => {
+    type LegacyCliProviderId = "claude" | "cursor" | "opencode";
+    const fixtures: Array<{
+      providerId: LegacyCliProviderId;
+      lines: unknown[];
+      expectedText: string;
+      sessionId: string;
+    }> = [
       {
         providerId: "claude",
         sessionId: "33333333-3333-4333-8333-333333333333",

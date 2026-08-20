@@ -291,7 +291,9 @@ export function ComposerToolbar({
           aria-label="Add context"
         >
         <IconButton
-          label={running ? "Attach follow-up images" : "Attach images or documents"}
+          label={running
+            ? "Attach follow-up images"
+            : "Attach images, documents, or spreadsheets"}
           onClick={() => void onChooseAttachments()}
           disabled={
             disabled

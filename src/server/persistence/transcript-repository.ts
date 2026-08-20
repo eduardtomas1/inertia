@@ -203,6 +203,51 @@ export class TranscriptRepository {
     }
   }
 
+  replaceAssistantMessagesForTurnSnapshot(
+    turnId: string,
+    retainedMessageId: string | null,
+    content: string,
+  ): void {
+    if (!retainedMessageId && content) {
+      throw new Error("A non-empty assistant snapshot requires a message.");
+    }
+    this.context.database.transaction(() => {
+      this.context.requireAgentTurn(turnId);
+      if (retainedMessageId) {
+        const retained = this.context.database.prepare(`
+          SELECT id, turn_id, role
+          FROM messages
+          WHERE id = ?
+        `).get(retainedMessageId) as Pick<
+          MessageRow,
+          "id" | "turn_id" | "role"
+        > | undefined;
+        if (
+          !retained
+          || retained.turn_id !== turnId
+          || retained.role !== "assistant"
+        ) {
+          throw new Error(
+            "The retained assistant message does not belong to this turn.",
+          );
+        }
+        if (replaceMessageContent(
+          this.context.database,
+          retainedMessageId,
+          content,
+        ) !== 1) {
+          throw new RecordNotFoundError("Message not found.");
+        }
+      }
+      this.context.database.prepare(`
+        DELETE FROM messages
+        WHERE turn_id = ?
+          AND role = 'assistant'
+          AND (? IS NULL OR id <> ?)
+      `).run(turnId, retainedMessageId, retainedMessageId);
+    })();
+  }
+
   appendMessageContent(messageId: string, delta: string): void {
     if (!delta) return;
     if (!appendMessageContentChunks(this.context.database, messageId, delta)) {

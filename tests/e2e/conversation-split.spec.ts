@@ -419,7 +419,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     }));
   }, app.attachmentImagePath);
   await primary.getByRole("button", {
-    name: "Attach images or documents",
+    name: "Attach images, documents, or spreadsheets",
   }).click();
   await primary.getByRole("button", {
     name: "Preview attachment preview.png",

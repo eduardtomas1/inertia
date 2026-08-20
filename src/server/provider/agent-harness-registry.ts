@@ -1,6 +1,7 @@
 import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
 import { createCodexAppServerHarness } from "./codex-app-server-harness";
 import { createCursorAcpHarness } from "./cursor-acp-harness";
+import { createKimiAcpHarness } from "./kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "./opencode-sdk-harness";
 import type {
   AgentHarness,
@@ -18,6 +19,7 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "opencode-cli": "opencode",
   "claude-agent-sdk": "claude",
   "cursor-acp": "cursor",
+  "kimi-acp": "kimi",
   "opencode-sdk": "opencode",
 };
 
@@ -66,12 +68,14 @@ export class AgentHarnessRegistry {
       throw new ProviderRuntimeError("invalid_input", `Backend '${input.backendProfile.displayName}' is disabled.`);
     }
     if (input.backendProfile.source === "custom") {
-      if (input.providerId === "cursor" || input.providerId === "opencode") {
+      if (input.providerId === "cursor" || input.providerId === "kimi" || input.providerId === "opencode") {
         throw new ProviderRuntimeError(
           "invalid_input",
           input.providerId === "cursor"
             ? "Cursor controls its backend; external backend profiles cannot be injected."
-            : "OpenCode backends must come from OpenCode's native provider catalog.",
+            : input.providerId === "kimi"
+              ? "Kimi Code controls its backend; external backend profiles cannot be injected."
+              : "OpenCode backends must come from OpenCode's native provider catalog.",
         );
       }
       if (input.backendCompatibility.provenance !== "probe") {
@@ -107,6 +111,7 @@ export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
     createCodexAppServerHarness(),
     createClaudeAgentSdkHarness(),
     createCursorAcpHarness(),
+    createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
   ]);
 }

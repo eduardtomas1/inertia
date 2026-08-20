@@ -300,6 +300,7 @@ export function resolveTurnRequest(
           reasoningPendingHighSurrogate: "",
           reasoningId: null,
           timeoutTimer: null,
+          lifetimeTimer: null,
           runningActivities,
           providerActivitiesById: new Map<string, AgentActivity>(),
           providerActivityDetailChars: 0,

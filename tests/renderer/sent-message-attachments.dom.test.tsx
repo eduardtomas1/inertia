@@ -55,9 +55,9 @@ describe("sent message attachments", () => {
       image.name,
     );
     expect(trigger).toHaveAccessibleDescription("PNG image · 1.0 KB");
-    expect(screen.getByRole("group", { name: "Attached file evidence.json" }))
+    expect(screen.getByRole("button", { name: "Preview attachment evidence.json" }))
       .toHaveTextContent("JSON document · 2.0 KB");
-    expect(screen.getByRole("group", { name: "Attached file evidence.json" }))
+    expect(screen.getByRole("button", { name: "Preview attachment evidence.json" }))
       .toHaveAccessibleDescription("JSON document · 2.0 KB");
     expect(container.textContent).not.toContain("/private/");
 
@@ -67,7 +67,7 @@ describe("sent message attachments", () => {
 
     trigger.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("dialog", { name: image.name }))
+    expect(await screen.findByRole("dialog", { name: image.name }))
       .toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole("button", {

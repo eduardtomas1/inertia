@@ -3,8 +3,14 @@ import { createHash } from "node:crypto";
 import { ProviderRunEventBudget } from "./io";
 
 export const MAX_CLAUDE_EVENT_MEDIA_BYTES = 20 * 1024 * 1024;
-export const MAX_CLAUDE_RUN_MEDIA_BYTES = 48 * 1024 * 1024;
-export const MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES = 128 * 1024 * 1024;
+export const MAX_CLAUDE_MEDIA_BURST_BYTES = 48 * 1024 * 1024;
+export const MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES = 128 * 1024 * 1024;
+export const CLAUDE_MEDIA_RUN_BUDGET_BURSTS = 8;
+export const MAX_CLAUDE_RUN_MEDIA_BYTES =
+  MAX_CLAUDE_MEDIA_BURST_BYTES * CLAUDE_MEDIA_RUN_BUDGET_BURSTS;
+export const MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES =
+  MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES * CLAUDE_MEDIA_RUN_BUDGET_BURSTS;
+export const CLAUDE_MEDIA_BUDGET_WINDOW_MS = 60_000;
 const MAX_CLAUDE_EVENT_MEDIA_ENCODED_CHARS =
   4 * Math.ceil(MAX_CLAUDE_EVENT_MEDIA_BYTES / 3);
 
@@ -210,19 +216,13 @@ function structuredReadMedia(
   if (decodedBytes === null) {
     throw new Error("Claude sent non-canonical base64 tool-result media.");
   }
-  if (
-    decodedBytes > MAX_CLAUDE_EVENT_MEDIA_BYTES
-    || file.originalSize > MAX_CLAUDE_EVENT_MEDIA_BYTES
-  ) {
+  if (decodedBytes > MAX_CLAUDE_EVENT_MEDIA_BYTES) {
     throw new Error("Claude sent oversized tool-result media.");
   }
-  // Claude can resize/optimize image data before placing it in `base64`, while
-  // `originalSize` continues to describe the source file. PDFs have no such
-  // transformed representation in the SDK contract, so retain the exact-size
-  // invariant for that topology and fail closed if it drifts.
-  if (result.type === "pdf" && decodedBytes !== file.originalSize) {
-    throw new Error("Claude sent inconsistent tool-result media metadata.");
-  }
+  // originalSize describes the source file while base64 describes the payload
+  // returned to the model. Current Claude builds can transform both images and
+  // PDFs, so equality is not a protocol invariant. Memory accounting remains
+  // anchored to the validated base64 payload that is actually resident here.
   return {
     data: file.base64,
     decodedBytes,
@@ -309,27 +309,88 @@ export function projectClaudeSdkEventMedia(value: unknown): ClaudeMediaProjectio
 }
 
 export class ClaudeRunEventBudget {
+  private availableMediaBytes = MAX_CLAUDE_MEDIA_BURST_BYTES;
+  private availableMediaEncodedBytes = MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES;
   private mediaBytes = 0;
   private mediaEncodedBytes = 0;
+  private readonly windowMs: number;
+  private readonly now: () => number;
+  private readonly maxRunMediaBytes: number;
+  private readonly maxRunMediaEncodedBytes: number;
+  private lastRefillAt: number;
 
-  constructor(private readonly events: ProviderRunEventBudget) {}
+  constructor(
+    private readonly events: ProviderRunEventBudget,
+    options: {
+      windowMs?: number;
+      now?: () => number;
+      maxRunMediaBytes?: number;
+      maxRunMediaEncodedBytes?: number;
+    } = {},
+  ) {
+    this.windowMs = options.windowMs ?? CLAUDE_MEDIA_BUDGET_WINDOW_MS;
+    this.now = options.now ?? Date.now;
+    this.maxRunMediaBytes = options.maxRunMediaBytes
+      ?? MAX_CLAUDE_RUN_MEDIA_BYTES;
+    this.maxRunMediaEncodedBytes = options.maxRunMediaEncodedBytes
+      ?? MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES;
+    if (
+      !Number.isSafeInteger(this.windowMs)
+      || this.windowMs < 1
+      || !Number.isSafeInteger(this.maxRunMediaBytes)
+      || this.maxRunMediaBytes < 1
+      || !Number.isSafeInteger(this.maxRunMediaEncodedBytes)
+      || this.maxRunMediaEncodedBytes < 1
+    ) {
+      throw new Error("The Claude media event budget is invalid.");
+    }
+    this.lastRefillAt = this.now();
+  }
 
   observe(value: unknown): void {
     const projected = projectClaudeSdkEventMedia(value);
-    if (this.mediaBytes + projected.mediaBytes > MAX_CLAUDE_RUN_MEDIA_BYTES) {
+    if (projected.mediaBytes > this.maxRunMediaBytes - this.mediaBytes) {
       throw new Error("Claude exceeded the bounded media event budget for this run.");
+    }
+    if (
+      projected.mediaEncodedBytes
+      > this.maxRunMediaEncodedBytes - this.mediaEncodedBytes
+    ) {
+      throw new Error("Claude exceeded the bounded encoded-media event budget for this run.");
+    }
+    this.refill();
+    if (this.availableMediaBytes < projected.mediaBytes) {
+      throw new Error("Claude exceeded the bounded media event rate for this run.");
     }
     // For the current exact two-copy topology this is a derived raw-wire
     // ceiling for the decoded budget. Keep it explicit so a future topology
     // change cannot silently add another encoded occurrence.
     if (
-      this.mediaEncodedBytes + projected.mediaEncodedBytes
-      > MAX_CLAUDE_RUN_MEDIA_ENCODED_BYTES
+      this.availableMediaEncodedBytes < projected.mediaEncodedBytes
     ) {
-      throw new Error("Claude exceeded the bounded encoded-media event budget for this run.");
+      throw new Error("Claude exceeded the bounded encoded-media event rate for this run.");
     }
     this.events.observe(projected.value);
     this.mediaBytes += projected.mediaBytes;
     this.mediaEncodedBytes += projected.mediaEncodedBytes;
+    this.availableMediaBytes -= projected.mediaBytes;
+    this.availableMediaEncodedBytes -= projected.mediaEncodedBytes;
+  }
+
+  private refill(): void {
+    const observedAt = this.now();
+    const elapsedMs = observedAt - this.lastRefillAt;
+    if (!Number.isFinite(observedAt) || elapsedMs <= 0) return;
+    this.lastRefillAt = observedAt;
+    const fraction = Math.min(1, elapsedMs / this.windowMs);
+    this.availableMediaBytes = Math.min(
+      MAX_CLAUDE_MEDIA_BURST_BYTES,
+      this.availableMediaBytes + MAX_CLAUDE_MEDIA_BURST_BYTES * fraction,
+    );
+    this.availableMediaEncodedBytes = Math.min(
+      MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES,
+      this.availableMediaEncodedBytes
+        + MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES * fraction,
+    );
   }
 }

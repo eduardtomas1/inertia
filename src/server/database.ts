@@ -120,7 +120,7 @@ export class RuntimeStore {
   private readonly reviewRepository: ReviewRepository;
   private readonly settingsRepository: SettingsRepository;
   private readonly snapshotRepository: SnapshotRepository;
-  private readonly transcriptRepository: TranscriptRepository;
+  readonly transcriptRepository: TranscriptRepository;
   private readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;

@@ -24,6 +24,10 @@ export function quarantineActiveDuoTurn(
     dependencies.scheduler.clearTimeout(active.timeoutTimer);
     active.timeoutTimer = null;
   }
+  if (active.lifetimeTimer !== null) {
+    dependencies.scheduler.clearTimeout(active.lifetimeTimer);
+    active.lifetimeTimer = null;
+  }
   for (const requestId of active.approvalIds) {
     if (!dependencies.pendingApprovals.delete(requestId)) continue;
     dependencies.hooks.broadcast({

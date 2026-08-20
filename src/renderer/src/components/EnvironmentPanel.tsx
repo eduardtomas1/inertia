@@ -12,6 +12,7 @@ import {
   CloudUpload,
   ExternalLink,
   FileDiff,
+  FileSpreadsheet,
   FileText,
   Folder,
   FolderGit2,
@@ -27,7 +28,10 @@ import {
   Trash2,
 } from "lucide-react";
 
-import { chatAttachmentKind } from "@shared/attachments";
+import {
+  chatAttachmentKind,
+  isSpreadsheetAttachmentMimeType,
+} from "@shared/attachments";
 import type {
   EnvironmentRunItem,
   EnvironmentSummarySnapshot,
@@ -688,7 +692,9 @@ export function EnvironmentPanel({
                 <li key={attachment.id}>
                   {chatAttachmentKind(attachment.mimeType) === "image"
                     ? <Image size={14} aria-hidden="true" />
-                    : <FileText size={14} aria-hidden="true" />}
+                    : isSpreadsheetAttachmentMimeType(attachment.mimeType)
+                      ? <FileSpreadsheet size={14} aria-hidden="true" />
+                      : <FileText size={14} aria-hidden="true" />}
                   <span title={attachment.name}>{attachment.name}</span>
                 </li>
               ))}

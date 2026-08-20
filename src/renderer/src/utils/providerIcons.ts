@@ -1,6 +1,7 @@
 import anthropicIcon from "../assets/provider-icons/anthropic.svg?no-inline";
 import cursorDarkIcon from "../assets/provider-icons/cursor-dark.svg?no-inline";
 import cursorLightIcon from "../assets/provider-icons/cursor-light.svg?no-inline";
+import kimiIcon from "../assets/provider-icons/kimi.svg?no-inline";
 import openaiIcon from "../assets/provider-icons/openai.svg?no-inline";
 import opencodeDarkIcon from "../assets/provider-icons/opencode-dark.svg?no-inline";
 import opencodeLightIcon from "../assets/provider-icons/opencode-light.svg?no-inline";
@@ -9,7 +10,7 @@ import type { ProviderId } from "@shared/contracts";
 
 export type ProviderIconDefinition = Readonly<{
   providerId: ProviderId;
-  brand: "openai" | "anthropic" | "cursor" | "opencode";
+  brand: "openai" | "anthropic" | "cursor" | "kimi" | "opencode";
   label: string;
   lightSrc: string;
   darkSrc?: string;
@@ -36,6 +37,13 @@ const providerIconDefinitions: Readonly<Record<ProviderId, ProviderIconDefinitio
     label: "Cursor",
     lightSrc: cursorLightIcon,
     darkSrc: cursorDarkIcon,
+  },
+  kimi: {
+    providerId: "kimi",
+    brand: "kimi",
+    label: "Kimi Code",
+    lightSrc: kimiIcon,
+    invertInDark: true,
   },
   opencode: {
     providerId: "opencode",

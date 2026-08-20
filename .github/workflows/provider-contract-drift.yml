@@ -143,6 +143,7 @@ jobs:
                 "@opencode-ai/sdk",
                 "@openai/codex",
                 "@anthropic-ai/claude-code",
+                "@moonshot-ai/kimi-code",
                 "opencode-ai",
               ]);
               let report = {};

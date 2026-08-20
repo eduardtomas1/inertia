@@ -46,6 +46,15 @@ function cursorCandidateIsIdentified(
     || /\bcursor(?:[ -]agent)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
 }
 
+function kimiCandidateIsIdentified(
+  executable: string,
+  versionOutput: string,
+  acpOutput: string,
+): boolean {
+  const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
+  return name === "kimi" || /\bkimi(?:[ -]code)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
+}
+
 function versionFromOutput(output: string): string | undefined {
   return output.match(/\bv?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?\b/u)?.[0];
 }
@@ -195,6 +204,25 @@ function authStateFromProbe(providerId: ProviderId, probe: ProbeResult): Provide
     } catch { /* Older Claude releases may return text. */ }
   }
 
+  if (providerId === "kimi") {
+    if (/not (?:logged|signed) in|authentication required|please (?:log|sign) in/iu.test(lower)) {
+      return "unauthenticated";
+    }
+    try {
+      const status = JSON.parse(normalized) as { providers?: unknown };
+      if (
+        status.providers
+        && typeof status.providers === "object"
+        && !Array.isArray(status.providers)
+        && Object.keys(status.providers).length > 0
+      ) return "configured";
+    } catch { /* Older Kimi Code releases may return a text table. */ }
+    if (probe.exitCode === 0 && /\b(?:kimi|anthropic|openai)\b/iu.test(lower)) {
+      return "configured";
+    }
+    return "unknown";
+  }
+
   if (providerId === "opencode") {
     if (probe.exitCode !== 0) return "unknown";
     const configurationCounts = [...lower.matchAll(/\b(\d+)\s+(?:credentials?|environment variables?)\b/gu)]
@@ -295,10 +323,13 @@ export async function detectProvider(
 
   const versionProbes = await Promise.all(candidates.map(async (executable) => {
     const probe = await runProbe(executable, ["--version"], environment, cwd, timeoutMs);
-    const acpProbe = providerId === "cursor" && probe.started && !probe.timedOut && probe.exitCode === 0
+    const acpProbe = (providerId === "cursor" || providerId === "kimi")
+      && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(
           executable,
-          cursorAgentCommandArgs(executable, ["acp", "--help"]),
+          providerId === "cursor"
+            ? cursorAgentCommandArgs(executable, ["acp", "--help"])
+            : ["acp", "--help"],
           environment,
           cwd,
           timeoutMs,
@@ -308,12 +339,10 @@ export async function detectProvider(
       acpProbe.started
       && !acpProbe.timedOut
       && acpProbe.exitCode === 0
-      && /(?:agent client protocol|\bacp\b|cursor)/iu.test(acpProbe.output)
-      && cursorCandidateIsIdentified(
-        executable,
-        probe.output,
-        acpProbe.output,
-      )
+      && /(?:agent client protocol|\bacp\b|cursor|kimi)/iu.test(acpProbe.output)
+      && (providerId === "cursor"
+        ? cursorCandidateIsIdentified(executable, probe.output, acpProbe.output)
+        : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output))
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(executable, ["app-server", "--help"], environment, cwd, timeoutMs)
@@ -351,20 +380,20 @@ export async function detectProvider(
     const cleanupUnconfirmed = versionProbes.some(
       ({ cleanupConfirmed }) => !cleanupConfirmed,
     );
-    const cursorWithoutAcp = providerId === "cursor" && versionProbes.some(
+    const providerWithoutAcp = (providerId === "cursor" || providerId === "kimi") && versionProbes.some(
       ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
     );
     return {
       provider,
-      available: cursorWithoutAcp,
-      installState: cursorWithoutAcp ? "installed" : "error",
+      available: providerWithoutAcp,
+      installState: providerWithoutAcp ? "installed" : "error",
       authState: "unknown",
       canRun: false,
       cleanupConfirmed: !cleanupUnconfirmed,
       statusMessage: cleanupUnconfirmed
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
-        : cursorWithoutAcp
-        ? "Cursor CLI found, but ACP is unavailable"
+        : providerWithoutAcp
+        ? `${provider.name} CLI found, but ACP is unavailable`
         : providerId === "codex" ? "Codex CLI was found but failed to start" : statusMessage("error", "unknown"),
     };
   }
@@ -401,13 +430,21 @@ export async function detectProvider(
   );
   const authState = authStateFromProbe(providerId, authProbe);
   const authenticated = authState === "authenticated" || authState === "configured";
+  // `kimi provider list --json` enumerates configured API providers, but a
+  // valid managed OAuth login need not appear there. Kimi ACP owns the
+  // authoritative `authenticate` exchange at session startup, so an otherwise
+  // healthy ACP install with unknown static auth remains admissible. A known
+  // unauthenticated result is still blocked, and AUTH_REQUIRED is translated
+  // into an actionable runtime error by the native harness.
+  const runtimeNegotiatesAuthentication = providerId === "kimi"
+    && authState === "unknown";
   const appServerReady = selected.appServerReady;
   const versionCleanupConfirmed = versionProbes.every(
     (probe) => probe.cleanupConfirmed,
   );
   const cleanupConfirmed = authProbe.cleanupConfirmed === true
     && versionCleanupConfirmed;
-  const canRun = authenticated
+  const canRun = (authenticated || runtimeNegotiatesAuthentication)
     && appServerReady
     && cleanupConfirmed;
   return {
@@ -425,6 +462,8 @@ export async function detectProvider(
       ? `${provider.name} connection probe timed out, and its process tree could not be confirmed stopped`
       : providerId === "codex" && !appServerReady
       ? "Codex App Server is unsupported; update the selected CLI"
+      : runtimeNegotiatesAuthentication
+      ? "Installed; Kimi ACP will verify sign-in when a session starts"
       : statusMessage("installed", authState),
   };
 }

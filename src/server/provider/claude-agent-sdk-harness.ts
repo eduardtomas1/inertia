@@ -11,7 +11,10 @@ import {
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
-import { providerActivityDetailSections } from "./activity-detail";
+import {
+  MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+  sanitizeProviderActivityDetail,
+} from "./activity-detail";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import {
   createClaudeOwnedQueryProcess,
@@ -26,10 +29,11 @@ import {
   type AgentHarnessStartOptions,
   type ClaudeAgentSdkHarnessCapabilities,
 } from "./agent-harness";
-import type { ProviderRunResult } from "./contracts";
+import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
 import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
+import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { claudeQuestions } from "./claude-questions";
 import {
@@ -50,8 +54,6 @@ import {
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
 import {
-  parseClaudeRateLimitEvent,
-  parseClaudeUsage,
   readClaudeContextUsage,
 } from "./claude-usage";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
@@ -387,10 +389,6 @@ function startClaudeRun(
   const delegateLifecycle = new ClaudeDelegateLifecycle();
   const promptChannel = new ClaudePromptChannel();
   const subagentTracker = new ClaudeSubagentTraceTracker(emitter.subagent);
-  const toolActivities = new Map<
-    string,
-    { kind: "command" | "tool"; label: string }
-  >();
   let query: Query | undefined;
   let messageIterator: AsyncIterator<SDKMessage> | undefined;
   let cancelRequested = false;
@@ -398,14 +396,12 @@ function startClaudeRun(
   let acceptedFollowUp = false;
   const pendingFollowUpIds = new Set<string>();
   let sessionId = options.input.sessionId;
-  let latestContextUsage: Awaited<ReturnType<typeof readClaudeContextUsage>>;
+  let latestContextUsage: unknown;
   let contextUsageRequest: Promise<void> | null = null;
   let stagedSkillPlugin: Awaited<ReturnType<
     typeof stageClaudeSkillPlugin
   >> = null;
   let selectedSkillsVerified = false;
-  let compactSucceeded = false;
-  let compactFailure: string | undefined;
   const requestedFastMode = options.input.modelSelection.providerOptions.fastMode;
   if (requestedFastMode !== undefined && requestedFastMode !== "fast") {
     throw new Error("Claude received an invalid Fast mode option.");
@@ -580,6 +576,19 @@ function startClaudeRun(
         "",
         options.input.backendProfile,
       );
+  const messageProjector = new ClaudeMessageProjector({
+    emitter,
+    text,
+    usesNativeAnthropic,
+    selectedModelId: options.input.modelSelection.modelId,
+    contextWindowOverride:
+      options.input.modelSelection.contextWindowOverride,
+    contextUsage: () => latestContextUsage,
+    acceptContextUsage: (usage) => {
+      latestContextUsage = usage;
+    },
+    refreshContextUsage,
+  });
   const providerResult = (async (): Promise<ProviderRunResult> => {
     try {
       const compactInstruction = options.input.operation?.instruction;
@@ -682,8 +691,6 @@ function startClaudeRun(
       }
       acceptingFollowUps = true;
       emitter.status("running");
-      let sawStreamText = false;
-      let sawOutputText = false;
       messageIterator = query[Symbol.asyncIterator]();
       let drainTerminalSubagents = false;
       while (true) {
@@ -736,6 +743,7 @@ function startClaudeRun(
         }
         const lifecycle = delegateLifecycle.observe(message);
         subagentTracker.observe(message);
+        messageProjector.observe(message, provesRequestedCompaction);
         if (
           lifecycle.turnEnded
           && message.type !== "result"
@@ -749,130 +757,7 @@ function startClaudeRun(
         ) {
           drainTerminalSubagents = true;
         }
-        if (message.type === "stream_event") {
-          if (childOwned) continue;
-          const delta = objectValue(objectValue(record.event)?.delta);
-          const deltaType = stringValue(delta?.type);
-          const value = stringValue(delta?.text) ?? stringValue(delta?.thinking);
-          if (value && deltaType === "text_delta") {
-            sawStreamText = true;
-            sawOutputText = true;
-            emitText(value, text, emitter.text);
-          } else if (value && deltaType === "thinking_delta") {
-            emitter.rich({ type: "reasoning-summary", text: bounded(value) });
-          }
-          continue;
-        }
-        if (message.type === "assistant") {
-          if (childOwned) continue;
-          const content = Array.isArray(objectValue(record.message)?.content) ? objectValue(record.message)?.content as unknown[] : [];
-          for (const block of content) {
-            const item = objectValue(block);
-            if (!item) continue;
-            if (item.type === "text" && !sawStreamText && stringValue(item.text)) {
-              sawOutputText = true;
-              emitText(item.text as string, text, emitter.text);
-            }
-            if (item.type === "thinking" && typeof item.thinking === "string") emitter.rich({ type: "reasoning-summary", text: bounded(item.thinking) });
-            if (item.type === "tool_use") {
-              const name = stringValue(item.name) ?? "tool";
-              const input = objectValue(item.input);
-              const kind = name === "Bash" ? "command" : "tool";
-              const label = bounded(name);
-              const activityId = stringValue(item.id);
-              if (activityId) toolActivities.set(activityId, { kind, label });
-              emitter.activity(kind, "started", label, {
-                ...(activityId ? { activityId } : {}),
-                ...(name === "Bash"
-                  ? {
-                      detail: providerActivityDetailSections({
-                        command: input?.command,
-                      }) ?? undefined,
-                    }
-                  : {}),
-              });
-              if (name === "ExitPlanMode" && input) {
-                const plan = stringValue(input.plan) ?? stringValue(input.content);
-                if (plan) emitter.rich({ type: "plan", explanation: plan, steps: planSteps(plan) });
-              }
-            }
-          }
-          // This control read runs alongside the provider loop. It must never
-          // delay a terminal result; result.iterations remains the exact
-          // fallback when the optional response has not arrived yet.
-          refreshContextUsage();
-          continue;
-        }
-        if (message.type === "user") {
-          if (childOwned) continue;
-          const content = Array.isArray(objectValue(record.message)?.content)
-            ? objectValue(record.message)?.content as unknown[]
-            : [];
-          for (const block of content) {
-            const result = objectValue(block);
-            if (result?.type !== "tool_result") continue;
-            const activityId = stringValue(result.tool_use_id);
-            const activity = activityId ? toolActivities.get(activityId) : undefined;
-            const failed = result.is_error === true;
-            const detail = providerActivityDetailSections({
-              [failed ? "error" : "output"]: result.content,
-            });
-            emitter.activity(
-              activity?.kind ?? "tool",
-              failed ? "failed" : "completed",
-              activity?.label ?? "Tool",
-              {
-                ...(activityId ? { activityId } : {}),
-                ...(detail ? { detail } : {}),
-              },
-            );
-            if (activityId) toolActivities.delete(activityId);
-          }
-          continue;
-        }
-        if (message.type === "rate_limit_event" && usesNativeAnthropic) {
-          const rateLimit = parseClaudeRateLimitEvent(record);
-          if (rateLimit) {
-            emitter.rich({
-              type: "metadata",
-              metadata: { rateLimits: [rateLimit] },
-              source: "session",
-              complete: false,
-            });
-          }
-          continue;
-        }
-        if (message.type === "system" && message.subtype === "status") {
-          if (provesRequestedCompaction
-            && message.compact_result === "success" && !compactFailure) {
-            compactSucceeded = true;
-          }
-          if (provesRequestedCompaction && message.compact_result === "failed") {
-            compactSucceeded = false;
-            compactFailure = message.compact_error?.trim()
-              || "Claude reported that context compaction failed.";
-          }
-          continue;
-        }
-        if (message.type === "system" && message.subtype === "compact_boundary") {
-          if (
-            provesRequestedCompaction
-            && message.compact_metadata.trigger === "manual"
-            && !compactFailure
-          ) compactSucceeded = true;
-          refreshContextUsage();
-          continue;
-        }
         if (message.type === "result") {
-          const usage = parseClaudeUsage(record, {
-            selectedModelId: options.input.modelSelection.modelId,
-            contextWindowOverride:
-              options.input.modelSelection.contextWindowOverride,
-            contextUsage: latestContextUsage,
-          });
-          if (usage) {
-            emitter.rich({ type: "usage", usage });
-          }
           if (message.subtype === "success" && pendingFollowUpIds.size > 0) {
             const userMessageId = stringValue(record.user_message_uuid);
             if (!userMessageId) {
@@ -885,8 +770,7 @@ function startClaudeRun(
               // Each streaming-input result ends one SDK user turn. Parent
               // snapshots from the next turn must not be suppressed by text
               // that was emitted before the admitted follow-up was handled.
-              sawStreamText = false;
-              sawOutputText = false;
+              messageProjector.resetTurnOutput();
               continue;
             }
           }
@@ -905,13 +789,16 @@ function startClaudeRun(
         );
       }
       if (options.input.operation?.kind === "compact"
-        && (compactFailure || !compactSucceeded)) {
+        && (messageProjector.compactFailure
+          || !messageProjector.compactSucceeded)) {
+        const error = routeFailure(
+          messageProjector.compactFailure
+            ?? "Claude did not confirm that context compaction completed.",
+        );
         return finishResult(
           "failed",
-          routeFailure(
-            compactFailure
-              ?? "Claude did not confirm that context compaction completed.",
-          ),
+          error,
+          claudeFailure(error, "system/compact_boundary"),
         );
       }
       if (!fastModeVerified) {
@@ -923,30 +810,70 @@ function startClaudeRun(
       }
       const completion = delegateLifecycle.complete();
       if (completion.kind === "incomplete") {
+        const projectedFailure = messageProjector.preferredFailure();
+        const error = routeFailure(
+          projectedFailure?.message
+            ?? claudeLifecycleFailure(completion.reason),
+        );
         return finishResult(
           "failed",
-          routeFailure(claudeLifecycleFailure(completion.reason)),
+          error,
+          projectedFailure
+            ? { ...projectedFailure, message: error }
+            : claudeFailure(error, `lifecycle/${completion.reason}`),
         );
       }
       const finalMessage = completion.result;
       if (finalMessage.subtype !== "success") {
-        const failure = finalMessage.errors
-          .filter((value): value is string => typeof value === "string")
-          .join("\n");
+        const technicalDetail = sanitizeProviderActivityDetail(
+          finalMessage.errors
+            .filter((value): value is string => typeof value === "string")
+            .join("\n"),
+          {
+            workspaceRoot: options.input.cwd,
+            maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+          },
+        );
+        const projectedFailure = messageProjector.preferredFailure();
+        const error = routeFailure(
+          projectedFailure?.message
+            ?? claudeResultFailure(finalMessage.subtype),
+        );
         return finishResult(
           "failed",
-          routeFailure(failure || "Claude could not complete the request."),
+          error,
+          projectedFailure
+            ? {
+                ...projectedFailure,
+                message: error,
+                ...(technicalDetail ? { technicalDetail } : {}),
+              }
+            : claudeFailure(
+                error,
+                `result/${finalMessage.subtype}`,
+                technicalDetail ?? undefined,
+              ),
         );
       }
-      if (!sawOutputText && typeof finalMessage.result === "string") {
-        emitText(finalMessage.result, text, emitter.text);
+      if (!messageProjector.sawOutputText && typeof finalMessage.result === "string") {
+        messageProjector.emitTerminalText(finalMessage.result, finalMessage.uuid);
       }
-      return finishResult("completed");
+      return finishResult(
+        "completed",
+        undefined,
+        undefined,
+        messageProjector.hadSupersession
+          ? messageProjector.authoritativeText()
+          : undefined,
+      );
     } catch (error) {
       if (cancelRequested || abortController.signal.aborted) return finishResult("cancelled");
+      const rawError = safeError(error, "Claude Agent SDK stopped unexpectedly.");
+      const message = routeFailure(rawError);
       return finishResult(
         "failed",
-        routeFailure(safeError(error, "Claude Agent SDK stopped unexpectedly.")),
+        message,
+        claudeRuntimeFailure(rawError, message),
       );
     } finally {
       acceptingFollowUps = false;
@@ -1027,18 +954,29 @@ function startClaudeRun(
     return terminal;
   });
 
-  function finishResult(status: ProviderRunResult["status"], error?: string): ProviderRunResult {
+  function finishResult(
+    status: ProviderRunResult["status"],
+    error?: string,
+    failure?: ProviderRunFailure,
+    textOverride?: string,
+  ): ProviderRunResult {
+    const resultText = textOverride === undefined
+      ? text.toString()
+      : textOverride.slice(0, MAX_RESULT_TEXT_CHARS);
     return {
       providerId: "claude",
       conversationId,
       status,
       ...(sessionId ? { sessionId } : {}),
-      text: text.toString(),
-      textTruncated: text.truncated,
+      text: resultText,
+      textTruncated: textOverride === undefined
+        ? text.truncated
+        : textOverride.length > MAX_RESULT_TEXT_CHARS,
       exitCode: null,
       signal: null,
       cleanupConfirmed: true,
       ...(error ? { error } : {}),
+      ...(failure ? { failure } : {}),
     };
   }
 
@@ -1178,10 +1116,53 @@ function claudeLifecycleFailure(
   }
 }
 
-function emitText(value: string, buffer: CappedProviderBuffer, emit: (text: string) => void): void {
-  const safe = bounded(value);
-  buffer.append(safe);
-  emit(safe);
+function claudeResultFailure(
+  subtype: Exclude<
+    Extract<SDKMessage, { type: "result" }>["subtype"],
+    "success"
+  >,
+): string {
+  switch (subtype) {
+    case "error_during_execution":
+      return "Claude could not complete the request.";
+    case "error_max_turns":
+      return "Claude reached the maximum number of agent turns.";
+    case "error_max_budget_usd":
+      return "Claude reached the configured spending limit.";
+    case "error_max_structured_output_retries":
+      return "Claude could not produce a valid structured response.";
+  }
+}
+
+function claudeFailure(
+  message: string,
+  terminalEvent: string,
+  technicalDetail?: string,
+): ProviderRunFailure {
+  return {
+    reason: "provider-error",
+    message,
+    phase: "turn",
+    terminalEvent,
+    ...(technicalDetail ? { technicalDetail } : {}),
+  };
+}
+
+function claudeRuntimeFailure(
+  rawError: string,
+  message: string,
+): ProviderRunFailure {
+  const reason: ProviderRunFailure["reason"] = /oversized|(?:stream|text)-correlation|trace state|bounded(?: [\w-]+)* event rate/iu.test(rawError)
+    ? "protocol-overflow"
+    : /unserializable|malformed|non-canonical/iu.test(rawError)
+      ? "malformed-protocol"
+      : "provider-error";
+  return {
+    reason,
+    message,
+    phase: "runtime",
+    terminalEvent: "sdk/exception",
+  };
 }
 
 function bounded(value: string): string {

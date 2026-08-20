@@ -49,6 +49,11 @@ export class TurnSettlementCoordinator {
     active.acceptingProviderEvents = false;
     if (active.timeoutTimer !== null) {
       this.options.scheduler.clearTimeout(active.timeoutTimer);
+      active.timeoutTimer = null;
+    }
+    if (active.lifetimeTimer !== null) {
+      this.options.scheduler.clearTimeout(active.lifetimeTimer);
+      active.lifetimeTimer = null;
     }
 
     let persistenceError: string | null = null;

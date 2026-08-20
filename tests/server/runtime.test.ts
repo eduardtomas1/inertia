@@ -74,7 +74,6 @@ async function loadConversationDetailResult(
   }
   return event.result;
 }
-
 async function loadConversationDetail(
   socket: WebSocket,
   events: EventQueue,
@@ -101,7 +100,6 @@ async function waitForConversationDetail(
   }
   throw new Error(`Conversation detail for ${conversationId} did not reach the expected state.`);
 }
-
 function waitForRejectedUpgrade(url: string, origin: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url, { origin });
@@ -116,7 +114,6 @@ function waitForRejectedUpgrade(url: string, origin: string): Promise<number> {
     });
   });
 }
-
 describe("local runtime", () => {
   // The portable Windows fixture is a relocated node.exe whose subcommand is
   // intentionally cwd-relative. These isolation tests use a cwd-independent
@@ -2494,5 +2491,9 @@ process.exit(child.status ?? 1);
       ready.activeConversationId!,
     )).reviewSummaries).toEqual([]);
     expect(readdirSync(data).filter((name) => name.startsWith("read-only-summary-"))).toEqual([]);
+    client.socket.close();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await runtime.close();
+    runtimes.splice(runtimes.indexOf(runtime), 1);
   });
 });

@@ -8,7 +8,6 @@ import type {
   ConversationAttachmentStoreAnyOperationRunner,
   ConversationAttachmentStoreAuthority,
 } from "../node/conversation-attachment-store-child.js";
-import { chatAttachmentKind } from "../shared/attachments.js";
 import type { ValidatedAttachmentPreview } from "./attachment-registry.js";
 import { AttachmentRegistry } from "./attachment-registry.js";
 import { validateAttachmentImport } from "./attachment-import.js";
@@ -111,13 +110,7 @@ export async function resolveAttachmentPreviewResponse(
           size: retainedPreview.attachment.size,
         }
       : null);
-  if (
-    !preview
-    || (
-      chatAttachmentKind(preview.mimeType) !== "image"
-      && preview.mimeType !== "application/pdf"
-    )
-  ) return null;
+  if (!preview) return null;
   return new Response(new Uint8Array(preview.bytes).buffer, {
     status: 200,
     headers: {

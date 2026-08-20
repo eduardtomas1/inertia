@@ -245,6 +245,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     const darkComposer = page.getByRole("region", { name: "Message composer" });
     const darkSend = darkComposer.getByRole("button", { name: "Send message" });
     await expect(darkSend).toBeVisible();
+    await expect(darkSend).toHaveAttribute("data-motion-state", "send");
     const darkSendGeometry = await darkSend.evaluate((button) => {
       const bounds = button.getBoundingClientRect();
       return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };

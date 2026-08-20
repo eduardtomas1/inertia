@@ -186,7 +186,13 @@ describe("runtime boundary helpers", () => {
 
   it("produces deterministic provider placeholders", () => {
     const providers = initialProviderSnapshots(true);
-    expect(providers.map(({ id }) => id)).toEqual(["codex", "claude", "cursor", "opencode"]);
+    expect(providers.map(({ id }) => id)).toEqual([
+      "codex",
+      "claude",
+      "cursor",
+      "kimi",
+      "opencode",
+    ]);
     expect(providers.every(({ canRun, installState, authState }) => !canRun && installState === "checking" && authState === "checking")).toBe(true);
     expect(providers.every(
       ({ agentThreadManagement }) => agentThreadManagement?.state === "supported",

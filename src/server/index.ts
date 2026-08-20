@@ -939,8 +939,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   }
 
   if (enableProviders) {
-    void trackRuntimeOperation(async () => {
-      await refreshProviderInfo(undefined, true);
+    void refreshProviderInfo(undefined, true).then(async () => {
+      // Remote version advisories are best-effort UI data and own no shutdown resources.
       if (!closed) await providerMaintenance.refresh(PROVIDER_IDS, false);
     }).catch(() => {
       if (closed) return;

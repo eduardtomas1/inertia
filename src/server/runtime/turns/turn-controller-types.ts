@@ -92,6 +92,11 @@ export interface TurnProviderRuntime {
   disposeAll(): Promise<void>;
 }
 
+export interface ProviderStartAttempt {
+  readonly accepted: boolean;
+  readonly started: Promise<boolean>;
+}
+
 export interface TurnStructuredContextCapture {
   conversation: Conversation;
   content: string;
@@ -262,6 +267,7 @@ export interface ActiveTurn {
   reasoningId: string | null;
   reasoningStream: TurnStreamChannel;
   timeoutTimer: unknown;
+  lifetimeTimer: unknown;
   runningActivities: Map<ProviderActivityEvent["kind"], AgentActivity[]>;
   providerActivitiesById: Map<string, AgentActivity>;
   providerActivityDetailChars: number;

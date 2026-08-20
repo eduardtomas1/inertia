@@ -5,16 +5,18 @@ import {
 import {
   codexGoalContinuationGraceMs,
   codexSubagentDrainTimeoutMs,
-  commandExecutionLabel,
   type CodexRunPhase,
 } from "./app-server-config";
 import {
   CodexSubagentLifecycle,
-  strictCodexProviderIdentifier,
   type CodexSubagentAuthority,
   type CodexSubagentProjection,
   type CodexSubagentUpdate,
 } from "./app-server-subagents";
+import {
+  isLiveCodexSubagentStatus,
+  shouldAcceptCodexSubagentProjection,
+} from "./app-server-subagent-projection";
 import {
   CodexHostToolRuntime,
   isHostToolApprovalId,
@@ -38,7 +40,13 @@ import {
   isCodexInputRequestMethod,
   parseCodexOwnedInputRequest,
 } from "./questions";
-import { completedReasoningSummary } from "./reasoning";
+import {
+  handleCodexHook,
+  handleCodexItem,
+  type CodexItemActivity,
+} from "./app-server-item-events";
+import { projectCodexSecurityNotification } from "./app-server-security-events";
+import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
 import { parseCodexRateLimits } from "../codex-metadata";
@@ -100,35 +108,13 @@ export interface CodexAppServerEventHost {
   ) => void;
 }
 
-const SUBAGENT_AUTHORITY: Record<CodexSubagentAuthority, number> = {
-  activity: 0,
-  state: 1,
-  turn: 2,
-};
-
-const LIVE_SUBAGENT_STATUSES = new Set<CodexSubagentUpdate["status"]>([
-  "queued",
-  "spawned",
-  "running",
-  "waiting",
-]);
-
-const TERMINAL_SUBAGENT_STATUSES =
-  new Set<CodexSubagentUpdate["status"]>([
-    "completed",
-    "failed",
-    "cancelled",
-    "interrupted",
-    "unknown",
-    "lost",
-  ]);
-
 interface PendingParentCompletion {
   status: CodexAppServerResult["status"];
   exitCode: number | null;
 }
 
 const MAX_CODEX_PENDING_SERVER_REQUESTS = 32;
+const MAX_CODEX_TRACKED_ITEM_ACTIVITIES = 4_096;
 
 function rpcRequestKey(id: RpcId): string {
   return `${typeof id}:${String(id)}`;
@@ -140,6 +126,7 @@ export class CodexAppServerEvents {
   private readonly pendingServerRequestIds = new Set<string>();
   private readonly deltaItems = new Set<string>();
   private readonly reasoningDeltaItems = new Set<string>();
+  private readonly itemActivities = new Map<string, CodexItemActivity>();
   private readonly completedTurnIds = new Set<string>();
   private readonly subagentProjection = new Map<
     string,
@@ -211,6 +198,9 @@ export class CodexAppServerEvents {
     this.pendingGoalMutationCompletion = null;
     this.liveSubagentIds.clear();
     this.completedTurnIds.clear();
+    this.deltaItems.clear();
+    this.reasoningDeltaItems.clear();
+    this.itemActivities.clear();
     this.subagents.dispose();
     this.hostTools.settle("cancel");
   }
@@ -571,10 +561,72 @@ export class CodexAppServerEvents {
       this.handleResolvedRequest(params);
       return;
     }
+    if (projectCodexSecurityNotification(
+      method,
+      params,
+      (...activity) => this.host.options.onActivity?.(...activity),
+    )) return;
     const notificationThreadId = boundedText(params.threadId, 512);
     const notificationTurnId = boundedText(params.turnId, 512)
       ?? boundedText(objectValue(params.turn)?.id, 512);
     if (this.subagents.handleNotification(method, params)) return;
+
+    const runtimeProjection = projectCodexRuntimeNotification({
+      providerThreadId: this.host.providerThreadId,
+      activeTurnId: this.host.activeTurnId,
+      emitActivity: (...activity) => this.host.options.onActivity?.(...activity),
+    }, method, params);
+    if (runtimeProjection === "active-thread-deleted") {
+      const message = "Codex deleted the active thread before the turn completed.";
+      this.host.setLastError(message);
+      this.host.setTerminalEvent("thread/deleted");
+      this.host.rememberFailure("codex-error", message);
+      this.emitActivity("system", "failed", message);
+      this.completeParentTurn("failed", 1);
+      return;
+    }
+    if (runtimeProjection === "handled") return;
+
+    if (method === "thread/closed") {
+      if (notificationThreadId !== this.host.providerThreadId()) return;
+      const message = "Codex closed the active thread before the turn completed.";
+      this.host.setLastError(message);
+      this.host.setTerminalEvent("thread/closed");
+      this.host.rememberFailure("codex-error", message);
+      this.emitActivity("system", "failed", message);
+      this.completeParentTurn("failed", 1);
+      return;
+    }
+
+    if (method === "thread/status/changed") {
+      if (
+        notificationThreadId !== this.host.providerThreadId()
+      ) return;
+      const status = stringValue(objectValue(params.status)?.type);
+      if (status === "systemError" || status === "notLoaded") {
+        this.emitActivity(
+          "system",
+          status === "systemError" ? "failed" : "info",
+          status === "systemError"
+            ? "Codex thread reported a system error"
+            : "Codex thread is no longer loaded",
+        );
+      }
+      return;
+    }
+
+    if (method === "hook/started" || method === "hook/completed") {
+      if (
+        notificationThreadId !== this.host.providerThreadId()
+        || (
+          notificationTurnId
+          && this.host.activeTurnId()
+          && notificationTurnId !== this.host.activeTurnId()
+        )
+      ) return;
+      handleCodexHook(this.host, method, params);
+      return;
+    }
 
     if (method === "thread/goal/updated") {
       this.projectGoalUpdate(params);
@@ -635,7 +687,7 @@ export class CodexAppServerEvents {
       const delta = stringValue(params.delta);
       if (!delta) return;
       const itemId = boundedText(params.itemId, 512);
-      if (itemId) this.deltaItems.add(itemId);
+      if (itemId && !this.trackStreamItem(this.deltaItems, itemId)) return;
       this.host.resultText.append(delta);
       this.host.options.onText?.(delta);
       return;
@@ -644,7 +696,10 @@ export class CodexAppServerEvents {
       const delta = stringValue(params.delta);
       if (!delta) return;
       const itemId = boundedText(params.itemId, 512);
-      if (itemId) this.reasoningDeltaItems.add(itemId);
+      if (
+        itemId
+        && !this.trackStreamItem(this.reasoningDeltaItems, itemId)
+      ) return;
       this.host.options.onReasoning?.(delta);
       return;
     }
@@ -654,7 +709,77 @@ export class CodexAppServerEvents {
       return;
     }
     if (method === "item/started" || method === "item/completed") {
-      this.handleItem(method, params);
+      handleCodexItem(
+        {
+          options: this.host.options,
+          appendResultText: (text) => this.host.resultText.append(text),
+          setLastActivityId: this.host.setLastActivityId,
+          handleSubagentItem: (item, phase, threadId) =>
+            this.subagents.handleItem(item, phase, threadId),
+        },
+        {
+          deltaItems: this.deltaItems,
+          reasoningDeltaItems: this.reasoningDeltaItems,
+          itemActivities: this.itemActivities,
+          maxTrackedActivities: MAX_CODEX_TRACKED_ITEM_ACTIVITIES,
+        },
+        method,
+        params,
+      );
+      return;
+    }
+    if (method === "item/mcpToolCall/progress") {
+      const itemId = boundedText(params.itemId, 1_000);
+      const progress = boundedText(params.message, 8_000);
+      if (!itemId || !progress) return;
+      const activity = this.itemActivities.get(itemId) ?? {
+        kind: "tool" as const,
+        label: "MCP tool",
+      };
+      this.emitActivity(activity.kind, "started", activity.label, {
+        activityId: itemId,
+        detail: `Progress:\n${progress}`,
+      });
+      return;
+    }
+    if (method === "item/commandExecution/terminalInteraction") {
+      const itemId = boundedText(params.itemId, 1_000);
+      if (!itemId) return;
+      const processId = boundedText(params.processId, 1_000);
+      const input = boundedText(params.stdin, 8_000);
+      const activity = this.itemActivities.get(itemId) ?? {
+        kind: "command" as const,
+        label: "Command",
+      };
+      const detail = [
+        processId ? `Process: ${processId}` : null,
+        input ? `Terminal input:\n${input}` : null,
+      ].filter((value): value is string => Boolean(value)).join("\n\n");
+      this.emitActivity(activity.kind, "started", activity.label, {
+        activityId: itemId,
+        ...(detail ? { detail } : {}),
+      });
+      return;
+    }
+    if (
+      method === "item/commandExecution/outputDelta"
+      || method === "item/fileChange/outputDelta"
+    ) {
+      const itemId = boundedText(params.itemId, 1_000);
+      const delta = stringValue(params.delta);
+      if (!itemId || !delta) return;
+      const activity = this.itemActivities.get(itemId) ?? {
+        kind: method === "item/commandExecution/outputDelta"
+          ? "command" as const
+          : "tool" as const,
+        label: method === "item/commandExecution/outputDelta"
+          ? "Command"
+          : "File change",
+      };
+      this.emitActivity(activity.kind, "started", activity.label, {
+        activityId: itemId,
+        detail: providerActivityDetailSections({ output: delta }) ?? undefined,
+      });
       return;
     }
     if (method === "error") {
@@ -662,7 +787,19 @@ export class CodexAppServerEvents {
       const message =
         boundedText(error?.message, 4_000) ?? "Codex reported an error.";
       this.host.setLastError(message);
-      if (params.willRetry !== true) {
+      if (params.willRetry === true) {
+        this.emitActivity(
+          "system",
+          "info",
+          "Codex is retrying after an error",
+          {
+            ...(boundedText(params.itemId, 1_000)
+              ? { activityId: boundedText(params.itemId, 1_000)! }
+              : {}),
+            detail: providerActivityDetailSections({ error: message })!,
+          },
+        );
+      } else {
         this.host.rememberFailure(
           "codex-error",
           "Codex reported an error.",
@@ -680,6 +817,44 @@ export class CodexAppServerEvents {
           },
         );
       }
+      return;
+    }
+    if (method === "model/rerouted") {
+      const fromModel = boundedText(params.fromModel, 160);
+      const toModel = boundedText(params.toModel, 160);
+      const reason = boundedText(params.reason, 500);
+      this.emitActivity(
+        "system",
+        "info",
+        fromModel && toModel
+          ? `Model rerouted · ${fromModel} → ${toModel}`
+          : "Codex rerouted the model",
+        reason ? { detail: `Reason:\n${reason}` } : undefined,
+      );
+      return;
+    }
+    if (method === "thread/compacted") {
+      this.emitActivity("system", "completed", "Context compacted");
+      return;
+    }
+    if (method === "item/plan/delta") {
+      const itemId = boundedText(params.itemId, 1_000);
+      const delta = boundedText(params.delta, 8_000);
+      if (!delta) return;
+      this.emitActivity("turn", "started", "Plan updated", {
+        ...(itemId ? { activityId: itemId } : {}),
+        detail: `Progress:\n${delta}`,
+      });
+      return;
+    }
+    if (method === "turn/diff/updated") {
+      const diff = boundedText(params.diff, 128_000);
+      this.emitActivity(
+        "tool",
+        "started",
+        "Patch updated",
+        diff ? { detail: `Diff:\n${diff}` } : undefined,
+      );
       return;
     }
     if (method === "turn/plan/updated") {
@@ -743,6 +918,9 @@ export class CodexAppServerEvents {
         );
         this.completeParentTurn("failed", 1);
       }
+      this.deltaItems.clear();
+      this.reasoningDeltaItems.clear();
+      this.itemActivities.clear();
     }
   }
 
@@ -946,48 +1124,17 @@ export class CodexAppServerEvents {
   private emitSubagent(
     update: Omit<CodexSubagentUpdate, "sequence" | "isLive">,
     authority: CodexSubagentAuthority,
-    isLive = LIVE_SUBAGENT_STATUSES.has(update.status),
+    isLive = isLiveCodexSubagentStatus(update.status),
   ): void {
     const providerAgentId = update.providerAgentId;
     if (providerAgentId) {
       const current = this.subagentProjection.get(providerAgentId);
-      if (current) {
-        const weaker =
-          SUBAGENT_AUTHORITY[authority] < SUBAGENT_AUTHORITY[current.authority];
-        const stronger =
-          SUBAGENT_AUTHORITY[authority] > SUBAGENT_AUTHORITY[current.authority];
-        const clarifiesUnknown =
-          current.status === "unknown"
-          && update.status !== "unknown"
-          && SUBAGENT_AUTHORITY[authority]
-            >= SUBAGENT_AUTHORITY[current.authority];
-        const authoritativelyRevivesTerminalUnknown =
-          !current.isLive
-          && isLive
-          && current.status === "unknown"
-          && update.status !== "unknown"
-          && stronger;
-        if (
-          !current.isLive
-          && isLive
-          && !authoritativelyRevivesTerminalUnknown
-        ) {
-          return;
-        }
-        if (
-          TERMINAL_SUBAGENT_STATUSES.has(current.status)
-          && (
-            weaker
-            || (
-              !stronger
-              && !clarifiesUnknown
-              && update.status !== current.status
-            )
-          )
-        ) {
-          return;
-        }
-      }
+      if (!shouldAcceptCodexSubagentProjection(
+        current,
+        update,
+        authority,
+        isLive,
+      )) return;
       this.subagentProjection.set(providerAgentId, {
         status: update.status,
         authority,
@@ -1021,6 +1168,11 @@ export class CodexAppServerEvents {
       this.pendingApprovals.delete(requestId);
       this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
       this.host.options.onApprovalResolved?.(requestId, "cancelled");
+      this.emitActivity(
+        "system",
+        "completed",
+        "Approval request resolved by Codex",
+      );
       return;
     }
     for (const [requestId, pending] of this.pendingInputs) {
@@ -1028,65 +1180,32 @@ export class CodexAppServerEvents {
       this.pendingInputs.delete(requestId);
       this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
       this.host.options.onInputResolved?.(requestId);
+      this.emitActivity(
+        "system",
+        "completed",
+        "Input request resolved by Codex",
+      );
       return;
     }
   }
 
-  private handleItem(
-    method: "item/started" | "item/completed",
-    params: JsonObject,
-  ): void {
-    const item = objectValue(params.item);
-    const activityId = boundedText(item?.id, 1_000);
-    if (activityId) this.host.setLastActivityId(activityId);
-    if (item && this.subagents.handleItem(
-      item,
-      method === "item/started" ? "started" : "completed",
-      strictCodexProviderIdentifier(params.threadId),
-    )) return;
-    const itemType = stringValue(item?.type);
-    const phase = method === "item/completed" ? "completed" : "started";
-    if (itemType === "reasoning") {
-      this.emitActivity("reasoning", phase, "Thinking");
-      if (method === "item/completed" && item) {
-        const summary = completedReasoningSummary(
-          item,
-          this.reasoningDeltaItems,
-        );
-        if (summary) this.host.options.onReasoning?.(summary);
-      }
-    } else if (itemType === "commandExecution" && item) {
-      const command = item.command ?? item.cmd;
-      const output = item.aggregatedOutput
-        ?? item.output
-        ?? [item.stdout, item.stderr];
-      const activityDetail = providerActivityDetailSections({
-        command,
-        ...(method === "item/completed" ? { output } : {}),
-      });
-      this.emitActivity(
-        "command",
-        phase,
-        commandExecutionLabel(item),
-        {
-          ...(activityId ? { activityId } : {}),
-          ...(activityDetail ? { detail: activityDetail } : {}),
-        },
+  private trackStreamItem(items: Set<string>, itemId: string): boolean {
+    if (items.has(itemId)) return true;
+    if (items.size >= MAX_CODEX_TRACKED_ITEM_ACTIVITIES) {
+      const message =
+        `Codex exceeded the ${MAX_CODEX_TRACKED_ITEM_ACTIVITIES}-item streaming correlation limit.`;
+      this.host.setLastError(message);
+      this.host.rememberFailure(
+        "malformed-protocol",
+        "Codex sent too many concurrent streaming items.",
+        message,
       );
-    } else if (itemType === "fileChange") {
-      this.emitActivity(
-        "tool",
-        phase,
-        "File change",
-        activityId ? { activityId } : undefined,
-      );
-    } else if (itemType === "agentMessage" && method === "item/completed") {
-      const itemId = boundedText(item?.id, 512);
-      const text = stringValue(item?.text);
-      if (text && (!itemId || !this.deltaItems.has(itemId))) {
-        this.host.resultText.append(text);
-        this.host.options.onText?.(text);
-      }
+      this.emitActivity("system", "failed", message);
+      this.host.cancel();
+      return false;
     }
+    items.add(itemId);
+    return true;
   }
+
 }

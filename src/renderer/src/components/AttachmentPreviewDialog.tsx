@@ -1,8 +1,10 @@
-import { ExternalLink, FileText, X } from "lucide-react";
+import { ExternalLink, FileSpreadsheet, FileText, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
   useId,
+  lazy,
+  Suspense,
   useRef,
   useState,
 } from "react";
@@ -21,6 +23,11 @@ import {
   trapModalFocus,
 } from "../utils/modalFocus";
 import { PdfAttachmentPreview } from "./PdfAttachmentPreview";
+
+const DocumentAttachmentPreview = lazy(async () => ({
+  default: (await import("./DocumentAttachmentPreview"))
+    .DocumentAttachmentPreview,
+}));
 
 type AttachmentPreviewDialogProps = {
   attachment: ChatAttachment;
@@ -80,7 +87,11 @@ export function AttachmentPreviewDialog({
       >
         <header className="attachment-preview-header">
           <span className="attachment-preview-identity">
-            {previewKind === "pdf" && <FileText size={16} aria-hidden="true" />}
+            {previewKind === "spreadsheet"
+              ? <FileSpreadsheet size={16} aria-hidden="true" />
+              : previewKind !== "image"
+                ? <FileText size={16} aria-hidden="true" />
+                : null}
             <span>
               <strong id={titleId}>{attachment.name}</strong>
               <small id={descriptionId}>
@@ -120,13 +131,28 @@ export function AttachmentPreviewDialog({
                     onError={markLoadFailed}
                   />
                 )
-              : (
+              : previewKind === "pdf"
+                ? (
                   <PdfAttachmentPreview
                     source={previewUrl}
                     title={attachment.name}
                     onFailure={markLoadFailed}
                   />
-                )}
+                  )
+                : (
+                    <Suspense fallback={(
+                      <div className="document-attachment-preview-loading" role="status">
+                        <span>Preparing secure preview…</span>
+                      </div>
+                    )}>
+                      <DocumentAttachmentPreview
+                        source={previewUrl}
+                        title={attachment.name}
+                        mimeType={attachment.mimeType}
+                        onFailure={markLoadFailed}
+                      />
+                    </Suspense>
+                  )}
         </div>
         {previewKind === "pdf" && (
           <footer className="attachment-preview-footer">

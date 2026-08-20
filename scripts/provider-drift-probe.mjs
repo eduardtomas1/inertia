@@ -17,6 +17,7 @@ const productSdks = [
 const latestPackages = [
   "@openai/codex",
   "@anthropic-ai/claude-code",
+  "@moonshot-ai/kimi-code",
   "opencode-ai",
 ];
 
@@ -285,6 +286,56 @@ async function main() {
       }
     });
 
+    await check("Codex generated notification discriminants are exhaustively reviewed", async () => {
+      const generatedRoot = join(options.workspace, "codex-app-server-types");
+      await mkdir(generatedRoot, { recursive: true });
+      await requireSuccessfulCommand(
+        bin("codex"),
+        ["app-server", "generate-ts", "--experimental", "--out", generatedRoot],
+        {
+          cwd: options.workspace,
+          environment,
+          timeoutMs: TYPECHECK_TIMEOUT_MS,
+          allowEmpty: true,
+        },
+      );
+      const generated = await readFile(
+        join(generatedRoot, "ServerNotification.ts"),
+        "utf8",
+      );
+      const generatedMethods = [...generated.matchAll(
+        /"method"\s*:\s*"([^"]+)"/gu,
+      )].map((match) => match[1]).sort();
+      const dispositions = await readFile(
+        join(
+          repositoryRoot,
+          "src",
+          "server",
+          "codex",
+          "app-server-notifications.ts",
+        ),
+        "utf8",
+      );
+      const table = dispositions.match(
+        /CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS\s*=\s*\{([\s\S]*?)\}\s*as const/u,
+      )?.[1] ?? "";
+      const reviewedMethods = [...table.matchAll(
+        /^\s*(?:"([^"]+)"|([A-Za-z][A-Za-z0-9]*))\s*:/gmu,
+      )].map((match) => match[1] ?? match[2]).sort();
+      if (generatedMethods.length === 0) {
+        throw new Error("Codex generated no ServerNotification discriminants.");
+      }
+      if (JSON.stringify(generatedMethods) !== JSON.stringify(reviewedMethods)) {
+        const generatedSet = new Set(generatedMethods);
+        const reviewedSet = new Set(reviewedMethods);
+        const added = generatedMethods.filter((method) => !reviewedSet.has(method));
+        const removed = reviewedMethods.filter((method) => !generatedSet.has(method));
+        throw new Error(
+          `Codex notification surface drifted. Added: ${added.join(", ") || "none"}; removed: ${removed.join(", ") || "none"}.`,
+        );
+      }
+    });
+
     await check("Claude latest CLI exposes version and authentication help", async () => {
       const version = await requireSuccessfulCommand(
         bin("claude"),
@@ -298,6 +349,22 @@ async function main() {
       );
       if (!/claude/iu.test(version) || !/(?:status|login|logout)/iu.test(help)) {
         throw new Error("Claude CLI output no longer identifies its authentication surface.");
+      }
+    });
+
+    await check("Kimi latest CLI exposes version and ACP help", async () => {
+      const version = await requireSuccessfulCommand(
+        bin("kimi"),
+        ["--version"],
+        { cwd: options.workspace, environment },
+      );
+      const help = await requireSuccessfulCommand(
+        bin("kimi"),
+        ["acp", "--help"],
+        { cwd: options.workspace, environment },
+      );
+      if (!version.trim() || !/(?:acp|agent client protocol)/iu.test(help)) {
+        throw new Error("Kimi CLI output no longer identifies its ACP surface.");
       }
     });
 

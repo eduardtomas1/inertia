@@ -5,7 +5,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ChatAttachment } from "../../src/shared/contracts";
-import { MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from "../../src/shared/contracts";
+import {
+  CHAT_ATTACHMENT_MIME_TYPES,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+} from "../../src/shared/contracts";
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
 import {
   attachmentPreviewKind,
@@ -83,10 +86,25 @@ describe("composer attachment previews", () => {
     expect(attachmentPreviewUrl(document)).not.toContain(document.path);
     expect(attachmentPreviewKind(image)).toBe("image");
     expect(attachmentPreviewKind(document)).toBe("pdf");
-    expect(attachmentPreviewUrl(attachment("text", {
+    expect(attachmentPreviewKind(attachment("text", {
       name: "notes.txt",
       mimeType: "text/plain",
-    }))).toBeNull();
+    }))).toBe("text");
+    expect(attachmentPreviewKind(attachment("sheet", {
+      name: "forecast.xlsx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }))).toBe("spreadsheet");
+  });
+
+  it("provides an opaque preview route for every accepted attachment type", () => {
+    for (const mimeType of CHAT_ATTACHMENT_MIME_TYPES) {
+      const candidate = attachment(`type-${mimeType}`, { mimeType });
+      expect(attachmentPreviewKind(candidate)).not.toBeNull();
+      expect(attachmentPreviewUrl(candidate)).toBe(
+        `inertia://bundle/attachment-preview/${encodeURIComponent(candidate.id)}`,
+      );
+    }
   });
 
   it("renders real image elements, safe document metadata, and obvious accessible removal", () => {

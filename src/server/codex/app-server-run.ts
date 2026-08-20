@@ -556,16 +556,19 @@ export function startCodexAppServerRun(
         "Codex App Server returned invalid UTF-8.",
         "The JSONL transport emitted a frame that was not valid UTF-8.",
       );
-    } else {
-      const scope = decoderError === "line-overflow" ? "frame" : "run";
+    } else if (decoderError === "line-overflow") {
       rememberFailure(
         "protocol-overflow",
-        "Codex App Server exceeded Inertia's protocol safety limit.",
-        scope === "frame"
-          ? `A JSONL frame exceeded ${protocolLimits.maxFrameBytes} bytes.`
-          : `JSONL output exceeded ${
-            protocolLimits.maxProtocolBytes
-          } bytes for one run.`,
+        "Codex produced a protocol message that was too large to process safely.",
+        `A JSONL frame exceeded ${protocolLimits.maxFrameBytes} bytes.`,
+      );
+    } else {
+      rememberFailure(
+        "protocol-overflow",
+        "Codex produced protocol output too quickly to process safely.",
+        `JSONL output exceeded the refillable ${
+          protocolLimits.maxWindowBytes
+        }-byte burst budget (${protocolLimits.windowMs} ms window).`,
       );
     }
     finish("failed", null, null);
@@ -575,7 +578,10 @@ export function startCodexAppServerRun(
     protocolLimits.maxFrameBytes,
     handleLine,
     decoderFailure,
-    protocolLimits.maxProtocolBytes,
+    {
+      maxBytes: protocolLimits.maxWindowBytes,
+      windowMs: protocolLimits.windowMs,
+    },
   );
   child.stdout.on("data", (chunk: Buffer) => decoder?.push(chunk));
   const handleTransportClose = (): void => {

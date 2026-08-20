@@ -32,7 +32,7 @@ export interface NativeBackendProbeAdapter {
   probe(
     input: {
       profileId: string;
-      protocol: Extract<ModelBackendProtocol, "cursor-managed" | "opencode-native">;
+      protocol: Extract<ModelBackendProtocol, "cursor-managed" | "kimi-managed" | "opencode-native">;
       modelId: string;
     },
     signal: AbortSignal,
@@ -49,7 +49,7 @@ export interface BackendCompatibilityProbeDependencies {
     signal: AbortSignal,
   ) => Promise<readonly BackendProbeResolvedAddress[]>;
   nativeAdapters?: Partial<Record<
-    Extract<ModelBackendProtocol, "cursor-managed" | "opencode-native">,
+    Extract<ModelBackendProtocol, "cursor-managed" | "kimi-managed" | "opencode-native">,
     NativeBackendProbeAdapter
   >>;
   timeoutMs?: number;

@@ -81,6 +81,7 @@ export const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
+  kimi: "Kimi Code",
   opencode: "OpenCode",
 };
 

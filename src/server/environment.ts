@@ -38,6 +38,7 @@ function normalizeCodexHomeEnvironment(
 let environmentPromise: Promise<ProviderEnvironment> | undefined;
 
 const SAFE_CHILD_ENVIRONMENT_KEYS = new Set([
+  "ALL_PROXY",
   "APPDATA",
   "COLORTERM",
   "COMSPEC",
@@ -85,6 +86,10 @@ const PROVIDER_ENVIRONMENT_KEYS: Record<ProviderId, readonly RegExp[]> = {
   ],
   cursor: [
     /^CURSOR_(?:API_KEY|HOME)$/u,
+  ],
+  kimi: [
+    /^GOOGLE_APPLICATION_CREDENTIALS$/u,
+    /^KIMI_[A-Z0-9_]+$/u,
   ],
   opencode: [
     /^(?:ANTHROPIC|CEREBRAS|COHERE|DEEPSEEK|FIREWORKS|GEMINI|GROQ|MISTRAL|OPENAI|OPENROUTER|PERPLEXITY|TOGETHER|XAI)_API_KEY$/u,

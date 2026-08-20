@@ -24,9 +24,14 @@ import {
 } from "../../src/node/conversation-attachment-store";
 
 const roots: string[] = [];
-const png = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-]);
+const png = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY2BgYPgPAAEEAQB9ssjfAAAAAElFTkSuQmCC",
+  "base64",
+);
+const alternatePng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY/j///9/AAn7A/0I0egeAAAAAElFTkSuQmCC",
+  "base64",
+);
 
 async function root(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-conversation-attachments-"));
@@ -288,9 +293,7 @@ describe("durable conversation attachment storage", () => {
     await store.retain([original]);
     const changed = {
       attachment: original.attachment,
-      bytes: Buffer.from([
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0b,
-      ]),
+      bytes: alternatePng,
     };
 
     await expect(store.retain([changed]))
@@ -951,7 +954,8 @@ describe("durable conversation attachment storage", () => {
     store.acceptRetention(retentionId);
     await writeFile(retained!.path, Buffer.from("tampered", "utf8"));
 
-    await expect(store.preview(retained!.id)).rejects.toThrow(/changed|invalid/u);
+    await expect(store.preview(retained!.id))
+      .rejects.toThrow(/changed|invalid|unsafe/u);
 
     await store.release([retained!.id]);
     const unsafeDirectory = join(

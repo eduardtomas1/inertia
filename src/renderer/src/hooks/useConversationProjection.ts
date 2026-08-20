@@ -56,6 +56,17 @@ const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
 const EMPTY_GIT_ARTIFACTS: TurnGitArtifact[] = [];
 const MAX_STREAMING_CHARACTERS = 500_000;
 
+function replaceAssistantMessagesForTurn(
+  messages: readonly ChatMessage[],
+  turnId: string,
+  replacement: ChatMessage | null,
+): ChatMessage[] {
+  const retained = messages.filter((message) =>
+    message.turnId !== turnId || message.role !== "assistant");
+  if (replacement) retained.push(replacement);
+  return retained.sort(compareCreatedRecords);
+}
+
 interface FreshHydrationBaseline {
   conversationId: string;
   syncCompleted: boolean;
@@ -731,6 +742,58 @@ export function useConversationProjection({
       ));
       if (hydration) hydration.channel = "text";
       markTestStreamingStage("renderer-projection-updated");
+    }
+    if (event.type === "agent.text.replaced") {
+      const eventOwner = turnEventOwner(event);
+      if (terminalEventMatchesCurrentTurn({
+        conversation: activeConversation,
+        detailState: detailStateRef.current,
+        eventOwner,
+        liveOwner: liveTurnOwnerRef.current,
+      })) {
+        liveTurnOwnerRef.current = eventOwner;
+        const hydration = freshHydrationRef.current;
+        if (hydration) {
+          hydration.text = "";
+          hydration.channel = null;
+        }
+        setStreaming(closeTextStreamState);
+      }
+      setDetailState((current) => {
+        if (
+          current?.state !== "ready"
+          || current.conversationId !== event.conversationId
+        ) return current;
+        return {
+          ...current,
+          detail: {
+            ...current.detail,
+            messages: replaceAssistantMessagesForTurn(
+              current.detail.messages,
+              event.turnId,
+              event.message,
+            ),
+          },
+        };
+      });
+      setLiveMessages((current) => {
+        const existing = current[event.conversationId] ?? [];
+        const replacement = replaceAssistantMessagesForTurn(
+          existing,
+          event.turnId,
+          event.message,
+        );
+        if (replacement.length === 0) {
+          if (!(event.conversationId in current)) return current;
+          const next = { ...current };
+          delete next[event.conversationId];
+          return next;
+        }
+        return {
+          ...current,
+          [event.conversationId]: replacement,
+        };
+      });
     }
     if (event.type === "agent.reasoning") {
       liveTurnOwnerRef.current = turnEventOwner(event);

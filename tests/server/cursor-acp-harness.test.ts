@@ -10,7 +10,9 @@ import {
   cursorOneShotPermissionOption,
   cursorPermissionDisplayIsSafe,
   isCursorFileMutationKind,
+  parseCursorGenerateImageNotification,
   parseCursorQuestionRequest,
+  parseCursorTaskNotification,
 } from "../../src/server/provider/cursor-acp-harness";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
@@ -197,6 +199,44 @@ describe.sequential("Cursor ACP harness", () => {
         ],
       }],
     })).toThrow("duplicate option ID");
+  });
+
+  it("validates Cursor task and generated-image extension notifications", () => {
+    expect(parseCursorTaskNotification({
+      toolCallId: "task-tool",
+      description: "Explore provider events",
+      prompt: "Find missing lifecycle events",
+      subagentType: { custom: "provider-auditor" },
+      model: "cursor-model",
+      agentId: "agent-1",
+      durationMs: 42,
+    })).toMatchObject({
+      toolCallId: "task-tool",
+      subagentType: "provider-auditor",
+      durationMs: 42,
+    });
+    expect(() => parseCursorTaskNotification({
+      toolCallId: "task-tool",
+      description: "Explore",
+      prompt: "Inspect",
+      subagentType: "explore",
+      durationMs: -1,
+    })).toThrow("durationMs");
+
+    expect(parseCursorGenerateImageNotification({
+      toolCallId: "image-tool",
+      description: "Provider diagram",
+      filePath: "/tmp/provider.png",
+      referenceImagePaths: ["/tmp/reference.png"],
+    })).toMatchObject({
+      toolCallId: "image-tool",
+      referenceImagePaths: ["/tmp/reference.png"],
+    });
+    expect(() => parseCursorGenerateImageNotification({
+      toolCallId: "image-tool",
+      description: "Provider diagram",
+      referenceImagePaths: Array.from({ length: 21 }, () => "/tmp/ref.png"),
+    })).toThrow("more than 20");
   });
 
   it("bridges compaction through Cursor's summarize command without forwarding focus text", async () => {
@@ -483,7 +523,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
   if (message.method === "session/prompt") {
-    for (let index = 0; index < 8_200; index += 1) {
+    for (let index = 0; index < 20_000; index += 1) {
       send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: "build" } } });
     }
   }
@@ -503,7 +543,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       access: "full",
     }))).resolves.toMatchObject({
       status: "failed",
-      error: "Cursor ACP exceeded the bounded event budget for this run.",
+      error: "Cursor ACP exceeded the bounded event rate for this run.",
+      failure: {
+        reason: "protocol-overflow",
+        phase: "runtime",
+        terminalEvent: "acp/exception",
+      },
     });
     expect(manager.activeConversationIds()).toEqual([]);
   });
@@ -549,6 +594,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   ] } });
   if (message.id === 101) return send({ jsonrpc: "2.0", id: 102, method: "cursor/create_plan", params: { toolCallId: "tool-3", plan: "Inspect then implement", todos: [{ id: "todo-1", content: "Inspect", status: "in_progress" }] } });
   if (message.id === 102) {
+    send({ jsonrpc: "2.0", method: "cursor/task", params: { toolCallId: "tool-subagent", description: "Explore provider events", prompt: "Find missing lifecycle events", subagentType: "explore", model: "model-a", agentId: "agent-1", durationMs: 42 } });
+    send({ jsonrpc: "2.0", method: "cursor/generate_image", params: { toolCallId: "tool-image", description: "Provider architecture", filePath: ${JSON.stringify(join(root, "generated.png"))}, referenceImagePaths: [${JSON.stringify(imagePath)}] } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "stale-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "stale" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Checking" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan", entries: [{ content: "Implement", priority: "high", status: "pending" }] } } });
@@ -564,7 +611,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-6", status: "completed", rawOutput: "clean" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: 321, size: 200000 } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Cursor response" } } } });
-    return send({ jsonrpc: "2.0", id: promptRequestId, result: { stopReason: "end_turn", usage: { totalTokens: 350, inputTokens: 320, outputTokens: 30, thoughtTokens: 5, cachedReadTokens: 20 } } });
+    return send({ jsonrpc: "2.0", id: promptRequestId, result: { stopReason: "end_turn", usage: { totalTokens: 350, inputTokens: 320, outputTokens: 30, thoughtTokens: 5, cachedReadTokens: 20, cachedWriteTokens: 0.5 } } });
   }
 });
 `);
@@ -581,6 +628,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: string[][] = [];
     const activities: Array<{ activityId?: string; detail?: string; phase: string }> = [];
+    const subagents: Array<{
+      providerTaskId: string | null;
+      providerAgentId: string | null;
+      status: string;
+      description: string | null;
+      progress: string | null;
+    }> = [];
 
     const result = await manager.run(nativeProviderRunInput({
       providerId: "cursor",
@@ -614,6 +668,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       },
       onReasoning: (event) => reasoning.push(event.text),
       onActivity: (event) => activities.push(event),
+      onSubagent: (event) => subagents.push(event),
       onUsage: (event) => {
         usage.push(event.usage.usedTokens);
         usageDetails.push(event.usage);
@@ -657,6 +712,19 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         label: "Cursor session: Provider audit",
       }),
     ]));
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "tool-image",
+      phase: "completed",
+      label: "Generated image: Provider architecture",
+      detail: "Output: <workspace>/generated.png\nReferences: <workspace>/reference.png",
+    }));
+    expect(subagents).toEqual([expect.objectContaining({
+      providerTaskId: "tool-subagent",
+      providerAgentId: "agent-1",
+      status: "completed",
+      description: "Explore provider events",
+      progress: "Completed in 42 ms",
+    })]);
     expect(usage).toEqual([321, 321]);
     expect(usageDetails.at(-1)).toMatchObject({
       usedTokens: 321,
@@ -665,6 +733,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       maxTokens: 200_000,
       inputTokens: 320,
       cachedInputTokens: 20,
+      cacheWriteInputTokens: null,
       outputTokens: 30,
       reasoningOutputTokens: 5,
       compactsAutomatically: null,
@@ -689,6 +758,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         ],
       },
     });
+    expect(captured.find((message) => message.id === 102)).toMatchObject({
+      result: { outcome: { outcome: "accepted" } },
+    });
     const prompt = captured.find((message) => message.method === "session/prompt") as { params: { prompt: Array<Record<string, unknown>> } };
     expect(prompt.params.prompt).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "image", mimeType: "image/png", data: "iVBORw==" }),
@@ -707,7 +779,40 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const command = portableNodeExecutable(root, "cursor-agent");
     writeNodeSubcommand(root, "acp", `process.stdout.write("not-json\\n"); setTimeout(() => {}, 1000);`);
     const manager = new ProviderManager({ commands: { cursor: command } }, new AgentHarnessRegistry([createCursorAcpHarness()]));
-    await expect(manager.run(nativeProviderRunInput({ providerId: "cursor", conversationId: "cursor-invalid", cwd: root, prompt: "Hi", interactionMode: "build", access: "supervised" }))).resolves.toMatchObject({ status: "failed" });
+    await expect(manager.run(nativeProviderRunInput({ providerId: "cursor", conversationId: "cursor-invalid", cwd: root, prompt: "Hi", interactionMode: "build", access: "supervised" }))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "malformed-protocol", phase: "runtime" },
+    });
+  });
+
+  it("fails closed on malformed UTF-8 split across ACP stdout chunks", async () => {
+    const root = portableFixtureRoot("cursor ACP invalid utf8");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+process.stdout.write(Buffer.from('{"jsonrpc":"2.0","method":"cursor/test","params":{"value":"'));
+process.stdout.write(Buffer.from([0xc3]));
+setTimeout(() => {
+  process.stdout.write(Buffer.concat([Buffer.from([0x28]), Buffer.from('"}}\\n')]));
+}, 10);
+setTimeout(() => {}, 1000);
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-invalid-utf8",
+      cwd: root,
+      prompt: "Hi",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringMatching(/not valid.*utf-8/iu),
+      failure: { reason: "malformed-protocol", phase: "runtime" },
+    });
   });
 
   it("loads a resumable ACP session instead of creating a replacement", async () => {
@@ -749,6 +854,79 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{ method?: string }>;
     expect(messages.some(({ method }) => method === "session/load")).toBe(true);
     expect(messages.some(({ method }) => method === "session/new")).toBe(false);
+  });
+
+  it("ignores Cursor task and image notifications before the resumed prompt is active", async () => {
+    const root = portableFixtureRoot("cursor ACP extension ownership");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sessionId = "cursor-extension-session";
+const task = (id) => ({ jsonrpc: "2.0", method: "cursor/task", params: { toolCallId: id, description: id, prompt: "Inspect", subagentType: "explore" } });
+const image = (id) => ({ jsonrpc: "2.0", method: "cursor/generate_image", params: { toolCallId: id, description: id, referenceImagePaths: [] } });
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send({ jsonrpc: "2.0", method: "cursor/task", params: {} });
+    send({ jsonrpc: "2.0", method: "cursor/generate_image", params: {} });
+    return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "Cursor", version: "test" } } });
+  }
+  if (message.method === "session/load") {
+    send({ jsonrpc: "2.0", method: "cursor/task", params: { description: "pre-prompt" } });
+    send({ jsonrpc: "2.0", method: "cursor/generate_image", params: { description: "pre-prompt" } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "pre-prompt text" } } } });
+    send({ jsonrpc: "2.0", id: 900, method: "session/request_permission", params: { sessionId, toolCall: { toolCallId: "pre-prompt-permission", title: "Pre-prompt permission", kind: "execute", status: "pending", rawInput: { command: "should-not-run" } }, options: [{ optionId: "allow", name: "Allow once", kind: "allow_once" }] } });
+    send({ jsonrpc: "2.0", id: 901, method: "cursor/ask_question", params: {} });
+    send({ jsonrpc: "2.0", id: 902, method: "cursor/create_plan", params: {} });
+    send({ jsonrpc: "2.0", method: "cursor/update_todos", params: {} });
+    return setTimeout(() => send({ jsonrpc: "2.0", id: message.id, result: { modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } }), 20);
+  }
+  if (message.method === "session/prompt") {
+    send(task("live-task"));
+    send(image("live-image"));
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "live text" } } } });
+    return setTimeout(() => send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } }), 20);
+  }
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    const taskIds: Array<string | null> = [];
+    const imageIds: Array<string | undefined> = [];
+    const approvals: string[] = [];
+    const inputs: string[] = [];
+    const plans: string[] = [];
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-extension-ownership",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "cursor-extension-session",
+    }), {
+      onApproval: (event) => approvals.push(event.request.title),
+      onInput: (event) => inputs.push(
+        event.request.questions[0]?.question ?? "",
+      ),
+      onPlan: (event) => plans.push(event.explanation ?? ""),
+      onSubagent: (event) => taskIds.push(event.providerTaskId),
+      onActivity: (event) => {
+        if (event.label.startsWith("Generated image:")) {
+          imageIds.push(event.activityId);
+        }
+      },
+    })).resolves.toMatchObject({ status: "completed", text: "live text" });
+    expect(approvals).toEqual([]);
+    expect(inputs).toEqual([]);
+    expect(plans).toEqual([]);
+    expect(taskIds).toEqual(["live-task"]);
+    expect(imageIds).toEqual(["live-image"]);
   });
 
   it("publishes the terminal ACP status only after owned cleanup settles", async () => {
@@ -833,12 +1011,67 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     })).resolves.toMatchObject({
       status: "failed",
       error: "Cursor ACP process tree could not be confirmed stopped.",
+      cleanupConfirmed: false,
+      failure: {
+        reason: "provider-error",
+        message: "Cursor ACP process tree could not be confirmed stopped.",
+        phase: "cleanup",
+        terminalEvent: "process-tree/cleanup",
+      },
     });
     expect(statuses).not.toContain("completed");
     expect(statuses.at(-1)).toBe("failed");
     expect(terminateProcessTree.mock.calls.map(([, force]) => force)).toEqual([
       true,
     ]);
+  });
+
+  it("makes cleanup failure authoritative while retaining a prior provider failure", async () => {
+    const root = portableFixtureRoot("cursor ACP failure after failure");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-double-failure", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "refusal" } });
+});
+`);
+    const terminateProcessTree = vi.fn(async (child, _force: boolean) => {
+      await terminateProcessTreeAndWait(child, true);
+      return false;
+    });
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([
+        createCursorAcpHarness({ terminateProcessTree }),
+      ]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-double-failure",
+      cwd: root,
+      prompt: "Fail twice",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: "Cursor ACP process tree could not be confirmed stopped.",
+      cleanupConfirmed: false,
+      failure: {
+        reason: "provider-error",
+        message: "Cursor ACP process tree could not be confirmed stopped.",
+        phase: "cleanup",
+        terminalEvent: "process-tree/cleanup",
+        technicalDetail: expect.stringMatching(
+          /Prior failure reason: provider-error[\s\S]*refusal/,
+        ),
+      },
+    });
   });
 
   it("cancels through ACP and closes the owned process socket", async () => {
@@ -892,6 +1125,64 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
+  it("does not launch a prompt after cancellation settles session setup", async () => {
+    const root = portableFixtureRoot("cursor ACP setup cancellation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const fs = require("node:fs");
+const readline = require("node:readline");
+const messages = [];
+let configRequestId;
+const configOptions = [{ type: "select", id: "model", name: "Model", category: "model", currentValue: "default", options: [{ value: "model-a", name: "Model A" }] }];
+const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(messages));
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  messages.push(message); save();
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-setup-cancel", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions } });
+  if (message.method === "session/set_config_option") { configRequestId = message.id; return; }
+  if (message.method === "session/cancel" && configRequestId !== undefined) {
+    return send({ jsonrpc: "2.0", id: configRequestId, result: { configOptions } });
+  }
+  if (message.method === "session/prompt") return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-setup-cancel",
+      cwd: root,
+      prompt: "Must not launch",
+      model: "model-a",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+
+    await waitFor("Cursor setup request", () => {
+      try {
+        const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
+          method?: string;
+        }>;
+        return messages.some(({ method }) => method === "session/set_config_option");
+      } catch {
+        return false;
+      }
+    });
+    expect(manager.cancel("cursor-setup-cancel")).toBe(true);
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
+      method?: string;
+    }>;
+    expect(messages.some(({ method }) => method === "session/cancel")).toBe(true);
+    expect(messages.some(({ method }) => method === "session/prompt")).toBe(false);
+  });
+
   it("rejects oversized ACP frames and unavailable negotiated capabilities", async () => {
     const oversizedRoot = portableFixtureRoot("cursor ACP oversized");
     roots.push(oversizedRoot);
@@ -908,7 +1199,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("oversized") });
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("oversized"),
+      failure: { reason: "protocol-overflow", phase: "runtime" },
+    });
 
     const capabilityRoot = portableFixtureRoot("cursor ACP capabilities");
     roots.push(capabilityRoot);

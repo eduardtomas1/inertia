@@ -171,6 +171,12 @@ const summary: EnvironmentSummarySnapshot = {
   attachments: [
     { id: "attachment-1", name: "reference.png", mimeType: "image/png" },
     { id: "attachment-2", name: "requirements.pdf", mimeType: "application/pdf" },
+    {
+      id: "attachment-3",
+      name: "forecast.xlsx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    },
   ],
 };
 
@@ -328,6 +334,8 @@ describe("Environment panel", () => {
     expect(within(panel).getByText("Current")).toBeVisible();
     expect(within(panel).getByText("reference.png")).toBeVisible();
     expect(within(panel).getByText("requirements.pdf")).toBeVisible();
+    expect(within(panel).getByText("forecast.xlsx")).toBeVisible();
+    expect(panel.querySelector(".lucide-file-spreadsheet")).not.toBeNull();
   });
 
   it("does not offer repository mutations without scoped Git authority", () => {

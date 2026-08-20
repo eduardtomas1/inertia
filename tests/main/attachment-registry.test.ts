@@ -27,11 +27,18 @@ import {
 const directories: string[] = [];
 const handoffId = "22222222-2222-4222-8222-222222222222";
 const retryHandoffId = "33333333-3333-4333-8333-333333333333";
-const png = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-]);
-const alternatePng = Buffer.concat([png, Buffer.from([0x01])]);
-const sameSizeReplacementPng = Buffer.concat([png, Buffer.from([0x02])]);
+const png = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY2BgYPgPAAEEAQB9ssjfAAAAAElFTkSuQmCC",
+  "base64",
+);
+const alternatePng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY/j///9/AAn7A/0I0egeAAAAAElFTkSuQmCC",
+  "base64",
+);
+const sameSizeReplacementPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY/jPwPAfAAUAAf+rzjaJAAAAAElFTkSuQmCC",
+  "base64",
+);
 
 async function registry(
   limits?: AttachmentRegistryLimits,

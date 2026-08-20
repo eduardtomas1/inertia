@@ -1,1 +1,1 @@
-export type ProviderId = "codex" | "claude" | "cursor" | "opencode";
+export type ProviderId = "codex" | "claude" | "cursor" | "kimi" | "opencode";

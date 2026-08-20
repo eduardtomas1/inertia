@@ -68,6 +68,25 @@ export class TurnProviderEventProjector {
       case "text":
         this.options.streams.appendAssistant(active, event.text);
         break;
+      case "text-snapshot": {
+        const message = this.options.streams.replaceAssistantSnapshot(
+          active,
+          event.text,
+        );
+        this.options.hooks.broadcast({
+          type: "agent.text.replaced",
+          conversationId: active.conversation.id,
+          runId: active.turn.runId,
+          turnId: active.turn.id,
+          message,
+        });
+        this.options.hooks.broadcast({
+          type: "conversation.detail.invalidated",
+          conversationId: active.conversation.id,
+        });
+        this.options.hooks.broadcastSnapshot();
+        break;
+      }
       case "reasoning-summary":
         this.options.streams.appendReasoning(active, event.text);
         break;

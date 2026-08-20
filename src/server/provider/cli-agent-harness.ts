@@ -108,9 +108,9 @@ export const CLI_AGENT_HARNESS_CAPABILITIES = {
       modelMetadata: "unavailable-in-current-harness",
     },
   },
-} as const satisfies Readonly<Record<ProviderId, AgentHarnessCapabilities>>;
+} as const satisfies Readonly<Record<Exclude<ProviderId, "kimi">, AgentHarnessCapabilities>>;
 
-const HARNESS_IDS: Readonly<Record<ProviderId, AgentHarnessId>> = {
+const HARNESS_IDS: Readonly<Record<Exclude<ProviderId, "kimi">, AgentHarnessId>> = {
   codex: "codex-cli",
   claude: "claude-cli",
   cursor: "cursor-cli",
@@ -129,6 +129,9 @@ export function createCliAgentHarness(
   providerId: ProviderId,
   options: CliAgentHarnessOptions = {},
 ): AgentHarness {
+  if (providerId === "kimi") {
+    throw new Error("Kimi Code is available only through its native ACP harness.");
+  }
   const harnessId = HARNESS_IDS[providerId];
   return {
     id: harnessId,

@@ -49,7 +49,7 @@ function authorization(connection: ProviderHostToolMcpConnection): string {
   return `Bearer ${connection.bearerToken}`;
 }
 
-export function cursorHostMcpServers(
+export function acpHostMcpServers(
   connection: ProviderHostToolMcpConnection,
   supportsHttp: boolean,
 ): McpServer[] {

@@ -34,6 +34,11 @@ test("keeps compact Work sidebar geometry", async ({
       );
       store.createConversation(
         project.id,
+        "Inspect Kimi ACP bridge",
+        { providerId: "kimi", branch: "kimi/acp-bridge", activate: false },
+      );
+      store.createConversation(
+        project.id,
         "Check OpenCode packaging",
         { providerId: "opencode", branch: "opencode/offline-assets", activate: false },
       );
@@ -54,6 +59,7 @@ test("keeps compact Work sidebar geometry", async ({
           codex: "OpenAI",
           claude: "Anthropic",
           cursor: "Cursor",
+          kimi: "Kimi Code",
           opencode: "OpenCode",
         },
       });
@@ -92,7 +98,7 @@ test("keeps compact Work sidebar geometry", async ({
     const statusBox = await statusCue.boundingBox();
     expect(statusBox?.width).toBe(11);
     expect(statusBox?.height).toBe(11);
-    for (const providerId of ["codex", "claude", "cursor", "opencode"]) {
+    for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
       ).first();
@@ -167,6 +173,9 @@ test("keeps compact Work sidebar geometry", async ({
     });
     await expect(sidebar.locator(
       '.provider-brand-icon[data-provider-id="codex"] .provider-brand-icon-source',
+    ).first()).toHaveCSS("filter", "invert(1)");
+    await expect(sidebar.locator(
+      '.provider-brand-icon[data-provider-id="kimi"] .provider-brand-icon-source',
     ).first()).toHaveCSS("filter", "invert(1)");
     await expect(sidebar.locator(
       '.provider-brand-icon[data-provider-id="claude"]',

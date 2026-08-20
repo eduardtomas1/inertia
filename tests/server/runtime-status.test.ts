@@ -78,7 +78,7 @@ describe("headless runtime status", () => {
       mutationSupport: "unsupported",
     }]);
     expect(JSON.stringify(report)).not.toContain("connection metadata");
-    expect(detectProvider).toHaveBeenCalledTimes(4);
+    expect(detectProvider).toHaveBeenCalledTimes(5);
     expect(detectProvider.mock.calls.every(([, options]) =>
       options?.probeAuthentication === false)).toBe(true);
   });
@@ -160,7 +160,13 @@ describe("headless runtime status", () => {
       }),
     });
 
-    expect(report.providers).toHaveLength(4);
+    expect(report.providers.map(({ id }) => id)).toEqual([
+      "codex",
+      "claude",
+      "cursor",
+      "kimi",
+      "opencode",
+    ]);
     expect(report.providers[0]).toMatchObject({
       id: "codex",
       authState: "unknown",

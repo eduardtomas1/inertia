@@ -151,7 +151,7 @@ test("never replaces mounted chats during a supervised runtime restart", async (
     }));
   }, app.attachmentImagePath);
   await primary.getByRole("button", {
-    name: "Attach images or documents",
+    name: "Attach images, documents, or spreadsheets",
   }).click();
   const attachment = primary.getByRole("button", {
     name: "Preview attachment preview.png",

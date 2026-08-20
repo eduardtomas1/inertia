@@ -13,11 +13,18 @@ import type {
   ProviderRunFailure,
   ProviderRunResult,
 } from "../../provider/contracts";
-import type { ActiveTurn, TurnTimerScheduler } from "./turn-controller-types";
+import type {
+  ActiveTurn,
+  TurnControllerHooks,
+  TurnTimerScheduler,
+} from "./turn-controller-types";
 
 export const MAX_ASSISTANT_TEXT = 4 * 1024 * 1024;
 export const MAX_REASONING_TEXT = 512 * 1024;
+/** Maximum provider silence, not an absolute turn lifetime. */
 export const DEFAULT_TURN_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
+/** Fail-safe ceiling for one owned provider process, even if it stays noisy. */
+export const DEFAULT_TURN_MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 
 export function defaultTurnScheduler(): TurnTimerScheduler {
   return {
@@ -30,6 +37,17 @@ export function defaultTurnScheduler(): TurnTimerScheduler {
   };
 }
 
+export function broadcastTurnConversationShell(
+  hooks: TurnControllerHooks,
+  active: ActiveTurn,
+): void {
+  if (hooks.broadcastConversationShell) {
+    hooks.broadcastConversationShell(active.conversation.id);
+  } else {
+    hooks.broadcastSnapshot();
+  }
+}
+
 export function providerLabel(providerId: ProviderId): string {
   return providerId === "codex"
     ? "Codex"
@@ -37,7 +55,9 @@ export function providerLabel(providerId: ProviderId): string {
       ? "Claude"
       : providerId === "cursor"
         ? "Cursor"
-        : "OpenCode";
+        : providerId === "kimi"
+          ? "Kimi Code"
+          : "OpenCode";
 }
 
 export function projectActionKind(name: string): "check" | "service" {

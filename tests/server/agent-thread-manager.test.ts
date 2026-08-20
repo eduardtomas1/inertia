@@ -199,6 +199,7 @@ describe("AgentThreadManager", () => {
         "codex-app-server",
         "claude-agent-sdk",
         "cursor-acp",
+        "kimi-acp",
         "opencode-sdk",
       ] as const) {
         expect(manager.bridgeFor({
@@ -206,6 +207,29 @@ describe("AgentThreadManager", () => {
           turn: { ...sourceTurn, harnessId },
         })).toBeDefined();
       }
+    } finally {
+      store.close();
+    }
+  });
+
+  it("advertises and validates Kimi as a managed child route", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const definition = bridge?.definitions.find(
+        ({ name }) => name === "inertia_create_conversation",
+      );
+      const route = (definition?.inputSchema.properties as {
+        route?: {
+          properties?: { providerId?: { enum?: string[] } };
+        };
+      } | undefined)?.route;
+      expect(route?.properties?.providerId?.enum).toContain("kimi");
+      expect(definition?.inputValidator?.safeParse({
+        title: "Kimi verifier",
+        prompt: "Inspect independently.",
+        route: { providerId: "kimi" },
+      }).success).toBe(true);
     } finally {
       store.close();
     }

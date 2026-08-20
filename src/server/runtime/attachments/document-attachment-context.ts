@@ -8,9 +8,16 @@ import {
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
   chatAttachmentKind,
+  isSpreadsheetAttachmentMimeType,
 } from "../../../shared/attachments";
 import type { ChatAttachment } from "../../../shared/contracts";
+import {
+  SPREADSHEET_PROVIDER_LIMITS,
+  readSpreadsheetWorkbook,
+  spreadsheetWorkbookToText,
+} from "../../../shared/spreadsheet-workbook";
 import type { ResolvedAttachmentPayload } from "./trusted-attachment-resolver";
 import {
   DocumentExtractionCancelledError,
@@ -571,6 +578,34 @@ function extractTextDocument(
   return { content: bounded.value, truncated: bounded.truncated };
 }
 
+async function extractSpreadsheetDocument(
+  attachment: ChatAttachment,
+  bytes: Uint8Array,
+  maximumJsonBytes: number,
+  signal: AbortSignal,
+): Promise<{ content: string; truncated: boolean }> {
+  if (signal.aborted) throw new DocumentExtractionCancelledError();
+  try {
+    const workbook = await readSpreadsheetWorkbook(
+      bytes,
+      SPREADSHEET_PROVIDER_LIMITS,
+    );
+    if (signal.aborted) throw new DocumentExtractionCancelledError();
+    const bounded = boundedUtf8(
+      spreadsheetWorkbookToText(workbook).trim(),
+      maximumJsonBytes,
+    );
+    if (!bounded.value) throw new Error("The workbook has no readable cells.");
+    return {
+      content: bounded.value,
+      truncated: bounded.truncated || workbook.contentTruncated,
+    };
+  } catch (error) {
+    if (error instanceof DocumentExtractionCancelledError) throw error;
+    throw new Error(`${attachment.name} could not be read as a spreadsheet.`);
+  }
+}
+
 export async function prepareDocumentAttachments(
   payloads: readonly ResolvedAttachmentPayload[],
   options: DocumentAttachmentContextOptions = {},
@@ -672,6 +707,35 @@ export async function prepareDocumentAttachments(
             }),
           };
         }
+        if (isSpreadsheetAttachmentMimeType(attachment.mimeType)) {
+          const extracted = await scheduler.schedule({
+            groupId,
+            weight: bytes.byteLength
+              + MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
+            deadlineAt,
+            signal: batchAbort.signal,
+            onOperationFailure: (error) => {
+              if (!(error instanceof DocumentExtractionCancelledError)) {
+                batchAbort.abort();
+              }
+            },
+            operation: (signal) => extractSpreadsheetDocument(
+              attachment,
+              bytes,
+              maximumJsonBytes,
+              signal,
+            ),
+          });
+          return {
+            kind: "text" as const,
+            context: {
+              attachmentId: attachment.id,
+              label: `Spreadsheet · ${attachment.name}`,
+              content: extracted.content,
+              truncated: extracted.truncated,
+            } satisfies DocumentAttachmentContext,
+          };
+        }
         const extracted = extractTextDocument(
           attachment,
           bytes,
@@ -699,7 +763,7 @@ export async function prepareDocumentAttachments(
       && !(result.reason instanceof DocumentExtractionCancelledError));
     if (failed) {
       if (failed.reason instanceof DocumentExtractionDeadlineError) {
-        throw new Error("PDF text extraction timed out.");
+        throw new Error("Document extraction timed out.");
       }
       throw failed.reason;
     }

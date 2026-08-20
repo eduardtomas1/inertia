@@ -5,6 +5,7 @@ export type SelectedModelChipGlyph =
   | "codex"
   | "claude"
   | "cursor"
+  | "kimi"
   | "opencode"
   | "custom"
   | "unknown";

@@ -6,6 +6,7 @@ export const MODEL_SOURCE_PROVIDER_ORDER = [
   "codex",
   "claude",
   "cursor",
+  "kimi",
   "opencode",
 ] as const satisfies readonly ProviderId[];
 
@@ -13,6 +14,7 @@ const providerLabels: Readonly<Record<ProviderId, string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
+  kimi: "Kimi Code",
   opencode: "OpenCode",
 };
 

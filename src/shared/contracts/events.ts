@@ -90,6 +90,14 @@ export type RuntimeMutationEvent =
   | { type: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
   | { type: "agent.started"; conversationId: string; runId: string; turnId: string }
   | { type: "agent.text"; conversationId: string; runId: string; turnId: string; text: string }
+  | {
+      type: "agent.text.replaced";
+      conversationId: string;
+      runId: string;
+      turnId: string;
+      /** Exact durable assistant projection after an authoritative correction. */
+      message: ChatMessage | null;
+    }
   | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string }
   | { type: "agent.commentary.persisted"; message: ChatMessage }
   | { type: "agent.usage"; usage: ThreadUsageSnapshot }

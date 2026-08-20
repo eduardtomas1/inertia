@@ -155,6 +155,60 @@ export class TurnStreamProjection {
     active.assistantStream.replacePending(correctedSegment);
   }
 
+  /**
+   * Replaces every assistant segment for this active turn with one
+   * provider-authored authoritative snapshot. Existing durable segments are
+   * consolidated transactionally before any active or renderer state moves.
+   */
+  replaceAssistantSnapshot(active: ActiveTurn, text: string): ReturnType<RuntimeStore["message"]> | null {
+    const finalText = normalizedPrefix(
+      normalizeStreamText(text),
+      MAX_ASSISTANT_TEXT,
+    );
+    let retainedMessageId = finalText
+      ? active.assistantMessageId ?? active.latestAssistantMessageId
+      : null;
+    if (retainedMessageId || !finalText) {
+      this.options.store.transcriptRepository
+        .replaceAssistantMessagesForTurnSnapshot(
+          active.turn.id,
+          retainedMessageId,
+          finalText,
+        );
+    } else {
+      // With no durable segment there are no siblings to consolidate. Creating
+      // the canonical message is itself the only persistence mutation.
+      retainedMessageId = this.options.store.createMessage(
+        active.conversation.id,
+        finalText,
+        "assistant",
+        [],
+        active.turn.id,
+        this.options.now(),
+      ).id;
+    }
+    active.assistantPendingHighSurrogate = "";
+    active.assistantStream.replacePending("");
+    active.assistantText = finalText;
+    active.assistantSegmentText = finalText;
+    active.assistantMessageId = retainedMessageId;
+    active.latestAssistantMessageId = retainedMessageId;
+    if (retainedMessageId) {
+      try {
+        this.options.hooks.onStreamingPersisted?.({
+          turnId: active.turn.id,
+          kind: "assistant",
+          recordId: retainedMessageId,
+        });
+      } catch {
+        // Optional downstream hooks cannot invalidate durable stream storage.
+      }
+    }
+    return retainedMessageId
+      ? this.options.store.message(retainedMessageId)
+      : null;
+  }
+
   flush(active: ActiveTurn, kind: "assistant" | "reasoning"): boolean {
     const normalized = this.normalizeIngress(active, kind, "", true);
     if (kind === "assistant") this.appendNormalizedAssistant(active, normalized);

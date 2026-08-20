@@ -16,7 +16,7 @@ const PUBLISHED_RELEASES_BY_SCHEMA: Readonly<Record<number, readonly string[]>> 
   15: ["v0.0.5", "v0.0.6"],
 };
 
-const PROVIDERS = new Set(["codex", "claude", "cursor", "opencode"]);
+const PROVIDERS = new Set(["codex", "claude", "cursor", "kimi", "opencode"]);
 const INTERACTION_MODES = new Set(["build", "plan"]);
 const ACCESS_MODES = new Set(["supervised", "auto-edit", "full"]);
 const TERMINAL_WORKSPACE_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
@@ -66,6 +66,12 @@ export interface DatabaseMigrationContext {
 export interface DatabaseMigration {
   readonly version: number;
   readonly name: string;
+  /**
+   * Some SQLite table rebuilds must temporarily suspend FK enforcement. The
+   * runner owns that transition outside its transaction, verifies the final
+   * graph with `foreign_key_check`, and restores the caller's original mode.
+   */
+  readonly foreignKeys?: "off";
   readonly up: string | ((database: SqliteDatabase, context: DatabaseMigrationContext) => void);
 }
 
@@ -277,6 +283,7 @@ export function runDatabaseMigrations(
   let failedVersion: number | null = null;
   let failedMigration: string | null = null;
   let legacyBackfill: LegacyBackfillDiagnostics | null = null;
+  let restoreForeignKeys = false;
 
   try {
     validateMigrations(migrations);
@@ -286,6 +293,22 @@ export function runDatabaseMigrations(
       && sourceSchemaVersion < firstManagedVersion - 1
     ) {
       throw new Error("The database is older than the supplied migration baseline.");
+    }
+    const requiresForeignKeysOff = migrations.some((migration) =>
+      migration.version > sourceSchemaVersion
+      && migration.foreignKeys === "off",
+    );
+    if (requiresForeignKeysOff) {
+      if (database.inTransaction) {
+        throw new Error(
+          "A foreign-key table rebuild cannot begin inside another transaction.",
+        );
+      }
+      restoreForeignKeys = database.pragma(
+        "foreign_keys",
+        { simple: true },
+      ) === 1;
+      if (restoreForeignKeys) database.pragma("foreign_keys = OFF");
     }
     database.transaction(() => {
       database.exec(
@@ -324,6 +347,12 @@ export function runDatabaseMigrations(
         insertApplied.run(migration.version, options.now?.() ?? new Date().toISOString());
         appliedVersions.push(migration.version);
       }
+      if (requiresForeignKeysOff) {
+        const violations = database.pragma("foreign_key_check") as unknown[];
+        if (violations.length > 0) {
+          throw new Error("The migrated database contains foreign-key violations.");
+        }
+      }
     })();
   } catch (error) {
     const diagnostic: DatabaseMigrationDiagnostic = {
@@ -339,6 +368,8 @@ export function runDatabaseMigrations(
     };
     emitDiagnostic(options.onDiagnostic, diagnostic);
     throw new DatabaseMigrationError(diagnostic, error);
+  } finally {
+    if (restoreForeignKeys) database.pragma("foreign_keys = ON");
   }
 
   const diagnostic: DatabaseMigrationDiagnostic = {

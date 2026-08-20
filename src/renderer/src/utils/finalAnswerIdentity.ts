@@ -15,6 +15,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "claude-cli": "Claude",
   "cursor-acp": "Cursor",
   "cursor-cli": "Cursor",
+  "kimi-acp": "Kimi Code",
   "opencode-sdk": "OpenCode",
   "opencode-cli": "OpenCode",
 };
@@ -25,6 +26,7 @@ const STRUCTURAL_BACKEND_LABELS: Readonly<Record<string, string>> = {
   "builtin:anthropic": "Anthropic",
   "builtin:kimi-code": "Kimi",
   "builtin:cursor": "Cursor",
+  "builtin:kimi": "Kimi Code",
   "builtin:opencode": "OpenCode",
 };
 

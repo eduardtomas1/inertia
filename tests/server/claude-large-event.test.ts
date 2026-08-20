@@ -190,7 +190,7 @@ describe("Claude Agent SDK large event boundary", () => {
     },
   );
 
-  it("enforces supported scale, per-event bytes, canonical base64, and source size", () => {
+  it("enforces payload bounds while treating source size as independent metadata", () => {
     const largeBytes = 16.5 * 1024 * 1024;
     const largeBase64 = Buffer.alloc(largeBytes, 0xa5).toString("base64");
     const large = projectClaudeSdkEventMedia(claudeReadMediaResult({
@@ -229,15 +229,22 @@ describe("Claude Agent SDK large event boundary", () => {
         bytes: originalSize,
       }))).toThrow("Claude sent malformed structured tool-result media.");
     }
-    expect(() => projectClaudeSdkEventMedia(claudeReadMediaResult({
+    expect(projectClaudeSdkEventMedia(claudeReadMediaResult({
       base64: "YQ==",
       bytes: MAX_CLAUDE_EVENT_MEDIA_BYTES + 1,
-    }))).toThrow("Claude sent oversized tool-result media.");
-    expect(() => projectClaudeSdkEventMedia(claudeReadMediaResult({
+    })).mediaBytes).toBe(1);
+    const transformedPdf = projectClaudeSdkEventMedia(claudeReadMediaResult({
       base64: "YQ==",
       bytes: 2,
       kind: "pdf",
-    }))).toThrow("Claude sent inconsistent tool-result media metadata.");
+    }));
+    expect(transformedPdf.mediaBytes).toBe(1);
+    expect(JSON.stringify(transformedPdf.value)).not.toContain("YQ==");
+    expect(() => claudeEventBudget().observe(claudeReadMediaResult({
+      base64: "YQ==",
+      bytes: 2,
+      kind: "pdf",
+    }))).not.toThrow();
   });
 
   it("keeps malformed, mismatched, unknown, and non-media data on strict bounds", () => {
@@ -285,11 +292,18 @@ describe("Claude Agent SDK large event boundary", () => {
     })).toThrow("Claude sent an oversized event.");
   });
 
-  it("accounts duplicate occurrences atomically and bounds aggregate media", () => {
+  it("accounts duplicate occurrences atomically and replenishes media capacity", () => {
+    let now = 0;
     const bytes = 15 * 1024 * 1024;
     const base64 = Buffer.alloc(bytes, 0x5a).toString("base64");
     const event = claudeReadMediaResult({ base64, bytes });
-    const budget = claudeEventBudget();
+    const budget = new ClaudeRunEventBudget(new ProviderRunEventBudget(
+      "Claude",
+      1024 * 1024,
+      8_192,
+      32 * 1024 * 1024,
+      { windowMs: 1_000, now: () => now },
+    ), { windowMs: 1_000, now: () => now });
     expect(() => budget.observe({
       ...event as unknown as Record<string, unknown>,
       unrelated: "x".repeat(1024 * 1024),
@@ -306,7 +320,12 @@ describe("Claude Agent SDK large event boundary", () => {
     expect(() => budget.observe(claudeReadMediaResult({
       base64: "YQ==",
       bytes: 1,
-    }))).toThrow("Claude exceeded the bounded media event budget for this run.");
+    }))).toThrow("Claude exceeded the bounded media event rate for this run.");
+    now = 1_000;
+    expect(() => budget.observe(claudeReadMediaResult({
+      base64,
+      bytes,
+    }))).not.toThrow();
   });
 
   it("cancels and releases an owned SDK process after accepted media", async () => {
@@ -463,6 +482,7 @@ describe("Claude Agent SDK large event boundary", () => {
     })).resolves.toMatchObject({
       status: "failed",
       error: "Claude sent an oversized event.",
+      failure: { reason: "protocol-overflow" },
     });
     await expect(pendingPermission).resolves.toMatchObject({
       behavior: "deny",

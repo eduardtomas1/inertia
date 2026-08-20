@@ -25,18 +25,18 @@ describe("provider run event budget", () => {
     expect(overflows).toBe(1);
   });
 
-  it("bounds both event cardinality and aggregate UTF-8 bytes", () => {
+  it("bounds both event cardinality and UTF-8 bytes within one burst", () => {
     const countBudget = new ProviderRunEventBudget("Provider", 16, 2, 32);
     countBudget.observe("a");
     countBudget.observe("b");
     expect(() => countBudget.observe("c")).toThrow(
-      "Provider exceeded the bounded event budget for this run.",
+      "Provider exceeded the bounded event rate for this run.",
     );
 
     const byteBudget = new ProviderRunEventBudget("Provider", 16, 4, 8);
     byteBudget.observe("é");
     expect(() => byteBudget.observe("éé")).toThrow(
-      "Provider exceeded the bounded event budget for this run.",
+      "Provider exceeded the bounded event rate for this run.",
     );
     expect(() => new ProviderRunEventBudget(
       "Provider",
@@ -44,6 +44,45 @@ describe("provider run event budget", () => {
       4,
       16,
     ).observe("long")).toThrow("Provider sent an oversized event.");
+  });
+
+  it("replenishes burst capacity so long-lived runs do not exhaust a lifetime quota", () => {
+    let now = 0;
+    const budget = new ProviderRunEventBudget(
+      "Provider",
+      16,
+      2,
+      8,
+      { windowMs: 1_000, now: () => now },
+    );
+
+    budget.observe("a");
+    budget.observe("b");
+    expect(() => budget.observe("c")).toThrow(/bounded event rate/u);
+
+    now = 500;
+    budget.observe("c");
+    expect(() => budget.observe("d")).toThrow(/bounded event rate/u);
+
+    now = 1_500;
+    budget.observe("d");
+    budget.observe("e");
+  });
+
+  it("rejects invalid event-budget limits", () => {
+    expect(() => new ProviderRunEventBudget(
+      "Provider",
+      0,
+      1,
+      1,
+    )).toThrow("The provider event budget is invalid.");
+    expect(() => new ProviderRunEventBudget(
+      "Provider",
+      1,
+      1,
+      1,
+      { windowMs: 0 },
+    )).toThrow("The provider event budget is invalid.");
   });
 
   it("fails closed for values that cannot be serialized", () => {

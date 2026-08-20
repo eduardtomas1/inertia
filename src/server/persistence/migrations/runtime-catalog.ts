@@ -1,11 +1,7 @@
 import type Database from "better-sqlite3";
 import type { ProviderId } from "../../../shared/contracts";
 import { continuationIdentityForSelection, nativeModelSelection } from "../../../shared/model-routing";
-import {
-  backfillLegacyAgentTurns,
-  formatMigrationDiagnostic,
-  runDatabaseMigrations,
-} from "../../database-migrations";
+import { backfillLegacyAgentTurns, formatMigrationDiagnostic, runDatabaseMigrations } from "../../database-migrations";
 import {
   nativeProviderMetadataScope,
   providerMetadataScopeKey,
@@ -14,7 +10,11 @@ import {
 import { legacyModelSelection } from "../codecs";
 import type { AgentTurnRow, ConversationRow } from "../rows";
 import { sanitizePersistedAttachmentCapabilities } from "./attachment-capabilities";
-import { createRuntimeMigrationCatalog, type DatabaseMigrationDefinition } from "./catalog";
+import {
+  CURRENT_DATABASE_SCHEMA_VERSION,
+  createRuntimeMigrationCatalog,
+  type DatabaseMigrationDefinition,
+} from "./catalog";
 import { conversationWorktreeOwnershipMigration } from "./conversation-worktree-ownership";
 import { persistColorTheme } from "./color-theme";
 import { persistAgentThreadManagement } from "./agent-thread-management";
@@ -22,6 +22,7 @@ import { durableDataMigrationDefinitions } from "./durable-data";
 import { protectCancellingDuoDeletion, protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
+import { nativeKimiProviderMigration } from "./native-kimi-provider";
 import { promptPresetMigrationDefinition } from "./prompt-presets";
 import { providerRunOwnershipMigration } from "./provider-run-ownership";
 import { persistFinalAnswerAutoScroll, roadmapSettingsMigrationDefinitions } from "./roadmap-settings";
@@ -30,11 +31,8 @@ import { ensureTurnAssociationColumns } from "./turn-association-columns";
 import { workspacePathAuthoritiesMigration } from "./workspace-path-authorities";
 import { conversationContextPacketsMigration } from "./conversation-context-packets";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
-const MODEL_SELECTION_COLUMNS = [
-  "model_selection_json",
-  "continuation_identity_json",
-] as const;
-export function migrateRuntimeDatabase(database: Database.Database): void {
+const MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
+export function migrateRuntimeDatabase(database: Database.Database, maximumVersion = CURRENT_DATABASE_SCHEMA_VERSION): void {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
       (sql, index) => {
       const version = index + 1;
@@ -1224,14 +1222,16 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           WHERE usage_start_json IS NOT NULL;
         `,
       },
-      persistColorTheme, persistAgentThreadManagement,
+      persistColorTheme,
+      persistAgentThreadManagement,
       conversationContextPacketsMigration,
+      nativeKimiProviderMigration,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,
     );
-    runDatabaseMigrations(database, runtimeMigrations, {
+    runDatabaseMigrations(database, runtimeMigrations.slice(0, maximumVersion), {
       onDiagnostic: (diagnostic) => {
         if (diagnostic.outcome === "failed") {
           console.error(formatMigrationDiagnostic(diagnostic));

@@ -314,6 +314,7 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
     case "conversation.detail.invalidated":
     case "agent.started":
     case "agent.text":
+    case "agent.text.replaced":
     case "agent.reasoning":
     case "agent.approval.resolved":
     case "agent.input.resolved":

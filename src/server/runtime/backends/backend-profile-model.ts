@@ -33,6 +33,7 @@ export const PROVIDER_IDS: readonly ProviderId[] = [
   "codex",
   "claude",
   "cursor",
+  "kimi",
   "opencode",
 ];
 

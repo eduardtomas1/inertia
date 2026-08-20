@@ -44,6 +44,7 @@ const harnessLabels: Readonly<Record<ProviderId, string>> = {
   codex: "Codex harness",
   claude: "Claude harness",
   cursor: "Cursor",
+  kimi: "Kimi Code",
   opencode: "OpenCode",
 };
 

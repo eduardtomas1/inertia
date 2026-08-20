@@ -8,6 +8,7 @@ import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
+import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
@@ -47,10 +48,12 @@ function cursorAgent(
   leakPath?: string,
   echoPath?: string,
   nestedLeak = false,
+  reverseRequestLeak = false,
+  controlResponseLeak = false,
 ): string {
   const command = portableNodeExecutable(root, `cursor-host-${supportsHttp ? "http" : "stdio"}`);
   const subcommand = writeNodeSubcommand(root, "acp", `
-const fs=require("node:fs"),readline=require("node:readline");let secretToken,secretUrl;
+const fs=require("node:fs"),readline=require("node:readline");let secretToken,secretUrl,promptId;
 const send=value=>process.stdout.write(JSON.stringify(value)+"\\n");
 const deeplyNested=value=>{let result={type:"text",text:JSON.stringify(value)};for(let depth=0;depth<40;depth+=1)result={type:"tool_result",content:result};return result;};
 const capture=message=>{
@@ -79,9 +82,100 @@ readline.createInterface({input:process.stdin}).on("line",line=>{
  const message=JSON.parse(line);
  if(message.method==="initialize")return send({jsonrpc:"2.0",id:message.id,result:{protocolVersion:1,agentCapabilities:{loadSession:true,mcpCapabilities:{http:${String(supportsHttp)}}},agentInfo:{name:"Cursor",version:"test"}}});
  if(message.method==="session/new"||message.method==="session/load"){
-  capture(message);return send({jsonrpc:"2.0",id:message.id,result:{sessionId:"cursor-host-session",modes:{currentModeId:"build",availableModes:[{id:"build",name:"Build"}]},configOptions:[]}});
+  capture(message);return send({jsonrpc:"2.0",id:message.id,result:{sessionId:"cursor-host-session",modes:{currentModeId:"build",availableModes:[{id:"build",name:"Build"}]},configOptions:${controlResponseLeak ? `[{type:"select",id:"model",name:"Model",category:"model",currentValue:"model-a",options:[{value:"model-a",name:"Model A",description:"Initial"}]}]` : "[]"}}});
  }
- if(message.method==="session/prompt"){${echoPath ? nestedLeak ? `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"nested-secret-tool",title:"Nested provider diagnostic",kind:"execute",status:"failed",rawInput:{command:"echo safe"},rawOutput:deeplyNested({token:secretToken,url:secretUrl})}}});` : `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"safe "+secretToken+" "+secretUrl}}}});send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"secret-tool",title:"Secret echo",kind:"execute",status:"failed",rawInput:{command:"echo "+secretToken},rawOutput:secretUrl}}});` : ""}${leakPath ? "return process.exit(7);" : "return send({jsonrpc:\"2.0\",id:message.id,result:{stopReason:\"end_turn\"}});"}}
+ ${controlResponseLeak ? `if(message.method==="session/set_config_option")return send({jsonrpc:"2.0",id:message.id,result:{configOptions:[{type:"select",id:"model",name:"Model",category:"model",currentValue:"model-a",options:[{value:"model-a",name:"Model "+secretToken,description:"Endpoint "+secretUrl}]}]}});` : ""}
+ if(message.method==="session/prompt"){${reverseRequestLeak ? `promptId=message.id;return send({jsonrpc:"2.0",id:899,method:"session/request_permission",params:{sessionId:"cursor-host-session",toolCall:{toolCallId:"permission",title:"Approve "+secretToken,kind:"execute",status:"pending",rawInput:{command:"echo "+secretUrl}},options:[{optionId:"allow",name:"Allow once",kind:"allow_once"},{optionId:"reject",name:"Reject once",kind:"reject_once"}]}});` : `${echoPath ? nestedLeak ? `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"nested-secret-tool",title:"Nested provider diagnostic",kind:"execute",status:"failed",rawInput:{command:"echo safe"},rawOutput:deeplyNested({token:secretToken,url:secretUrl})}}});` : `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"safe "+secretToken+" "+secretUrl}}}});send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"secret-tool",title:"Secret echo",kind:"execute",status:"failed",rawInput:{command:"echo "+secretToken},rawOutput:secretUrl}}});` : ""}${leakPath ? "return process.exit(7);" : "return send({jsonrpc:\"2.0\",id:message.id,result:{stopReason:\"end_turn\"}});"}`}}
+ ${reverseRequestLeak ? `if(message.id===899)return send({jsonrpc:"2.0",id:900,method:"cursor/ask_question",params:{toolCallId:"question",title:"Choose "+secretToken,questions:[{id:"scope",prompt:"Scope "+secretUrl,options:[{id:"focused",label:"Focused "+secretToken}]}]}});if(message.id===900){send({jsonrpc:"2.0",method:"cursor/task",params:{toolCallId:"task",description:"Task "+secretToken,prompt:"Inspect "+secretUrl,subagentType:"explore",model:"model"}});return send({jsonrpc:"2.0",id:promptId,result:{stopReason:"end_turn"}});}` : ""}
+});
+`);
+  execFileSync(process.execPath, ["--check", subcommand]);
+  return command;
+}
+
+type KimiSessionPath = "new" | "resume" | "load";
+
+function kimiAgent(
+  root: string,
+  capturePath: string,
+  options: {
+    supportsHttp: boolean;
+    sessionPath?: KimiSessionPath;
+    leakPath?: string;
+    echoPath?: string;
+    nestedLeak?: boolean;
+    callMutation?: boolean;
+    permissionLeak?: boolean;
+  },
+): string {
+  const {
+    supportsHttp,
+    sessionPath = "new",
+    leakPath,
+    echoPath,
+    nestedLeak = false,
+    callMutation = false,
+    permissionLeak = false,
+  } = options;
+  const command = portableNodeExecutable(
+    root,
+    `kimi-host-${supportsHttp ? "http" : "stdio"}-${sessionPath}`,
+  );
+  const continuationCapabilities = sessionPath === "resume"
+    ? "sessionCapabilities:{resume:{}}"
+    : sessionPath === "load"
+      ? "loadSession:true"
+      : "";
+  const subcommand = writeNodeSubcommand(root, "acp", `
+const fs=require("node:fs"),readline=require("node:readline");
+let secretToken,secretUrl,captured={},promptId,cancelled=false;
+const send=value=>process.stdout.write(JSON.stringify(value)+"\\n");
+const save=()=>fs.writeFileSync(${JSON.stringify(capturePath)},JSON.stringify(captured));
+const deeplyNested=value=>{let result={type:"text",text:JSON.stringify(value)};for(let depth=0;depth<40;depth+=1)result={type:"tool_result",content:result};return result;};
+const capture=message=>{
+ const server=message.params.mcpServers[0];
+ if(!server){captured={method:message.method,count:0};save();return;}
+ const bearer=Array.isArray(server.env)?server.env.find(entry=>entry.name==="INERTIA_HOST_MCP_TOKEN")?.value:undefined;
+ const endpoint=Array.isArray(server.env)?server.env.find(entry=>entry.name==="INERTIA_HOST_MCP_URL")?.value:undefined;
+ const authorization=Array.isArray(server.headers)?server.headers.find(entry=>entry.name==="Authorization")?.value:undefined;
+ secretToken=bearer??authorization?.replace(/^Bearer /,"");secretUrl=endpoint??server.url;
+ ${(leakPath ?? echoPath) ? `fs.writeFileSync(${JSON.stringify(leakPath ?? echoPath)},JSON.stringify({token:secretToken,url:secretUrl}));` : ""}
+ ${leakPath ? `process.stderr.write("provider diagnostic "+secretToken+" "+secretUrl+"\\n");` : ""}
+ captured={
+  method:message.method,
+  type:server.type??"stdio",
+  name:server.name,
+  endpointIsLoopback:typeof secretUrl==="string"&&secretUrl.startsWith("http://127.0.0.1:"),
+  endpointPort:typeof secretUrl==="string"?Number(new URL(secretUrl).port):null,
+  hasAuthorization:Array.isArray(server.headers)&&server.headers.some(entry=>entry.name==="Authorization"&&entry.value.startsWith("Bearer ")),
+  commandIsAbsolute:typeof server.command==="string"&&require("node:path").isAbsolute(server.command),
+  envNames:Array.isArray(server.env)?server.env.map(entry=>entry.name).sort():[],
+  argsContainCredential:Array.isArray(server.args)&&server.args.some(value=>(bearer&&value.includes(bearer))||(endpoint&&value.includes(endpoint))),
+ };save();
+};
+const callHostMutation=async()=>{
+ const response=await fetch(secretUrl,{method:"POST",headers:{Authorization:"Bearer "+secretToken,"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:"kimi-mutation",method:"tools/call",params:{name:"inertia_create_conversation",arguments:{title:"Verifier"}}})});
+ captured.mcpResponse=await response.json();save();
+};
+readline.createInterface({input:process.stdin}).on("line",line=>{
+ const message=JSON.parse(line);
+ if(message.method==="initialize")return send({jsonrpc:"2.0",id:message.id,result:{protocolVersion:1,agentCapabilities:{mcpCapabilities:{http:${String(supportsHttp)}}${continuationCapabilities ? `,${continuationCapabilities}` : ""}},agentInfo:{name:"Kimi Code",version:"test"}}});
+ if(message.method==="session/new"||message.method==="session/resume"||message.method==="session/load"){
+  capture(message);return send({jsonrpc:"2.0",id:message.id,result:{sessionId:"kimi-host-session",modes:{currentModeId:"build",availableModes:[{id:"build",name:"Build"}]},configOptions:[]}});
+ }
+ if(message.method==="session/prompt"){
+  promptId=message.id;
+  ${permissionLeak ? `return send({jsonrpc:"2.0",id:899,method:"session/request_permission",params:{sessionId:"kimi-host-session",toolCall:{toolCallId:"permission",title:"Approve "+secretToken,kind:"execute",status:"pending",rawInput:{command:"echo "+secretUrl}},options:[{optionId:"allow",name:"Allow once",kind:"allow_once"},{optionId:"reject",name:"Reject once",kind:"reject_once"}]}});` : ""}
+  ${leakPath ? "return process.exit(7);" : ""}
+  ${callMutation ? "void callHostMutation().then(()=>{if(!cancelled){send({jsonrpc:\"2.0\",method:\"session/update\",params:{sessionId:\"kimi-host-session\",update:{sessionUpdate:\"agent_message_chunk\",content:{type:\"text\",text:\"Mutation complete\"}}}});send({jsonrpc:\"2.0\",id:promptId,result:{stopReason:\"end_turn\"}});}}).catch(()=>{});return;" : ""}
+  ${echoPath ? nestedLeak ? `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"kimi-host-session",update:{sessionUpdate:"tool_call",toolCallId:"nested-secret-tool",title:"Nested provider diagnostic",kind:"execute",status:"failed",rawInput:{command:"echo safe"},rawOutput:deeplyNested({token:secretToken,url:secretUrl})}}});` : `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"kimi-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"safe "+secretToken+" "+secretUrl}}}});send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"kimi-host-session",update:{sessionUpdate:"tool_call",toolCallId:"secret-tool",title:"Secret echo",kind:"execute",status:"failed",rawInput:{command:"echo "+secretToken},rawOutput:secretUrl}}});` : `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"kimi-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"Done"}}}});`}
+  return send({jsonrpc:"2.0",id:message.id,result:{stopReason:"end_turn"}});
+ }
+ if(message.id===899){send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"kimi-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"Done"}}}});return send({jsonrpc:"2.0",id:promptId,result:{stopReason:"end_turn"}});}
+ if(message.method==="session/cancel"){
+  cancelled=true;
+  if(promptId!==undefined)send({jsonrpc:"2.0",id:promptId,result:{stopReason:"cancelled"}});
+ }
 });
 `);
   execFileSync(process.execPath, ["--check", subcommand]);
@@ -95,6 +189,7 @@ function openCodeServer(
   leakPath?: string,
   echoPath?: string,
   nestedLeak = false,
+  sessionResponseLeak = false,
 ): string {
   const command = portableNodeExecutable(root, failAfterMcp ? "opencode-host-fail" : "opencode-host");
   writeNodeSubcommand(root, "serve", `
@@ -123,11 +218,11 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,"http://127
  }
  if(req.method==="GET"&&url.pathname==="/provider")return ${failAfterMcp ? "json(res,{message:\"provider failed \"+secretToken+\" \"+secretUrl},500)" : "json(res,{all:[{id:\"fake\",name:\"Fake\",source:\"config\",env:[],options:{},models:{\"model-a\":model}}],default:{fake:\"model-a\"},connected:[\"fake\"]})"};
  if(req.method==="GET"&&url.pathname==="/agent")return json(res,[]);
- if(req.method==="POST"&&url.pathname==="/session"){sessionPermission=parsed?.permission;save();return json(res,session);}
+ if(req.method==="POST"&&url.pathname==="/session"){sessionPermission=parsed?.permission;save();return json(res,${sessionResponseLeak ? `{...session,id:secretToken}` : "session"});}
  if(url.pathname==="/session/"+sessionID)return json(res,session);
  if(req.method==="GET"&&url.pathname==="/event"){events=res;res.writeHead(200,{"content-type":"text/event-stream","cache-control":"no-cache",connection:"keep-alive"});return res.flushHeaders();}
  if(req.method==="POST"&&url.pathname==="/session/"+sessionID+"/prompt_async"){
-  captured.push({kind:"prompt"});save();json(res,undefined,204);setTimeout(()=>{send({type:"message.updated",properties:{sessionID,info:{id:"assistant",parentID:parsed.messageID,sessionID,role:"assistant"}}});${echoPath ? nestedLeak ? `send({type:"session.next.tool.failed",properties:{sessionID,callID:"nested-secret-tool",tool:"fixture",error:deeplyNested({token:secretToken,url:secretUrl})}});` : `send({type:"session.status",properties:{sessionID,status:{type:"retry",message:"retry "+secretToken+" "+secretUrl}}});` : ""}send({type:"message.part.updated",properties:{sessionID,part:{id:"text",sessionID,messageID:"assistant",type:"text",text:${echoPath && !nestedLeak ? `"Done "+secretToken+" "+secretUrl` : `"Done"`}}}});send({type:"session.idle",properties:{sessionID}});},10);return;
+  captured.push({kind:"prompt"});save();json(res,undefined,204);setTimeout(()=>{send({type:"message.updated",properties:{sessionID,info:{id:"assistant",parentID:parsed.messageID,sessionID,role:"assistant"}}});${echoPath ? nestedLeak ? `send({type:"session.next.tool.called",properties:{timestamp:Date.now(),sessionID,assistantMessageID:"assistant",callID:"nested-secret-tool",tool:"fixture",input:{},provider:{executed:true}}});send({type:"session.next.tool.failed",properties:{timestamp:Date.now(),sessionID,assistantMessageID:"assistant",callID:"nested-secret-tool",tool:"fixture",error:deeplyNested({token:secretToken,url:secretUrl})}});` : `send({type:"session.status",properties:{sessionID,status:{type:"retry",message:"retry "+secretToken+" "+secretUrl}}});` : ""}send({type:"message.part.updated",properties:{sessionID,part:{id:"text",sessionID,messageID:"assistant",type:"text",text:${echoPath && !nestedLeak ? `"Done "+secretToken+" "+secretUrl` : `"Done"`}}}});send({type:"session.idle",properties:{sessionID}});},10);return;
  }
  return json(res,{});
 });});
@@ -246,6 +341,189 @@ describe.sequential("provider host-tool injection", () => {
     }
   });
 
+  it.each([
+    { supportsHttp: true, expectedType: "http" },
+    { supportsHttp: false, expectedType: "stdio" },
+  ])("injects and cleans up Kimi's exact $expectedType bridge for every session path", async ({
+    supportsHttp,
+    expectedType,
+  }) => {
+    for (const sessionPath of ["new", "resume", "load"] as const) {
+      const root = portableFixtureRoot(
+        `Kimi host ${expectedType} ${sessionPath}`,
+      );
+      roots.push(root);
+      const capturePath = join(root, "capture.json");
+      const manager = new ProviderManager(
+        {
+          commands: {
+            kimi: kimiAgent(root, capturePath, {
+              supportsHttp,
+              sessionPath,
+            }),
+          },
+        },
+        new AgentHarnessRegistry([createKimiAcpHarness()]),
+      );
+      const result = await manager.run(nativeProviderRunInput({
+        providerId: "kimi",
+        conversationId: `kimi-${expectedType}-${sessionPath}`,
+        runId: `run-${sessionPath}`,
+        turnId: `turn-${sessionPath}`,
+        cwd: root,
+        prompt: "Use chat tools",
+        interactionMode: "build",
+        access: "supervised",
+        ...(sessionPath === "new"
+          ? {}
+          : { sessionId: "kimi-host-session" }),
+      }), { hostTools });
+      expect(result.status).toBe("completed");
+      const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+        endpointPort: number;
+      } & Record<string, unknown>;
+      expect(capture).toMatchObject({
+        method: `session/${sessionPath}`,
+        type: expectedType,
+        name: "inertia-chat-manager",
+        endpointIsLoopback: true,
+        ...(supportsHttp
+          ? { hasAuthorization: true }
+          : {
+              commandIsAbsolute: true,
+              argsContainCredential: false,
+              envNames: expect.arrayContaining([
+                "INERTIA_HOST_MCP_TOKEN",
+                "INERTIA_HOST_MCP_URL",
+              ]),
+            }),
+      });
+      expect(await loopbackPortIsOpen(capture.endpointPort)).toBe(false);
+    }
+  });
+
+  it("routes Kimi MCP mutation approval through the exact turn owner", async () => {
+    const root = portableFixtureRoot("Kimi host mutation approval");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const mutationHostTools: ProviderHostToolBridge = {
+      definitions: [{
+        name: "inertia_create_conversation",
+        description: "Create an approved chat.",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        },
+        inputValidator: z.object({ title: z.string() }).strict(),
+        readOnly: false,
+      }],
+      invoke: async (call) => {
+        const decision = await call.requestApproval({
+          title: "Create verifier chat",
+          detail: "Create one independent verifier chat.",
+          reason: "Kimi requested the conversation.",
+          permissionRoots: [],
+        });
+        return decision === "approve"
+          ? { success: true, text: JSON.stringify({ created: true }) }
+          : { success: false, text: decision };
+      },
+    };
+    const manager = new ProviderManager(
+      {
+        commands: {
+          kimi: kimiAgent(root, capturePath, {
+            supportsHttp: true,
+            callMutation: true,
+          }),
+        },
+      },
+      new AgentHarnessRegistry([createKimiAcpHarness()]),
+    );
+    const approvals: string[] = [];
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "kimi",
+      conversationId: "kimi-host-mutation",
+      runId: "run-kimi-host-mutation",
+      turnId: "turn-kimi-host-mutation",
+      cwd: root,
+      prompt: "Create a verifier",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      hostTools: mutationHostTools,
+      onApproval: (event) => {
+        approvals.push(event.request.title);
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+        )).toBe(true);
+      },
+    });
+    expect(result).toMatchObject({ status: "completed", cleanupConfirmed: true });
+    expect(approvals).toEqual(["Create verifier chat"]);
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      endpointPort: number;
+      mcpResponse: unknown;
+    };
+    expect(capture.mcpResponse).toMatchObject({
+      id: "kimi-mutation",
+      result: {
+        content: [{ text: JSON.stringify({ created: true }) }],
+      },
+    });
+    expect(await loopbackPortIsOpen(capture.endpointPort)).toBe(false);
+  });
+
+  it("fails Kimi's public result when host-tool cleanup cannot be confirmed", async () => {
+    const root = portableFixtureRoot("Kimi host cleanup failure");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    let closeAttempted = false;
+    const manager = new ProviderManager(
+      {
+        commands: {
+          kimi: kimiAgent(root, capturePath, { supportsHttp: true }),
+        },
+      },
+      new AgentHarnessRegistry([createKimiAcpHarness({
+        createHostMcpSession: () => ({
+          start: async () => ({
+            url: "http://127.0.0.1:9/mcp",
+            bearerToken: "fixture-host-token",
+          }),
+          close: async () => {
+            closeAttempted = true;
+            throw new Error("fixture cleanup failure");
+          },
+        }),
+      })]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "kimi",
+      conversationId: "kimi-host-cleanup-failure",
+      runId: "run-kimi-host-cleanup-failure",
+      turnId: "turn-kimi-host-cleanup-failure",
+      cwd: root,
+      prompt: "Finish only after cleanup",
+      interactionMode: "build",
+      access: "supervised",
+    }), { hostTools })).resolves.toMatchObject({
+      status: "failed",
+      error: "Kimi Inertia chat tools could not be cleaned up.",
+      cleanupConfirmed: false,
+      failure: {
+        reason: "provider-error",
+        phase: "cleanup",
+        terminalEvent: "host-tools/cleanup",
+      },
+    });
+    expect(closeAttempted).toBe(true);
+  });
+
   it.each([false, true])("adds and disconnects OpenCode's directory-scoped bridge (failure=%s)", async (failAfterMcp) => {
     const root = portableFixtureRoot(`OpenCode host ${failAfterMcp ? "failure" : "success"}`);
     roots.push(root);
@@ -312,8 +590,9 @@ describe.sequential("provider host-tool injection", () => {
   it("does not start or inject provider MCP state for ordinary runs without host tools", async () => {
     const claudeRoot = portableFixtureRoot("Claude without host tools");
     const cursorRoot = portableFixtureRoot("Cursor without host tools");
+    const kimiRoot = portableFixtureRoot("Kimi without host tools");
     const openCodeRoot = portableFixtureRoot("OpenCode without host tools");
-    roots.push(claudeRoot, cursorRoot, openCodeRoot);
+    roots.push(claudeRoot, cursorRoot, kimiRoot, openCodeRoot);
     let claudeOptions: { mcpServers?: unknown; strictMcpConfig?: boolean } | undefined;
     const claude = new ProviderManager(
       { commands: { claude: process.execPath } },
@@ -362,6 +641,31 @@ describe.sequential("provider host-tool injection", () => {
       count: 0,
     });
 
+    const kimiCapture = join(kimiRoot, "capture.json");
+    const kimi = new ProviderManager(
+      {
+        commands: {
+          kimi: kimiAgent(kimiRoot, kimiCapture, { supportsHttp: true }),
+        },
+      },
+      new AgentHarnessRegistry([createKimiAcpHarness()]),
+    );
+    const kimiResult = await kimi.run(nativeProviderRunInput({
+      providerId: "kimi",
+      conversationId: "kimi-no-host-tools",
+      runId: "run-no-host-tools",
+      turnId: "turn-no-host-tools",
+      cwd: kimiRoot,
+      prompt: "Ordinary run",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+    expect(kimiResult.status).toBe("completed");
+    expect(JSON.parse(readFileSync(kimiCapture, "utf8"))).toEqual({
+      method: "session/new",
+      count: 0,
+    });
+
     const openCode = new ProviderManager(
       { commands: { opencode: openCodeServer(openCodeRoot, openCodeCapture) } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
@@ -383,7 +687,166 @@ describe.sequential("provider host-tool injection", () => {
     expect(openCodeEvents.captured).toEqual([{ kind: "prompt" }]);
   });
 
-  it.each(["cursor", "opencode"] as const)("redacts %s MCP credentials from provider failures", async (provider) => {
+  it("redacts Cursor MCP credentials from permissions, questions, and custom notifications", async () => {
+    const root = portableFixtureRoot("Cursor host reverse-request redaction");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const secretPath = join(root, "fixture-secret.json");
+    const manager = new ProviderManager(
+      {
+        commands: {
+          cursor: cursorAgent(
+            root,
+            capturePath,
+            true,
+            undefined,
+            secretPath,
+            false,
+            true,
+            true,
+          ),
+        },
+      },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    const visible: string[] = [];
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-reverse-request-redaction",
+      runId: "run-cursor-reverse-request-redaction",
+      turnId: "turn-cursor-reverse-request-redaction",
+      cwd: root,
+      prompt: "Exercise reverse requests",
+      interactionMode: "build",
+      access: "supervised",
+      model: "model-a",
+    }), {
+      hostTools,
+      onApproval: (event) => {
+        visible.push(JSON.stringify(event));
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+        )).toBe(true);
+      },
+      onInput: (event) => {
+        visible.push(JSON.stringify(event));
+        expect(manager.respondToInput(
+          event.conversationId,
+          event.request.requestId,
+          { scope: ["focused"] },
+        )).toBe(true);
+      },
+      onSubagent: (event) => visible.push(JSON.stringify(event)),
+      onMetadata: (event) => visible.push(JSON.stringify(event)),
+    });
+    const secret = JSON.parse(readFileSync(secretPath, "utf8")) as {
+      token: string;
+      url: string;
+    };
+    expect(result.status).toBe("completed");
+    const exposed = visible.join("\n");
+    expect(exposed).toContain("[redacted]");
+    expect(exposed).not.toContain(secret.token);
+    expect(exposed).not.toContain(secret.url);
+  });
+
+  it("redacts Kimi MCP credentials from native permission requests", async () => {
+    const root = portableFixtureRoot("Kimi host permission redaction");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const secretPath = join(root, "fixture-secret.json");
+    const manager = new ProviderManager(
+      {
+        commands: {
+          kimi: kimiAgent(root, capturePath, {
+            supportsHttp: true,
+            echoPath: secretPath,
+            permissionLeak: true,
+          }),
+        },
+      },
+      new AgentHarnessRegistry([createKimiAcpHarness()]),
+    );
+    const visible: string[] = [];
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "kimi",
+      conversationId: "kimi-permission-redaction",
+      runId: "run-kimi-permission-redaction",
+      turnId: "turn-kimi-permission-redaction",
+      cwd: root,
+      prompt: "Exercise permission",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      hostTools,
+      onApproval: (event) => {
+        visible.push(JSON.stringify(event));
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+        )).toBe(true);
+      },
+    });
+    const secret = JSON.parse(readFileSync(secretPath, "utf8")) as {
+      token: string;
+      url: string;
+    };
+    expect(result.status).toBe("completed");
+    const exposed = visible.join("\n");
+    expect(exposed).toContain("[redacted]");
+    expect(exposed).not.toContain(secret.token);
+    expect(exposed).not.toContain(secret.url);
+  });
+
+  it("rejects an OpenCode session identity containing an MCP credential", async () => {
+    const root = portableFixtureRoot("OpenCode host session identity redaction");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const secretPath = join(root, "fixture-secret.json");
+    const manager = new ProviderManager(
+      {
+        commands: {
+          opencode: openCodeServer(
+            root,
+            capturePath,
+            false,
+            undefined,
+            secretPath,
+            false,
+            true,
+          ),
+        },
+      },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-session-identity-redaction",
+      runId: "run-opencode-session-identity-redaction",
+      turnId: "turn-opencode-session-identity-redaction",
+      cwd: root,
+      prompt: "Create a session",
+      interactionMode: "build",
+      access: "supervised",
+    }), { hostTools });
+    const secret = JSON.parse(readFileSync(secretPath, "utf8")) as {
+      token: string;
+      url: string;
+    };
+    expect(result).toMatchObject({
+      status: "failed",
+      error:
+        "OpenCode returned a session identity containing an Inertia bridge credential.",
+    });
+    const exposed = JSON.stringify(result);
+    expect(exposed).not.toContain(secret.token);
+    expect(exposed).not.toContain(secret.url);
+  });
+
+  it.each(["cursor", "kimi", "opencode"] as const)("redacts %s MCP credentials from provider failures", async (provider) => {
     const root = portableFixtureRoot(`${provider} host tool diagnostic redaction`);
     roots.push(root);
     const capturePath = join(root, "capture.json");
@@ -393,10 +856,22 @@ describe.sequential("provider host-tool injection", () => {
           { commands: { cursor: cursorAgent(root, capturePath, true, leakPath) } },
           new AgentHarnessRegistry([createCursorAcpHarness()]),
         )
-      : new ProviderManager(
-          { commands: { opencode: openCodeServer(root, capturePath, true, leakPath) } },
-          new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
-        );
+      : provider === "kimi"
+        ? new ProviderManager(
+            {
+              commands: {
+                kimi: kimiAgent(root, capturePath, {
+                  supportsHttp: true,
+                  leakPath,
+                }),
+              },
+            },
+            new AgentHarnessRegistry([createKimiAcpHarness()]),
+          )
+        : new ProviderManager(
+            { commands: { opencode: openCodeServer(root, capturePath, true, leakPath) } },
+            new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+          );
     const result = await manager.run(nativeProviderRunInput({
       providerId: provider,
       conversationId: `${provider}-redaction`,
@@ -419,6 +894,8 @@ describe.sequential("provider host-tool injection", () => {
   it.each([
     { provider: "cursor" as const, supportsHttp: true, label: "Cursor HTTP" },
     { provider: "cursor" as const, supportsHttp: false, label: "Cursor stdio" },
+    { provider: "kimi" as const, supportsHttp: true, label: "Kimi HTTP" },
+    { provider: "kimi" as const, supportsHttp: false, label: "Kimi stdio" },
     { provider: "opencode" as const, supportsHttp: true, label: "OpenCode" },
   ])("redacts MCP credentials from $label text and activity", async ({ provider, supportsHttp }) => {
     const root = portableFixtureRoot(`${provider} host activity redaction`);
@@ -430,10 +907,22 @@ describe.sequential("provider host-tool injection", () => {
           { commands: { cursor: cursorAgent(root, capturePath, supportsHttp, undefined, secretPath) } },
           new AgentHarnessRegistry([createCursorAcpHarness()]),
         )
-      : new ProviderManager(
-          { commands: { opencode: openCodeServer(root, capturePath, false, undefined, secretPath) } },
-          new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
-        );
+      : provider === "kimi"
+        ? new ProviderManager(
+            {
+              commands: {
+                kimi: kimiAgent(root, capturePath, {
+                  supportsHttp,
+                  echoPath: secretPath,
+                }),
+              },
+            },
+            new AgentHarnessRegistry([createKimiAcpHarness()]),
+          )
+        : new ProviderManager(
+            { commands: { opencode: openCodeServer(root, capturePath, false, undefined, secretPath) } },
+            new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+          );
     const visible: string[] = [];
     const result = await manager.run(nativeProviderRunInput({
       providerId: provider,
@@ -466,6 +955,8 @@ describe.sequential("provider host-tool injection", () => {
   it.each([
     { provider: "cursor" as const, supportsHttp: true, label: "Cursor HTTP" },
     { provider: "cursor" as const, supportsHttp: false, label: "Cursor stdio" },
+    { provider: "kimi" as const, supportsHttp: true, label: "Kimi HTTP" },
+    { provider: "kimi" as const, supportsHttp: false, label: "Kimi stdio" },
     { provider: "opencode" as const, supportsHttp: true, label: "OpenCode" },
   ])("drops over-depth $label provider diagnostics before projection", async ({
     provider,
@@ -491,21 +982,34 @@ describe.sequential("provider host-tool injection", () => {
           },
           new AgentHarnessRegistry([createCursorAcpHarness()]),
         )
-      : new ProviderManager(
-          {
-            commands: {
-              opencode: openCodeServer(
-                root,
-                capturePath,
-                false,
-                undefined,
-                secretPath,
-                true,
-              ),
+      : provider === "kimi"
+        ? new ProviderManager(
+            {
+              commands: {
+                kimi: kimiAgent(root, capturePath, {
+                  supportsHttp,
+                  echoPath: secretPath,
+                  nestedLeak: true,
+                }),
+              },
             },
-          },
-          new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
-        );
+            new AgentHarnessRegistry([createKimiAcpHarness()]),
+          )
+        : new ProviderManager(
+            {
+              commands: {
+                opencode: openCodeServer(
+                  root,
+                  capturePath,
+                  false,
+                  undefined,
+                  secretPath,
+                  true,
+                ),
+              },
+            },
+            new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+          );
     const visible: string[] = [];
     const result = await manager.run(nativeProviderRunInput({
       providerId: provider,

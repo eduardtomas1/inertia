@@ -34,6 +34,7 @@ export interface ProviderEmitter {
   matches: (identity: ProviderEventBase) => boolean;
   event: (event: ProviderEvent) => void;
   text: (text: string) => void;
+  textSnapshot: (itemId: string, text: string) => void;
   activity: (
     kind: ProviderActivityKind,
     phase: ProviderActivityPhase,
@@ -75,6 +76,9 @@ export function createProviderEmitter(
     switch (providerEvent.type) {
       case "text":
         safeCallback(() => callbacks.onText?.(providerEvent));
+        break;
+      case "text-snapshot":
+        safeCallback(() => callbacks.onTextSnapshot?.(providerEvent));
         break;
       case "activity":
         safeCallback(() => callbacks.onActivity?.(providerEvent));
@@ -126,6 +130,12 @@ export function createProviderEmitter(
     matches,
     event,
     text: (text) => event({ ...base, type: "text", text }),
+    textSnapshot: (itemId, text) => event({
+      ...base,
+      type: "text-snapshot",
+      itemId,
+      text,
+    }),
     activity: (kind, phase, label, detail = {}) => event({
       ...base,
       type: "activity",

@@ -55,9 +55,9 @@ describe("sent message attachments", () => {
       image.name,
     );
     expect(trigger).toHaveAccessibleDescription("PNG image · 1.0 KB");
-    expect(screen.getByRole("group", { name: "Attached file evidence.json" }))
+    expect(screen.getByRole("button", { name: "Preview attachment evidence.json" }))
       .toHaveTextContent("JSON document · 2.0 KB");
-    expect(screen.getByRole("group", { name: "Attached file evidence.json" }))
+    expect(screen.getByRole("button", { name: "Preview attachment evidence.json" }))
       .toHaveAccessibleDescription("JSON document · 2.0 KB");
     expect(container.textContent).not.toContain("/private/");
 

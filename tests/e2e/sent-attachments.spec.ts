@@ -70,7 +70,9 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     }));
   }, [attachmentImagePath, attachmentDocumentPath]);
 
-  await page.getByRole("button", { name: "Attach images or documents" }).click();
+  await page.getByRole("button", {
+    name: "Attach images, documents, or spreadsheets",
+  }).click();
   const attachments = page.getByRole("list", {
     name: "Attachments",
     exact: true,
@@ -78,7 +80,10 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await expect(attachments.getByText("preview.png", { exact: true })).toBeVisible();
   await expect(attachments.getByText("notes.pdf", { exact: true })).toBeVisible();
   await expect(attachments.getByText("PNG image · 68 B", { exact: true })).toBeVisible();
-  await expect(attachments.getByText("PDF document · 35 B", { exact: true })).toBeVisible();
+  await expect(attachments.getByText(
+    `PDF document · ${(await stat(attachmentDocumentPath)).size} B`,
+    { exact: true },
+  )).toBeVisible();
   const chosenPreview = attachments.locator("img");
   await expect(chosenPreview).toHaveCount(1);
   await expect.poll(() => chosenPreview.evaluate((element) => {
@@ -161,7 +166,9 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await page.getByRole("textbox", { name: "Message" }).fill("Inspect the selected image.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(attachments).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Attach images or documents" }))
+  await expect(page.getByRole("button", {
+    name: "Attach images, documents, or spreadsheets",
+  }))
     .toBeEnabled({ timeout: 5_000 });
   await expect.poll(async () =>
     stat(selectedTempPath).then(() => true, () => false)).toBe(false);
@@ -255,7 +262,10 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     }));
   }, documentBytes);
   await expect(attachments.getByText("dropped.pdf", { exact: true })).toBeVisible();
-  await expect(attachments.getByText("PDF document · 35 B", { exact: true })).toBeVisible();
+  await expect(attachments.getByText(
+    `PDF document · ${(await stat(attachmentDocumentPath)).size} B`,
+    { exact: true },
+  )).toBeVisible();
   await attachments.getByRole("button", { name: "Remove attachment dropped.pdf" }).click();
 
   await electronApp.evaluate(({ dialog }, path) => {
@@ -265,7 +275,9 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
       bookmarks: [],
     }));
   }, malformedAttachmentPath);
-  await page.getByRole("button", { name: "Attach images or documents" }).click();
+  await page.getByRole("button", {
+    name: "Attach images, documents, or spreadsheets",
+  }).click();
   await expect(page.getByRole("alert")).toContainText(
     "Attachment content does not match its safe file type.",
   );
@@ -279,7 +291,9 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
       bookmarks: [],
     }));
   }, attachmentImagePath);
-  await page.getByRole("button", { name: "Attach images or documents" }).click();
+  await page.getByRole("button", {
+    name: "Attach images, documents, or spreadsheets",
+  }).click();
   const unsentSource = await attachments.locator("img").getAttribute("src");
   const unsentId = unsentSource?.split("/").at(-1);
   const unsentTempPath = await stagedAttachmentPath(unsentId, "png");

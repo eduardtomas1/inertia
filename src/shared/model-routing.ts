@@ -9,6 +9,7 @@ export const KNOWN_HARNESS_IDS = [
   "claude-cli",
   "cursor-acp",
   "cursor-cli",
+  "kimi-acp",
   "opencode-sdk",
   "opencode-cli",
 ] as const;
@@ -21,6 +22,7 @@ export const MODEL_BACKEND_PROTOCOLS = [
   "openai-responses",
   "anthropic-messages",
   "cursor-managed",
+  "kimi-managed",
   "opencode-native",
 ] as const;
 
@@ -117,6 +119,7 @@ export const HARNESS_BACKEND_COMPATIBILITY_REASON_CODES = [
   "anthropic-probe-verified",
   "claude-provider-documented",
   "cursor-managed",
+  "kimi-managed",
   "opencode-native-catalog",
 ] as const;
 
@@ -328,6 +331,7 @@ const NATIVE_HARNESS: Readonly<Record<ProviderId, KnownHarnessId>> = {
   codex: "codex-app-server",
   claude: "claude-agent-sdk",
   cursor: "cursor-acp",
+  kimi: "kimi-acp",
   opencode: "opencode-sdk",
 };
 
@@ -362,6 +366,16 @@ const NATIVE_BACKENDS: Readonly<Record<ProviderId, ModelBackendProfile>> = {
     configurationRevision: 0,
     endpointIdentity: null,
   },
+  kimi: {
+    id: "builtin:kimi",
+    displayName: "Kimi Code",
+    protocol: "kimi-managed",
+    authenticationMode: "harness-managed",
+    source: "built-in",
+    enabled: true,
+    configurationRevision: 0,
+    endpointIdentity: null,
+  },
   opencode: {
     id: "builtin:opencode",
     displayName: "OpenCode",
@@ -381,6 +395,7 @@ const EXPECTED_PROTOCOL: Readonly<Partial<Record<KnownHarnessId, ModelBackendPro
   "claude-cli": "anthropic-messages",
   "cursor-acp": "cursor-managed",
   "cursor-cli": "cursor-managed",
+  "kimi-acp": "kimi-managed",
   "opencode-sdk": "opencode-native",
   "opencode-cli": "opencode-native",
 };
@@ -397,6 +412,7 @@ export function legacyProviderIdForHarness(harnessId: HarnessId): ProviderId | n
   if (harnessId.startsWith("codex-")) return "codex";
   if (harnessId.startsWith("claude-")) return "claude";
   if (harnessId.startsWith("cursor-")) return "cursor";
+  if (harnessId.startsWith("kimi-")) return "kimi";
   if (harnessId.startsWith("opencode-")) return "opencode";
   return null;
 }
@@ -451,6 +467,7 @@ export function resolveHarnessBackendCompatibility(
   }
   if (native && profile.id === native.id && profile.protocol === native.protocol) {
     const cursorManaged = harnessId === "cursor-acp" || harnessId === "cursor-cli";
+    const kimiManaged = harnessId === "kimi-acp";
     const openCodeNative = harnessId === "opencode-sdk" || harnessId === "opencode-cli";
     return {
       harnessId,
@@ -461,15 +478,20 @@ export function resolveHarnessBackendCompatibility(
       allowsModelSwitchWithinSession: (
         harnessId === "codex-app-server"
         || harnessId === "claude-agent-sdk"
+        || harnessId === "kimi-acp"
         || harnessId === "opencode-sdk"
       ),
       reasonCode: cursorManaged
         ? "cursor-managed"
+        : kimiManaged
+          ? "kimi-managed"
         : openCodeNative
           ? "opencode-native-catalog"
           : "native-backend",
       reason: cursorManaged
         ? "Cursor manages its backend; model selection is available only when ACP advertises it."
+        : kimiManaged
+          ? "Kimi Code manages its backend; model and thinking selection follow the active ACP session."
         : openCodeNative
           ? "OpenCode provides its native provider and model catalog."
           : "Built-in native harness and backend pairing.",
@@ -491,6 +513,7 @@ export function resolveHarnessBackendCompatibility(
   if (
     harnessId === "cursor-acp"
     || harnessId === "cursor-cli"
+    || harnessId === "kimi-acp"
     || harnessId === "opencode-sdk"
     || harnessId === "opencode-cli"
   ) {
@@ -503,9 +526,13 @@ export function resolveHarnessBackendCompatibility(
       allowsModelSwitchWithinSession: false,
       reasonCode: harnessId.startsWith("cursor-")
         ? "cursor-managed"
+        : harnessId.startsWith("kimi-")
+          ? "kimi-managed"
         : "opencode-native-catalog",
       reason: harnessId.startsWith("cursor-")
         ? "Cursor controls its backend; Inertia does not inject external backend profiles."
+        : harnessId.startsWith("kimi-")
+          ? "Kimi Code controls its backend; Inertia does not inject external backend profiles."
         : "Select a provider and model from OpenCode's native catalog.",
     };
   }

@@ -21,6 +21,7 @@ import type {
   ProviderStatusEvent,
   ProviderSubagentEvent,
   ProviderTextEvent,
+  ProviderTextSnapshotEvent,
   ProviderUsageEvent,
   ProviderHarnessLaunchConfiguration,
 } from "./contracts";
@@ -153,6 +154,21 @@ export interface CursorAcpHarnessCapabilities extends AgentHarnessCoreCapabiliti
   };
 }
 
+export interface KimiAcpHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: {
+    kind: "kimi-acp";
+    protocol: "acp-v1-json-rpc";
+    approvals: "native";
+    questions: "native-over-permission";
+    plans: "native";
+    reasoning: "native";
+    usage: "optional-acp-v1";
+    images: "capability-negotiated";
+    authentication: "kimi-cli";
+    modelMetadata: "session-config-options";
+  };
+}
+
 export interface OpenCodeSdkHarnessCapabilities extends AgentHarnessCoreCapabilities {
   extension: {
     kind: "opencode-sdk";
@@ -176,10 +192,12 @@ export type AgentHarnessCapabilities =
   | OpenCodeCliHarnessCapabilities
   | ClaudeAgentSdkHarnessCapabilities
   | CursorAcpHarnessCapabilities
+  | KimiAcpHarnessCapabilities
   | OpenCodeSdkHarnessCapabilities;
 
 export type AgentHarnessCoreEvent =
   | ProviderTextEvent
+  | ProviderTextSnapshotEvent
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
@@ -221,6 +239,7 @@ interface ProviderInteractiveHarnessExtensionEventBase {
 export type ProviderInteractiveHarnessExtensionEvent =
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "claude"; extension: "claude-agent-sdk" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "cursor"; extension: "cursor-acp" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "kimi"; extension: "kimi-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "opencode"; extension: "opencode-sdk" });
 
 export type AgentHarnessEvent =
@@ -252,7 +271,7 @@ export interface CodexAppServerRunExtension {
 }
 
 export interface ProviderInteractiveRunExtension {
-  kind: "claude-agent-sdk" | "cursor-acp" | "opencode-sdk";
+  kind: "claude-agent-sdk" | "cursor-acp" | "kimi-acp" | "opencode-sdk";
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Present only for transports with a persistent parent-session input stream. */
@@ -288,7 +307,8 @@ export interface AgentHarness {
 }
 
 export interface AgentHarnessEmitter {
-  text: (text: string) => void;
+  text: (text: string, itemId?: string) => void;
+  textSnapshot: (itemId: string, text: string) => void;
   activity: (
     kind: ProviderActivityEvent["kind"],
     phase: ProviderActivityEvent["phase"],
@@ -323,7 +343,18 @@ export function createAgentHarnessEmitter(
   let localActivitySequence = 0;
   const localActivityIds = new Map<string, string[]>();
   return {
-    text: (text) => emit({ ...base, type: "text", text }),
+    text: (text, itemId) => emit({
+      ...base,
+      type: "text",
+      text,
+      ...(itemId ? { itemId } : {}),
+    }),
+    textSnapshot: (itemId, text) => emit({
+      ...base,
+      type: "text-snapshot",
+      itemId,
+      text,
+    }),
     activity: (kind, phase, label, detail = {}) => {
       const safeLabel = label
         .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
@@ -384,6 +415,7 @@ export function createAgentHarnessEmitter(
     rich: (event) => {
       if (providerId === "claude") emit({ ...base, providerId, type: "extension", extension: "claude-agent-sdk", event });
       else if (providerId === "cursor") emit({ ...base, providerId, type: "extension", extension: "cursor-acp", event });
+      else if (providerId === "kimi") emit({ ...base, providerId, type: "extension", extension: "kimi-acp", event });
       else if (providerId === "opencode") emit({ ...base, providerId, type: "extension", extension: "opencode-sdk", event });
     },
   };

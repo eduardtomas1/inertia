@@ -100,10 +100,11 @@ const server = http.createServer((req, res) => {
       return res.flushHeaders();
     }
     if (req.method === "POST" && url.pathname.endsWith("/prompt_async")) {
+      const parsed = body ? JSON.parse(body) : undefined;
       json(res, undefined, 204);
       return setTimeout(() => {
         if (scenario === "authenticated" || scenario === "default-authenticated") {
-          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", sessionID, role: "assistant" } } });
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
           sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "text", sessionID, messageID: "assistant", type: "text", text: "Authenticated OpenCode response" } } });
           return sendEvent({ type: "session.idle", properties: { sessionID } });
         }

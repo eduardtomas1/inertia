@@ -782,7 +782,7 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it("injects one Build instruction before every native or custom adapter and never in Plan mode", async () => {
-    const nativeProviders = ["codex", "claude", "cursor", "opencode"] as const;
+    const nativeProviders = ["codex", "claude", "cursor", "kimi", "opencode"] as const;
     for (const providerId of nativeProviders) {
       const runtime = await testRuntime({}, {
         modelSelection: nativeModelSelection({

@@ -109,7 +109,9 @@ export function providerDisplayName(providerId: ProviderInfo["id"]): string {
       ? "Claude"
       : providerId === "cursor"
         ? "Cursor"
-        : "OpenCode";
+        : providerId === "kimi"
+          ? "Kimi Code"
+          : "OpenCode";
 }
 
 export function workspaceActionKind(

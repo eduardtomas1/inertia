@@ -766,7 +766,10 @@ export class ProviderManager {
         ...(instruction ? { instruction } : {}),
       },
     };
-    const instructionForwarded = operationInput.providerId === "claude"
+    const instructionForwarded = (
+      operationInput.providerId === "claude"
+      || operationInput.providerId === "kimi"
+    )
       && instruction !== undefined;
     let interactionError: string | undefined;
     const rejectInteractiveCompaction = (

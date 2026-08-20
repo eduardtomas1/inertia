@@ -4,6 +4,7 @@ export const PROVIDER_MAINTENANCE_PROVIDER_IDS = [
   "codex",
   "claude",
   "cursor",
+  "kimi",
   "opencode",
 ] as const;
 

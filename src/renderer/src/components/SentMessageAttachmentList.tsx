@@ -1,4 +1,9 @@
-import { FileText, Image as ImageIcon, ImageOff } from "lucide-react";
+import {
+  FileSpreadsheet,
+  FileText,
+  Image as ImageIcon,
+  ImageOff,
+} from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 
 import type { ChatAttachment } from "@shared/contracts";
@@ -83,7 +88,9 @@ export function SentMessageAttachmentList({
                       className="sent-attachment-thumbnail is-document"
                       aria-hidden="true"
                     >
-                      <FileText size={18} />
+                      {previewKind === "spreadsheet"
+                        ? <FileSpreadsheet size={18} />
+                        : <FileText size={18} />}
                     </span>
                   )}
               <span className="sent-attachment-copy">

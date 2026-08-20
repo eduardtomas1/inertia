@@ -46,7 +46,9 @@ export function composerHarnessLabel(harnessId: string): string {
       ? "Codex harness"
       : harnessId.startsWith("cursor")
         ? "Cursor"
-        : "OpenCode";
+        : harnessId.startsWith("kimi")
+          ? "Kimi Code"
+          : "OpenCode";
 }
 
 export function routeRepairLabel(action: ComposerRouteRepair): string {

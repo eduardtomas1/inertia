@@ -14,6 +14,7 @@ import {
 import { portableNodeExecutable } from "../helpers/portable-provider-fixture";
 
 const ENVIRONMENT_KEYS = [
+  "ALL_PROXY",
   "ANTHROPIC_API_KEY",
   "APPDATA",
   "AWS_SECRET_ACCESS_KEY",
@@ -27,6 +28,7 @@ const ENVIRONMENT_KEYS = [
   "HOME",
   "HTTPS_PROXY",
   "INERTIA_LOGIN_SHELL_MARKER",
+  "KIMI_API_KEY",
   "LOCALAPPDATA",
   "NVM_BIN",
   "NODE_EXTRA_CA_CERTS",
@@ -288,6 +290,26 @@ describe.sequential("provider environment discovery", () => {
       PATH: process.env.PATH,
       CODEX_HOME: codexHome,
     })).not.toHaveProperty("CODEX_HOME");
+  });
+
+  it("passes Kimi's documented credentials and proxy without unrelated secrets", () => {
+    const source = {
+      PATH: process.env.PATH,
+      KIMI_API_KEY: "kimi-secret",
+      GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google-adc.json",
+      ALL_PROXY: "socks5://127.0.0.1:1080",
+      GITHUB_TOKEN: "unrelated-github-token",
+      DATABASE_URL: "postgres://unrelated-secret",
+    };
+
+    expect(providerChildEnvironment("kimi", source)).toMatchObject({
+      PATH: source.PATH,
+      KIMI_API_KEY: source.KIMI_API_KEY,
+      GOOGLE_APPLICATION_CREDENTIALS: source.GOOGLE_APPLICATION_CREDENTIALS,
+      ALL_PROXY: source.ALL_PROXY,
+    });
+    expect(providerChildEnvironment("kimi", source)).not.toHaveProperty("GITHUB_TOKEN");
+    expect(providerChildEnvironment("kimi", source)).not.toHaveProperty("DATABASE_URL");
   });
 
   it("passes documented OpenCode cloud-provider authentication without unrelated secrets", () => {

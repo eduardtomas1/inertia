@@ -122,6 +122,7 @@ const AVAILABLE_FIELDS: Record<ProviderId, readonly ProviderMetadataField[]> = {
   codex: ["models", "rateLimits"],
   claude: ["models", "rateLimits"],
   cursor: ["models"],
+  kimi: ["models"],
   opencode: ["models"],
 };
 
@@ -129,6 +130,7 @@ const PROBE_FIELDS: Record<ProviderId, readonly ProviderMetadataField[]> = {
   codex: ["models", "rateLimits"],
   claude: ["models", "rateLimits"],
   cursor: [],
+  kimi: [],
   opencode: ["models"],
 };
 

@@ -15,6 +15,8 @@ const budgets = {
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
+  deferredAttachmentPreviewJavaScript: 12 * kibibyte,
+  deferredSpreadsheetJavaScript: 510 * kibibyte,
   // The rare failure dossier has its own strict deferred ceiling below, while
   // its conditional loader remains inside the existing shared core ceiling.
   coreJavaScript: 1_940 * kibibyte,
@@ -94,6 +96,12 @@ const deferredPdfJavaScript = assetNames.find(
 const deferredFailureDiagnosticsJavaScript = assetNames.find(
   (name) => /^failurePanel-.*\.js$/u.test(name),
 );
+const deferredAttachmentPreviewJavaScript = assetNames.find(
+  (name) => /^DocumentAttachmentPreview-.*\.js$/u.test(name),
+);
+const deferredSpreadsheetJavaScript = assetNames.find(
+  (name) => /^xlsx-.*\.js$/u.test(name),
+);
 const deferredPdfWorker = assetNames.find(
   (name) => /^pdf\.worker\.min-.*\.mjs$/u.test(name),
 );
@@ -120,6 +128,11 @@ if (!deferredPdfJavaScript || !deferredPdfWorker) {
 if (!deferredFailureDiagnosticsJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred failure diagnostics chunk.",
+  );
+}
+if (!deferredAttachmentPreviewJavaScript || !deferredSpreadsheetJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred attachment preview chunks.",
   );
 }
 
@@ -158,6 +171,12 @@ const deferredPdfWorkerBytes = await assetBytes(
 const deferredFailureDiagnosticsJavaScriptBytes = await assetBytes(
   `assets/${deferredFailureDiagnosticsJavaScript}`,
 );
+const deferredAttachmentPreviewJavaScriptBytes = await assetBytes(
+  `assets/${deferredAttachmentPreviewJavaScript}`,
+);
+const deferredSpreadsheetJavaScriptBytes = await assetBytes(
+  `assets/${deferredSpreadsheetJavaScript}`,
+);
 const javaScriptSizes = await Promise.all(
   assetNames
     .filter((name) => name.endsWith(".js"))
@@ -170,7 +189,9 @@ const totalJavaScriptBytes = javaScriptSizes.reduce(
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredPdfJavaScriptBytes
-  - deferredFailureDiagnosticsJavaScriptBytes;
+  - deferredFailureDiagnosticsJavaScriptBytes
+  - deferredAttachmentPreviewJavaScriptBytes
+  - deferredSpreadsheetJavaScriptBytes;
 const measurements = {
   entryJavaScript: entryJavaScriptBytes,
   entryCss: entryCssBytes,
@@ -180,6 +201,9 @@ const measurements = {
   transcriptJavaScript: transcriptJavaScriptBytes,
   deferredFailureDiagnosticsJavaScript:
     deferredFailureDiagnosticsJavaScriptBytes,
+  deferredAttachmentPreviewJavaScript:
+    deferredAttachmentPreviewJavaScriptBytes,
+  deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,
   coreJavaScript: coreJavaScriptBytes,
   deferredPdfJavaScript: deferredPdfJavaScriptBytes,
   deferredPdfWorker: deferredPdfWorkerBytes,

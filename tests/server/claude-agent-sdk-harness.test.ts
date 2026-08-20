@@ -129,7 +129,7 @@ describe("Claude Agent SDK harness", () => {
     const harness = createClaudeAgentSdkHarness({
       createQuery: () => fixtureClaudeQuery(
         (async function* (): AsyncGenerator<SDKMessage> {
-          for (let index = 0; index < 8_193; index += 1) {
+          for (let index = 0; index < 16_385; index += 1) {
             yield claudeSystem("status", { index });
           }
         })(),
@@ -149,7 +149,7 @@ describe("Claude Agent SDK harness", () => {
       access: "full",
     }))).resolves.toMatchObject({
       status: "failed",
-      error: "Claude exceeded the bounded event budget for this run.",
+      error: "Claude exceeded the bounded event rate for this run.",
     });
     expect(manager.activeConversationIds()).toEqual([]);
   });

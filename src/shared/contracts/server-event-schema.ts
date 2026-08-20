@@ -13,7 +13,7 @@ import { dailyWorkDashboardSchema } from "./daily-work-schema";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { COLOR_THEME_IDS } from "./app";
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
-type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "opencode"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
+type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 
 function record(value: unknown): value is UnknownRecord {
@@ -1073,6 +1073,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
     case "agent.text":
     case "agent.reasoning":
       return recordWithStrings(value, "conversationId", "runId", "turnId", "text");
+    case "agent.text.replaced": return recordWithStrings(value, "conversationId", "runId", "turnId") && (value.message === null || (chatMessage(value.message) && record(value.message) && value.message.role === "assistant" && value.message.conversationId === value.conversationId && value.message.turnId === value.turnId));
     case "agent.usage":
       return threadUsage(value.usage);
     case "agent.activity":
@@ -1207,7 +1208,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
             "sessionId",
           )
             && oneOf(value.providerResume, "providerId", [
-              "codex", "claude", "cursor", "opencode",
+              "codex", "claude", "cursor", "kimi", "opencode",
             ])
             && nonemptyStringField(value.providerResume, "providerLabel")
             && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(

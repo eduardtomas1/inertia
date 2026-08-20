@@ -1077,7 +1077,7 @@ describe("server event provider identity boundary", () => {
       activeConversationId: null,
     },
   });
-  it.each(["codex", "claude", "cursor", "opencode"])(
+  it.each(["codex", "claude", "cursor", "kimi", "opencode"])(
     "accepts the canonical %s provider identity",
     (id) => {
       const expectedFastMode = id === "codex"
@@ -1467,6 +1467,35 @@ describe("server event remaining discriminant and identity boundary", () => {
       conversation: conversationShell,
       runs: [run],
     }))).toBeTruthy();
+  });
+  it("accepts only turn-owned durable assistant text replacements", () => {
+    const assistantMessage = {
+      ...conversationDetail.messages[0],
+      id: "assistant-replacement",
+      role: "assistant",
+      content: "Authoritative replacement.",
+    };
+    const replacement = {
+      type: "agent.text.replaced",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      message: assistantMessage,
+    };
+    expect(parseServerEvent(replacement)).toBeTruthy();
+    expect(parseServerEvent({ ...replacement, message: null })).toBeTruthy();
+    expect(() => parseServerEvent({
+      ...replacement,
+      message: { ...assistantMessage, role: "user" },
+    })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({
+      ...replacement,
+      message: { ...assistantMessage, turnId: "turn-2" },
+    })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({
+      ...replacement,
+      message: { ...assistantMessage, conversationId: "conversation-2" },
+    })).toThrow("Malformed server event");
   });
   it("binds snapshot conversation runs while preserving project-scoped runs", () => {
     const parseSnapshot = (runs: unknown[]): unknown => parseServerEvent({

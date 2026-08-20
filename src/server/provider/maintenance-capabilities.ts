@@ -44,6 +44,7 @@ const PACKAGE_NAMES: Readonly<
 > = {
   codex: "@openai/codex",
   claude: "@anthropic-ai/claude-code",
+  kimi: "@moonshot-ai/kimi-code",
   opencode: "opencode-ai",
 };
 
@@ -53,6 +54,7 @@ const INSTRUCTIONS_URLS: Readonly<
   codex: "https://github.com/openai/codex#installing-and-running-codex-cli",
   claude: "https://docs.anthropic.com/en/docs/claude-code/getting-started#update-claude-code",
   cursor: "https://docs.cursor.com/en/cli/installation#updates",
+  kimi: "https://moonshotai.github.io/kimi-code/en/guides/getting-started.html",
   opencode: "https://opencode.ai/docs/cli/#upgrade",
 };
 
@@ -146,6 +148,12 @@ export async function resolveProviderMaintenanceCapabilities(
   }
   if (target.providerId === "cursor") {
     return providerManagedCapabilities(target, ["update"]);
+  }
+  if (target.providerId === "kimi") {
+    // The documented self-updater requires an interactive choice. The
+    // maintenance runner is intentionally non-interactive, so exposing it as
+    // a one-click action would only hang until the bounded timeout.
+    return manualCapabilities(target, "provider-managed");
   }
   if (target.providerId === "opencode") {
     return providerManagedCapabilities(target, ["upgrade"]);

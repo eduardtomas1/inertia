@@ -5,6 +5,7 @@ import {
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentKind,
+  isSpreadsheetAttachmentMimeType,
 } from "@shared/attachments";
 
 export interface AttachmentMergeResult {
@@ -57,13 +58,22 @@ export function formatAttachmentSize(bytes: number): string {
   return `${(bytes / (1_024 * 1_024)).toFixed(1)} MB`;
 }
 
-export type AttachmentPreviewKind = "image" | "pdf";
+export type AttachmentPreviewKind =
+  | "image"
+  | "pdf"
+  | "spreadsheet"
+  | "text";
 
 export function attachmentPreviewKind(
   attachment: Pick<ChatAttachment, "mimeType">,
 ): AttachmentPreviewKind | null {
   if (chatAttachmentKind(attachment.mimeType) === "image") return "image";
-  return attachment.mimeType === "application/pdf" ? "pdf" : null;
+  if (attachment.mimeType === "application/pdf") return "pdf";
+  if (
+    attachment.mimeType === "text/csv"
+    || isSpreadsheetAttachmentMimeType(attachment.mimeType)
+  ) return "spreadsheet";
+  return "text";
 }
 
 export function attachmentPreviewUrl(attachment: ChatAttachment): string | null {

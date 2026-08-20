@@ -89,6 +89,7 @@ export function providerTerminalResumeArguments(
     case "claude":
     case "cursor":
       return ["--resume", sessionId];
+    case "kimi":
     case "opencode":
       return ["--session", sessionId];
   }

@@ -38,6 +38,13 @@ describe("ProviderBrandIcon", () => {
         invertInDark: false,
       },
       {
+        providerId: "kimi",
+        brand: "kimi",
+        label: "Kimi Code",
+        hasDarkAsset: false,
+        invertInDark: true,
+      },
+      {
         providerId: "opencode",
         brand: "opencode",
         label: "OpenCode",
@@ -64,6 +71,7 @@ describe("ProviderBrandIcon", () => {
         <ProviderBrandIcon providerId="codex" size={18} />
         <ProviderBrandIcon providerId="claude" />
         <ProviderBrandIcon providerId="cursor" />
+        <ProviderBrandIcon providerId="kimi" />
         <ProviderBrandIcon providerId="opencode" />
       </>,
     );
@@ -77,6 +85,8 @@ describe("ProviderBrandIcon", () => {
       .toHaveAttribute("data-provider-brand", "anthropic");
     expect(screen.getByRole("img", { name: "Cursor icon" }).querySelectorAll("img"))
       .toHaveLength(2);
+    expect(screen.getByRole("img", { name: "Kimi Code icon" }))
+      .toHaveAttribute("data-provider-brand", "kimi");
     expect(screen.getByRole("img", { name: "OpenCode icon" }).querySelectorAll("img"))
       .toHaveLength(2);
   });

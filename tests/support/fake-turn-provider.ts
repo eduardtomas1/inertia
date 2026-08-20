@@ -14,20 +14,28 @@ import { resolveNativeModelRoute } from "../server/model-route-fixture";
 export class FakeTurnScheduler implements TurnTimerScheduler {
   private nextId = 0;
   readonly callbacks = new Map<number, () => void>();
+  readonly delays = new Map<number, number>();
 
-  setTimeout(callback: () => void): number {
+  setTimeout(callback: () => void, delayMs: number): number {
     const id = ++this.nextId;
     this.callbacks.set(id, callback);
+    this.delays.set(id, delayMs);
     return id;
   }
 
   clearTimeout(handle: unknown): void {
-    this.callbacks.delete(handle as number);
+    const id = handle as number;
+    this.callbacks.delete(id);
+    this.delays.delete(id);
   }
 
   runAll(): void {
-    for (const [id, callback] of this.callbacks) {
+    const pending = [...this.callbacks].sort(([left], [right]) =>
+      (this.delays.get(left) ?? 0) - (this.delays.get(right) ?? 0));
+    for (const [id, callback] of pending) {
+      if (!this.callbacks.has(id)) continue;
       this.callbacks.delete(id);
+      this.delays.delete(id);
       callback();
     }
   }

@@ -86,6 +86,71 @@ describe("runtime worker shutdown", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
+  it("keeps the utility alive while an owned process claim remains", async () => {
+    const post = vi.fn();
+    const exit = vi.fn();
+
+    await completeRuntimeWorkerShutdown({
+      runtime: runtimeWithClose(vi.fn(async () => undefined)),
+      cause: "runtime-shutdown",
+      exitCode: 0,
+      closeBrokers: vi.fn(),
+      ownedProcessCleanupConfirmed: () => false,
+      post,
+      exit,
+    });
+
+    expect(post).toHaveBeenCalledWith({ type: "runtime.shutdown-unconfirmed" });
+    expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("awaits a closing owned process claim before reporting stopped", async () => {
+    const post = vi.fn();
+    const exit = vi.fn();
+
+    await completeRuntimeWorkerShutdown({
+      runtime: runtimeWithClose(vi.fn(async () => undefined)),
+      cause: "runtime-shutdown",
+      exitCode: 0,
+      closeBrokers: vi.fn(),
+      ownedProcessCleanupConfirmed: () => new Promise<boolean>((resolve) => {
+        queueMicrotask(() => resolve(true));
+      }),
+      post,
+      exit,
+    });
+
+    expect(post).toHaveBeenCalledWith({ type: "runtime.stopped" });
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
+  it("does not wait beyond the runtime shutdown deadline for claim retirement", async () => {
+    vi.useFakeTimers();
+    try {
+      const post = vi.fn();
+      const exit = vi.fn();
+      const shutdown = completeRuntimeWorkerShutdown({
+        runtime: runtimeWithClose(vi.fn(async () => undefined)),
+        cause: "runtime-shutdown",
+        exitCode: 0,
+        closeBrokers: vi.fn(),
+        ownedProcessCleanupConfirmed: () => new Promise<boolean>(() => undefined),
+        post,
+        exit,
+      });
+
+      await vi.advanceTimersByTimeAsync(2_500);
+      await shutdown;
+      expect(post).toHaveBeenCalledWith({
+        type: "runtime.shutdown-unconfirmed",
+      });
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("never reports stopped when an owned child misses the shutdown deadline", async () => {
     vi.useFakeTimers();
     try {

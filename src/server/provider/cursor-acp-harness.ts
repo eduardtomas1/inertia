@@ -21,6 +21,7 @@ import type {
 
 import type { ProviderModel } from "../../shared/contracts";
 import { INERTIA_VERSION } from "../../shared/version";
+import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 import {
   createOwnedProcessTreeTermination,
   type ProcessTreeTerminator,
@@ -252,7 +253,7 @@ function startCursorRun(
       options.executable,
       options.environment,
     );
-    child = spawn(invocation.command, invocation.args, {
+    child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
       cwd: options.input.cwd,
       env: options.environment,
       detached: process.platform !== "win32",
@@ -260,7 +261,7 @@ function startCursorRun(
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
-    });
+    }));
   } catch (error) {
     return failedCursorRun(conversationId, safeError(error, "Cursor ACP could not be started."), emitter);
   }

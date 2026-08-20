@@ -18,6 +18,7 @@ import {
   resolve,
 } from "node:path";
 
+import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 import { MAX_PATH_LENGTH } from "./constants";
 import {
   repositoryRoot,
@@ -264,12 +265,13 @@ async function verifyLinuxDirectoryBirthtime(
   let stdout: string;
   try {
     stdout = await new Promise<string>((resolveProbe, rejectProbe) => {
-      const child = spawn(executable, args, {
+      const child = spawnRuntimeOwnedProcess(() => spawn(executable, args, {
         env: linuxStatEnvironment(),
+        detached: true,
         shell: false,
         stdio: ["ignore", "pipe", "ignore", fileDescriptor],
         windowsHide: true,
-      });
+      }));
       const chunks: Buffer[] = [];
       let bytes = 0;
       let failure: Error | null = null;

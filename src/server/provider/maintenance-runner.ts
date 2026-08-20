@@ -4,6 +4,7 @@ import {
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
 import { homedir } from "node:os";
+import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 
 import { environmentValue } from "../environment";
 import {
@@ -239,14 +240,14 @@ export async function runProviderMaintenanceAction(
     };
 
     try {
-      child = spawnProcess(invocation.command, invocation.args, {
+      child = spawnRuntimeOwnedProcess(() => spawnProcess(invocation.command, invocation.args, {
         cwd: options.cwd ?? homedir(),
         env: environment,
         shell: false,
         detached: platform !== "win32",
         windowsHide: true,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-      });
+      }));
     } catch {
       finish(
         cancelled ? "cancelled" : "failed",

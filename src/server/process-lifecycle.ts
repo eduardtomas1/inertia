@@ -9,6 +9,7 @@ import {
   forceKillPosixProcessTree,
   forceKillPosixProcessTreeWithStatus,
 } from "../node/posix-process-tree";
+import { confirmRuntimeOwnedProcessStopped } from "../node/runtime-owned-processes";
 
 const DEFAULT_TERMINATION_WAIT_MS = 2_000;
 const PROCESS_GROUP_POLL_MS = 10;
@@ -119,12 +120,20 @@ export function createOwnedProcessTreeTermination(
     termination ??= (async () => {
       if (!forceRequested) {
         try {
-          if (await terminate(child, false)) return;
+          if (await terminate(child, false)) {
+            if (!confirmRuntimeOwnedProcessStopped(child)) {
+              throw new ProcessTreeTerminationError(subject);
+            }
+            return;
+          }
         } catch {
           // The final force attempt below owns the authoritative result.
         }
       }
       await requireProcessTreeTermination(terminate, child, true, subject);
+      if (!confirmRuntimeOwnedProcessStopped(child)) {
+        throw new ProcessTreeTerminationError(subject);
+      }
     })();
     return termination;
   };

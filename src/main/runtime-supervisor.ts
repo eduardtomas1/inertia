@@ -40,6 +40,9 @@ import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeUpdatePreparationCoordinator } from "./runtime-update-preparation-coordinator.js";
 import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
+import { recoverRuntimeOwnedProcesses } from "./runtime-owned-process-recovery.js";
+import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
+import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import type {
   PendingCredentialRequest,
   PendingPrivateConnectRuntimeRequest,
@@ -58,7 +61,6 @@ export type { RuntimeCredentialBroker, RuntimeSecureFileBroker,
 export { runtimeRestartDelayMs } from "./runtime-supervisor-values.js";
 type PrivateConnectPromptRequest = Extract<PrivateConnectRuntimeRequest,
   { type: "prompt.send" }>;
-
 export class RuntimeSupervisor {
   private readonly spawnProcess: RuntimeSupervisorOptions["spawn"];
   private readonly workerOptions: RuntimeSupervisorOptions["workerOptions"];
@@ -70,6 +72,8 @@ export class RuntimeSupervisor {
   private readonly setTimer: typeof setTimeout;
   private readonly clearTimer: typeof clearTimeout;
   private readonly forceKill: NonNullable<RuntimeSupervisorOptions["forceKill"]>;
+  private readonly recoverOwnedProcesses:
+    NonNullable<RuntimeSupervisorOptions["recoverOwnedProcesses"]>;
   private readonly credentialBroker?: RuntimeCredentialBroker;
   private readonly credentialRequestTimeoutMs: number;
   private readonly attachmentRequests: RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
@@ -89,11 +93,13 @@ export class RuntimeSupervisor {
   private readonly ownerNonce = randomUUID();
   private readonly cleanupReceipts: RuntimeCleanupReceiptJournal;
   private readonly runtimeGenerationLeases: RuntimeGenerationLeaseJournal;
+  private readonly runtimeOwnedProcesses: RuntimeOwnedProcessJournal;
   private restartTimer: RuntimeSupervisorTimer | null = null;
   private startupTimer: RuntimeSupervisorTimer | null = null;
   private stableTimer: RuntimeSupervisorTimer | null = null;
   private shutdownTimer: RuntimeSupervisorTimer | null = null;
   private shutdownDeadlineTimer: RuntimeSupervisorTimer | null = null;
+  private readonly startupRecovery: RuntimeSupervisorStartupRecovery;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
   private readonly pendingPrivateConnectRuntimeRequests = new Map<string, PendingPrivateConnectRuntimeRequest>();
   private readonly databaseRecoveryRequests: RuntimeDatabaseRecoveryCoordinator;
@@ -105,7 +111,6 @@ export class RuntimeSupervisor {
   private stopPromise: Promise<boolean> | null = null;
   private resolveStop: ((confirmed: boolean) => void) | null = null;
   private readonly testRecycle = new RuntimeSupervisorRecycle();
-
   constructor(options: RuntimeSupervisorOptions) {
     this.spawnProcess = options.spawn;
     this.workerOptions = options.workerOptions;
@@ -121,6 +126,7 @@ export class RuntimeSupervisor {
     this.runtimeGenerationLeases = new RuntimeGenerationLeaseJournal(
       options.workerOptions.dataDirectory,
     );
+    this.runtimeOwnedProcesses = new RuntimeOwnedProcessJournal(options.workerOptions.dataDirectory);
     this.startupTimeoutMs = boundedDuration(options.startupTimeoutMs, runtimeSupervisorDefaults.startupTimeoutMs);
     this.stableUptimeMs = boundedDuration(options.stableUptimeMs, runtimeSupervisorDefaults.stableUptimeMs);
     this.shutdownGraceMs = boundedDuration(options.shutdownGraceMs, runtimeSupervisorDefaults.shutdownGraceMs);
@@ -130,6 +136,15 @@ export class RuntimeSupervisor {
     this.forceKill = options.forceKill
       ?? ((pid, deadlineAt) =>
         forceKillRuntimeProcessTree(pid, { deadlineAt }));
+    this.recoverOwnedProcesses = options.recoverOwnedProcesses
+      ?? ((runtimeGenerationId, systemBootId, deadlineAt) =>
+        recoverRuntimeOwnedProcesses(options.workerOptions.dataDirectory,
+          runtimeGenerationId, systemBootId, { deadlineAt }));
+    this.startupRecovery = new RuntimeSupervisorStartupRecovery({
+      dataDirectory: options.workerOptions.dataDirectory, systemBootId,
+      forceKillWaitMs: this.forceKillWaitMs, leases: this.runtimeGenerationLeases,
+      receipts: this.cleanupReceipts,
+    });
     this.privateConnectPrompts = new RuntimePrivateConnectPromptCoordinator({
       timeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
       setTimer: this.setTimer,
@@ -189,12 +204,19 @@ export class RuntimeSupervisor {
     });
     this.onStateChange = options.onStateChange;
   }
-
-  start(): void {
-    if (this.desiredRunning || this.restartBlocked) return;
-    this.desiredRunning = true;
-    this.clearShutdownTimers();
-    this.spawnNext();
+  start(): void { if (this.desiredRunning || this.restartBlocked) return;
+    this.desiredRunning = true; this.clearShutdownTimers();
+    const priorRecovery = this.startupRecovery.begin((recovered) => { if (!this.desiredRunning) return;
+      if (!recovered) { this.desiredRunning = false; this.restartBlocked = true; this.phase = "stopped";
+        this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+          "A prior runtime generation still has unconfirmed process cleanup.",
+        );
+        this.emitState(); return;
+      }
+      this.spawnNext();
+    });
+    if (!priorRecovery) { this.spawnNext(); return; }
+    this.phase = "starting"; this.emitState();
   }
   connection(): RuntimeConnection {
     const result = runtimeConnection({
@@ -210,7 +232,6 @@ export class RuntimeSupervisor {
     }
     return result.connection;
   }
-
   resolveProjectPath(request: OpenProjectPathRequest): Promise<string> {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
@@ -228,7 +249,6 @@ export class RuntimeSupervisor {
       this.post(record.child, { type: "runtime.resolve-project-path", requestId, request });
     });
   }
-
   prepareForUpdate(): Promise<RuntimeUpdatePreparationResult> {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
@@ -236,7 +256,6 @@ export class RuntimeSupervisor {
     }
     return this.updatePreparation.prepare(record);
   }
-
   /**
    * Reopens admission for the supervisor-owned preparation token. This is
    * idempotent once no gate is held and never releases a different generation.
@@ -244,7 +263,6 @@ export class RuntimeSupervisor {
   releaseUpdatePreparation(): Promise<boolean> {
     return this.updatePreparation.release();
   }
-
   databaseRecovery(
     operation: RuntimeDatabaseRecoveryOperation,
     path: string,
@@ -268,7 +286,6 @@ export class RuntimeSupervisor {
       targetDirectory,
     );
   }
-
   privateConnectRequest(
     subject: PrivateConnectRuntimeAuthorization,
     request: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
@@ -305,7 +322,6 @@ export class RuntimeSupervisor {
       });
     });
   }
-
   preparePrivateConnectPrompt(
     subject: PrivateConnectRuntimeAuthorization,
     request: PrivateConnectPromptRequest,
@@ -315,13 +331,11 @@ export class RuntimeSupervisor {
       ? Promise.reject(record)
       : this.privateConnectPrompts.prepare(record, subject, request);
   }
-
   forgetPrivateConnectTranscripts(scope: RuntimePrivateConnectForgetScope): void {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) return;
     this.post(record.child, { type: "runtime.private-connect-forget", scope });
   }
-
   commitPrivateConnectPrompt(
     subject: PrivateConnectRuntimeAuthorization,
     request: PrivateConnectPromptRequest,
@@ -339,7 +353,6 @@ export class RuntimeSupervisor {
           onPosted,
         );
   }
-
   private privateConnectPromptRecord(): RuntimeProcessRecord | Error {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
@@ -351,7 +364,6 @@ export class RuntimeSupervisor {
     }
     return record;
   }
-
   snapshot(): RuntimeSupervisorSnapshot {
     return {
       phase: this.phase, generation: this.generation,
@@ -361,18 +373,15 @@ export class RuntimeSupervisor {
       databaseRecovery: this.databaseRecoveryReport,
     };
   }
-
   ownsAttachment(attachmentId: string): boolean {
     const records = [this.current, ...this.quarantined];
     return this.attachmentRequests.owns(records, attachmentId);
   }
-
   deferAttachmentRelease(attachmentId: string): boolean {
     const records = [this.current, ...this.quarantined];
     return this.attachmentRequests.deferRendererReleaseForAny(records,
       attachmentId);
   }
-
   testOnlyRecycle(): Promise<boolean> {
     const active = this.testRecycle.activePromise();
     if (active) return active;
@@ -404,7 +413,6 @@ export class RuntimeSupervisor {
     }
     return recycle.promise;
   }
-
   stop(): Promise<boolean> {
     this.testRecycle.cancelForStop();
     if (this.stopPromise) return this.stopPromise;
@@ -428,9 +436,8 @@ export class RuntimeSupervisor {
     this.clearCredentialRequests(this.current);
     this.secureFiles.clear(this.current);
     const secureFilesStopped = this.secureFiles.shutdown();
-
     if (!this.current) {
-      this.phase = "stopped";
+      this.phase = this.startupRecovery.activePromise() ? "stopping" : "stopped";
       if (this.quarantined.size > 0) {
         this.restartBlocked = true;
         this.lastError = unconfirmedRuntimeCleanupMessage(
@@ -439,11 +446,16 @@ export class RuntimeSupervisor {
         );
       }
       this.emitState();
-      this.stopPromise = secureFilesStopped.then((confirmed) =>
-        confirmed && this.quarantined.size === 0);
+      const startupRecovery = this.startupRecovery.activePromise()
+        ?? Promise.resolve(true);
+      this.stopPromise = Promise.all([secureFilesStopped, startupRecovery])
+        .then(([confirmed, recovered]) => {
+          this.phase = "stopped";
+          this.emitState();
+          return confirmed && recovered && this.quarantined.size === 0;
+        });
       return this.stopPromise;
     }
-
     this.phase = "stopping";
     this.current.acceptingReady = false;
     this.emitState();
@@ -464,7 +476,6 @@ export class RuntimeSupervisor {
     });
     return this.stopPromise;
   }
-
   private beginRuntimeShutdown(
     record: RuntimeProcessRecord,
     onDeadline: (message: string) => void,
@@ -489,7 +500,6 @@ export class RuntimeSupervisor {
     }, shutdownDeadlineMs);
     return this.post(child, { type: "runtime.shutdown" });
   }
-
   private rejectTestRecycle(
     record: RuntimeProcessRecord,
     message: string,
@@ -506,7 +516,6 @@ export class RuntimeSupervisor {
     this.lastError = message;
     this.emitState();
   }
-
   private spawnNext(): void {
     if (!this.desiredRunning || this.current) return;
     this.clearTimerValue("restartTimer");
@@ -515,12 +524,13 @@ export class RuntimeSupervisor {
     const runtimeGenerationId = `${this.ownerNonce}:${generation}`;
     this.websocketUrl = null;
     this.phase = this.restartAttempt > 0 ? "restarting" : "starting";
-
     this.runtimeGenerationLeases.refresh();
-    if (!this.runtimeGenerationLeases.publish(
+    if (!this.runtimeOwnedProcesses.startSession(runtimeGenerationId, this.systemBootId)
+      || !this.runtimeGenerationLeases.publish(
       runtimeGenerationId,
       this.systemBootId,
     )) {
+      this.runtimeOwnedProcesses.finishSession(runtimeGenerationId);
       this.restartBlocked = true;
       this.desiredRunning = false;
       this.phase = "stopped";
@@ -533,7 +543,8 @@ export class RuntimeSupervisor {
     try {
       child = this.spawnProcess();
     } catch (error) {
-      if (!this.runtimeGenerationLeases.consume(runtimeGenerationId)) {
+      if (!this.runtimeOwnedProcesses.finishSession(runtimeGenerationId)
+        || !this.runtimeGenerationLeases.consume(runtimeGenerationId)) {
         this.restartBlocked = true;
         this.desiredRunning = false;
         this.phase = "stopped";
@@ -821,28 +832,44 @@ export class RuntimeSupervisor {
       return;
     }
     if (!record.cleanupConfirmed && !record.processTreeTermination) {
-      this.current = null;
-      this.clearShutdownTimers();
-      this.quarantined.add(record);
-      this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
-        "The runtime exited before complete process-tree cleanup was confirmed.");
-      if (!this.desiredRunning) {
-        this.phase = "stopped";
-        this.restartBlocked = true;
-        this.resolveStop?.(false);
-        this.resolveStop = null;
+      this.phase = this.desiredRunning ? "restarting" : "stopping";
+      this.emitState();
+      const deadlineAt = Date.now() + this.forceKillWaitMs * 2;
+      const finishRecovery = (confirmed: boolean): void => {
+        if (this.current !== record) return;
+        if (confirmed) {
+          record.cleanupConfirmed = true;
+          record.processTreeTerminationConfirmed = true;
+          record.processTreeTerminationSettled = true;
+          this.handleDrainedExit(record, code, true);
+          return;
+        }
+        this.current = null;
+        this.clearShutdownTimers();
+        this.quarantined.add(record);
+        this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+          "The runtime exited before complete process-tree cleanup was confirmed.");
+        if (!this.desiredRunning) {
+          this.phase = "stopped";
+          this.restartBlocked = true;
+          this.resolveStop?.(false);
+          this.resolveStop = null;
+        } else if (this.unconfirmedRestarts
+          >= runtimeSupervisorDefaults.maxUnconfirmedRestarts) {
+          this.phase = "stopped";
+          this.restartBlocked = true;
+          this.desiredRunning = false;
+        } else {
+          this.unconfirmedRestarts += 1;
+          this.scheduleRestart();
+        }
         this.emitState();
-        return;
-      }
-      if (this.unconfirmedRestarts >= runtimeSupervisorDefaults.maxUnconfirmedRestarts) {
-        this.phase = "stopped";
-        this.restartBlocked = true;
-        this.desiredRunning = false;
-        this.emitState();
-        return;
-      }
-      this.unconfirmedRestarts += 1;
-      this.scheduleRestart();
+      };
+      const recovery = this.recoverOwnedProcesses(record.runtimeGenerationId,
+        this.systemBootId, deadlineAt);
+      if (typeof recovery === "boolean") finishRecovery(recovery);
+      else if (recovery) void recovery.catch(() => false).then(finishRecovery);
+      else finishRecovery(false);
       return;
     }
     if (!this.desiredRunning) {
@@ -913,7 +940,6 @@ export class RuntimeSupervisor {
     }
     continueAfterTermination(record.cleanupConfirmed);
   }
-
   private scheduleRestart(): void {
     if (!this.desiredRunning || this.current || this.restartTimer) return;
     const delay = runtimeRestartDelayMs(this.restartAttempt);
@@ -925,7 +951,6 @@ export class RuntimeSupervisor {
     }, delay);
     this.emitState();
   }
-
   private post(child: UtilityProcess, message: RuntimeWorkerCommand): boolean {
     try {
       child.postMessage(message);
@@ -941,7 +966,6 @@ export class RuntimeSupervisor {
       return false;
     }
   }
-
   private forceTerminate(child: UtilityProcess): void {
     const pid = child.pid;
     const record = this.current;
@@ -979,9 +1003,9 @@ export class RuntimeSupervisor {
     }
     child.kill();
   }
-
   private completeGenerationCleanup(record: RuntimeProcessRecord): boolean {
-    if (persistRuntimeGenerationCleanup(record, this.cleanupReceipts, this.runtimeGenerationLeases)) {
+    if (persistRuntimeGenerationCleanup(record, this.cleanupReceipts,
+      this.runtimeGenerationLeases, this.runtimeOwnedProcesses)) {
       this.attachmentRequests.clear(record);
       return true;
     }
@@ -1004,12 +1028,10 @@ export class RuntimeSupervisor {
     this.emitState();
     return false;
   }
-
   private clearShutdownTimers(): void {
     this.clearTimerValue("shutdownTimer");
     this.clearTimerValue("shutdownDeadlineTimer");
   }
-
   private rejectProjectPaths(record: RuntimeProcessRecord | null, message: string): void {
     if (!record) return;
     for (const [requestId, pending] of this.pendingProjectPaths) {
@@ -1019,7 +1041,6 @@ export class RuntimeSupervisor {
       pending.reject(new Error(message));
     }
   }
-
   private rejectPrivateConnectRuntimeRequests(
     record: RuntimeProcessRecord | null,
     message: string,
@@ -1033,7 +1054,6 @@ export class RuntimeSupervisor {
     }
     this.privateConnectPrompts.reject(record, message);
   }
-
   private handleCredentialRequest(
     record: RuntimeProcessRecord,
     event: Extract<
@@ -1162,7 +1182,6 @@ export class RuntimeSupervisor {
       },
     );
   }
-
   private acceptsBrokerRequests(record: RuntimeProcessRecord): boolean {
     return this.current === record
       && this.desiredRunning
@@ -1173,7 +1192,6 @@ export class RuntimeSupervisor {
         || this.phase === "ready"
       );
   }
-
   private clearCredentialRequests(record: RuntimeProcessRecord | null): void {
     if (!record) return;
     for (const [requestId, pending] of this.pendingCredentialRequests) {
@@ -1183,7 +1201,6 @@ export class RuntimeSupervisor {
       pending.controller.abort();
     }
   }
-
   private settleStopped(record: RuntimeProcessRecord): void {
     if (this.current !== record || this.desiredRunning) return;
     if (
@@ -1220,14 +1237,12 @@ export class RuntimeSupervisor {
     );
     this.resolveStop = null;
   }
-
   private clearTimerValue(key: "restartTimer" | "startupTimer" | "stableTimer" | "shutdownTimer" | "shutdownDeadlineTimer"): void {
     const timer = this[key];
     if (!timer) return;
     this.clearTimer(timer);
     this[key] = null;
   }
-
   private emitState(): void {
     this.onStateChange?.(this.snapshot());
   }

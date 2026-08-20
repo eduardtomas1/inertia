@@ -19,6 +19,8 @@ import {
   type ConversationAttachmentStoreAuthority,
 } from "../../src/node/conversation-attachment-store-child";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
+import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
+import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
 import {
   privateConnectRuntimeGrantsFromProjectIds,
 } from "../../src/shared/private-connect/runtime-grants";
@@ -105,6 +107,11 @@ function createHarness(options: {
   stableUptimeMs?: number;
   shutdownGraceMs?: number;
   forceKillWaitMs?: number;
+  recoverOwnedProcesses?: (
+    runtimeGenerationId: string,
+    systemBootId: string,
+    deadlineAt: number,
+  ) => boolean | Promise<boolean> | null;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;
@@ -137,6 +144,8 @@ function createHarness(options: {
     shutdownGraceMs: options.shutdownGraceMs ?? 1_000,
     forceKillWaitMs: options.forceKillWaitMs ?? 500,
     forceKill,
+    // Generic tests model exact cleanup; fail-closed cases override it below.
+    recoverOwnedProcesses: options.recoverOwnedProcesses ?? (() => true),
     credentialBroker: options.credentialBroker,
     credentialRequestTimeoutMs: options.credentialRequestTimeoutMs,
     secureFileBroker: options.secureFileBroker,
@@ -162,6 +171,32 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor", () => {
+  it.runIf(process.platform === "linux")(
+    "retires a recoverable prior app generation before spawning",
+    async () => {
+      const priorGeneration = "30000000-0000-4000-8000-000000000003:7";
+      const bootId = "test:00000000-0000-4000-8000-000000000001";
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory)
+        .publish(priorGeneration, bootId)).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(dataDirectory)
+        .startSession(priorGeneration, bootId)).toBe(true);
+      const { children, supervisor } = createHarness();
+
+      supervisor.start();
+      expect(children).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(children).toHaveLength(1);
+      children[0].spawn();
+      expect(children[0].messages.at(-1)).toMatchObject({
+        type: "runtime.start",
+        options: {
+          confirmedTerminatedRuntimeGenerationIds: [priorGeneration],
+        },
+      });
+    },
+  );
+
   it("prepares and releases only the current runtime generation for an update", async () => {
     const { children, supervisor } = createHarness();
     supervisor.start();
@@ -1276,7 +1311,7 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
   });
 
-  it("retains generation ownership when attachment deletion fails", async () => {
+  it("retries retained attachment deletion after exact crash cleanup", async () => {
     const attachmentBroker: RuntimeAttachmentBroker = {
       resolve: vi.fn(async () => trustedAttachment),
       release: vi.fn()
@@ -1313,8 +1348,8 @@ describe("RuntimeSupervisor", () => {
 
     children[0].exit(1);
     await vi.advanceTimersByTimeAsync(0);
-    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
-    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(2);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
   });
 
   it("keeps runtime-owned attachments until graceful shutdown settles", async () => {
@@ -1634,11 +1669,48 @@ describe("RuntimeSupervisor", () => {
     children[1].spawn();
     expect(children[1].messages.at(-1)).toMatchObject({
       type: "runtime.start",
+      options: {
+        confirmedTerminatedRuntimeGenerationIds: [
+          expect.stringMatching(/^[0-9a-f-]{36}:1$/u),
+        ],
+      },
+    });
+    expect(children[1].messages.at(-1)).not.toMatchObject({
       options: { priorRuntimeCleanupUnconfirmed: true },
     });
     children[1].message({ type: "runtime.ready", websocketUrl: secondUrl });
     expect(supervisor.connection()).toEqual({ websocketUrl: secondUrl });
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 2 });
+  });
+
+  it("restarts outside safety mode after exact owned crash cleanup", async () => {
+    const recoverOwnedProcesses = vi.fn(async () => true);
+    const { children, supervisor } = createHarness({ recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    children[0].exit(9);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(recoverOwnedProcesses).toHaveBeenCalledWith(
+      expect.stringMatching(/^[0-9a-f-]{36}:1$/u),
+      "test:00000000-0000-4000-8000-000000000001",
+      expect.any(Number),
+    );
+    expect(children).toHaveLength(2);
+    children[1].spawn();
+    expect(children[1].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        confirmedTerminatedRuntimeGenerationIds: [
+          expect.stringMatching(/^[0-9a-f-]{36}:1$/u),
+        ],
+      },
+    });
+    expect(children[1].messages.at(-1)).not.toMatchObject({
+      options: { priorRuntimeCleanupUnconfirmed: true },
+    });
   });
 
   it("waits for the crashed generation store helper before restarting", async () => {
@@ -2164,7 +2236,10 @@ describe("RuntimeSupervisor", () => {
 
   it("bounds crash-and-reconnect attempts and quarantines prior generations", () => {
     const crashCount = 3;
-    const { children, supervisor } = createHarness({ stableUptimeMs: 60_000 });
+    const { children, supervisor } = createHarness({
+      stableUptimeMs: 60_000,
+      recoverOwnedProcesses: () => null,
+    });
     supervisor.start();
 
     for (let cycle = 0; cycle < crashCount; cycle += 1) {

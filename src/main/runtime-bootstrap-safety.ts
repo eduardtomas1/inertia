@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
+import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import { runtimeCleanupReceiptIds } from "./runtime-cleanup-receipts.js";
 import { readSystemBootId } from "./system-boot-id.js";
 
@@ -24,10 +25,12 @@ export function prepareRuntimeBootstrapSafety(
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
   const systemBootId = readSystemBootId() ?? "unavailable";
   const generationLeases = new RuntimeGenerationLeaseJournal(dataDirectory);
+  const ownedProcesses = new RuntimeOwnedProcessJournal(dataDirectory);
   const receiptsRetired = runtimeCleanupReceiptIds(dataDirectory).every(
     (generationId) => generationLeases.clearRuntimeGeneration(generationId),
   );
-  const priorBootRetired = generationLeases.clearPriorBootSessions(systemBootId);
+  const priorBootRetired = ownedProcesses.clearPriorBootSessions(systemBootId)
+    && generationLeases.clearPriorBootSessions(systemBootId);
   return {
     systemBootId,
     preserveAttachments: !receiptsRetired

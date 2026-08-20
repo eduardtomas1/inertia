@@ -124,6 +124,11 @@ export interface RuntimeSupervisorOptions {
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;
   forceKill?: (pid: number, deadlineAt: number) => boolean | Promise<boolean>;
+  recoverOwnedProcesses?: (
+    runtimeGenerationId: string,
+    systemBootId: string,
+    deadlineAt: number,
+  ) => boolean | Promise<boolean> | null;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;

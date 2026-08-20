@@ -22,6 +22,7 @@ import {
 import type { ProviderId, ProviderRunResult } from "./contracts";
 import { CappedProviderBuffer, ProviderNdjsonDecoder } from "./io";
 import { providerProcessInvocation } from "./process";
+import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 
 const MAX_NDJSON_LINE_BYTES = 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
@@ -215,7 +216,7 @@ function startCliRun(
   let child: ChildProcessWithoutNullStreams;
   try {
     const processInvocation = providerProcessInvocation(invocation.command, invocation.args, options.environment);
-    child = spawn(processInvocation.command, processInvocation.args, {
+    child = spawnRuntimeOwnedProcess(() => spawn(processInvocation.command, processInvocation.args, {
       cwd: options.input.cwd,
       env: options.environment,
       detached: process.platform !== "win32",
@@ -223,7 +224,7 @@ function startCliRun(
       windowsVerbatimArguments: processInvocation.windowsVerbatimArguments,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
-    });
+    }));
   } catch (error) {
     spawnError = error instanceof Error ? (error as NodeJS.ErrnoException) : undefined;
     const message = providerFailureMessage(

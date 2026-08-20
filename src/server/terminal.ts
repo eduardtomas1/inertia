@@ -5,6 +5,7 @@ import { spawn, type IDisposable, type IPty } from "node-pty";
 import WebSocket from "ws";
 
 import type { ServerEvent } from "../shared/contracts";
+import { spawnRuntimeOwnedPidProcess } from "../node/runtime-owned-processes";
 import {
   createOwnedPidProcessTreeTermination,
   type OwnedPidProcessTreeTermination,
@@ -36,6 +37,7 @@ interface TerminalSession {
   terminationRequested: boolean;
   closing: Promise<void> | null;
   terminateProcessTree: OwnedPidProcessTreeTermination | null;
+  confirmOwnedProcessStopped: () => boolean;
   flushOutput: () => void;
   disposeOutput: () => void;
   onExit?: (exitCode: number) => void;
@@ -283,14 +285,23 @@ export class TerminalManager {
 
     const id = randomUUID();
     let pseudoterminal: IPty;
+    let confirmOwnedProcessStopped!: () => boolean;
+    let releaseOwnedProcessIfExited!: () => void;
     try {
-      pseudoterminal = this.spawnTerminal(executable, typeof args === "string" ? args : [...args], {
-        name: "xterm-256color",
-        cols,
-        rows,
-        cwd,
-        env: { ...env, TERM: "xterm-256color", COLORTERM: "truecolor" },
-      });
+      const owned = spawnRuntimeOwnedPidProcess(() => this.spawnTerminal(
+        executable,
+        typeof args === "string" ? args : [...args],
+        {
+          name: "xterm-256color",
+          cols,
+          rows,
+          cwd,
+          env: { ...env, TERM: "xterm-256color", COLORTERM: "truecolor" },
+        },
+      ));
+      pseudoterminal = owned.process;
+      confirmOwnedProcessStopped = owned.confirmStopped;
+      releaseOwnedProcessIfExited = owned.releaseIfGroupExited;
     } catch {
       throw new TerminalError("Unable to start a terminal for this project.");
     }
@@ -352,6 +363,7 @@ export class TerminalManager {
       session.exitObserved = true;
       for (const resolveExit of session.exitWaiters) resolveExit();
       session.exitWaiters.clear();
+      releaseOwnedProcessIfExited();
       if (session.terminationRequested) return;
       this.dispose(id, false);
       send(owner, { type: "terminal.exit", terminalId: id, exitCode });
@@ -369,6 +381,7 @@ export class TerminalManager {
       terminationRequested: false,
       closing: null,
       terminateProcessTree: null,
+      confirmOwnedProcessStopped,
       flushOutput,
       disposeOutput,
       onExit,
@@ -523,6 +536,12 @@ export class TerminalManager {
             return;
           }
           this.dispose(session.id, false);
+          if (!session.confirmOwnedProcessStopped()) {
+            finish(new TerminalError(
+              "A terminal process ownership claim could not be retired during runtime shutdown.",
+            ));
+            return;
+          }
           try {
             session.onExit?.(130);
           } catch {

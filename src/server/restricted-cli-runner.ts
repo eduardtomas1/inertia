@@ -5,6 +5,7 @@ import {
 } from "node:child_process";
 
 import { environmentValue } from "./environment";
+import { spawnRuntimeOwnedProcess } from "../node/runtime-owned-processes";
 import { providerProcessInvocation } from "./provider/process";
 import {
   createOwnedProcessTreeTermination,
@@ -112,14 +113,14 @@ export async function runRestrictedCli(
         environment,
         platform,
       );
-      child = spawnProcess(invocation.command, invocation.args, {
+      child = spawnRuntimeOwnedProcess(() => spawnProcess(invocation.command, invocation.args, {
         cwd: options.cwd,
         env: environment,
         shell: false,
         detached: platform !== "win32",
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         windowsHide: true,
-      });
+      }));
     } catch (error) {
       rejectRun(new RestrictedCliError(
         "unavailable",

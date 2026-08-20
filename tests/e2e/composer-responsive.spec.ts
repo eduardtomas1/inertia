@@ -94,7 +94,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
 
   const updateAppearance = (
     theme: "light" | "dark",
-    interfaceScale: "compact" | "large",
+    interfaceScale: "compact" | "default" | "large",
     responseDensity: "compact" | "comfortable",
   ): void => {
     const store = new RuntimeStore(databasePath, workspaceDirectory, {
@@ -128,7 +128,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
   };
 
   try {
-    updateAppearance("light", "compact", "compact");
+    updateAppearance("light", "default", "compact");
     await resizeWindow(1440, 920);
     await page.reload();
     const textbox = page.getByRole("textbox", { name: "Message" });
@@ -146,7 +146,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await expect(page.locator("html")).toHaveAttribute(
       "data-interface-scale",
-      "compact",
+      "default",
     );
     await expect(page.locator(".chat-workspace")).toHaveClass(
       /response-density-compact/u,
@@ -243,8 +243,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         optionMarkers,
       };
     });
-    expect(wideGeometry.width).toBeGreaterThanOrEqual(738);
-    expect(wideGeometry.width).toBeLessThanOrEqual(742);
+    expect(wideGeometry.width).toBeGreaterThanOrEqual(858);
+    expect(wideGeometry.width).toBeLessThanOrEqual(862);
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
@@ -256,8 +256,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.dockFits).toBe(true);
     expect(wideGeometry.toolbarFits).toBe(true);
     expect(wideGeometry.zoneOrder).toEqual(["input", "controls"]);
-    expect(wideGeometry.inputPaddingInline).toBe("12px");
-    expect(wideGeometry.inputPaddingBlock).toBe("8px");
+    expect(wideGeometry.inputPaddingInline).toBe("14px");
+    expect(wideGeometry.inputPaddingBlock).toBe("10px");
     expect(wideGeometry.toolbarBorderTop).toBe("1px");
     expect(wideGeometry.toolbarBackground)
       .not.toBe(wideGeometry.textareaBackground);
@@ -414,7 +414,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await accessTrigger.click();
     await expect(page.getByRole("menu", { name: "Project access" }))
       .toBeVisible();
-    await capture("composer-controls-access-light-compact-1440x920");
+    await capture("composer-controls-access-light-default-1440x920");
     await page.keyboard.press("Escape");
 
     const initialTextareaHeight = await textbox.evaluate(
@@ -435,7 +435,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(grownTextareaHeight).toBeGreaterThan(initialTextareaHeight);
     expect(grownTextareaHeight).toBeLessThanOrEqual(176);
     await textbox.fill("");
-    await capture("composer-dock-light-compact-1440x920");
+    await capture("composer-dock-light-default-1440x920");
 
     await electronApp.evaluate(({ dialog }, paths) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({
@@ -493,8 +493,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     ]);
     expect(attachmentGeometry.thumbnailSizes).toHaveLength(2);
     for (const size of attachmentGeometry.thumbnailSizes) {
-      expect(size.width).toBeCloseTo(30, 2);
-      expect(size.height).toBeCloseTo(30, 2);
+      expect(size.width).toBeCloseTo(32, 2);
+      expect(size.height).toBeCloseTo(32, 2);
     }
     await capture("composer-zones-attachment-light-1440x920");
     await attachmentList.getByRole("button", {

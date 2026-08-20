@@ -94,7 +94,7 @@
   --final-answer-max-width: 760px;
   --commentary-max-width: 740px;
   --user-request-max-width: min(680px, 80%);
-  --composer-max-width: 780px;
+  --composer-max-width: 860px;
   --popover-width: 280px;
   --model-chooser-width: min(640px, calc(100vw - 32px));
   --conversation-canvas-surface: var(--surface-strong);
@@ -107,7 +107,7 @@
     0 1px 4px -3px color-mix(in srgb, var(--text) 14%, transparent);
   --composer-input-padding-inline: 14px;
   --composer-input-padding-block: 11px;
-  --composer-control-padding-inline: 8px;
+  --composer-control-padding-inline: 12px;
   --composer-control-padding-block: 6px;
   --composer-zone-gap: 7px;
   --composer-density-spacing-adjustment: 0px;
@@ -184,13 +184,13 @@
   --final-answer-max-width: 720px;
   --commentary-max-width: 700px;
   --user-request-max-width: min(640px, 80%);
-  --composer-max-width: 740px;
+  --composer-max-width: 760px;
   --popover-width: 260px;
   --model-chooser-width: min(600px, calc(100vw - 28px));
   --radius-composer: 11px;
   --composer-input-padding-inline: 12px;
   --composer-input-padding-block: 9px;
-  --composer-control-padding-inline: 6px;
+  --composer-control-padding-inline: 10px;
   --composer-control-padding-block: 5px;
   --composer-bottom-breathing-room: 8px;
 }
@@ -205,13 +205,13 @@
   --final-answer-max-width: 780px;
   --commentary-max-width: 760px;
   --user-request-max-width: min(700px, 80%);
-  --composer-max-width: 800px;
+  --composer-max-width: 900px;
   --popover-width: 300px;
   --model-chooser-width: min(660px, calc(100vw - 36px));
   --radius-composer: 13px;
   --composer-input-padding-inline: 15px;
   --composer-input-padding-block: 12px;
-  --composer-control-padding-inline: 9px;
+  --composer-control-padding-inline: 13px;
   --composer-control-padding-block: 7px;
   --composer-bottom-breathing-room: 12px;
 }
@@ -226,13 +226,13 @@
   --final-answer-max-width: 780px;
   --commentary-max-width: 780px;
   --user-request-max-width: min(720px, 80%);
-  --composer-max-width: 800px;
+  --composer-max-width: 940px;
   --popover-width: 320px;
   --model-chooser-width: min(680px, calc(100vw - 40px));
   --radius-composer: 14px;
   --composer-input-padding-inline: 16px;
   --composer-input-padding-block: 13px;
-  --composer-control-padding-inline: 10px;
+  --composer-control-padding-inline: 14px;
   --composer-control-padding-block: 8px;
   --composer-bottom-breathing-room: 14px;
 }
@@ -3592,6 +3592,7 @@ button.environment-row:focus-visible,
 .composer {
   position: relative;
   z-index: 5;
+  container-type: inline-size;
   max-width: var(--composer-max-width);
   margin: 0 auto;
   padding: 0;
@@ -4147,11 +4148,12 @@ button.environment-row:focus-visible,
   min-width: 0;
   grid-template-columns: max-content minmax(0, 1fr) max-content;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
   padding:
     calc(var(--composer-control-padding-block) + var(--composer-density-spacing-adjustment))
     var(--composer-control-padding-inline);
   border-top: 1px solid var(--composer-zone-separator);
+  border-radius: 0 0 calc(var(--radius-composer) - 1px) calc(var(--radius-composer) - 1px);
   background: color-mix(in srgb, var(--surface-muted) 38%, var(--composer-surface));
   box-shadow: inset 0 1px var(--composer-setting-separator);
 }
@@ -4785,7 +4787,7 @@ button.environment-row:focus-visible,
   font-size: 8px;
 }
 
-@container (max-width: 720px) {
+@container (max-width: 840px) {
   .composer-action-control,
   .composer-provider-control,
   .composer-setting-family {
@@ -4815,6 +4817,12 @@ button.environment-row:focus-visible,
 
   .composer-more-control .composer-pill > span,
   .composer-more-control .composer-pill > svg:last-child {
+    display: none;
+  }
+}
+
+@container (max-width: 900px) {
+  .composer-options > .composer-action-control {
     display: none;
   }
 }
@@ -13971,7 +13979,7 @@ button.sent-attachment-open:focus-visible {
 .model-chooser-anchor {
   display: flex;
   min-width: 0;
-  max-width: min(260px, 28vw);
+  max-width: clamp(112px, 20cqw, 168px);
   flex: 0 1 auto;
 }
 
@@ -14159,7 +14167,7 @@ button.sent-attachment-open:focus-visible {
   }
 }
 
-@container (max-width: 720px) {
+@container (max-width: 840px) {
   .model-chooser-anchor {
     max-width: clamp(78px, 22cqw, 96px);
     flex: 1 1 78px;

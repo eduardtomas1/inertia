@@ -193,7 +193,11 @@ export function ComposerToolbar({
       role="group"
       aria-label="Composer controls"
     >
-      <div className="composer-tools">
+      <div
+        className="composer-tools"
+        role="group"
+        aria-label="Add context"
+      >
         <IconButton
           label={running ? "Attach follow-up images" : "Attach images or documents"}
           onClick={() => void onChooseAttachments()}
@@ -309,7 +313,11 @@ export function ComposerToolbar({
           </div>
         ) : null}
       </div>
-      <div className="composer-options">
+      <div
+        className="composer-options"
+        role="group"
+        aria-label="Model and run settings"
+      >
         <ModelChooser
           routes={modelRoutes}
           selectedRoute={selectedModelRoute}
@@ -377,7 +385,11 @@ export function ComposerToolbar({
           </span>
         )}
       </div>
-      <div className="composer-actions">
+      <div
+        className="composer-actions"
+        role="group"
+        aria-label="Usage and message actions"
+      >
         {selectedProvider ? (
           <UsageIndicator
             usage={usage}

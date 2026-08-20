@@ -91,10 +91,10 @@ describe("cohesive composer dock", () => {
     expect(settingsSource.indexOf("composer-access-control"))
       .toBeLessThan(settingsSource.indexOf("composer-mode-control"));
     expect(css).toMatch(
-      /@container \(max-width:\s*720px\)\s*\{[\s\S]*?\.composer-action-control,[\s\S]*?\.composer-setting-family\s*\{[^}]*display:\s*none/su,
+      /@container \(max-width:\s*840px\)\s*\{[\s\S]*?\.composer-action-control,[\s\S]*?\.composer-setting-family\s*\{[^}]*display:\s*none/su,
     );
     expect(css).toMatch(
-      /@container \(max-width:\s*720px\)\s*\{[\s\S]*?\.composer-more-control\s*\{[^}]*display:\s*block/su,
+      /@container \(max-width:\s*840px\)\s*\{[\s\S]*?\.composer-more-control\s*\{[^}]*display:\s*block/su,
     );
     expect(css).toMatch(
       /\.composer-tools,[\s\S]*?\.composer-options,[\s\S]*?\.composer-actions\s*\{[^}]*min-width:\s*0;[^}]*gap:\s*3px/su,
@@ -122,14 +122,14 @@ describe("cohesive composer dock", () => {
     expect(composerRule).not.toContain("backdrop-filter");
     expect(composerShadow).not.toContain("--glass-inset");
     expect(css).toMatch(
-      /:root\[data-interface-scale="compact"\]\s*\{[^}]*--composer-max-width:\s*740px/su,
+      /:root\[data-interface-scale="compact"\]\s*\{[^}]*--composer-max-width:\s*760px/su,
     );
-    expect(css).toContain("--composer-max-width: 780px;");
+    expect(css).toContain("--composer-max-width: 860px;");
     expect(css).toMatch(
-      /:root\[data-interface-scale="comfortable"\]\s*\{[^}]*--composer-max-width:\s*800px/su,
+      /:root\[data-interface-scale="comfortable"\]\s*\{[^}]*--composer-max-width:\s*900px/su,
     );
     expect(css).toMatch(
-      /:root\[data-interface-scale="large"\]\s*\{[^}]*--composer-max-width:\s*800px/su,
+      /:root\[data-interface-scale="large"\]\s*\{[^}]*--composer-max-width:\s*940px/su,
     );
     expect(css).toMatch(
       /\.provider-readiness\s*\{[^}]*min-width:\s*0;[^}]*margin:\s*0;[^}]*border-bottom:\s*1px solid var\(--composer-zone-separator\);[^}]*background:\s*transparent/su,

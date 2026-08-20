@@ -109,7 +109,7 @@ describe("composer input and control zones", () => {
       /@media \(max-width:\s*1180px\)[\s\S]*?\.access-control\s*\{[^}]*display:\s*none/su,
     );
     expect(css).toMatch(
-      /@container \(max-width:\s*720px\)[\s\S]*?\.composer-setting-family\s*\{[^}]*display:\s*none[\s\S]*?\.composer-more-control\s*\{[^}]*display:\s*block/su,
+      /@container \(max-width:\s*840px\)[\s\S]*?\.composer-setting-family\s*\{[^}]*display:\s*none[\s\S]*?\.composer-more-control\s*\{[^}]*display:\s*block/su,
     );
   });
 

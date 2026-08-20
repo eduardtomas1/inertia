@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
@@ -13,18 +13,65 @@ import {
 } from "./support/workspace-tools";
 
 let app!: AppFixture;
+let electronApp!: AppFixture["electronApp"];
 let page!: AppFixture["page"];
 let testDirectory!: AppFixture["testDirectory"];
 let workspaceDirectory!: AppFixture["workspaceDirectory"];
+let attachmentImagePath!: AppFixture["attachmentImagePath"];
 let rendererErrors!: AppFixture["rendererErrors"];
 let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 
+const measureComposerRail = async (composer: Locator): Promise<{
+  dockWidth: number;
+  containerType: string;
+  toolbarFits: boolean;
+  groupsContained: boolean;
+  groupGaps: number[];
+  attachmentBeforeMessage: boolean | null;
+}> => composer.evaluate((dock) => {
+  const toolbar = dock.querySelector<HTMLElement>(".composer-toolbar");
+  const groups = [
+    dock.querySelector<HTMLElement>(".composer-tools"),
+    dock.querySelector<HTMLElement>(".composer-options"),
+    dock.querySelector<HTMLElement>(".composer-actions"),
+  ].flatMap((group) => group ? [group.getBoundingClientRect()] : []);
+  const toolbarBounds = toolbar?.getBoundingClientRect();
+  const attachmentBounds = dock.querySelector<HTMLElement>(
+    ".composer-attachments",
+  )?.getBoundingClientRect();
+  const textareaBounds = dock.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Message"]',
+  )?.getBoundingClientRect();
+  return {
+    dockWidth: dock.getBoundingClientRect().width,
+    containerType: getComputedStyle(dock).containerType,
+    toolbarFits: Boolean(
+      toolbar
+      && toolbar.scrollWidth <= toolbar.clientWidth + 1
+    ),
+    groupsContained: Boolean(
+      toolbarBounds
+      && groups.length === 3
+      && groups.every((bounds) =>
+        bounds.left >= toolbarBounds.left - 1
+        && bounds.right <= toolbarBounds.right + 1),
+    ),
+    groupGaps: groups.slice(1).map((bounds, index) =>
+      bounds.left - groups[index]!.right),
+    attachmentBeforeMessage: attachmentBounds && textareaBounds
+      ? attachmentBounds.bottom <= textareaBounds.top
+      : null,
+  };
+});
+
 test.beforeAll(async () => {
   app = await createAppFixture({ name: "activity", initialState: "conversation" });
+  electronApp = app.electronApp;
   page = app.page;
   testDirectory = app.testDirectory;
   workspaceDirectory = app.workspaceDirectory;
+  attachmentImagePath = app.attachmentImagePath;
   rendererErrors = app.rendererErrors;
   resizeWindow = app.resizeWindow;
   expectNoViewportOverflow = app.expectNoViewportOverflow;
@@ -520,6 +567,100 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       path: wideScreenshot,
       contentType: "image/png",
     });
+
+    await resizeWindow(744, 800);
+    const compactMore = composer.getByRole("button", {
+      name: "More composer options",
+    });
+    await expect(compactMore).toBeVisible();
+    await expect(composer.getByRole("group", { name: "Composer settings" }))
+      .toBeHidden();
+    const compactRailGeometry = await measureComposerRail(composer);
+    expect(compactRailGeometry.dockWidth).toBeLessThanOrEqual(760);
+    expect(compactRailGeometry.containerType).toBe("inline-size");
+    expect(compactRailGeometry.toolbarFits).toBe(true);
+    expect(compactRailGeometry.groupsContained).toBe(true);
+    expect(Math.min(...compactRailGeometry.groupGaps)).toBeGreaterThanOrEqual(7);
+    await expectNoViewportOverflow();
+    const compactComposerScreenshot = testInfo.outputPath("composer-working-compact-744x800.png");
+    await page.screenshot({ animations: "disabled", path: compactComposerScreenshot });
+    await testInfo.attach("composer-working-compact-744x800", {
+      path: compactComposerScreenshot,
+      contentType: "image/png",
+    });
+
+    await resizeWindow(866, 800);
+    const navigation = page.getByRole("complementary", {
+      name: "Project navigation",
+      exact: true,
+    });
+    if (await navigation.isVisible()) {
+      await page.getByRole("button", {
+        name: "Toggle project navigation",
+      }).click();
+      await expect(navigation).toBeHidden();
+    }
+    const workspacePanel = page.locator(".workspace-panel");
+    if (await workspacePanel.isVisible()) {
+      await page.getByRole("button", {
+        name: "Close workspace tools",
+      }).first().click();
+      await expect(workspacePanel).toBeHidden();
+    }
+    await expect(compactMore).toBeVisible();
+    await expect(composer.getByRole("group", { name: "Composer settings" }))
+      .toBeHidden();
+    const constrainedRailGeometry = await measureComposerRail(composer);
+    expect(constrainedRailGeometry.dockWidth).toBeGreaterThanOrEqual(775);
+    expect(constrainedRailGeometry.dockWidth).toBeLessThanOrEqual(785);
+    expect(constrainedRailGeometry.toolbarFits).toBe(true);
+    expect(constrainedRailGeometry.groupsContained).toBe(true);
+    expect(Math.min(...constrainedRailGeometry.groupGaps))
+      .toBeGreaterThanOrEqual(7);
+    await expectNoViewportOverflow();
+    const constrainedComposerScreenshot = testInfo.outputPath("composer-working-constrained-779x800.png");
+    await page.screenshot({ animations: "disabled", path: constrainedComposerScreenshot });
+    await testInfo.attach("composer-working-constrained-779x800", {
+      path: constrainedComposerScreenshot,
+      contentType: "image/png",
+    });
+
+    await resizeWindow(933, 800);
+    await electronApp.evaluate(({ dialog }, imagePath) => {
+      Reflect.set(dialog, "showOpenDialog", async () => ({
+        canceled: false,
+        filePaths: [imagePath],
+        bookmarks: [],
+      }));
+    }, attachmentImagePath);
+    await composer.getByRole("button", {
+      name: "Attach follow-up images",
+    }).click();
+    const activeAttachments = composer.getByRole("list", {
+      name: "Attachments",
+    });
+    await expect(activeAttachments.locator("img")).toHaveCount(1);
+    const expandedRailGeometry = await measureComposerRail(composer);
+    expect(expandedRailGeometry.dockWidth).toBeGreaterThanOrEqual(838);
+    expect(expandedRailGeometry.toolbarFits).toBe(true);
+    expect(expandedRailGeometry.groupsContained).toBe(true);
+    expect(Math.min(...expandedRailGeometry.groupGaps)).toBeGreaterThanOrEqual(7);
+    expect(expandedRailGeometry.attachmentBeforeMessage).toBe(true);
+    if (expandedRailGeometry.dockWidth <= 842) {
+      await expect(compactMore).toBeVisible();
+      await expect(composer.getByRole("group", { name: "Composer settings" }))
+        .toBeHidden();
+    }
+    await expectNoViewportOverflow();
+    const attachmentComposerScreenshot = testInfo.outputPath("composer-working-attachment-expanded-933x800.png");
+    await page.screenshot({ animations: "disabled", path: attachmentComposerScreenshot });
+    await testInfo.attach("composer-working-attachment-expanded-933x800", {
+      path: attachmentComposerScreenshot,
+      contentType: "image/png",
+    });
+    await activeAttachments.getByRole("button", {
+      name: "Remove attachment preview.png",
+    }).click();
 
     await resizeWindow(760, 800);
     await disclosure.scrollIntoViewIfNeeded();

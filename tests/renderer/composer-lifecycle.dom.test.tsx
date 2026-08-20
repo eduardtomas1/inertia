@@ -188,9 +188,14 @@ describe("composer asynchronous ownership", () => {
 
     expect(input.compareDocumentPosition(toolbar)
       & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(toolbar.querySelector(":scope > .composer-tools")).not.toBeNull();
-    expect(toolbar.querySelector(":scope > .composer-options")).not.toBeNull();
-    expect(toolbar.querySelector(":scope > .composer-actions")).not.toBeNull();
+    expect(within(toolbar).getByRole("group", { name: "Add context" }))
+      .toBeInTheDocument();
+    expect(within(toolbar).getByRole("group", {
+      name: "Model and run settings",
+    })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("group", {
+      name: "Usage and message actions",
+    })).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "Keep every control reachable" } });
     const attach = within(toolbar).getByRole("button", {

@@ -130,13 +130,13 @@ describe("composer setting control family", () => {
       /\.composer-more-layer\s*\{[^}]*right:\s*0/su,
     );
     expect(css).toMatch(
-      /@container \(max-width:\s*720px\)[\s\S]*?\.composer-options > \.composer-more-control\s*\{[^}]*display:\s*block;[^}]*position:\s*static/su,
+      /@container \(max-width:\s*840px\)[\s\S]*?\.composer-options > \.composer-more-control\s*\{[^}]*display:\s*block;[^}]*position:\s*static/su,
     );
   });
 
   it("moves the whole low-priority family into one More control at the container threshold", () => {
     const compactRule = css.match(
-      /@container \(max-width:\s*720px\)\s*\{(?<body>[\s\S]*?)\n\}/u,
+      /@container \(max-width:\s*840px\)\s*\{(?<body>[\s\S]*?)\n\}/u,
     )?.groups?.body ?? "";
 
     expect(compactRule).toContain(".composer-setting-family");
@@ -146,6 +146,9 @@ describe("composer setting control family", () => {
     expect(compactRule).not.toContain(".model-chooser-anchor {\n    display: none");
     expect(compactRule).not.toContain(".composer-usage {\n    display: none");
     expect(compactRule).not.toContain(".send-button {\n    display: none");
+    expect(css).toMatch(
+      /@container \(max-width:\s*900px\)\s*\{[\s\S]*?\.composer-options > \.composer-action-control\s*\{[^}]*display:\s*none/su,
+    );
     expect(moreMenuSource).toContain('aria-label="More composer options"');
     expect(moreMenuSource).toContain('aria-haspopup="menu"');
     expect(moreMenuSource).toContain('aria-controls={menuId("more")}');

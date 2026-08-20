@@ -435,6 +435,9 @@ describe("append-oriented stream text persistence", () => {
 
     const old = new Database(current.databasePath);
     old.exec(`
+      DROP TRIGGER conversation_context_packets_discard_source_drafts;
+      DROP TABLE agent_context_requests;
+      DROP TABLE conversation_context_packets;
       DROP TABLE agent_thread_operations;
       DROP TABLE agent_managed_conversations;
       DROP TABLE provider_run_ownership;
@@ -487,6 +490,9 @@ describe("append-oriented stream text persistence", () => {
 
     const old = new Database(current.databasePath);
     old.exec(`
+      DROP TRIGGER conversation_context_packets_discard_source_drafts;
+      DROP TABLE agent_context_requests;
+      DROP TABLE conversation_context_packets;
       DROP TABLE agent_thread_operations;
       DROP TABLE agent_managed_conversations;
       DROP TABLE provider_run_ownership;

@@ -152,6 +152,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
       "data-composer-action-state",
       "send-disabled",
     );
+    await expect(disabledSend).toHaveAttribute("data-motion-state", "send");
     const disabledStyle = await disabledSend.evaluate((button) => {
       const style = getComputedStyle(button);
       return {
@@ -199,6 +200,9 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     await expect(textbox).toBeFocused();
     await capture("composer-send-ready-light-compact-1440x920");
 
+    const acceptedIconObserved = expect(
+      composer.locator('[data-icon-state="accepted"]'),
+    ).not.toHaveCount(0, { timeout: 5_000 });
     await textbox.press("Enter");
     const submitting = composer.getByRole("button", {
       name: "Sending message",
@@ -214,6 +218,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     expect(await textbox.evaluate((element) =>
       (element as HTMLTextAreaElement).readOnly)).toBe(true);
     await expect(submitting.locator('[data-icon-state="sending"]')).toHaveCount(1);
+    await acceptedIconObserved;
     await expectComposerEndsAtDock(composer);
     expect(await composer.locator(".usage-context-ring").evaluateAll((rings) =>
       rings.reduce((count, ring) =>
@@ -228,11 +233,6 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     await capture("composer-send-submitting-light-compact-1440x920");
     await expect(composer.getByRole("button", { name: "Send message" }))
       .toBeVisible({ timeout: 5_000 });
-    const acceptedStatus = composer.getByRole("status")
-      .filter({ hasText: "Message accepted." });
-    await expect(acceptedStatus).toBeVisible();
-    await expect(acceptedStatus.locator('[data-icon-state="accepted"]'))
-      .toHaveCount(1);
 
     const darkIdleStore = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,

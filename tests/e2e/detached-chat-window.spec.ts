@@ -16,6 +16,7 @@ let attachmentImagePath!: string;
 let conversationId!: string;
 let projectId!: string;
 let sourceConversationId!: string;
+const detachedAnswer = "Detached copy feedback is ready.";
 
 test.beforeAll(async () => {
   app = await createAppFixture({
@@ -77,11 +78,20 @@ test.beforeAll(async () => {
         conversationContextPacketIds: [packet.id],
         contextRequestId: randomUUID(),
       });
+      const answer = store.createMessage(
+        snapshot.activeConversationId,
+        detachedAnswer,
+        "assistant",
+        [],
+        turn.turn.id,
+        requestedAt,
+      );
       store.updateAgentTurnLifecycle(turn.turn.id, {
         status: "completed",
         startedAt: requestedAt,
         completedAt: requestedAt,
         terminalReason: "provider-completed",
+        terminalAssistantMessageId: answer.id,
         updatedAt: requestedAt,
       });
       store.close();
@@ -150,6 +160,9 @@ test("moves one live chat between a remembered native window and the main app", 
   await expect(copiedAnswer.locator('[data-icon-state="copied"]')).toHaveCount(1);
   await expect(popup.getByRole("status").filter({ hasText: "Answer copied." }))
     .toBeVisible();
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ clipboard }) => clipboard.readText(),
+  )).toBe(detachedAnswer);
   await expect.poll(() => popup.evaluate(async ({ own, foreign, project }) => {
     const status = async (url: string): Promise<number> => {
       try {

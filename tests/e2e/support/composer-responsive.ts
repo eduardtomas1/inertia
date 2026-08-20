@@ -1,6 +1,23 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../../src/server/database";
+
+const execFileAsync = promisify(execFile);
+
+export async function fixtureCheckoutLabel(
+  workspaceDirectory: string,
+): Promise<string> {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["rev-parse", "--abbrev-ref", "HEAD"],
+    { cwd: workspaceDirectory },
+  );
+  const branch = stdout.trim();
+  if (!branch) throw new Error("Composer fixture checkout is unavailable.");
+  return branch === "HEAD" ? "Detached HEAD" : branch;
+}
 
 export function loadComposerResponsiveFixture(
   databasePath: string,

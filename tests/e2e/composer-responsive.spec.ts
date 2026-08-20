@@ -11,10 +11,10 @@ import {
 } from "./support/app-fixture";
 import {
   createComposerResponsiveHelpers,
+  fixtureCheckoutLabel,
   inspectLongComposerHeading,
   loadComposerResponsiveFixture,
 } from "./support/composer-responsive";
-
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
 let page!: AppFixture["page"];
@@ -83,6 +83,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   }
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
+  const expectedCheckoutLabel = await fixtureCheckoutLabel(workspaceDirectory);
   const { originalProject, restore } = loadComposerResponsiveFixture(databasePath, workspaceDirectory);
   const navigation = page.getByRole("complementary", {
     name: "Project navigation",
@@ -92,7 +93,6 @@ test("keeps the composer as one cohesive dock across themes and responsive split
   const workspacePanelWasVisible = await page.locator(
     ".workspace-panel:visible",
   ).count() > 0;
-
   const {
     updateAppearance,
     updateProjectName,
@@ -105,7 +105,6 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     page,
     testInfo,
   });
-
   try {
     updateAppearance("light", "default", "compact");
     await resizeWindow(1440, 920);
@@ -153,12 +152,13 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await setWorkspaceTools(false);
 
     const dock = page.getByRole("region", { name: "Message composer" });
+    await expect(dock.getByRole("group", { name: "Chat checkout context" }))
+      .toContainText(expectedCheckoutLabel);
     await expectComposerEndsAtDock(dock);
     await expectComposerReadinessContained(dock);
     const model = dock.getByRole("button", { name: /^Choose model\./u });
     const usage = dock.getByRole("region", { name: "Usage and context" });
     const send = dock.getByRole("button", { name: "Send message" });
-
     await expect(dock).toHaveAttribute("aria-busy", "false");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await expect(page.locator("html")).toHaveAttribute(
@@ -283,7 +283,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       .not.toBe(wideGeometry.textareaBackground);
     expect(wideGeometry.toolbarGroups).toEqual(["options", "tools", "actions"]);
     expect(wideGeometry.checkoutText).toContain("Current checkout");
-    expect(wideGeometry.checkoutText).toContain("master");
+    expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);

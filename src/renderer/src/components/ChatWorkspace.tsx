@@ -123,6 +123,7 @@ type ChatWorkspaceProps = {
   skillsLoading: boolean;
   skillsError: string | null;
   promptPresets?: readonly PromptPreset[];
+  promptPresetsEnabled?: boolean;
   goal?: ChatGoalControlProps | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
@@ -165,7 +166,7 @@ type ChatWorkspaceProps = {
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => Promise<void>;
-  onCreateConversationForSelection: (
+  onCreateConversationForSelection?: (
     selection: ModelSelection,
     options?: { prefillText?: string },
   ) => Promise<void>;
@@ -229,6 +230,7 @@ export function ChatWorkspace({
   skillsLoading,
   skillsError,
   promptPresets = EMPTY_PROMPT_PRESETS,
+  promptPresetsEnabled = true,
   goal,
   approvals,
   inputRequests,
@@ -846,6 +848,7 @@ export function ChatWorkspace({
           {...(onCompactConversation ? { onCompact: onCompactConversation } : {})}
           onListSkills={onListSkills}
           promptPresets={promptPresets}
+          promptPresetsEnabled={promptPresetsEnabled}
           onPromptPresetCommand={onPromptPresetCommand}
           onUpdateConversation={onUpdateConversation}
           onCreateConversationForSelection={onCreateConversationForSelection}

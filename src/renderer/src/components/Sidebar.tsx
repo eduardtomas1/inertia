@@ -15,7 +15,6 @@ import {
   ChevronRight,
   CircleDot,
   CircleX,
-  Columns2,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -27,7 +26,6 @@ import {
   Minus,
   MoreHorizontal,
   Pencil,
-  Pin,
   Search,
   Settings,
   ShieldAlert,
@@ -37,7 +35,7 @@ import {
   Zap,
 } from "lucide-react";
 import clsx from "clsx";
-import type { AppSnapshot, Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
+import type { Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
 import { formatRelativeTime } from "../lib/format";
 import { agentRequestProviderName } from "../utils/agentInput";
 import {
@@ -71,45 +69,15 @@ import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
 import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
+import type { SidebarProps } from "./sidebar/SidebarProps";
+import {
+  EMPTY_DETACHED_CONVERSATION_IDS,
+  SidebarConversationMarks,
+} from "./sidebar/SidebarConversationMarks";
 
 const WORK_DONE_PAGE_SIZE = 10;
 const WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
-type SidebarProps = {
-  snapshot: AppSnapshot | null;
-  connectionStatus: ConnectionStatus;
-  view: AppView;
-  open: boolean;
-  busy: boolean;
-  layoutWidth: number;
-  onClose: () => void;
-  onViewChange: (view: AppView) => void;
-  onImportProject: () => void;
-  onSelectProject: (project: Project) => void;
-  onSelectConversation: (conversation: Conversation) => void;
-  splitConversationId: string | null;
-  onOpenConversationInSplit: (conversation: Conversation) => void;
-  onCloseConversationSplit: () => void;
-  onCreateConversation: (project: Project) => void;
-  onOpenMultiSpawn: () => void;
-  onOpenDailyWork: () => void;
-  dailyWorkOpen: boolean;
-  onRenameConversation: (conversation: Conversation, title: string) => void;
-  onPinConversation: (conversation: Conversation, pinned: boolean) => void;
-  onSnoozeConversation: (conversation: Conversation, until: string | null) => void;
-  onArchiveConversation: (conversation: Conversation) => void;
-  onSettleConversation: (conversation: Conversation) => void;
-  onRestoreConversation: (conversation: Conversation) => void;
-  onDeleteConversation: (conversation: Conversation) => void;
-  onAcknowledgeRun: (run: WorkspaceRun) => void;
-  onDismissRun: (run: WorkspaceRun) => void;
-  onOpenProject: (project: Project) => void;
-  onRenameProject: (project: Project, name: string) => void;
-  onSetProjectGrouping: (project: Project, groupingMode: ProjectGroupingMode | null) => void;
-  onSetProjectGitRepositoryLimit: (project: Project, limit: number) => void;
-  onSidebarModeChange: (mode: AppSnapshot["settings"]["sidebarMode"]) => void;
-  onRemoveProject: (project: Project) => void;
-};
 
 const statusLabels: Record<SidebarThreadStatus, string> = {
   working: "Working",
@@ -174,8 +142,11 @@ function SidebarView({
   onImportProject,
   onSelectProject,
   onSelectConversation,
+  detachedConversationIds = EMPTY_DETACHED_CONVERSATION_IDS,
+  detachedChatLimitReached = false,
   splitConversationId,
   onOpenConversationInSplit,
+  onOpenConversationInWindow,
   onCloseConversationSplit,
   onCreateConversation,
   onOpenMultiSpawn,
@@ -647,9 +618,22 @@ function SidebarView({
         type="button"
         role="menuitem"
         className="is-danger"
-        disabled={snapshot?.runs.some((run) => (
-          run.projectId === project.id && (run.status === "running" || run.status === "waiting")
-        ))}
+        disabled={
+          snapshot?.runs.some((run) => (
+            run.projectId === project.id
+            && (run.status === "running" || run.status === "waiting")
+          ))
+          || snapshot?.conversations.some((conversation) => (
+            conversation.projectId === project.id
+            && detachedConversationIds.has(conversation.id)
+          ))
+        }
+        title={snapshot?.conversations.some((conversation) => (
+          conversation.projectId === project.id
+          && detachedConversationIds.has(conversation.id)
+        ))
+          ? "Return this project's detached chats before removing it."
+          : undefined}
         onClick={() => { setProjectMenu(null); onRemoveProject(project); }}
       >
         <Trash2 size={13} />Remove project
@@ -665,6 +649,8 @@ function SidebarView({
         activeConversationId={snapshot?.activeConversationId ?? null}
         activity={sidebarMode === "activity"}
         conversation={conversation}
+        detachedChatLimitReached={detachedChatLimitReached}
+        isDetached={detachedConversationIds.has(conversation.id)}
         runs={snapshot?.runs ?? []}
         splitConversationId={splitConversationId}
         thread={thread}
@@ -675,6 +661,7 @@ function SidebarView({
         onDismiss={dismissConversationMenu}
         onDismissRun={onDismissRun}
         onOpenConversationInSplit={onOpenConversationInSplit}
+        onOpenConversationInWindow={onOpenConversationInWindow}
         onPinConversation={onPinConversation}
         onRestoreConversation={onRestoreConversation}
         onSetPopover={(node) => setConversationMenuPopover(conversation.id, node)}
@@ -726,6 +713,7 @@ function SidebarView({
     const projectLabel = workProjectLabel(project);
     const repositoryLabel = workRepositoryLabel(project);
     const WorkStatusIcon = workStatusIcons[model.status];
+    const isDetached = detachedConversationIds.has(conversation.id);
     const accessibleContext = [
       conversation.title,
       providerLabel,
@@ -737,6 +725,7 @@ function SidebarView({
         ? "Snoozed"
         : null,
       conversation.pinnedAt ? "Pinned" : null,
+      isDetached ? "Open in a separate chat window" : null,
       splitConversationId === conversation.id ? "Open in split view" : null,
       model.unread ? "New completion" : null,
     ].filter((value): value is string => Boolean(value)).join(", ");
@@ -746,6 +735,7 @@ function SidebarView({
           "activity-thread",
           `status-${model.status}`,
           isActive && "is-active",
+          isDetached && "is-detached",
           splitConversationId === conversation.id && "is-split",
           model.unread && "is-unread",
         )}
@@ -783,14 +773,11 @@ function SidebarView({
             <span className="activity-thread-copy">
               <span className="activity-thread-topline">
                 <span className="activity-thread-title">{conversation.title}</span>
-                {conversation.pinnedAt && <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />}
-                {splitConversationId === conversation.id && (
-                  <Columns2
-                    className="conversation-split-mark"
-                    size={11}
-                    aria-label="Open in split view"
-                  />
-                )}
+                <SidebarConversationMarks
+                  pinned={Boolean(conversation.pinnedAt)}
+                  detached={isDetached}
+                  split={splitConversationId === conversation.id}
+                />
                 {model.unread && <span className="thread-unread-mark">New</span>}
               </span>
               <span className="work-thread-meta">
@@ -1101,8 +1088,17 @@ function SidebarView({
                               conversation,
                               snapshot?.activeConversationId ?? null,
                             );
+                          const isDetached = detachedConversationIds.has(
+                            conversation.id,
+                          );
                           return (
-                            <div className={clsx("conversation-item", thread.unread && "is-unread")} key={conversation.id}>
+                            <div
+                              className={clsx(
+                                "conversation-item",
+                                thread.unread && "is-unread",
+                              )}
+                              key={conversation.id}
+                            >
                               {renaming === conversation.id ? renameForm(conversation) : (
                                 <button
                                   type="button"
@@ -1111,6 +1107,7 @@ function SidebarView({
                                     snapshot?.activeConversationId === conversation.id
                                       && view === "workspace"
                                       && "is-active",
+                                    isDetached && "is-detached",
                                     splitConversationId === conversation.id
                                       && "is-split",
                                   )}
@@ -1127,14 +1124,11 @@ function SidebarView({
                                     title={statusLabels[thread.status]}
                                   />
                                   <span className="conversation-title">{conversation.title}</span>
-                                  {conversation.pinnedAt && <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />}
-                                  {splitConversationId === conversation.id && (
-                                    <Columns2
-                                      className="conversation-split-mark"
-                                      size={11}
-                                      aria-label="Open in split view"
-                                    />
-                                  )}
+                                  <SidebarConversationMarks
+                                    pinned={Boolean(conversation.pinnedAt)}
+                                    detached={isDetached}
+                                    split={splitConversationId === conversation.id}
+                                  />
                                   {thread.unread && <span className="conversation-unread" aria-label="Unread completed work" />}
                                   {!compact && <span className="conversation-time">{formatRelativeTime(conversation.updatedAt)}</span>}
                                 </button>

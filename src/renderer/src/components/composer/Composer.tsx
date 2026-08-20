@@ -48,6 +48,7 @@ import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
+import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -93,7 +94,7 @@ export const Composer = memo(function Composer({
   onSend,
   onCompact = unavailableCompaction,
   onListSkills,
-  promptPresets = [],
+  promptPresets = [], promptPresetsEnabled = true,
   onPromptPresetCommand = ignorePromptPresetMutation,
   onUpdateConversation,
   onCreateConversationForSelection,
@@ -237,6 +238,23 @@ export const Composer = memo(function Composer({
     }
     scheduleDraftPersistence(conversationId, next);
   }, [flushDraftPersistence, scheduleDraftPersistence]);
+
+  useComposerDetachmentOwnership({
+    conversationId: conversation.id,
+    flushDraftPersistence,
+    readState: () => ({
+      attachmentCount: attachmentsRef.current.length,
+      fileReferenceCount: fileReferences.length,
+      mutationInFlight: submittingRef.current
+        || stoppingRef.current
+        || creatingRouteConversation
+        || routeRepairing
+        || conversationUpdatePending,
+      pendingModelRoute: pendingRoute !== null,
+      previewContextSelected: selectedPreviewUrlRef.current !== null,
+      promptContextSelected: Boolean(promptContext),
+    }),
+  });
 
   const markEditorChanged = (conversationId = conversation.id): void => {
     editorRevisionSequenceRef.current += 1;
@@ -898,6 +916,12 @@ export const Composer = memo(function Composer({
       hasProviderSession: Boolean(conversation.providerSessionId),
     }, route);
     if (transition.kind === "create-new-conversation") {
+      if (!onCreateConversationForSelection) {
+        setConversationUpdateError(
+          "Return this chat to the main window to choose a model that requires a new chat.",
+        );
+        return;
+      }
       const sourceLatestTurn = latestTurnSummary ?? latestTurn;
       setRouteCreationError(null);
       setPendingRoute({
@@ -1186,6 +1210,7 @@ export const Composer = memo(function Composer({
           onListSkills={onListSkills}
           onInsertSkill={insertSkill}
           promptPresets={promptPresets}
+          promptPresetsEnabled={promptPresetsEnabled}
           currentPrompt={message}
           onApplyPromptPreset={applyPromptPreset}
           onPromptPresetCommand={onPromptPresetCommand}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseAttachmentPickerMode,
+  parseDetachedChatWindowRequest,
   parseOpenProjectPathRequest,
   parsePrivateConnectDeviceUpdateRequest,
   parsePrivateConnectPairingApprovalRequest,
@@ -14,6 +15,27 @@ import {
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
+
+describe("desktop detached-chat contract", () => {
+  it("accepts one exact conversation identity and a bounded display title", () => {
+    expect(parseDetachedChatWindowRequest({
+      conversationId,
+      title: "  Keep the runtime running  ",
+    })).toEqual({
+      conversationId,
+      title: "Keep the runtime running",
+    });
+    for (const request of [
+      { conversationId: "not-a-uuid", title: "Chat" },
+      { conversationId, title: "" },
+      { conversationId, title: "line one\nline two" },
+      { conversationId, title: "x".repeat(121) },
+      { conversationId, title: "Chat", activate: true },
+    ]) {
+      expect(parseDetachedChatWindowRequest(request)).toBeNull();
+    }
+  });
+});
 
 describe("desktop project-path contract", () => {
   it("accepts only scoped relative paths and enumerated OS actions", () => {

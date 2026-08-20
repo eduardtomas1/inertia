@@ -14,6 +14,7 @@ import {
 import { defaultSettings } from "@shared/contracts/app";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { AppLayout } from "./components/AppLayout";
+import { LoadingMark } from "./components/ui";
 import type { WorkspaceSceneProps } from "./components/WorkspaceScene";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
@@ -28,6 +29,7 @@ import {
 } from "./hooks/useAgentWorkflows";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
+import { useDetachedChatWindows } from "./hooks/useDetachedChatWindows";
 import { useDraftConversation } from "./hooks/useDraftConversation";
 import {
   useActivityActions,
@@ -72,6 +74,7 @@ import { createWorkspaceSceneModel } from "./components/workspace-scene/createWo
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
 import { requestComposerPrefill } from "./utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "./utils/subagentDisclosure";
+import { prepareComposerDetachment } from "./utils/composerOwnership";
 import type { AppView } from "./appView";
 
 const focusPrimaryPreview = (): void => {
@@ -98,6 +101,7 @@ export function commandMayChangeWorkspaceAuthority(
 
 export default function App(): React.JSX.Element {
   const connection = useStableController(useInertiaConnection());
+  const detachedChats = useDetachedChatWindows();
   const sendCommand = connection.sendCommand;
   const appUpdate = useStableController(useAppUpdate());
   const providerQuotaNotices = useStableController(
@@ -130,6 +134,8 @@ export default function App(): React.JSX.Element {
   const [splitConversationId, setSplitConversationId] = useState<string | null>(
     () => readSplitConversationId(window.localStorage),
   );
+  const [suppressedMainConversationIds, setSuppressedMainConversationIds] =
+    useState<Set<string>>(() => new Set());
   const [secondaryPaneFirst, setSecondaryPaneFirst] = useState(false);
   const splitSelectionTransitionsRef = useRef(0);
   const conversationSelectionGenerationRef = useRef(0);
@@ -147,6 +153,21 @@ export default function App(): React.JSX.Element {
     [connection.snapshot?.settings],
   );
   useTheme(settings.theme, settings.colorTheme);
+
+  useEffect(() => {
+    if (detachedChats.conversationIds.size === 0) return;
+    setSuppressedMainConversationIds((current) => {
+      const next = new Set(current);
+      let changed = false;
+      for (const conversationId of detachedChats.conversationIds) {
+        if (!next.has(conversationId)) {
+          next.add(conversationId);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [detachedChats.conversationIds]);
 
   useEffect(() => {
     const preference = connection.snapshot?.settings.theme;
@@ -215,6 +236,19 @@ export default function App(): React.JSX.Element {
     connection.snapshot,
     splitConversation,
     splitConversationId,
+    updateSplitConversationId,
+  ]);
+  const splitConversationDetached = Boolean(
+    splitConversation
+    && detachedChats.conversationIds.has(splitConversation.id),
+  );
+  useEffect(() => {
+    if (detachedChats.ready && splitConversationDetached) {
+      updateSplitConversationId(null);
+    }
+  }, [
+    detachedChats.ready,
+    splitConversationDetached,
     updateSplitConversationId,
   ]);
   const effectiveWorkspaceStartupSurface = legacyWorkspaceStartup?.surface
@@ -532,7 +566,15 @@ export default function App(): React.JSX.Element {
       payload: { projectId: nextProject.id },
     }).then(() => updateSplitConversationId(null)).catch(() => undefined);
   };
-  const selectConversation = useCallback((nextConversation: Conversation) => {
+  const selectConversationInMain = useCallback((
+    nextConversation: Conversation,
+  ) => {
+    setSuppressedMainConversationIds((current) => {
+      if (!current.has(nextConversation.id)) return current;
+      const next = new Set(current);
+      next.delete(nextConversation.id);
+      return next;
+    });
     if (nextConversation.id === conversation?.id) return;
     if (nextConversation.id === splitConversation?.id) {
       // A split-pane promotion is visual only. Retargeting the primary and
@@ -577,6 +619,71 @@ export default function App(): React.JSX.Element {
     splitConversation,
     updateSplitConversationId,
   ]);
+  const selectConversation = useCallback((nextConversation: Conversation) => {
+    if (!detachedChats.conversationIds.has(nextConversation.id)) {
+      selectConversationInMain(nextConversation);
+      return;
+    }
+    void detachedChats.focus(nextConversation.id).then((focused) => {
+      // A dock event can overtake React's projection of the native registry.
+      // Falling back here makes the explicit return-to-main action race-safe.
+      if (!focused) selectConversationInMain(nextConversation);
+    }).catch(() => selectConversationInMain(nextConversation));
+  }, [detachedChats, selectConversationInMain]);
+  const openConversationInWindow = useCallback((
+    nextConversation: Conversation,
+  ): void => {
+    setActionError(null);
+    if (detachedChats.conversationIds.has(nextConversation.id)) {
+      void detachedChats.focus(nextConversation.id).catch((error: unknown) => {
+        setActionError(error instanceof Error
+          ? error.message
+          : "The chat window could not be focused.");
+      });
+      return;
+    }
+    const preparation = prepareComposerDetachment(nextConversation.id);
+    if (preparation.status === "blocked") {
+      setActionError(preparation.reason);
+      return;
+    }
+    const wasSuppressed = suppressedMainConversationIds.has(
+      nextConversation.id,
+    );
+    const wasSplit = splitConversationId === nextConversation.id;
+    setSuppressedMainConversationIds((current) => {
+      if (current.has(nextConversation.id)) return current;
+      const next = new Set(current);
+      next.add(nextConversation.id);
+      return next;
+    });
+    if (wasSplit) updateSplitConversationId(null);
+
+    // Let React unmount the current composer before the second renderer owns it.
+    void new Promise<void>((resolve) => window.requestAnimationFrame(() => {
+      resolve();
+    })).then(() => detachedChats.open({
+      conversationId: nextConversation.id,
+      title: nextConversation.title.trim() || "Untitled chat",
+    })).catch((error: unknown) => {
+      if (!wasSuppressed) {
+        setSuppressedMainConversationIds((current) => {
+          const next = new Set(current);
+          next.delete(nextConversation.id);
+          return next;
+        });
+      }
+      if (wasSplit) updateSplitConversationId(nextConversation.id);
+      setActionError(error instanceof Error
+        ? error.message
+        : "The chat window could not be opened.");
+    });
+  }, [
+    detachedChats,
+    splitConversationId,
+    suppressedMainConversationIds,
+    updateSplitConversationId,
+  ]);
   const openConversationInSplit = (nextConversation: Conversation): void => {
     if (
       !conversation
@@ -585,6 +692,16 @@ export default function App(): React.JSX.Element {
     ) {
       return;
     }
+    if (detachedChats.conversationIds.has(nextConversation.id)) {
+      void detachedChats.focus(nextConversation.id).catch(() => undefined);
+      return;
+    }
+    setSuppressedMainConversationIds((current) => {
+      if (!current.has(nextConversation.id)) return current;
+      const next = new Set(current);
+      next.delete(nextConversation.id);
+      return next;
+    });
     updateSplitConversationId(nextConversation.id);
     setView("workspace");
     setSidebarOpen(false);
@@ -959,11 +1076,22 @@ export default function App(): React.JSX.Element {
     splitWorkspace,
   ]);
   const visibleSplitScene = useMemo(() => {
+    if (splitConversationDetached) return null;
     const splitScene = splitWorkspace.scene;
+    if (!splitScene) return null;
     const secondaryTools = splitScene?.secondary.tools;
-    if (!splitScene || !secondaryTools) return splitScene;
+    const detachedActions = {
+      onOpenPrimaryInWindow: conversation
+        ? () => openConversationInWindow(conversation)
+        : undefined,
+      onOpenSecondaryInWindow: splitConversation
+        ? () => openConversationInWindow(splitConversation)
+        : undefined,
+    };
+    if (!secondaryTools) return { ...splitScene, ...detachedActions };
     return {
       ...splitScene,
+      ...detachedActions,
       secondary: {
         ...splitScene.secondary,
         tools: {
@@ -975,7 +1103,20 @@ export default function App(): React.JSX.Element {
         },
       },
     };
-  }, [openWorkspaceRunPreview, splitWorkspace.scene]);
+  }, [
+    conversation,
+    openConversationInWindow,
+    openWorkspaceRunPreview,
+    splitConversation,
+    splitConversationDetached,
+    splitWorkspace.scene,
+  ]);
+  const primaryConversationSuppressed = Boolean(
+    conversation && (
+      suppressedMainConversationIds.has(conversation.id)
+      || detachedChats.conversationIds.has(conversation.id)
+    ),
+  );
   const visibleWorkspaceScene = useMemo<WorkspaceSceneProps>(() => ({
     ...workspaceScene,
     chat: {
@@ -991,14 +1132,30 @@ export default function App(): React.JSX.Element {
         onOpenRunPreview: openWorkspaceRunPreview,
       },
     } : null,
+    detachedChat: conversation && primaryConversationSuppressed ? {
+      title: conversation.title,
+      windowOpen: detachedChats.conversationIds.has(conversation.id),
+      onActivate: () => selectConversation(conversation),
+    } : null,
     splitScene: visibleSplitScene,
   }), [
     conversation,
+    detachedChats.conversationIds,
     openWorkspaceRunPreview,
+    primaryConversationSuppressed,
+    selectConversation,
     sendingConversationIds,
     visibleSplitScene,
     workspaceScene,
   ]);
+
+  if (!detachedChats.ready) {
+    return (
+      <main className="app-startup-loading" aria-busy="true">
+        <LoadingMark label="Restoring chat windows" />
+      </main>
+    );
+  }
 
   return (
     <AppLayout
@@ -1024,6 +1181,9 @@ export default function App(): React.JSX.Element {
       project={project}
       conversation={conversation}
       splitConversationId={splitConversation?.id ?? null}
+      detachedConversationIds={detachedChats.conversationIds}
+      detachedChatLimitReached={detachedChats.atLimit}
+      conversationSuppressedInMain={primaryConversationSuppressed}
       sceneActiveTool={sceneHeaderActiveTool}
       sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
       sceneOpenEnvironment={sceneOpenEnvironment}
@@ -1051,6 +1211,7 @@ export default function App(): React.JSX.Element {
         selectProject,
         selectConversation,
         openConversationInSplit,
+        openConversationInWindow,
         closeConversationSplit: () => updateSplitConversationId(null),
         openProviderSetup,
         openBackendSetup,

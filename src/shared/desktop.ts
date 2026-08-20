@@ -149,6 +149,27 @@ export interface DesktopNotificationRequest {
   kind: DesktopNotificationKind;
 }
 
+export const DETACHED_CHAT_WINDOW_LIMIT = 8;
+
+export interface DetachedChatWindowRequest {
+  conversationId: string;
+  title: string;
+}
+
+export interface DetachedChatWindowSummary {
+  conversationId: string;
+  alwaysOnTop: boolean;
+}
+
+export type DesktopWindowContext =
+  | { role: "main" }
+  | ({ role: "detached-chat" } & DetachedChatWindowSummary);
+
+export interface DetachedChatWindowOpenResult
+  extends DetachedChatWindowSummary {
+  disposition: "opened" | "focused";
+}
+
 export interface AppProcessHealth {
   pid: number;
   cpuPercent: number;
@@ -182,6 +203,27 @@ export function parseDesktopNotificationRequest(
     )
   ) return null;
   return value as unknown as DesktopNotificationRequest;
+}
+
+export function parseDetachedChatWindowRequest(
+  value: unknown,
+): DetachedChatWindowRequest | null {
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 2
+    || !keys.every((key) => key === "conversationId" || key === "title")
+    || typeof value.conversationId !== "string"
+    || !UUID_PATTERN.test(value.conversationId)
+    || typeof value.title !== "string"
+  ) return null;
+  const title = value.title.trim();
+  if (
+    title.length === 0
+    || title.length > 120
+    || /[\0\r\n]/u.test(title)
+  ) return null;
+  return { conversationId: value.conversationId, title };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -331,6 +373,27 @@ function plainObject(value: unknown): value is Record<string, unknown> {
 }
 
 export interface DesktopBridge {
+  /** Identifies the main workbench or one main-owned fixed-chat renderer. */
+  getWindowContext: () => Promise<DesktopWindowContext>;
+  /** Opens one native, fixed-conversation chat window or focuses its existing owner. */
+  openDetachedChat: (
+    request: DetachedChatWindowRequest,
+  ) => Promise<DetachedChatWindowOpenResult>;
+  focusDetachedChat: (conversationId: string) => Promise<boolean>;
+  getDetachedChatWindows: () => Promise<DetachedChatWindowSummary[]>;
+  onDetachedChatWindowsChanged: (
+    listener: (windows: DetachedChatWindowSummary[]) => void,
+  ) => () => void;
+  /** Detached-renderer-only controls; the main process validates sender ownership. */
+  setDetachedChatAlwaysOnTop: (
+    alwaysOnTop: boolean,
+  ) => Promise<DetachedChatWindowSummary>;
+  retargetDetachedChat: (
+    request: DetachedChatWindowRequest,
+  ) => Promise<DetachedChatWindowSummary>;
+  /** Explicitly returns the chat to the main workbench. Native close never docks it. */
+  dockDetachedChat: () => Promise<void>;
+  closeDetachedChat: () => Promise<void>;
   getRuntimeConnection: () => Promise<RuntimeConnection>;
   /** Wakes a reconnect attempt without exposing the runtime URL capability. */
   onRuntimeReady: (listener: () => void) => () => void;

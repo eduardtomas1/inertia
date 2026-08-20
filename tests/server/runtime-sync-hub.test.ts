@@ -155,6 +155,85 @@ describe("runtime sync hub", () => {
     expect(runtime.hub.connectionCount).toBe(1);
   });
 
+  it("binds detached hydration and live delivery to its claimed conversation", () => {
+    const runtime = fixture();
+    const fullSnapshot = snapshot(undefined);
+    fullSnapshot.projects = [
+      { id: "project-a", name: "A" },
+      { id: "project-b", name: "B" },
+    ] as AppSnapshot["projects"];
+    fullSnapshot.conversations = [
+      { id: CONVERSATION_A, projectId: "project-a", title: "A" },
+      { id: CONVERSATION_B, projectId: "project-b", title: "B secret" },
+    ] as AppSnapshot["conversations"];
+    const otherApproval = {
+      ...approval(),
+      id: "approval-b",
+      conversationId: CONVERSATION_B,
+    };
+    const otherInput = {
+      ...inputRequest(),
+      id: "input-b",
+      conversationId: CONVERSATION_B,
+    };
+    const otherPlan = { ...plan(), conversationId: CONVERSATION_B };
+
+    runtime.hub.connect("detached", { kind: "none" }, {
+      snapshot: () => fullSnapshot,
+      approvals: [approval(), otherApproval],
+      inputs: [inputRequest(), otherInput],
+      plans: [plan(), otherPlan],
+    }, {
+      kind: "detached-chat",
+      conversationId: CONVERSATION_A,
+      clientId: "window-1",
+    });
+
+    const hydrated = runtime.events.get("detached")!;
+    const welcome = hydrated[0] as Extract<
+      ServerEvent,
+      { type: "server.welcome" }
+    >;
+    expect(welcome.snapshot.conversations.map(({ id }) => id)).toEqual([
+      CONVERSATION_A,
+    ]);
+    expect(JSON.stringify(hydrated)).not.toContain(CONVERSATION_B);
+    expect(hydrated.map(({ type }) => type)).toEqual([
+      "server.welcome",
+      "agent.approval.requested",
+      "agent.input.requested",
+      "agent.plan.updated",
+      "runtime.sync.completed",
+    ]);
+
+    runtime.hub.setConversationSubscription(
+      "detached",
+      "secondary",
+      CONVERSATION_B,
+    );
+    hydrated.length = 0;
+    runtime.hub.broadcast({
+      type: "agent.text",
+      conversationId: CONVERSATION_B,
+      runId: "run-b",
+      turnId: "turn-b",
+      text: "secret-b",
+    });
+    runtime.hub.broadcast({
+      type: "agent.text",
+      conversationId: CONVERSATION_A,
+      runId: "run-a",
+      turnId: "turn-a",
+      text: "visible-a",
+    });
+    expect(hydrated[0]).toMatchObject({ type: "runtime.cursor" });
+    expect(hydrated[1]).toMatchObject({
+      type: "runtime.event",
+      event: { type: "agent.text", text: "visible-a" },
+    });
+    expect(JSON.stringify(hydrated)).not.toContain("secret-b");
+  });
+
   it("owns a fresh socket before sending welcome so an immediate disconnect is not leaked", () => {
     let hub: RuntimeSyncHub<string>;
     const events: ServerEvent[] = [];

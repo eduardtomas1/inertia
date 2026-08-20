@@ -31,10 +31,13 @@ export default defineConfig({
       target: "node22",
       sourcemap: false,
       rollupOptions: {
-        input: resolve("src/preload/index.ts"),
+        input: {
+          index: resolve("src/preload/index.ts"),
+          "detached-chat": resolve("src/preload/detached-chat.ts"),
+        },
         output: {
           format: "cjs",
-          entryFileNames: "index.cjs",
+          entryFileNames: "[name].cjs",
         },
       },
     },
@@ -58,6 +61,16 @@ export default defineConfig({
         input: resolve("src/renderer/index.html"),
         output: {
           onlyExplicitManualChunks: true,
+          chunkFileNames({ name }) {
+            const compactNames: Record<string, string> = {
+              attentionVisibility: "chat",
+              "terminal-turn-projection": "turn",
+              timelineFocus: "focus",
+              "archive-restore": "restore",
+              workspaceFileReference: "file-ref",
+            };
+            return `assets/${compactNames[name] ?? name}-[hash].js`;
+          },
           manualChunks(id) {
             const normalizedId = id.replaceAll("\\", "/");
             if (normalizedId.endsWith(

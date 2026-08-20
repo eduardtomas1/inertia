@@ -90,6 +90,7 @@ export interface ComposerToolbarProps {
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onInsertSkill: (skill: AgentSkillSummary) => void;
   promptPresets: readonly PromptPreset[];
+  promptPresetsEnabled: boolean;
   currentPrompt: string;
   onApplyPromptPreset: (preset: PromptPreset) => Promise<boolean>;
   onPromptPresetCommand: PromptPresetCommandRunner;
@@ -154,6 +155,7 @@ export function ComposerToolbar({
   onListSkills,
   onInsertSkill,
   promptPresets,
+  promptPresetsEnabled,
   currentPrompt,
   onApplyPromptPreset,
   onPromptPresetCommand,
@@ -320,31 +322,33 @@ export function ComposerToolbar({
         >
           <MessagesSquare size={16} />
         </IconButton>
-        <Suspense fallback={null}>
-          <PromptPresetMenu
-            presets={promptPresets}
-            currentMessage={currentPrompt}
-            currentRoute={{
-              harnessId: conversation.modelSelection.harnessId,
-              backendProfileId: conversation.modelSelection.backendProfileId,
-              modelId: conversation.modelSelection.modelId,
-              reasoningEffort: conversation.modelSelection.reasoningEffort,
-              ...((selectedModel?.fastMode || selectedFastMode)
-                && routeSupportsNativeFastModeIdentity(
-                  conversation.modelSelection,
-                )
-                ? {
-                    fastMode: modelSelectionUsesFastMode(
-                      conversation.modelSelection,
-                    ),
-                  }
-                : {}),
-            }}
-            menuController={menuController}
-            onApply={onApplyPromptPreset}
-            onCommand={onPromptPresetCommand}
-          />
-        </Suspense>
+        {promptPresetsEnabled && (
+          <Suspense fallback={null}>
+            <PromptPresetMenu
+              presets={promptPresets}
+              currentMessage={currentPrompt}
+              currentRoute={{
+                harnessId: conversation.modelSelection.harnessId,
+                backendProfileId: conversation.modelSelection.backendProfileId,
+                modelId: conversation.modelSelection.modelId,
+                reasoningEffort: conversation.modelSelection.reasoningEffort,
+                ...((selectedModel?.fastMode || selectedFastMode)
+                  && routeSupportsNativeFastModeIdentity(
+                    conversation.modelSelection,
+                  )
+                  ? {
+                      fastMode: modelSelectionUsesFastMode(
+                        conversation.modelSelection,
+                      ),
+                    }
+                  : {}),
+              }}
+              menuController={menuController}
+              onApply={onApplyPromptPreset}
+              onCommand={onPromptPresetCommand}
+            />
+          </Suspense>
+        )}
         <Suspense fallback={null}>
           <PromptStashMenu
             entries={promptStash}

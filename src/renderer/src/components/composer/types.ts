@@ -46,6 +46,7 @@ export interface ComposerProps {
   skillsCapability: AgentWorkflowSkillsCapability | null;
   skillsLoading: boolean;
   skillsError: string | null;
+  promptPresetsEnabled?: boolean;
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];

@@ -10,7 +10,11 @@ import { createPortal } from "react-dom";
 
 import type { WorkspaceFilePreview } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import { trapModalFocus } from "../utils/modalFocus";
+import {
+  captureModalFocus,
+  focusOnAnimationFrame,
+  trapModalFocus,
+} from "../utils/modalFocus";
 import { LoadingMark } from "./ui";
 
 function normalizedEditorText(value: string): string {
@@ -68,13 +72,11 @@ export function FileEditorDialog({
   useNativePreviewSuspension(true);
 
   useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const frame = window.requestAnimationFrame(() => editorRef.current?.focus());
+    const restoreFocus = captureModalFocus();
+    const cancelFocus = focusOnAnimationFrame(() => editorRef.current?.focus());
     return () => {
-      window.cancelAnimationFrame(frame);
-      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      cancelFocus();
+      restoreFocus();
     };
   }, []);
 

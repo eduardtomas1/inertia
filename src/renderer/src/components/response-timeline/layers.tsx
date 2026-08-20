@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Link2, MessagesSquare, RotateCcw } from "lucide-react";
+import { MessagesSquare, RotateCcw } from "lucide-react";
 import clsx from "clsx";
 import type {
   ChatMessage,
@@ -118,7 +118,7 @@ export function UserRequestLayer({
         label="Request attachments"
       />
       {contextPackets.length > 0 && (
-        <div className="sent-conversation-context" aria-label="Shared chat context">
+        <div className="sent-context" aria-label="Shared chat context">
           {contextPackets.map((packet) => (
             <span key={packet.id} data-source-state={packet.sourceState}>
               <MessagesSquare size={13} aria-hidden="true" />
@@ -127,12 +127,9 @@ export function UserRequestLayer({
                 <small>
                   {packet.sourceState === "deleted"
                     ? "Source chat deleted · immutable sent excerpt"
-                    : `${packet.sourceProjectName} · ${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}`}
+                    : `${packet.sourceProjectName} · ${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}${packet.workspaceRelation === "different-workspace" ? " · different workspace" : ""}`}
                 </small>
               </span>
-              {packet.workspaceRelation === "different-workspace" && (
-                <Link2 size={12} aria-label="Different workspace" />
-              )}
             </span>
           ))}
         </div>

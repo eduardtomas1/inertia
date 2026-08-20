@@ -40,7 +40,11 @@ import clsx from "clsx";
 import type { AppSnapshot, Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
 import { formatRelativeTime } from "../lib/format";
 import { agentRequestProviderName } from "../utils/agentInput";
-import { trapModalFocus } from "../utils/modalFocus";
+import {
+  captureModalFocus,
+  focusOnAnimationFrame,
+  trapModalFocus,
+} from "../utils/modalFocus";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
@@ -290,8 +294,8 @@ function SidebarView({
   useEffect(() => {
     if (!mobile || !open) return;
     const sidebar = sidebarRef.current;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const frame = window.requestAnimationFrame(() => (
+    const restoreFocus = captureModalFocus();
+    const cancelFocus = focusOnAnimationFrame(() => (
       sidebar?.querySelector<HTMLElement>('[aria-label="Close navigation"]')?.focus({ preventScroll: true })
     ));
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -304,9 +308,9 @@ function SidebarView({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
-      window.cancelAnimationFrame(frame);
+      cancelFocus();
       document.removeEventListener("keydown", onKeyDown);
-      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      restoreFocus();
     };
   }, [mobile, open]);
 

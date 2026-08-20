@@ -14,7 +14,7 @@ import {
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
 import { unreviewedCommitHunks } from "../lib/commitReview";
-import { trapModalFocus } from "../utils/modalFocus";
+import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { IconButton, LoadingMark } from "./ui";
 
 export type CommitDialogProps = {
@@ -213,11 +213,11 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
   }, [open, status?.files]);
   useEffect(() => {
     if (!open) return;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const restoreFocus = captureModalFocus(false);
     const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0);
     return () => {
       window.clearTimeout(focusTimer);
-      if (previous?.isConnected) previous.focus();
+      restoreFocus();
     };
   }, [open]);
   useEffect(() => {

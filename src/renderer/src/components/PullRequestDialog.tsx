@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
-import { trapModalFocus } from "../utils/modalFocus";
+import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import type { GitForge, ServerEvent } from "@shared/contracts";
 import { IconButton, LoadingMark } from "./ui";
 
@@ -54,15 +54,13 @@ export function PullRequestDialog({
   useEffect(() => {
     if (!open) return;
     setTitle(initialTitleRef.current);
-    const previous = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+    const restoreFocus = captureModalFocus(false);
     const timer = window.setTimeout(() => {
       (titleRef.current ?? primaryActionRef.current)?.focus();
     }, 0);
     return () => {
       window.clearTimeout(timer);
-      if (previous?.isConnected) previous.focus();
+      restoreFocus();
     };
   }, [open]);
   if (!open) return null;

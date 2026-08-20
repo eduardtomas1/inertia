@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import { trapModalFocus } from "../utils/modalFocus";
+import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { IconButton } from "./ui";
 
 type CommandPaletteProps = {
@@ -55,13 +55,9 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
 
   useLayoutEffect(() => {
     if (!open) return;
-    const previous = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+    const restoreFocus = captureModalFocus(false);
     searchRef.current?.focus();
-    return () => {
-      if (previous?.isConnected) previous.focus();
-    };
+    return restoreFocus;
   }, [open]);
 
   const allItems = useMemo(() => {

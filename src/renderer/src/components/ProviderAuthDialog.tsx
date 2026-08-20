@@ -21,7 +21,7 @@ import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { ProviderAuthBrowserUrlDetector } from "../utils/providerAuthBrowser";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
-import { trapModalFocus } from "../utils/modalFocus";
+import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { IconButton, LoadingMark } from "./ui";
 import "./ProviderAuthDialog.css";
 
@@ -245,7 +245,7 @@ export function ProviderAuthDialog({
 
   useEffect(() => {
     if (!providerId) return;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const restoreFocus = captureModalFocus(false);
     const dialog = dialogRef.current;
     const pendingOutput = pendingOutputRef.current;
     requestAnimationFrame(() => dialog?.querySelector<HTMLElement>("button")?.focus());
@@ -261,7 +261,7 @@ export function ProviderAuthDialog({
     return () => {
       document.removeEventListener("keydown", onKeyDown);
       pendingOutput.clear();
-      previous?.focus();
+      restoreFocus();
     };
   }, [closeDialog, providerId]);
 

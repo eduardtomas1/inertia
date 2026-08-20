@@ -1,4 +1,4 @@
-import { ArrowUpRight, MessagesSquare, Trash2 } from "lucide-react";
+import { MessagesSquare, X } from "lucide-react";
 import type { ConversationContextPacketSummary } from "@shared/contracts";
 import "./ConversationContextPacketStrip.css";
 
@@ -15,19 +15,19 @@ export function ConversationContextPacketStrip({
 }): React.JSX.Element | null {
   if (packets.length === 0) return null;
   return (
-    <div className="conversation-context-strip" aria-label="Selected chat context">
+    <div className="p-s" aria-label="Selected chat context">
       {packets.map((packet) => (
         <article
           key={packet.id}
-          className="conversation-context-card"
+          className="p-c"
           data-workspace-relation={packet.workspaceRelation}
         >
-          <span className="conversation-context-card-mark" aria-hidden="true">
+          <span className="p-m" aria-hidden="true">
             <MessagesSquare size={14} />
           </span>
           <button
             type="button"
-            className="conversation-context-card-open"
+            className="p-o"
             onClick={() => onPreview(packet.id)}
           >
             <span>
@@ -40,16 +40,16 @@ export function ConversationContextPacketStrip({
                   : ""}
               </small>
             </span>
-            <ArrowUpRight size={12} aria-hidden="true" />
+            <span aria-hidden="true">↗</span>
           </button>
           <button
             type="button"
-            className="conversation-context-card-remove"
+            className="p-r"
             aria-label={`Remove context from ${packet.sourceConversationTitle}`}
             disabled={disabled}
             onClick={() => onRemove(packet.id)}
           >
-            <Trash2 size={12} />
+            <X size={12} />
           </button>
         </article>
       ))}

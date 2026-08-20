@@ -22,7 +22,11 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
 import { formatCompact, formatCount, formatDuration } from "../lib/usageFormat";
-import { trapModalFocus } from "../utils/modalFocus";
+import {
+  captureModalFocus,
+  focusOnAnimationFrame,
+  trapModalFocus,
+} from "../utils/modalFocus";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { ProviderMark } from "./ProviderMark";
 import { IconButton, LoadingMark } from "./ui";
@@ -172,10 +176,8 @@ export function DailyWorkDialog({
   useNativePreviewSuspension(true);
 
   useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
+    const restoreFocus = captureModalFocus();
+    const cancelFocus = focusOnAnimationFrame(() => closeRef.current?.focus());
     const closeOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -184,9 +186,9 @@ export function DailyWorkDialog({
     };
     document.addEventListener("keydown", closeOnEscape, true);
     return () => {
-      window.cancelAnimationFrame(frame);
+      cancelFocus();
       document.removeEventListener("keydown", closeOnEscape, true);
-      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      restoreFocus();
     };
   }, [onClose]);
 

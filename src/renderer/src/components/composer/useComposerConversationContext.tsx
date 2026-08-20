@@ -1,7 +1,6 @@
 import {
   lazy,
   Suspense,
-  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -15,16 +14,12 @@ import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
 } from "../conversation-context/types";
+import { ConversationContextPacketStrip } from "../conversation-context/ConversationContextPacketStrip";
 
 const ConversationContextDialog = lazy(async () => ({
   default: (await import("../conversation-context/ConversationContextDialog"))
     .ConversationContextDialog,
 }));
-const ConversationContextPacketStrip = lazy(async () => ({
-  default: (await import("../conversation-context/ConversationContextPacketStrip"))
-    .ConversationContextPacketStrip,
-}));
-
 type ContextDialogState =
   | { kind: "create" }
   | { kind: "preview"; packetId: string }
@@ -73,13 +68,13 @@ export function useComposerConversationContext(input: {
     () => draftContextPackets.map(({ id }) => id),
     [draftContextPackets],
   );
-  const remove = useCallback(async (packetId: string): Promise<void> => {
+  const remove = async (packetId: string): Promise<void> => {
     if (!onCommand) return;
     await onCommand("conversation.context.remove", {
       type: "conversation.context.remove",
       payload: { packetId, targetConversationId: conversationId },
     });
-  }, [conversationId, onCommand]);
+  };
 
   return {
     contextPacketIds,
@@ -101,16 +96,14 @@ export function ComposerConversationContextStrip({
 }): React.JSX.Element | null {
   if (controller.draftContextPackets.length === 0) return null;
   return (
-    <Suspense fallback={null}>
-      <ConversationContextPacketStrip
-        packets={controller.draftContextPackets}
-        disabled={disabled}
-        onPreview={controller.openPreview}
-        onRemove={(packetId) => {
-          void controller.remove(packetId).catch(() => undefined);
-        }}
-      />
-    </Suspense>
+    <ConversationContextPacketStrip
+      packets={controller.draftContextPackets}
+      disabled={disabled}
+      onPreview={controller.openPreview}
+      onRemove={(packetId) => {
+        void controller.remove(packetId).catch(() => undefined);
+      }}
+    />
   );
 }
 

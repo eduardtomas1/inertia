@@ -1,11 +1,11 @@
-.conversation-context-strip {
+.p-s {
   display: flex;
   padding: 0 12px 8px;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.conversation-context-card {
+.p-c {
   display: grid;
   min-width: min(310px, 100%);
   max-width: 420px;
@@ -18,19 +18,19 @@
   background: color-mix(in srgb, var(--accent-soft) 24%, var(--surface));
 }
 
-.conversation-context-card[data-workspace-relation="different-workspace"] {
+.p-c[data-workspace-relation="different-workspace"] {
   border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
   background: color-mix(in srgb, var(--warning) 7%, var(--surface));
 }
 
-.conversation-context-card-mark {
+.p-m {
   display: grid;
   width: 34px;
   place-items: center;
   color: var(--accent-strong);
 }
 
-.conversation-context-card-open {
+.p-o {
   display: grid;
   min-width: 0;
   padding: 6px 4px;
@@ -41,14 +41,14 @@
   text-align: left;
 }
 
-.conversation-context-card-open > span { display: grid; min-width: 0; gap: 2px; }
-.conversation-context-card-open strong,
-.conversation-context-card-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-context-card-open strong { color: var(--text); font-size: 11px; font-weight: 620; }
-.conversation-context-card-open small { color: var(--text-muted); font-size: 10px; }
-.conversation-context-card-open:hover strong { color: var(--accent-strong); }
+.p-o > span { display: grid; min-width: 0; gap: 2px; }
+.p-o strong,
+.p-o small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p-o strong { color: var(--text); font-size: 11px; font-weight: 620; }
+.p-o small { color: var(--text-muted); font-size: 10px; }
+.p-o:hover strong { color: var(--accent-strong); }
 
-.conversation-context-card-remove {
+.p-r {
   display: grid;
   width: 30px;
   height: 30px;
@@ -58,7 +58,7 @@
   color: var(--text-faint);
 }
 
-.conversation-context-card-remove:hover:not(:disabled) {
+.p-r:hover:not(:disabled) {
   color: var(--danger);
   background: var(--surface-hover);
 }

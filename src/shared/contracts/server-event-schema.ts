@@ -13,7 +13,7 @@ import { dailyWorkDashboardSchema } from "./daily-work-schema";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { COLOR_THEME_IDS } from "./app";
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
-type UnknownRecord = Record<string, unknown>;
+type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "opencode"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 
 function record(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -57,7 +57,7 @@ function oneOf(value: UnknownRecord, key: string, options: readonly string[]): b
 }
 
 function providerId(value: UnknownRecord, key: string): boolean {
-  return oneOf(value, key, ["codex", "claude", "cursor", "opencode"]);
+  return oneOf(value, key, PROVIDER_IDS);
 }
 function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownRecord {
   return record(value) && keys.every((key) => stringField(value, key));
@@ -162,7 +162,7 @@ function project(value: unknown): boolean {
     && nullableStringField(value, "repositoryIdentity")
     && nullableStringField(value, "repositoryRoot")
     && (value.groupingMode === null
-      || oneOf(value, "groupingMode", ["repository", "repository-path", "separate"]))
+      || oneOf(value, "groupingMode", PROJECT_GROUPING))
     && integerField(value, "gitRepositoryLimit")
     && Number(value.gitRepositoryLimit) >= 1;
 }
@@ -206,8 +206,8 @@ function conversation(value: unknown): value is UnknownRecord {
     "updatedAt",
   )
     && providerId(value, "providerId")
-    && oneOf(value, "interactionMode", ["build", "plan"])
-    && oneOf(value, "accessMode", ["supervised", "auto-edit", "full"])
+    && oneOf(value, "interactionMode", INTERACTION_MODES)
+    && oneOf(value, "accessMode", ACCESS_MODES)
     && oneOf(value, "status", ["idle", "running", "needs-input", "completed", "failed"])
     && modelSelection(value.modelSelection)
     && (value.continuationIdentity === null
@@ -327,16 +327,16 @@ function appSettings(value: unknown): boolean {
   const enums = {
     theme: ["system", "light", "dark"],
     colorTheme: COLOR_THEME_IDS,
-    defaultProvider: ["codex", "claude", "cursor", "opencode"],
-    defaultAccessMode: ["supervised", "auto-edit", "full"],
+    defaultProvider: PROVIDER_IDS,
+    defaultAccessMode: ACCESS_MODES,
     newThreadMode: ["local", "worktree"],
     usageDisplayMode: ["expanded", "compact", "hidden"],
     interfaceScale: ["compact", "default", "comfortable", "large"],
     responseDensity: ["compact", "default", "comfortable"],
     workspaceStartupSurface: ["summary", "tools"],
     sidebarMode: ["classic", "activity"],
-    projectGrouping: ["repository", "repository-path", "separate"],
-    defaultInteractionMode: ["build", "plan"],
+    projectGrouping: PROJECT_GROUPING,
+    defaultInteractionMode: INTERACTION_MODES,
   } as const;
   const booleans = [
     "compactSidebar", "showTimestamps", "wrapDiffs", "ignoreWhitespace",
@@ -352,7 +352,7 @@ function appSettings(value: unknown): boolean {
     && Number(value.terminalFontSize) <= 22
     && record(value.providerIdentityLabels)
     && Object.entries(value.providerIdentityLabels).every(([key, label]) => (
-      ["codex", "claude", "cursor", "opencode"].includes(key)
+      PROVIDER_IDS.includes(key as typeof PROVIDER_IDS[number])
       && typeof label === "string"
       && label.length >= 1
       && label.length <= 48
@@ -403,7 +403,7 @@ function threadUsage(value: unknown): boolean {
       "reasoningOutputTokens",
     ].every((key) => nullableNumberField(value, key))
     && (value.totalProcessedScope === null
-      || oneOf(value, "totalProcessedScope", ["thread", "session", "run"]))
+      || oneOf(value, "totalProcessedScope", USAGE_SCOPES))
     && (value.compactsAutomatically === null
       || booleanField(value, "compactsAutomatically"));
 }
@@ -482,26 +482,26 @@ function approvalRequest(value: unknown): boolean {
 function conversationContextExcerpt(value: unknown): boolean {
   return recordWithStrings(value, "sourceMessageId", "role", "content", "createdAt") && nullableStringField(value, "sourceTurnId")
     && oneOf(value, "role", ["user", "assistant"]) && booleanField(value, "truncated") && (value.content as string).length > 0
-    && new TextEncoder().encode(value.content as string).byteLength <= MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
+    && UTF8_ENCODER.encode(value.content as string).byteLength <= MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
 }
-function conversationContextPacketSummary(value: unknown): boolean {
+function conversationContextPacketSummary(value: unknown): value is UnknownRecord {
   return recordWithStrings(value, "id", "sourceConversationId", "targetConversationId", "sourceProjectId", "targetProjectId", "sourceConversationTitle", "sourceProjectName", "sourceWorkspaceLabel", "targetWorkspaceLabel", "workspaceRelation", "createdAt", "sourceState")
-    && oneOf(value, "workspaceRelation", ["same-workspace", "different-workspace"]) && oneOf(value, "sourceState", ["available", "deleted"])
-    && nullableStringField(value, "note") && (value.note === null || new TextEncoder().encode(value.note as string).byteLength <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
+    && oneOf(value, "workspaceRelation", WORKSPACE_RELATIONS) && oneOf(value, "sourceState", ["available", "deleted"])
+    && nullableStringField(value, "note") && (value.note === null || UTF8_ENCODER.encode(value.note as string).byteLength <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
     && nullableStringField(value, "consumedMessageId") && nullableStringField(value, "consumedAt")
-    && integerField(value, "messageCount") && Number(value.messageCount) >= 1 && Number(value.messageCount) <= MAX_CONVERSATION_CONTEXT_MESSAGES
-    && integerField(value, "characterCount") && Number(value.characterCount) >= 1 && Number(value.characterCount) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES;
+    && integerField(value, "messageCount") && (value.messageCount as number) >= 1 && (value.messageCount as number) <= MAX_CONVERSATION_CONTEXT_MESSAGES
+    && integerField(value, "characterCount") && (value.characterCount as number) >= 1 && (value.characterCount as number) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES;
 }
 function conversationContextPacket(value: unknown): boolean {
-  if (!conversationContextPacketSummary(value) || !record(value) || !arrayOf(value.excerpts, conversationContextExcerpt)
+  if (!conversationContextPacketSummary(value) || !arrayOf(value.excerpts, conversationContextExcerpt)
     || (value.excerpts as unknown[]).length !== value.messageCount || !uniqueRecordField(value.excerpts as unknown[], "sourceMessageId")) return false;
   const excerpts = value.excerpts as UnknownRecord[];
-  return excerpts.reduce((total, excerpt) => total + new TextEncoder().encode(excerpt.content as string).byteLength, 0) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
+  return excerpts.reduce((total, excerpt) => total + UTF8_ENCODER.encode(excerpt.content as string).byteLength, 0) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
     && excerpts.reduce((total, excerpt) => total + (excerpt.content as string).length, 0) === value.characterCount;
 }
 function conversationContextSource(value: unknown): boolean {
   return recordWithStrings(value, "conversationId", "projectId", "conversationTitle", "projectName", "workspaceLabel", "targetConversationId", "targetProjectId", "targetWorkspaceLabel", "workspaceRelation")
-    && oneOf(value, "workspaceRelation", ["same-workspace", "different-workspace"]) && arrayOf(value.messages, conversationContextExcerpt)
+    && oneOf(value, "workspaceRelation", WORKSPACE_RELATIONS) && arrayOf(value.messages, conversationContextExcerpt)
     && (value.messages as unknown[]).length <= MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES && uniqueRecordField(value.messages as unknown[], "sourceMessageId");
 }
 function inputRequest(value: unknown): boolean {
@@ -808,8 +808,8 @@ function workspaceGitDiff(value: unknown): boolean {
 function turnGitDiff(value: unknown): boolean {
   return gitDiff(value)
     && recordWithStrings(value, "artifactId", "turnId", "title")
-    && oneOf(value, "completeness", ["complete", "truncated", "partial", "unavailable"])
-    && oneOf(value, "patchState", ["none", "available", "truncated", "expired", "failed"]);
+    && oneOf(value, "completeness", COMPLETENESS)
+    && oneOf(value, "patchState", PATCH_STATES);
 }
 
 function reversalValidation(value: unknown): boolean {
@@ -898,7 +898,7 @@ function turnUsage(value: unknown): boolean {
       "reasoningOutputTokens",
     ].every((key) => nullableNumberField(value, key))
     && (value.totalProcessedScope === null
-      || oneOf(value, "totalProcessedScope", ["thread", "session", "run"]))
+      || oneOf(value, "totalProcessedScope", USAGE_SCOPES))
     && (value.compactsAutomatically === null
       || booleanField(value, "compactsAutomatically"))
     && (!("providerSessionBound" in value) || booleanField(value, "providerSessionBound"));
@@ -966,8 +966,8 @@ function turnGitArtifact(value: unknown): boolean {
     && integerField(value, "insertions")
     && integerField(value, "deletions")
     && oneOf(value, "status", ["pending", "ready", "partial", "unavailable", "failed"])
-    && oneOf(value, "completeness", ["complete", "truncated", "partial", "unavailable"])
-    && oneOf(value, "patchState", ["none", "available", "truncated", "expired", "failed"]);
+    && oneOf(value, "completeness", COMPLETENESS)
+    && oneOf(value, "patchState", PATCH_STATES);
 }
 
 function agentReasoning(value: unknown): boolean {
@@ -1113,7 +1113,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
     && oneOf(value, "disposition", ["new-turn", "follow-up"]),
-  "conversation.compacted": (value) => recordWithStrings(value, "conversationId", "providerId", "message") && oneOf(value, "providerId", ["codex", "claude", "cursor", "opencode"]) && booleanField(value, "instructionForwarded"),
+  "conversation.compacted": (value) => recordWithStrings(value, "conversationId", "providerId", "message") && oneOf(value, "providerId", PROVIDER_IDS) && booleanField(value, "instructionForwarded"),
   "backend.profile": (value) => backendProfile(value.profile, true),
   "backend.profile.probe": (value) => backendProfile(value.profile, true),
   "backend.default": (value) => value.value === null || backendDefault(value.value),

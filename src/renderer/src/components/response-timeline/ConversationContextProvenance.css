@@ -1,15 +1,15 @@
-.sent-conversation-context {
+.sent-context {
   display: grid;
   gap: 6px;
   margin-top: 8px;
 }
 
-.sent-conversation-context > span {
+.sent-context > span {
   display: grid;
   width: fit-content;
   max-width: min(100%, 440px);
   padding: 7px 9px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
@@ -18,31 +18,31 @@
   background: color-mix(in srgb, var(--accent-soft) 22%, transparent);
 }
 
-.sent-conversation-context > span[data-source-state="deleted"] {
+.sent-context > span[data-source-state="deleted"] {
   border-style: dashed;
   color: var(--text-muted);
 }
 
-.sent-conversation-context > span > span {
+.sent-context > span > span {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.sent-conversation-context strong,
-.sent-conversation-context small {
+.sent-context strong,
+.sent-context small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sent-conversation-context strong {
+.sent-context strong {
   color: var(--text-soft);
   font-size: 11px;
   font-weight: 620;
 }
 
-.sent-conversation-context small {
+.sent-context small {
   color: var(--text-muted);
   font-size: 10px;
 }

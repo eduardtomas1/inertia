@@ -36,7 +36,7 @@ import {
   selectedModelSearchRoute,
   type ComposerModelRoute,
 } from "../utils/modelChooserRoutes";
-import { trapModalFocus } from "../utils/modalFocus";
+import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import {
   initialMultiSpawnDraft,
   projectsShareLocalCheckout,
@@ -401,9 +401,7 @@ export function MultiSpawnDialog({
   useEffect(() => {
     if (!open) return;
     restoreFocusRef.current = true;
-    const previous = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+    const restoreFocus = captureModalFocus();
     const frame = window.requestAnimationFrame(() => {
       const dialog = dialogRef.current;
       const active = document.activeElement;
@@ -417,9 +415,7 @@ export function MultiSpawnDialog({
     });
     return () => {
       window.cancelAnimationFrame(frame);
-      if (restoreFocusRef.current && previous?.isConnected) {
-        previous.focus({ preventScroll: true });
-      }
+      if (restoreFocusRef.current) restoreFocus();
     };
   }, [open]);
 

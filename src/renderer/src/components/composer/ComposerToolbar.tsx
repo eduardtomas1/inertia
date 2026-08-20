@@ -64,6 +64,15 @@ const ComposerMoreMenu = lazy(async () => ({
   default: (await import("./ComposerMoreMenu")).ComposerMoreMenu,
 }));
 
+export function composerCheckoutBranch(
+  conversation: Pick<Conversation, "branch" | "worktreePath">,
+  checkoutBranch: string | null | undefined,
+): string {
+  return (conversation.worktreePath
+    ? conversation.branch ?? checkoutBranch
+    : checkoutBranch ?? conversation.branch) ?? "Detached HEAD";
+}
+
 export interface ComposerToolbarProps {
   actions: ProjectAction[];
   disabled: boolean;
@@ -179,6 +188,10 @@ export function ComposerToolbar({
 }: ComposerToolbarProps): React.JSX.Element {
   const canAttachWhileRunning = supportsActiveParentFollowUp(
     latestTurn?.harnessId ?? null,
+  );
+  const visibleCheckoutBranch = composerCheckoutBranch(
+    conversation,
+    checkoutBranch,
   );
   const {
     menu,
@@ -481,12 +494,10 @@ export function ComposerToolbar({
         </span>
         <span
           className="composer-checkout-branch"
-          title={conversation.branch ?? checkoutBranch ?? "Detached HEAD"}
+          title={visibleCheckoutBranch}
         >
           <GitBranch size={12} aria-hidden="true" />
-          <code translate="no">
-            {conversation.branch ?? checkoutBranch ?? "Detached HEAD"}
-          </code>
+          <code translate="no">{visibleCheckoutBranch}</code>
         </span>
       </div>
     </div>

@@ -18,7 +18,7 @@ import { normalizeIdentityPath } from "../project-identity";
 import type { ProviderManager } from "../providers";
 import type { ProviderGoalSnapshot } from "../provider/contracts";
 import { RuntimeRequestError } from "../runtime-errors";
-import { mentionedSkillNames } from "./agent-skill-invocation";
+import { containsPotentialSkillInvocation, mentionedSkillNames, skillDiscoveryIsFresh } from "./agent-skill-invocation";
 
 const MAX_SKILLS = 128;
 const SKILL_CAPABILITY_TTL_MS = 30 * 60 * 1_000;
@@ -1060,40 +1060,49 @@ export class AgentWorkflowController {
     routeKey: string | null;
   }> {
     this.pruneSkills();
-    if (!content.includes("$")) {
-      return { inputs: [], routeKey: null };
-    }
+    if (!content.includes("$")) return { inputs: [], routeKey: null };
     const conversation = this.store.conversation(conversationId);
-    const routeKey = this.skillRouteKey(
-      conversation,
-      this.store.conversationPath(conversationId),
-    );
+    const routeKey = this.skillRouteKey(conversation, this.store.conversationPath(conversationId));
     const cachedSummaries = [...this.skills.values()]
-      .filter((capability) =>
-        capability.summary.conversationId === conversationId
-        && capability.routeKey === routeKey
-        && capability.summary.enabled)
+      .filter(({ summary, routeKey: capabilityRoute }) =>
+        summary.conversationId === conversationId
+        && capabilityRoute === routeKey && summary.enabled)
       .map(({ summary }) => summary);
-    const cachedNames = mentionedSkillNames(
-      content,
-      cachedSummaries.map(({ name }) => name),
-    );
+    const cachedNames = mentionedSkillNames(content,
+      cachedSummaries.map(({ name }) => name));
     if (cachedNames.length === 0) {
-      // A dollar sign is ordinary prompt content unless it exactly names a
-      // capability already discovered for this route. This avoids putting
-      // currency and shell snippets on the provider discovery hot path. The
-      // visible token still reaches providers that interpret it natively.
-      return { inputs: [], routeKey: null };
+      const supportsSkills = isNativeCodexConversation(conversation)
+        || isNativeClaudeConversation(conversation);
+      const discovery = this.skillDiscovery.get(conversationId);
+      if (
+        !supportsSkills
+        || !containsPotentialSkillInvocation(content)
+        || (
+          discovery?.routeKey === routeKey
+          && skillDiscoveryIsFresh(
+            discovery.state.synchronizedAt, this.clock().getTime(),
+            SKILL_CAPABILITY_TTL_MS,
+          )
+        )
+      ) return { inputs: [], routeKey: null };
     }
-    // Revalidate through the provider's normal cache without forcing a costly
-    // filesystem/control-plane refresh for every invocation.
     await this.listSkills(conversationId, false);
-    if (cachedNames.length > 8) {
+    const names = mentionedSkillNames(content, [...this.skills.values()]
+      .filter(({ summary, routeKey: capabilityRoute }) =>
+        summary.conversationId === conversationId
+        && capabilityRoute === routeKey && summary.enabled)
+      .map(({ summary }) => summary.name));
+    const missingCachedName = cachedNames.find((name) => !names.includes(name));
+    if (missingCachedName) {
       throw new RuntimeRequestError(
-        "Invoke at most eight skills in one message.",
+        `The invoked skill $${missingCachedName} is no longer available. `
+        + "Refresh skills and try again.",
       );
     }
-    const inputs = cachedNames.map((name) => {
+    if (names.length > 8) throw new RuntimeRequestError(
+      "Invoke at most eight skills in one message.",
+    );
+    const inputs = names.map((name) => {
       const matches = [...this.skills.values()].filter((capability) =>
         capability.summary.conversationId === conversationId
         && capability.routeKey === routeKey

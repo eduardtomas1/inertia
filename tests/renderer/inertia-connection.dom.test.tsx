@@ -49,7 +49,10 @@ describe("useInertiaConnection", () => {
   it("reconnects immediately when the utility runtime announces readiness", async () => {
     let announceReady: (() => void) | undefined;
     const getRuntimeConnection = vi.fn()
-      .mockRejectedValueOnce(new Error("The local service is starting."))
+      .mockResolvedValueOnce({
+        unavailable: true,
+        message: "The local service is starting.",
+      })
       .mockResolvedValue({
         websocketUrl: "ws://127.0.0.1:12345/runtime/test",
       });

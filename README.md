@@ -32,6 +32,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
 - Continue an eligible native Codex, Claude, Cursor, Kimi Code, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle.
 - Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
+- Generate a Discord release summary from the latest GitHub or GitLab release diff, grouped into improvements, implementations, bugs, and other changes.
 - Recover local history from validated rotating SQLite backups, or use explicit native-dialog export and import flows when manual recovery is required.
 - Open the optional Inertia Private Connect PWA through your private Tailscale network without exposing files, terminals, approvals, Git, provider settings, or Full Access to the browser.
 - Search commands, projects, and threads from one keyboard-friendly palette.
@@ -138,6 +139,10 @@ Inertia does not estimate price from a model name or send usage to a hosted anal
 - Use native Kimi Code, the built-in Kimi coding profile through the Claude harness, or a compatible custom endpoint with explicit models and routing.
 - Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
 - Choose whether Inertia opens on the compact Environment summary or the full workspace tools; fresh installs use Environment, and no decorative Ready label competes with its actionable rows.
+
+### Discord release summaries
+
+Open **Settings → Discord** to configure release posts. Add the public GitHub or GitLab repository URL, then paste a Discord incoming webhook URL from the target channel's **Edit Channel → Integrations → Webhooks** settings. Inertia stores that webhook only in the operating system credential vault; the renderer and SQLite database receive configured/unconfigured state, never the saved URL. Press **Generate** to compare the latest release tag with the previous one and post a bounded local diff summary with **Millores**, **Implementacions**, **Bugs**, and **Altres**. Empty Discord settings stay blank and do not block startup.
 
 ### Private Connect, without surrendering the desktop
 

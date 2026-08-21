@@ -2,11 +2,7 @@ import type Database from "better-sqlite3";
 import type { ProviderId } from "../../../shared/contracts";
 import { continuationIdentityForSelection, nativeModelSelection } from "../../../shared/model-routing";
 import { backfillLegacyAgentTurns, formatMigrationDiagnostic, runDatabaseMigrations } from "../../database-migrations";
-import {
-  nativeProviderMetadataScope,
-  providerMetadataScopeKey,
-  type PersistedProviderMetadata,
-} from "../../provider/metadata";
+import { nativeProviderMetadataScope, providerMetadataScopeKey, type PersistedProviderMetadata } from "../../provider/metadata";
 import { legacyModelSelection } from "../codecs";
 import type { AgentTurnRow, ConversationRow } from "../rows";
 import { sanitizePersistedAttachmentCapabilities } from "./attachment-capabilities";
@@ -19,6 +15,7 @@ import { conversationWorktreeOwnershipMigration } from "./conversation-worktree-
 import { persistColorTheme } from "./color-theme";
 import { persistAgentThreadManagement } from "./agent-thread-management";
 import { durableDataMigrationDefinitions } from "./durable-data";
+import { persistDiscordReleaseRepositoryUrl } from "./discord-release";
 import { protectCancellingDuoDeletion, protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
@@ -1226,6 +1223,7 @@ export function migrateRuntimeDatabase(database: Database.Database, maximumVersi
       persistAgentThreadManagement,
       conversationContextPacketsMigration,
       nativeKimiProviderMigration,
+      persistDiscordReleaseRepositoryUrl,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

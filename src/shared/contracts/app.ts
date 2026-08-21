@@ -168,6 +168,8 @@ export interface AppSettings {
   defaultInteractionMode: InteractionMode;
   /** Empty uses automatic discovery; otherwise an explicitly validated Codex binary or shim. */
   codexBinaryPath: string;
+  /** Public GitHub or GitLab repository URL used to load releases for Discord announcements. */
+  discordReleaseRepositoryUrl: string;
 }
 
 export interface Project {
@@ -312,4 +314,5 @@ export const defaultSettings: AppSettings = {
   defaultReasoningEffort: "",
   defaultInteractionMode: "build",
   codexBinaryPath: "",
+  discordReleaseRepositoryUrl: "",
 };

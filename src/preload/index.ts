@@ -6,7 +6,7 @@ import type {
   DetachedChatWindowSummary,
   PendingDetachedChatDraft,
   PreviewStateUpdate,
-  RuntimeConnection,
+  RuntimeConnectionResult,
 } from "../shared/desktop.js";
 import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
 import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
@@ -26,6 +26,7 @@ const IPC = {
   cancelAppUpdateDownload: "inertia:cancel-app-update-download",
   installAppUpdate: "inertia:install-app-update",
   appUpdateStatus: "inertia:app-update-status",
+  sendDiscordReleaseInfo: "inertia:send-discord-release-info",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
@@ -172,7 +173,7 @@ const bridge: DesktopBridge = Object.freeze({
     return ipcRenderer.sendSync(DETACHED_CHAT_IPC.mirrorDraft, draft) === true;
   },
   getRuntimeConnection: () =>
-    ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnection>,
+    ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnectionResult>,
   onRuntimeReady: (listener: () => void) => {
     const handler = () => listener();
     ipcRenderer.on(IPC.runtimeReady, handler);
@@ -220,6 +221,12 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.on(IPC.appUpdateStatus, handler);
     return () => ipcRenderer.removeListener(IPC.appUpdateStatus, handler);
   },
+  sendDiscordReleaseInfo: (
+    request: Parameters<DesktopBridge["sendDiscordReleaseInfo"]>[0],
+  ) =>
+    ipcRenderer.invoke(IPC.sendDiscordReleaseInfo, request) as ReturnType<
+      DesktopBridge["sendDiscordReleaseInfo"]
+    >,
   selectAttachments: (mode: Parameters<DesktopBridge["selectAttachments"]>[0]) => ipcRenderer.invoke(IPC.selectAttachments, mode) as ReturnType<DesktopBridge["selectAttachments"]>,
   importAttachments: (files: Parameters<DesktopBridge["importAttachments"]>[0]) => ipcRenderer.invoke(IPC.importAttachments, files) as ReturnType<DesktopBridge["importAttachments"]>,
   prepareAttachmentHandoff: (request: Parameters<DesktopBridge["prepareAttachmentHandoff"]>[0]) =>

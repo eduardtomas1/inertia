@@ -100,8 +100,12 @@ export function useInertiaConnection(): InertiaConnection {
           throw new Error("The desktop bridge is unavailable. Open Inertia through the desktop app.");
         }
 
+        const runtimeConnection = await window.inertia.getRuntimeConnection();
+        if ("unavailable" in runtimeConnection) {
+          throw new Error(runtimeConnection.message);
+        }
         const { websocketUrl, databaseRecoveryNotice: startupNotice } =
-          await window.inertia.getRuntimeConnection();
+          runtimeConnection;
         if (disposed) return;
         if (startupNotice) setDatabaseRecoveryNotice(startupNotice);
 

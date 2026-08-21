@@ -329,6 +329,7 @@ export const configurationCommandSchemas = [
           terminalFontSize: z.number().int().min(11).max(22).optional(),
           defaultProvider: providerIdSchema.optional(),
           defaultModel: z.string().trim().max(160).optional(),
+          discordReleaseRepositoryUrl: z.string().trim().max(500).optional(),
           defaultAccessMode: accessModeSchema.optional(),
           newThreadMode: z.enum(["local", "worktree"]).optional(),
           wrapDiffs: z.boolean().optional(),

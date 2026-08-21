@@ -20,6 +20,7 @@ const budgets = {
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   deferredAttachmentPreviewJavaScript: 12 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
+  deferredDiscordSettingsJavaScript: 6 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
@@ -108,6 +109,9 @@ const deferredAttachmentPreviewJavaScript = assetNames.find(
 const deferredSpreadsheetJavaScript = assetNames.find(
   (name) => /^xlsx-.*\.js$/u.test(name),
 );
+const deferredDiscordSettingsJavaScript = assetNames.find(
+  (name) => /^DiscordSettings-.*\.js$/u.test(name),
+);
 const mainWorkbenchJavaScript = assetNames.find(
   (name) => /^App-.*\.js$/u.test(name),
 );
@@ -154,6 +158,11 @@ if (!deferredFailureDiagnosticsJavaScript) {
 if (!deferredAttachmentPreviewJavaScript || !deferredSpreadsheetJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred attachment preview chunks.",
+  );
+}
+if (!deferredDiscordSettingsJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred Discord settings chunk.",
   );
 }
 if (!mainWorkbenchJavaScript) {
@@ -246,6 +255,9 @@ const deferredAttachmentPreviewJavaScriptBytes = await assetBytes(
 const deferredSpreadsheetJavaScriptBytes = await assetBytes(
   `assets/${deferredSpreadsheetJavaScript}`,
 );
+const deferredDiscordSettingsJavaScriptBytes = await assetBytes(
+  `assets/${deferredDiscordSettingsJavaScript}`,
+);
 const detachedChatJavaScriptBytes = await closureBytes(
   detachedChatJavaScriptClosure,
   mainWorkbenchJavaScriptClosure,
@@ -280,6 +292,7 @@ const coreJavaScriptBytes =
   - deferredFailureDiagnosticsJavaScriptBytes
   - deferredAttachmentPreviewJavaScriptBytes
   - deferredSpreadsheetJavaScriptBytes
+  - deferredDiscordSettingsJavaScriptBytes
   - detachedChatJavaScriptBytes
   // The dependency and feature adapter each have strict ceilings above, so do
   // not charge the same isolated bytes to multiple independent budgets.
@@ -300,6 +313,7 @@ const measurements = {
   deferredAttachmentPreviewJavaScript:
     deferredAttachmentPreviewJavaScriptBytes,
   deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,
+  deferredDiscordSettingsJavaScript: deferredDiscordSettingsJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,
   morphiconsJavaScript: morphiconsJavaScriptBytes,
   morphingIconFeedbackJavaScript: morphingIconFeedbackJavaScriptBytes,

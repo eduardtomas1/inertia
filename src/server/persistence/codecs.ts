@@ -383,6 +383,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     defaultReasoningEffort: state.default_reasoning_effort,
     defaultInteractionMode: state.default_interaction_mode,
     codexBinaryPath: state.codex_binary_path,
+    discordReleaseRepositoryUrl: state.discord_release_repository_url ?? "",
   };
 }
 

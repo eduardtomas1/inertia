@@ -18,10 +18,6 @@ import {
   utilityProcess,
   type IpcMainInvokeEvent,
 } from "electron";
-import {
-  parseBackendCredentialProfileRequest,
-  parseSetBackendCredentialRequest,
-} from "../shared/backend-credentials.js";
 import { MAX_CHAT_ATTACHMENTS } from "../shared/attachments.js";
 import {
   builtInKimiClaudeBackendProfile,
@@ -31,6 +27,7 @@ import {
   type AppHealthSnapshot, type AppProcessHealth,
   parseAttachmentPickerMode, parseDesktopNotificationRequest,
   parseOpenProjectPathRequest,
+  type RuntimeConnectionUnavailable,
 } from "../shared/desktop.js";
 import { safeHttpUrl } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
@@ -57,6 +54,7 @@ import {
   openConversationAttachments,
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
+import { registerInertiaReleaseIpc } from "./inertia-release-ipc.js";
 import { resolveAppUpdateCapability } from "./app-update-capability.js";
 import { AppUpdateInstallCoordinator } from "./app-update-install.js";
 import { loadElectronAppUpdater } from "./electron-app-updater.js";
@@ -76,6 +74,7 @@ import {
   finishPrivilegedExit,
 } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
+import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
 import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
 import * as detachedChatClose from "./detached-chat-close-coordinator.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
@@ -128,9 +127,6 @@ const IPC = {
   previewClose: "inertia:preview-close",
   previewState: "inertia:preview-state",
   syncThemePreference: "inertia:sync-theme-preference",
-  setBackendCredential: "inertia:set-backend-credential",
-  clearBackendCredential: "inertia:clear-backend-credential",
-  getBackendCredentialState: "inertia:get-backend-credential-state",
 } as const;
 protocol.registerSchemesAsPrivileged([
   {
@@ -354,20 +350,38 @@ function assertTrustedChatIpc(event: IpcMainInvokeEvent, argumentCount: number, 
   return detachedChatMain.assertTrustedChatIpc(event, argumentCount, expectedArguments);
 }
 
+function runtimeConnectionUnavailable(message: string): RuntimeConnectionUnavailable {
+  return { unavailable: true, message };
+}
+
+function isTransientRuntimeConnectionError(error: unknown): error is Error {
+  return error instanceof Error && (
+    error.message.startsWith("The local service is starting.")
+    || error.message.startsWith("The local service is restarting.")
+  );
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length);
 
     if (!runtimeSupervisor) {
-      throw new Error("The local runtime is not available");
+      return runtimeConnectionUnavailable("The local runtime is not available.");
     }
 
-    return context.role === "main"
-      ? runtimeSupervisor.connection(true)
-      : runtimeSupervisor.detachedConnection(
-          context.conversationId,
-          `web-contents:${event.sender.id}`,
-        );
+    try {
+      return context.role === "main"
+        ? runtimeSupervisor.connection(true)
+        : runtimeSupervisor.detachedConnection(
+            context.conversationId,
+            `web-contents:${event.sender.id}`,
+          );
+    } catch (error) {
+      if (isTransientRuntimeConnectionError(error)) {
+        return runtimeConnectionUnavailable(error.message);
+      }
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC.selectDirectory, async (event, ...args) => {
@@ -484,6 +498,13 @@ function registerIpcHandlers(): void {
     diagnostics.record("report.copy");
     return { copied: true, eventCount: report.eventCount };
   });
+
+  registerInertiaReleaseIpc(
+    ipcMain,
+    net.fetch as typeof globalThis.fetch,
+    () => credentialVault,
+    assertTrustedIpc,
+  );
 
   registerClipboardIpc(IPC.copyText, assertTrustedChatIpc);
 
@@ -776,32 +797,7 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC.setBackendCredential, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
-    const request = parseSetBackendCredentialRequest(args[0]);
-    if (!request || !credentialVault) {
-      throw new Error("The backend credential request is invalid.");
-    }
-    return await credentialVault.setForProfile(request.profileId, request.secret);
-  });
-
-  ipcMain.handle(IPC.clearBackendCredential, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
-    const request = parseBackendCredentialProfileRequest(args[0]);
-    if (!request || !credentialVault) {
-      throw new Error("The backend credential request is invalid.");
-    }
-    return await credentialVault.clearForProfile(request.profileId);
-  });
-
-  ipcMain.handle(IPC.getBackendCredentialState, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
-    const request = parseBackendCredentialProfileRequest(args[0]);
-    if (!request || !credentialVault) {
-      throw new Error("The backend credential request is invalid.");
-    }
-    return await credentialVault.stateForProfile(request.profileId);
-  });
+  registerCredentialVaultIpc(ipcMain, () => credentialVault, assertTrustedIpc);
 }
 
 async function createMainWindow(): Promise<void> {

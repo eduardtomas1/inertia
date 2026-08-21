@@ -37,7 +37,8 @@ export class SettingsRepository {
         keybindings_json = ?,
         default_reasoning_effort = ?,
         default_interaction_mode = ?,
-        codex_binary_path = ?
+        codex_binary_path = ?,
+        discord_release_repository_url = ?
       WHERE id = 1
     `).run(
       next.theme,
@@ -71,6 +72,7 @@ export class SettingsRepository {
       next.defaultReasoningEffort,
       next.defaultInteractionMode,
       next.codexBinaryPath,
+      next.discordReleaseRepositoryUrl,
     );
   }
 

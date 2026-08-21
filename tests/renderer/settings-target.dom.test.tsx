@@ -171,13 +171,13 @@ describe("Settings external section targets", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
     expect(screen.getByText("Full local database backup")).toBeVisible();
     expect(screen.getByText(
-      /complete SQLite database include prompt presets/u,
+      /Validated SQLite copies include presets/u,
     )).toBeVisible();
     expect(screen.getByText(/Last validated backup:/u)).toBeVisible();
     expect(screen.getByText("Portable conversation recovery export"))
       .toBeVisible();
     expect(screen.getByText(
-      /exclude prompt presets, attachments, provider sessions, execution context, Git artifacts, credentials/u,
+      /without presets, attachments, sessions, execution context, Git artifacts, credentials, secret references, or vault data/u,
     )).toBeVisible();
   });
 });

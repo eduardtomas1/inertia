@@ -38,7 +38,10 @@ import {
   type ProviderMaintenanceProviderId,
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
-import type { AppHealthSnapshot, AppUpdateStatus } from "@shared/desktop";
+import type {
+  AppHealthSnapshot,
+  AppUpdateStatus,
+} from "@shared/desktop";
 import { INERTIA_VERSION } from "@shared/version";
 import {
   APP_SHORTCUT_KEYS,
@@ -51,6 +54,7 @@ import { LoadingMark, Switch } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 import {
   loadConnectionsAndDevicesSettings,
+  loadDiscordSettings,
   loadModelBackendsSettings,
   prefetchSettingsSection,
 } from "./settingsSectionLoaders";
@@ -112,13 +116,22 @@ export type SettingsViewProps = {
   onClearBackendDefault: (projectId: string | null) => Promise<void>;
 };
 
-type SettingsSection = "general" | "providers" | "backends" | "connections" | "source" | "keybindings" | "archive";
+type SettingsSection =
+  | "general"
+  | "providers"
+  | "backends"
+  | "connections"
+  | "discord"
+  | "source"
+  | "keybindings"
+  | "archive";
 
 const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> = [
   { id: "general", label: "General", icon: PanelLeft },
   { id: "providers", label: "Providers", icon: Bot },
   { id: "backends", label: "Model backends", icon: ServerCog },
   { id: "connections", label: "Connections & devices", icon: Laptop },
+  { id: "discord", label: "Discord", icon: Bot },
   { id: "source", label: "Source control", icon: GitCompareArrows },
   { id: "keybindings", label: "Keybindings", icon: Keyboard },
   { id: "archive", label: "Archive & data", icon: ArchiveRestore },
@@ -231,6 +244,10 @@ export function SettingsView({
     loadConnectionsAndDevicesSettings,
     section === "connections",
   );
+  const DiscordSettings = useLoadedSurface(
+    loadDiscordSettings,
+    section === "discord",
+  );
   const previousTarget = useRef(target);
   useEffect(() => {
     if (target && target !== previousTarget.current) setSection(target.section);
@@ -341,7 +358,7 @@ export function SettingsView({
     setHealthStatus(null);
     try {
       setAppHealth(await window.inertia.clearAppCache());
-      setHealthStatus("Recreatable browser cache cleared. User data was not changed.");
+      setHealthStatus("Browser cache cleared; user data was unchanged.");
     } catch {
       setHealthStatus("The browser cache could not be cleared.");
     } finally {
@@ -431,7 +448,6 @@ export function SettingsView({
       setRecoveryOperation(null);
     }
   };
-
   return (
     <main
       ref={rootRef}
@@ -536,14 +552,14 @@ export function SettingsView({
             </section>
 
             <section className="settings-card" aria-labelledby="application-update-heading">
-              <div className="settings-card-heading"><div><Download size={18} /></div><span><h3 id="application-update-heading">Application updates</h3><p>Check, download, and restart on your schedule. Inertia never installs while work is active.</p></span></div>
+              <div className="settings-card-heading"><div><Download size={18} /></div><span><h3 id="application-update-heading">Application updates</h3><p>Update on your schedule, never during active work.</p></span></div>
               <div className="codex-binary-path application-update-setting">
                 <span>
                   <strong>Inertia v{INERTIA_VERSION}</strong>
                   <small role="status" aria-live="polite" aria-atomic="true">
                     {updateCheckStatus
                       ?? appUpdateStatus?.message
-                      ?? "Inertia checks quietly after launch. You stay in control of every download and install."}
+                      ?? "Checks run quietly after launch; downloads and installs remain manual."}
                   </small>
                 </span>
                 <div>
@@ -688,11 +704,11 @@ export function SettingsView({
                   );
                 })}
               </div>
-              <p className="settings-card-note">Authentication remains with each provider. Inertia never stores account passwords or provider tokens.</p>
+              <p className="settings-card-note">Authentication stays with each provider; Inertia stores no account passwords or tokens.</p>
             </section>
 
             <section className="settings-card codex-binary-setting" aria-labelledby="codex-binary-heading">
-              <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="codex-binary-heading">Codex executable</h3><p>Automatic discovery checks official, package-manager, custom-home, and PATH installations.</p></span></div>
+              <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="codex-binary-heading">Codex executable</h3><p>Checks official, package-manager, custom-home, and PATH installs.</p></span></div>
               <div className="codex-binary-path">
                 <span><strong>{settings.codexBinaryPath ? "Manual override" : "Selected executable"}</strong><small title={settings.codexBinaryPath || providers.find(({ id }) => id === "codex")?.executable || undefined}>{settings.codexBinaryPath || providers.find(({ id }) => id === "codex")?.executable || "No working Codex executable detected"}</small></span>
                 <div>
@@ -704,7 +720,7 @@ export function SettingsView({
             </section>
 
             <section className="settings-card" aria-labelledby="defaults-heading">
-              <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="defaults-heading">New chat defaults</h3><p>These choices apply only when a new chat is created.</p></span></div>
+              <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="defaults-heading">New chat defaults</h3><p>Applied only to new chats.</p></span></div>
               <div className="settings-form-grid">
                 <label><span>Provider</span><select value={settings.defaultProvider} disabled={disabled} onChange={(event) => onUpdate({ defaultProvider: event.target.value as ProviderId, defaultModel: "", defaultReasoningEffort: "" })}>{providers.map((provider) => <option value={provider.id} key={provider.id}>{provider.label} — {providerStateLabel(provider)}</option>)}</select></label>
                 <label><span>Model</span><select value={settings.defaultModel} disabled={disabled || !defaultProvider?.models.length} onChange={(event) => { const model = defaultProvider?.models.find(({ id }) => id === event.target.value); onUpdate({ defaultModel: event.target.value, defaultReasoningEffort: model?.defaultReasoningEffort ?? "" }); }}><option value="">{providerDefaultModelLabel}</option>{settings.defaultModel && !storedDefaultModel && <option value={settings.defaultModel}>{settings.defaultModel} — Unavailable</option>}{defaultProvider?.models.map((model) => <option value={model.id} key={model.id}>{model.label}{model.isDefault ? " — Default" : ""}</option>)}</select></label>
@@ -746,17 +762,27 @@ export function SettingsView({
           ) : <SettingsSectionFallback />
         )}
 
+        {section === "discord" && (
+          DiscordSettings ? (
+            <DiscordSettings
+              disabled={disabled}
+              repositoryUrl={settings.discordReleaseRepositoryUrl}
+              onUpdate={onUpdate}
+            />
+          ) : <SettingsSectionFallback />
+        )}
+
         {section === "source" && (
           <section className="settings-card" aria-labelledby="source-heading">
-            <div className="settings-card-heading"><div><GitCompareArrows size={18} /></div><span><h3 id="source-heading">Changes</h3><p>Keep diffs readable without hiding the work being reviewed.</p></span></div>
-            <div className="settings-rows"><SettingSwitch title="Wrap long diff lines" detail="Keep wide changes readable without horizontal scrolling." checked={settings.wrapDiffs} disabled={disabled} onChange={(wrapDiffs) => onUpdate({ wrapDiffs })} /><SettingSwitch title="Ignore whitespace" detail="Hide whitespace-only changes when supported." checked={settings.ignoreWhitespace} disabled={disabled} onChange={(ignoreWhitespace) => onUpdate({ ignoreWhitespace })} /></div>
-            <p className="settings-card-note">Commits, pushes, branches, and worktrees always use the current project repository.</p>
+            <div className="settings-card-heading"><div><GitCompareArrows size={18} /></div><span><h3 id="source-heading">Changes</h3><p>Keep diffs easy to review.</p></span></div>
+            <div className="settings-rows"><SettingSwitch title="Wrap long diff lines" detail="Read wide changes without horizontal scrolling." checked={settings.wrapDiffs} disabled={disabled} onChange={(wrapDiffs) => onUpdate({ wrapDiffs })} /><SettingSwitch title="Ignore whitespace" detail="Hide whitespace-only changes when supported." checked={settings.ignoreWhitespace} disabled={disabled} onChange={(ignoreWhitespace) => onUpdate({ ignoreWhitespace })} /></div>
+            <p className="settings-card-note">Git actions always use the current project repository.</p>
           </section>
         )}
 
         {section === "keybindings" && (
           <section className="settings-card" aria-labelledby="keybindings-heading">
-            <div className="settings-card-heading"><div><Keyboard size={18} /></div><span><h3 id="keybindings-heading">Keyboard shortcuts</h3><p>Fast paths for the actions used most often.</p></span></div>
+            <div className="settings-card-heading"><div><Keyboard size={18} /></div><span><h3 id="keybindings-heading">Keyboard shortcuts</h3><p>Fast paths for common actions.</p></span></div>
             <div className="shortcut-list">{shortcuts.map(([action, label]) => <label key={action}><span>{label}</span><span className="shortcut-binding"><kbd>{primaryModifier}</kbd><select aria-label={`${label} key`} value={keybindingsDraft[action]} disabled={disabled} onChange={(event) => {
               const keybindings = {
                 ...keybindingsDraftRef.current,
@@ -788,23 +814,23 @@ export function SettingsView({
                 setKeybindingsDraft(authoritative);
               });
             }}><RotateCcw size={14} />Reset shortcuts</button>
-            <p className="settings-card-note">The primary Cmd/Ctrl modifier stays fixed. Available keys avoid common browser and system shortcuts.</p>
+            <p className="settings-card-note">Cmd/Ctrl stays fixed; available keys avoid system shortcuts.</p>
           </section>
         )}
 
         {section === "archive" && (
           <>
             <section className="settings-card" aria-labelledby="archive-heading">
-              <div className="settings-card-heading"><div><ArchiveRestore size={18} /></div><span><h3 id="archive-heading">Archived threads</h3><p>Restore earlier work without losing its provider or project context.</p></span></div>
+              <div className="settings-card-heading"><div><ArchiveRestore size={18} /></div><span><h3 id="archive-heading">Archived threads</h3><p>Restore work with its original context.</p></span></div>
               {archived.length > 0 ? <div className="archive-list">{archived.map((thread) => <div className="archive-row" key={thread.id}><span><strong>{thread.title}</strong><small>{archivedByProvider.get(thread.providerId) ?? thread.providerId}</small></span><button type="button" className="secondary-button" disabled={disabled} onClick={() => onUnarchive(thread)}><ArchiveRestore size={14} />Restore</button></div>)}</div> : <div className="settings-empty-state"><ArchiveRestore size={19} /><strong>No archived threads</strong><span>Archived work will appear here.</span></div>}
             </section>
             <section className="settings-card" aria-labelledby="data-heading">
-              <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="data-heading">Local data</h3><p>Full SQLite backups and portable conversation exports serve different recovery needs.</p></span></div>
+              <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="data-heading">Local data</h3><p>Database backups and portable recovery exports.</p></span></div>
               <div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div>
               <div className="codex-binary-path runtime-log-setting app-health-setting">
                 <span>
                   <strong><Activity size={14} />Local resource health</strong>
-                  <small>Sampled only while this page is open. Values cover Inertia processes and fixed app-owned storage; project files are never scanned.</small>
+                  <small>Sampled only while open; covers Inertia processes and app storage, never project files.</small>
                   {appHealth ? (
                     <span className="app-health-grid">
                       <span><b>{formatStorageBytes(appHealth.totalMemoryBytes)}</b><small>App memory</small></span>
@@ -823,7 +849,7 @@ export function SettingsView({
               <div className="codex-binary-path runtime-log-setting">
                 <span>
                   <strong>Full local database backup</strong>
-                  <small>Automatic validated copies of the complete SQLite database include prompt presets, provider-session references, execution context, Git artifacts, and attachment records. Credential secrets and separately stored attachment bytes remain outside SQLite.</small>
+                  <small>Validated SQLite copies include presets, session references, execution context, Git artifacts, and attachment records—not secrets or attachment bytes.</small>
                   <small>
                     {databaseBackup?.lastValidatedAt
                       ? <>Last validated backup: <time dateTime={databaseBackup.lastValidatedAt} title={databaseBackup.lastValidatedAt}>{new Date(databaseBackup.lastValidatedAt).toLocaleString()}</time>.</>
@@ -834,7 +860,7 @@ export function SettingsView({
               <div className="codex-binary-path runtime-log-setting">
                 <span>
                   <strong>Portable conversation recovery export</strong>
-                  <small>Exports contain project paths and conversation messages only. They exclude prompt presets, attachments, provider sessions, execution context, Git artifacts, credentials, secret references, and vault data. Imports always create new identities with supervised access.</small>
+                  <small>Exports project paths and messages without presets, attachments, sessions, execution context, Git artifacts, credentials, secret references, or vault data. Imports create new supervised identities.</small>
                 </span>
                 <div>
                   <button type="button" className="secondary-button" disabled={disabled || recoveryOperation !== null} onClick={() => { void exportRecoveryData(); }}><Download size={14} />{recoveryOperation === "export" ? "Exporting…" : "Export recovery file"}</button>
@@ -845,7 +871,7 @@ export function SettingsView({
               <div className="codex-binary-path runtime-log-setting">
                 <span>
                   <strong>Runtime diagnostics</strong>
-                  <small>Local-only lifecycle and failure metadata. Prompts, source, token values, and credentials are excluded. Logs rotate at 256 KB and expire after seven days.</small>
+                  <small>Local-only lifecycle and failure metadata. Excludes prompts, source, tokens, and credentials. Logs rotate at 256 KB and expire after seven days.</small>
                 </span>
                 <div>
                   <button type="button" className="secondary-button" disabled={copyingSupportReport} onClick={() => { void copyRuntimeSupportReport(); }}><Copy size={14} />{copyingSupportReport ? "Copying…" : "Copy support summary"}</button>

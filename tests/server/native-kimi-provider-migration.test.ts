@@ -272,7 +272,7 @@ describe.sequential("native Kimi provider migration", () => {
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect((database.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(62);
+    ).get() as { version: number }).version).toBe(63);
 
     const indexes = (database.prepare(`
       SELECT name FROM sqlite_master

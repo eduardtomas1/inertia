@@ -15,6 +15,15 @@ export interface RuntimeConnection {
   databaseRecoveryNotice?: DatabaseRecoveryStartupNotice;
 }
 
+export interface RuntimeConnectionUnavailable {
+  unavailable: true;
+  message: string;
+}
+
+export type RuntimeConnectionResult =
+  | RuntimeConnection
+  | RuntimeConnectionUnavailable;
+
 export interface DatabaseRecoveryStartupNotice {
   id: string;
   outcome: "restored" | "created-empty";
@@ -22,6 +31,19 @@ export interface DatabaseRecoveryStartupNotice {
   preservedCorruptPrimary: boolean;
   invalidBackupsSkipped: number;
   unsupportedBackupsSkipped: number;
+}
+
+export interface InertiaReleaseInfo {
+  tag: string;
+  name: string | null;
+  url: string | null;
+  createdAt: string;
+  releasedAt: string | null;
+  description: string | null;
+}
+
+export interface SendDiscordReleaseInfoRequest {
+  repositoryUrl: string;
 }
 
 export interface DatabaseRecoveryImportSummary {
@@ -498,7 +520,7 @@ export interface DesktopBridge {
   persistDetachedChatDraft: (draft: string) => boolean;
   /** Mirrors coalesced popup edits without performing a durable handoff. */
   mirrorDetachedChatDraft: (draft: string) => boolean;
-  getRuntimeConnection: () => Promise<RuntimeConnection>;
+  getRuntimeConnection: () => Promise<RuntimeConnectionResult>;
   /** Wakes a reconnect attempt without exposing the runtime URL capability. */
   onRuntimeReady: (listener: () => void) => () => void;
   selectDirectory: () => Promise<string | null>;
@@ -522,6 +544,10 @@ export interface DesktopBridge {
   installAppUpdate: () => Promise<AppUpdateStatus>;
   /** Receives sanitized authoritative updater snapshots. */
   onAppUpdateStatus: (listener: (status: AppUpdateStatus) => void) => () => void;
+  /** Fetches authoritative release metadata and sends the latest comparison to Discord. */
+  sendDiscordReleaseInfo: (
+    request: SendDiscordReleaseInfoRequest,
+  ) => Promise<{ sent: true }>;
   selectAttachments: (
     mode?: AttachmentPickerMode,
   ) => Promise<DesktopAttachment[]>;

@@ -439,8 +439,8 @@ export function SettingsView({
       const result = await window.inertia.importRecoveryData();
       setRecoveryStatus(result.status === "imported"
         ? result.summary.alreadyImported
-          ? "That recovery file was already imported; nothing was duplicated."
-          : `Imported ${result.summary.projects} projects, ${result.summary.conversations} conversations, and ${result.summary.messages} messages as new supervised identities.`
+          ? "That recovery file was already imported into the authorized folder; no data was duplicated."
+          : `Imported ${result.summary.projects} projects, ${result.summary.conversations} conversations, and ${result.summary.messages} messages under new identities with supervised access.`
         : "Recovery import cancelled.");
     } catch {
       setRecoveryStatus("The recovery file was rejected or could not be imported.");

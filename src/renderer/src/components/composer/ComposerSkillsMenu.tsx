@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { RefreshCw, Search, Sparkles } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { RefreshCw, Sparkles } from "lucide-react";
 import clsx from "clsx";
 
 import type {
@@ -16,6 +16,7 @@ export interface ComposerSkillsMenuProps {
   capability: AgentWorkflowSkillsCapability | null;
   loading: boolean;
   error: string | null;
+  completionQuery?: string | null;
   disabled: boolean;
   running: boolean;
   menuController: ComposerMenuController;
@@ -23,19 +24,12 @@ export interface ComposerSkillsMenuProps {
   onInsert: (skill: AgentSkillSummary) => void;
 }
 
-const SCOPE_LABELS = {
-  repo: "Project",
-  user: "Personal",
-  system: "System",
-  admin: "Managed",
-  provider: "Provider",
-} as const;
-
 export function ComposerSkillsMenu({
   skills,
   capability,
   loading,
   error,
+  completionQuery = null,
   disabled,
   running,
   menuController,
@@ -46,6 +40,7 @@ export function ComposerSkillsMenu({
   const popoverId = `${instanceId}-composer-skills-menu`;
   const searchId = `${instanceId}-composer-skills-search`;
   const searchRef = useRef<HTMLInputElement>(null);
+  const autoOpenedRef = useRef(false);
   const [query, setQuery] = useState("");
   const {
     menu,
@@ -55,19 +50,36 @@ export function ComposerSkillsMenu({
     setMenuPopover,
   } = menuController;
 
-  const visibleSkills = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return skills;
-    return skills.filter((skill) =>
+  const needle = query.trim().toLocaleLowerCase();
+  const visibleSkills = completionQuery !== null
+    ? skills.filter((skill) => skill.enabled && skill.name
+      .toLocaleLowerCase().startsWith(completionQuery))
+    : !needle
+      ? skills
+      : skills.filter((skill) =>
       `${skill.name} ${skill.shortDescription ?? skill.description}`
         .toLocaleLowerCase()
         .includes(needle));
-  }, [query, skills]);
 
   useEffect(() => {
     if (menu === "skills") return;
     setQuery("");
   }, [menu]);
+
+  const showCompletion = completionQuery !== null
+    && visibleSkills.length > 0
+    && Boolean(capability?.available)
+    && !disabled
+    && !running;
+  useEffect(() => {
+    if (showCompletion && !autoOpenedRef.current && menu !== "skills") {
+      autoOpenedRef.current = true;
+      toggleMenu("skills");
+    } else if (!showCompletion && autoOpenedRef.current) {
+      autoOpenedRef.current = false;
+      if (menu === "skills") dismissMenu("context-change");
+    }
+  }, [dismissMenu, menu, showCompletion, toggleMenu]);
 
   if (!capability) return null;
   const readiness = composerSkillsReadiness({
@@ -77,12 +89,6 @@ export function ComposerSkillsMenu({
     loading,
   });
 
-  const enabledItems = (): HTMLButtonElement[] => [
-    ...(document.getElementById(popoverId)
-      ?.querySelectorAll<HTMLButtonElement>(
-        '.composer-skills-list [role="menuitem"]:not(:disabled)',
-      ) ?? []),
-  ];
   const open = (): void => {
     if (!readiness.interactive) return;
     if (menu !== "skills" && skills.length === 0 && !loading) {
@@ -98,30 +104,6 @@ export function ComposerSkillsMenu({
     }
     open();
   };
-  const handlePopoverKeyDown = (
-    event: React.KeyboardEvent<HTMLDivElement>,
-  ): void => {
-    const items = enabledItems();
-    if (event.key === "ArrowDown" && event.target === searchRef.current) {
-      event.preventDefault();
-      items[0]?.focus();
-      return;
-    }
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    if (items.length === 0) return;
-    event.preventDefault();
-    const current = items.indexOf(document.activeElement as HTMLButtonElement);
-    if (event.key === "Home") items[0]?.focus();
-    else if (event.key === "End") items.at(-1)?.focus();
-    else if (event.key === "ArrowDown") {
-      items[(current + 1 + items.length) % items.length]?.focus();
-    } else if (current <= 0) {
-      searchRef.current?.focus();
-    } else {
-      items[current - 1]?.focus();
-    }
-  };
-
   return (
     <div className="popover-anchor composer-skills-control">
       <button
@@ -156,16 +138,17 @@ export function ComposerSkillsMenu({
           ref={(node) => setMenuPopover("skills", node)}
           id={popoverId}
           className="composer-popover composer-skills-popover"
-          role="menu"
-          aria-label={`Insert ${capability.label}`}
-          onKeyDown={handlePopoverKeyDown}
+          role={completionQuery === null ? "menu" : "listbox"}
+          aria-label={completionQuery === null
+            ? `Insert ${capability.label}`
+            : "Skill suggestions"}
         >
           <header>
             <span>
               <strong>Invoke a skill</strong>
-              <small>Inserts the provider’s exact <code>$skill-name</code> token.</small>
+              <small>Inserts the exact <code>$skill-name</code> token.</small>
             </span>
-            <button
+            {completionQuery === null && <button
               type="button"
               role="menuitem"
               tabIndex={-1}
@@ -179,10 +162,9 @@ export function ComposerSkillsMenu({
                 className={loading ? "is-spinning" : undefined}
                 aria-hidden="true"
               />
-            </button>
+            </button>}
           </header>
-          <label className="composer-skills-search" htmlFor={searchId}>
-            <Search size={13} aria-hidden="true" />
+          {completionQuery === null && <label className="composer-skills-search" htmlFor={searchId}>
             <input
               ref={searchRef}
               id={searchId}
@@ -195,7 +177,7 @@ export function ComposerSkillsMenu({
               placeholder="Find a skill…"
               onChange={(event) => setQuery(event.currentTarget.value)}
             />
-          </label>
+          </label>}
           {error && <p className="composer-skills-error" role="alert">{error}</p>}
           {!error && loading && skills.length === 0 && (
             <p className="composer-skills-empty" role="status">
@@ -214,9 +196,12 @@ export function ComposerSkillsMenu({
             {visibleSkills.map((skill) => (
               <button
                 type="button"
-                role="menuitem"
+                role={completionQuery === null ? "menuitem" : "option"}
+                aria-selected={completionQuery === null
+                  ? undefined
+                  : skill.id === visibleSkills[0]?.id}
                 disabled={!skill.enabled}
-                tabIndex={-1}
+                tabIndex={completionQuery === null ? 0 : -1}
                 key={skill.id}
                 onClick={() => {
                   onInsert(skill);
@@ -224,18 +209,11 @@ export function ComposerSkillsMenu({
                   // must not run the menu's normal trigger-focus restoration.
                   dismissMenu("context-change");
                 }}
-                title={skill.enabled
-                  ? `Insert $${skill.name}`
-                  : `${skill.name} is unavailable for this project.`}
+                title={skill.enabled ? `Insert $${skill.name}` : undefined}
               >
                 <code translate="no">{`$${skill.name}`}</code>
                 <span>
-                  <strong>{skill.name}</strong>
-                  <small>
-                    {SCOPE_LABELS[skill.scope]}
-                    {" · "}
-                    {skill.shortDescription ?? skill.description}
-                  </small>
+                  <small>{skill.shortDescription ?? skill.description}</small>
                 </span>
               </button>
             ))}

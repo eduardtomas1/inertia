@@ -28,9 +28,9 @@ export const TIMELINE_VIRTUALIZATION_MIN_ROWS = 14;
 export const TIMELINE_VIRTUALIZATION_MIN_WEIGHTED_ROWS = 10;
 export const TIMELINE_VIRTUALIZATION_MIN_WEIGHT = 10;
 export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
-// Twelve 24px targets fit the 320px minimap track without relying on the
-// target-spacing exception for pointer accessibility.
-export const TIMELINE_MINIMAP_MAX_MARKERS = 12;
+// Keep long conversations legible without collapsing ten or more turns into
+// each marker. The rail remains bounded and scrollable in shorter viewports.
+export const TIMELINE_MINIMAP_MAX_MARKERS = 40;
 
 /**
  * Row count alone misses short-but-expensive histories. A turn containing
@@ -629,6 +629,7 @@ export interface TimelineMinimapMarker {
   index: number;
   id: string;
   label: string;
+  summary: string | null;
 }
 
 export function buildTimelineMinimapMarkers(
@@ -636,18 +637,16 @@ export function buildTimelineMinimapMarkers(
   maximum = TIMELINE_MINIMAP_MAX_MARKERS,
 ): TimelineMinimapMarker[] {
   if (turns.length === 0 || maximum <= 0) return [];
-  const count = Math.min(turns.length, Math.max(2, Math.floor(maximum)));
-  const indexes = new Set<number>();
-  for (let marker = 0; marker < count; marker += 1) {
-    indexes.add(Math.round(marker * (turns.length - 1) / Math.max(1, count - 1)));
-  }
-  return [...indexes].map((index) => {
+  const count = Math.min(turns.length, Math.floor(maximum));
+  return Array.from({ length: count }, (_, marker) => {
+    const index = Math.round(marker * (turns.length - 1) / Math.max(1, count - 1));
     const turn = turns[index]!;
     const request = turn.userMessage.content.replace(/\s+/gu, " ").trim();
     return {
       index,
       id: turn.id,
-      label: request.length > 72 ? `${request.slice(0, 69)}…` : request || `Turn ${turn.index}`,
+      label: request.length > 120 ? `${request.slice(0, 119)}…` : request || `Turn ${turn.index}`,
+      summary: turn.terminalAssistantMessage?.content.slice(0, 180) ?? null,
     };
   });
 }

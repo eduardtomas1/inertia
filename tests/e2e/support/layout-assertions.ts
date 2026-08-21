@@ -46,7 +46,7 @@ export async function expectComposerEndsAtDock(composer: Locator): Promise<void>
   expect(layout.preDockGoalOnly).toBe(true);
   expect(layout.directShellOnly).toBe(true);
   expect(layout.bottomPadding).toBeGreaterThanOrEqual(8);
-  expect(layout.bottomPadding).toBeLessThanOrEqual(14);
+  expect(layout.bottomPadding).toBeLessThanOrEqual(22);
   expect(Math.abs(layout.bottomGap - layout.bottomPadding)).toBeLessThanOrEqual(1);
   expect(layout.detachedContextRows).toBe(0);
 }

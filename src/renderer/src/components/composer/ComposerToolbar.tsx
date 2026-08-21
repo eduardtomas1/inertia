@@ -14,7 +14,6 @@ import type {
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
   Conversation,
-  MessageSendAcceptance,
   ModelBackendProfileView,
   ProjectAction,
   ProviderInfo,
@@ -29,7 +28,6 @@ import {
 } from "../../../../shared/model-routing";
 import {
   supportsActiveParentFollowUp,
-  type ComposerFollowUpState,
   type ComposerPrimaryActionState,
 } from "../../utils/composerPrimaryAction";
 import type { ComposerModelRoute } from "../../utils/modelChooserRoutes";
@@ -49,6 +47,7 @@ import {
 import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { PromptPresetCommandRunner } from "./types";
+import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
 
 const PromptStashMenu = lazy(async () => ({
@@ -92,6 +91,7 @@ export interface ComposerToolbarProps {
   skillsCapability: AgentWorkflowSkillsCapability | null;
   skillsLoading: boolean;
   skillsError: string | null;
+  skillCompletionQuery: string | null;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onInsertSkill: (skill: AgentSkillSummary) => void;
   promptPresets: readonly PromptPreset[];
@@ -139,9 +139,11 @@ export interface ComposerToolbarProps {
   usageDisplayMode: UsageDisplayMode;
   latestTurn: AgentTurn | null;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
-  followUpState: ComposerFollowUpState;
   primaryAction: ComposerPrimaryActionState;
-  sendAcceptance: MessageSendAcceptance | null;
+  canSendQueuedNow: boolean;
+  queuedTurnId: string | null;
+  queuedTurnStatus: AgentTurnStatus | null;
+  onSendQueued: (content: string) => Promise<unknown>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }
@@ -161,6 +163,7 @@ export function ComposerToolbar({
   skillsCapability,
   skillsLoading,
   skillsError,
+  skillCompletionQuery,
   onListSkills,
   onInsertSkill,
   promptPresets,
@@ -200,9 +203,11 @@ export function ComposerToolbar({
   usageDisplayMode,
   latestTurn,
   onUsageDisplayModeChange,
-  followUpState,
   primaryAction,
-  sendAcceptance,
+  canSendQueuedNow,
+  queuedTurnId,
+  queuedTurnStatus,
+  onSendQueued,
   onSubmit,
   onStop,
 }: ComposerToolbarProps): React.JSX.Element {
@@ -384,6 +389,7 @@ export function ComposerToolbar({
             capability={skillsCapability}
             loading={skillsLoading}
             error={skillsError}
+            completionQuery={skillCompletionQuery}
             disabled={disabled}
             running={running}
             menuController={menuController}
@@ -467,7 +473,6 @@ export function ComposerToolbar({
         <Suspense
           fallback={(
             <ComposerSendActionsFallback
-              followUpState={followUpState}
               primaryAction={primaryAction}
               onSubmit={onSubmit}
               onStop={onStop}
@@ -476,9 +481,12 @@ export function ComposerToolbar({
         >
           <ComposerSendActions
             conversationId={conversation.id}
-            followUpState={followUpState}
             primaryAction={primaryAction}
-            acceptance={sendAcceptance}
+            canSendQueuedNow={canSendQueuedNow}
+            running={running}
+            latestTurnId={queuedTurnId}
+            latestTurnStatus={queuedTurnStatus}
+            onSendQueued={onSendQueued}
             onSubmit={onSubmit}
             onStop={onStop}
           />

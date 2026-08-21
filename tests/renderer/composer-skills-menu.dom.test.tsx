@@ -5,6 +5,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 
 import {
   ComposerSkillsMenu,
@@ -103,6 +104,7 @@ describe("ComposerSkillsMenu", () => {
   });
 
   it("searches, navigates, and inserts the exact canonical token", async () => {
+    const user = userEvent.setup();
     const onInsert = vi.fn();
     render(<Harness {...defaults} onInsert={onInsert} />);
     const trigger = screen.getByRole("button", {
@@ -115,8 +117,8 @@ describe("ComposerSkillsMenu", () => {
     fireEvent.change(search, { target: { value: "skill 1 summary" } });
     expect(screen.queryByRole("menuitem", { name: /skill-0/i }))
       .not.toBeInTheDocument();
-    fireEvent.keyDown(search, { key: "ArrowDown" });
     const item = screen.getByRole("menuitem", { name: /\$skill-1/i });
+    await user.tab();
     expect(item).toHaveFocus();
     fireEvent.click(item);
     expect(onInsert).toHaveBeenCalledWith(expect.objectContaining({

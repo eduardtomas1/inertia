@@ -315,6 +315,8 @@ describe("draft turn anchoring", () => {
     })).toBeVisible();
     expect(document.querySelector(".empty-thread-project"))
       .toHaveTextContent("Anchor project");
+    expect(document.querySelector(".chat-workspace"))
+      .toHaveClass("is-empty-thread");
     expect(document.querySelector(".empty-thread-icon")).toBeNull();
     expect(screen.queryByText(
       "Describe the outcome you want. The details can take shape together.",

@@ -163,8 +163,8 @@ describe("composer Send and Stop", () => {
       submitting: false,
       sending: false,
     })).toBe("unavailable");
-    expect(sendActionsSource).toContain('className="secondary-button composer-follow-up-button"');
-    expect(sendActionsSource).toContain("Follow-up unavailable");
+    expect(sendActionsSource).toContain('aria-label="Queued messages"');
+    expect(sendActionsSource).not.toContain("Follow-up unavailable");
     const textarea = inputSource.slice(
       inputSource.indexOf("<textarea"),
       inputSource.indexOf("/>", inputSource.indexOf("<textarea")),
@@ -173,7 +173,7 @@ describe("composer Send and Stop", () => {
     expect(textarea).not.toContain("disabled={disabled || running}");
   });
 
-  it("shows distinct pending feedback for initial messages and follow-ups", () => {
+  it("keeps sending and acceptance feedback on the action controls", () => {
     expect(workspaceSceneModelSource).toContain(
       'sending: busyAction === "message.send"',
     );
@@ -182,8 +182,9 @@ describe("composer Send and Stop", () => {
     );
     expect(sendActionsSource).toContain("loaderCircleMorphIcon");
     expect(sendActionsSource).toContain('iconState: "sending"');
-    expect(sendActionsSource).toContain('label: "Message accepted"');
-    expect(sendActionsSource).toContain('"Follow-up accepted."');
+    expect(sendActionsSource).not.toContain('label: "Message accepted"');
+    expect(sendActionsSource).not.toContain("AcceptanceStatus");
+    expect(sendActionsSource).not.toContain("composer-send-acceptance");
     expect(morphIconSource).toContain('reducedMotion: "user"');
     expect(sendActionsCss).toContain("prefers-reduced-motion: reduce");
     expect(sendActionsCss).toContain("animation: none");

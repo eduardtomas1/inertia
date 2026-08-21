@@ -1,27 +1,33 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ComposerSendActions } from "../../src/renderer/src/components/composer/ComposerSendActions";
 import { ComposerSendActionsFallback } from "../../src/renderer/src/components/composer/ComposerSendActionsFallback";
 
 const idle = {
-  followUpState: "hidden" as const,
-  feedback: null,
+  conversationId: "composer-actions",
+  canSendQueuedNow: true,
+  running: false,
+  latestTurnId: null,
+  latestTurnStatus: null,
+  onSendQueued: vi.fn(async () => undefined),
   onSubmit: vi.fn(async () => undefined),
   onStop: vi.fn(async () => undefined),
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+});
 
 describe("composer morphing send actions", () => {
   it.each([
-    ["Send message", "hidden", "send-ready"],
-    ["Stop agent", "hidden", "stop-ready"],
-    ["Send follow-up", "ready", "stop-ready"],
+    ["Send message", "send-ready"],
+    ["Stop agent", "stop-ready"],
   ] as const)(
     "preserves focus on %s when the deferred action replaces its fallback",
-    (label, followUpState, primaryAction) => {
-      const props = { ...idle, followUpState, primaryAction };
+    (label, primaryAction) => {
+      const props = { ...idle, primaryAction };
       const view = render(
         <div className="composer-actions">
           <ComposerSendActionsFallback {...props} />
@@ -63,31 +69,7 @@ describe("composer morphing send actions", () => {
     view.rerender(
       <ComposerSendActions
         {...idle}
-        primaryAction="submitting"
-        feedback={{ disposition: "new-turn", turnId: "turn-accepted", visible: true }}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Message accepted" }))
-      .toBe(primary);
-    expect(primary.querySelector("[data-icon-state]"))
-      .toHaveAttribute("data-icon-state", "accepted");
-
-    view.rerender(
-      <ComposerSendActions
-        {...idle}
-        primaryAction="submitting"
-        feedback={{ disposition: "new-turn", turnId: "turn-accepted", visible: false }}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Message accepted" }))
-      .toBe(primary);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-
-    view.rerender(
-      <ComposerSendActions
-        {...idle}
         primaryAction="stop-ready"
-        feedback={{ disposition: "new-turn", turnId: "turn-accepted", visible: false }}
       />,
     );
     expect(screen.getByRole("button", { name: "Stop agent" })).toBe(primary);
@@ -95,50 +77,47 @@ describe("composer morphing send actions", () => {
       .toHaveAttribute("data-icon-state", "stop");
   });
 
-  it("shows accepted follow-up feedback beside an immediately available Stop", () => {
-    const feedback = {
-      disposition: "follow-up" as const,
-      turnId: "turn-running",
-      visible: true,
-    };
-    const view = render(
-      <ComposerSendActions
-        {...idle}
-        primaryAction="stop-ready"
-        feedback={feedback}
-      />,
+  it("shows the head of the queue with immediate-send and remove actions", async () => {
+    const onSendQueued = vi.fn(async () => undefined);
+    window.localStorage.setItem(
+      "inertia:queued-prompts:composer-actions",
+      JSON.stringify([
+        { id: "queued-1", content: "Run the release checks", createdAt: "2026-08-21T10:00:00.000Z" },
+        { id: "queued-2", content: "Update the changelog", createdAt: "2026-08-21T10:01:00.000Z" },
+      ]),
     );
-
-    const accepted = screen.getByRole("status");
-    expect(accepted).toHaveTextContent("Follow-up accepted.");
-    expect(accepted.querySelector("[data-icon-state]"))
-      .toHaveAttribute("data-icon-state", "accepted");
-    expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
-
-    view.rerender(
-      <ComposerSendActions
-        {...idle}
-        followUpState="ready"
-        primaryAction="stop-ready"
-        feedback={feedback}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("keeps Stop authoritative while showing a separate new-turn acceptance", () => {
     render(
       <ComposerSendActions
         {...idle}
         primaryAction="stop-ready"
-        feedback={{ disposition: "new-turn", turnId: "turn-running", visible: true }}
+        onSendQueued={onSendQueued}
+      />,
+    );
+
+    expect(screen.getByText("Run the release checks")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send queued message now" }));
+    expect(onSendQueued).toHaveBeenCalledWith("Run the release checks");
+    expect(await screen.findByText("Update the changelog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove queued message" }));
+    await waitFor(() => expect(screen.queryByRole("list", {
+      name: "Queued messages",
+    })).not.toBeInTheDocument());
+    expect(window.localStorage.getItem(
+      "inertia:queued-prompts:composer-actions",
+    )).toBeNull();
+  });
+
+  it("keeps Stop authoritative without a separate new-turn acceptance", () => {
+    render(
+      <ComposerSendActions
+        {...idle}
+        primaryAction="stop-ready"
       />,
     );
 
     expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
-    expect(screen.getByRole("status"))
-      .toHaveTextContent("Message accepted.");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("jumps to the target path when the user prefers reduced motion", () => {
@@ -164,11 +143,10 @@ describe("composer morphing send actions", () => {
       <ComposerSendActions
         {...idle}
         primaryAction="submitting"
-        feedback={{ disposition: "new-turn", turnId: "turn-reduced", visible: true }}
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Message accepted" }))
+    expect(screen.getByRole("button", { name: "Sending message" }))
       .toBe(primary);
     expect(primary.querySelector("path")).toBe(path);
     expect(path?.getAttribute("d")).not.toBe(sendPath);

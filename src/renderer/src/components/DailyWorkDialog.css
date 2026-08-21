@@ -33,7 +33,7 @@
 
 .daily-work-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 11px;
   padding: 16px 20px;
@@ -93,6 +93,24 @@
   border-left: 1px solid var(--border-strong);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.daily-work-date-input {
+  width: 136px;
+  height: 30px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: 0;
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  font: inherit;
+  font-size: max(var(--ui-font-micro), 9px);
+}
+
+:root[data-theme="dark"] .daily-work-date-input {
+  color-scheme: dark;
 }
 
 .daily-work-refresh {
@@ -571,6 +589,7 @@
 }
 
 .daily-work-refresh:focus-visible,
+.daily-work-date-input:focus-visible,
 .daily-work-conversation-card:focus-visible,
 .daily-work-error button:focus-visible {
   outline: 2px solid var(--focus-ring);
@@ -602,6 +621,16 @@
   .daily-work-dialog { max-height: calc(100vh - 20px); }
   .daily-work-content { padding: 15px; }
   .daily-work-note { padding-inline: 15px; }
+  .daily-work-header {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+  .daily-work-date-input {
+    grid-row: 2;
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+  .daily-work-refresh { grid-row: 1; grid-column: 3; }
+  .daily-work-header > .icon-button { grid-row: 1; grid-column: 4; }
   .daily-work-header-date { display: none; }
   .daily-work-totals,
   .daily-work-skeleton-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }

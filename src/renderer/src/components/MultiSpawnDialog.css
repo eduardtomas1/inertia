@@ -1,0 +1,798 @@
+.multi-spawn-backdrop {
+  align-items: safe center;
+  justify-items: center;
+  overflow-y: auto;
+  background: rgba(9, 9, 12, 0.62);
+}
+
+.multi-spawn-dialog {
+  position: relative;
+  display: grid;
+  width: min(980px, 100%);
+  max-height: min(860px, calc(100dvh - 32px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-muted) 34%, var(--surface));
+  box-shadow:
+    0 30px 84px color-mix(in srgb, var(--shadow) 96%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--text) 3%, transparent);
+  animation: quiet-ledger-document-reveal var(--motion-base) var(--motion-ease) both;
+}
+
+.multi-spawn-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.multi-spawn-dialog-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface-strong);
+}
+
+.multi-spawn-dialog-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 76%, var(--border));
+  border-radius: 10px;
+  color: var(--accent-text);
+  background: var(--accent);
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.multi-spawn-dialog-header h2 {
+  margin: 0 0 3px;
+  font-size: max(calc(var(--ui-font-main) + 2px), 14px);
+  font-weight: 680;
+  letter-spacing: -0.025em;
+}
+
+.multi-spawn-dialog-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: max(var(--ui-font-secondary), 10px);
+  line-height: 1.4;
+}
+
+.multi-spawn-prompt-zone {
+  display: grid;
+  gap: 7px;
+  padding: 13px 18px 15px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-strong) 82%, var(--surface-muted));
+}
+
+.multi-spawn-prompt-zone > label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
+  font-size: max(var(--ui-font-secondary), 10px);
+  font-weight: 650;
+}
+
+.multi-spawn-prompt-zone > label > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.multi-spawn-prompt-zone > label small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  font-weight: 500;
+}
+
+.multi-spawn-prompt-zone textarea {
+  width: 100%;
+  min-height: 92px;
+  max-height: 190px;
+  resize: vertical;
+  padding: 12px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  outline: none;
+  color: var(--text);
+  background: var(--surface-strong);
+  font-family: inherit;
+  font-size: max(calc(var(--ui-font-main) - 1px), 12px);
+  line-height: 1.55;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.multi-spawn-prompt-zone textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-soft) 34%, transparent);
+}
+
+.multi-spawn-sides {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 12px;
+  padding: 15px 18px;
+}
+
+.multi-spawn-side {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 12px;
+  overflow: visible;
+  padding: 15px;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, var(--border));
+  border-radius: 14px;
+  background: var(--surface-strong);
+  box-shadow:
+    0 12px 28px color-mix(in srgb, var(--shadow) 34%, transparent),
+    inset 0 1px color-mix(in srgb, white 52%, transparent);
+}
+
+.multi-spawn-side > header {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.multi-spawn-side > header > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.multi-spawn-side > header strong,
+.multi-spawn-side > header small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multi-spawn-side > header strong {
+  font-size: max(var(--ui-font-main), 12px);
+  letter-spacing: -0.01em;
+}
+
+.multi-spawn-side > header small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.multi-spawn-side-number {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 7px;
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 74%, var(--surface-strong));
+  font-size: var(--ui-font-micro);
+  font-weight: 750;
+}
+
+.multi-spawn-side[data-route-side="b"] .multi-spawn-side-number {
+  border-color: color-mix(in srgb, var(--question-accent) 42%, var(--border));
+  color: color-mix(in srgb, var(--question-accent) 84%, var(--text));
+  background: color-mix(in srgb, var(--question-surface) 82%, var(--surface-strong));
+}
+
+.multi-spawn-side[data-route-side="judge"] .multi-spawn-side-number {
+  border-color: color-mix(in srgb, var(--success-state) 44%, var(--border));
+  color: var(--success-state);
+  background: color-mix(in srgb, var(--success-state) 10%, var(--surface-strong));
+}
+
+.multi-spawn-readiness {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warning);
+  font-size: var(--ui-font-micro);
+  font-weight: 650;
+}
+
+.multi-spawn-readiness.is-ready {
+  color: var(--success-state);
+}
+
+.multi-spawn-field-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1.25fr) minmax(100px, 0.75fr);
+  gap: 8px;
+}
+
+.multi-spawn-field-grid.is-compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.multi-spawn-field {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-micro);
+  font-weight: 650;
+}
+
+.multi-spawn-field > span,
+.multi-spawn-control-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.multi-spawn-field input,
+.multi-spawn-field select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text);
+  background: var(--surface-strong);
+  font: inherit;
+  font-size: max(var(--ui-font-secondary), 10px);
+  font-weight: 520;
+}
+
+.multi-spawn-field input:focus,
+.multi-spawn-field select:focus {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-soft) 30%, transparent);
+}
+
+.multi-spawn-route {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-micro);
+  font-weight: 650;
+}
+
+.multi-spawn-route .model-chooser-anchor {
+  width: 100%;
+  max-width: none;
+}
+
+.multi-spawn-route .selected-model-chip {
+  width: 100%;
+  max-width: none;
+  min-height: 32px;
+  justify-content: flex-start;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.multi-spawn-route .selected-model-chip-label {
+  flex: 1;
+  text-align: left;
+}
+
+.multi-spawn-route .model-chooser-palette {
+  position: fixed;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  width: min(600px, calc(100vw - 64px));
+  height: min(420px, calc(100dvh - 48px));
+  transform: translate(-50%, -50%);
+}
+
+.multi-spawn-route-warning {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border-left: 2px solid var(--warning);
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+}
+
+.multi-spawn-route-warning > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.multi-spawn-route-warning strong {
+  font-size: var(--ui-font-secondary);
+}
+
+.multi-spawn-route-warning small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.35;
+}
+
+.multi-spawn-route-warning button {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 6px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  font-size: var(--ui-font-micro);
+  font-weight: 680;
+}
+
+.multi-spawn-comparison {
+  display: grid;
+  gap: 0;
+  margin: 0 18px 14px;
+  overflow: visible;
+  border: 1px solid var(--border-strong);
+  border-radius: 13px;
+  background: var(--surface-strong);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.multi-spawn-comparison.is-enabled {
+  border-color: color-mix(in srgb, var(--success-state) 44%, var(--border-strong));
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--shadow) 32%, transparent);
+}
+
+.multi-spawn-comparison-toggle {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 13px 15px;
+  cursor: pointer;
+}
+
+.multi-spawn-comparison-toggle input {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  margin: 0;
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+
+.multi-spawn-comparison-toggle input::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  content: "";
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.multi-spawn-comparison-toggle input:checked {
+  border-color: color-mix(in srgb, var(--success-state) 62%, var(--border));
+  background: var(--success-state);
+}
+
+.multi-spawn-comparison-toggle input:checked::after {
+  background: var(--surface-strong);
+  transform: translateX(14px);
+}
+
+.multi-spawn-comparison-toggle input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.multi-spawn-comparison-toggle > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.multi-spawn-comparison-toggle strong {
+  font-size: max(var(--ui-font-main), 12px);
+  letter-spacing: -0.01em;
+}
+
+.multi-spawn-comparison-toggle small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.4;
+}
+
+.multi-spawn-comparison-body {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--success-state) 3%, var(--surface-strong));
+}
+
+.multi-spawn-judge-config {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.multi-spawn-judge-config > summary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 11px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.multi-spawn-judge-config > summary::-webkit-details-marker {
+  display: none;
+}
+
+.multi-spawn-judge-config-action {
+  color: var(--accent-strong);
+  font-size: var(--ui-font-secondary);
+  font-weight: 650;
+}
+
+.multi-spawn-judge-config-action::after {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 2px 3px 8px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: "";
+  transform: rotate(45deg);
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.multi-spawn-judge-config[open] .multi-spawn-judge-config-action::after {
+  transform: translateY(3px) rotate(225deg);
+}
+
+.multi-spawn-judge-config > .multi-spawn-side {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 11px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface-strong);
+  box-shadow: none;
+}
+
+.multi-spawn-judge-config > .multi-spawn-side > header {
+  display: none;
+}
+
+.multi-spawn-judge-config > .multi-spawn-side > .multi-spawn-field-grid.is-compact,
+.multi-spawn-judge-config > .multi-spawn-side > .multi-spawn-route-warning {
+  grid-column: 1 / -1;
+}
+
+.multi-spawn-lock-contract {
+  min-width: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.multi-spawn-lock-contract > summary {
+  padding: 9px 1px 2px;
+  color: var(--text);
+  font-size: var(--ui-font-secondary);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.multi-spawn-lock-contract p {
+  margin: 7px 1px 0;
+  font-size: var(--ui-font-secondary);
+  line-height: 1.45;
+}
+
+.multi-spawn-judge-risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 9px;
+  border-left: 2px solid var(--warning);
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.45;
+}
+
+.multi-spawn-judge-risk svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--warning);
+}
+
+.multi-spawn-judge-risk span {
+  display: grid;
+  gap: 2px;
+}
+
+.multi-spawn-judge-risk strong {
+  color: var(--text);
+}
+
+.multi-spawn-dialog-status {
+  margin: 0 18px 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--warning);
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+  font-size: var(--ui-font-secondary);
+}
+
+.multi-spawn-dialog-status.is-error {
+  border-left-color: var(--failure-state);
+  background: color-mix(in srgb, var(--failure-state) 7%, transparent);
+}
+
+.multi-spawn-recovery-status,
+.multi-spawn-recovery-guidance {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--failure-state) 24%, var(--border));
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.multi-spawn-comparison-status {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--success-state) 24%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--success-state) 5%, var(--surface));
+}
+
+.multi-spawn-comparison-status > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success-state);
+}
+
+.multi-spawn-comparison-status > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.multi-spawn-comparison-status p {
+  margin: 0;
+}
+
+.multi-spawn-recovery-status p,
+.multi-spawn-recovery-guidance p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.multi-spawn-recovery-status dl,
+.multi-spawn-recovery-guidance dl {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.multi-spawn-recovery-status dl > div {
+  display: contents;
+}
+
+.multi-spawn-recovery-status dt,
+.multi-spawn-recovery-guidance dt {
+  color: var(--text-muted);
+}
+
+.multi-spawn-recovery-status dd,
+.multi-spawn-recovery-guidance dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.multi-spawn-recovery-guidance ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.multi-spawn-recovery-guidance li {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.multi-spawn-recovery-guidance [data-recovery-command] {
+  display: block;
+  padding: 7px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.multi-spawn-recovery-status .secondary-button,
+.multi-spawn-recovery-guidance .secondary-button,
+.multi-spawn-comparison-status .secondary-button {
+  width: max-content;
+  max-width: 100%;
+  margin: 0;
+}
+
+.multi-spawn-dialog-footer {
+  position: sticky;
+  z-index: 4;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 18px 15px;
+  border-top: 1px solid var(--border-strong);
+  border-radius: 0 0 17px 17px;
+  background: var(--surface-strong);
+}
+
+.multi-spawn-preset-toggle {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+}
+
+.multi-spawn-preset-toggle input {
+  accent-color: var(--accent);
+}
+
+.multi-spawn-preset-toggle > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.multi-spawn-preset-toggle strong {
+  font-size: var(--ui-font-secondary);
+}
+
+.multi-spawn-preset-toggle small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.multi-spawn-dialog-footer > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.multi-spawn-dialog-footer .primary-button,
+.multi-spawn-dialog-footer .secondary-button {
+  min-height: 34px;
+  margin: 0;
+}
+
+.multi-spawn-launch {
+  gap: 7px;
+  min-width: 126px;
+}
+
+.multi-spawn-launch .loading-mark {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 780px) {
+  .multi-spawn-backdrop {
+    place-items: start center;
+    padding: 12px;
+  }
+
+  .multi-spawn-dialog {
+    max-height: calc(100dvh - 24px);
+    border-radius: 16px;
+  }
+
+  .multi-spawn-sides {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}
+
+@media (max-width: 620px) {
+
+  .multi-spawn-sides {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .multi-spawn-judge-config > .multi-spawn-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .multi-spawn-judge-config > .multi-spawn-side > .multi-spawn-field-grid.is-compact,
+  .multi-spawn-judge-config > .multi-spawn-side > .multi-spawn-route-warning {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .multi-spawn-dialog-header {
+    padding: 14px;
+  }
+
+  .multi-spawn-dialog-header p {
+    display: none;
+  }
+
+  .multi-spawn-prompt-zone,
+  .multi-spawn-sides {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .multi-spawn-comparison {
+    margin-right: 14px;
+    margin-left: 14px;
+  }
+
+  .multi-spawn-comparison-toggle input {
+    grid-row: 1;
+  }
+
+  .multi-spawn-field-grid,
+  .multi-spawn-field-grid.is-compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .multi-spawn-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 12px 14px 14px;
+  }
+
+  .multi-spawn-dialog-footer > div {
+    justify-content: flex-end;
+  }
+}

@@ -79,7 +79,7 @@ describe("composer input and control zones", () => {
       /\.chat-workspace\.response-density-comfortable \.composer\s*\{[^}]*--composer-density-spacing-adjustment:\s*1px/su,
     );
     expect(css).toMatch(
-      /\.composer textarea\s*\{[^}]*font-size:\s*calc\(var\(--ui-font-main\) \+ var\(--platform-readability-adjustment\)\)/su,
+      /\.composer textarea\s*\{[^}]*font-size:\s*max\(calc\(var\(--ui-font-main\) \+ 1\.5px \+ var\(--platform-readability-adjustment\)\), 15px\)/su,
     );
     expect(css).not.toMatch(
       /\.composer textarea\s*\{[^}]*transition:\s*height/su,
@@ -94,7 +94,10 @@ describe("composer input and control zones", () => {
       /\.composer\s*\{[^}]*padding:\s*0;[^}]*background:\s*var\(--composer-surface\)/su,
     );
     expect(css).toMatch(
-      /\.composer-input-zone\s*\{[^}]*display:\s*grid;[^}]*gap:\s*calc\(var\(--composer-zone-gap\) \+ var\(--composer-density-spacing-adjustment\)\);[^}]*padding:[^}]*var\(--composer-input-padding-inline\)/su,
+      /\.composer-input-zone\s*\{[^}]*display:\s*grid;[^}]*min-height:\s*clamp\(72px, 11cqh, 96px\);[^}]*gap:\s*calc\(var\(--composer-zone-gap\) \+ var\(--composer-density-spacing-adjustment\)\);[^}]*padding:[^}]*var\(--composer-input-padding-inline\)/su,
+    );
+    expect(css).toMatch(
+      /\.composer textarea\s*\{[^}]*min-height:\s*clamp\(44px, 7cqh, 60px\);[^}]*max-height:\s*176px/su,
     );
     expect(css).toMatch(
       /\.composer-primary-rail\s*\{[^}]*padding:[^}]*var\(--composer-control-padding-inline\)/su,

@@ -244,7 +244,7 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await expect(headerMark).toBeVisible();
   await expect(headerMark).toHaveAttribute("width", "19");
   await expect(dailyWorkDialog.getByRole("region", {
-    name: "Today’s totals",
+    name: "Daily work totals",
   })).toBeVisible();
   const dailyWorkPath = testInfo.outputPath("daily-work-day-ledger-mark.png");
   await dailyWorkDialog.screenshot({

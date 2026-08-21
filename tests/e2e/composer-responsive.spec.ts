@@ -1,16 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  expectComposerEndsAtDock,
-  expectComposerReadinessContained,
-} from "./support/layout-assertions";
-import {
-  createAppFixture,
-  type AppFixture,
-} from "./support/app-fixture";
+import { expectComposerEndsAtDock, expectComposerReadinessContained } from "./support/layout-assertions";
+import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import {
   createComposerResponsiveHelpers,
+  exerciseComposerQueue,
   fixtureCheckoutLabel,
   inspectLongComposerHeading,
   loadComposerResponsiveFixture,
@@ -298,8 +293,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     if (wideGeometry.optionMarkers.includes("reasoning")) {
       expect(wideGeometry.optionMarkers.indexOf("reasoning")).toBe(1);
     }
-
     await expect(send).toBeDisabled();
+    await page.mouse.move(0, 0);
     const modelIdleBackground = await model.evaluate(
       (button) => getComputedStyle(button).backgroundColor,
     );
@@ -458,6 +453,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(grownTextareaHeight).toBeLessThanOrEqual(176);
     await textbox.fill("");
     await capture("composer-dock-light-default-1440x920");
+    await exerciseComposerQueue({
+      databasePath, workspaceDirectory, page, capture,
+    });
 
     await electronApp.evaluate(({ dialog }, paths) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({

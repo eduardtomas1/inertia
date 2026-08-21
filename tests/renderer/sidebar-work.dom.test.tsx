@@ -690,6 +690,29 @@ describe("compact Work sidebar", () => {
       .toHaveFocus();
   });
 
+  it("dismisses the Projects overflow menu when pointing outside it", () => {
+    renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
+
+    const trigger = screen.getByRole("button", {
+      name: "Project actions for Studio",
+    });
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("menu", {
+      name: "Project actions for Studio",
+    })).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.pointerDown(screen.getByRole("searchbox", {
+      name: "Search projects and conversations",
+    }));
+
+    expect(screen.queryByRole("menu", {
+      name: "Project actions for Studio",
+    })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("keeps Home and End keyboard navigation working across virtual windows", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

@@ -142,6 +142,11 @@ describe("Duo third-model comparison dialog", () => {
       name: "Compare with a third model",
     }));
     expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(3);
+    const judgeConfiguration = screen.getByText("Configure judge")
+      .closest("details");
+    expect(judgeConfiguration).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("Configure judge"));
+    expect(judgeConfiguration).toHaveAttribute("open");
     const sharingDetails = screen.getByText("What is shared with the judge?")
       .closest("details");
     expect(sharingDetails).not.toHaveAttribute("open");

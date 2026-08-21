@@ -229,9 +229,9 @@ interface TimelineGutter {
 }
 
 const EMPTY_TIMELINE_GUTTER: TimelineGutter = { available: 0, minimapLeft: 0 };
-// Centers the visible Codex-style rail while keeping its wider pointer target
-// inside the transcript gutter.
-const TIMELINE_MINIMAP_WIDTH = 24;
+// Keep the rail near the transcript column instead of floating in the middle
+// of a very wide gutter.
+const TIMELINE_MINIMAP_TRAILING_SPACE = 84;
 
 function useTimelineGutter(
   scrollElementRef: RefObject<HTMLDivElement | null> | undefined,
@@ -258,7 +258,10 @@ function useTimelineGutter(
       const available = Math.max(0, Math.round(rowLeft - scrollBounds.left));
       const minimapLeft = Math.round(
         scrollBounds.left
-          + Math.max(6, (available - TIMELINE_MINIMAP_WIDTH) / 2)
+          + Math.max(
+            6,
+            available - TIMELINE_MINIMAP_TRAILING_SPACE,
+          )
           - timelineBounds.left,
       );
       setGutter((current) =>
@@ -285,6 +288,7 @@ export interface TimelineMarker {
   id: string;
   label: string;
   number: number;
+  summary: string | null;
 }
 
 const EMPTY_SUBAGENTS: SubagentTrace[] = [];
@@ -357,8 +361,17 @@ export function TimelineMinimap({
           ))}
         </span>
         {previewedMarker && (
-          <span className="timeline-minimap-preview" aria-hidden="true">
-            {`Turn ${previewedMarker.number} · ${previewedMarker.label}`}
+          <span
+            className="timeline-minimap-preview"
+            data-turn={previewedMarker.number}
+            aria-hidden="true"
+          >
+            <strong>{previewedMarker.label}</strong>
+            {previewedMarker.summary && (
+              <span className="timeline-minimap-preview-summary">
+                {previewedMarker.summary}
+              </span>
+            )}
           </span>
         )}
       </nav>

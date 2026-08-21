@@ -8,10 +8,18 @@ const css = readFileSync(
 ).replace(/\r\n?/gu, "\n");
 
 describe("timeline minimap presentation", () => {
-  it("matches the Codex prompt rail line geometry", () => {
+  it("uses a long dense prompt rail with compact line geometry", () => {
     expect(css).toMatch(/\.timeline-minimap\s*\{[^}]*width:\s*36px;/su);
+    expect(css).toMatch(/\.timeline-minimap\s*\{[^}]*max-height:\s*min\(440px, calc\(100cqh - 80px\)\);/su);
     expect(css).toMatch(/\.timeline-minimap button\s*\{[^}]*width:\s*36px;[^}]*height:\s*10px;/su);
     expect(css).toMatch(/\.timeline-minimap button::before\s*\{[^}]*width:\s*calc\(6px \+ 20px \* var\(--timeline-marker-progress\)\);[^}]*height:\s*2px;/su);
+  });
+
+  it("shows a layered turn preview and anchors it to the emphasized marker", () => {
+    expect(css).toContain(".timeline-minimap-preview::before");
+    expect(css).toContain(".timeline-minimap-preview-summary");
+    expect(css).toContain("position-anchor: --timeline-minimap-preview-anchor;");
+    expect(css).toContain("anchor-name: --timeline-minimap-preview-anchor;");
   });
 
   it("uses the same restrained three-step neighboring emphasis", () => {

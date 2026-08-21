@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -159,7 +159,7 @@ describe("DailyWorkDialog", () => {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     });
 
-    const totals = within(dialog).getByRole("region", { name: "Today’s totals" });
+    const totals = within(dialog).getByRole("region", { name: "Daily work totals" });
     expect(totals).toHaveTextContent("2.4K");
     expect(totals).toHaveTextContent("1.5h");
     expect(totals).toHaveTextContent("2");
@@ -176,7 +176,7 @@ describe("DailyWorkDialog", () => {
     expect(view.onOpenConversation).toHaveBeenCalledWith("conversation-active");
 
     expect(within(dialog).getByRole("button", { name: /New planning chat/u }))
-      .toHaveTextContent("Created today");
+      .toHaveTextContent("Created this day");
   });
 
   it("renders each provider's settled token share against the day total", async () => {
@@ -227,7 +227,37 @@ describe("DailyWorkDialog", () => {
     const created = within(dialog).getByRole("button", { name: /New planning chat/u });
     expect(running.querySelector(".daily-work-badge.is-running")).toHaveTextContent("Running");
     expect(created.querySelector(".daily-work-badge.is-running")).toBeNull();
-    expect(created.querySelector(".daily-work-badge.is-new")).toHaveTextContent("Created today");
+    expect(created.querySelector(".daily-work-badge.is-new")).toHaveTextContent("Created this day");
+  });
+
+  it("selects recorded local days without allowing a future date", async () => {
+    const view = renderDialog();
+    await waitFor(() => expect(view.request).toHaveBeenCalledTimes(1));
+    const today = new Date();
+    const previousDay = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate() - 1,
+      12,
+    );
+
+    const input = screen.getByLabelText("Daily work date", { selector: "input" });
+    expect(input).toHaveAttribute("max", dailyWorkCommand(today).payload.date);
+    fireEvent.change(input, {
+      target: { value: dailyWorkCommand(previousDay).payload.date },
+    });
+    await waitFor(() => expect(view.request).toHaveBeenCalledTimes(2));
+    expect(view.request.mock.calls[1]?.[0]).toEqual(dailyWorkCommand(previousDay));
+    expect(input).toHaveValue(dailyWorkCommand(previousDay).payload.date);
+    expect(screen.getByRole("region", { name: "Daily work totals" }))
+      .toBeVisible();
+    expect(screen.getByText("Created this day")).toBeVisible();
+
+    fireEvent.change(input, {
+      target: { value: dailyWorkCommand(today).payload.date },
+    });
+    await waitFor(() => expect(view.request).toHaveBeenCalledTimes(3));
+    expect(view.request.mock.calls[2]?.[0]).toEqual(dailyWorkCommand(today));
   });
 
   it("focuses the close control, closes on Escape, and restores prior focus", async () => {

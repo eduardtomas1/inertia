@@ -6,7 +6,6 @@ import {
 import {
   useEffect,
   useId,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -63,19 +62,12 @@ export function dailyWorkCommand(now = new Date()): DailyWorkCommand {
 }
 
 /** Renders the dashboard day key as a calendar label without re-parsing as UTC. */
-function formatDateLabel(dateKey: string | undefined): string | null {
-  if (!dateKey) return null;
-  const [year, month, day] = dateKey.split("-").map(Number);
-  if (!year || !month || !day) return null;
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-    }).format(new Date(year, month - 1, day));
-  } catch {
-    return null;
-  }
+function formatDateLabel(dateKey: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(`${dateKey}T12:00:00`));
 }
 
 /** Share of a settled total, or null when either side is unmeasured. */
@@ -160,6 +152,8 @@ export function DailyWorkDialog({
   const closeRef = useRef<HTMLButtonElement>(null);
   const loadGeneration = useRef(0);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [selectedDateKey, setSelectedDateKey] = useState(() =>
+    localDateKey(new Date()));
   const [dashboard, setDashboard] = useState<DailyWorkDashboard | null>(null);
   const [requestLoading, setRequestLoading] = useState(true);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -168,10 +162,8 @@ export function DailyWorkDialog({
   const error = status === "offline"
     ? "Daily work is unavailable while the local service is offline."
     : requestError;
-  const dateLabel = useMemo(
-    () => formatDateLabel(dashboard?.date),
-    [dashboard?.date],
-  );
+  const todayKey = localDateKey(new Date());
+  const dateLabel = formatDateLabel(selectedDateKey);
   useNativePreviewSuspension(true);
 
   useEffect(() => {
@@ -196,7 +188,7 @@ export function DailyWorkDialog({
     if (status !== "online") return;
     setRequestLoading(true);
     setRequestError(null);
-    void request(dailyWorkCommand()).then((event) => {
+    void request(dailyWorkCommand(new Date(`${selectedDateKey}T12:00:00`))).then((event) => {
       if (loadGeneration.current !== generation) return;
       const result = resultEvent(event).result;
       if (result.kind !== "daily.work") {
@@ -209,7 +201,7 @@ export function DailyWorkDialog({
     }).finally(() => {
       if (loadGeneration.current === generation) setRequestLoading(false);
     });
-  }, [refreshVersion, request, status]);
+  }, [refreshVersion, request, selectedDateKey, status]);
 
   return (
     <div
@@ -235,9 +227,20 @@ export function DailyWorkDialog({
           <div>
             <h2 id={titleId}>Daily work</h2>
             <p id={descriptionId}>
-              Today’s agent work{dateLabel && <span className="daily-work-header-date">{dateLabel}</span>}
+              Agent work<span className="daily-work-header-date">{dateLabel}</span>
             </p>
           </div>
+          <input
+            className="daily-work-date-input"
+            type="date"
+            aria-label="Daily work date"
+            value={selectedDateKey}
+            max={todayKey}
+            onChange={(event) => {
+              const date = event.currentTarget.value;
+              if (date && date <= todayKey) setSelectedDateKey(date);
+            }}
+          />
           <button
             type="button"
             className="daily-work-refresh"
@@ -257,7 +260,7 @@ export function DailyWorkDialog({
             <div className="daily-work-loading">
               <p className="daily-work-loading-status">
                 <LoadingMark label="Loading daily work" />
-                <span>Loading today’s work…</span>
+                <span>Loading daily work…</span>
               </p>
               <div className="daily-work-skeleton" aria-hidden="true">
                 <div className="daily-work-skeleton-band"><i /><i /><i /></div>
@@ -273,7 +276,10 @@ export function DailyWorkDialog({
           )}
           {!loading && !error && dashboard && (
             <>
-              <section className="daily-work-totals" aria-label="Today’s totals">
+              <section
+                className="daily-work-totals"
+                aria-label="Daily work totals"
+              >
                 <article className="is-primary">
                   <span>Processed tokens</span>
                   <strong><MetricValue metric={dashboard.totals.processedTokens} format={formatCompact} /></strong>
@@ -287,7 +293,9 @@ export function DailyWorkDialog({
                 <article className="is-conversation-count">
                   <span>Conversations</span>
                   <strong>{formatCount(dashboard.totals.conversationCount)}</strong>
-                  <small>{formatCount(dashboard.totals.turnCount)} {dashboard.totals.turnCount === 1 ? "turn" : "turns"} today</small>
+                  <small>
+                    {formatCount(dashboard.totals.turnCount)} {dashboard.totals.turnCount === 1 ? "turn" : "turns"}
+                  </small>
                 </article>
               </section>
 
@@ -323,8 +331,8 @@ export function DailyWorkDialog({
                 {dashboard.conversations.length === 0 ? (
                   <div className="daily-work-empty">
                     <DailyWorkMark size={24} />
-                    <strong>No work recorded today</strong>
-                    <span>New conversations and settled agent turns will appear here.</span>
+                    <strong>No work recorded</strong>
+                    <span>No conversations or settled agent turns were found for this date.</span>
                   </div>
                 ) : (
                   <div className="daily-work-conversation-list">
@@ -345,7 +353,9 @@ export function DailyWorkDialog({
                           <span className="daily-work-conversation-meta">
                             <small>{conversation.projectName} · {conversation.turnCount} {conversation.turnCount === 1 ? "turn" : "turns"}</small>
                             {conversation.running && <em className="daily-work-badge is-running">Running</em>}
-                            {conversation.createdToday && <em className="daily-work-badge is-new">Created today</em>}
+                            {conversation.createdToday && (
+                              <em className="daily-work-badge is-new">Created this day</em>
+                            )}
                           </span>
                         </span>
                         <span className="daily-work-card-metrics">
@@ -370,7 +380,7 @@ export function DailyWorkDialog({
 
         {!loading && !error && dashboard && (
           <footer className="daily-work-note">
-            Runtime is clipped to today. Tokens count when turns settle.
+            Runtime is clipped to this local day. Tokens count when turns settle.
           </footer>
         )}
       </section>

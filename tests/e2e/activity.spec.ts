@@ -548,7 +548,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     await expect(textbox).toBeEnabled();
     await expect(textbox).toHaveAttribute(
       "placeholder",
-      "Add a follow-up or attach images…",
+      "Enter sends · Tab queues",
     );
     const evidenceRow = delegatedWork.getByRole("listitem", {
       name: /Evidence Scout, Checking the provider lifecycle and exact task identity\., Claude · Agent SDK, Running/u,
@@ -558,8 +558,6 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       "Please follow up on the delegated task “Checking the provider lifecycle and exact task identity.” and incorporate its latest result.",
     );
     await textbox.fill("Please prioritize the lifecycle evidence.");
-    await expect(composer.getByRole("button", { name: "Send follow-up" }))
-      .toBeVisible();
     await expect(composer.getByRole("button", { name: "Stop agent" }))
       .toBeVisible();
     await expect(composer.getByRole("button", { name: "Stop agent" }))
@@ -672,8 +670,6 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     await expect(delegatedWork.getByRole("button", {
       name: "Stop Evidence Scout",
     })).toBeVisible();
-    await expect(composer.getByRole("button", { name: "Send follow-up" }))
-      .toBeVisible();
     await expectNoViewportOverflow();
     const narrowScreenshot = testInfo.outputPath(
       "delegated-agent-trace-narrow-dark.png",
@@ -753,7 +749,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       "Keep this draft while the unsupported route is active.";
     await unsupportedTextbox.fill(preservedDraft);
     await expect(unsupportedComposer.getByText(
-      "Follow-up unavailable",
+      "Refresh needed",
       { exact: true },
     )).toBeVisible();
     await expect(unsupportedComposer.getByRole("button", {

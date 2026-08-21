@@ -139,9 +139,12 @@ describe("multi-spawn preset", () => {
     expect(target.getItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY)).toBeNull();
   });
 
-  it("keeps the route model palette outside card and dialog clipping", () => {
+  it("keeps the dialog contained while the route model palette escapes scrolling", () => {
     const styles = readFileSync(
-      new URL("../../src/renderer/src/styles.css", import.meta.url),
+      new URL(
+        "../../src/renderer/src/components/MultiSpawnDialog.css",
+        import.meta.url,
+      ),
       "utf8",
     );
     const dialogRules = styles.match(
@@ -150,9 +153,17 @@ describe("multi-spawn preset", () => {
     const routeCardRules = styles.match(
       /\.multi-spawn-side \{(?<rules>[^}]+)\}/u,
     )?.groups?.rules;
+    const bodyRules = styles.match(
+      /\.multi-spawn-dialog-body \{(?<rules>[^}]+)\}/u,
+    )?.groups?.rules;
+    const routePaletteRules = styles.match(
+      /\.multi-spawn-route \.model-chooser-palette \{(?<rules>[^}]+)\}/u,
+    )?.groups?.rules;
 
-    expect(dialogRules).toContain("overflow: visible");
+    expect(dialogRules).toContain("overflow: hidden");
+    expect(bodyRules).toContain("overflow: auto");
     expect(routeCardRules).toContain("overflow: visible");
+    expect(routePaletteRules).toContain("position: fixed");
   });
 
   it("persists only bounded route identity, reasoning, access, and names", () => {

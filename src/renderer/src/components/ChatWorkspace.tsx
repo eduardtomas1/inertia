@@ -695,10 +695,17 @@ export function ChatWorkspace({
   const projectPromptName = project.name.trim();
   const emptyThreadProject = projectPromptName || "this project";
   const emptyThreadTitle = `What should we build in ${emptyThreadProject}?`;
+  const isEmptyThread = !detailLoading
+    && ownedMessages.length === 0
+    && ownedTurns.length === 0;
 
   return (
     <Root
-      className={clsx("chat-workspace", `response-density-${responseDensity}`)}
+      className={clsx(
+        "chat-workspace",
+        `response-density-${responseDensity}`,
+        isEmptyThread && "is-empty-thread",
+      )}
       data-reasoning-effort={selectedReasoningEffort}
       aria-busy={detailLoading || undefined}
     >
@@ -723,7 +730,7 @@ export function ChatWorkspace({
         </span>
         <div ref={timelineRef} className="response-timeline">
           {detailLoading && <LoadingMark label="Loading conversation" />}
-          {!detailLoading && ownedMessages.length === 0 && ownedTurns.length === 0 && (
+          {isEmptyThread && (
             <div className="empty-thread">
               <h3 aria-label={emptyThreadTitle}>
                 What should we build in{" "}

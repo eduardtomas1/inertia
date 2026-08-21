@@ -170,15 +170,16 @@ function SidebarView({
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const {
-    menu: conversationMenu,
-    toggleMenu: toggleConversationMenu,
-    dismissMenu: dismissConversationMenu,
-    setMenuTrigger: setConversationMenuTrigger,
-    setMenuPopover: setConversationMenuPopover,
+    menu,
+    toggleMenu,
+    dismissMenu,
+    setMenuTrigger,
+    setMenuPopover,
   } = useDismissibleMenu<string>();
+  const projectMenu = menu?.[0] === ":" ? menu.slice(1) : null;
+  const conversationMenu = projectMenu ? null : menu;
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
-  const [projectMenu, setProjectMenu] = useState<{ projectId: string; anchor: string } | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [doneVisible, setDoneVisible] = useState(WORK_DONE_PAGE_SIZE);
@@ -231,10 +232,10 @@ function SidebarView({
 
   useLayoutEffect(() => {
     setQuery("");
-    dismissConversationMenu("context-change");
+    dismissMenu("context-change");
     setRenaming(null);
     setRenameDraft("");
-  }, [dismissConversationMenu, sidebarMode]);
+  }, [dismissMenu, sidebarMode]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -374,7 +375,7 @@ function SidebarView({
   useLayoutEffect(() => {
     if (sidebarMode !== "activity") return;
     if (conversationMenu && !visibleWorkConversationIds.has(conversationMenu)) {
-      dismissConversationMenu("context-change");
+      dismissMenu("context-change");
     }
     if (renaming && !visibleWorkConversationIds.has(renaming)) {
       setRenaming(null);
@@ -382,7 +383,7 @@ function SidebarView({
     }
   }, [
     conversationMenu,
-    dismissConversationMenu,
+    dismissMenu,
     renaming,
     sidebarMode,
     visibleWorkConversationIds,
@@ -390,7 +391,7 @@ function SidebarView({
   useLayoutEffect(() => {
     if (sidebarMode !== "activity" || !virtualizedWorkIndex) return;
     if (conversationMenu && !renderedWorkConversationIds.has(conversationMenu)) {
-      dismissConversationMenu("context-change");
+      dismissMenu("context-change");
     }
     if (renaming && !renderedWorkConversationIds.has(renaming)) {
       setRenaming(null);
@@ -398,7 +399,7 @@ function SidebarView({
     }
   }, [
     conversationMenu,
-    dismissConversationMenu,
+    dismissMenu,
     renaming,
     renderedWorkConversationIds,
     sidebarMode,
@@ -564,21 +565,26 @@ function SidebarView({
   };
 
   const startProjectRename = (project: Project) => {
-    setProjectMenu(null);
+    dismissMenu("context-change");
     setProjectRenameDraft(project.name);
     setRenamingProject(project.id);
   };
 
   const projectActions = (project: Project) => (
-    <div className="project-menu" role="menu" aria-label={`Project actions for ${project.name}`}>
-      <button type="button" role="menuitem" onClick={() => { setProjectMenu(null); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
+    <div
+      ref={(node) => setMenuPopover(`:${project.id}`, node)}
+      className="project-menu"
+      role="menu"
+      aria-label={`Project actions for ${project.name}`}
+    >
+      <button type="button" role="menuitem" onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
       <button type="button" role="menuitem" onClick={() => startProjectRename(project)}><Pencil size={13} />Rename</button>
       <span className="project-menu-heading"><Layers3 size={12} />Grouping behavior</span>
       <button
         type="button"
         role="menuitemradio"
         aria-checked={project.groupingMode === null}
-        onClick={() => { setProjectMenu(null); onSetProjectGrouping(project, null); }}
+        onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, null); }}
       >
         <span className="menu-check">{project.groupingMode === null ? "✓" : ""}</span>
         Use global ({groupingLabel(globalGrouping)})
@@ -588,7 +594,7 @@ function SidebarView({
           type="button"
           role="menuitemradio"
           aria-checked={project.groupingMode === mode}
-          onClick={() => { setProjectMenu(null); onSetProjectGrouping(project, mode); }}
+          onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, mode); }}
           key={mode}
         >
           <span className="menu-check">{project.groupingMode === mode ? "✓" : ""}</span>
@@ -602,7 +608,7 @@ function SidebarView({
           role="menuitemradio"
           aria-checked={project.gitRepositoryLimit === limit}
           onClick={() => {
-            setProjectMenu(null);
+            dismissMenu("selection");
             onSetProjectGitRepositoryLimit(project, limit);
           }}
           key={limit}
@@ -633,7 +639,7 @@ function SidebarView({
         ))
           ? "Return this project's detached chats before removing it."
           : undefined}
-        onClick={() => { setProjectMenu(null); onRemoveProject(project); }}
+        onClick={() => { dismissMenu("selection"); onRemoveProject(project); }}
       >
         <Trash2 size={13} />Remove project
       </button>
@@ -657,13 +663,13 @@ function SidebarView({
         onArchiveConversation={onArchiveConversation}
         onCloseConversationSplit={onCloseConversationSplit}
         onDeleteConversation={onDeleteConversation}
-        onDismiss={dismissConversationMenu}
+        onDismiss={dismissMenu}
         onDismissRun={onDismissRun}
         onOpenConversationInSplit={onOpenConversationInSplit}
         onOpenConversationInWindow={onOpenConversationInWindow}
         onPinConversation={onPinConversation}
         onRestoreConversation={onRestoreConversation}
-        onSetPopover={(node) => setConversationMenuPopover(conversation.id, node)}
+        onSetPopover={(node) => setMenuPopover(conversation.id, node)}
         onSettleConversation={onSettleConversation}
         onSnoozeConversation={onSnoozeConversation}
         onStartRename={() => {
@@ -809,7 +815,7 @@ function SidebarView({
           </button>
         )}
         <IconButton
-          ref={(node) => setConversationMenuTrigger(conversation.id, node)}
+          ref={(node) => setMenuTrigger(conversation.id, node)}
           label={`Thread actions for ${conversation.title}`}
           className="activity-thread-menu-button"
           data-work-focus-id={`thread-actions:${conversation.id}`}
@@ -819,8 +825,7 @@ function SidebarView({
             ? `conversation-actions-${conversation.id}`
             : undefined}
           onClick={() => {
-            setProjectMenu(null);
-            toggleConversationMenu(conversation.id);
+            toggleMenu(conversation.id);
           }}
         >
           <MoreHorizontal size={13} />
@@ -862,7 +867,7 @@ function SidebarView({
               data-work-focus-id={`section:${section.id}`}
               aria-expanded={expanded}
               onClick={() => {
-                dismissConversationMenu("context-change");
+                dismissMenu("context-change");
                 setExpandedWorkSections((current) => {
                   const next = new Set(current);
                   if (next.has(section.id)) next.delete(section.id);
@@ -1057,26 +1062,23 @@ function SidebarView({
                           disabled={connectionStatus !== "online"}
                           onClick={(event) => {
                             event.stopPropagation();
-                            dismissConversationMenu("context-change");
-                            setProjectMenu(null);
+                            dismissMenu("context-change");
                             onCreateConversation(project);
                           }}
                         >
                           <SquarePen size={13} />
                         </IconButton>
                         <IconButton
+                          ref={(node) => setMenuTrigger(`:${project.id}`, node)}
                           label={`Project actions for ${project.name}`}
                           className="project-menu-button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            const anchor = `classic:${project.id}`;
-                            setProjectMenu(projectMenu?.anchor === anchor ? null : { projectId: project.id, anchor });
-                          }}
+                          aria-expanded={projectMenu === project.id}
+                          onClick={() => toggleMenu(`:${project.id}`)}
                         >
                           <MoreHorizontal size={14} />
                         </IconButton>
                       </span>
-                      {projectMenu?.anchor === `classic:${project.id}` && projectActions(project)}
+                      {projectMenu === project.id && projectActions(project)}
                     </div>
 
                     {isExpanded && (
@@ -1133,7 +1135,7 @@ function SidebarView({
                                 </button>
                               )}
                               <IconButton
-                                ref={(node) => setConversationMenuTrigger(
+                                ref={(node) => setMenuTrigger(
                                   conversation.id,
                                   node,
                                 )}
@@ -1145,8 +1147,7 @@ function SidebarView({
                                   ? `conversation-actions-${conversation.id}`
                                   : undefined}
                                 onClick={() => {
-                                  setProjectMenu(null);
-                                  toggleConversationMenu(conversation.id);
+                                  toggleMenu(conversation.id);
                                 }}
                               >
                                 <MoreHorizontal size={13} />

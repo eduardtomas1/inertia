@@ -3,8 +3,10 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 
 import {
   ComposerSkillsMenu,
@@ -103,6 +105,7 @@ describe("ComposerSkillsMenu", () => {
   });
 
   it("searches, navigates, and inserts the exact canonical token", async () => {
+    const user = userEvent.setup();
     const onInsert = vi.fn();
     render(<Harness {...defaults} onInsert={onInsert} />);
     const trigger = screen.getByRole("button", {
@@ -115,8 +118,8 @@ describe("ComposerSkillsMenu", () => {
     fireEvent.change(search, { target: { value: "skill 1 summary" } });
     expect(screen.queryByRole("menuitem", { name: /skill-0/i }))
       .not.toBeInTheDocument();
-    fireEvent.keyDown(search, { key: "ArrowDown" });
     const item = screen.getByRole("menuitem", { name: /\$skill-1/i });
+    await user.tab();
     expect(item).toHaveFocus();
     fireEvent.click(item);
     expect(onInsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -137,5 +140,29 @@ describe("ComposerSkillsMenu", () => {
     expect(onList).toHaveBeenCalledWith(false);
     expect(screen.getByRole("menu", { name: "Insert Codex skills" }))
       .toBeInTheDocument();
+  });
+
+  it("keeps autocomplete options keyboard reachable and natively activatable", async () => {
+    const user = userEvent.setup();
+    const onInsert = vi.fn();
+    render(
+      <div className="composer">
+        <textarea aria-label="Message" defaultValue="$skill" />
+        <Harness {...defaults} completionQuery="skill" onInsert={onInsert} />
+      </div>,
+    );
+    const editor = screen.getByRole("textbox", { name: "Message" });
+    editor.focus();
+    const suggestions = await screen.findByRole("listbox", {
+      name: "Skill suggestions",
+    });
+    const options = within(suggestions).getAllByRole("option");
+    expect(options.every((option) => option.tabIndex === 0)).toBe(true);
+    options[0]!.focus();
+    expect(options[0]).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onInsert).toHaveBeenCalledWith(expect.objectContaining({
+      name: "skill-0",
+    }));
   });
 });

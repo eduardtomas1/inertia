@@ -104,7 +104,7 @@ describe("composer setting control family", () => {
       /\.composer-setting-family\s*\{[^}]*display:\s*flex;[^}]*gap:\s*1px;[^}]*border-right:\s*1px solid var\(--composer-setting-separator\);[^}]*border-left:\s*1px solid var\(--composer-setting-separator\)/su,
     );
     expect(css).toMatch(
-      /\.composer-pill\s*\{[^}]*height:\s*var\(--composer-control-height\);[^}]*border:\s*0;[^}]*font-size:\s*max\(calc\(var\(--ui-font-secondary\) \+ var\(--platform-readability-adjustment\)\), 10px\)/su,
+      /\.composer-pill\s*\{[^}]*height:\s*var\(--composer-control-height\);[^}]*border:\s*0;[^}]*font-size:\s*max\(calc\(var\(--ui-font-secondary\) \+ 1px \+ var\(--platform-readability-adjustment\)\), 12px\);[^}]*font-weight:\s*550/su,
     );
     expect(css).toMatch(
       /\.composer-setting-trigger\s*\{[^}]*max-width:\s*148px;[^}]*gap:\s*4px;[^}]*padding:\s*0 7px/su,

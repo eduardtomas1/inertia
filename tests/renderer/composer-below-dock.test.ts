@@ -68,9 +68,9 @@ describe("composer below-dock cleanup", () => {
       expect(inputSource, marker).toContain(marker);
     }
     expect(inputSource).not.toContain("composer-attachment-boundary");
-    expect(inputSource).toContain('? "Add a follow-up or attach images…"');
-    expect(sendActionsSource).toContain('className="secondary-button composer-follow-up-button"');
-    expect(sendActionsSource).toContain('className="composer-follow-up-unavailable"');
+    expect(inputSource).toContain('? "Enter sends · Tab queues"');
+    expect(inputSource).toContain('event.key === "Tab"');
+    expect(sendActionsSource).toContain('className="composer-queue"');
     expect(toolbarSource).toContain("<UsageIndicator");
   });
 
@@ -93,9 +93,9 @@ describe("composer below-dock cleanup", () => {
       expect.stringContaining("padding: 7px clamp(18px, 4vw, 54px) var(--composer-bottom-breathing-room)"),
       expect.stringContaining("padding: 7px 9px var(--composer-bottom-breathing-room)"),
     ]));
-    expect(css).toContain("--composer-bottom-breathing-room: 10px");
+    expect(css).toContain("--composer-bottom-breathing-room: 18px");
     expect(css).toMatch(
-      /\.app-shell\.platform-(?:linux|win32)\s*\{[^}]*--composer-bottom-breathing-room:\s*12px/su,
+      /\.app-shell\.platform-(?:linux|win32)\s*\{[^}]*--composer-bottom-breathing-room:\s*20px/su,
     );
   });
 });

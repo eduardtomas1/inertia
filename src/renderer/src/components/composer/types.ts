@@ -106,6 +106,12 @@ export interface ComposerProps {
   onClearPromptContext?: () => void;
 }
 
+export interface ComposerQueuedPrompt {
+  id: string;
+  content: string;
+  createdAt: string;
+}
+
 export type PromptPresetCommand = Extract<
   CommandWithoutId,
   { type: `prompt-preset.${string}` }

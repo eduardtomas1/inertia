@@ -39,6 +39,11 @@ test("switches between Projects and Work and manages chat history", async () => 
   await expect(projectMenu.getByRole("menuitem", { name: "New chat" })).toHaveCount(0);
   await expect(projectMenu.getByRole("menuitem", { name: "Rename" })).toBeVisible();
   await expect(projectMenu.getByText("Grouping behavior", { exact: true })).toBeVisible();
+  await sidebar.getByRole("searchbox", {
+    name: "Search projects and conversations",
+  }).click();
+  await expect(projectMenu).toHaveCount(0);
+  await sidebar.getByRole("button", { name: "Project actions for Inertia" }).first().click();
   await projectMenu.getByRole("menuitemradio", { name: "Keep separate", exact: true }).click();
 
   const branchName = (await page

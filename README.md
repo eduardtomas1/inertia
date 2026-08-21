@@ -25,6 +25,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
 - Move up to eight chats into independent native windows with remembered bounds, optional always-on-top, and an explicit return to the main workspace while their agent work continues.
 - Bring exact visible messages from another chat into the next request with a reviewable, bounded context packet whose source remains visible after reload.
+- While an agent is running, press Enter to send an immediate text follow-up or Tab to queue it for the next completed turn. Each chat keeps its own visible FIFO queue across reloads and detached windows, with explicit send-now and remove controls; failed or cancelled work never consumes the queued draft.
 - Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
 - Save up to 30 reusable prompt presets, search and organize them, and insert one into the selected composer without sending it. Optional route binding stores only harness, backend, model, and reasoning identity—never attachments, chat context, endpoints, continuation state, or credentials.
 - Start from a compact Environment summary with Changes, worktree, branch, Git actions, validated local servers, provider context, repository, editor, sent attachments, and delegated work, while keeping the full workspace tools one click away.
@@ -88,7 +89,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Codex-native goals and Inertia-local objectives keep their source visible. Native goals can start before the first ordinary message, continue across automatic turns, and resume truthfully after Stop or restart, while next-turn skills stay route-bound and never expose provider paths or contents.
 - Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
-- Long transcripts keep stable rows, preview distant requests from the conversation minimap, and load heavier detail only when opened, while bounded runtime updates resume safely after a restart.
+- Long transcripts keep stable rows, use a responsive longer minimap with richer previews of distant requests, and load heavier detail only when opened, while bounded runtime updates resume safely after a restart.
 - The transcript follows live work only while you are near the bottom, so reading earlier context is not interrupted.
 - New final answers can settle at the beginning of the viewport for immediate reading without reclaiming the transcript after deliberate navigation; **Jump to completed answers** controls the behavior in Settings.
 - Provider-reported delegated work remains attached to its parent turn with provider and harness identity, live elapsed time, hierarchy, progress, and terminal outcome. **Guide parent** prepares an ordinary parent follow-up, while direct Stop appears only for an exact live Claude Agent SDK task.
@@ -98,7 +99,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 ### Truthful goals, skills, and delegated work
 
 - Codex-native goals and Inertia-local objectives are labeled separately, persisted across reconnects, and never substituted for one another.
-- Skills are discovered from the selected Codex or Claude route and attached only to the next turn after privileged revalidation; the renderer never receives their filesystem path or content.
+- Skills are discovered from the selected Codex or Claude route and attached only to the next turn after privileged revalidation; typing `$` autocompletes only the enabled names reported for that route, and the renderer never receives their filesystem path or content.
 - Delegated agent trees preserve provider-reported parentage, status, ownership, route identity, and elapsed time. Compact views keep separate live or failed branches represented; Guide parent prepares an ordinary supported follow-up, and direct Stop appears only for an exact live Claude Agent SDK task.
 - Codex, Claude, Cursor, and OpenCode chats can use host-owned tools to list, inspect, create, dispatch, follow up, observe, stop, and archive independent top-level Inertia chats after exact user approval. Inertia injects a scoped bridge through each provider's audited native tool or MCP surface, derives project authority locally, bounds recursion and per-turn work, revokes authority at turn settlement, and persists provenance without transcripts, credentials, or provider sessions.
 
@@ -123,7 +124,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 
 ### Understand local agent usage without invented numbers
 
-Usage turns locally recorded terminal-turn token snapshots into a clear 7-, 30-, or 90-day view. Compare measured provider totals, explore daily activity, and switch the breakdown between models and days while coverage labels explain which turns expose enough data to count.
+Usage turns locally recorded terminal-turn token snapshots into a clear 7-, 30-, or 90-day view. Compare measured provider totals, explore daily activity, move between every retained Daily Work date, and switch the breakdown between models and days while coverage labels explain which turns expose enough data to count. Dates before Daily Work existed remain unavailable because Inertia does not invent historical records retroactively.
 
 Inertia does not estimate price from a model name or send usage to a hosted analytics service. When providers do not expose cost, the Cost control stays unavailable and says why. Provider account windows remain separate in Environment because context usage, account quota, and historical processed tokens are different measurements.
 

@@ -253,7 +253,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await expect.poll(() => virtualWindow.locator(".response-virtual-item").count()).toBeLessThan(24);
     const minimap = transcript.getByRole("navigation", { name: "Conversation minimap" });
     await expect(minimap).toBeVisible();
-    await expect(minimap.getByRole("button")).toHaveCount(12);
+    await expect(minimap.getByRole("button")).toHaveCount(40);
     const firstMinimapMarker = minimap.getByRole("button").first();
     await expect(firstMinimapMarker).toHaveAttribute(
       "aria-label",
@@ -271,13 +271,12 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     );
     const minimapPreview = minimap.locator(".timeline-minimap-preview");
     await expect(minimapPreview).toHaveCount(1);
-    await expect(minimapPreview).toHaveText(
-      "Turn 1 · Virtualized request 0",
-    );
+    await expect(minimapPreview).toHaveAttribute("data-turn", "1");
+    await expect(minimapPreview).toContainText("Virtualized request 0");
     await expect(minimapPreview).toHaveAttribute("aria-hidden", "true");
     await expect(firstMinimapMarker).not.toHaveAttribute("aria-describedby");
     // Hover has to enlarge the marker itself without shifting the 36px pointer
-    // target that keeps twelve markers reachable.
+    // target that keeps the dense marker rail reachable.
     await expect.poll(() => minimap.getByRole("button").evaluateAll((buttons) =>
       buttons.slice(0, 5).map((button) => Number.parseFloat(
         getComputedStyle(button, "::before").width,

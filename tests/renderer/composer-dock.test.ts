@@ -142,7 +142,7 @@ describe("cohesive composer dock", () => {
 
   it("retains multiline, attachment, route, mention, slash, and keyboard behavior", () => {
     expect(css).toMatch(
-      /\.composer textarea\s*\{[^}]*min-height:\s*76px;[^}]*max-height:\s*176px;[^}]*resize:\s*none;[^}]*overflow-y:\s*auto/su,
+      /\.composer textarea\s*\{[^}]*min-height:\s*clamp\(44px, 7cqh, 60px\);[^}]*max-height:\s*176px;[^}]*resize:\s*none;[^}]*overflow-y:\s*auto/su,
     );
     expect(css).not.toMatch(
       /\.composer textarea\s*\{[^}]*transition:\s*height/su,
@@ -155,8 +155,8 @@ describe("cohesive composer dock", () => {
       "textarea.style.overflowY = contentHeight > MAX_TEXTAREA_HEIGHT_PX",
     );
     expect(inputSource).toContain("if (shouldSubmitComposerKey(event))");
-    expect(sendActionsSource).toContain('className="secondary-button composer-follow-up-button"');
-    expect(sendActionsSource).toContain('title="This active agent route cannot accept parent follow-ups."');
+    expect(sendActionsSource).toContain('className="composer-queue"');
+    expect(sendActionsSource).toContain('aria-label="Send queued message now"');
     expect(composerSource).toContain('event.dataTransfer.types.includes("Files")');
     expect(inputSource).toContain("event.clipboardData.files.length > 0");
     expect(inputSource).toContain('aria-label="Project files"');

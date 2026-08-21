@@ -423,7 +423,7 @@ export function SettingsView({
     try {
       const result = await window.inertia.exportRecoveryData();
       setRecoveryStatus(result.status === "exported"
-        ? "Recovery exported without attachments, credentials, sessions, or vault data."
+        ? "Recovery file exported. Attachments, credentials, provider sessions, and vault data were excluded."
         : "Recovery export cancelled.");
     } catch {
       setRecoveryStatus("The recovery file could not be exported.");

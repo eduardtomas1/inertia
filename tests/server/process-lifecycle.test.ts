@@ -452,7 +452,11 @@ describe("provider process-tree termination", () => {
         if (!running) throw new Error("group gone");
         return true as const;
       }
-      if (signal === "SIGKILL") running = false;
+      if (signal === "SIGKILL") {
+        running = false;
+        child.exitCode = 1;
+        queueMicrotask(() => child.emit("close", 1));
+      }
       return true as const;
     });
 
@@ -474,6 +478,40 @@ describe("provider process-tree termination", () => {
     expect(killProcess).toHaveBeenCalledWith(-4_242, "SIGKILL");
     expect(killProcess).toHaveBeenCalledWith(-4_242, 0);
     expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm POSIX termination before the direct child closes", async () => {
+    const child = fakeChild();
+    let running = true;
+    const killProcess = vi.fn((_pid: number, signal?: NodeJS.Signals | number) => {
+      if (signal === 0 && _pid < 0) {
+        if (!running) throw new Error("group gone");
+        return true as const;
+      }
+      if (signal === "SIGKILL") running = false;
+      return true as const;
+    });
+    let settled = false;
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "linux",
+        killProcess,
+        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "" })) as never,
+        waitMs: 100,
+      },
+    ).then((confirmed) => {
+      settled = true;
+      return confirmed;
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    child.exitCode = 1;
+    child.emit("close", 1);
+    await expect(termination).resolves.toBe(true);
   });
 
   it("only probes a POSIX PGID after the owned root and stdio fully closed", async () => {
@@ -584,6 +622,7 @@ describe("provider process-tree termination", () => {
     const startedWhileOwned = terminateOwnedProcessTree(true);
     child.exitCode = 0;
     child.stdio[1] = { closed: true };
+    child.emit("close", 0);
     const lateAwait = terminateOwnedProcessTree(true);
 
     expect(lateAwait).toBe(startedWhileOwned);

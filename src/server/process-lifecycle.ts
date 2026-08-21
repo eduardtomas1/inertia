@@ -265,13 +265,6 @@ function observeDirectChildClose(
   };
 }
 
-function waitForDirectChildExit(
-  child: ChildProcess,
-  waitMs: number,
-): Promise<boolean> {
-  return observeDirectChildClose(child)(waitMs);
-}
-
 async function confirmWindowsChildResourcesClosed(
   waitForObservedClose: (waitMs: number) => Promise<boolean>,
   waitMs: number,
@@ -570,6 +563,7 @@ export async function terminateProcessTreeAndWait(
       return (error as NodeJS.ErrnoException).code === "ESRCH";
     }
   }
+  const waitForObservedDirectChildClose = observeDirectChildClose(child);
 
   if (force) {
     const descendants = forceKillPosixProcessTree(pid, {
@@ -577,17 +571,22 @@ export async function terminateProcessTreeAndWait(
       spawnProcessSync,
       rootProcessGroup: true,
     });
-    const [groupExited, descendantsExited] = await Promise.all([
+    const [groupExited, descendantsExited, childClosed] = await Promise.all([
       waitForPosixProcessGroupExit(pid, killProcess, waitMs),
       waitForPosixProcessesExit(descendants, killProcess, waitMs),
+      waitForObservedDirectChildClose(waitMs),
     ]);
-    return groupExited && descendantsExited;
+    return groupExited && descendantsExited && childClosed;
   }
   try {
     killProcess(-pid, "SIGTERM");
-    return await waitForPosixProcessGroupExit(pid, killProcess, waitMs);
+    const [groupExited, childClosed] = await Promise.all([
+      waitForPosixProcessGroupExit(pid, killProcess, waitMs),
+      waitForObservedDirectChildClose(waitMs),
+    ]);
+    return groupExited && childClosed;
   } catch {
     killDirectChild(child, false);
-    return await waitForDirectChildExit(child, waitMs);
+    return await waitForObservedDirectChildClose(waitMs);
   }
 }

@@ -112,6 +112,50 @@ describe("TurnFollowUpCoordinator", () => {
     cancelled!.release();
   });
 
+  it("persists provider-accepted work when the caller aborts during admission", async () => {
+    let accept!: (accepted: boolean) => void;
+    const steer = vi.fn(async () => await new Promise<boolean>((resolve) => {
+      accept = resolve;
+    }));
+    const persist = vi.fn((
+      _conversationId: string,
+      turnId: string,
+      content: string,
+    ) => ({ turnId, content }) as ChatMessage);
+    const acknowledged = vi.fn();
+    const active = activeTurn();
+    const coordinator = new TurnFollowUpCoordinator({
+      store: {
+        createAcknowledgedFollowUpMessage: persist,
+      } as never,
+      providers: { steer } as never,
+      now: () => "2026-08-21T10:00:00.000Z",
+      activeForConversation: () => active,
+    });
+    const admission = coordinator.acquire(active)!;
+    const controller = new AbortController();
+    const pending = coordinator.steer(
+      admission,
+      { content: "Keep the provider-accepted follow-up", imagePaths: [] },
+      [],
+      acknowledged,
+      controller.signal,
+    );
+
+    await flushPromises();
+    expect(steer).toHaveBeenCalledTimes(1);
+    controller.abort();
+    accept(true);
+
+    await expect(pending).resolves.toMatchObject({
+      turnId: active.turn.id,
+      content: "Keep the provider-accepted follow-up",
+    });
+    expect(acknowledged).toHaveBeenCalledOnce();
+    expect(persist).toHaveBeenCalledOnce();
+    admission.release();
+  });
+
   it("does not acknowledge or persist a follow-up when its owner settles during provider steering", async () => {
     let accept!: (accepted: boolean) => void;
     const steer = vi.fn(async () => await new Promise<boolean>((resolve) => {

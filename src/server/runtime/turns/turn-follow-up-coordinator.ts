@@ -99,7 +99,6 @@ export class TurnFollowUpCoordinator {
     );
     if (
       !accepted
-      || signal?.aborted
       || ownerAfterSteer !== active
       || active.settled
       || !active.acceptingProviderEvents

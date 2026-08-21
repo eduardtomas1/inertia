@@ -855,24 +855,25 @@ function startOpenCodeRun(
       const acknowledgeCancellation = (): void => {
         interruptRun(new Error("OpenCode acknowledged session cancellation."));
       };
+      const requiresV2Cancellation = hasAdmittedV2Work || activeV2Operations > 0;
       const legacyCancellation = client.session.abort(
         { sessionID: sessionId, directory: options.input.cwd },
         { throwOnError: true },
-      ).then((response) => {
-        if (response.data === true) acknowledgeCancellation();
-        return response.data === true;
-      }).catch(() => false);
-      const v2Cancellation = hasAdmittedV2Work || activeV2Operations > 0
+      ).then((response) => response.data === true).catch(() => false);
+      const v2Cancellation = requiresV2Cancellation
         ? client.v2.session.interrupt(
             { sessionID: sessionId },
             { throwOnError: true },
-          ).then(() => {
-            acknowledgeCancellation();
-            return true;
-          }).catch(() => false)
+          ).then(() => true).catch(() => false)
         : Promise.resolve(false);
-      void Promise.all([legacyCancellation, v2Cancellation]).then((accepted) => {
-        if (accepted.some(Boolean)) return;
+      void Promise.all([legacyCancellation, v2Cancellation]).then(([
+        legacyAccepted,
+        v2Accepted,
+      ]) => {
+        if (requiresV2Cancellation ? v2Accepted : legacyAccepted) {
+          acknowledgeCancellation();
+          return;
+        }
         eventAbort.abort();
         interruptRun(new Error("OpenCode session cancellation failed."));
       });

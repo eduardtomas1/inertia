@@ -44,6 +44,23 @@ export function insertComposerSkillToken(
   rawSelectionEnd: number,
 ): ComposerSkillTokenInsertion {
   const token = `$${canonicalName}`;
+  const selectionStart = clampedSelection(value, rawSelectionStart);
+  const selectionEnd = Math.max(
+    selectionStart,
+    clampedSelection(value, rawSelectionEnd),
+  );
+  if (
+    selectionStart === selectionEnd
+    && selectionEnd === value.length
+    && value.slice(replacementStart(value, selectionStart)) === token
+  ) {
+    return {
+      value: `${value} `,
+      selectionStart: selectionStart + 1,
+      selectionEnd: selectionStart + 1,
+      inserted: true,
+    };
+  }
   const existing = existingTokenRange(value, token);
   if (existing) {
     return {
@@ -54,11 +71,6 @@ export function insertComposerSkillToken(
     };
   }
 
-  const selectionStart = clampedSelection(value, rawSelectionStart);
-  const selectionEnd = Math.max(
-    selectionStart,
-    clampedSelection(value, rawSelectionEnd),
-  );
   const start = selectionStart === selectionEnd
     ? replacementStart(value, selectionStart)
     : selectionStart;

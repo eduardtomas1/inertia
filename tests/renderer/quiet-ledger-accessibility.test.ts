@@ -347,11 +347,11 @@ describe("Quiet Ledger transcript accessibility", () => {
       /\.timeline-minimap button\[data-emphasized="true"\]::before[^{]*\{(?<body>[\s\S]*?)\n\}/u,
     )?.groups?.body ?? "";
 
-    // The Codex-style rail uses a compact 36x10 pointer row while the visible
-    // line grows horizontally from 6px to 26px without shifting that target.
+    // The compact rail uses a 36x10 pointer row while the visible line grows
+    // horizontally from 6px to 26px without shifting that target.
     expect(buttonRule).toContain("width: 36px");
     expect(buttonRule).toContain("height: 10px");
-    expect(minimapRule).toContain("max-height: min(320px, calc(100cqh - 24px))");
+    expect(minimapRule).toContain("max-height: min(440px, calc(100cqh - 80px))");
     expect(trackRule).toContain("max-height: inherit");
     expect(trackRule).toContain("overflow-y: auto");
     expect(trackRule).toContain("overscroll-behavior: contain");

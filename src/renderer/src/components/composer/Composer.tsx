@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import type { ChatAttachment, MessageSendAcceptance, PromptPreset } from "@shared/contracts";
+import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import { fastModeProviderValue, legacyProviderIdForHarness,
@@ -34,7 +34,10 @@ import {
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
-import type { ComposerProps, PendingModelRoute } from "./types";
+import type {
+  ComposerProps,
+  PendingModelRoute,
+} from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
@@ -163,7 +166,6 @@ export const Composer = memo(function Composer({
   const [commandSurface, setCommandSurface] = useState<"goal" | "resume" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
-  const [sendAcceptance, setSendAcceptance] = useState<MessageSendAcceptance | null>(null);
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null);
   useNativePreviewSuspension(conversationContext.dialog !== null || agentContextRequest !== null);
@@ -171,6 +173,8 @@ export const Composer = memo(function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
+  const skillCompletionQuery = /(?:^|\s)\$([A-Za-z0-9._:-]*)$/u
+    .exec(message)?.[1].toLocaleLowerCase() ?? null;
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
   const dismissCommandSurface = useCallback((
     reason: "action" | "escape" | "outside" | "owner-change",
@@ -519,7 +523,6 @@ export const Composer = memo(function Composer({
           contextPacketIds,
         );
     if ((!canSend && followUpState !== "ready") || submittingRef.current) return;
-    setSendAcceptance(null);
     flushDraftPersistence();
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
@@ -541,7 +544,7 @@ export const Composer = memo(function Composer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      const acceptance = await onSend(
+      await onSend(
         running ? request.visibleContent || attachmentFallback : request.visibleContent,
         submittedAttachments,
         request.context,
@@ -561,9 +564,6 @@ export const Composer = memo(function Composer({
         clearPersistedComposerDraft(submittedConversationId, submittedDraft);
       }
       if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
-      setSendAcceptance(
-        acceptance?.conversationId === submittedConversationId ? acceptance : null,
-      );
       if (editorUnchanged) {
         draftValueRef.current = "";
         setMessage("");
@@ -746,6 +746,25 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
   });
+  const canQueue = running && sendEligible
+    && attachments.length === 0 && !promptContext && !previewContextSelected
+    && fileReferences.length === 0 && contextPacketIds.length === 0
+    && !submitting && !sending;
+  const queueCurrentMessage = async (): Promise<void> => {
+    if (!canQueue) return;
+    const content = message.trim();
+    if (!(await import("./ComposerSendActions")).enqueueComposerPrompt(
+      conversation.id, content,
+    )) return;
+    if (conversationIdRef.current !== conversation.id
+      || draftValueRef.current !== message) return;
+    flushDraftPersistence();
+    clearPersistedComposerDraft(conversation.id, message);
+    markEditorChanged();
+    draftValueRef.current = "";
+    setMessage("");
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
   const runRouteRepair = async (): Promise<void> => {
     if (routeReadiness.ready || !routeReadiness.action || routeRepairing) return;
     const action = routeReadiness.action;
@@ -1116,6 +1135,8 @@ export const Composer = memo(function Composer({
           onMessageChange={updateMessage}
           onImportAttachments={importAttachments}
           onSubmit={submit}
+          canQueue={canQueue}
+          onQueue={() => void queueCurrentMessage()}
           running={running}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
@@ -1154,6 +1175,7 @@ export const Composer = memo(function Composer({
           skillsCapability={skillsCapability}
           skillsLoading={skillsLoading}
           skillsError={skillsError}
+          skillCompletionQuery={skillCompletionQuery}
           onListSkills={onListSkills}
           onInsertSkill={insertSkill}
           promptPresets={promptPresets}
@@ -1211,9 +1233,12 @@ export const Composer = memo(function Composer({
           usageDisplayMode={usageDisplayMode}
           latestTurn={latestTurn}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
-          followUpState={followUpState}
           primaryAction={primaryAction}
-          sendAcceptance={sendAcceptance}
+          canSendQueuedNow={!disabled && !sending
+            && (!running || followUpState === "ready")}
+          queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
+          queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
+          onSendQueued={(content) => onSend(content, [], undefined)}
           onSubmit={submit}
           onStop={stop}
         />

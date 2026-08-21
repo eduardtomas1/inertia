@@ -191,7 +191,7 @@ describe("composer asynchronous ownership", () => {
       .not.toBeInTheDocument();
   });
 
-  it("shows definite acceptance before yielding the same control to Stop", async () => {
+  it("keeps send feedback as motion before yielding the same control to Stop", async () => {
     const current = conversation("conversation-accepted-motion");
     const sent = deferred<MessageSendAcceptance>();
     const view = render(<Composer {...composerProps(current, {
@@ -213,10 +213,10 @@ describe("composer asynchronous ownership", () => {
       userMessageId: "message-accepted-motion",
       disposition: "new-turn",
     }));
-    expect(screen.getByRole("button", { name: "Message accepted" }))
+    expect(screen.getByRole("button", { name: "Sending message" }))
       .toBe(primary);
     expect(primary.querySelector("[data-icon-state]"))
-      .toHaveAttribute("data-icon-state", "accepted");
+      .toHaveAttribute("data-icon-state", "sending");
 
     view.rerender(<Composer {...composerProps(current, {
       running: true,
@@ -291,7 +291,7 @@ describe("composer asynchronous ownership", () => {
     });
 
     expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Message accepted.");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("does not reuse the previous turn acceptance for a consecutive send", async () => {
@@ -311,7 +311,7 @@ describe("composer asynchronous ownership", () => {
     const textbox = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(textbox, { target: { value: "First fast turn" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    expect(await screen.findByRole("button", { name: "Message accepted" }))
+    expect(await screen.findByRole("button", { name: "Sending message" }))
       .toBeInTheDocument();
 
     view.rerender(<Composer {...composerProps(current, { running: true, onSend })} />);
@@ -321,11 +321,10 @@ describe("composer asynchronous ownership", () => {
 
     expect(screen.getByRole("button", { name: "Sending message" }))
       .toHaveAttribute("data-motion-state", "sending");
-    expect(screen.queryByRole("button", { name: "Message accepted" }))
-      .not.toBeInTheDocument();
+    expect(screen.queryByText("Accepted")).not.toBeInTheDocument();
   });
 
-  it("acknowledges an accepted follow-up without obscuring Stop", async () => {
+  it("keeps accepted follow-ups visually quiet without obscuring Stop", async () => {
     const current = conversation("conversation-follow-up-motion");
     const onSend = vi.fn(async (): Promise<MessageSendAcceptance> => ({
       kind: "message.accepted",
@@ -345,14 +344,88 @@ describe("composer asynchronous ownership", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
       target: { value: "Add one more constraint" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send follow-up" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "Enter",
+    });
 
-    expect(await screen.findByRole("status"))
-      .toHaveAttribute("data-motion-state", "accepted");
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
   });
 
-  it("inserts a visible skill invocation at the caret and sends transcript-faithful text", async () => {
+  it("queues with Tab and admits one queued prompt after the active turn completes", async () => {
+    const current = conversation("conversation-queued-prompt");
+    const onSend = vi.fn(async () => undefined);
+    const runningTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "turn-before-queue",
+      status: "running" as const,
+      harnessId: "codex-app-server" as const,
+    };
+    const view = render(<Composer {...composerProps(current, {
+      running: true,
+      latestTurn: runningTurn,
+      onSend,
+    })} />);
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(textbox, { target: { value: "Run the release checks next" } });
+    fireEvent.keyDown(textbox, { key: "Tab" });
+
+    await waitFor(() => expect(textbox).toHaveValue(""));
+    expect(await screen.findByText("Run the release checks next"))
+      .toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(
+      `inertia:queued-prompts:${current.id}`,
+    )).toContain("Run the release checks next");
+
+    view.rerender(<Composer {...composerProps(current, {
+      latestTurn: { ...runningTurn, status: "completed" },
+      onSend,
+    })} />);
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledExactlyOnceWith(
+      "Run the release checks next",
+      [],
+      undefined,
+    ));
+    await waitFor(() => expect(screen.queryByText("Run the release checks next"))
+      .not.toBeInTheDocument());
+    expect(window.localStorage.getItem(
+      `inertia:queued-prompts:${current.id}`,
+    )).toBeNull();
+  });
+
+  it("keeps queued prompts after a failed turn", async () => {
+    const current = conversation("conversation-queued-after-failure");
+    const onSend = vi.fn(async () => undefined);
+    const runningTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "turn-before-failure",
+      status: "running" as const,
+      harnessId: "codex-app-server" as const,
+    };
+    const view = render(<Composer {...composerProps(current, {
+      running: true,
+      latestTurn: runningTurn,
+      onSend,
+    })} />);
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(textbox, { target: { value: "Keep this for retry" } });
+    fireEvent.keyDown(textbox, { key: "Tab" });
+    expect(await screen.findByText("Keep this for retry")).toBeInTheDocument();
+
+    view.rerender(<Composer {...composerProps(current, {
+      latestTurn: { ...runningTurn, status: "failed" },
+      onSend,
+    })} />);
+    await act(async () => Promise.resolve());
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("Keep this for retry")).toBeInTheDocument();
+  });
+
+  it("autocompletes a discovered skill invocation and sends transcript-faithful text", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => undefined);
     const selectedSkill: AgentSkillSummary = {
@@ -376,10 +449,13 @@ describe("composer asynchronous ownership", () => {
     })} />);
     const textbox = screen.getByRole("textbox", { name: "Message" });
     await user.type(textbox, "Please $sec");
-    await user.click(await screen.findByRole("button", {
-      name: "Insert a codex skills invocation",
-    }));
-    await user.click(await screen.findByRole("menuitem", {
+    const suggestions = await screen.findByRole("listbox", {
+      name: "Skill suggestions",
+    });
+    expect(within(suggestions).getByRole("option", {
+      name: /\$security-review/u,
+    })).toHaveAttribute("aria-selected", "true");
+    await user.click(within(suggestions).getByRole("option", {
       name: /\$security-review/u,
     }));
 
@@ -391,6 +467,54 @@ describe("composer asynchronous ownership", () => {
       [],
       undefined,
     ));
+  });
+
+  it("offers real skill matches and stays quiet for an unknown name", async () => {
+    const user = userEvent.setup();
+    const availableSkills: AgentSkillSummary[] = [
+      {
+        id: "skill-security-review",
+        conversationId: "conversation-skill-navigation",
+        name: "security-review",
+        description: "Review the repository security posture.",
+        shortDescription: "Review security posture",
+        scope: "repo",
+        enabled: true,
+        source: "codex-native",
+      },
+      {
+        id: "skill-security-fix",
+        conversationId: "conversation-skill-navigation",
+        name: "security-fix",
+        description: "Fix reviewed security findings.",
+        shortDescription: "Fix security findings",
+        scope: "repo",
+        enabled: true,
+        source: "codex-native",
+      },
+    ];
+    render(<Composer {...composerProps(conversation("conversation-skill-navigation"), {
+      skills: availableSkills,
+      skillsCapability: {
+        kind: "codex-native",
+        available: true,
+        label: "Codex skills",
+      },
+    })} />);
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+    await user.type(textbox, "$security");
+    const suggestions = await screen.findByRole("listbox", {
+      name: "Skill suggestions",
+    });
+    await user.click(within(suggestions).getByRole("option", {
+      name: /\$security-fix/u,
+    }));
+    expect(textbox).toHaveValue("$security-fix ");
+
+    await user.clear(textbox);
+    await user.type(textbox, "$missing");
+    expect(screen.queryByRole("listbox", { name: "Skill suggestions" }))
+      .not.toBeInTheDocument();
   });
 
   it("presents a two-tier editor and keyboard-navigable grouped control rail", async () => {
@@ -662,7 +786,9 @@ describe("composer asynchronous ownership", () => {
     await screen.findByText("follow-up-reference.png");
     expect(chooseAttachments).toHaveBeenCalledExactlyOnceWith("images");
 
-    fireEvent.click(screen.getByRole("button", { name: "Send follow-up" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "Enter",
+    });
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(
       "Please inspect the attached image.",
       [selected],
@@ -698,7 +824,7 @@ describe("composer asynchronous ownership", () => {
     await waitFor(() => expect(onReleaseAttachment)
       .toHaveBeenCalledExactlyOnceWith(document.id));
     expect(screen.queryByText("unsafe-document.pdf")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Send follow-up" }))
+    expect(screen.queryByRole("button", { name: "Send queued message now" }))
       .not.toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
   });

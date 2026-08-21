@@ -78,37 +78,6 @@
   background: color-mix(in srgb, var(--accent-soft) 52%, transparent);
 }
 
-.detached-chat-status {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 5px;
-  margin-right: 3px;
-  padding: 0 8px;
-  border: 1px solid color-mix(in srgb, var(--status-completed) 22%, var(--border));
-  border-radius: 999px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--status-completed) 6%, transparent);
-  font-size: var(--ui-font-micro);
-  font-weight: 620;
-  white-space: nowrap;
-}
-
-.detached-chat-status svg {
-  color: var(--status-completed);
-  fill: currentcolor;
-}
-
-.detached-chat-shell[data-connection-status="connecting"]
-  .detached-chat-status svg {
-  color: var(--status-approval);
-}
-
-.detached-chat-shell[data-connection-status="offline"]
-  .detached-chat-status svg {
-  color: var(--status-failed);
-}
-
 .detached-chat-content {
   display: flex;
   min-width: 0;

@@ -66,6 +66,8 @@ export interface ComposerInputZoneProps {
   onMessageChange: (message: string) => void;
   onImportAttachments: (files: File[]) => Promise<void>;
   onSubmit: () => Promise<void>;
+  canQueue: boolean;
+  onQueue: () => void;
   running: boolean;
   submissionPending: boolean;
   followUpPending: boolean;
@@ -112,6 +114,8 @@ export function ComposerInputZone({
   onMessageChange,
   onImportAttachments,
   onSubmit,
+  canQueue,
+  onQueue,
   running,
   submissionPending,
   followUpPending,
@@ -383,6 +387,17 @@ export function ComposerInputZone({
               }
               return;
             }
+            if (
+              canQueue
+              && event.key === "Tab"
+              && !event.shiftKey
+              && !(event.ctrlKey || event.metaKey || event.altKey)
+              && !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault();
+              onQueue();
+              return;
+            }
             if (shouldSubmitComposerKey(event)) {
               event.preventDefault();
               void onSubmit();
@@ -394,8 +409,8 @@ export function ComposerInputZone({
           readOnly={submissionPending || followUpPending}
           aria-label="Message"
           placeholder={running
-            ? "Add a follow-up or attach images…"
-            : "Ask anything, @ tag files, $ use skills, or / for commands…"}
+            ? "Enter sends · Tab queues"
+            : "Ask for follow-up changes or attach images"}
         />
         {!messageFits && (
           <p className="composer-limit-warning" role="alert">

@@ -48,13 +48,17 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     .selectOption("full");
   await dialog.getByRole("checkbox", { name: "Compare with a third model" })
     .check();
+  const judgeConfiguration = dialog.locator(".multi-spawn-judge-config");
+  await expect(judgeConfiguration).not.toHaveAttribute("open", "");
+  await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
   await dialog.getByRole("textbox", { name: "Comparison chat name" })
     .fill("Independent judge");
   await dialog.getByRole("combobox", { name: "Comparison chat project" })
     .selectOption({ label: "Companion" });
   await dialog.getByRole("combobox", { name: "Comparison chat access" })
     .selectOption("full");
-  await expect(dialog.getByText("Judge route", { exact: true }))
+  await expect(judgeConfiguration).toHaveAttribute("open", "");
+  await expect(dialog.getByRole("textbox", { name: "Comparison chat name" }))
     .toBeVisible();
   const sharingDisclosure = dialog.getByText(
     "What is shared with the judge?",
@@ -69,6 +73,14 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   await sharingDisclosure.click();
   await expect(dialog.getByText("Judge can edit a source checkout", { exact: true }))
     .toBeVisible();
+  await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
+  await expect(judgeConfiguration).not.toHaveAttribute("open", "");
+
+  const wideDialogBounds = await dialog.boundingBox();
+  expect(wideDialogBounds).not.toBeNull();
+  expect(wideDialogBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(wideDialogBounds!.y + wideDialogBounds!.height)
+    .toBeLessThanOrEqual(900);
 
   await page.evaluate(() => {
     document.documentElement.dataset.theme = "light";
@@ -90,10 +102,19 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     document.documentElement.dataset.theme = "dark";
     document.documentElement.style.colorScheme = "dark";
   });
-  await sharingDisclosure
-    .scrollIntoViewIfNeeded();
+  await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
+  await judgeConfiguration.scrollIntoViewIfNeeded();
   await expect(dialog.getByRole("button", { name: "Launch duo" }))
     .toBeVisible();
+  const routeCards = dialog.locator(".multi-spawn-sides > .multi-spawn-side");
+  const routeCardBounds = await routeCards.evaluateAll((cards) => cards.map((card) => {
+    const bounds = card.getBoundingClientRect();
+    return { left: bounds.left, top: bounds.top, right: bounds.right };
+  }));
+  expect(routeCardBounds).toHaveLength(2);
+  expect(Math.abs(routeCardBounds[0].top - routeCardBounds[1].top))
+    .toBeLessThanOrEqual(1);
+  expect(routeCardBounds[0].right).toBeLessThan(routeCardBounds[1].left);
   await app.expectNoViewportOverflow();
   const darkNarrow = testInfo.outputPath("multi-spawn-dark-narrow.png");
   await page.screenshot({

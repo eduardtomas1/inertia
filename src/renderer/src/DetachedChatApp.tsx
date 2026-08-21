@@ -10,7 +10,6 @@ import {
   PanelTopOpen,
   Pin,
   PinOff,
-  Radio,
   X,
 } from "lucide-react";
 import type {
@@ -491,20 +490,9 @@ export default function DetachedChatApp({
     ({ conversationContextRequest }) => conversationContextRequest !== undefined,
   );
   const visibleConversation = projection.detail?.conversation ?? conversation;
-  const statusLabel = connection.status === "online"
-    ? conversation?.status === "running"
-      ? "Working"
-      : conversation?.status === "needs-input"
-        ? "Needs input"
-        : "Live"
-    : connection.status === "connecting"
-      ? "Connecting"
-      : "Offline";
-
   return (
     <div
       className="detached-chat-shell"
-      data-connection-status={connection.status}
       data-interface-scale={settings.interfaceScale}
     >
       <header className="detached-chat-header drag-region">
@@ -513,10 +501,6 @@ export default function DetachedChatApp({
           <h1>{conversation?.title ?? "Detached chat"}</h1>
         </div>
         <div className="detached-chat-window-actions no-drag">
-          <span className="detached-chat-status" role="status">
-            <Radio size={11} aria-hidden="true" />
-            {statusLabel}
-          </span>
           <IconButton
             label={windowContext.alwaysOnTop
               ? "Unpin chat window"

@@ -918,7 +918,7 @@ async function streamingResponsivenessSample(
     timeout: 10_000,
   });
   const liveViewport = page.locator(".message-scroll");
-  await liveViewport.hover();
+  await liveViewport.hover({ position: { x: 16, y: 16 } });
   for (let gesture = 0; gesture < 8; gesture += 1) {
     await page.mouse.wheel(0, -30_000);
   }

@@ -40,6 +40,21 @@ describe("insertComposerSkillToken", () => {
     });
   });
 
+  it("finishes an exact token at the end with a readable separator", () => {
+    const value = "Please $security-review";
+    expect(insertComposerSkillToken(
+      value,
+      "security-review",
+      value.length,
+      value.length,
+    )).toEqual({
+      value: "Please $security-review ",
+      selectionStart: value.length + 1,
+      selectionEnd: value.length + 1,
+      inserted: true,
+    });
+  });
+
   it("does not confuse escaped or longer tokens with an existing invocation", () => {
     const value = "\\$review and $review-extra done";
     expect(insertComposerSkillToken(

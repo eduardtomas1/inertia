@@ -1,98 +1,84 @@
-import { useLayoutEffect, useRef, useState, type Ref } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import { CornerDownRight, Trash2 } from "lucide-react";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import {
-  checkMorphIcon,
   loaderCircleMorphIcon,
   sendHorizontalMorphIcon,
   sendMorphIcon,
   squareMorphIcon,
 } from "../motion/lucideMorphData";
-import type {
-  ComposerFollowUpState,
-  ComposerPrimaryActionState,
-} from "../../utils/composerPrimaryAction";
-import type { MessageSendAcceptance } from "@shared/contracts";
-import {
-  type ComposerSendFeedback,
-  useComposerSendFeedback,
-} from "./useComposerSendFeedback";
+import type { ComposerPrimaryActionState } from "../../utils/composerPrimaryAction";
+import type { ComposerQueuedPrompt } from "./types";
+import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import "./ComposerSendActions.css";
 
-function FollowUpAction({
-  state,
-  onSubmit,
-  buttonRef,
-}: {
-  state: ComposerFollowUpState;
-  onSubmit: () => Promise<void>;
-  buttonRef: Ref<HTMLButtonElement>;
-}): React.JSX.Element | null {
-  if (state === "unavailable") {
-    return (
-      <small
-        className="composer-follow-up-unavailable"
-        role="status"
-        title="This active agent route cannot accept parent follow-ups."
-      >
-        Follow-up unavailable
-      </small>
-    );
-  }
-  if (state !== "ready" && state !== "pending") return null;
-  const pending = state === "pending";
-  const icon = pending ? loaderCircleMorphIcon : sendMorphIcon;
-  const iconState = pending ? "sending" : "send";
-  return (
-    <button
-      ref={buttonRef}
-      type="button"
-      className="secondary-button composer-follow-up-button"
-      aria-label={pending ? "Sending follow-up" : "Send follow-up"}
-      aria-busy={pending}
-      disabled={pending}
-      data-motion-state={iconState}
-      onClick={() => void onSubmit()}
-    >
-      <InertiaMorphIcon
-        className="composer-send-motion-icon"
-        icon={icon}
-        iconState={iconState}
-        size={13}
-      />
-      <span>{pending ? "Sending…" : "Follow up"}</span>
-    </button>
-  );
+const QUEUED_PROMPTS_CHANGED_EVENT = "inertia:queued-prompts-changed";
+
+function queueKey(conversationId: string): string {
+  return `inertia:queued-prompts:${conversationId}`;
 }
 
-function AcceptanceStatus({
-  kind,
-  visuallyHidden = false,
-}: {
-  kind: "message" | "follow-up";
-  visuallyHidden?: boolean;
-}): React.JSX.Element {
-  const label = kind === "follow-up" ? "Follow-up accepted." : "Message accepted.";
-  return (
-    <span
-      className={visuallyHidden
-        ? "composer-send-acceptance visually-hidden"
-        : "composer-send-acceptance"}
-      data-motion-state="accepted"
-      role="status"
-      aria-live="polite"
-    >
-      <InertiaMorphIcon icon={checkMorphIcon} iconState="accepted" size={13} />
-      <span className="composer-send-acceptance-text" aria-hidden="true">
-        Accepted
-      </span>
-      <span className="visually-hidden">{label}</span>
-    </span>
-  );
+function readQueue(conversationId: string): ComposerQueuedPrompt[] {
+  try {
+    const value: unknown = JSON.parse(
+      window.localStorage.getItem(queueKey(conversationId)) ?? "[]",
+    );
+    return Array.isArray(value)
+      ? value.filter((entry): entry is ComposerQueuedPrompt => Boolean(
+          entry
+          && typeof entry === "object"
+          && typeof entry.id === "string"
+          && typeof entry.content === "string"
+          && entry.content.length > 0
+          && entry.content.length <= 20_000
+          && typeof entry.createdAt === "string",
+        )).slice(0, 10)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeQueue(
+  conversationId: string,
+  prompts: readonly ComposerQueuedPrompt[],
+): void {
+  const key = queueKey(conversationId);
+  if (prompts.length > 0) {
+    window.localStorage.setItem(key, JSON.stringify(prompts));
+  } else {
+    window.localStorage.removeItem(key);
+  }
+  window.dispatchEvent(new Event(QUEUED_PROMPTS_CHANGED_EVENT));
+}
+
+export function enqueueComposerPrompt(
+  conversationId: string,
+  content: string,
+): boolean {
+  try {
+    const current = readQueue(conversationId);
+    if (current.length >= 10) return false;
+    writeQueue(conversationId, [...current, {
+      id: window.crypto.randomUUID(),
+      content,
+      createdAt: new Date().toISOString(),
+    }]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function primaryPresentation(
   state: ComposerPrimaryActionState,
-  accepted: boolean,
   intent: boolean,
 ) {
   if (state === "stop-ready" || state === "stop-pending") {
@@ -106,23 +92,14 @@ function primaryPresentation(
     };
   }
   if (state === "submitting") {
-    return accepted
-      ? {
-          action: "send" as const,
-          busy: false,
-          disabled: true,
-          icon: checkMorphIcon,
-          iconState: "accepted",
-          label: "Message accepted",
-        }
-      : {
-          action: "send" as const,
-          busy: true,
-          disabled: true,
-          icon: loaderCircleMorphIcon,
-          iconState: "sending",
-          label: "Sending message",
-        };
+    return {
+      action: "send" as const,
+      busy: true,
+      disabled: true,
+      icon: loaderCircleMorphIcon,
+      iconState: "sending",
+      label: "Sending message",
+    };
   }
   return {
     action: "send" as const,
@@ -137,58 +114,169 @@ function primaryPresentation(
 }
 
 export function ComposerSendActions({
-  followUpState,
+  conversationId,
   primaryAction,
-  feedback,
+  canSendQueuedNow,
+  running,
+  latestTurnId,
+  latestTurnStatus,
+  onSendQueued,
   onSubmit,
   onStop,
 }: {
-  followUpState: ComposerFollowUpState;
+  conversationId: string;
   primaryAction: ComposerPrimaryActionState;
-  feedback: ComposerSendFeedback | null;
+  canSendQueuedNow: boolean;
+  running: boolean;
+  latestTurnId: string | null;
+  latestTurnStatus: AgentTurnStatus | null;
+  onSendQueued: (content: string) => Promise<unknown>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }): React.JSX.Element {
   const [intent, setIntent] = useState(false);
-  const followUpRef = useRef<HTMLButtonElement>(null);
+  const [queuedPrompts, setQueuedPrompts] = useState(() => readQueue(conversationId));
+  const [queueSendingId, setQueueSendingId] = useState<string | null>(null);
+  const [queueHost, setQueueHost] = useState<HTMLElement | null>(null);
+  const queuedPromptsRef = useRef(queuedPrompts);
+  const queueSendingRef = useRef<string | null>(null);
+  const conversationIdRef = useRef(conversationId);
+  const autoQueuedTurnRef = useRef<string | null>(null);
+  conversationIdRef.current = conversationId;
+  queuedPromptsRef.current = queuedPrompts;
+  const syncQueue = useCallback((): void => {
+    const next = readQueue(conversationId);
+    queuedPromptsRef.current = next;
+    setQueuedPrompts(next);
+  }, [conversationId]);
+  useEffect(() => {
+    queueSendingRef.current = null;
+    autoQueuedTurnRef.current = null;
+    setQueueSendingId(null);
+    syncQueue();
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === queueKey(conversationId)) syncQueue();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(QUEUED_PROMPTS_CHANGED_EVENT, syncQueue);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(QUEUED_PROMPTS_CHANGED_EVENT, syncQueue);
+    };
+  }, [conversationId, syncQueue]);
+  const removeQueued = useCallback((promptId: string): void => {
+    writeQueue(
+      conversationId,
+      readQueue(conversationId).filter(({ id }) => id !== promptId),
+    );
+  }, [conversationId]);
+  const sendQueued = useCallback(async (promptId: string): Promise<void> => {
+    const dispatch = async (): Promise<void> => {
+      if (queueSendingRef.current || !canSendQueuedNow) return;
+      const queued = readQueue(conversationId).find(({ id }) => id === promptId);
+      if (!queued) return;
+      queueSendingRef.current = promptId;
+      setQueueSendingId(promptId);
+      try {
+        await onSendQueued(queued.content);
+        removeQueued(promptId);
+      } catch {
+        // The workspace owns the error surface; keep the draft for retry.
+      } finally {
+        if (
+          conversationIdRef.current === conversationId
+          && queueSendingRef.current === promptId
+        ) {
+          queueSendingRef.current = null;
+          setQueueSendingId(null);
+        }
+      }
+    };
+    if (!navigator.locks) {
+      await dispatch();
+      return;
+    }
+    await navigator.locks.request(
+      `inertia:queued-prompt:${conversationId}`,
+      { ifAvailable: true },
+      async (lock) => {
+        if (lock) await dispatch();
+      },
+    );
+  }, [canSendQueuedNow, conversationId, onSendQueued, removeQueued]);
+  useEffect(() => {
+    const queued = queuedPrompts[0];
+    if (
+      running
+      || queueSendingRef.current
+      || !canSendQueuedNow
+      || !queued
+      || !latestTurnId
+      || latestTurnStatus !== "completed"
+    ) return;
+    const terminalKey = `${conversationId}:${latestTurnId}`;
+    if (autoQueuedTurnRef.current === terminalKey) return;
+    autoQueuedTurnRef.current = terminalKey;
+    void sendQueued(queued.id);
+  }, [
+    canSendQueuedNow,
+    conversationId,
+    latestTurnId,
+    latestTurnStatus,
+    queuedPrompts,
+    running,
+    sendQueued,
+  ]);
   const primaryRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    setQueueHost(primaryRef.current?.closest<HTMLElement>(".composer") ?? null);
+  }, [conversationId]);
   const focusedElement = document.activeElement;
   const focusedGroup = focusedElement?.closest(".composer-actions");
   const focusedAction = focusedElement?.classList.contains("send-button")
     ? "primary"
-    : focusedElement?.classList.contains("composer-follow-up-button")
-      ? "follow-up"
-      : null;
+    : null;
   useLayoutEffect(() => {
     const group = primaryRef.current?.closest<HTMLElement>(".composer-actions");
     if (group !== focusedGroup || document.activeElement !== document.body) return;
     if (focusedAction === "primary") primaryRef.current?.focus();
-    if (focusedAction === "follow-up") followUpRef.current?.focus();
   }, [focusedAction, focusedGroup]);
-  const followUpAccepted = feedback?.disposition === "follow-up";
-  const primaryAccepted = primaryAction === "submitting"
-    && feedback?.disposition === "new-turn";
-  const showFollowUpStatus = followUpAccepted
-    && feedback.visible
-    && followUpState !== "ready"
-    && followUpState !== "pending";
-  const showPrimaryStatus = feedback?.disposition === "new-turn"
-    && feedback.visible;
-  const presentation = primaryPresentation(primaryAction, primaryAccepted, intent);
+  const presentation = primaryPresentation(primaryAction, intent);
+  const queued = queuedPrompts[0] ?? null;
+  const queueElement = queued ? (
+    <div className="composer-queue" role="list" aria-label="Queued messages">
+      <div className="composer-queue-item" role="listitem">
+        <CornerDownRight size={15} aria-hidden="true" />
+        <span className="composer-queue-copy" title={queued.content}>
+          {queued.content}
+        </span>
+        <small className="composer-queue-count">
+          {queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
+        </small>
+        <button
+          type="button"
+          className="composer-queue-send"
+          aria-label="Send queued message now"
+          disabled={!canSendQueuedNow || queueSendingId !== null}
+          onClick={() => void sendQueued(queued.id)}
+        >
+          {queueSendingId === queued.id ? "Sending…" : "Send now"}
+        </button>
+        <button
+          type="button"
+          className="composer-queue-remove"
+          aria-label="Remove queued message"
+          disabled={queueSendingId === queued.id}
+          onClick={() => removeQueued(queued.id)}
+        >
+          <Trash2 size={14} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  ) : null;
   return (
     <>
-      {showFollowUpStatus ? (
-        <AcceptanceStatus kind="follow-up" />
-      ) : (
-        <FollowUpAction
-          state={followUpState}
-          onSubmit={onSubmit}
-          buttonRef={followUpRef}
-        />
-      )}
-      {showPrimaryStatus ? (
-        <AcceptanceStatus kind="message" visuallyHidden={primaryAccepted} />
-      ) : null}
+      {queueElement && (queueHost ? createPortal(queueElement, queueHost) : queueElement)}
       <button
         ref={primaryRef}
         type="button"
@@ -196,9 +284,7 @@ export function ComposerSendActions({
         title={presentation.label}
         className={`icon-button send-button${
           presentation.action === "stop" ? " stop-button" : ""
-        }${presentation.iconState === "sending" ? " send-button-loading" : ""}${
-          presentation.iconState === "accepted" ? " send-button-accepted" : ""
-        }`}
+        }${presentation.iconState === "sending" ? " send-button-loading" : ""}`}
         data-composer-action-state={primaryAction}
         data-motion-state={presentation.iconState}
         aria-busy={presentation.busy}
@@ -226,12 +312,9 @@ export function ComposerSendActions({
 
 export function ConversationComposerSendActions({
   conversationId,
-  acceptance,
   ...props
-}: Omit<React.ComponentProps<typeof ComposerSendActions>, "feedback"> & {
+}: React.ComponentProps<typeof ComposerSendActions> & {
   conversationId: string;
-  acceptance: MessageSendAcceptance | null;
 }): React.JSX.Element {
-  const feedback = useComposerSendFeedback(conversationId, acceptance);
-  return <ComposerSendActions {...props} feedback={feedback} />;
+  return <ComposerSendActions {...props} conversationId={conversationId} />;
 }

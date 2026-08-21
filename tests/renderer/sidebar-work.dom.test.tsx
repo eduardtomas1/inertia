@@ -690,6 +690,47 @@ describe("compact Work sidebar", () => {
       .toHaveFocus();
   });
 
+  it("dismisses the Projects overflow menu when pointing outside it", () => {
+    renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
+
+    const trigger = screen.getByRole("button", {
+      name: "Project actions for Studio",
+    });
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("menu", {
+      name: "Project actions for Studio",
+    })).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.pointerDown(screen.getByRole("searchbox", {
+      name: "Search projects and conversations",
+    }));
+
+    expect(screen.queryByRole("menu", {
+      name: "Project actions for Studio",
+    })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps focus in the project rename field after dismissing its menu", async () => {
+    renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Project actions for Studio",
+    }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const renameInput = screen.getByRole("textbox", { name: "Rename project" });
+
+    expect(renameInput).toHaveFocus();
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    });
+    expect(renameInput).toHaveFocus();
+  });
+
   it("keeps Home and End keyboard navigation working across virtual windows", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

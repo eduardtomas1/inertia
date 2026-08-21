@@ -12,12 +12,14 @@ const markers: TimelineMarker[] = [
     id: "turn-1",
     label: "Inspect the lifecycle boundary",
     number: 1,
+    summary: "The lifecycle boundary is stable.",
   },
   {
     timelineIndex: 4,
     id: "turn-2",
     label: "Verify the focused regression",
     number: 2,
+    summary: null,
   },
 ];
 
@@ -48,8 +50,9 @@ describe("TimelineMinimap", () => {
     fireEvent.pointerEnter(first);
     expect(first).toHaveAttribute("data-emphasized", "true");
     expect(document.querySelectorAll(".timeline-minimap-preview")).toHaveLength(1);
+    expect(document.querySelector(".timeline-minimap-preview")).toHaveAttribute("data-turn", "1");
     expect(document.querySelector(".timeline-minimap-preview")).toHaveTextContent(
-      "Turn 1 · Inspect the lifecycle boundary",
+      "Inspect the lifecycle boundaryThe lifecycle boundary is stable.",
     );
     expect(first).not.toHaveAttribute("aria-describedby");
     expect(document.querySelector(".timeline-minimap-preview"))
@@ -60,15 +63,16 @@ describe("TimelineMinimap", () => {
     expect(first).toHaveAttribute("data-emphasized", "true");
     expect(document.querySelectorAll(".timeline-minimap-preview")).toHaveLength(1);
     expect(document.querySelector(".timeline-minimap-preview")).toHaveTextContent(
-      "Turn 1 · Inspect the lifecycle boundary",
+      "Inspect the lifecycle boundaryThe lifecycle boundary is stable.",
     );
 
     fireEvent.pointerEnter(second);
     expect(first).not.toHaveAttribute("data-emphasized");
     expect(second).toHaveAttribute("data-emphasized", "true");
     expect(document.querySelectorAll(".timeline-minimap-preview")).toHaveLength(1);
+    expect(document.querySelector(".timeline-minimap-preview")).toHaveAttribute("data-turn", "2");
     expect(document.querySelector(".timeline-minimap-preview")).toHaveTextContent(
-      "Turn 2 · Verify the focused regression",
+      "Verify the focused regression",
     );
 
     fireEvent.pointerLeave(second);
@@ -76,7 +80,7 @@ describe("TimelineMinimap", () => {
     expect(second).not.toHaveAttribute("data-emphasized");
     expect(document.querySelectorAll(".timeline-minimap-preview")).toHaveLength(1);
     expect(document.querySelector(".timeline-minimap-preview")).toHaveTextContent(
-      "Turn 1 · Inspect the lifecycle boundary",
+      "Inspect the lifecycle boundaryThe lifecycle boundary is stable.",
     );
 
     fireEvent.keyDown(first, { key: "ArrowDown" });

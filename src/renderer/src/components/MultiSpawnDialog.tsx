@@ -1,10 +1,9 @@
 import {
-  ArrowLeftRight,
   Brain,
   Check,
-  Columns2,
   Folder,
   KeyRound,
+  MessagesSquare,
   Scale,
   ShieldCheck,
   TriangleAlert,
@@ -54,6 +53,7 @@ import {
 } from "../utils/duoRecoveryCommands";
 import { ModelChooser } from "./ModelChooser";
 import { IconButton, LoadingMark } from "./ui";
+import "./MultiSpawnDialog.css";
 
 export interface MultiSpawnDialogProps {
   open: boolean;
@@ -504,7 +504,6 @@ export function MultiSpawnDialog({
       side.projectId,
       draft.comparison.side.projectId,
     ));
-
   const updateSide = (
     index: 0 | 1,
     next: MultiSpawnSideDraft,
@@ -575,13 +574,13 @@ export function MultiSpawnDialog({
       >
         <header className="multi-spawn-dialog-header">
           <span className="multi-spawn-dialog-mark">
-            <Columns2 size={18} />
+            <MessagesSquare size={18} strokeWidth={1.9} />
           </span>
           <span>
             <h2 id="multi-spawn-title">Launch a duo</h2>
             <p id="multi-spawn-description">
-              Send one brief to two independent routes. Inertia coordinates
-              the launch durably, but provider-side effects cannot be atomic.
+              Send one brief to two independent agents with separate routes
+              and permissions.
             </p>
           </span>
           <IconButton
@@ -593,6 +592,7 @@ export function MultiSpawnDialog({
           </IconButton>
         </header>
 
+        <div className="multi-spawn-dialog-body">
         <div className="multi-spawn-prompt-zone">
           <label htmlFor="multi-spawn-prompt">
             <span>Brief for both chats</span>
@@ -623,9 +623,6 @@ export function MultiSpawnDialog({
             onChange={(next) => updateSide(0, next)}
             onRepair={() => openRepair(0)}
           />
-          <span className="multi-spawn-pair-arrow" aria-hidden="true">
-            <ArrowLeftRight size={15} />
-          </span>
           <MultiSpawnSideEditor
             index={1}
             side={draft.sides[1]}
@@ -657,35 +654,40 @@ export function MultiSpawnDialog({
             />
             <span>
               <strong id="multi-spawn-comparison-title">
-                Compare both results with a third model
+                Add an independent judge
               </strong>
               <small>
-                After both routes finish, a separate judge receives their
-                bounded results and opens as the full-width chat.
+                Runs after both agents finish and receives bounded results only.
               </small>
             </span>
           </label>
 
           {draft.comparison.enabled && (
             <div className="multi-spawn-comparison-body">
-              <MultiSpawnSideEditor
-                index={2}
-                side={draft.comparison.side}
-                projects={snapshot.projects}
-                routeState={comparisonRouteState}
-                disabled={busy}
-                onChange={updateComparison}
-                onRepair={() => openRepair(2)}
-              />
+              <details className="multi-spawn-judge-config">
+                <summary>
+                  <strong>Independent judge</strong>
+                  <span className="multi-spawn-judge-config-action">
+                    Configure judge
+                  </span>
+                </summary>
+                <MultiSpawnSideEditor
+                  index={2}
+                  side={draft.comparison.side}
+                  projects={snapshot.projects}
+                  routeState={comparisonRouteState}
+                  disabled={busy}
+                  onChange={updateComparison}
+                  onRepair={() => openRepair(2)}
+                />
+              </details>
               {judgeSharesSourceCheckout && (
                 <div className="multi-spawn-judge-risk" role="status">
                   <TriangleAlert size={15} />
                   <span>
                     <strong>Judge can edit a source checkout</strong>
-                    The selected access is write-capable. The judge starts only
-                    after both source turns end, but the lock does not make this
-                    checkout read-only. Choose Supervised or another project if
-                    comparison should not make autonomous edits.
+                    Full access can modify this checkout. Choose Supervised to
+                    keep comparison read-only.
                   </span>
                 </div>
               )}
@@ -693,15 +695,14 @@ export function MultiSpawnDialog({
                 <summary>What is shared with the judge?</summary>
                 <p>
                   Inertia waits for both pinned turns, then sends the shared
-                  brief, each terminal status, and up to 5,500 characters of
-                  each attributed assistant result. It sends no source session,
+                  brief, terminal status, and up to 5,500 characters from each
+                  assistant result. It sends no source session,
                   reasoning, tool history, permissions, credentials,
                   attachments, or hidden context.
                 </p>
                 <p>
-                  The judge uses only the project, route, and access selected
-                  above. The comparison does not freeze either source chat or
-                  working tree.
+                  The judge uses only the selected project, route, and access.
+                  It does not freeze either source chat or working tree.
                 </p>
               </details>
             </div>
@@ -916,6 +917,7 @@ export function MultiSpawnDialog({
           </div>
         )}
 
+        </div>
         <footer className="multi-spawn-dialog-footer">
           <label className="multi-spawn-preset-toggle">
             <input

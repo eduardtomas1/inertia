@@ -60,15 +60,17 @@ describe("transcript and composer composition", () => {
       .toContain("max-width: var(--answer-max-width)");
   });
 
-  it("keeps the dock distinct without a glossy shadow or dominant accent halo", () => {
+  it("keeps the dock elevated with layered shadow and a restrained focus halo", () => {
     const root = cssBlock(css, ":root {");
     const focus = cssBlock(css, ".composer:focus-within {");
 
-    expect(root).toContain("--composer-border: var(--interactive-border)");
-    expect(root).toContain("--radius-composer: 12px");
-    expect(root).toContain("0 8px 24px -22px");
-    expect(root).toContain("0 1px 4px -3px");
+    expect(root).toContain("--composer-border: color-mix(in srgb, var(--interactive-border) 82%, transparent)");
+    expect(root).toContain("--radius-composer: 18px");
+    expect(root).toContain("0 30px 62px -30px");
+    expect(root).toContain("0 16px 34px -26px");
+    expect(root).toContain("0 2px 8px -5px");
     expect(focus).toContain("var(--interactive-border-hover)");
+    expect(focus).toContain("var(--composer-shadow)");
     expect(focus).toContain("0 0 0 2px");
     expect(focus).toContain("var(--focus-ring-soft)");
     expect(focus).not.toContain("0 0 0 3px");

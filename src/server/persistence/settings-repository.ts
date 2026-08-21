@@ -38,11 +38,7 @@ export class SettingsRepository {
         default_reasoning_effort = ?,
         default_interaction_mode = ?,
         codex_binary_path = ?,
-        discord_release_repository_url = ?,
-        discord_release_provider = ?,
-        discord_release_model = ?,
-        discord_release_reasoning_effort = ?,
-        discord_webhook_url = ?
+        discord_release_repository_url = ?
       WHERE id = 1
     `).run(
       next.theme,
@@ -77,10 +73,6 @@ export class SettingsRepository {
       next.defaultInteractionMode,
       next.codexBinaryPath,
       next.discordReleaseRepositoryUrl,
-      next.discordReleaseProvider,
-      next.discordReleaseModel,
-      next.discordReleaseReasoningEffort,
-      next.discordWebhookUrl,
     );
   }
 

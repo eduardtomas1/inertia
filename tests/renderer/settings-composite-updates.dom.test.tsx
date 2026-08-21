@@ -216,11 +216,28 @@ describe("Settings composite updates", () => {
     expect(reasoning).toHaveDisplayValue("Xhigh");
   });
 
-  it("saves the Discord release repository and webhook URLs", () => {
+  it("keeps the Discord webhook in privileged credential storage", async () => {
+    const getBackendCredentialState = vi.fn(async () => ({
+      profileId: "discord-release-webhook",
+      hasSecret: false,
+      maskedValue: null,
+      credentialGeneration: null,
+      storage: { available: true, provider: "keychain" as const, message: null },
+    }));
+    const setBackendCredential = vi.fn(async () => ({
+      profileId: "discord-release-webhook",
+      hasSecret: true,
+      maskedValue: "••••••••" as const,
+      credentialGeneration: "webhook-generation",
+      storage: { available: true, provider: "keychain" as const, message: null },
+    }));
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
         getPlatform: () => "darwin",
+        getBackendCredentialState,
+        setBackendCredential,
+        clearBackendCredential: vi.fn(),
         listInertiaReleases: vi.fn(async () => []),
       },
     });
@@ -231,6 +248,9 @@ describe("Settings composite updates", () => {
     />);
 
     fireEvent.click(screen.getByRole("button", { name: "Discord" }));
+    await waitFor(() => expect(getBackendCredentialState).toHaveBeenCalledWith({
+      profileId: "discord-release-webhook",
+    }));
     const repository = screen.getByLabelText("Discord release repository URL");
     expect(repository).toHaveValue("");
 
@@ -252,26 +272,18 @@ describe("Settings composite updates", () => {
         value: "https://discord.com/api/webhooks/test/token",
       },
     });
-
-    expect(onUpdate).toHaveBeenLastCalledWith({
-      discordWebhookUrl: "https://discord.com/api/webhooks/test/token",
-    });
-
-    fireEvent.change(screen.getByLabelText("Model"), {
-      target: { value: "codex:gpt-5.6-sol" },
-    });
-    expect(onUpdate).toHaveBeenLastCalledWith({
-      discordReleaseProvider: "codex",
-      discordReleaseModel: "gpt-5.6-sol",
-      discordReleaseReasoningEffort: "low",
-    });
-
-    fireEvent.change(screen.getByLabelText("Reasoning"), {
-      target: { value: "xhigh" },
-    });
-    expect(onUpdate).toHaveBeenLastCalledWith({
-      discordReleaseReasoningEffort: "xhigh",
-    });
+    expect(onUpdate).not.toHaveBeenCalledWith(expect.objectContaining({
+      discordWebhookUrl: expect.anything(),
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Save webhook" }));
+    await waitFor(() => expect(setBackendCredential).toHaveBeenCalledWith({
+      profileId: "discord-release-webhook",
+      secret: "https://discord.com/api/webhooks/test/token",
+    }));
+    expect(webhook).toHaveValue("");
+    expect(webhook).toHaveAttribute("placeholder", "••••••••");
+    expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Reasoning")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled();
   });
 
@@ -297,6 +309,15 @@ describe("Settings composite updates", () => {
       configurable: true,
       value: {
         getPlatform: () => "darwin",
+        getBackendCredentialState: vi.fn(async () => ({
+          profileId: "discord-release-webhook",
+          hasSecret: true,
+          maskedValue: "••••••••" as const,
+          credentialGeneration: "webhook-generation",
+          storage: { available: true, provider: "keychain" as const, message: null },
+        })),
+        setBackendCredential: vi.fn(),
+        clearBackendCredential: vi.fn(),
         listInertiaReleases: vi.fn(async () => [release, previousRelease]),
         sendDiscordReleaseInfo,
       },
@@ -307,13 +328,12 @@ describe("Settings composite updates", () => {
       settings={{
         ...defaultSettings,
         discordReleaseRepositoryUrl: "https://github.com/eduardtomas1/inertia",
-        discordReleaseModel: "gpt-5.6-sol",
-        discordReleaseReasoningEffort: "xhigh",
-        discordWebhookUrl: "https://discord.com/api/webhooks/test/token",
       }}
     />);
 
     fireEvent.click(screen.getByRole("button", { name: "Discord" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
 
     await waitFor(() =>
@@ -322,7 +342,6 @@ describe("Settings composite updates", () => {
       }));
     await waitFor(() =>
       expect(sendDiscordReleaseInfo).toHaveBeenCalledWith({
-        webhookUrl: "https://discord.com/api/webhooks/test/token",
         repositoryUrl: "https://github.com/eduardtomas1/inertia",
         previousRelease,
         release,

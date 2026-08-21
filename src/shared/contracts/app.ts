@@ -170,14 +170,6 @@ export interface AppSettings {
   codexBinaryPath: string;
   /** Public GitHub or GitLab repository URL used to load releases for Discord announcements. */
   discordReleaseRepositoryUrl: string;
-  /** Provider used to generate Discord release analysis. */
-  discordReleaseProvider: ProviderId;
-  /** Empty uses the provider default model for Discord release analysis. */
-  discordReleaseModel: string;
-  /** Empty uses the selected model default reasoning effort for Discord release analysis. */
-  discordReleaseReasoningEffort: string;
-  /** Discord incoming webhook URL used by the internal release announcement flow. */
-  discordWebhookUrl: string;
 }
 
 export interface Project {
@@ -323,8 +315,4 @@ export const defaultSettings: AppSettings = {
   defaultInteractionMode: "build",
   codexBinaryPath: "",
   discordReleaseRepositoryUrl: "",
-  discordReleaseProvider: "codex",
-  discordReleaseModel: "",
-  discordReleaseReasoningEffort: "",
-  discordWebhookUrl: "",
 };

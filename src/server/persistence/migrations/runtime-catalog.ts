@@ -2,11 +2,7 @@ import type Database from "better-sqlite3";
 import type { ProviderId } from "../../../shared/contracts";
 import { continuationIdentityForSelection, nativeModelSelection } from "../../../shared/model-routing";
 import { backfillLegacyAgentTurns, formatMigrationDiagnostic, runDatabaseMigrations } from "../../database-migrations";
-import {
-  nativeProviderMetadataScope,
-  providerMetadataScopeKey,
-  type PersistedProviderMetadata,
-} from "../../provider/metadata";
+import { nativeProviderMetadataScope, providerMetadataScopeKey, type PersistedProviderMetadata } from "../../provider/metadata";
 import { legacyModelSelection } from "../codecs";
 import type { AgentTurnRow, ConversationRow } from "../rows";
 import { sanitizePersistedAttachmentCapabilities } from "./attachment-capabilities";
@@ -19,6 +15,7 @@ import { conversationWorktreeOwnershipMigration } from "./conversation-worktree-
 import { persistColorTheme } from "./color-theme";
 import { persistAgentThreadManagement } from "./agent-thread-management";
 import { durableDataMigrationDefinitions } from "./durable-data";
+import { persistDiscordReleaseRepositoryUrl } from "./discord-release";
 import { protectCancellingDuoDeletion, protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
@@ -1226,58 +1223,7 @@ export function migrateRuntimeDatabase(database: Database.Database, maximumVersi
       persistAgentThreadManagement,
       conversationContextPacketsMigration,
       nativeKimiProviderMigration,
-      {
-        name: "PersistDiscordReleaseWebhookUrl",
-        up: (database) => {
-          const columns = database.prepare("PRAGMA table_info(app_state)")
-            .all() as Array<{ name: string }>;
-          if (columns.some(({ name }) => name === "discord_webhook_url")) {
-            return;
-          }
-          database.exec(`
-            ALTER TABLE app_state
-              ADD COLUMN discord_webhook_url TEXT NOT NULL DEFAULT ''
-              CHECK (length(discord_webhook_url) <= 500);
-          `);
-        },
-      },
-      {
-        name: "PersistDiscordReleaseRepositoryUrl",
-        up: (database) => {
-          const columns = database.prepare("PRAGMA table_info(app_state)")
-            .all() as Array<{ name: string }>;
-          if (columns.some(({ name }) => name === "discord_release_repository_url")) {
-            return;
-          }
-          database.exec(`
-            ALTER TABLE app_state
-              ADD COLUMN discord_release_repository_url TEXT NOT NULL DEFAULT ''
-              CHECK (length(discord_release_repository_url) <= 500);
-          `);
-        },
-      },
-      {
-        name: "PersistDiscordReleaseAnalysisModel",
-        up: (database) => {
-          const columns = database.prepare("PRAGMA table_info(app_state)")
-            .all() as Array<{ name: string }>;
-          const names = new Set(columns.map(({ name }) => name));
-          const additions = [
-            names.has("discord_release_provider")
-              ? null
-              : "ADD COLUMN discord_release_provider TEXT NOT NULL DEFAULT 'codex'",
-            names.has("discord_release_model")
-              ? null
-              : "ADD COLUMN discord_release_model TEXT NOT NULL DEFAULT '' CHECK (length(discord_release_model) <= 160)",
-            names.has("discord_release_reasoning_effort")
-              ? null
-              : "ADD COLUMN discord_release_reasoning_effort TEXT NOT NULL DEFAULT '' CHECK (length(discord_release_reasoning_effort) <= 40)",
-          ].filter((sql): sql is string => sql !== null);
-          for (const addition of additions) {
-            database.exec(`ALTER TABLE app_state ${addition};`);
-          }
-        },
-      },
+      persistDiscordReleaseRepositoryUrl,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

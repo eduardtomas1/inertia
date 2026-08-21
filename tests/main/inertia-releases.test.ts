@@ -153,26 +153,29 @@ describe("Discord release info", () => {
       return new Response(null, { status: 204 });
     });
 
-    await expect(sendDiscordReleaseInfo(fetch, {
-      webhookUrl: "https://discord.com/api/webhooks/123/token",
-      repositoryUrl: "https://github.com/eduardtomas1/inertia",
-      previousRelease: {
-        tag: "v0.0.40",
-        name: "Inertia 0.0.40",
-        url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.40",
-        createdAt: "2030-01-02T03:04:05.000Z",
-        releasedAt: "2030-01-02T04:04:05.000Z",
-        description: "Previous release notes",
+    await expect(sendDiscordReleaseInfo(
+      fetch,
+      "https://discord.com/api/webhooks/123/token",
+      {
+        repositoryUrl: "https://github.com/eduardtomas1/inertia",
+        previousRelease: {
+          tag: "v0.0.40",
+          name: "Inertia 0.0.40",
+          url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.40",
+          createdAt: "2030-01-02T03:04:05.000Z",
+          releasedAt: "2030-01-02T04:04:05.000Z",
+          description: "Previous release notes",
+        },
+        release: {
+          tag: "v0.0.41",
+          name: "Inertia 0.0.41",
+          url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.41",
+          createdAt: "2030-01-03T03:04:05.000Z",
+          releasedAt: "2030-01-03T04:04:05.000Z",
+          description: "Release notes",
+        },
       },
-      release: {
-        tag: "v0.0.41",
-        name: "Inertia 0.0.41",
-        url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.41",
-        createdAt: "2030-01-03T03:04:05.000Z",
-        releasedAt: "2030-01-03T04:04:05.000Z",
-        description: "Release notes",
-      },
-    })).resolves.toEqual({ sent: true });
+    )).resolves.toEqual({ sent: true });
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -192,26 +195,29 @@ describe("Discord release info", () => {
         ? jsonResponse({ commits: [], files: [] })
         : new Response(null, { status: 204 }));
 
-    await expect(sendDiscordReleaseInfo(fetch, {
-      webhookUrl: "https://discord.com/api/webhooks/123/token",
-      repositoryUrl: "https://github.com/eduardtomas1/inertia",
-      previousRelease: {
-        tag: "v0.0.40",
-        name: "Inertia 0.0.40",
-        url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.40",
-        createdAt: "2030-01-02T03:04:05.000Z",
-        releasedAt: "2030-01-02T04:04:05.000Z",
-        description: "Previous release notes",
+    await expect(sendDiscordReleaseInfo(
+      fetch,
+      "https://discord.com/api/webhooks/123/token",
+      {
+        repositoryUrl: "https://github.com/eduardtomas1/inertia",
+        previousRelease: {
+          tag: "v0.0.40",
+          name: "Inertia 0.0.40",
+          url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.40",
+          createdAt: "2030-01-02T03:04:05.000Z",
+          releasedAt: "2030-01-02T04:04:05.000Z",
+          description: "Previous release notes",
+        },
+        release: {
+          tag: "v0.0.41",
+          name: "Inertia 0.0.41",
+          url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.41",
+          createdAt: "2030-01-03T03:04:05.000Z",
+          releasedAt: "2030-01-03T04:04:05.000Z",
+          description: "Release notes",
+        },
       },
-      release: {
-        tag: "v0.0.41",
-        name: "Inertia 0.0.41",
-        url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.41",
-        createdAt: "2030-01-03T03:04:05.000Z",
-        releasedAt: "2030-01-03T04:04:05.000Z",
-        description: "Release notes",
-      },
-    })).resolves.toEqual({ sent: true });
+    )).resolves.toEqual({ sent: true });
 
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -219,26 +225,29 @@ describe("Discord release info", () => {
   it("rejects non-Discord webhook URLs", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>();
 
-    await expect(sendDiscordReleaseInfo(fetch, {
-      webhookUrl: "https://example.com/api/webhooks/123/token",
-      repositoryUrl: "https://github.com/eduardtomas1/inertia",
-      previousRelease: {
-        tag: "v0.0.40",
-        name: "Inertia 0.0.40",
-        url: null,
-        createdAt: "2030-01-02T03:04:05.000Z",
-        releasedAt: null,
-        description: null,
+    await expect(sendDiscordReleaseInfo(
+      fetch,
+      "https://example.com/api/webhooks/123/token",
+      {
+        repositoryUrl: "https://github.com/eduardtomas1/inertia",
+        previousRelease: {
+          tag: "v0.0.40",
+          name: "Inertia 0.0.40",
+          url: null,
+          createdAt: "2030-01-02T03:04:05.000Z",
+          releasedAt: null,
+          description: null,
+        },
+        release: {
+          tag: "v0.0.41",
+          name: "Inertia 0.0.41",
+          url: null,
+          createdAt: "2030-01-03T03:04:05.000Z",
+          releasedAt: null,
+          description: null,
+        },
       },
-      release: {
-        tag: "v0.0.41",
-        name: "Inertia 0.0.41",
-        url: null,
-        createdAt: "2030-01-03T03:04:05.000Z",
-        releasedAt: null,
-        description: null,
-      },
-    })).rejects.toThrow("Discord webhook URL is invalid");
+    )).rejects.toThrow("Discord webhook URL is invalid");
     expect(fetch).not.toHaveBeenCalled();
   });
 });

@@ -9,11 +9,16 @@ export const loadConnectionsAndDevicesSettings = createSurfaceLoader(
 export const loadModelBackendsSettings = createSurfaceLoader(async () => ({
   default: (await import("./ModelBackendsSettings")).ModelBackendsSettings,
 }));
+export const loadDiscordSettings = createSurfaceLoader(async () => ({
+  default: (await import("./DiscordSettings")).DiscordSettings,
+}));
 
 export function prefetchSettingsSection(section: string): void {
   if (section === "backends") {
     void loadModelBackendsSettings();
   } else if (section === "connections") {
     void loadConnectionsAndDevicesSettings();
+  } else if (section === "discord") {
+    void loadDiscordSettings();
   }
 }

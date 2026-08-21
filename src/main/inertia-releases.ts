@@ -439,9 +439,10 @@ export async function listInertiaReleases(
 
 export async function sendDiscordReleaseInfo(
   fetch: typeof globalThis.fetch,
+  webhook: string,
   request: SendDiscordReleaseInfoRequest,
 ): Promise<{ sent: true }> {
-  const webhookUrl = discordWebhookUrl(request?.webhookUrl);
+  const webhookUrl = discordWebhookUrl(webhook);
   const repository = repositoryDescriptor(request?.repositoryUrl);
   const previousRelease = validatedRelease(request?.previousRelease);
   const release = validatedRelease(request?.release);

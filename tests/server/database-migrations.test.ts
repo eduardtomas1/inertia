@@ -1846,8 +1846,6 @@ describe("runtime migration catalog", () => {
       { version: 61 },
       { version: 62 },
       { version: 63 },
-      { version: 64 },
-      { version: 65 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -1858,6 +1856,14 @@ describe("runtime migration catalog", () => {
     expect(migrated.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'prompt_presets'",
     ).get()).toEqual({ name: "prompt_presets" });
+    const appStateColumns = new Set((migrated.prepare(
+      "PRAGMA table_info(app_state)",
+    ).all() as Array<{ name: string }>).map(({ name }) => name));
+    expect(appStateColumns.has("discord_release_repository_url")).toBe(true);
+    expect(appStateColumns.has("discord_webhook_url")).toBe(false);
+    expect(appStateColumns.has("discord_release_provider")).toBe(false);
+    expect(appStateColumns.has("discord_release_model")).toBe(false);
+    expect(appStateColumns.has("discord_release_reasoning_effort")).toBe(false);
     migrated.close();
   });
 });

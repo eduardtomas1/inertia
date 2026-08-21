@@ -327,10 +327,6 @@ export interface StateRow {
   default_interaction_mode: InteractionMode;
   codex_binary_path: string;
   discord_release_repository_url: string;
-  discord_release_provider: ProviderId;
-  discord_release_model: string;
-  discord_release_reasoning_effort: string;
-  discord_webhook_url: string;
   active_project_id: string | null;
   active_conversation_id: string | null;
 }

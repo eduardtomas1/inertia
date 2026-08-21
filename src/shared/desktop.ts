@@ -43,7 +43,6 @@ export interface InertiaReleaseInfo {
 }
 
 export interface SendDiscordReleaseInfoRequest {
-  webhookUrl: string;
   repositoryUrl: string;
   previousRelease: InertiaReleaseInfo;
   release: InertiaReleaseInfo;

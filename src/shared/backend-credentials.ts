@@ -1,5 +1,6 @@
 export const BACKEND_CREDENTIAL_MASK = "••••••••";
 export const MAX_BACKEND_CREDENTIAL_LENGTH = 16_384;
+export const DISCORD_RELEASE_WEBHOOK_PROFILE_ID = "discord-release-webhook";
 
 export type BackendCredentialStorageProvider =
   | "keychain"

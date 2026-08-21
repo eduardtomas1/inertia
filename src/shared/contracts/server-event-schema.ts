@@ -323,20 +323,11 @@ function providerInfo(value: unknown): boolean {
 
 function appSettings(value: unknown): boolean {
   if (!record(value)) return false;
-  const strings = [
-    "defaultModel",
-    "defaultReasoningEffort",
-    "codexBinaryPath",
-    "discordReleaseRepositoryUrl",
-    "discordReleaseModel",
-    "discordReleaseReasoningEffort",
-    "discordWebhookUrl",
-  ];
+  const strings = ["defaultModel", "defaultReasoningEffort", "codexBinaryPath", "discordReleaseRepositoryUrl"];
   const enums = {
     theme: ["system", "light", "dark"],
     colorTheme: COLOR_THEME_IDS,
     defaultProvider: PROVIDER_IDS,
-    discordReleaseProvider: PROVIDER_IDS,
     defaultAccessMode: ACCESS_MODES,
     newThreadMode: ["local", "worktree"],
     usageDisplayMode: ["expanded", "compact", "hidden"],

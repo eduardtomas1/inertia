@@ -384,10 +384,6 @@ export function settingsFromState(state: StateRow): AppSettings {
     defaultInteractionMode: state.default_interaction_mode,
     codexBinaryPath: state.codex_binary_path,
     discordReleaseRepositoryUrl: state.discord_release_repository_url ?? "",
-    discordReleaseProvider: state.discord_release_provider ?? "codex",
-    discordReleaseModel: state.discord_release_model ?? "",
-    discordReleaseReasoningEffort: state.discord_release_reasoning_effort ?? "",
-    discordWebhookUrl: state.discord_webhook_url ?? "",
   };
 }
 

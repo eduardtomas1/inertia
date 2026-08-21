@@ -9,11 +9,19 @@ import {
   type ServerEvent,
 } from "../../shared/contracts";
 import {
-  projectRuntimeFrame,
   RuntimeSequencer,
   type RuntimeDetailSubscription,
   type RuntimeResumeRequest,
 } from "../runtime-sequencing";
+import {
+  projectDetachedChatInputRequest,
+  projectDetachedChatSnapshot,
+  projectRuntimeFrameForAuthority,
+} from "./detached-chat-runtime-projection";
+import {
+  MAIN_RUNTIME_CLIENT_AUTHORITY,
+  type RuntimeClientAuthority,
+} from "./runtime-client-authority";
 
 export interface RuntimeSyncHydration {
   beforeFreshSnapshot?(): void;
@@ -26,6 +34,7 @@ export interface RuntimeSyncHydration {
 type RuntimeSubscriptionOwner = "primary" | "secondary";
 
 interface RuntimeClientSubscription extends RuntimeDetailSubscription {
+  authority: RuntimeClientAuthority;
   mountedConversations: Record<
     RuntimeSubscriptionOwner,
     string | null
@@ -57,11 +66,15 @@ export class RuntimeSyncHub<Socket> {
     socket: Socket,
     resumeRequest: RuntimeResumeRequest,
     hydration: RuntimeSyncHydration,
+    authority: RuntimeClientAuthority = MAIN_RUNTIME_CLIENT_AUTHORITY,
   ): void {
-    const resumedConversationIds = resumeRequest.kind === "resume"
-      ? [...resumeRequest.conversationIds]
-      : [];
+    const resumedConversationIds = authority.kind === "detached-chat"
+      ? [authority.conversationId]
+      : resumeRequest.kind === "resume"
+        ? [...resumeRequest.conversationIds]
+        : [];
     const subscription: RuntimeClientSubscription = {
+      authority,
       conversationIds: resumedConversationIds,
       mountedConversations: {
         primary: resumedConversationIds[0] ?? null,
@@ -91,22 +104,53 @@ export class RuntimeSyncHub<Socket> {
         protocolVersion: PROTOCOL_VERSION,
         sync: replay.cursor,
       });
-      for (const frame of replay.frames) this.send(socket, frame);
+      for (const frame of replay.frames) {
+        this.send(socket, frame.type === "runtime.event"
+          ? projectRuntimeFrameForAuthority(
+              frame,
+              subscription,
+              authority,
+            )
+          : frame);
+      }
     } else {
       const sync = this.sequencer.cursor();
+      const snapshot = hydration.snapshot(sync);
       this.send(socket, {
         type: "server.welcome",
         protocolVersion: PROTOCOL_VERSION,
-        snapshot: hydration.snapshot(sync),
+        snapshot: authority.kind === "detached-chat"
+          ? projectDetachedChatSnapshot(snapshot, authority.conversationId)
+          : snapshot,
         sync,
       });
       for (const request of hydration.approvals) {
+        if (
+          authority.kind === "detached-chat"
+          && request.conversationId !== authority.conversationId
+        ) continue;
         this.send(socket, { type: "agent.approval.requested", request });
       }
       for (const request of hydration.inputs) {
-        this.send(socket, { type: "agent.input.requested", request });
+        if (
+          authority.kind === "detached-chat"
+          && request.conversationId !== authority.conversationId
+        ) continue;
+        this.send(socket, {
+          type: "agent.input.requested",
+          request: authority.kind === "detached-chat"
+            ? projectDetachedChatInputRequest(
+                request,
+                authority.conversationId,
+              )
+            : request,
+        });
       }
       for (const plan of hydration.plans) {
+        if (
+          authority.kind === "detached-chat"
+          && plan.conversationId !== authority.conversationId
+        ) continue;
         this.send(socket, { type: "agent.plan.updated", plan });
       }
     }
@@ -124,6 +168,16 @@ export class RuntimeSyncHub<Socket> {
   ): void {
     const subscription = this.clients.get(socket);
     if (!subscription) return;
+    if (subscription.authority.kind === "detached-chat") {
+      subscription.mountedConversations = {
+        primary: subscription.authority.conversationId,
+        secondary: null,
+      };
+      subscription.conversationIds = [
+        subscription.authority.conversationId,
+      ];
+      return;
+    }
     subscription.mountedConversations[owner] = conversationId;
     subscription.conversationIds = [
       subscription.mountedConversations.primary,
@@ -145,6 +199,7 @@ export class RuntimeSyncHub<Socket> {
     const subscription = this.clients.get(socket);
     if (
       !subscription
+      || subscription.authority.kind === "detached-chat"
       || subscription.conversationIds.includes(conversationId)
     ) return;
     const owner = subscription.mountedConversations.primary === null
@@ -180,7 +235,11 @@ export class RuntimeSyncHub<Socket> {
     for (const [socket, subscription] of this.clients) {
       this.send(
         socket,
-        projectRuntimeFrame(frame, subscription),
+        projectRuntimeFrameForAuthority(
+          frame,
+          subscription,
+          subscription.authority,
+        ),
       );
     }
   }

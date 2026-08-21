@@ -1,0 +1,62 @@
+.send-button[data-motion-state="sending"] .composer-send-motion-icon,
+.composer-follow-up-button[data-motion-state="sending"] .composer-send-motion-icon {
+  animation: composer-send-motion-spin 760ms linear infinite;
+}
+
+.composer-send-acceptance {
+  display: inline-flex;
+  height: var(--composer-control-height);
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--success-accent) 34%, var(--border));
+  border-radius: 8px;
+  color: var(--success-accent);
+  background: color-mix(in srgb, var(--success-accent) 10%, var(--surface-muted));
+  font-size: var(--ui-font-micro);
+  font-weight: 620;
+  white-space: nowrap;
+  animation: composer-send-acceptance-in 180ms var(--motion-ease) both;
+}
+
+.send-button.send-button-accepted:disabled,
+.composer-follow-up-button[data-motion-state="accepted"] {
+  border-color: color-mix(in srgb, var(--success-accent) 34%, var(--border));
+  color: var(--success-accent);
+  background: color-mix(in srgb, var(--success-accent) 10%, var(--surface-muted));
+  opacity: 1;
+}
+
+@keyframes composer-send-motion-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes composer-send-acceptance-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+@container (max-width: 480px) {
+  .composer-send-acceptance-text {
+    display: none;
+  }
+
+  .composer-send-acceptance {
+    width: var(--composer-control-height);
+    justify-content: center;
+    padding: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .send-button[data-motion-state="sending"] .composer-send-motion-icon,
+  .composer-follow-up-button[data-motion-state="sending"] .composer-send-motion-icon {
+    animation: none;
+  }
+
+  .composer-send-acceptance {
+    animation: none;
+  }
+}

@@ -70,6 +70,21 @@ function inputRequest(): AgentInputRequest {
   };
 }
 
+function conversationContextInputRequest(): AgentInputRequest {
+  return {
+    ...inputRequest(),
+    questions: [],
+    conversationContextRequest: {
+      requestId: "input",
+      targetConversationId: CONVERSATION_A,
+      targetTurnId: "turn",
+      requestedSourceConversationId: CONVERSATION_B,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-01-01T00:05:00.000Z",
+    },
+  };
+}
+
 function plan(): AgentPlan {
   return {
     conversationId: CONVERSATION_A,
@@ -153,6 +168,164 @@ describe("runtime sync hub", () => {
     });
     expect(beforeFreshSnapshot).toHaveBeenCalledTimes(1);
     expect(runtime.hub.connectionCount).toBe(1);
+  });
+
+  it("binds detached hydration and live delivery to its claimed conversation", () => {
+    const runtime = fixture();
+    const fullSnapshot = snapshot(undefined);
+    fullSnapshot.projects = [
+      { id: "project-a", name: "A" },
+      { id: "project-b", name: "B" },
+    ] as AppSnapshot["projects"];
+    fullSnapshot.conversations = [
+      { id: CONVERSATION_A, projectId: "project-a", title: "A" },
+      { id: CONVERSATION_B, projectId: "project-b", title: "B secret" },
+    ] as AppSnapshot["conversations"];
+    const otherApproval = {
+      ...approval(),
+      id: "approval-b",
+      conversationId: CONVERSATION_B,
+    };
+    const otherInput = {
+      ...inputRequest(),
+      id: "input-b",
+      conversationId: CONVERSATION_B,
+    };
+    const otherPlan = { ...plan(), conversationId: CONVERSATION_B };
+
+    runtime.hub.connect("detached", { kind: "none" }, {
+      snapshot: () => fullSnapshot,
+      approvals: [approval(), otherApproval],
+      inputs: [inputRequest(), otherInput],
+      plans: [plan(), otherPlan],
+    }, {
+      kind: "detached-chat",
+      conversationId: CONVERSATION_A,
+      clientId: "window-1",
+    });
+
+    const hydrated = runtime.events.get("detached")!;
+    const welcome = hydrated[0] as Extract<
+      ServerEvent,
+      { type: "server.welcome" }
+    >;
+    expect(welcome.snapshot.conversations.map(({ id }) => id)).toEqual([
+      CONVERSATION_A,
+    ]);
+    expect(JSON.stringify(hydrated)).not.toContain(CONVERSATION_B);
+    expect(hydrated.map(({ type }) => type)).toEqual([
+      "server.welcome",
+      "agent.approval.requested",
+      "agent.input.requested",
+      "agent.plan.updated",
+      "runtime.sync.completed",
+    ]);
+
+    runtime.hub.setConversationSubscription(
+      "detached",
+      "secondary",
+      CONVERSATION_B,
+    );
+    hydrated.length = 0;
+    runtime.hub.broadcast({
+      type: "agent.text",
+      conversationId: CONVERSATION_B,
+      runId: "run-b",
+      turnId: "turn-b",
+      text: "secret-b",
+    });
+    runtime.hub.broadcast({
+      type: "agent.text",
+      conversationId: CONVERSATION_A,
+      runId: "run-a",
+      turnId: "turn-a",
+      text: "visible-a",
+    });
+    expect(hydrated[0]).toMatchObject({ type: "runtime.cursor" });
+    expect(hydrated[1]).toMatchObject({
+      type: "runtime.event",
+      event: { type: "agent.text", text: "visible-a" },
+    });
+    expect(JSON.stringify(hydrated)).not.toContain("secret-b");
+  });
+
+  it("redacts foreign context identities from detached fresh and live inputs only", () => {
+    const runtime = fixture();
+    const request = conversationContextInputRequest();
+    const fullSnapshot = snapshot(undefined);
+    fullSnapshot.projects = [
+      { id: "project-a", name: "A" },
+    ] as AppSnapshot["projects"];
+    fullSnapshot.conversations = [
+      { id: CONVERSATION_A, projectId: "project-a", title: "A" },
+    ] as AppSnapshot["conversations"];
+    const hydration = {
+      snapshot: () => fullSnapshot,
+      approvals: [],
+      inputs: [request],
+      plans: [],
+    };
+
+    runtime.hub.connect("detached-context", { kind: "none" }, hydration, {
+      kind: "detached-chat",
+      conversationId: CONVERSATION_A,
+      clientId: "window-context",
+    });
+    runtime.hub.connect("main-context", { kind: "none" }, hydration);
+    runtime.hub.setConversationSubscription(
+      "main-context",
+      "primary",
+      CONVERSATION_A,
+    );
+
+    const hydratedDetached = runtime.events.get("detached-context")?.find(
+      (event): event is Extract<ServerEvent, { type: "agent.input.requested" }> =>
+        event.type === "agent.input.requested",
+    );
+    const hydratedMain = runtime.events.get("main-context")?.find(
+      (event): event is Extract<ServerEvent, { type: "agent.input.requested" }> =>
+        event.type === "agent.input.requested",
+    );
+    expect(hydratedDetached?.request.conversationContextRequest)
+      .toMatchObject({ requestedSourceConversationId: null });
+    expect(hydratedMain?.request).toBe(request);
+    expect(request.conversationContextRequest?.requestedSourceConversationId)
+      .toBe(CONVERSATION_B);
+
+    runtime.events.get("detached-context")!.length = 0;
+    runtime.events.get("main-context")!.length = 0;
+    runtime.hub.broadcast({ type: "agent.input.requested", request });
+
+    const liveDetached = runtime.events.get("detached-context")?.[0];
+    const liveMain = runtime.events.get("main-context")?.[0];
+    expect(liveDetached).toMatchObject({
+      type: "runtime.event",
+      event: {
+        type: "agent.input.requested",
+        request: {
+          conversationContextRequest: {
+            requestedSourceConversationId: null,
+          },
+        },
+      },
+    });
+    expect(liveMain).toMatchObject({
+      type: "runtime.event",
+      event: {
+        type: "agent.input.requested",
+        request: {
+          conversationContextRequest: {
+            requestedSourceConversationId: CONVERSATION_B,
+          },
+        },
+      },
+    });
+    expect(
+      liveMain?.type === "runtime.event"
+      && liveMain.event.type === "agent.input.requested"
+        ? liveMain.event.request
+        : null,
+    ).toBe(request);
   });
 
   it("owns a fresh socket before sending welcome so an immediate disconnect is not leaked", () => {

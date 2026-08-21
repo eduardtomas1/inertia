@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import type { ChatAttachment, PromptPreset } from "@shared/contracts";
+import type { ChatAttachment, MessageSendAcceptance, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import { fastModeProviderValue, legacyProviderIdForHarness,
@@ -26,10 +26,8 @@ import {
   advanceRecurringPrompt,
   persistPromptStashUpdate,
   PROMPT_STASH_CHANGED_EVENT,
-  PROMPT_STASH_STORAGE_KEY,
   promptStashRouteMatches,
   promptStashRestoreBlockedReason,
-  readPromptStash,
   removePromptStashEntry,
   setPromptStashRecurrence,
   type PromptStashEntry,
@@ -39,15 +37,18 @@ import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps, PendingModelRoute } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
-import {
-  COMPOSER_PREFILL_EVENT,
-  type ComposerPrefillDetail,
-} from "../../utils/composerPrefill";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
+import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
+import { useComposerPrefill } from "./useComposerPrefill";
+import { useComposerPromptStash } from "./useComposerPromptStash";
+import {
+  clearPersistedComposerDraft,
+  persistComposerDraft,
+} from "../../utils/composerDraftPersistence";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -69,6 +70,7 @@ const unavailableCompaction = (): Promise<never> => Promise.reject(new Error(
 export const Composer = memo(function Composer({
   conversation,
   checkoutBranch,
+  showCheckoutContext = true,
   providers,
   actions,
   disabled,
@@ -82,9 +84,8 @@ export const Composer = memo(function Composer({
   usageDisplayMode,
   skills,
   skillsCapability,
-  skillsLoading,
-  skillsError,
-  promptContext,
+  skillsLoading, skillsError,
+  conversationContextHandoffEnabled = true, promptContext,
   contextSources = [], contextPackets = [],
   agentContextRequest = null, onConversationContextCommand,
   previewContextUrl,
@@ -92,8 +93,8 @@ export const Composer = memo(function Composer({
   goal,
   onSend,
   onCompact = unavailableCompaction,
-  onListSkills,
-  promptPresets = [],
+  onListSkills, promptPresets = [], promptPresetsEnabled = true,
+  promptStashEnabled = true,
   onPromptPresetCommand = ignorePromptPresetMutation,
   onUpdateConversation,
   onCreateConversationForSelection,
@@ -117,8 +118,8 @@ export const Composer = memo(function Composer({
   const [message, setMessage] = useState(
     () => window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "",
   );
-  const [promptStash, setPromptStash] = useState(
-    () => readPromptStash(window.localStorage),
+  const [promptStash, setPromptStash] = useComposerPromptStash(
+    promptStashEnabled,
   );
   const draftValueRef = useRef(message);
   const pendingDraftRef = useRef<{
@@ -128,7 +129,7 @@ export const Composer = memo(function Composer({
   const draftPersistenceTimerRef = useRef<number | null>(null);
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, onCommand: onConversationContextCommand });
+  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -162,6 +163,7 @@ export const Composer = memo(function Composer({
   const [commandSurface, setCommandSurface] = useState<"goal" | "resume" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
+  const [sendAcceptance, setSendAcceptance] = useState<MessageSendAcceptance | null>(null);
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null);
   useNativePreviewSuspension(conversationContext.dialog !== null || agentContextRequest !== null);
@@ -193,13 +195,7 @@ export const Composer = memo(function Composer({
     const pending = pendingDraftRef.current;
     pendingDraftRef.current = null;
     if (!pending) return;
-    try {
-      const key = `inertia:draft:${pending.conversationId}`;
-      if (pending.value) window.localStorage.setItem(key, pending.value);
-      else window.localStorage.removeItem(key);
-    } catch {
-      // Keep editing available when browser storage is unavailable.
-    }
+    persistComposerDraft(pending.conversationId, pending.value);
   }, []);
 
   const scheduleDraftPersistence = useCallback((
@@ -238,6 +234,25 @@ export const Composer = memo(function Composer({
     scheduleDraftPersistence(conversationId, next);
   }, [flushDraftPersistence, scheduleDraftPersistence]);
 
+  useComposerDetachmentOwnership({
+    conversationId: conversation.id,
+    flushDraftPersistence,
+    readDraft: () => draftValueRef.current,
+    readState: () => ({
+      attachmentCount: attachmentsRef.current.length,
+      conversationContextPending: conversationContextHandoffEnabled && (conversationContext.draftContextPackets.length > 0 || conversationContext.dialog !== null || agentContextRequest !== null),
+      fileReferenceCount: fileReferences.length,
+      mutationInFlight: submittingRef.current
+        || stoppingRef.current
+        || creatingRouteConversation
+        || routeRepairing
+        || conversationUpdatePending,
+      pendingModelRoute: pendingRoute !== null,
+      previewContextSelected: selectedPreviewUrlRef.current !== null,
+      promptContextSelected: Boolean(promptContext),
+    }),
+  });
+
   const markEditorChanged = (conversationId = conversation.id): void => {
     editorRevisionSequenceRef.current += 1;
     editorRevisionsRef.current.set(
@@ -246,57 +261,15 @@ export const Composer = memo(function Composer({
     );
   };
 
-  useEffect(() => {
-    const prefill = (event: Event): void => {
-      const detail = (event as CustomEvent<ComposerPrefillDetail>).detail;
-      if (
-        !detail
-        || detail.conversationId !== conversationIdRef.current
-        || typeof detail.text !== "string"
-      ) return;
-      setMessage((current) => {
-        const skillPrefill = /^\$([A-Za-z0-9][A-Za-z0-9._:-]{0,159})\s*$/u
-          .exec(detail.text);
-        const next = skillPrefill?.[1]
-          ? insertComposerSkillToken(
-              current,
-              skillPrefill[1],
-              current.length,
-              current.length,
-            ).value
-          : current.trim()
-            ? `${current.trim()}\n\n${detail.text}`
-            : detail.text;
-        if (next !== current) {
-          markEditorChanged(conversationIdRef.current);
-          draftValueRef.current = next;
-          persistDraftChange(conversationIdRef.current, current, next);
-        }
-        return next;
-      });
-      window.requestAnimationFrame(() => textareaRef.current?.focus());
-    };
-    window.addEventListener(COMPOSER_PREFILL_EVENT, prefill);
-    return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, prefill);
-  }, [persistDraftChange]);
+  useComposerPrefill({
+    conversationIdRef,
+    draftValueRef,
+    markEditorChanged,
+    persistDraftChange,
+    setMessage,
+    textareaRef,
+  });
 
-  useEffect(() => {
-    const refreshPromptStash = (): void => {
-      setPromptStash(readPromptStash(window.localStorage));
-    };
-    const refreshFromStorage = (event: StorageEvent): void => {
-      if (event.key === PROMPT_STASH_STORAGE_KEY) refreshPromptStash();
-    };
-    window.addEventListener(PROMPT_STASH_CHANGED_EVENT, refreshPromptStash);
-    window.addEventListener("storage", refreshFromStorage);
-    return () => {
-      window.removeEventListener(
-        PROMPT_STASH_CHANGED_EVENT,
-        refreshPromptStash,
-      );
-      window.removeEventListener("storage", refreshFromStorage);
-    };
-  }, []);
   releaseAttachmentRef.current = onReleaseAttachment;
 
   useEffect(() => {
@@ -545,10 +518,8 @@ export const Composer = memo(function Composer({
           selectedPreviewUrlRef.current,
           contextPacketIds,
         );
-    if (
-      (!canSend && followUpState !== "ready")
-      || submittingRef.current
-    ) return;
+    if ((!canSend && followUpState !== "ready") || submittingRef.current) return;
+    setSendAcceptance(null);
     flushDraftPersistence();
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
@@ -570,7 +541,7 @@ export const Composer = memo(function Composer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      await onSend(
+      const acceptance = await onSend(
         running ? request.visibleContent || attachmentFallback : request.visibleContent,
         submittedAttachments,
         request.context,
@@ -587,19 +558,12 @@ export const Composer = memo(function Composer({
           === (submittedPromptContext ?? null)
         && selectedPreviewUrlRef.current === submittedPreviewUrl;
       if (editorUnchanged) {
-        try {
-          const key = `inertia:draft:${submittedConversationId}`;
-          if (window.localStorage.getItem(key) === submittedDraft) {
-            window.localStorage.removeItem(key);
-          }
-        } catch {
-          // The accepted in-memory draft can still settle when storage is unavailable.
-        }
+        clearPersistedComposerDraft(submittedConversationId, submittedDraft);
       }
-      if (
-        !mountedRef.current
-        || conversationIdRef.current !== submittedConversationId
-      ) return;
+      if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
+      setSendAcceptance(
+        acceptance?.conversationId === submittedConversationId ? acceptance : null,
+      );
       if (editorUnchanged) {
         draftValueRef.current = "";
         setMessage("");
@@ -898,6 +862,12 @@ export const Composer = memo(function Composer({
       hasProviderSession: Boolean(conversation.providerSessionId),
     }, route);
     if (transition.kind === "create-new-conversation") {
+      if (!onCreateConversationForSelection) {
+        setConversationUpdateError(
+          "Return this chat to the main window to choose a model that requires a new chat.",
+        );
+        return;
+      }
       const sourceLatestTurn = latestTurnSummary ?? latestTurn;
       setRouteCreationError(null);
       setPendingRoute({
@@ -931,6 +901,7 @@ export const Composer = memo(function Composer({
   const updatePromptStash = (
     update: (current: readonly PromptStashEntry[]) => PromptStashEntry[],
   ): boolean => {
+    if (!promptStashEnabled) return false;
     const next = persistPromptStashUpdate(
       window.localStorage,
       promptStash,
@@ -1083,7 +1054,7 @@ export const Composer = memo(function Composer({
             />
           </Suspense>
         )}
-        <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />
+        {conversationContextHandoffEnabled && <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />}
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
@@ -1177,7 +1148,7 @@ export const Composer = memo(function Composer({
           running={running}
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}
-          {...composerConversationContextToolbarProps(conversationContext, contextSources.length, Boolean(onConversationContextCommand))}
+          {...composerConversationContextToolbarProps(conversationContext, contextSources.length, Boolean(onConversationContextCommand), conversationContextHandoffEnabled)}
           onRunAction={onRunAction}
           skills={skills}
           skillsCapability={skillsCapability}
@@ -1186,6 +1157,8 @@ export const Composer = memo(function Composer({
           onListSkills={onListSkills}
           onInsertSkill={insertSkill}
           promptPresets={promptPresets}
+          promptPresetsEnabled={promptPresetsEnabled}
+          promptStashEnabled={promptStashEnabled}
           currentPrompt={message}
           onApplyPromptPreset={applyPromptPreset}
           onPromptPresetCommand={onPromptPresetCommand}
@@ -1226,6 +1199,7 @@ export const Composer = memo(function Composer({
           onUpdateFastMode={updateFastMode}
           conversation={conversation}
           checkoutBranch={checkoutBranch}
+          showCheckoutContext={showCheckoutContext}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}
           conversationUpdateError={conversationUpdateError}
@@ -1239,10 +1213,11 @@ export const Composer = memo(function Composer({
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           followUpState={followUpState}
           primaryAction={primaryAction}
+          sendAcceptance={sendAcceptance}
           onSubmit={submit}
           onStop={stop}
         />
-        <ComposerConversationContextDialog controller={conversationContext} targetConversationId={conversation.id} sources={contextSources} agentRequest={agentContextRequest} onCommand={onConversationContextCommand} />
+        {conversationContextHandoffEnabled && <ComposerConversationContextDialog controller={conversationContext} targetConversationId={conversation.id} sources={contextSources} agentRequest={agentContextRequest} onCommand={onConversationContextCommand} />}
       </section>
     </div>
   );

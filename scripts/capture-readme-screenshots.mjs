@@ -106,6 +106,8 @@ async function seedShowcaseData() {
   const runId = "readme-demo-run";
   const userMessageId = randomUUID();
   const assistantMessageId = randomUUID();
+  const companionUserMessageId = randomUUID();
+  const companionAssistantMessageId = randomUUID();
   const requestedAt = new Date(Date.now() - 70_000).toISOString();
   const startedAt = new Date(Date.now() - 69_500).toISOString();
   const assistantAt = new Date(Date.now() - 64_000).toISOString();
@@ -374,6 +376,26 @@ async function seedShowcaseData() {
       "I reviewed the onboarding path, kept the update focused, and left every change ready for review.",
       assistantAt,
       turnId,
+    );
+    database.prepare(`
+      INSERT INTO messages (
+        id, conversation_id, role, content, attachments_json, created_at, turn_id
+      ) VALUES (?, ?, 'user', ?, '[]', ?, NULL)
+    `).run(
+      companionUserMessageId,
+      companionConversationId,
+      "Keep the runtime review independent from the interface chat.",
+      requestedAt,
+    );
+    database.prepare(`
+      INSERT INTO messages (
+        id, conversation_id, role, content, attachments_json, created_at, turn_id
+      ) VALUES (?, ?, 'assistant', ?, '[]', ?, NULL)
+    `).run(
+      companionAssistantMessageId,
+      companionConversationId,
+      "Keep detached chat windows scoped to their exact conversation.",
+      assistantAt,
     );
     database.prepare(`
       INSERT INTO activities (
@@ -787,6 +809,43 @@ try {
   await page.getByRole("tabpanel", { name: "Environment" }).waitFor();
   await capture(page, "inertia-dark.png");
 
+  const detachedWindowOpened = app.waitForEvent("window");
+  await page.getByRole("button", {
+    name: "Open Welcome to Inertia in a new window",
+  }).click();
+  const detachedPage = await detachedWindowOpened;
+  await detachedPage.locator(".detached-chat-shell").waitFor();
+  await app.evaluate(({ BrowserWindow }) => {
+    const detached = BrowserWindow.getAllWindows().find((window) =>
+      window.getTitle().startsWith("Welcome to Inertia"));
+    detached?.setSize(1_100, 760);
+  });
+  await detachedPage.getByRole("textbox", { name: "Message" }).waitFor();
+  await capture(detachedPage, "inertia-detached-chat.png");
+  await Promise.all([
+    detachedPage.waitForEvent("close"),
+    detachedPage.getByRole("button", {
+      name: "Return chat to main window",
+    }).click({ noWaitAfter: true }),
+  ]);
+  await page.getByRole("textbox", { name: "Message" }).waitFor();
+
+  await page.getByRole("button", {
+    name: "Add context from another chat",
+  }).click();
+  const contextDialog = page.getByRole("dialog", {
+    name: "Bring context from another chat",
+  });
+  await contextDialog.getByRole("button", {
+    name: /Keep detached chat windows scoped to their exact conversation/u,
+  }).click();
+  await contextDialog.getByLabel("Context preview").getByText(
+    "Keep detached chat windows scoped to their exact conversation.",
+    { exact: true },
+  ).waitFor();
+  await capture(page, "inertia-context-handoff.png");
+  await contextDialog.getByRole("button", { name: "Cancel" }).click();
+
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
     exact: true,
@@ -857,8 +916,8 @@ try {
   await activeTurn.scrollIntoViewIfNeeded();
   await activeTurn.locator(".turn-execution-rail.is-live").waitFor();
   await activeTurn.locator(".turn-commentary-row").nth(1).waitFor();
-  await activeTurn.getByText("Running focused workspace tests", {
-    exact: true,
+  await activeTurn.locator(".agent-activity-title").filter({
+    hasText: /^Running focused workspace tests$/u,
   }).waitFor();
   await capture(page, "inertia-workstream.png");
 

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ChevronDown, FolderOpen, GitBranch, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
+import { ChevronDown, FolderOpen, GitBranch, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
@@ -27,6 +27,8 @@ type WorkspaceHeaderProps = {
   branches: GitBranchInfo[];
   actions: ProjectAction[];
   busy: boolean;
+  conversationDetached?: boolean;
+  detachedChatLimitReached?: boolean;
   onOpenSidebar: () => void;
   onToggleTools: () => void;
   workspaceToolsUnavailableReason?: string | null;
@@ -35,6 +37,7 @@ type WorkspaceHeaderProps = {
   onOpenSettings: () => void;
   onOpenConnectionsSettings: () => void;
   onOpenProject: () => void;
+  onOpenConversationInWindow?: (conversation: Conversation) => void;
   onRefreshBranches: () => void;
   onSwitchBranch: (name: string) => void;
   onCreateBranch: (name: string) => void;
@@ -59,6 +62,8 @@ export function WorkspaceHeader({
   branches,
   actions,
   busy,
+  conversationDetached = false,
+  detachedChatLimitReached = false,
   onOpenSidebar,
   onToggleTools,
   workspaceToolsUnavailableReason = null,
@@ -67,6 +72,7 @@ export function WorkspaceHeader({
   onOpenSettings,
   onOpenConnectionsSettings,
   onOpenProject,
+  onOpenConversationInWindow,
   onRefreshBranches,
   onSwitchBranch,
   onCreateBranch,
@@ -241,6 +247,27 @@ export function WorkspaceHeader({
                   </div>
                 )}
               </div>
+            )}
+            {conversation && onOpenConversationInWindow && (
+              <button
+                type="button"
+                className={`header-button detached-chat-header-button${
+                  conversationDetached ? " is-open" : ""
+                }`}
+                aria-label={conversationDetached
+                  ? `Focus chat window for ${conversation.title}`
+                  : `Open ${conversation.title} in a new window`}
+                title={!conversationDetached && detachedChatLimitReached
+                  ? "Close a chat window before opening another."
+                  : conversationDetached
+                    ? "Focus chat window"
+                    : "Open chat in new window"}
+                disabled={!conversationDetached && detachedChatLimitReached}
+                onClick={() => onOpenConversationInWindow(conversation)}
+              >
+                <PictureInPicture2 size={14} />
+                <span>{conversationDetached ? "Focus window" : "New window"}</span>
+              </button>
             )}
             <button type="button" className="header-button" onClick={onOpenProject}><FolderOpen size={14} /><span>Open</span></button>
             {gitStatus?.isRepository && (

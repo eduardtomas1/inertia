@@ -1,6 +1,6 @@
 {
   "name": "inertia",
-  "version": "0.0.39",
+  "version": "0.0.40",
   "description": "A calm local workspace for coding with agents.",
   "desktopName": "dev.inertia.app.desktop",
   "main": "out/main/index.js",
@@ -156,6 +156,7 @@
     "electron-updater": "6.8.9",
     "highlight.js": "^11.12.0",
     "lucide-react": "^1.31.0",
+    "morphicons": "1.7.0",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "6.2.108",
     "qrcode": "1.5.4",
@@ -192,6 +193,7 @@
     "oxlint": "^1.78.0",
     "oxlint-tsgolint": "7.0.2001",
     "tailwindcss": "^4.3.3",
+    "terser": "5.43.1",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
     "vitest": "^4.1.10",

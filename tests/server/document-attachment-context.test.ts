@@ -632,6 +632,11 @@ describe("document attachment execution context", () => {
   );
 
   it("cleans an earlier generated page when a later raster is aborted", async () => {
+    // This test owns a mocked PDF pipeline and is not exercising the native
+    // canvas cold start. Warm that dependency before the product deadline is
+    // created so a contended hosted Windows worker still reaches the exact
+    // second-render cancellation boundary the test is meant to prove.
+    await import("@napi-rs/canvas");
     const directory = await mkdtemp(join(tmpdir(), "inertia-raster-abort-"));
     temporaryDirectories.push(directory);
     const store = await generatedStore(directory);
@@ -707,7 +712,7 @@ describe("document attachment execution context", () => {
       bytes: 0,
       records: 0,
     }));
-  });
+  }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
 
   it.skipIf(hostedWindowsCi)(
     "cleans a final page when cancellation wins immediately after its private write",

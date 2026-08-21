@@ -7,6 +7,7 @@ import type {
   Conversation,
   ConversationContextPacketSummary,
   ConversationLatestTurnSummary,
+  MessageSendAcceptance,
   ModelBackendProfileView,
   ModelSelection,
   ProjectAction,
@@ -31,6 +32,7 @@ import type {
 export interface ComposerProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
+  showCheckoutContext?: boolean;
   providers: ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;
@@ -46,6 +48,9 @@ export interface ComposerProps {
   skillsCapability: AgentWorkflowSkillsCapability | null;
   skillsLoading: boolean;
   skillsError: string | null;
+  promptPresetsEnabled?: boolean;
+  promptStashEnabled?: boolean;
+  conversationContextHandoffEnabled?: boolean;
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];
@@ -58,7 +63,7 @@ export interface ComposerProps {
     message: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-  ) => Promise<void>;
+  ) => Promise<MessageSendAcceptance | null | void>;
   onCompact?: (instruction?: string) => Promise<{
     message: string;
     instructionForwarded: boolean;

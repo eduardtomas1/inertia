@@ -14,6 +14,7 @@ import type {
   AgentSkillSummary,
   ChatAttachment,
   Conversation,
+  MessageSendAcceptance,
   ProviderInfo,
   PromptPreset,
   ServerEvent,
@@ -130,6 +131,12 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
+async function waitForComposerSendEnhancement(): Promise<void> {
+  await waitFor(() => expect(
+    screen.getByRole("button", { name: "Send message" }),
+  ).toHaveAttribute("data-motion-state", "send"));
+}
+
 function composerProps(
   current: Conversation,
   overrides: Partial<React.ComponentProps<typeof Composer>> = {},
@@ -175,6 +182,176 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("omits scratch-prompt storage controls when the window disables them", () => {
+    render(<Composer {...composerProps(conversation("detached-stash"), {
+      promptStashEnabled: false,
+    })} />);
+
+    expect(screen.queryByRole("button", { name: "Scratch prompts" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows definite acceptance before yielding the same control to Stop", async () => {
+    const current = conversation("conversation-accepted-motion");
+    const sent = deferred<MessageSendAcceptance>();
+    const view = render(<Composer {...composerProps(current, {
+      onSend: () => sent.promise,
+    })} />);
+    await waitForComposerSendEnhancement();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Animate only definite acceptance" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const primary = screen.getByRole("button", { name: "Sending message" });
+    expect(primary.querySelector("[data-icon-state]"))
+      .toHaveAttribute("data-icon-state", "sending");
+
+    await act(async () => sent.resolve({
+      kind: "message.accepted",
+      conversationId: current.id,
+      turnId: "turn-accepted-motion",
+      userMessageId: "message-accepted-motion",
+      disposition: "new-turn",
+    }));
+    expect(screen.getByRole("button", { name: "Message accepted" }))
+      .toBe(primary);
+    expect(primary.querySelector("[data-icon-state]"))
+      .toHaveAttribute("data-icon-state", "accepted");
+
+    view.rerender(<Composer {...composerProps(current, {
+      running: true,
+      onSend: () => sent.promise,
+    })} />);
+    expect(screen.getByRole("button", { name: "Stop agent" })).toBe(primary);
+    expect(primary.querySelector("[data-icon-state]"))
+      .toHaveAttribute("data-icon-state", "stop");
+  });
+
+  it("does not claim acceptance for a legacy null acknowledgement", async () => {
+    const current = conversation("conversation-null-acceptance");
+    const onSend = vi.fn(async () => null);
+    render(<Composer {...composerProps(current, { onSend })} />);
+    await waitForComposerSendEnhancement();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Keep legacy acknowledgement neutral" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("button", { name: "Message accepted" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sending message" }))
+      .toHaveAttribute("data-motion-state", "sending");
+  });
+
+  it("does not claim acceptance returned for another conversation", async () => {
+    const current = conversation("conversation-mismatched-acceptance");
+    const onSend = vi.fn(async (): Promise<MessageSendAcceptance> => ({
+      kind: "message.accepted",
+      conversationId: "another-conversation",
+      turnId: "turn-from-another-conversation",
+      userMessageId: "message-from-another-conversation",
+      disposition: "new-turn",
+    }));
+    render(<Composer {...composerProps(current, { onSend })} />);
+    await waitForComposerSendEnhancement();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Keep acceptance conversation-owned" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("button", { name: "Message accepted" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sending message" }))
+      .toHaveAttribute("data-motion-state", "sending");
+  });
+
+  it("keeps Stop authoritative when acceptance and running settle together", async () => {
+    const current = conversation("conversation-accepted-running-motion");
+    const sent = deferred<MessageSendAcceptance>();
+    const onSend = () => sent.promise;
+    const view = render(<Composer {...composerProps(current, { onSend })} />);
+    await waitForComposerSendEnhancement();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Preserve the Stop control" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await act(async () => {
+      view.rerender(<Composer {...composerProps(current, { running: true, onSend })} />);
+      sent.resolve({
+        kind: "message.accepted",
+        conversationId: current.id,
+        turnId: "turn-accepted-running-motion",
+        userMessageId: "message-accepted-running-motion",
+        disposition: "new-turn",
+      });
+      await sent.promise;
+    });
+
+    expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Message accepted.");
+  });
+
+  it("does not reuse the previous turn acceptance for a consecutive send", async () => {
+    const current = conversation("conversation-consecutive-motion");
+    const secondSend = deferred<MessageSendAcceptance>();
+    const firstAcceptance: MessageSendAcceptance = {
+      kind: "message.accepted",
+      conversationId: current.id,
+      turnId: "turn-first-motion",
+      userMessageId: "message-first-motion",
+      disposition: "new-turn",
+    };
+    const onSend = vi.fn()
+      .mockResolvedValueOnce(firstAcceptance)
+      .mockImplementationOnce(() => secondSend.promise);
+    const view = render(<Composer {...composerProps(current, { onSend })} />);
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(textbox, { target: { value: "First fast turn" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByRole("button", { name: "Message accepted" }))
+      .toBeInTheDocument();
+
+    view.rerender(<Composer {...composerProps(current, { running: true, onSend })} />);
+    view.rerender(<Composer {...composerProps(current, { onSend })} />);
+    fireEvent.change(textbox, { target: { value: "Second fast turn" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(screen.getByRole("button", { name: "Sending message" }))
+      .toHaveAttribute("data-motion-state", "sending");
+    expect(screen.queryByRole("button", { name: "Message accepted" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("acknowledges an accepted follow-up without obscuring Stop", async () => {
+    const current = conversation("conversation-follow-up-motion");
+    const onSend = vi.fn(async (): Promise<MessageSendAcceptance> => ({
+      kind: "message.accepted",
+      conversationId: current.id,
+      turnId: "turn-follow-up-motion",
+      userMessageId: "message-follow-up-motion",
+      disposition: "follow-up",
+    }));
+    render(<Composer {...composerProps(current, {
+      running: true,
+      latestTurn: {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        harnessId: "codex-app-server",
+      },
+      onSend,
+    })} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Add one more constraint" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    expect(await screen.findByRole("status"))
+      .toHaveAttribute("data-motion-state", "accepted");
+    expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
+  });
+
   it("inserts a visible skill invocation at the caret and sends transcript-faithful text", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => undefined);

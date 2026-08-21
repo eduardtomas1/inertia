@@ -3,6 +3,7 @@ import type {
   RuntimeConnection,
 } from "../shared/desktop.js";
 import type { RuntimeDatabaseStartupRecoveryReport } from "../node/runtime-process-protocol.js";
+import { mintDetachedRuntimeWebSocketUrl } from "../node/detached-runtime-capability.js";
 import type { RuntimeSupervisorPhase } from "./runtime-supervisor-types.js";
 
 interface RuntimeConnectionState {
@@ -47,5 +48,19 @@ export function runtimeConnection(state: RuntimeConnectionState): {
       ...(databaseRecoveryNotice ? { databaseRecoveryNotice } : {}),
     },
     consumedRecoveryNotice: databaseRecoveryNotice !== undefined,
+  };
+}
+
+export function detachedRuntimeConnection(
+  connection: RuntimeConnection,
+  conversationId: string,
+  clientId: string,
+): RuntimeConnection {
+  return {
+    websocketUrl: mintDetachedRuntimeWebSocketUrl({
+      websocketUrl: connection.websocketUrl,
+      conversationId,
+      clientId,
+    }),
   };
 }

@@ -4,7 +4,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { ArrowLeftRight, PanelBottom, X } from "lucide-react";
+import { ArrowLeftRight, PanelBottom, PictureInPicture2, X } from "lucide-react";
 
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -38,6 +38,8 @@ interface ConversationSplitViewProps {
   onToggleSecondaryTools: () => void;
   onSwapPanes: () => void;
   onCloseSecondary: () => void;
+  onOpenPrimaryInWindow?: () => void;
+  onOpenSecondaryInWindow?: () => void;
 }
 
 export function ConversationSplitView({
@@ -54,6 +56,8 @@ export function ConversationSplitView({
   onToggleSecondaryTools,
   onSwapPanes,
   onCloseSecondary,
+  onOpenPrimaryInWindow,
+  onOpenSecondaryInWindow,
 }: ConversationSplitViewProps): React.JSX.Element {
   const [splitPercent, setSplitPercent] = useState(initialSplitPercent);
   const stacked = useMediaQuery("(max-width: 860px)");
@@ -68,6 +72,7 @@ export function ConversationSplitView({
     projectName: primaryProjectName,
     toolsOpen: primaryToolsOpen,
     onToggleTools: onTogglePrimaryTools,
+    onOpenInWindow: onOpenPrimaryInWindow,
   } as const;
   const secondaryPane = {
     owner: "secondary",
@@ -76,6 +81,7 @@ export function ConversationSplitView({
     projectName: secondaryProjectName,
     toolsOpen: secondaryToolsOpen,
     onToggleTools: onToggleSecondaryTools,
+    onOpenInWindow: onOpenSecondaryInWindow,
   } as const;
 
   const pane = (
@@ -93,6 +99,14 @@ export function ConversationSplitView({
         <span title={details.projectName}>{details.projectName}</span>
         <strong title={details.title}>{details.title}</strong>
         <span className="conversation-split-actions">
+          {details.onOpenInWindow && (
+            <IconButton
+              label={`Open ${details.title} in a new window`}
+              onClick={details.onOpenInWindow}
+            >
+              <PictureInPicture2 size={14} />
+            </IconButton>
+          )}
           <IconButton
             label={`${details.toolsOpen ? "Close" : "Open"} tools for ${
               details.title

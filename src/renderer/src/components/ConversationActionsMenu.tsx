@@ -15,6 +15,7 @@ import {
   History,
   MessageSquare,
   Pencil,
+  PictureInPicture2,
   Trash2,
   X,
 } from "lucide-react";
@@ -64,6 +65,8 @@ interface ConversationActionsMenuProps {
   activeConversationId: string | null;
   activity: boolean;
   conversation: Conversation;
+  detachedChatLimitReached?: boolean;
+  isDetached?: boolean;
   runs: readonly WorkspaceRun[];
   splitConversationId: string | null;
   thread: SidebarThreadView;
@@ -74,6 +77,7 @@ interface ConversationActionsMenuProps {
   onDismiss: (reason: DismissReason) => void;
   onDismissRun: (run: WorkspaceRun) => void;
   onOpenConversationInSplit: (conversation: Conversation) => void;
+  onOpenConversationInWindow?: (conversation: Conversation) => void;
   onPinConversation: (conversation: Conversation, pinned: boolean) => void;
   onRestoreConversation: (conversation: Conversation) => void;
   onSetPopover: (node: HTMLDivElement | null) => void;
@@ -86,6 +90,8 @@ export function ConversationActionsMenu({
   activeConversationId,
   activity,
   conversation,
+  detachedChatLimitReached = false,
+  isDetached = false,
   runs,
   splitConversationId,
   thread,
@@ -96,6 +102,7 @@ export function ConversationActionsMenu({
   onDismiss,
   onDismissRun,
   onOpenConversationInSplit,
+  onOpenConversationInWindow,
   onPinConversation,
   onRestoreConversation,
   onSetPopover,
@@ -153,7 +160,9 @@ export function ConversationActionsMenu({
     && conversation.status !== "running"
     && conversation.status !== "needs-input";
   const canOpenInSplit = Boolean(
-    activeConversationId && activeConversationId !== conversation.id,
+    !isDetached
+    && activeConversationId
+    && activeConversationId !== conversation.id,
   );
   const itemProps = { onDismiss };
 
@@ -182,6 +191,19 @@ export function ConversationActionsMenu({
       >
         <MessageSquare size={13} />{conversation.pinnedAt ? "Unpin" : "Pin"}
       </ConversationMenuItem>
+      {onOpenConversationInWindow && (
+        <ConversationMenuItem
+          {...itemProps}
+          disabled={!isDetached && detachedChatLimitReached}
+          title={!isDetached && detachedChatLimitReached
+            ? "Close a chat window before opening another."
+            : undefined}
+          onActivate={() => onOpenConversationInWindow(conversation)}
+        >
+          <PictureInPicture2 size={13} />
+          {isDetached ? "Focus chat window" : "Open chat in new window"}
+        </ConversationMenuItem>
+      )}
       {conversation.snoozedUntil && Date.parse(conversation.snoozedUntil) > Date.now() ? (
         <ConversationMenuItem
           {...itemProps}
@@ -222,7 +244,11 @@ export function ConversationActionsMenu({
         <ConversationMenuItem
           {...itemProps}
           disabled={!canOpenInSplit}
-          title={canOpenInSplit ? undefined : "Choose another chat first."}
+          title={canOpenInSplit
+            ? undefined
+            : isDetached
+              ? "This chat is already open in its own window."
+              : "Choose another chat first."}
           onActivate={() => onOpenConversationInSplit(conversation)}
         >
           <Columns2 size={13} />Add this chat to split view
@@ -261,7 +287,10 @@ export function ConversationActionsMenu({
       ) : null}
       <ConversationMenuItem
         {...itemProps}
-        disabled={hasActiveWork}
+        disabled={hasActiveWork || isDetached}
+        title={isDetached
+          ? "Return this chat to the main window before archiving it."
+          : undefined}
         onActivate={() => onArchiveConversation(conversation)}
       >
         <Archive size={13} />Archive
@@ -269,7 +298,10 @@ export function ConversationActionsMenu({
       <ConversationMenuItem
         {...itemProps}
         className="is-danger"
-        disabled={hasActiveWork}
+        disabled={hasActiveWork || isDetached}
+        title={isDetached
+          ? "Return this chat to the main window before deleting it."
+          : undefined}
         onActivate={() => onDeleteConversation(conversation)}
       >
         <Trash2 size={13} />Delete

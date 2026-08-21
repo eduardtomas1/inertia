@@ -104,6 +104,7 @@ type ChatWorkspaceProps = {
   project: Project | null;
   conversation: Conversation | null;
   checkoutBranch?: string | null;
+  showCheckoutContext?: boolean;
   latestTurnSummary: ConversationLatestTurnSummary | null;
   turns: AgentTurn[];
   messages: ChatMessage[];
@@ -123,6 +124,9 @@ type ChatWorkspaceProps = {
   skillsLoading: boolean;
   skillsError: string | null;
   promptPresets?: readonly PromptPreset[];
+  promptPresetsEnabled?: boolean;
+  promptStashEnabled?: boolean;
+  conversationContextHandoffEnabled?: boolean;
   goal?: ChatGoalControlProps | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
@@ -165,7 +169,7 @@ type ChatWorkspaceProps = {
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => Promise<void>;
-  onCreateConversationForSelection: (
+  onCreateConversationForSelection?: (
     selection: ModelSelection,
     options?: { prefillText?: string },
   ) => Promise<void>;
@@ -210,6 +214,7 @@ export function ChatWorkspace({
   project,
   conversation,
   checkoutBranch = null,
+  showCheckoutContext = true,
   latestTurnSummary,
   turns,
   messages,
@@ -229,6 +234,9 @@ export function ChatWorkspace({
   skillsLoading,
   skillsError,
   promptPresets = EMPTY_PROMPT_PRESETS,
+  promptPresetsEnabled = true,
+  promptStashEnabled = true,
+  conversationContextHandoffEnabled = true,
   goal,
   approvals,
   inputRequests,
@@ -606,20 +614,21 @@ export function ChatWorkspace({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-  ): Promise<void> => {
+  ): Promise<TranscriptMessageSendAcceptance | null> => {
     const sourceConversationId = conversationId;
     const acceptance = await onSendMessage(
       content,
       attachments,
       context,
     );
-    if (!acceptance) return;
+    if (!acceptance) return null;
     clearReaderIntent();
     dispatchNavigation({
       type: "message.accepted",
       acceptance,
       sourceConversationId,
     });
+    return acceptance;
   }, [clearReaderIntent, conversationId, onSendMessage]);
 
   const turnAnchorId = activeNavigation.mode === "await-turn"
@@ -819,6 +828,7 @@ export function ChatWorkspace({
         <Composer
           conversation={conversation}
           checkoutBranch={checkoutBranch}
+          showCheckoutContext={showCheckoutContext}
           providers={providers}
           actions={actions}
           mentionResults={mentionResults}
@@ -829,6 +839,7 @@ export function ChatWorkspace({
           skillsLoading={skillsLoading}
           skillsError={skillsError}
           goal={goalControl}
+          conversationContextHandoffEnabled={conversationContextHandoffEnabled}
           promptContext={promptContext}
           contextSources={contextSources}
           contextPackets={contextPackets}
@@ -846,6 +857,8 @@ export function ChatWorkspace({
           {...(onCompactConversation ? { onCompact: onCompactConversation } : {})}
           onListSkills={onListSkills}
           promptPresets={promptPresets}
+          promptPresetsEnabled={promptPresetsEnabled}
+          promptStashEnabled={promptStashEnabled}
           onPromptPresetCommand={onPromptPresetCommand}
           onUpdateConversation={onUpdateConversation}
           onCreateConversationForSelection={onCreateConversationForSelection}

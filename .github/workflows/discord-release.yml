@@ -4,9 +4,12 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   notify-discord:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Send Discord notification
@@ -17,9 +20,23 @@ jobs:
           RELEASE_URL: ${{ github.event.release.html_url }}
           REPO_NAME: ${{ github.repository }}
         run: |
-          curl -H "Content-Type: application/json" \
-            -X POST \
-            -d "{
-              \"content\": \"Nova versio publicada a **${REPO_NAME}**: **${RELEASE_NAME}** (${RELEASE_TAG})\n${RELEASE_URL}\"
-            }" \
-            "$DISCORD_WEBHOOK_URL"
+          set -euo pipefail
+          if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
+            echo "Discord release notifications are not configured; skipping."
+            exit 0
+          fi
+          node <<'NODE'
+          const content = [
+            `Nova versio publicada a **${process.env.REPO_NAME}**:`,
+            `**${process.env.RELEASE_NAME}** (${process.env.RELEASE_TAG})`,
+            process.env.RELEASE_URL,
+          ].join("\n");
+          const response = await fetch(process.env.DISCORD_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ content }),
+          });
+          if (!response.ok) {
+            throw new Error(`Discord webhook returned HTTP ${response.status}.`);
+          }
+          NODE

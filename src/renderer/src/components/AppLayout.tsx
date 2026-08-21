@@ -82,6 +82,7 @@ interface AppLayoutActions {
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
   openConversationInSplit: (conversation: Conversation) => void;
+  openConversationInWindow: (conversation: Conversation) => void;
   closeConversationSplit: () => void;
   openProviderSetup: (providerId: Conversation["providerId"]) => void;
   openBackendSetup: (profileId: string) => void;
@@ -141,6 +142,9 @@ interface AppLayoutProps {
   project: Project | null;
   conversation: Conversation | null;
   splitConversationId: string | null;
+  detachedConversationIds: ReadonlySet<string>;
+  detachedChatLimitReached: boolean;
+  conversationSuppressedInMain: boolean;
   sceneActiveTool: WorkspacePanelTab | null;
   sceneToggleWorkspaceTools: () => void;
   sceneOpenEnvironment: () => void;
@@ -227,6 +231,9 @@ export function AppLayout({
   project,
   conversation,
   splitConversationId,
+  detachedConversationIds,
+  detachedChatLimitReached,
+  conversationSuppressedInMain,
   sceneActiveTool,
   sceneToggleWorkspaceTools,
   sceneOpenEnvironment,
@@ -280,6 +287,7 @@ export function AppLayout({
     selectProject: actions.selectProject,
     selectConversation: actions.selectConversation,
     openConversationInSplit: actions.openConversationInSplit,
+    openConversationInWindow: actions.openConversationInWindow,
     closeConversationSplit: actions.closeConversationSplit,
     createConversation: actions.createConversation,
     openMultiSpawn: multiSpawn.openDialog,
@@ -395,7 +403,8 @@ export function AppLayout({
     if (connection.status !== "online") return;
     return scheduleFrequentSurfacePrefetch();
   }, [connection.status]);
-  const activeConversationVisible = activeConversationIsVisible({
+  const activeConversationVisible = !conversationSuppressedInMain
+    && activeConversationIsVisible({
     view,
     commitDialogOpen,
     dailyWorkOpen,
@@ -404,7 +413,7 @@ export function AppLayout({
     paletteOpen,
     providerAuthOpen: Boolean(providerAuth.provider),
     mobileSidebarOpen: mobileNavigation && sidebarOpen,
-  });
+    });
 
   return (
     <div
@@ -453,7 +462,10 @@ export function AppLayout({
             onSelectProject={sidebarActions.selectProject}
             onSelectConversation={sidebarActions.selectConversation}
             splitConversationId={splitConversationId}
+            detachedConversationIds={detachedConversationIds}
+            detachedChatLimitReached={detachedChatLimitReached}
             onOpenConversationInSplit={sidebarActions.openConversationInSplit}
+            onOpenConversationInWindow={sidebarActions.openConversationInWindow}
             onCloseConversationSplit={sidebarActions.closeConversationSplit}
             onCreateConversation={sidebarActions.createConversation}
             onOpenMultiSpawn={sidebarActions.openMultiSpawn}
@@ -515,6 +527,11 @@ export function AppLayout({
             branches={branches}
             actions={projectActions}
             busy={Boolean(busyAction)}
+            conversationDetached={Boolean(
+              conversation && detachedConversationIds.has(conversation.id)
+            )}
+            detachedChatLimitReached={detachedChatLimitReached}
+            onOpenConversationInWindow={actions.openConversationInWindow}
             onOpenSidebar={() => {
               if (mobileNavigation) setSidebarOpen(true);
               else setSidebarCollapsed((collapsed) => !collapsed);

@@ -16,6 +16,10 @@ const toolbarSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
   "utf8",
 ).replace(/\r\n/gu, "\n");
+const sendActionsSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerSendActions.tsx", import.meta.url),
+  "utf8",
+).replace(/\r\n/gu, "\n");
 const chatWorkspaceSource = readFileSync(
   new URL("../../src/renderer/src/components/ChatWorkspace.tsx", import.meta.url),
   "utf8",
@@ -65,8 +69,8 @@ describe("composer below-dock cleanup", () => {
     }
     expect(inputSource).not.toContain("composer-attachment-boundary");
     expect(inputSource).toContain('? "Add a follow-up or attach images…"');
-    expect(toolbarSource).toContain('className="secondary-button composer-follow-up-button"');
-    expect(toolbarSource).toContain('className="composer-follow-up-unavailable"');
+    expect(sendActionsSource).toContain('className="secondary-button composer-follow-up-button"');
+    expect(sendActionsSource).toContain('className="composer-follow-up-unavailable"');
     expect(toolbarSource).toContain("<UsageIndicator");
   });
 

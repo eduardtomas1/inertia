@@ -18,6 +18,10 @@ const toolbarSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
   "utf8",
 );
+const sendActionsSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerSendActions.tsx", import.meta.url),
+  "utf8",
+);
 const settingsSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerSettings.tsx", import.meta.url),
   "utf8",
@@ -80,7 +84,7 @@ describe("cohesive composer dock", () => {
       "<ComposerSettings",
       "<ComposerMoreMenu",
       "<UsageIndicator",
-      'label="Send message"',
+      "<ComposerSendActions",
     ].map((marker) => toolbar.indexOf(marker));
 
     expect(toolbarStart).toBeGreaterThan(-1);
@@ -151,8 +155,8 @@ describe("cohesive composer dock", () => {
       "textarea.style.overflowY = contentHeight > MAX_TEXTAREA_HEIGHT_PX",
     );
     expect(inputSource).toContain("if (shouldSubmitComposerKey(event))");
-    expect(toolbarSource).toContain('className="secondary-button composer-follow-up-button"');
-    expect(toolbarSource).toContain('title="This active agent route cannot accept parent follow-ups."');
+    expect(sendActionsSource).toContain('className="secondary-button composer-follow-up-button"');
+    expect(sendActionsSource).toContain('title="This active agent route cannot accept parent follow-ups."');
     expect(composerSource).toContain('event.dataTransfer.types.includes("Files")');
     expect(inputSource).toContain("event.clipboardData.files.length > 0");
     expect(inputSource).toContain('aria-label="Project files"');

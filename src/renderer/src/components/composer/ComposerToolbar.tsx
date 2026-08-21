@@ -6,8 +6,6 @@ import {
   GitBranch,
   MessagesSquare,
   Paperclip,
-  Send,
-  Square,
   Wrench,
 } from "lucide-react";
 import clsx from "clsx";
@@ -16,6 +14,7 @@ import type {
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
   Conversation,
+  MessageSendAcceptance,
   ModelBackendProfileView,
   ProjectAction,
   ProviderInfo,
@@ -40,13 +39,14 @@ import {
   usageQuotaSourceForSelection,
 } from "../../utils/usageDisplay";
 import { ModelChooser } from "../ModelChooser";
-import { IconButton, LoadingMark } from "../ui";
+import { IconButton } from "../ui";
 import { UsageIndicator } from "../UsageIndicator";
 import { menuId } from "./config";
 import {
   ComposerSettings,
   type ComposerSettingsModel,
 } from "./ComposerSettings";
+import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { PromptPresetCommandRunner } from "./types";
 import type { PromptStashEntry } from "../../utils/promptStash";
@@ -60,6 +60,10 @@ const PromptPresetMenu = lazy(async () => ({
 const ComposerSkillsMenu = lazy(async () => ({
   default: (await import("./ComposerSkillsMenu")).ComposerSkillsMenu,
 }));
+const ComposerSendActions = lazy(async () => ({
+  default: (await import("./ComposerSendActions")).ConversationComposerSendActions,
+}));
+
 const ComposerMoreMenu = lazy(async () => ({
   default: (await import("./ComposerMoreMenu")).ComposerMoreMenu,
 }));
@@ -81,6 +85,7 @@ export interface ComposerToolbarProps {
   onChooseAttachments: () => Promise<void>;
   contextAvailable: boolean;
   contextCount: number;
+  conversationContextHandoffEnabled: boolean;
   onOpenContext: () => void;
   onRunAction: (action: ProjectAction) => void;
   skills: readonly AgentSkillSummary[];
@@ -90,6 +95,8 @@ export interface ComposerToolbarProps {
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onInsertSkill: (skill: AgentSkillSummary) => void;
   promptPresets: readonly PromptPreset[];
+  promptPresetsEnabled: boolean;
+  promptStashEnabled: boolean;
   currentPrompt: string;
   onApplyPromptPreset: (preset: PromptPreset) => Promise<boolean>;
   onPromptPresetCommand: PromptPresetCommandRunner;
@@ -115,6 +122,7 @@ export interface ComposerToolbarProps {
   onUpdateFastMode: (enabled: boolean) => Promise<void>;
   conversation: Conversation;
   checkoutBranch?: string | null;
+  showCheckoutContext: boolean;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -133,6 +141,7 @@ export interface ComposerToolbarProps {
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   followUpState: ComposerFollowUpState;
   primaryAction: ComposerPrimaryActionState;
+  sendAcceptance: MessageSendAcceptance | null;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }
@@ -145,6 +154,7 @@ export function ComposerToolbar({
   onChooseAttachments,
   contextAvailable,
   contextCount,
+  conversationContextHandoffEnabled,
   onOpenContext,
   onRunAction,
   skills,
@@ -154,6 +164,8 @@ export function ComposerToolbar({
   onListSkills,
   onInsertSkill,
   promptPresets,
+  promptPresetsEnabled,
+  promptStashEnabled,
   currentPrompt,
   onApplyPromptPreset,
   onPromptPresetCommand,
@@ -176,6 +188,7 @@ export function ComposerToolbar({
   onUpdateFastMode,
   conversation,
   checkoutBranch,
+  showCheckoutContext,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -189,6 +202,7 @@ export function ComposerToolbar({
   onUsageDisplayModeChange,
   followUpState,
   primaryAction,
+  sendAcceptance,
   onSubmit,
   onStop,
 }: ComposerToolbarProps): React.JSX.Element {
@@ -304,60 +318,66 @@ export function ComposerToolbar({
         >
           <Paperclip size={16} />
         </IconButton>
-        <IconButton
-          label={contextCount > 0
-            ? `Add chat context, ${contextCount} selected`
-            : "Add context from another chat"}
-          onClick={onOpenContext}
-          disabled={
-            disabled
-            || running
-            || primaryAction === "submitting"
-            || !contextAvailable
-            || contextCount >= 2
-          }
-          className={contextCount > 0 ? "has-context" : undefined}
-        >
-          <MessagesSquare size={16} />
-        </IconButton>
-        <Suspense fallback={null}>
-          <PromptPresetMenu
-            presets={promptPresets}
-            currentMessage={currentPrompt}
-            currentRoute={{
-              harnessId: conversation.modelSelection.harnessId,
-              backendProfileId: conversation.modelSelection.backendProfileId,
-              modelId: conversation.modelSelection.modelId,
-              reasoningEffort: conversation.modelSelection.reasoningEffort,
-              ...((selectedModel?.fastMode || selectedFastMode)
-                && routeSupportsNativeFastModeIdentity(
-                  conversation.modelSelection,
-                )
-                ? {
-                    fastMode: modelSelectionUsesFastMode(
-                      conversation.modelSelection,
-                    ),
-                  }
-                : {}),
-            }}
-            menuController={menuController}
-            onApply={onApplyPromptPreset}
-            onCommand={onPromptPresetCommand}
-          />
-        </Suspense>
-        <Suspense fallback={null}>
-          <PromptStashMenu
-            entries={promptStash}
-            canStash={canStashPrompt}
-            blockedReason={promptStashBlockedReason}
-            restoreBlockedReason={promptRestoreBlockedReason}
-            menuController={menuController}
-            onStash={onStashPrompt}
-            onRestore={onRestorePrompt}
-            onRemove={onRemoveStashedPrompt}
-            onSetRecurrence={onSetPromptRecurrence}
-          />
-        </Suspense>
+        {conversationContextHandoffEnabled && (
+          <IconButton
+            label={contextCount > 0
+              ? `Add chat context, ${contextCount} selected`
+              : "Add context from another chat"}
+            onClick={onOpenContext}
+            disabled={
+              disabled
+              || running
+              || primaryAction === "submitting"
+              || !contextAvailable
+              || contextCount >= 2
+            }
+            className={contextCount > 0 ? "has-context" : undefined}
+          >
+            <MessagesSquare size={16} />
+          </IconButton>
+        )}
+        {promptPresetsEnabled && (
+          <Suspense fallback={null}>
+            <PromptPresetMenu
+              presets={promptPresets}
+              currentMessage={currentPrompt}
+              currentRoute={{
+                harnessId: conversation.modelSelection.harnessId,
+                backendProfileId: conversation.modelSelection.backendProfileId,
+                modelId: conversation.modelSelection.modelId,
+                reasoningEffort: conversation.modelSelection.reasoningEffort,
+                ...((selectedModel?.fastMode || selectedFastMode)
+                  && routeSupportsNativeFastModeIdentity(
+                    conversation.modelSelection,
+                  )
+                  ? {
+                      fastMode: modelSelectionUsesFastMode(
+                        conversation.modelSelection,
+                      ),
+                    }
+                  : {}),
+              }}
+              menuController={menuController}
+              onApply={onApplyPromptPreset}
+              onCommand={onPromptPresetCommand}
+            />
+          </Suspense>
+        )}
+        {promptStashEnabled && (
+          <Suspense fallback={null}>
+            <PromptStashMenu
+              entries={promptStash}
+              canStash={canStashPrompt}
+              blockedReason={promptStashBlockedReason}
+              restoreBlockedReason={promptRestoreBlockedReason}
+              menuController={menuController}
+              onStash={onStashPrompt}
+              onRestore={onRestorePrompt}
+              onRemove={onRemoveStashedPrompt}
+              onSetRecurrence={onSetPromptRecurrence}
+            />
+          </Suspense>
+        )}
         <Suspense fallback={null}>
           <ComposerSkillsMenu
             skills={skills}
@@ -444,86 +464,46 @@ export function ComposerToolbar({
             onModeChange={onUsageDisplayModeChange}
           />
         ) : null}
-        {followUpState === "ready" || followUpState === "pending" ? (
-          <button
-            type="button"
-            className="secondary-button composer-follow-up-button"
-            aria-label={followUpState === "pending"
-              ? "Sending follow-up"
-              : "Send follow-up"}
-            aria-busy={followUpState === "pending"}
-            disabled={followUpState === "pending"}
-            onClick={() => void onSubmit()}
-          >
-            {followUpState === "pending"
-              ? <LoadingMark label="Sending follow-up" />
-              : <Send size={13} />}
-            <span>
-              {followUpState === "pending" ? "Sending…" : "Follow up"}
-            </span>
-          </button>
-        ) : followUpState === "unavailable" ? (
-          <small
-            className="composer-follow-up-unavailable"
-            role="status"
-            title="This active agent route cannot accept parent follow-ups."
-          >
-            Follow-up unavailable
-          </small>
-        ) : null}
-        {primaryAction === "stop-ready" || primaryAction === "stop-pending" ? (
-          <IconButton
-            label={primaryAction === "stop-pending"
-              ? "Stopping agent"
-              : "Stop agent"}
-            className="send-button stop-button"
-            data-composer-action-state={primaryAction}
-            aria-busy={primaryAction === "stop-pending"}
-            onClick={() => void onStop()}
-            disabled={primaryAction === "stop-pending"}
-          >
-            <Square size={13} fill="currentColor" />
-          </IconButton>
-        ) : primaryAction === "submitting" ? (
-          <IconButton
-            label="Sending message"
-            className="send-button send-button-loading"
-            data-composer-action-state={primaryAction}
-            aria-busy="true"
-            disabled
-          >
-            <LoadingMark label="Sending message" />
-          </IconButton>
-        ) : (
-          <IconButton
-            label="Send message"
-            className="send-button"
-            data-composer-action-state={primaryAction}
-            onClick={() => void onSubmit()}
-            disabled={primaryAction === "send-disabled"}
-          >
-            <Send size={16} />
-          </IconButton>
-        )}
+        <Suspense
+          fallback={(
+            <ComposerSendActionsFallback
+              followUpState={followUpState}
+              primaryAction={primaryAction}
+              onSubmit={onSubmit}
+              onStop={onStop}
+            />
+          )}
+        >
+          <ComposerSendActions
+            conversationId={conversation.id}
+            followUpState={followUpState}
+            primaryAction={primaryAction}
+            acceptance={sendAcceptance}
+            onSubmit={onSubmit}
+            onStop={onStop}
+          />
+        </Suspense>
         </div>
       </div>
-      <div
-        className="composer-checkout-strip"
-        role="group"
-        aria-label="Chat checkout context"
-      >
-        <span className="composer-checkout-location">
-          <FolderGit2 size={12} aria-hidden="true" />
-          <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
-        </span>
-        <span
-          className="composer-checkout-branch"
-          title={visibleCheckoutBranch}
+      {showCheckoutContext && (
+        <div
+          className="composer-checkout-strip"
+          role="group"
+          aria-label="Chat checkout context"
         >
-          <GitBranch size={12} aria-hidden="true" />
-          <code translate="no">{visibleCheckoutBranch}</code>
-        </span>
-      </div>
+          <span className="composer-checkout-location">
+            <FolderGit2 size={12} aria-hidden="true" />
+            <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+          </span>
+          <span
+            className="composer-checkout-branch"
+            title={visibleCheckoutBranch}
+          >
+            <GitBranch size={12} aria-hidden="true" />
+            <code translate="no">{visibleCheckoutBranch}</code>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import type { CompactComposerCommand } from "../../utils/composerCommands";
+import { clearPersistedComposerDraft } from "../../utils/composerDraftPersistence";
 
 export interface ComposerCompactNotice {
   kind: "working" | "success" | "error";
@@ -122,14 +123,7 @@ export function useComposerCompaction(options: {
       ) return;
       const ownsVisibleComposer = conversationIdRef.current === ownerId;
       if ((editorRevisions.current.get(ownerId) ?? 0) === submittedRevision) {
-        try {
-          const key = `inertia:draft:${ownerId}`;
-          if (window.localStorage.getItem(key) === submittedDraft) {
-            window.localStorage.removeItem(key);
-          }
-        } catch {
-          // The completed in-memory command can still settle without storage.
-        }
+        clearPersistedComposerDraft(ownerId, submittedDraft);
         if (ownsVisibleComposer) {
           draftValueRef.current = "";
           setMessage("");

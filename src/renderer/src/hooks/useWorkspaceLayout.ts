@@ -32,6 +32,37 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function useResizeObserverTarget<T extends Element>(
+  ref: RefObject<T | null>,
+  onResize: (entry: ResizeObserverEntry) => void,
+): void {
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const observedTargetRef = useRef<T | null>(null);
+  const onResizeRef = useRef(onResize);
+  onResizeRef.current = onResize;
+
+  useEffect(() => {
+    const target = ref.current;
+    if (target === observedTargetRef.current) return;
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    observedTargetRef.current = target;
+    if (!target) return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) onResizeRef.current(entry);
+    });
+    observer.observe(target);
+    observerRef.current = observer;
+  });
+
+  useEffect(() => () => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    observedTargetRef.current = null;
+  }, []);
+}
+
 function initialWorkspaceTool(
   preferred?: WorkspacePanelTab,
 ): WorkspacePanelTab {
@@ -287,26 +318,16 @@ export function useWorkspaceLayout(
     setActiveTool((current) => current ? null : lastToolRef.current);
   }, [setActiveTool]);
 
-  useEffect(() => {
-    const shell = appShellRef.current;
-    if (!shell) return;
-    const observer = new ResizeObserver(([entry]) =>
-      setShellWidth(entry.contentRect.width));
-    observer.observe(shell);
-    return () => observer.disconnect();
-  }, []);
+  useResizeObserverTarget(appShellRef, (entry) => {
+    setShellWidth(entry.contentRect.width);
+  });
 
-  useEffect(() => {
-    const body = workspaceBodyRef.current;
-    if (!body) return;
-    const observer = new ResizeObserver(([entry]) =>
-      setWorkspaceBodySize({
-        width: entry.contentRect.width,
-        height: entry.contentRect.height,
-      }));
-    observer.observe(body);
-    return () => observer.disconnect();
-  }, []);
+  useResizeObserverTarget(workspaceBodyRef, (entry) => {
+    setWorkspaceBodySize({
+      width: entry.contentRect.width,
+      height: entry.contentRect.height,
+    });
+  });
 
   const toolsVisible =
     view === "workspace" && Boolean(activeToolState && hasProject);

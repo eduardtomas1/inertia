@@ -2460,6 +2460,18 @@ button.environment-row:focus-visible,
   container-type: size;
 }
 
+.renderer-startup-error {
+  display: grid;
+  height: 100%;
+  margin: 0;
+  padding: 28px;
+  place-items: center;
+  color: var(--danger);
+  background: var(--conversation-canvas-surface);
+  font-size: var(--ui-font-secondary);
+  text-align: center;
+}
+
 .chat-workspace[data-reasoning-effort="ultra"] .composer::after {
   position: absolute;
   z-index: 1;

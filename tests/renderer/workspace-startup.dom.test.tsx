@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -6,21 +6,54 @@ import {
 } from "../../src/renderer/src/hooks/useWorkspaceLayout";
 import type { WorkspaceStartupSurface } from "../../src/shared/contracts";
 
+const resizeObservers: TestResizeObserver[] = [];
+
 class TestResizeObserver implements ResizeObserver {
   readonly root = null;
   readonly thresholds = [];
-  disconnect(): void {}
-  observe(): void {}
-  unobserve(): void {}
+  readonly targets = new Set<Element>();
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    resizeObservers.push(this);
+  }
+
+  disconnect(): void {
+    this.targets.clear();
+  }
+
+  observe(target: Element): void {
+    this.targets.add(target);
+  }
+
+  unobserve(target: Element): void {
+    this.targets.delete(target);
+  }
+
   takeRecords(): ResizeObserverEntry[] {
     return [];
   }
+
+  emit(target: Element, width: number, height: number): void {
+    this.callback([{
+      target,
+      contentRect: { width, height } as DOMRectReadOnly,
+      borderBoxSize: [],
+      contentBoxSize: [],
+      devicePixelContentBoxSize: [],
+    }], this);
+  }
 }
 
-function LayoutHarness({ surface, workspaceId = "conversation-1", forceStackedTools = false }: {
+function LayoutHarness({
+  surface,
+  workspaceId = "conversation-1",
+  forceStackedTools = false,
+  mountTargets = true,
+}: {
   surface: WorkspaceStartupSurface;
   workspaceId?: string;
   forceStackedTools?: boolean;
+  mountTargets?: boolean;
 }): React.JSX.Element {
   const layout = useWorkspaceLayout("workspace", true, {
     startupSurface: surface,
@@ -30,9 +63,19 @@ function LayoutHarness({ surface, workspaceId = "conversation-1", forceStackedTo
   });
   return (
     <>
+      {mountTargets && (
+        <div ref={layout.appShellRef} data-testid="app-shell-target">
+          <div
+            ref={layout.workspaceBodyRef}
+            data-testid="workspace-body-target"
+          />
+        </div>
+      )}
       <output aria-label="Active tool">{layout.activeTool ?? "none"}</output>
       <output aria-label="Stacked tools">{String(layout.stackedTools)}</output>
       <output aria-label="Tool width">{layout.tools.width}</output>
+      <output aria-label="Sidebar maximum">{layout.sidebar.max}</output>
+      <output aria-label="Tool maximum">{layout.tools.maxWidth}</output>
       <button type="button" onClick={layout.toggleWorkspaceTools}>Toggle tools</button>
       <button type="button" onClick={() => layout.showStartupSurface("summary")}>Prefer summary</button>
       <button type="button" onClick={() => layout.showStartupSurface("tools")}>Prefer tools</button>
@@ -61,6 +104,7 @@ function LayoutHarness({ surface, workspaceId = "conversation-1", forceStackedTo
 
 describe("workspace startup surface", () => {
   beforeEach(() => {
+    resizeObservers.length = 0;
     const values = new Map<string, string>();
     Object.defineProperty(window, "localStorage", {
       configurable: true,
@@ -102,6 +146,41 @@ describe("workspace startup surface", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle tools" }));
     expect(screen.getByLabelText("Active tool")).toHaveTextContent("environment");
+  });
+
+  it("starts observing layout targets that mount after the hook's initial effect", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1024,
+    });
+    const view = render(
+      <LayoutHarness surface="summary" mountTargets={false} />,
+    );
+    expect(resizeObservers).toHaveLength(0);
+    expect(screen.getByLabelText("Sidebar maximum")).toHaveTextContent("352");
+    expect(screen.getByLabelText("Tool maximum")).toHaveTextContent("377");
+
+    view.rerender(<LayoutHarness surface="summary" mountTargets />);
+    const shell = screen.getByTestId("app-shell-target");
+    const body = screen.getByTestId("workspace-body-target");
+    await waitFor(() => {
+      expect(resizeObservers.some(({ targets }) => targets.has(shell))).toBe(true);
+      expect(resizeObservers.some(({ targets }) => targets.has(body))).toBe(true);
+    });
+
+    const shellObserver = resizeObservers.find(({ targets }) =>
+      targets.has(shell));
+    const bodyObserver = resizeObservers.find(({ targets }) =>
+      targets.has(body));
+    expect(shellObserver).toBeDefined();
+    expect(bodyObserver).toBeDefined();
+    act(() => {
+      shellObserver?.emit(shell, 1440, 900);
+      bodyObserver?.emit(body, 1100, 800);
+    });
+
+    expect(screen.getByLabelText("Sidebar maximum")).toHaveTextContent("420");
+    expect(screen.getByLabelText("Tool maximum")).toHaveTextContent("753");
   });
 
   it("can start with the last tool and force split-view tools to the bottom", async () => {

@@ -5,6 +5,7 @@ import type {
 } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type { ProviderManager } from "../providers";
+import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
 import { AgentThreadManager } from "./agent-thread-manager";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
 import {
@@ -23,6 +24,7 @@ interface AgentThreadRuntimeDependencies {
   workspaceRuns: Pick<WorkspaceRunController<never>, "trackSourceControl">;
   dataDirectory: string;
   turns: TurnController;
+  providerTerminalResumes: ProviderTerminalResumeRegistry;
   pendingInputs: Map<string, AgentInputRequest>;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;

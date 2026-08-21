@@ -38,10 +38,7 @@ import clsx from "clsx";
 import type { Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
 import { formatRelativeTime } from "../lib/format";
 import { agentRequestProviderName } from "../utils/agentInput";
-import {
-  focusModalOnAnimationFrame,
-  trapModalFocus,
-} from "../utils/modalFocus";
+import { focusModalOnAnimationFrame, trapModalFocus } from "../utils/modalFocus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -56,12 +53,14 @@ import {
   classicSidebarSearch,
   groupWorkThreads,
   nextSidebarNavigationIndex,
+  isSidebarNavigationKey,
   sidebarThreadView,
   sidebarThreadViewMap,
   sortSidebarThreadViews,
   type SidebarThreadStatus,
   type SidebarWorkSectionId,
 } from "../utils/sidebarModel";
+import { navigateMenuItems } from "../utils/menuKeyboard";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { ConversationActionsMenu } from "./ConversationActionsMenu";
 import { DailyWorkMark } from "./DailyWorkMark";
@@ -221,6 +220,13 @@ function SidebarView({
     });
   }, [snapshot?.activeProjectId]);
   useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query, sidebarMode]);
+  useLayoutEffect(() => {
+    if (!projectMenu) return;
+    sidebarRef.current?.querySelector<HTMLButtonElement>(
+      `[data-project-menu-id="${projectMenu}"] [role^="menuitem"]:not([disabled])`,
+    )
+      ?.focus({ preventScroll: true });
+  }, [projectMenu]);
   useEffect(() => {
     try {
       window.localStorage.setItem(
@@ -523,7 +529,7 @@ function SidebarView({
   };
 
   const handleNavigationKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    if (!isSidebarNavigationKey(event.key)) return;
     const eventTarget = event.target instanceof HTMLElement ? event.target : null;
     if (
       eventTarget?.matches("input, textarea, select")
@@ -540,7 +546,7 @@ function SidebarView({
         : -1;
       const nextIndex = nextSidebarNavigationIndex(
         currentIndex,
-        event.key as "ArrowDown" | "ArrowUp" | "Home" | "End",
+        event.key,
         workNavigationOrder.length,
       );
       const nextIdentity = workNavigationOrder[nextIndex];
@@ -557,7 +563,7 @@ function SidebarView({
     const currentIndex = items.findIndex((item) => item === document.activeElement);
     const nextIndex = nextSidebarNavigationIndex(
       currentIndex,
-      event.key as "ArrowDown" | "ArrowUp" | "Home" | "End",
+      event.key,
       items.length,
     );
     event.preventDefault();
@@ -573,16 +579,20 @@ function SidebarView({
   const projectActions = (project: Project) => (
     <div
       ref={(node) => setMenuPopover(`:${project.id}`, node)}
+      id={`project-actions-${project.id}`}
+      data-project-menu-id={project.id}
       className="project-menu"
       role="menu"
       aria-label={`Project actions for ${project.name}`}
+      onKeyDown={navigateMenuItems}
     >
-      <button type="button" role="menuitem" onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
-      <button type="button" role="menuitem" onClick={() => startProjectRename(project)}><Pencil size={13} />Rename</button>
+      <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
+      <button type="button" role="menuitem" tabIndex={-1} onClick={() => startProjectRename(project)}><Pencil size={13} />Rename</button>
       <span className="project-menu-heading"><Layers3 size={12} />Grouping behavior</span>
       <button
         type="button"
         role="menuitemradio"
+        tabIndex={-1}
         aria-checked={project.groupingMode === null}
         onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, null); }}
       >
@@ -593,6 +603,7 @@ function SidebarView({
         <button
           type="button"
           role="menuitemradio"
+          tabIndex={-1}
           aria-checked={project.groupingMode === mode}
           onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, mode); }}
           key={mode}
@@ -606,6 +617,7 @@ function SidebarView({
         <button
           type="button"
           role="menuitemradio"
+          tabIndex={-1}
           aria-checked={project.gitRepositoryLimit === limit}
           onClick={() => {
             dismissMenu("selection");
@@ -622,6 +634,7 @@ function SidebarView({
       <button
         type="button"
         role="menuitem"
+        tabIndex={-1}
         className="is-danger"
         disabled={
           snapshot?.runs.some((run) => (
@@ -699,7 +712,11 @@ function SidebarView({
         aria-label={`Rename ${conversation.title}`}
         onChange={(event) => setRenameDraft(event.target.value)}
         onBlur={() => setRenaming(null)}
-        onKeyDown={(event) => { if (event.key === "Escape") setRenaming(null); }}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault(); event.stopPropagation();
+          setRenaming(null);
+        }}
       />
     </form>
   );
@@ -1000,7 +1017,11 @@ function SidebarView({
           >
             <label htmlFor="sidebar-project-rename">Rename project</label>
             <span>
-              <input id="sidebar-project-rename" value={projectRenameDraft} autoFocus maxLength={80} onChange={(event) => setProjectRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenamingProject(null); }} />
+              <input id="sidebar-project-rename" value={projectRenameDraft} autoFocus maxLength={80} onChange={(event) => setProjectRenameDraft(event.target.value)} onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault(); event.stopPropagation();
+                setRenamingProject(null);
+              }} />
               <button type="submit">Save</button>
             </span>
           </form>
@@ -1072,6 +1093,8 @@ function SidebarView({
                           ref={(node) => setMenuTrigger(`:${project.id}`, node)}
                           label={`Project actions for ${project.name}`}
                           className="project-menu-button"
+                          aria-haspopup="menu"
+                          aria-controls={`project-actions-${project.id}`}
                           aria-expanded={projectMenu === project.id}
                           onClick={() => toggleMenu(`:${project.id}`)}
                         >

@@ -692,7 +692,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   agentThreads = createAgentThreadRuntime({
-    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
+    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
+    providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
@@ -719,6 +720,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows,
+        providerTerminalResumes,
         broadcast,
         send,
       }),

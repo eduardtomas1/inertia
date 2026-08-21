@@ -25,7 +25,9 @@ function dependencies(
   return {
     workflows: {
       clearGoal: vi.fn(async () => cleared),
+      refresh: vi.fn(),
     } as unknown as AgentWorkflowController,
+    providerTerminalResumes: { isActive: vi.fn(() => false) },
     broadcast: vi.fn(),
     send: vi.fn(),
   };
@@ -39,6 +41,7 @@ describe("agent workflow commands", () => {
     const refresh = vi.fn();
     const runtime = {
       workflows: { state, refresh } as unknown as AgentWorkflowController,
+      providerTerminalResumes: { isActive: vi.fn(() => false) },
       broadcast: vi.fn(),
       send: vi.fn(),
     };
@@ -82,4 +85,24 @@ describe("agent workflow commands", () => {
       });
     },
   );
+
+  it("rejects native workflow mutations while its provider terminal is active", async () => {
+    const runtime = dependencies(true);
+    vi.mocked(runtime.providerTerminalResumes.isActive).mockReturnValue(true);
+    const handler = createAgentWorkflowCommandHandler(runtime);
+
+    await expect(handler({} as never, clearCommand)).rejects.toThrow(
+      /End the resumed provider terminal/u,
+    );
+    expect(runtime.workflows.clearGoal).not.toHaveBeenCalled();
+    await expect(handler({} as never, {
+      type: "agent.workflow.load",
+      requestId: clearCommand.requestId,
+      payload: {
+        conversationId: clearCommand.payload.conversationId,
+        refresh: true,
+      },
+    })).rejects.toThrow(/End the resumed provider terminal/u);
+    expect(runtime.workflows.refresh).not.toHaveBeenCalled();
+  });
 });

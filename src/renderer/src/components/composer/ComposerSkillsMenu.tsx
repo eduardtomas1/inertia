@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefreshCw, Sparkles } from "lucide-react";
 import clsx from "clsx";
 
@@ -16,7 +16,9 @@ export interface ComposerSkillsMenuProps {
   capability: AgentWorkflowSkillsCapability | null;
   loading: boolean;
   error: string | null;
-  completionQuery?: string | null;
+  completion?: string | null;
+  listboxId: string;
+  activeSkillId?: string | null;
   disabled: boolean;
   running: boolean;
   menuController: ComposerMenuController;
@@ -29,16 +31,16 @@ export function ComposerSkillsMenu({
   capability,
   loading,
   error,
-  completionQuery = null,
+  completion = null,
+  listboxId,
+  activeSkillId = null,
   disabled,
   running,
   menuController,
   onList,
   onInsert,
 }: ComposerSkillsMenuProps): React.JSX.Element | null {
-  const instanceId = useId();
-  const popoverId = `${instanceId}-composer-skills-menu`;
-  const searchId = `${instanceId}-composer-skills-search`;
+  const searchId = `${listboxId}-search`;
   const searchRef = useRef<HTMLInputElement>(null);
   const autoOpenedRef = useRef(false);
   const [query, setQuery] = useState("");
@@ -49,37 +51,39 @@ export function ComposerSkillsMenu({
     setMenuTrigger,
     setMenuPopover,
   } = menuController;
+  const menuOpen = menu === "skills";
 
-  const needle = query.trim().toLocaleLowerCase();
-  const visibleSkills = completionQuery !== null
+  const browsing = completion === null;
+  const needle = query.trim().toLowerCase();
+  const visibleSkills = !browsing
     ? skills.filter((skill) => skill.enabled && skill.name
-      .toLocaleLowerCase().startsWith(completionQuery))
+      .toLowerCase().startsWith(completion))
     : !needle
       ? skills
       : skills.filter((skill) =>
       `${skill.name} ${skill.shortDescription ?? skill.description}`
-        .toLocaleLowerCase()
+        .toLowerCase()
         .includes(needle));
 
   useEffect(() => {
-    if (menu === "skills") return;
+    if (menuOpen) return;
     setQuery("");
-  }, [menu]);
+  }, [menuOpen]);
 
-  const showCompletion = completionQuery !== null
+  const showCompletion = !browsing
     && visibleSkills.length > 0
     && Boolean(capability?.available)
     && !disabled
     && !running;
   useEffect(() => {
-    if (showCompletion && !autoOpenedRef.current && menu !== "skills") {
+    if (showCompletion && !autoOpenedRef.current && !menuOpen) {
       autoOpenedRef.current = true;
       toggleMenu("skills");
     } else if (!showCompletion && autoOpenedRef.current) {
       autoOpenedRef.current = false;
-      if (menu === "skills") dismissMenu("context-change");
+      if (menuOpen) dismissMenu("context-change");
     }
-  }, [dismissMenu, menu, showCompletion, toggleMenu]);
+  }, [dismissMenu, menuOpen, showCompletion, toggleMenu]);
   if (!capability) return null;
   const readiness = composerSkillsReadiness({
     capability,
@@ -90,14 +94,14 @@ export function ComposerSkillsMenu({
 
   const open = (): void => {
     if (!readiness.interactive) return;
-    if (menu !== "skills" && skills.length === 0 && !loading) {
+    if (!menuOpen && skills.length === 0 && !loading) {
       void onList(false).catch(() => undefined);
     }
-    if (menu !== "skills") toggleMenu("skills");
+    if (!menuOpen) toggleMenu("skills");
     window.requestAnimationFrame(() => searchRef.current?.focus());
   };
   const toggle = (): void => {
-    if (menu === "skills") {
+    if (menuOpen) {
       toggleMenu("skills");
       return;
     }
@@ -111,14 +115,14 @@ export function ComposerSkillsMenu({
         className={clsx(
           "composer-pill",
           "composer-skills-trigger",
-          menu === "skills" && "is-active",
+          menuOpen && "is-active",
         )}
         aria-label={!readiness.interactive
           ? `${COMPOSER_LABELS.skills} unavailable: ${readiness.reason}`
-          : `Insert a ${capability.label.toLocaleLowerCase()} invocation`}
+          : `Insert a ${capability.label.toLowerCase()} invocation`}
         aria-haspopup={readiness.interactive ? "menu" : undefined}
-        aria-controls={readiness.interactive ? popoverId : undefined}
-        aria-expanded={readiness.interactive ? menu === "skills" : undefined}
+        aria-controls={readiness.interactive ? listboxId : undefined}
+        aria-expanded={readiness.interactive ? menuOpen : undefined}
         aria-disabled={!readiness.interactive}
         data-readiness={readiness.state}
         title={readiness.reason ?? "Insert a $skill-name invocation"}
@@ -132,13 +136,13 @@ export function ComposerSkillsMenu({
         <Sparkles size={14} aria-hidden="true" />
         <span>{COMPOSER_LABELS.skills}</span>
       </button>
-      {readiness.interactive && menu === "skills" && (
+      {readiness.interactive && menuOpen && (
         <div
           ref={(node) => setMenuPopover("skills", node)}
-          id={popoverId}
+          id={listboxId}
           className="composer-popover composer-skills-popover"
-          role={completionQuery === null ? "menu" : "listbox"}
-          aria-label={completionQuery === null
+          role={browsing ? "menu" : "listbox"}
+          aria-label={browsing
             ? `Insert ${capability.label}`
             : "Skill suggestions"}
         >
@@ -147,7 +151,7 @@ export function ComposerSkillsMenu({
               <strong>Invoke a skill</strong>
               <small>Inserts the exact <code>$skill-name</code> token.</small>
             </span>
-            {completionQuery === null && <button
+            {browsing && <button
               type="button"
               role="menuitem"
               tabIndex={-1}
@@ -163,7 +167,7 @@ export function ComposerSkillsMenu({
               />
             </button>}
           </header>
-          {completionQuery === null && <label className="composer-skills-search" htmlFor={searchId}>
+          {browsing && <label className="composer-skills-search" htmlFor={searchId}>
             <input
               ref={searchRef}
               id={searchId}
@@ -194,11 +198,14 @@ export function ComposerSkillsMenu({
           <div className="composer-skills-list">
             {visibleSkills.map((skill) => (
               <button
-                type="button"
-                role={completionQuery === null ? "menuitem" : "option"}
-                aria-selected={completionQuery === null
+                id={browsing
                   ? undefined
-                  : skill.id === visibleSkills[0]?.id}
+                  : `${listboxId}-${skill.id}`}
+                type="button"
+                role={browsing ? "menuitem" : "option"}
+                aria-selected={browsing
+                  ? undefined
+                  : skill.id === activeSkillId}
                 disabled={!skill.enabled}
                 tabIndex={0}
                 key={skill.id}

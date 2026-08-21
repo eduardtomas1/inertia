@@ -9,14 +9,18 @@ import type { ProviderRunFailure } from "./contracts";
 export function cursorRuntimeFailure(
   message: string,
   child: ChildProcessWithoutNullStreams,
+  phase = "runtime",
+  terminalEvent = "acp/exception",
 ): ProviderRunFailure {
   const normalized = message.toLowerCase();
   const reason: ProviderRunFailure["reason"] =
-    /oversized|bounded event rate/u.test(normalized)
+    /oversized|bounded event rate|bounded tool activity/u.test(normalized)
       ? "protocol-overflow"
-      : /malformed|unserializable|invalid utf|not valid.*utf-?8|unexpected token|valid json/u.test(normalized)
+      : /malformed|unserializable|invalid utf|not valid.*utf-?8|unexpected token|valid json|cursor acp sent an invalid|invalid (?:.* identity|session update)/u.test(normalized)
         ? "malformed-protocol"
-        : child.signalCode
+        : /timed out|timeout|deadline|stopped responding/u.test(normalized)
+          ? "rpc-timeout"
+          : child.signalCode
           ? "process-signal"
           : child.exitCode !== null
             ? "process-exit"
@@ -26,8 +30,8 @@ export function cursorRuntimeFailure(
   return {
     reason,
     message,
-    phase: "runtime",
-    terminalEvent: "acp/exception",
+    phase,
+    terminalEvent,
   };
 }
 

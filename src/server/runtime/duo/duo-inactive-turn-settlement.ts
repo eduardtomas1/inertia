@@ -84,18 +84,29 @@ export function settleInactiveDuoTurn(
     turn = settlement.turn;
     const detail = store.conversationDetail(input.conversationId);
     if (!detail) return false;
-    const failed = turn.status === "failed" || turn.status === "interrupted";
+    const completed = turn.status === "completed";
+    const interruptedDetail = turn.status === "cancelled"
+      ? "the Duo turn was stopped."
+      : "the Duo turn did not complete.";
     for (const activity of detail.activities) {
       if (activity.turnId === input.turnId && activity.status === "running") {
         store.updateActivity(activity.id, {
-          status: failed ? "failed" : "completed",
+          status: completed ? "completed" : "failed",
+          ...(!completed
+            ? {
+                title: `Interrupted · ${activity.title}`,
+                detail: activity.detail
+                  ? `${activity.detail}\nInterrupted: ${interruptedDetail}`
+                  : `Interrupted: ${interruptedDetail}`,
+              }
+            : {}),
         });
       }
     }
     for (const reasoning of detail.reasonings) {
       if (reasoning.turnId === input.turnId && reasoning.status === "running") {
         store.updateReasoning(reasoning.id, {
-          status: failed ? "failed" : "completed",
+          status: completed ? "completed" : "failed",
         });
       }
     }
@@ -127,6 +138,8 @@ export function settleInactiveDuoTurn(
         conversationId: input.conversationId,
         runId: turn.runId,
         turnId: input.turnId,
+        status: "cancelled",
+        terminalReason: "duo-inactive-reconciliation",
       });
     }
     input.hooks.broadcast({

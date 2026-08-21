@@ -19,6 +19,10 @@ import {
 import { IconButton } from "./ui";
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
+import {
+  nextSidebarNavigationIndex,
+  type SidebarNavigationKey,
+} from "../utils/sidebarModel";
 
 export type { WorkspacePanelTab } from "./workspacePanelTypes";
 
@@ -90,13 +94,15 @@ export function WorkspacePanel({
     const currentIndex = tabs.indexOf(currentTab);
     if (currentIndex < 0 || tabs.length === 0) return;
     event.preventDefault();
-    const nextIndex = event.key === "Home"
-      ? 0
-      : event.key === "End"
-        ? tabs.length - 1
-        : event.key === "ArrowLeft"
-          ? currentIndex === 0 ? tabs.length - 1 : currentIndex - 1
-          : currentIndex === tabs.length - 1 ? 0 : currentIndex + 1;
+    const key = (event.key === "ArrowLeft"
+      ? "ArrowUp"
+      : event.key === "ArrowRight" ? "ArrowDown" : event.key
+    ) as SidebarNavigationKey;
+    const nextIndex = nextSidebarNavigationIndex(
+      currentIndex,
+      key,
+      tabs.length,
+    );
     const nextTab = tabs[nextIndex];
     if (nextTab) selectWorkspaceTool(nextTab, true);
   };

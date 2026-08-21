@@ -564,9 +564,11 @@ describe("inactive Duo turn recovery", () => {
     expect(runtime.store.workspaceRun(judge.turn.runId).status).toBe("cancelled");
     const detail = runtime.store.conversationDetail(judgeId)!;
     expect(detail.activities.find(({ id }) => id === activity.id)?.status)
-      .toBe("completed");
+      .toBe("failed");
+    expect(detail.activities.find(({ id }) => id === activity.id)?.title)
+      .toBe("Interrupted · Detached activity");
     expect(detail.reasonings.find(({ id }) => id === reasoning.id)?.status)
-      .toBe("completed");
+      .toBe("failed");
 
     const removeConversation = conversationHandler(runtime.store);
     for (const conversationId of [

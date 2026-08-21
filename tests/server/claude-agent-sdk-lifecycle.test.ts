@@ -8,6 +8,7 @@ import type {
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import {
+  CLAUDE_PROTOCOL_SESSION_ID,
   claudeSuccessResult,
   claudeSystem,
   fixtureClaudeQuery,
@@ -74,7 +75,7 @@ describe("Claude Agent SDK lifecycle isolation", () => {
         (async function* (): AsyncGenerator<SDKMessage> {
           yield {
             type: "assistant",
-            session_id: "45454545-4545-4545-8545-454545454545",
+            session_id: CLAUDE_PROTOCOL_SESSION_ID,
             parent_tool_use_id: null,
             message: {
               content: [{
@@ -182,7 +183,7 @@ describe("Claude Agent SDK lifecycle isolation", () => {
           // Empty parent text is not output and must not suppress the result.
           yield {
             type: "assistant",
-            session_id: "45454545-4545-4545-8545-454545454545",
+            session_id: CLAUDE_PROTOCOL_SESSION_ID,
             parent_tool_use_id: null,
             message: { content: [{ type: "text", text: "" }] },
           } as unknown as SDKMessage;

@@ -11,21 +11,25 @@ const flushPromises = async (): Promise<void> => {
   await Promise.resolve();
 };
 
+function activeTurn(): ActiveTurn {
+  return {
+    conversation: { id: "conversation-1" },
+    turn: {
+      id: "turn-1",
+      runId: "run-1",
+      harnessId: "codex-app-server",
+    },
+    acceptingProviderEvents: true,
+    settled: false,
+    supportsFollowUpImages: true,
+    followUpAdmissions: new Set<Promise<void>>(),
+    followUpAdmissionTail: Promise.resolve(),
+  } as ActiveTurn;
+}
+
 describe("TurnFollowUpCoordinator", () => {
   it("serializes acknowledged parent follow-ups FIFO for the exact active turn", async () => {
-    const active = {
-      conversation: { id: "conversation-1" },
-      turn: {
-        id: "turn-1",
-        runId: "run-1",
-        harnessId: "codex-app-server",
-      },
-      acceptingProviderEvents: true,
-      settled: false,
-      supportsFollowUpImages: true,
-      followUpAdmissions: new Set<Promise<void>>(),
-      followUpAdmissionTail: Promise.resolve(),
-    } as ActiveTurn;
+    const active = activeTurn();
     const acknowledgements: Array<(accepted: boolean) => void> = [];
     const steer = vi.fn(async () => await new Promise<boolean>((resolve) => {
       acknowledgements.push(resolve);
@@ -76,4 +80,71 @@ describe("TurnFollowUpCoordinator", () => {
       ]);
   });
 
+  it("does not dispatch a queued follow-up after its owner is cancelled", async () => {
+    const steer = vi.fn(async () => true);
+    const active = activeTurn();
+    const coordinator = new TurnFollowUpCoordinator({
+      store: {
+        createAcknowledgedFollowUpMessage: vi.fn(),
+      } as never,
+      providers: { steer } as never,
+      now: () => "2026-08-21T10:00:00.000Z",
+      activeForConversation: () => active,
+    });
+    const blocker = coordinator.acquire(active);
+    const cancelled = coordinator.acquire(active);
+    expect(blocker).not.toBeNull();
+    expect(cancelled).not.toBeNull();
+    const controller = new AbortController();
+    const pending = coordinator.steer(
+      cancelled!,
+      { content: "Do not dispatch this cancelled follow-up", imagePaths: [] },
+      [],
+      undefined,
+      controller.signal,
+    );
+
+    controller.abort();
+    blocker!.release();
+
+    await expect(pending).resolves.toBeNull();
+    expect(steer).not.toHaveBeenCalled();
+    cancelled!.release();
+  });
+
+  it("does not acknowledge or persist a follow-up when its owner settles during provider steering", async () => {
+    let accept!: (accepted: boolean) => void;
+    const steer = vi.fn(async () => await new Promise<boolean>((resolve) => {
+      accept = resolve;
+    }));
+    const persist = vi.fn();
+    const acknowledged = vi.fn();
+    const active = activeTurn();
+    const coordinator = new TurnFollowUpCoordinator({
+      store: {
+        createAcknowledgedFollowUpMessage: persist,
+      } as never,
+      providers: { steer } as never,
+      now: () => "2026-08-21T10:00:00.000Z",
+      activeForConversation: () => active,
+    });
+    const admission = coordinator.acquire(active)!;
+    const pending = coordinator.steer(
+      admission,
+      { content: "Do not persist after Stop", imagePaths: [] },
+      [],
+      acknowledged,
+    );
+
+    await flushPromises();
+    expect(steer).toHaveBeenCalledTimes(1);
+    active.acceptingProviderEvents = false;
+    active.settled = true;
+    accept(true);
+
+    await expect(pending).resolves.toBeNull();
+    expect(acknowledged).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
+    admission.release();
+  });
 });

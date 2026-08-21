@@ -11,6 +11,7 @@ import {
 } from "../../utils/dismissibleMenu";
 import { menuId, RESPONSE_SPEED_LABEL } from "./config";
 import type { ComposerMenu, MoreSection } from "./types";
+import { navigateMenuItems } from "../../utils/menuKeyboard";
 
 export interface ComposerMenuController {
   menu: ComposerMenu | null;
@@ -174,24 +175,7 @@ export function useComposerMenus(): ComposerMenuController {
 
   const handleMoreMenuNavigation = (
     event: React.KeyboardEvent<HTMLDivElement>,
-  ) => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(
-      "button:not(:disabled)",
-    )];
-    if (items.length === 0) return;
-    event.preventDefault();
-    const currentIndex = items.indexOf(
-      document.activeElement as HTMLButtonElement,
-    );
-    if (event.key === "Home") items[0]?.focus();
-    else if (event.key === "End") items.at(-1)?.focus();
-    else if (event.key === "ArrowDown") {
-      items[(currentIndex + 1 + items.length) % items.length]?.focus();
-    } else {
-      items[(currentIndex - 1 + items.length) % items.length]?.focus();
-    }
-  };
+  ) => navigateMenuItems(event, "button:not(:disabled)");
 
   const focusComposerMenuEdge = (
     menuName: ComposerMenu,
@@ -206,24 +190,7 @@ export function useComposerMenus(): ComposerMenuController {
 
   const handleComposerMenuNavigation = (
     event: React.KeyboardEvent<HTMLDivElement>,
-  ): void => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(
-      ":scope > button:not(:disabled)",
-    )];
-    if (items.length === 0) return;
-    event.preventDefault();
-    const currentIndex = items.indexOf(
-      document.activeElement as HTMLButtonElement,
-    );
-    if (event.key === "Home") items[0]?.focus();
-    else if (event.key === "End") items.at(-1)?.focus();
-    else if (event.key === "ArrowDown") {
-      items[(currentIndex + 1 + items.length) % items.length]?.focus();
-    } else {
-      items[(currentIndex - 1 + items.length) % items.length]?.focus();
-    }
-  };
+  ): void => navigateMenuItems(event, ":scope > button:not(:disabled)");
 
   const handleComposerMenuTriggerKeyDown = (
     menuName: ComposerMenu,

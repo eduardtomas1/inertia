@@ -44,6 +44,10 @@ import {
 } from "../utils/modelShortcuts";
 import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
 import type { SelectedModelChipRoute } from "../utils/selectedModelChip";
+import {
+  isSidebarNavigationKey,
+  nextSelectableNavigationIndex,
+} from "../utils/sidebarModel";
 
 export type ModelChooserNavigationKey =
   | "ArrowDown"
@@ -68,31 +72,19 @@ const MODEL_CHOOSER_INITIAL_VIRTUAL_RECT = {
 const MODEL_CHOOSER_ESTIMATED_ROW_SIZE = 54;
 const MODEL_CHOOSER_FALLBACK_RENDER_COUNT = 16;
 
-function availableIndices(routes: readonly ComposerModelRoute[]): number[] {
-  return routes.flatMap((route, index) => route.selectable ? [index] : []);
-}
-
 export function nextModelChooserIndex(
   routes: readonly ComposerModelRoute[],
   currentIndex: number,
   key: ModelChooserNavigationKey,
 ): number {
-  const indices = availableIndices(routes);
-  if (indices.length === 0) return -1;
-  if (key === "Home") return indices[0]!;
-  if (key === "End") return indices.at(-1)!;
-  const position = indices.indexOf(currentIndex);
-  if (position < 0) {
-    return key === "ArrowUp" ? indices.at(-1)! : indices[0]!;
-  }
-  if (key === "ArrowDown") return indices[(position + 1) % indices.length]!;
-  return indices[(position - 1 + indices.length) % indices.length]!;
+  const indices = routes.flatMap((route, index) => route.selectable ? [index] : []);
+  return nextSelectableNavigationIndex(indices, currentIndex, key);
 }
 
 export function modelShortcutPlatform(
   platform: string,
 ): ModelShortcutPlatform {
-  const normalized = platform.toLocaleLowerCase("en-US");
+  const normalized = platform.toLowerCase();
   if (normalized.includes("mac")) return "darwin";
   if (normalized.includes("win")) return "win32";
   if (normalized.includes("linux")) return "linux";
@@ -492,9 +484,7 @@ export function ModelChooser({
     ) {
       return;
     }
-    if (
-      ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
-    ) {
+    if (isSidebarNavigationKey(event.key)) {
       event.preventDefault();
       setActiveIndex((current) => {
         const nextIndex = nextModelChooserIndex(

@@ -99,6 +99,43 @@ describe("ConversationSplitView", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("restores focus to an actionable detached primary after closing the split", async () => {
+    function Harness(): React.JSX.Element {
+      const [split, setSplit] = useState(true);
+      const detached = (
+        <section className="chat-workspace">
+          <button type="button">Focus chat window</button>
+        </section>
+      );
+      return split ? (
+        <ConversationSplitView
+          primary={detached}
+          secondary={<section className="chat-workspace"><textarea aria-label="Second draft" /></section>}
+          primaryTitle="Detached owner"
+          secondaryTitle="Second chat"
+          primaryProjectName="Alpha"
+          secondaryProjectName="Beta"
+          primaryToolsOpen={false}
+          secondaryToolsOpen={false}
+          secondaryFirst={false}
+          onTogglePrimaryTools={() => undefined}
+          onToggleSecondaryTools={() => undefined}
+          onSwapPanes={() => undefined}
+          onCloseSecondary={() => setSplit(false)}
+        />
+      ) : detached;
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Close split chat Second chat",
+    }));
+
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Focus chat window",
+    })).toHaveFocus());
+  });
+
   it("reorders mounted conversation resources without retargeting them", async () => {
     const primaryUnmounted = vi.fn();
     const secondaryUnmounted = vi.fn();

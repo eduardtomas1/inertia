@@ -784,6 +784,65 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       },
     });
 
+    const mixedEnvelope = await runFailure(
+      "kimi ACP mixed request response envelope",
+      `process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "unknown", result: {} }) + "\\n"); setInterval(() => {}, 1000);`,
+    );
+    expect(mixedEnvelope.result).toMatchObject({
+      status: "failed",
+      failure: { reason: "malformed-protocol", terminalEvent: "transport/frame" },
+    });
+
+    const malformedSessionUpdate = await runFailure(
+      "kimi ACP malformed session update",
+      `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Kimi Code CLI", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "kimi-malformed-update", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    send({ jsonrpc: "2.0", method: "session/update", params: {} });
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`,
+    );
+    expect(malformedSessionUpdate.result).toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "malformed-protocol",
+        phase: "turn",
+        terminalEvent: "transport/frame",
+      },
+    });
+
+    const sessionUpdateRequest = await runFailure(
+      "kimi ACP session update request",
+      `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Kimi Code CLI", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "kimi-update-request", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    send({ jsonrpc: "2.0", id: 77, method: "session/update", params: { sessionId: "kimi-update-request", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Must not complete" } } } });
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`,
+    );
+    expect(sessionUpdateRequest.result).toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "malformed-protocol",
+        phase: "turn",
+        terminalEvent: "transport/frame",
+      },
+    });
+
     const invalidUtf8 = await runFailure("kimi ACP invalid UTF-8", `
 const readline = require("node:readline");
 readline.createInterface({ input: process.stdin }).once("line", (line) => {

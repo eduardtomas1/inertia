@@ -180,9 +180,7 @@ describe("composer setting control family", () => {
       "focusComposerMenuEdge(",
     );
     expect(menuHookSource).toContain("menuName,");
-    expect(menuHookSource).toContain(
-      '["ArrowDown", "ArrowUp", "Home", "End"]',
-    );
+    expect(menuHookSource).toContain("navigateMenuItems(event");
     expect(moreMenuSource).toContain(
       "openMoreSection(item.section, true)",
     );

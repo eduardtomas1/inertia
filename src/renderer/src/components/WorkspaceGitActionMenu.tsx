@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef } from "react";
 import {
   Download,
   GitCommitHorizontal,
@@ -12,6 +12,7 @@ import {
   type HeaderGitActionId,
 } from "../utils/headerGitActions";
 import { loadCommitDialog } from "./lazySurfaceLoaders";
+import { navigateMenuItems } from "../utils/menuKeyboard";
 
 type WorkspaceGitActionMenuProps = {
   status: GitStatusSnapshot;
@@ -41,23 +42,6 @@ export default function WorkspaceGitActionMenu({
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
-  const moveFocus = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = [...event.currentTarget.querySelectorAll<HTMLElement>(
-      '[role="menuitem"]',
-    )];
-    if (items.length === 0) return;
-    event.preventDefault();
-    const current = items.indexOf(document.activeElement as HTMLElement);
-    const next = event.key === "Home"
-      ? 0
-      : event.key === "End"
-        ? items.length - 1
-        : event.key === "ArrowUp"
-          ? current <= 0 ? items.length - 1 : current - 1
-          : current < 0 || current === items.length - 1 ? 0 : current + 1;
-    items[next]?.focus();
-  };
   return (
     <div
       ref={menuRef}
@@ -65,7 +49,7 @@ export default function WorkspaceGitActionMenu({
       id="workspace-header-git-menu"
       role="menu"
       aria-label="Git actions"
-      onKeyDown={moveFocus}
+      onKeyDown={navigateMenuItems}
     >
       <div className="git-action-popover-status">
         <strong>{status.branch ?? "Detached HEAD"}</strong>

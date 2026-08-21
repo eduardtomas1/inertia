@@ -45,6 +45,29 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return command;
 }
 
+function stalledCursorControlAgent(
+  root: string,
+  name: string,
+  stalledMethod: "initialize" | "session/set_config_option",
+): string {
+  const command = portableNodeExecutable(root, name);
+  writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === ${JSON.stringify(stalledMethod)}) return;
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
+    sessionId: "cursor-stalled-control",
+    modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] },
+    configOptions: [{ type: "select", id: "model", name: "Model", category: "model", currentValue: "model-a", options: [{ value: "model-a", name: "Model A" }, { value: "model-b", name: "Model B" }] }]
+  } });
+});
+`);
+  return command;
+}
+
 function compactingCursorAgent(
   root: string,
   name: string,
@@ -157,6 +180,44 @@ describe.sequential("Cursor ACP harness", () => {
       command: "/usr/local/bin/cursor-agent",
       args: ["acp"],
     });
+  });
+
+  it.each([
+    ["initialize", "initialize", "initialize"],
+    ["session/set_config_option", "configuration", "session/configuration"],
+  ] as const)("bounds a stalled Cursor %s control RPC", async (
+    stalledMethod,
+    expectedPhase,
+    expectedTerminalEvent,
+  ) => {
+    const root = portableFixtureRoot(`cursor stalled ${expectedPhase}`);
+    roots.push(root);
+    const command = stalledCursorControlAgent(root, `cursor-stalled-${expectedPhase}`, stalledMethod);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness({
+        controlRpcTimeoutMs: stalledMethod === "initialize" ? 25 : 250,
+      })]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: `cursor-stalled-${expectedPhase}`,
+      cwd: root,
+      prompt: "Do not hang",
+      model: stalledMethod === "session/set_config_option" ? "model-b" : undefined,
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("RPC deadline exceeded"),
+      failure: {
+        reason: "rpc-timeout",
+        phase: expectedPhase,
+        terminalEvent: expectedTerminalEvent,
+      },
+      cleanupConfirmed: true,
+    });
+    expect(manager.activeConversationIds()).toEqual([]);
   });
 
   it("rejects question payloads the interaction surface cannot represent", () => {
@@ -546,8 +607,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       error: "Cursor ACP exceeded the bounded event rate for this run.",
       failure: {
         reason: "protocol-overflow",
-        phase: "runtime",
-        terminalEvent: "acp/exception",
+        phase: "turn",
+        terminalEvent: "session/prompt",
       },
     });
     expect(manager.activeConversationIds()).toEqual([]);
@@ -607,7 +668,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-4", title: "Run command", kind: "execute", status: "in_progress", rawInput: { command: "npm test" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-4", title: "Run command", kind: "execute", status: "completed", rawOutput: "passed" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-5", title: "Already complete", kind: "execute", status: "completed", rawInput: { command: "npm run check" }, rawOutput: "green" } } });
-    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-6", title: "Retained input", kind: "execute", status: "pending", rawInput: { command: "npm run lint" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-6", title: "T".repeat(5000), kind: "execute", status: "pending", rawInput: { command: "c".repeat(5000), ignored: "x".repeat(500000) } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-6", status: "completed", rawOutput: "clean" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: 321, size: 200000 } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Cursor response" } } } });
@@ -627,7 +688,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const usage: Array<number | null> = [];
     const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: string[][] = [];
-    const activities: Array<{ activityId?: string; detail?: string; phase: string }> = [];
+    const activities: Array<{ activityId?: string; detail?: string; label: string; phase: string }> = [];
     const subagents: Array<{
       providerTaskId: string | null;
       providerAgentId: string | null;
@@ -697,11 +758,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       phase: "completed",
       detail: "Command:\nnpm run check\n\nOutput:\ngreen",
     }));
-    expect(activities).toContainEqual(expect.objectContaining({
-      activityId: "tool-6",
-      phase: "completed",
-      detail: "Command:\nnpm run lint\n\nOutput:\nclean",
-    }));
+    const boundedTool = activities.find((activity) =>
+      activity.activityId === "tool-6" && activity.phase === "completed");
+    expect(boundedTool?.label).toBe("T".repeat(240));
+    expect(boundedTool?.detail).toBe(`Command:\n${"c".repeat(4_000)}\n\nOutput:\nclean`);
     expect(activities).toEqual(expect.arrayContaining([
       expect.objectContaining({
         phase: "info",
@@ -781,7 +841,237 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const manager = new ProviderManager({ commands: { cursor: command } }, new AgentHarnessRegistry([createCursorAcpHarness()]));
     await expect(manager.run(nativeProviderRunInput({ providerId: "cursor", conversationId: "cursor-invalid", cwd: root, prompt: "Hi", interactionMode: "build", access: "supervised" }))).resolves.toMatchObject({
       status: "failed",
-      failure: { reason: "malformed-protocol", phase: "runtime" },
+      failure: { reason: "malformed-protocol", phase: "initialize" },
+    });
+  });
+
+  it("rejects an object that is not a JSON-RPC envelope before valid Cursor frames", async () => {
+    const root = portableFixtureRoot("cursor ACP malformed envelope");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+send({});
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-should-not-run", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-malformed-envelope",
+      cwd: root,
+      prompt: "Must not reach prompt",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "malformed-protocol", phase: "initialize" },
+    });
+  });
+
+  it("rejects an oversized Cursor tool identity", async () => {
+    const root = portableFixtureRoot("cursor ACP invalid tool identity");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-invalid-tool", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "cursor-invalid-tool", update: { sessionUpdate: "tool_call", toolCallId: "x".repeat(1001), title: "Tool", kind: "execute", status: "pending" } } });
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-invalid-tool",
+      cwd: root,
+      prompt: "Reject the invalid tool",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "malformed-protocol", phase: "turn" },
+    });
+  });
+
+  it("fails a Cursor turn when a malformed session update races end_turn", async () => {
+    const root = portableFixtureRoot("cursor malformed session update");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-malformed-update", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    send({ jsonrpc: "2.0", method: "session/update", params: {} });
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-malformed-update",
+      cwd: root,
+      prompt: "Reject the malformed update",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "malformed-protocol", phase: "turn" },
+    });
+  });
+
+  it("rejects a session update sent as a JSON-RPC request", async () => {
+    const root = portableFixtureRoot("cursor session update request");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-update-request", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    send({ jsonrpc: "2.0", id: 77, method: "session/update", params: { sessionId: "cursor-update-request", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Must not complete" } } } });
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-update-request",
+      cwd: root,
+      prompt: "Reject the wrong message kind",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "malformed-protocol", phase: "turn" },
+    });
+  });
+
+  it.each([
+    ["cursor/update_todos", "todo update"],
+    ["cursor/task", "task notification"],
+    ["cursor/generate_image", "generated-image notification"],
+  ] as const)("fails a Cursor turn when a malformed %s races end_turn", async (
+    method,
+    label,
+  ) => {
+    const root = portableFixtureRoot(`cursor malformed ${label}`);
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-malformed-extension", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    send({ jsonrpc: "2.0", method: ${JSON.stringify(method)}, params: {} });
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-malformed-extension",
+      cwd: root,
+      prompt: "Reject the malformed extension event",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "malformed-protocol", phase: "turn" },
+    });
+  });
+
+  it.each([
+    ["cursor/update_todos", {
+      toolCallId: "todo-tool",
+      todos: [],
+      merge: false,
+    }],
+    ["cursor/task", {
+      toolCallId: "task-tool",
+      description: "Inspect provider state",
+      prompt: "Inspect",
+      subagentType: "explore",
+    }],
+    ["cursor/generate_image", {
+      toolCallId: "image-tool",
+      description: "Provider diagram",
+      referenceImagePaths: [],
+    }],
+  ] as const)("rejects %s when it is sent as a JSON-RPC request", async (
+    method,
+    params,
+  ) => {
+    const methodLabel = method.replaceAll("/", "-");
+    const root = portableFixtureRoot(`cursor request kind ${methodLabel}`);
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-notification-request", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    send({ jsonrpc: "2.0", id: 88, method: ${JSON.stringify(method)}, params: ${JSON.stringify(params)} });
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: `cursor-request-kind-${methodLabel}`,
+      cwd: root,
+      prompt: "Reject the wrong message kind",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "malformed-protocol", phase: "turn" },
     });
   });
 
@@ -811,7 +1101,7 @@ setTimeout(() => {}, 1000);
     }))).resolves.toMatchObject({
       status: "failed",
       error: expect.stringMatching(/not valid.*utf-8/iu),
-      failure: { reason: "malformed-protocol", phase: "runtime" },
+      failure: { reason: "malformed-protocol", phase: "initialize" },
     });
   });
 
@@ -1202,7 +1492,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }))).resolves.toMatchObject({
       status: "failed",
       error: expect.stringContaining("oversized"),
-      failure: { reason: "protocol-overflow", phase: "runtime" },
+      failure: { reason: "protocol-overflow", phase: "initialize" },
     });
 
     const capabilityRoot = portableFixtureRoot("cursor ACP capabilities");

@@ -20,6 +20,7 @@ import {
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 import {
+  CLAUDE_PROTOCOL_SESSION_ID,
   claudeSuccessResult,
   fixtureClaudeQuery,
 } from "../helpers/claude-agent-sdk-protocol";
@@ -276,7 +277,7 @@ describe.sequential("provider host-tool injection", () => {
       prompt: "Use chat tools",
       interactionMode: "build",
       access: "supervised",
-      ...(resume ? { sessionId: "claude-existing-session" } : {}),
+      ...(resume ? { sessionId: CLAUDE_PROTOCOL_SESSION_ID } : {}),
     }), {
       hostTools,
       onApproval: (event) => richEvents.push(event),

@@ -23,6 +23,7 @@ import {
   writeClaudeSkill,
 } from "../helpers/claude-harness-fixture";
 import {
+  CLAUDE_PROTOCOL_SESSION_ID,
   claudeSuccessResult,
   claudeSystem,
   fixtureClaudeQuery,
@@ -42,7 +43,7 @@ function claudeReadMediaResult(options: {
   const kind = options.kind ?? "image";
   return {
     type: "user",
-    session_id: "77777777-7777-4777-8777-777777777777",
+    session_id: CLAUDE_PROTOCOL_SESSION_ID,
     parent_tool_use_id: null,
     message: {
       role: "user",
@@ -147,7 +148,7 @@ describe("Claude Agent SDK large event boundary", () => {
           (async function* (): AsyncGenerator<SDKMessage> {
             yield {
               type: "assistant",
-              session_id: "77777777-7777-4777-8777-777777777777",
+              session_id: CLAUDE_PROTOCOL_SESSION_ID,
               parent_tool_use_id: null,
               message: {
                 role: "assistant",

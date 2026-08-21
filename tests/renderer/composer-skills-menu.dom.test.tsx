@@ -44,6 +44,7 @@ const defaults: Omit<ComposerSkillsMenuProps, "menuController"> = {
   },
   loading: false,
   error: null,
+  listboxId: "test-skill-menu",
   disabled: false,
   running: false,
   onList: vi.fn(async () => undefined),
@@ -86,8 +87,8 @@ describe("ComposerSkillsMenu", () => {
   it("uses instance-scoped popup relationships in split composers", () => {
     render(
       <>
-        <Harness {...defaults} />
-        <Harness {...defaults} />
+        <Harness {...defaults} listboxId="split-skills-primary" />
+        <Harness {...defaults} listboxId="split-skills-secondary" />
       </>,
     );
     const triggers = screen.getAllByRole("button", {
@@ -148,7 +149,7 @@ describe("ComposerSkillsMenu", () => {
     render(
       <div className="composer">
         <textarea aria-label="Message" defaultValue="$skill" />
-        <Harness {...defaults} completionQuery="skill" onInsert={onInsert} />
+        <Harness {...defaults} completion="skill" onInsert={onInsert} />
       </div>,
     );
     const editor = screen.getByRole("textbox", { name: "Message" });

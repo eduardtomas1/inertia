@@ -83,10 +83,12 @@ export function useAgentWorkflows({
   subscribe,
 }: UseAgentWorkflowsOptions): AgentWorkflowProjection {
   const [state, setState] = useState<AgentWorkflowState | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [workflowLoading, setWorkflowLoading] = useState(false);
+  const [skillsLoading, setSkillsLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const generationRef = useRef(0);
+  const workflowGenerationRef = useRef(0);
+  const skillsGenerationRef = useRef(0);
   const activeConversationId = enabled ? conversationId : null;
   const activeConversationIdRef = useRef(activeConversationId);
   const statusRef = useRef(status);
@@ -101,9 +103,9 @@ export function useAgentWorkflows({
   const load = useCallback(async (providerRefresh = false): Promise<void> => {
     const targetId = activeConversationIdRef.current;
     if (!targetId || statusRef.current !== "online") return;
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    setLoading(true);
+    const generation = workflowGenerationRef.current + 1;
+    workflowGenerationRef.current = generation;
+    setWorkflowLoading(true);
     setError(null);
     try {
       let response: ServerEvent;
@@ -131,16 +133,18 @@ export function useAgentWorkflows({
         );
       }
       if (
-        generation !== generationRef.current
+        generation !== workflowGenerationRef.current
         || event.result.workflow.conversationId !== targetId
       ) return;
       setState(event.result.workflow);
       if (savedOnlyWarning) setError(savedOnlyWarning);
     } catch (loadError) {
-      if (generation !== generationRef.current) return;
+      if (generation !== workflowGenerationRef.current) return;
       setError(publicMessage(loadError));
     } finally {
-      if (generation === generationRef.current) setLoading(false);
+      if (generation === workflowGenerationRef.current) {
+        setWorkflowLoading(false);
+      }
     }
   }, [request]);
 
@@ -152,8 +156,10 @@ export function useAgentWorkflows({
     const statusChanged = lifecycleRef.current.status !== status;
     lifecycleRef.current = { identity, status };
     if (!identityChanged && !statusChanged) return;
-    generationRef.current += 1;
-    setLoading(false);
+    workflowGenerationRef.current += 1;
+    skillsGenerationRef.current += 1;
+    setWorkflowLoading(false);
+    setSkillsLoading(false);
     if (identityChanged) {
       setState(null);
       setError(null);
@@ -165,7 +171,8 @@ export function useAgentWorkflows({
 
   useEffect(() => subscribe((event) => {
     if (event.type === "server.welcome") {
-      generationRef.current += 1;
+      workflowGenerationRef.current += 1;
+      skillsGenerationRef.current += 1;
       if (
         activeConversationIdRef.current
         && statusRef.current === "online"
@@ -256,9 +263,9 @@ export function useAgentWorkflows({
   ): Promise<void> => {
     const targetId = activeConversationId;
     if (!targetId) return;
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    setLoading(true);
+    const generation = skillsGenerationRef.current + 1;
+    skillsGenerationRef.current = generation;
+    setSkillsLoading(true);
     setError(null);
     try {
       const event = resultEvent(await request({
@@ -276,7 +283,7 @@ export function useAgentWorkflows({
           "The local service returned an unexpected skills response.",
         );
       }
-      if (generation !== generationRef.current) return;
+      if (generation !== skillsGenerationRef.current) return;
       const listedSkills = event.result.skills;
       const skillDiscovery = event.result.skillDiscovery;
       setState((current) => current ? {
@@ -286,17 +293,19 @@ export function useAgentWorkflows({
         refreshedAt: new Date().toISOString(),
       } : current);
     } catch (listError) {
-      if (generation !== generationRef.current) return;
+      if (generation !== skillsGenerationRef.current) return;
       setError(publicMessage(listError));
       throw listError;
     } finally {
-      if (generation === generationRef.current) setLoading(false);
+      if (generation === skillsGenerationRef.current) setSkillsLoading(false);
     }
   }, [activeConversationId, request]);
 
   return useMemo(() => ({
     state: activeConversationId ? state : null,
-    loading: activeConversationId ? loading : false,
+    loading: activeConversationId
+      ? workflowLoading || skillsLoading
+      : false,
     mutating: activeConversationId ? mutating : false,
     error: activeConversationId ? error : null,
     refresh: load,
@@ -309,9 +318,10 @@ export function useAgentWorkflows({
     error,
     listSkills,
     load,
-    loading,
+    skillsLoading,
     mutating,
     setGoal,
     state,
+    workflowLoading,
   ]);
 }

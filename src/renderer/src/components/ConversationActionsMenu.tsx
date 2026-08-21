@@ -4,7 +4,6 @@ import {
   useLayoutEffect,
   useRef,
   type ButtonHTMLAttributes,
-  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import {
@@ -21,10 +20,8 @@ import {
 } from "lucide-react";
 import type { Conversation, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
-import {
-  nextSidebarNavigationIndex,
-  type SidebarThreadView,
-} from "../utils/sidebarModel";
+import type { SidebarThreadView } from "../utils/sidebarModel";
+import { navigateMenuItems } from "../utils/menuKeyboard";
 
 type DismissReason = "selection" | "context-change";
 
@@ -133,23 +130,6 @@ export function ConversationActionsMenu({
     return () => document.removeEventListener("focusin", dismissAfterFocusLeaves);
   }, [onDismiss]);
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(
-      '[role="menuitem"]:not([disabled])',
-    )];
-    if (items.length === 0) return;
-    const currentIndex = items.findIndex((item) => item === document.activeElement);
-    const nextIndex = nextSidebarNavigationIndex(
-      currentIndex,
-      event.key as "ArrowDown" | "ArrowUp" | "Home" | "End",
-      items.length,
-    );
-    event.preventDefault();
-    event.stopPropagation();
-    items[nextIndex]?.focus({ preventScroll: true });
-  };
-
   const activeRun = thread.run;
   const runAttention = activeRun ? workspaceRunAttentionView(activeRun) : null;
   const hasActiveWork = runs.some((run) => (
@@ -176,7 +156,7 @@ export function ConversationActionsMenu({
       data-work-focus-owner={activity
         ? `thread-actions:${conversation.id}`
         : undefined}
-      onKeyDown={handleKeyDown}
+      onKeyDown={navigateMenuItems}
     >
       <ConversationMenuItem
         {...itemProps}

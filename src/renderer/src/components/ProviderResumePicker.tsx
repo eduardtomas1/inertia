@@ -2,6 +2,11 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MessagesSquare, Search } from "lucide-react";
 
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
+import {
+  isSidebarNavigationKey,
+  nextSelectableNavigationIndex,
+  type SidebarNavigationKey,
+} from "../utils/sidebarModel";
 
 export interface ProviderResumePickerProps {
   options: readonly ProviderTerminalResumeOption[];
@@ -131,22 +136,17 @@ export function ProviderResumePicker({
       commit(activeIndex);
       return;
     }
-    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    if (!isSidebarNavigationKey(event.key)) return;
     event.preventDefault();
     const selectable = visible.flatMap((row, index) =>
       row.selectable ? [index] : []);
     if (selectable.length === 0) return;
-    setActiveIndex((current) => {
-      if (event.key === "Home") return selectable[0]!;
-      if (event.key === "End") return selectable.at(-1)!;
-      const position = selectable.indexOf(current);
-      if (event.key === "ArrowUp") {
-        return selectable[position <= 0 ? selectable.length - 1 : position - 1]!;
-      }
-      return selectable[position < 0 || position === selectable.length - 1
-        ? 0
-        : position + 1]!;
-    });
+    setActiveIndex((current) =>
+      nextSelectableNavigationIndex(
+        selectable,
+        current,
+        event.key as SidebarNavigationKey,
+      ));
   };
 
   return (

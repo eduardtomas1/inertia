@@ -138,9 +138,14 @@ export function ConversationSplitView({
               onClick={() => {
                 onCloseSecondary();
                 window.setTimeout(() => {
-                  document.querySelector<HTMLElement>(
-                    ".chat-workspace textarea",
-                  )?.focus({ preventScroll: true });
+                  const workspace = document.querySelector<HTMLElement>(
+                    ".chat-workspace",
+                  );
+                  const target = workspace?.querySelector<HTMLElement>(
+                    "textarea, button:not([disabled]), [tabindex]:not([tabindex='-1'])",
+                  );
+                  if (workspace && !target) workspace.tabIndex = -1;
+                  (target ?? workspace)?.focus({ preventScroll: true });
                 }, 0);
               }}
             >

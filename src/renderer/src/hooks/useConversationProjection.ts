@@ -836,8 +836,8 @@ export function useConversationProjection({
         current,
         {
           owner: eventOwner,
-          status: event.type === "agent.completed" ? "completed" : "failed",
-          terminalReason: event.type === "agent.failed" ? event.message : null,
+          status: event.status,
+          terminalReason: event.terminalReason,
         },
       ));
       terminalRefreshPendingRef.current = true;

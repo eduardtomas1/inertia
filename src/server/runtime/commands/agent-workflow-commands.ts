@@ -5,6 +5,8 @@ import type {
   ServerEvent,
 } from "../../../shared/contracts";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
+import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
+import { RuntimeRequestError } from "../../runtime-errors";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -12,6 +14,7 @@ import {
 
 export interface AgentWorkflowCommandDependencies {
   workflows: AgentWorkflowController;
+  providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "isActive">;
   broadcast(event: RuntimeMutationEvent): void;
   send(socket: WebSocket, event: ServerEvent): void;
 }
@@ -28,6 +31,16 @@ export function createAgentWorkflowCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "agent.workflow.load": {
+        if (
+          command.payload.refresh
+          && dependencies.providerTerminalResumes.isActive(
+            command.payload.conversationId,
+          )
+        ) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before refreshing this chat's native workflow.",
+          );
+        }
         const workflow = command.payload.refresh
           ? await dependencies.workflows.refresh(command.payload.conversationId)
           : dependencies.workflows.state(command.payload.conversationId);
@@ -51,6 +64,16 @@ export function createAgentWorkflowCommandHandler(
         return "handled";
       }
       case "agent.goal.set": {
+        if (
+          command.payload.source === "codex-native"
+          && dependencies.providerTerminalResumes.isActive(
+            command.payload.conversationId,
+          )
+        ) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before changing its native goal.",
+          );
+        }
         const goal = await dependencies.workflows.setGoal(command.payload);
         dependencies.broadcast({ type: "agent.goal.updated", goal });
         dependencies.send(socket, {
@@ -60,6 +83,16 @@ export function createAgentWorkflowCommandHandler(
         return "handled";
       }
       case "agent.goal.clear": {
+        if (
+          command.payload.source === "codex-native"
+          && dependencies.providerTerminalResumes.isActive(
+            command.payload.conversationId,
+          )
+        ) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before changing its native goal.",
+          );
+        }
         const cleared = await dependencies.workflows.clearGoal(
           command.payload.conversationId,
           command.payload.source,

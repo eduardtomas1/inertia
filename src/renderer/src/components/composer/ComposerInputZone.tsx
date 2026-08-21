@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import type {
+  AgentSkillSummary,
   ChatAttachment,
   Conversation,
   InteractionMode,
@@ -17,7 +18,14 @@ import type {
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import type { composerRouteReadiness } from "../../utils/composerReadiness";
 import { promptContextDetail } from "../../utils/requestContext";
-import { shouldSubmitComposerKey } from "../../utils/composerKeyboard";
+import {
+  handleComposerSuggestionKey,
+  shouldSubmitComposerKey,
+} from "../../utils/composerKeyboard";
+import {
+  nextSidebarNavigationIndex,
+  type SidebarNavigationKey,
+} from "../../utils/sidebarModel";
 import { ComposerAttachmentList } from "../ComposerAttachmentList";
 import {
   RouteRepairIcon,
@@ -76,6 +84,12 @@ export interface ComposerInputZoneProps {
   mentionMatch: RegExpExecArray | null;
   mentionResults: WorkspaceEntry[];
   onAddFileReference: (path: string) => void;
+  skillOpen: boolean;
+  activeSkill: AgentSkillSummary | null;
+  skillListboxId: string;
+  moveSkill: (key: SidebarNavigationKey) => void;
+  acceptSkill: (skill: AgentSkillSummary) => void;
+  dismissSkills: () => void;
   slashMatch: RegExpExecArray | null;
   onCompactCommand: () => void;
   compactNotice: {
@@ -124,6 +138,12 @@ export function ComposerInputZone({
   mentionMatch,
   mentionResults,
   onAddFileReference,
+  skillOpen,
+  activeSkill,
+  skillListboxId,
+  moveSkill,
+  acceptSkill,
+  dismissSkills,
   slashMatch,
   onCompactCommand,
   compactNotice,
@@ -145,53 +165,69 @@ export function ComposerInputZone({
     : [];
   const slashCommandDisabled = (item: ComposerSlashCommand): boolean =>
     disabled || item.disabled || (running && item.disabledWhileRunning);
-  const slashSearchKey = slashMatch?.[1].toLowerCase() ?? null;
   const selectableSlashCommands = matchingSlashCommands.filter((item) =>
     !slashCommandDisabled(item));
-  const [highlightedSlashCommand, setHighlightedSlashCommand] = useState<{
-    query: string;
-    id: string;
-  } | null>(null);
-  const [dismissedSlashValue, setDismissedSlashValue] = useState<string | null>(
+  const [highlightedSlashCommandId, setHighlightedSlashCommandId] = useState<string | null>(null);
+  const [dismissedSuggestionValue, setDismissedSuggestionValue] = useState<string | null>(
     null,
   );
-  const highlightedSlashCommandId = highlightedSlashCommand?.query
-    === slashSearchKey
-    ? highlightedSlashCommand.id
-    : selectableSlashCommands[0]?.id ?? null;
   const activeSlashCommand = selectableSlashCommands.find((item) =>
     item.id === highlightedSlashCommandId)
     ?? selectableSlashCommands[0]
     ?? null;
   const slashMenuVisible = Boolean(
-    slashMatch && dismissedSlashValue !== message,
+    slashMatch && dismissedSuggestionValue !== message,
+  );
+  const mentionListboxId = `${skillListboxId}-files`;
+  const visibleMentionResults = mentionResults.slice(0, 8);
+  const [highlightedMentionPath, setHighlightedMentionPath] = useState<string | null>(null);
+  const activeMention = visibleMentionResults.find(({ path }) =>
+    path === highlightedMentionPath) ?? visibleMentionResults[0] ?? null;
+  const mentionMenuVisible = Boolean(
+    !running
+    && mentionMatch
+    && visibleMentionResults.length > 0
+    && dismissedSuggestionValue !== message,
   );
 
-  const moveSlashHighlight = (
-    direction: "previous" | "next" | "first" | "last",
+  const moveMentionHighlight = (
+    key: SidebarNavigationKey,
   ): void => {
-    if (slashSearchKey === null || selectableSlashCommands.length === 0) return;
+    if (visibleMentionResults.length === 0) return;
+    const activeIndex = visibleMentionResults.findIndex(({ path }) =>
+      path === activeMention?.path);
+    const nextIndex = nextSidebarNavigationIndex(
+      activeIndex,
+      key,
+      visibleMentionResults.length,
+    );
+    setHighlightedMentionPath(visibleMentionResults[nextIndex]!.path);
+  };
+  const acceptMention = (entry: WorkspaceEntry): void => {
+    onMessageChange(message.replace(
+      /@[^\s@]*$/u,
+      `@${entry.path}${entry.kind === "directory" ? "/" : " "}`,
+    ));
+    if (entry.kind === "file") onAddFileReference(entry.path);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const moveSlashHighlight = (
+    key: SidebarNavigationKey,
+  ): void => {
+    if (selectableSlashCommands.length === 0) return;
     const activeIndex = selectableSlashCommands.findIndex((item) =>
       item.id === activeSlashCommand?.id);
-    let nextIndex = 0;
-    if (direction === "last") nextIndex = selectableSlashCommands.length - 1;
-    else if (direction === "previous") {
-      nextIndex = activeIndex <= 0
-        ? selectableSlashCommands.length - 1
-        : activeIndex - 1;
-    } else if (direction === "next") {
-      nextIndex = activeIndex < 0 || activeIndex === selectableSlashCommands.length - 1
-        ? 0
-        : activeIndex + 1;
-    }
-    setHighlightedSlashCommand({
-      query: slashSearchKey,
-      id: selectableSlashCommands[nextIndex]!.id,
-    });
+    const nextIndex = nextSidebarNavigationIndex(
+      activeIndex,
+      key,
+      selectableSlashCommands.length,
+    );
+    setHighlightedSlashCommandId(selectableSlashCommands[nextIndex]!.id);
   };
   const activateSlashCommand = (item: ComposerSlashCommand): void => {
     if (slashCommandDisabled(item)) return;
-    setDismissedSlashValue(message);
+    setDismissedSuggestionValue(message);
     if (item.action) {
       item.action();
       return;
@@ -351,31 +387,30 @@ export function ComposerInputZone({
             }
           }}
           onKeyDown={(event) => {
-            if (slashMenuVisible && slashMatch) {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setDismissedSlashValue(message);
-                return;
-              }
-              if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
-                event.preventDefault();
-                moveSlashHighlight(
-                  event.key === "ArrowUp"
-                    ? "previous"
-                    : event.key === "ArrowDown"
-                      ? "next"
-                      : event.key === "End"
-                        ? "last"
-                        : "first",
-                );
-                return;
-              }
-              if (event.key === "Tab" && !event.shiftKey && activeSlashCommand) {
-                event.preventDefault();
-                activateSlashCommand(activeSlashCommand);
-                return;
-              }
-            }
+            if (skillOpen && activeSkill && handleComposerSuggestionKey(
+              event,
+              dismissSkills,
+              moveSkill,
+              () => {
+                acceptSkill(activeSkill);
+                dismissSkills();
+              },
+            )) return;
+            if (mentionMenuVisible && activeMention && handleComposerSuggestionKey(
+              event,
+              () => setDismissedSuggestionValue(message),
+              moveMentionHighlight,
+              () => acceptMention(activeMention),
+            )) return;
+            if (slashMenuVisible && slashMatch && handleComposerSuggestionKey(
+              event,
+              () => setDismissedSuggestionValue(message),
+              moveSlashHighlight,
+              activeSlashCommand
+                ? () => activateSlashCommand(activeSlashCommand)
+                : undefined,
+              false,
+            )) return;
             if (
               slashMenuVisible
               && matchingSlashCommands.length > 0
@@ -407,6 +442,17 @@ export function ComposerInputZone({
           maxLength={typedMessageLimit}
           disabled={disabled}
           readOnly={submissionPending || followUpPending}
+          role={skillOpen || mentionMenuVisible ? "combobox" : undefined}
+          aria-autocomplete={skillOpen || mentionMenuVisible ? "list" : undefined}
+          aria-expanded={skillOpen || mentionMenuVisible ? true : undefined}
+          aria-controls={skillOpen
+            ? skillListboxId
+            : mentionMenuVisible ? mentionListboxId : undefined}
+          aria-activedescendant={skillOpen && activeSkill
+            ? `${skillListboxId}-${activeSkill.id}`
+            : mentionMenuVisible && activeMention
+              ? `${mentionListboxId}-${visibleMentionResults.indexOf(activeMention)}`
+              : undefined}
           aria-label="Message"
           placeholder={running
             ? "Enter sends · Tab queues"
@@ -418,28 +464,23 @@ export function ComposerInputZone({
           </p>
         )}
       </div>
-      {!running && mentionMatch && mentionResults.length > 0 && (
+      {mentionMenuVisible && (
         <div
+          id={mentionListboxId}
           className="composer-suggestion-menu"
           role="listbox"
           aria-label="Project files"
         >
           <div className="popover-title">Reference a file</div>
-          {mentionResults.slice(0, 8).map((entry) => (
+          {visibleMentionResults.map((entry, index) => (
             <button
+              id={`${mentionListboxId}-${index}`}
               type="button"
               role="option"
-              aria-selected="false"
+              aria-selected={entry.path === activeMention?.path}
               key={entry.path}
-              onClick={() => {
-                onMessageChange(message.replace(
-                  /@[^\s@]*$/u,
-                  `@${entry.path}${entry.kind === "directory" ? "/" : " "}`,
-                ));
-                if (entry.kind === "file") {
-                  onAddFileReference(entry.path);
-                }
-              }}
+              onMouseEnter={() => setHighlightedMentionPath(entry.path)}
+              onClick={() => acceptMention(entry)}
             >
               <span>{entry.path}</span>
               <small>{entry.kind}</small>
@@ -459,9 +500,9 @@ export function ComposerInputZone({
                 disabled: slashCommandDisabled(item),
               }))}
               activeItemId={activeSlashCommand?.id ?? null}
-              grouped={slashSearchKey === ""}
+              grouped={slashMatch[1] === ""}
               onActiveItemChange={(id) => {
-                setHighlightedSlashCommand({ query: slashSearchKey ?? "", id });
+                setHighlightedSlashCommandId(id);
               }}
               onSelect={(id) => {
                 const item = matchingSlashCommands.find((candidate) =>

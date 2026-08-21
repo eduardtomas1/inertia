@@ -27,6 +27,7 @@ import type {
   ProviderHostToolDefinition,
   ProviderHostToolResult,
 } from "../provider/contracts";
+import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
 import type { ProviderManager } from "../providers";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
 import type { ConversationCreationService } from "./conversation-creation-service";
@@ -267,6 +268,10 @@ export interface AgentThreadManagerDependencies {
   backendProfileController: BackendProfileController;
   creation: ConversationCreationService;
   turns: TurnController;
+  providerTerminalResumes: Pick<
+    ProviderTerminalResumeRegistry,
+    "acquire" | "isActive" | "release"
+  >;
   contextRequests: ConversationContextRequestCoordinator;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
@@ -1073,7 +1078,7 @@ export class AgentThreadManager {
         const message = await this.dependencies.turns.steer(lease, {
           content: input.content,
           imagePaths: [],
-        });
+        }, [], undefined, signal);
         if (!message?.turnId) throw new Error("The target provider did not accept the follow-up.");
         this.dependencies.broadcastSnapshot();
         return json({
@@ -1086,29 +1091,39 @@ export class AgentThreadManager {
         lease.release();
       }
     }
-    this.dependencies.store.agentThreadManagement.transition(
-      operationId,
-      ["approved"],
-      "dispatching",
-      { childConversationId: target.id },
-      this.now(),
-    );
-    const queued = this.dependencies.turns.queue({
-      conversationId: target.id,
-      content: input.content,
-      activateConversation: false,
-    });
-    if (!this.dependencies.turns.start(queued.turn.id)) {
-      this.dependencies.turns.failBeforeStart(target.id, "The managed follow-up could not start.");
-      throw new Error("The target chat could not start the new turn.");
+    if (!this.dependencies.providerTerminalResumes.acquire(target.id)) {
+      throw new Error(
+        "End the resumed provider terminal for the target chat before sending another message.",
+      );
     }
-    this.dependencies.broadcastSnapshot();
-    return json({
-      conversationId: target.id,
-      turnId: queued.turn.id,
-      disposition: "new-turn",
-      accepted: true,
-    });
+    try {
+      if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
+      this.dependencies.store.agentThreadManagement.transition(
+        operationId,
+        ["approved"],
+        "dispatching",
+        { childConversationId: target.id },
+        this.now(),
+      );
+      const queued = this.dependencies.turns.queue({
+        conversationId: target.id,
+        content: input.content,
+        activateConversation: false,
+      });
+      if (!this.dependencies.turns.start(queued.turn.id)) {
+        this.dependencies.turns.failBeforeStart(target.id, "The managed follow-up could not start.");
+        throw new Error("The target chat could not start the new turn.");
+      }
+      this.dependencies.broadcastSnapshot();
+      return json({
+        conversationId: target.id,
+        turnId: queued.turn.id,
+        disposition: "new-turn",
+        accepted: true,
+      });
+    } finally {
+      this.dependencies.providerTerminalResumes.release(target.id);
+    }
   }
 
   private async stop(
@@ -1140,7 +1155,10 @@ export class AgentThreadManager {
     const current = this.assertSource(source);
     const target = this.managedTarget(current, input.conversationId);
     if (signal.aborted) throw new Error("The parent turn ended before archive.");
-    if (this.dependencies.turns.isActive(target.id)) {
+    if (
+      this.dependencies.turns.isActive(target.id)
+      || this.dependencies.providerTerminalResumes.isActive(target.id)
+    ) {
       throw new Error("Stop the managed chat before changing its archive state.");
     }
     this.dependencies.store.archiveConversation(target.id, input.archived);
@@ -1150,10 +1168,15 @@ export class AgentThreadManager {
   }
 
   private activeManagedChildren(sourceConversationId: string): number {
-    return this.dependencies.turns.activeConversationIds().filter(
-      (conversationId) => this.dependencies.store.agentThreadManagement
-        .managedBy(sourceConversationId, conversationId) !== null,
-    ).length;
+    const active = new Set(this.dependencies.turns.activeConversationIds());
+    for (const conversation of this.dependencies.store.shellSnapshot().conversations) {
+      if (this.dependencies.providerTerminalResumes.isActive(conversation.id)) {
+        active.add(conversation.id);
+      }
+    }
+    return [...active].filter((conversationId) =>
+      this.dependencies.store.agentThreadManagement
+        .managedBy(sourceConversationId, conversationId) !== null).length;
   }
 
   private async serializeMutation<T>(

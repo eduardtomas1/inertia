@@ -60,7 +60,10 @@ import {
   shouldFollowTimeline,
   type StreamingAgentChannel,
 } from "../utils/responseTimeline";
-import type { TerminalTurnProjections } from "../utils/terminalTurnProjection";
+import {
+  turnEventOwner,
+  type TerminalTurnProjections,
+} from "../utils/terminalTurnProjection";
 import { revealAgentInputRequest } from "../utils/agentInputNavigation";
 import {
   initialTranscriptNavigation,
@@ -372,6 +375,12 @@ export function ChatWorkspace({
   const showJump = activeNavigation.mode === "reading-history";
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
   const ownedTurns = recordsOwnedByConversation(turns, conversationId);
+  const queueTurnOwner = latestTurnSummary ?? ownedTurns.at(-1) ?? null;
+  const queuedTurnAuthoritative = !queueTurnOwner
+    || !terminalProjections?.[turnEventOwner({
+      runId: queueTurnOwner.runId,
+      turnId: queueTurnOwner.id,
+    })];
   const ownedMessages = recordsOwnedByConversation(messages, conversationId);
   const ownedActivities = recordsOwnedByConversation(activities, conversationId);
   const ownedSubagents = recordsOwnedByConversation(subagents, conversationId);
@@ -860,6 +869,7 @@ export function ChatWorkspace({
           backendProfiles={backendProfiles}
           latestTurn={ownedTurns.at(-1) ?? null}
           latestTurnSummary={latestTurnSummary}
+          queuedTurnAuthoritative={queuedTurnAuthoritative}
           onSend={sendMessage}
           {...(onCompactConversation ? { onCompact: onCompactConversation } : {})}
           onListSkills={onListSkills}

@@ -71,6 +71,7 @@ export class TurnFollowUpCoordinator {
     input: ProviderSteerInput,
     attachments: readonly ChatAttachment[],
     onProviderAcknowledged?: () => void,
+    signal?: AbortSignal,
   ): Promise<ChatMessage | null> {
     await lease.ready;
     const active = this.owners.get(lease);
@@ -86,13 +87,25 @@ export class TurnFollowUpCoordinator {
       || !followUp
       || (input.imagePaths.length > 0 && !lease.supportsImages)
       || !this.options.providers.steer
+      || signal?.aborted
     ) return null;
     const accepted = await this.options.providers.steer(
       lease.conversationId,
       { content: followUp, imagePaths: input.imagePaths },
       { runId: active.turn.runId, turnId: active.turn.id },
     );
-    if (!accepted) return null;
+    const ownerAfterSteer = this.options.activeForConversation(
+      lease.conversationId,
+    );
+    if (
+      !accepted
+      || signal?.aborted
+      || ownerAfterSteer !== active
+      || active.settled
+      || !active.acceptingProviderEvents
+      || active.turn.runId !== lease.runId
+      || active.turn.id !== lease.turnId
+    ) return null;
     onProviderAcknowledged?.();
     return this.options.store.createAcknowledgedFollowUpMessage(
       lease.conversationId,

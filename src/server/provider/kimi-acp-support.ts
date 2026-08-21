@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { parseAcpSessionNotification, validAcpJsonRpcEnvelope } from "./acp-json-rpc";
 import { Transform, type TransformCallback } from "node:stream";
 
 import {
@@ -74,39 +75,15 @@ export class BoundedKimiJsonLineTransform extends Transform {
     this.pendingBytes = 0;
     if (lineBytes === 0) return;
     const parsed: unknown = JSON.parse(line);
-    if (!validKimiJsonRpcEnvelope(parsed)) {
+    if (!validAcpJsonRpcEnvelope(parsed)) {
       throw new Error("Kimi ACP sent a malformed JSON-RPC frame.");
+    }
+    if ((parsed as { method?: unknown }).method === "session/update") {
+      parseAcpSessionNotification((parsed as { params?: unknown }).params);
     }
     this.eventBudget.observeBytes(lineBytes);
     this.push(`${line}\n`);
   }
-}
-
-function validKimiJsonRpcEnvelope(value: unknown): boolean {
-  const envelope = objectValue(value);
-  if (!envelope || envelope.jsonrpc !== "2.0") return false;
-  const owns = (key: string): boolean =>
-    Object.prototype.hasOwnProperty.call(envelope, key);
-  const validId = (id: unknown): boolean =>
-    id === null
-    || typeof id === "string"
-    || (typeof id === "number" && Number.isFinite(id));
-
-  if (typeof envelope.method === "string" && envelope.method.length > 0) {
-    return !owns("id") || validId(envelope.id);
-  }
-  if (owns("method") || !owns("id") || !validId(envelope.id)) return false;
-  const hasResult = owns("result");
-  const hasError = owns("error");
-  if (hasResult === hasError) return false;
-  if (!hasError) return true;
-  const error = objectValue(envelope.error);
-  return Boolean(
-    error
-    && typeof error.code === "number"
-    && Number.isInteger(error.code)
-    && typeof error.message === "string",
-  );
 }
 
 export async function observeKimiProcessExit(

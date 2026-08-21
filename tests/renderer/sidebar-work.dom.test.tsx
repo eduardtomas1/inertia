@@ -713,6 +713,72 @@ describe("compact Work sidebar", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("keeps keyboard focus inside the Projects overflow menu", () => {
+    vi.useFakeTimers();
+    renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
+
+    const trigger = screen.getByRole("button", {
+      name: "Project actions for Studio",
+    });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu", {
+      name: "Project actions for Studio",
+    });
+    const openFolder = within(menu).getByRole("menuitem", {
+      name: "Open folder",
+    });
+    const rename = within(menu).getByRole("menuitem", { name: "Rename" });
+    const remove = within(menu).getByRole("menuitem", {
+      name: "Remove project",
+    });
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveAttribute("aria-controls", menu.id);
+    expect(openFolder).toHaveFocus();
+
+    fireEvent.keyDown(openFolder, { key: "ArrowDown" });
+    expect(rename).toHaveFocus();
+    fireEvent.keyDown(rename, { key: "End" });
+    expect(remove).toHaveFocus();
+    fireEvent.keyDown(remove, { key: "Home" });
+    expect(openFolder).toHaveFocus();
+    fireEvent.keyDown(openFolder, { key: "Escape" });
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(screen.queryByRole("menu", {
+      name: "Project actions for Studio",
+    })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("cancels a mobile project rename without closing navigation", () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query === "(max-width: 760px)",
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    const view = renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Project actions for Studio",
+    }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const rename = screen.getByRole("textbox", { name: "Rename project" });
+    fireEvent.keyDown(rename, { key: "Escape" });
+
+    expect(screen.queryByRole("textbox", { name: "Rename project" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", {
+      name: "Search projects and conversations",
+    })).toBeInTheDocument();
+    expect(view.onClose).not.toHaveBeenCalled();
+  });
+
   it("keeps focus in the project rename field after dismissing its menu", async () => {
     renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
 

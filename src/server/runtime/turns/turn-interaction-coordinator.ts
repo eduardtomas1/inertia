@@ -40,7 +40,23 @@ export interface TurnInteractionCoordinatorOptions {
  * used by snapshots and reconnect hydration.
  */
 export class TurnInteractionCoordinator {
+  private readonly acceptedResponses = new WeakMap<ActiveTurn, {
+    approvals: Set<string>;
+    inputs: Set<string>;
+  }>();
+
   constructor(private readonly options: TurnInteractionCoordinatorOptions) {}
+
+  private responses(active: ActiveTurn): {
+    approvals: Set<string>;
+    inputs: Set<string>;
+  } {
+    const current = this.acceptedResponses.get(active);
+    if (current) return current;
+    const created = { approvals: new Set<string>(), inputs: new Set<string>() };
+    this.acceptedResponses.set(active, created);
+    return created;
+  }
 
   private broadcastConversationShell(active: ActiveTurn): void {
     if (this.options.hooks.broadcastConversationShell) {
@@ -66,6 +82,9 @@ export class TurnInteractionCoordinator {
       || pending.turnId !== active.turn.id
       || !pending.availableDecisions.includes(decision)
     ) return false;
+    const accepted = this.responses(active).approvals;
+    if (accepted.has(requestId)) return false;
+    accepted.add(requestId);
     const responded = this.options.providers.respondToApproval(
       conversationId,
       requestId,
@@ -73,6 +92,7 @@ export class TurnInteractionCoordinator {
       { runId: active.turn.runId, turnId: active.turn.id },
     );
     if (!responded) {
+      accepted.delete(requestId);
       this.options.settle(
         active,
         "failed",
@@ -80,6 +100,7 @@ export class TurnInteractionCoordinator {
         "The selected provider cannot answer this approval request.",
       );
     } else if (decision === "cancel") {
+      accepted.delete(requestId);
       this.options.providers.cancel(conversationId);
       this.options.settle(
         active,
@@ -106,6 +127,9 @@ export class TurnInteractionCoordinator {
       || pending.runId !== active.turn.runId
       || pending.turnId !== active.turn.id
     ) return false;
+    const accepted = this.responses(active).inputs;
+    if (accepted.has(requestId)) return false;
+    accepted.add(requestId);
     const responded = this.options.providers.respondToInput(
       conversationId,
       requestId,
@@ -113,6 +137,7 @@ export class TurnInteractionCoordinator {
       { runId: active.turn.runId, turnId: active.turn.id },
     );
     if (!responded) {
+      accepted.delete(requestId);
       this.options.settle(
         active,
         "failed",
@@ -161,6 +186,7 @@ export class TurnInteractionCoordinator {
     requestId: string,
     decision: AgentApprovalDecision | "cancelled",
   ): void {
+    this.responses(active).approvals.delete(requestId);
     const pending = this.options.pendingApprovals.get(requestId);
     if (
       !pending
@@ -221,6 +247,7 @@ export class TurnInteractionCoordinator {
   }
 
   resolveInput(active: ActiveTurn, requestId: string): void {
+    this.responses(active).inputs.delete(requestId);
     const pending = this.options.pendingInputs.get(requestId);
     if (
       !pending

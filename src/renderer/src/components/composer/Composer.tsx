@@ -3,9 +3,7 @@ import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
-import { fastModeProviderValue, legacyProviderIdForHarness,
-  routeSupportsNativeFastModeIdentity, withModelSelectionFastMode,
-} from "../../../../shared/model-routing";
+import { fastModeProviderValue, legacyProviderIdForHarness, routeSupportsNativeFastModeIdentity, withModelSelectionFastMode } from "../../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import {
@@ -34,10 +32,7 @@ import {
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
-import type {
-  ComposerProps,
-  PendingModelRoute,
-} from "./types";
+import type { ComposerProps, PendingModelRoute } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
@@ -48,10 +43,8 @@ import { ComposerConversationContextDialog, ComposerConversationContextStrip, co
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
 import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
-import {
-  clearPersistedComposerDraft,
-  persistComposerDraft,
-} from "../../utils/composerDraftPersistence";
+import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
+import { clearPersistedComposerDraft, persistComposerDraft } from "../../utils/composerDraftPersistence";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -82,6 +75,7 @@ export const Composer = memo(function Composer({
   backendProfiles = [],
   latestTurn = null,
   latestTurnSummary = null,
+  queuedTurnAuthoritative = true,
   mentionResults,
   usage,
   usageDisplayMode,
@@ -173,8 +167,7 @@ export const Composer = memo(function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
-  const skillCompletionQuery = /(?:^|\s)\$([A-Za-z0-9._:-]*)$/u
-    .exec(message)?.[1].toLocaleLowerCase() ?? null;
+  const skillCompletion = useComposerSkillCompletion(skills, message, menu === "skills");
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
   const dismissCommandSurface = useCallback((
     reason: "action" | "escape" | "outside" | "owner-change",
@@ -1145,6 +1138,9 @@ export const Composer = memo(function Composer({
           mentionMatch={mentionMatch}
           mentionResults={mentionResults}
           onAddFileReference={addFileReference}
+          {...skillCompletion}
+          acceptSkill={insertSkill}
+          dismissSkills={() => dismissMenu("context-change")}
           slashMatch={slashMatch}
           onCompactCommand={() => void compact({ kind: "compact" })}
           compactNotice={compactNotice}
@@ -1175,7 +1171,9 @@ export const Composer = memo(function Composer({
           skillsCapability={skillsCapability}
           skillsLoading={skillsLoading}
           skillsError={skillsError}
-          skillCompletionQuery={skillCompletionQuery}
+          skillQuery={skillCompletion.skillQuery}
+          skillListboxId={skillCompletion.skillListboxId}
+          activeSkillId={skillCompletion.activeSkill?.id ?? null}
           onListSkills={onListSkills}
           onInsertSkill={insertSkill}
           promptPresets={promptPresets}
@@ -1238,6 +1236,7 @@ export const Composer = memo(function Composer({
             && (!running || followUpState === "ready")}
           queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
+          queuedTurnAuthoritative={queuedTurnAuthoritative}
           onSendQueued={(content) => onSend(content, [], undefined)}
           onSubmit={submit}
           onStop={stop}

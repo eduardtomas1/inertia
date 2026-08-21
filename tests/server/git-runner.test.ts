@@ -22,6 +22,8 @@ import {
 
 const temporaryDirectories: string[] = [];
 const descendantPids: number[] = [];
+const hostedWindowsCi =
+  process.platform === "win32" && process.env.CI === "true";
 
 afterEach(async () => {
   for (const pid of descendantPids.splice(0)) {
@@ -430,7 +432,11 @@ setInterval(() => {}, 1000);
         "refs/heads/main",
         "1".repeat(40),
         {
-          deadlineAt: Date.now() + 2_000,
+          // The assertion begins only after the fixture reports prepare. Give
+          // hosted Windows enough time to start the copied Node executable;
+          // the 480ms abort acknowledgement and 500ms cleanup race below stay
+          // unchanged and remain the behavior this test proves.
+          deadlineAt: Date.now() + (hostedWindowsCi ? 10_000 : 2_000),
           failureMessage: "Git reservation failed.",
         },
         () => {
@@ -448,7 +454,7 @@ setInterval(() => {}, 1000);
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
     }
-  });
+  }, hostedWindowsCi ? 30_000 : 15_000);
 
   it("terminates a Git process that acknowledges abort but does not close", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-abort-hang-"));
@@ -476,14 +482,22 @@ setInterval(() => {}, 1000);
         directory,
         "refs/heads/main",
         "1".repeat(40),
-        { failureMessage: "Git reservation failed." },
+        {
+          // Avoid making the hosted runner's copied-executable cold start
+          // compete with the product's ordinary 30s default. Once prepared,
+          // the abort cleanup still owns the same exact 500ms boundary.
+          ...(hostedWindowsCi
+            ? { deadlineAt: Date.now() + 45_000 }
+            : {}),
+          failureMessage: "Git reservation failed.",
+        },
         () => undefined,
       )).rejects.toMatchObject({ code: "operation-failed" });
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
     }
-  });
+  }, hostedWindowsCi ? 60_000 : 15_000);
 
   it.each([
     ["commit only", "commit: ok\\n"],

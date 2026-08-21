@@ -712,7 +712,7 @@ describe("document attachment execution context", () => {
       bytes: 0,
       records: 0,
     }));
-  }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
+  }, hostedWindowsCi ? 75_000 : PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
 
   it.skipIf(hostedWindowsCi)(
     "cleans a final page when cancellation wins immediately after its private write",

@@ -80,7 +80,6 @@ export function ComposerSkillsMenu({
       if (menu === "skills") dismissMenu("context-change");
     }
   }, [dismissMenu, menu, showCompletion, toggleMenu]);
-
   if (!capability) return null;
   const readiness = composerSkillsReadiness({
     capability,
@@ -201,7 +200,7 @@ export function ComposerSkillsMenu({
                   ? undefined
                   : skill.id === visibleSkills[0]?.id}
                 disabled={!skill.enabled}
-                tabIndex={completionQuery === null ? 0 : -1}
+                tabIndex={0}
                 key={skill.id}
                 onClick={() => {
                   onInsert(skill);

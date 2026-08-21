@@ -4,6 +4,32 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.41 — 2026-08-21
+
+### Active chats stay compact while follow-ups remain deliberate
+
+- The main and detached composers use the same tighter responsive surface, clearer type, restrained depth, and stable control geometry. Detached windows no longer carry a decorative Live badge, and accepted sends are expressed by truthful Send-to-Stop motion instead of a lingering status label.
+- While an agent is running, Enter sends an immediate text follow-up and Tab places it in that chat's durable FIFO queue. Queued drafts survive reloads and detached-window moves, expose exact send-now and remove controls, and are not consumed by failed or cancelled turns.
+- Typing `$` opens keyboard-accessible autocomplete for only the enabled skills discovered from the selected Codex or Claude route. Unknown names remain ordinary prompt text, and selection never exposes skill paths or contents to the renderer.
+- Long conversations use a richer responsive minimap with a longer bounded rail, more stable nearby turns, and readable previews without mounting distant transcript detail.
+
+### Daily Work, Duo, and project navigation fit their real content
+
+- Daily Work can move between every retained local date with a native date control, reload-safe selection, and truthful unavailable states. Dates from before Daily Work existed remain unavailable rather than being reconstructed from incomplete history.
+- Duo setup gains a distinct overlapping-chat mark, stronger contrast, calmer cards, and a compact optional judge section that remains positioned inside the dialog at narrow and wide sizes.
+- Project action menus now dismiss on outside interaction like Work menus, while rename focus remains stable through the menu-to-editor transition. Composer, minimap, and dialog layouts continue to adapt across split panes and detached windows.
+
+### Release summaries reach Discord without exposing the webhook
+
+- Settings gains a Discord release-summary surface for a public GitHub or GitLab repository. Inertia compares the latest release with its predecessor and groups a bounded deterministic local diff into improvements, implementations, bugs, and other changes before posting one Discord embed.
+- The incoming webhook is stored only in the operating system credential vault. SQLite and the renderer receive configured state rather than the secret, and the privileged main process re-fetches authoritative release metadata immediately before posting instead of trusting renderer-supplied tags, titles, or dates.
+- Empty settings remain inert at startup, repository and payload sizes are bounded, public hosting responses are validated, and JSON-safe Discord construction preserves a clean no-secret failure path.
+
+### Release confidence
+
+- Hosted Windows Git and PDF fixtures retain their product deadlines and assertions while receiving enough test-harness startup headroom for copied executables and native canvas loading. Exact-head Linux, macOS, Windows desktop, and both Windows unit shards are green before the release branch starts.
+- Architecture and both lint layers, all TypeScript projects, 4,176 unit and integration tests, 430 portable provider contracts, real Electron scenarios, Private Connect, production builds, renderer budgets, native package smoke, Electron fuses, refreshed README screenshots, and the dedicated release PR protect the release.
+
 ## 0.0.40 — 2026-08-20
 
 ### Chats can move, share context, and coordinate without sharing authority

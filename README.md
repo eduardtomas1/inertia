@@ -128,6 +128,8 @@ Usage turns locally recorded terminal-turn token snapshots into a clear 7-, 30-,
 
 Inertia does not estimate price from a model name or send usage to a hosted analytics service. When providers do not expose cost, the Cost control stays unavailable and says why. Provider account windows remain separate in Environment because context usage, account quota, and historical processed tokens are different measurements.
 
+![Review retained Daily Work dates](docs/screenshots/inertia-daily-work.png)
+
 ![Locally measured provider and model usage in Inertia](docs/screenshots/inertia-usage.png)
 
 ### Settings that stay understandable
@@ -143,6 +145,8 @@ Inertia does not estimate price from a model name or send usage to a hosted anal
 ### Discord release summaries
 
 Open **Settings → Discord** to configure release posts. Add the public GitHub or GitLab repository URL, then paste a Discord incoming webhook URL from the target channel's **Edit Channel → Integrations → Webhooks** settings. Inertia stores that webhook only in the operating system credential vault; the renderer and SQLite database receive configured/unconfigured state, never the saved URL. Press **Generate** to compare the latest release tag with the previous one and post a bounded local diff summary with **Millores**, **Implementacions**, **Bugs**, and **Altres**. Empty Discord settings stay blank and do not block startup.
+
+![Configure credential-safe Discord release summaries](docs/screenshots/inertia-discord-settings.png)
 
 ### Private Connect, without surrendering the desktop
 
@@ -197,15 +201,15 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.40
+### Version 0.0.41
 
-Chats can now move into independent native windows, bring exact reviewed messages from another conversation, and—after explicit approval—let Codex, Claude, Cursor, or OpenCode coordinate independent top-level Inertia chats through bounded host-owned tools. Drafts, context, ownership, access, and provider sessions remain tied to the exact conversation rather than being treated as shared.
+Active chats now use a tighter responsive composer in both the main workspace and detached windows. Enter sends an immediate follow-up, Tab queues one durably for that chat, `$` autocompletes only route-discovered skills, and the longer responsive minimap keeps more of a large transcript reachable without adding noise.
 
-Native Kimi Code joins the provider catalog, provider runtimes gain stricter lifecycle and cumulative-output boundaries, and sent images, PDFs, text, Markdown, JSON, CSV, and Excel workbooks retain private bounded previews. Linux can recover exact runtime-owned processes after a crash without guessing by name or workspace.
+Daily Work can browse every retained local date, Duo setup keeps its optional judge compact, and project menus dismiss and rename predictably. Refreshed dark, light, Duo, detached-chat, workstream, Daily Work, and settings captures document the resulting responsive surfaces.
 
-The responsive composer, explicit skill tokens, Claude sign-in, Markdown navigation recovery, Daily Work state, and truthful Send, Stop, follow-up, and Copy feedback complete the visible pass. This version is prepared through a release PR whose Windows job runs the same full gate as the exact-tag workflow before a tag exists.
+Discord release summaries compare the latest public GitHub or GitLab release with its predecessor, categorize a bounded local diff, and post through a webhook held only by the operating system credential vault. The privileged main process re-fetches authoritative release metadata before sending, so the renderer never supplies trusted tags or receives the saved secret.
 
-Download [Inertia v0.0.40](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.40):
+Download [Inertia v0.0.41](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.41):
 
 | Platform | Download |
 | --- | --- |

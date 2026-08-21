@@ -809,6 +809,14 @@ try {
   await page.getByRole("tabpanel", { name: "Environment" }).waitFor();
   await capture(page, "inertia-dark.png");
 
+  await page.getByRole("button", { name: "Daily work", exact: true }).click();
+  const dailyWorkDialog = page.getByRole("dialog", { name: "Daily work" });
+  await dailyWorkDialog.getByRole("region", {
+    name: "Daily work totals",
+  }).waitFor();
+  await capture(page, "inertia-daily-work.png");
+  await page.getByRole("button", { name: "Close daily work" }).click();
+
   const detachedWindowOpened = app.waitForEvent("window");
   await page.getByRole("button", {
     name: "Open Welcome to Inertia in a new window",
@@ -949,6 +957,21 @@ try {
     { exact: true },
   ).first().waitFor();
   await capture(page, "inertia-settings.png");
+
+  await page.getByRole("button", { name: "Discord", exact: true }).click();
+  await page.getByRole("heading", { name: "Discord", level: 3 }).waitFor();
+  await page.getByLabel("Discord release repository URL").fill(
+    "https://github.com/eduardtomas1/inertia",
+  );
+  await page.getByText(
+    "Incoming Discord webhook stored only in the operating system credential vault.",
+    { exact: true },
+  ).waitFor();
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  await page.mouse.move(1_500, 900);
+  await capture(page, "inertia-discord-settings.png");
 
   await page.getByRole("button", { name: "Go to workspace" }).click();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");

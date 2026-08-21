@@ -238,7 +238,6 @@ describe("Settings composite updates", () => {
         getBackendCredentialState,
         setBackendCredential,
         clearBackendCredential: vi.fn(),
-        listInertiaReleases: vi.fn(async () => []),
       },
     });
     const onUpdate = vi.fn(async () => undefined);
@@ -288,22 +287,6 @@ describe("Settings composite updates", () => {
   });
 
   it("sends the latest release info to Discord", async () => {
-    const previousRelease = {
-      tag: "v0.0.40",
-      name: "Inertia 0.0.40",
-      url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.40",
-      createdAt: "2030-01-02T03:04:05.000Z",
-      releasedAt: "2030-01-02T04:04:05.000Z",
-      description: "Previous release notes",
-    };
-    const release = {
-      tag: "v0.0.41",
-      name: "Inertia 0.0.41",
-      url: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.41",
-      createdAt: "2030-01-03T03:04:05.000Z",
-      releasedAt: "2030-01-03T04:04:05.000Z",
-      description: "Release notes",
-    };
     const sendDiscordReleaseInfo = vi.fn(async () => ({ sent: true as const }));
     Object.defineProperty(window, "inertia", {
       configurable: true,
@@ -318,7 +301,6 @@ describe("Settings composite updates", () => {
         })),
         setBackendCredential: vi.fn(),
         clearBackendCredential: vi.fn(),
-        listInertiaReleases: vi.fn(async () => [release, previousRelease]),
         sendDiscordReleaseInfo,
       },
     });
@@ -337,14 +319,8 @@ describe("Settings composite updates", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
 
     await waitFor(() =>
-      expect(window.inertia.listInertiaReleases).toHaveBeenCalledWith({
-        repositoryUrl: "https://github.com/eduardtomas1/inertia",
-      }));
-    await waitFor(() =>
       expect(sendDiscordReleaseInfo).toHaveBeenCalledWith({
         repositoryUrl: "https://github.com/eduardtomas1/inertia",
-        previousRelease,
-        release,
       }));
     expect(await screen.findByText("Release info sent to Discord."))
       .toHaveAttribute("role", "status");

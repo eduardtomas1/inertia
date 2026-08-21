@@ -13,7 +13,6 @@ type CredentialResolver = {
   resolve: (secretReference: string) => Promise<string | null>;
 };
 
-const LIST_RELEASES_CHANNEL = "inertia:list-inertia-releases";
 const SEND_RELEASE_CHANNEL = "inertia:send-discord-release-info";
 
 export function registerInertiaReleaseIpc(
@@ -26,19 +25,23 @@ export function registerInertiaReleaseIpc(
     expectedArgumentCount?: number,
   ) => void,
 ): void {
-  ipcMain.handle(LIST_RELEASES_CHANNEL, async (event, ...args) => {
-    assertTrusted(event, args.length, 1);
-    return await listInertiaReleases(fetch, args[0]);
-  });
-
   ipcMain.handle(SEND_RELEASE_CHANNEL, async (event, ...args) => {
     assertTrusted(event, args.length, 1);
+    const request = args[0];
+    const [release, previousRelease] = await listInertiaReleases(fetch, request);
+    if (!release || !previousRelease) {
+      throw new Error("At least two releases are required to build the comparison.");
+    }
     const vault = credentialVault();
     if (!vault) throw new Error("Secure credential storage is unavailable.");
     const webhookUrl = await vault.resolve(
       backendSecretReferenceForProfile(DISCORD_RELEASE_WEBHOOK_PROFILE_ID),
     );
     if (!webhookUrl) throw new Error("A Discord webhook URL is required.");
-    return await sendDiscordReleaseInfo(fetch, webhookUrl, args[0]);
+    return await sendDiscordReleaseInfo(fetch, webhookUrl, {
+      repositoryUrl: request?.repositoryUrl,
+      previousRelease,
+      release,
+    });
   });
 }

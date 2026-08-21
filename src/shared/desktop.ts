@@ -44,12 +44,6 @@ export interface InertiaReleaseInfo {
 
 export interface SendDiscordReleaseInfoRequest {
   repositoryUrl: string;
-  previousRelease: InertiaReleaseInfo;
-  release: InertiaReleaseInfo;
-}
-
-export interface ListInertiaReleasesRequest {
-  repositoryUrl: string;
 }
 
 export interface DatabaseRecoveryImportSummary {
@@ -550,11 +544,7 @@ export interface DesktopBridge {
   installAppUpdate: () => Promise<AppUpdateStatus>;
   /** Receives sanitized authoritative updater snapshots. */
   onAppUpdateStatus: (listener: (status: AppUpdateStatus) => void) => () => void;
-  /** Lists public Inertia module releases ordered by creation date. */
-  listInertiaReleases: (
-    request: ListInertiaReleasesRequest,
-  ) => Promise<InertiaReleaseInfo[]>;
-  /** Sends one selected release announcement through a Discord incoming webhook. */
+  /** Fetches authoritative release metadata and sends the latest comparison to Discord. */
   sendDiscordReleaseInfo: (
     request: SendDiscordReleaseInfoRequest,
   ) => Promise<{ sent: true }>;

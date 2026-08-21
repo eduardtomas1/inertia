@@ -1,6 +1,5 @@
 import type {
   InertiaReleaseInfo,
-  ListInertiaReleasesRequest,
   SendDiscordReleaseInfoRequest,
 } from "../shared/desktop.js";
 
@@ -404,7 +403,7 @@ async function releaseCompare(
 
 export async function listInertiaReleases(
   fetch: typeof globalThis.fetch,
-  request: ListInertiaReleasesRequest,
+  request: SendDiscordReleaseInfoRequest,
 ): Promise<InertiaReleaseInfo[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RELEASE_FETCH_TIMEOUT_MS);
@@ -440,7 +439,10 @@ export async function listInertiaReleases(
 export async function sendDiscordReleaseInfo(
   fetch: typeof globalThis.fetch,
   webhook: string,
-  request: SendDiscordReleaseInfoRequest,
+  request: SendDiscordReleaseInfoRequest & {
+    previousRelease: InertiaReleaseInfo;
+    release: InertiaReleaseInfo;
+  },
 ): Promise<{ sent: true }> {
   const webhookUrl = discordWebhookUrl(webhook);
   const repository = repositoryDescriptor(request?.repositoryUrl);

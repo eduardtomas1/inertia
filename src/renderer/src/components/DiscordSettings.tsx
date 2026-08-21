@@ -102,20 +102,8 @@ export function DiscordSettings({
         setReleaseInfoError("Add and save a Discord webhook before generating.");
         return;
       }
-      const releases = await window.inertia.listInertiaReleases({
-        repositoryUrl: normalizedRepositoryUrl,
-      });
-      const [release, previousRelease] = releases;
-      if (!release || !previousRelease) {
-        setReleaseInfoError(
-          "At least two releases are required to build the comparison.",
-        );
-        return;
-      }
       await window.inertia.sendDiscordReleaseInfo({
         repositoryUrl: normalizedRepositoryUrl,
-        previousRelease,
-        release,
       });
       setReleaseInfoStatus("Release info sent to Discord.");
     } catch {

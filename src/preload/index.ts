@@ -26,7 +26,6 @@ const IPC = {
   cancelAppUpdateDownload: "inertia:cancel-app-update-download",
   installAppUpdate: "inertia:install-app-update",
   appUpdateStatus: "inertia:app-update-status",
-  listInertiaReleases: "inertia:list-inertia-releases",
   sendDiscordReleaseInfo: "inertia:send-discord-release-info",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
@@ -222,12 +221,6 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.on(IPC.appUpdateStatus, handler);
     return () => ipcRenderer.removeListener(IPC.appUpdateStatus, handler);
   },
-  listInertiaReleases: (
-    request: Parameters<DesktopBridge["listInertiaReleases"]>[0],
-  ) =>
-    ipcRenderer.invoke(IPC.listInertiaReleases, request) as ReturnType<
-      DesktopBridge["listInertiaReleases"]
-    >,
   sendDiscordReleaseInfo: (
     request: Parameters<DesktopBridge["sendDiscordReleaseInfo"]>[0],
   ) =>

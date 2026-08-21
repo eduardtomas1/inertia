@@ -85,9 +85,9 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   if (await closeTools.isVisible() && await closeTools.isEnabled()) {
     await closeTools.click();
   }
-  const composer = page.getByRole("textbox", { name: "Message" });
+  const composer = page.getByLabel("Message", { exact: true });
   await composer.fill("@sam");
-  await expect(page.getByRole("listbox", { name: "Project files" }).getByRole("option").first()).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByRole("listbox", { name: "Project files" }).getByRole("option").first()).toHaveAttribute("aria-selected", "true");
   await composer.fill("/p");
   await expect(page.getByRole("listbox", { name: "Composer commands" }).getByRole("option", { name: /plan/i })).toHaveAttribute("aria-selected", "true");
   await composer.fill("");

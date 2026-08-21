@@ -713,6 +713,24 @@ describe("compact Work sidebar", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("keeps focus in the project rename field after dismissing its menu", async () => {
+    renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Project actions for Studio",
+    }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const renameInput = screen.getByRole("textbox", { name: "Rename project" });
+
+    expect(renameInput).toHaveFocus();
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    });
+    expect(renameInput).toHaveFocus();
+  });
+
   it("keeps Home and End keyboard navigation working across virtual windows", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

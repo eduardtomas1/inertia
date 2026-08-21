@@ -565,7 +565,7 @@ function SidebarView({
   };
 
   const startProjectRename = (project: Project) => {
-    dismissMenu("selection");
+    dismissMenu("context-change");
     setProjectRenameDraft(project.name);
     setRenamingProject(project.id);
   };

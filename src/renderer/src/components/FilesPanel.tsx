@@ -663,9 +663,10 @@ export function FilesPanel({
 
   const updateQuery = useCallback((value: string): void => {
     searchGeneration.current += 1;
+    previousSelectedPathRef.current = selectedPath;
     setQuery(value);
     setSearch(EMPTY_SEARCH);
-  }, []);
+  }, [selectedPath]);
 
   useEffect(() => {
     const normalized = query.trim();

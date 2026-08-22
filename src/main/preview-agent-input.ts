@@ -237,38 +237,8 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
  * unguarded DOM boundary. User-agent shadow roots are excluded because their
  * contents are owned by Chromium, not the page.
  */
-export function hasUnguardedAgentPageContent(
-  frameTreeResult: unknown,
-  snapshotResult: unknown,
-): boolean {
-  const frameTree = objectRecord(objectRecord(frameTreeResult)?.frameTree);
-  if (!frameTree) return true;
-  const childFrames = frameTree.childFrames;
-  if (childFrames !== undefined && (!Array.isArray(childFrames) || childFrames.length > 0)) {
-    return true;
-  }
-
-  const snapshot = objectRecord(snapshotResult);
-  const strings = snapshot?.strings;
-  const documents = snapshot?.documents;
-  if (!Array.isArray(strings) || !strings.every((value) => typeof value === "string")
-      || !Array.isArray(documents)) return true;
-  for (const document of documents) {
-    const nodes = objectRecord(objectRecord(document)?.nodes);
-    const shadowRootType = objectRecord(nodes?.shadowRootType);
-    if (!shadowRootType) continue;
-    const indexes = shadowRootType.index;
-    const values = shadowRootType.value;
-    if (!Array.isArray(indexes) || !Array.isArray(values) || indexes.length !== values.length) {
-      return true;
-    }
-    for (const value of values) {
-      if (!Number.isInteger(value)) return true;
-      const type = strings[value as number];
-      if (type === "open" || type === "closed") return true;
-    }
-  }
-  return false;
+export function hasUnguardedAgentPageContent(boundaryState: unknown): boolean {
+  return objectRecord(boundaryState)?.nestedContentObserved !== false;
 }
 
 export async function agentPageHasUnguardedNestedContent(
@@ -278,13 +248,7 @@ export async function agentPageHasUnguardedNestedContent(
   if (!contents.debugger.isAttached()) {
     throw new Error("The Browser security debugger is unavailable.");
   }
-  const frameTree = await contents.debugger.sendCommand("Page.getFrameTree");
-  const snapshot = await contents.debugger.sendCommand("DOMSnapshot.captureSnapshot", {
-    computedStyles: [],
-    includeDOMRects: false,
-    includePaintOrder: false,
-  });
-  return hasUnguardedAgentPageContent(frameTree, snapshot);
+  return hasUnguardedAgentPageContent(agentPageBoundaryStates.get(contents));
 }
 
 export async function setAgentPageFrozen(

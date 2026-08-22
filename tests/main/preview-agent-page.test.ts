@@ -287,6 +287,72 @@ describe("agent browser semantic snapshots", () => {
     )).toBe(true);
   });
 
+  it("shares one fail-closed scan budget across each mutation callback", async () => {
+    let callback: ((records: unknown[]) => void) | undefined;
+    let attributeTargetsInspected = 0;
+    let addedNodesInspected = 0;
+    class MutationObserver {
+      constructor(observer: (records: unknown[]) => void) { callback = observer; }
+      observe(): void {}
+    }
+    const documentElement = { nodeType: 1, tagName: "HTML" };
+    const context = {
+      document: {
+        documentElement,
+        addEventListener: vi.fn(),
+        createNodeIterator: (root: { nodeType?: number }) => {
+          let first = true;
+          return {
+            nextNode: () => {
+              if (!first) return null;
+              first = false;
+              if (root.nodeType === 1 && root !== documentElement) {
+                addedNodesInspected += 1;
+              }
+              return root;
+            },
+          };
+        },
+      },
+      MutationObserver,
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await installAgentPagePrivacyGuard(contents as never);
+    expect(callback).toBeTypeOf("function");
+    const attributeRecords = Array.from({ length: 5_000 }, () => ({
+      type: "attributes",
+      get target() {
+        attributeTargetsInspected += 1;
+        return { tagName: "DIV" };
+      },
+      oldValue: null,
+      removedNodes: [],
+      addedNodes: [],
+    }));
+    callback!(attributeRecords);
+    expect(attributeTargetsInspected).toBe(4_000);
+
+    const addedNodes = Array.from({ length: 5_000 }, () => ({ nodeType: 1, tagName: "DIV" }));
+    callback!([{
+      type: "childList",
+      target: { tagName: "DIV" },
+      oldValue: null,
+      removedNodes: [],
+      addedNodes,
+    }]);
+    expect(addedNodesInspected).toBe(2_000);
+    expect(runInNewContext(
+      "globalThis.__inertiaAgentBrowser.nestedContentObserved",
+      context,
+    )).toBe(true);
+  });
+
   it("refuses interaction labels when their password scan budget is exhausted", async () => {
     let nextNodeCalls = 0;
     const element = {

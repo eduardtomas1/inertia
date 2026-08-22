@@ -3,46 +3,67 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  agentPageHasUnguardedNestedContent,
   beginAgentFileChooserBlock,
   hasUnguardedAgentPageContent,
+  installAgentFileChooserBlock,
   releaseAgentFileChooserBlock,
   settleAgentPageInput,
 } from "../../src/main/preview-agent-input";
 
-const rootFrame = { frameTree: { frame: { id: "main" } } };
-
 describe("agent Browser nested evidence boundary", () => {
-  it("allows a valid top-level document with only Chromium-owned shadow roots", () => {
-    expect(hasUnguardedAgentPageContent(rootFrame, {
-      strings: ["user-agent"],
-      documents: [{ nodes: { shadowRootType: { index: [2], value: [0] } } }],
+  it("allows only an initialized boundary state with no nested content", () => {
+    expect(hasUnguardedAgentPageContent({
+      mainFrameId: "main",
+      nestedContentObserved: false,
     })).toBe(false);
   });
 
-  it("fails closed for child frames and author-controlled shadow roots", () => {
-    expect(hasUnguardedAgentPageContent({
-      frameTree: {
-        frame: { id: "main" },
-        childFrames: [{ frame: { id: "child" } }],
-      },
-    }, {
-      strings: [],
-      documents: [{ nodes: {} }],
-    })).toBe(true);
-    for (const type of ["open", "closed"]) {
-      expect(hasUnguardedAgentPageContent(rootFrame, {
-        strings: [type],
-        documents: [{ nodes: { shadowRootType: { index: [4], value: [0] } } }],
-      })).toBe(true);
-    }
+  it("fails closed for tainted or malformed boundary state", () => {
+    expect(hasUnguardedAgentPageContent({ nestedContentObserved: true })).toBe(true);
+    expect(hasUnguardedAgentPageContent({})).toBe(true);
+    expect(hasUnguardedAgentPageContent(undefined)).toBe(true);
   });
 
-  it("fails closed when either debugger structure is malformed", () => {
-    expect(hasUnguardedAgentPageContent({}, {})).toBe(true);
-    expect(hasUnguardedAgentPageContent(rootFrame, {
-      strings: ["open"],
-      documents: [{ nodes: { shadowRootType: { index: [1], value: [] } } }],
-    })).toBe(true);
+  it("tracks nested boundaries incrementally without serializing the page DOM", async () => {
+    const debuggerEvents = new EventEmitter();
+    let attached = false;
+    const sendCommand = vi.fn(async () => undefined);
+    const contents = {
+      debugger: Object.assign(debuggerEvents, {
+        attach: vi.fn(() => { attached = true; }),
+        detach: vi.fn(() => { attached = false; }),
+        isAttached: vi.fn(() => attached),
+        sendCommand,
+      }),
+      getURL: () => "http://127.0.0.1:3000/",
+      loadURL: vi.fn(async () => undefined),
+      navigationHistory: {
+        getActiveIndex: () => 0,
+        getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/" }),
+      },
+    };
+
+    await installAgentFileChooserBlock(contents as never);
+    expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(false);
+    expect(sendCommand).not.toHaveBeenCalledWith("Page.getFrameTree");
+    expect(sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
+
+    debuggerEvents.emit("message", {}, "Page.frameAttached", {
+      frameId: "child",
+      parentFrameId: "main",
+    });
+    expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(true);
+
+    debuggerEvents.emit("message", {}, "Page.frameNavigated", {
+      frame: { id: "next-main" },
+    });
+    expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(false);
+
+    debuggerEvents.emit("message", {}, "DOM.shadowRootPushed", {
+      root: { shadowRootType: "closed" },
+    });
+    expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(true);
   });
 });
 

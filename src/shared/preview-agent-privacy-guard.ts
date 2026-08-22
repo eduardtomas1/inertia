@@ -100,33 +100,43 @@ export function installPreviewAgentPrivacyGuard(): void {
     const candidate = node as Partial<HTMLInputElement> | null;
     return candidate?.tagName === "INPUT" ? candidate as HTMLInputElement : null;
   };
-  const inspectTree = (node: Node): void => {
+  interface ScanBudget { exhausted: boolean; remaining: number }
+  const scanBudget = (): ScanBudget => ({ exhausted: false, remaining: maximumScanNodes });
+  const consume = (budget: ScanBudget): boolean => {
+    if (budget.remaining <= 0) {
+      budget.exhausted = true;
+      state.nestedContentObserved = true;
+      return false;
+    }
+    budget.remaining -= 1;
+    return true;
+  };
+  const inspectTree = (node: Node, budget: ScanBudget): void => {
     if (node.nodeType !== 1) return;
     const element = node as Element;
     const iterator = typeof document.createNodeIterator === "function"
       ? document.createNodeIterator(element, 1)
       : null;
     if (!iterator) {
+      budget.exhausted = true;
       state.nestedContentObserved = true;
       return;
     }
-    let scanned = 0;
-    while (scanned < maximumScanNodes) {
+    while (true) {
       const descendant = iterator.nextNode() as Element | null;
       if (!descendant) return;
-      scanned += 1;
+      if (!consume(budget)) return;
       if (descendant.matches?.("iframe,frame") || descendant.shadowRoot) {
         state.nestedContentObserved = true;
       }
       const input = inputElement(descendant);
       if (input) inspect(input);
     }
-    if (iterator.nextNode()) state.nestedContentObserved = true;
   };
   document.addEventListener(nestedBoundaryEvent, () => {
     state.nestedContentObserved = true;
   }, true);
-  if (document.documentElement) inspectTree(document.documentElement);
+  if (document.documentElement) inspectTree(document.documentElement, scanBudget());
   const inspectInputEvent = (event: Event): void => {
     let exposedControl = false;
     for (const node of event.composedPath()) {
@@ -158,13 +168,25 @@ export function installPreviewAgentPrivacyGuard(): void {
     event.stopImmediatePropagation();
   }, true);
   const observer = new MutationObserver((records) => {
-    for (const record of records) {
+    const budget = scanBudget();
+    for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
+      if (!consume(budget)) break;
+      const record = records[recordIndex]!;
       const changedInput = inputElement(record.target);
       if (record.type === "attributes" && changedInput) {
         inspect(changedInput, String(record.oldValue || "").toLowerCase() === "password");
       }
-      for (const node of record.removedNodes) inspectTree(node);
-      for (const node of record.addedNodes) inspectTree(node);
+      for (const node of record.removedNodes) {
+        if (!consume(budget)) break;
+        inspectTree(node, budget);
+        if (budget.exhausted) break;
+      }
+      if (budget.exhausted) break;
+      for (const node of record.addedNodes) {
+        if (!consume(budget)) break;
+        inspectTree(node, budget);
+        if (budget.exhausted) break;
+      }
     }
   });
   observer.observe(document, {

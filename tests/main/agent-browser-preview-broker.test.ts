@@ -105,18 +105,7 @@ vi.mock("electron", () => {
       emitMessage: (method: string, params: Record<string, unknown>): void => {
         for (const handler of this.debuggerMessageHandlers) handler({}, method, params);
       },
-      sendCommand: vi.fn(async (method: string) => {
-        if (method === "Page.getFrameTree") {
-          return { frameTree: { frame: { id: "main" } } };
-        }
-        if (method === "DOMSnapshot.captureSnapshot") {
-          return {
-            strings: [],
-            documents: [{ nodes: { shadowRootType: { index: [], value: [] } } }],
-          };
-        }
-        return undefined;
-      }),
+      sendCommand: vi.fn(async () => undefined),
     };
 
     constructor() {
@@ -561,21 +550,11 @@ describe("agent-owned native Browser", () => {
       url: "http://127.0.0.1:3000/login",
     });
     const contents = electronState.contents[contentsOffset]!;
-    let snapshots = 0;
-    contents.debugger.sendCommand.mockImplementation(async (method: string) => {
-      if (method === "Page.getFrameTree") {
-        return { frameTree: { frame: { id: "main" } } };
-      }
-      if (method === "DOMSnapshot.captureSnapshot") {
-        snapshots += 1;
-        return snapshots === 1
-          ? { strings: [], documents: [{ nodes: {} }] }
-          : {
-              strings: ["closed"],
-              documents: [{ nodes: { shadowRootType: { index: [2], value: [0] } } }],
-            };
-      }
-      return undefined;
+    pageTools.semanticPageSnapshot.mockImplementationOnce(async () => {
+      contents.debugger.emitMessage("DOM.shadowRootPushed", {
+        root: { nodeId: 21, shadowRootType: "closed" },
+      });
+      return JSON.stringify({ title: "Local app", elements: [] });
     });
 
     await expect(broker.perform(conversationId, { action: "snapshot" }))
@@ -585,6 +564,7 @@ describe("agent-owned native Browser", () => {
         message: "Page evidence is unavailable for nested page content.",
       });
     expect(pageTools.semanticPageSnapshot).toHaveBeenCalled();
+    expect(contents.debugger.sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
   });
 
   it("refuses evidence from unguarded nested page boundaries", async () => {
@@ -596,19 +576,9 @@ describe("agent-owned native Browser", () => {
       url: "http://127.0.0.1:3000/nested-login",
     });
     const contents = electronState.contents[contentsOffset]!;
-    contents.debugger.sendCommand.mockImplementation(async (method: string) => {
-      if (method === "Page.getFrameTree") {
-        return {
-          frameTree: {
-            frame: { id: "main" },
-            childFrames: [{ frame: { id: "credential-frame" } }],
-          },
-        };
-      }
-      if (method === "DOMSnapshot.captureSnapshot") {
-        return { strings: [], documents: [{ nodes: {} }] };
-      }
-      return undefined;
+    contents.debugger.emitMessage("Page.frameAttached", {
+      frameId: "credential-frame",
+      parentFrameId: "main",
     });
 
     await expect(broker.perform(conversationId, { action: "snapshot" }))
@@ -624,6 +594,8 @@ describe("agent-owned native Browser", () => {
         message: "Screenshots are unavailable for nested page content.",
       });
     expect(contents.capturePage).not.toHaveBeenCalled();
+    expect(contents.debugger.sendCommand).not.toHaveBeenCalledWith("Page.getFrameTree");
+    expect(contents.debugger.sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
   });
 
   it("retains privileged lifetime taint after a declarative closed root disappears", async () => {

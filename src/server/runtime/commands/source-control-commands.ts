@@ -1,12 +1,8 @@
 import { realpath } from "node:fs/promises";
-import { resolve } from "node:path";
 
 import WebSocket from "ws";
 
-import type {
-  GitStatusSnapshot,
-  ServerEvent,
-} from "../../../shared/contracts";
+import type { GitStatusSnapshot, ServerEvent } from "../../../shared/contracts";
 import {
   GIT_READ_OPERATION_TIMEOUT_MS,
   WORKSPACE_GIT_DISCOVERY_TIMEOUT_MS,
@@ -30,21 +26,10 @@ import {
   switchBranch,
 } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
-import {
-  changedFiles,
-  emptyGitStatusSnapshot,
-  gitStatusSnapshot,
-} from "../../runtime-snapshots";
-import {
-  TurnGitArtifactError,
-  type TurnGitArtifactManager,
-} from "../../turn-git-artifacts";
+import { changedFiles, emptyGitStatusSnapshot, gitStatusSnapshot } from "../../runtime-snapshots";
+import { TurnGitArtifactError, type TurnGitArtifactManager } from "../../turn-git-artifacts";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
-import {
-  isContained,
-  repositoryMetadataMarkerIdentity,
-  repositoryRoot,
-} from "../../git/paths";
+import { canonicalDirectoryPath, isContained, repositoryMetadataMarkerIdentity, repositoryRoot, sameFilesystemPath } from "../../git/paths";
 import {
   discoverWorkspaceGitRepositories,
   resolveWorkspaceGitRepository,
@@ -59,6 +44,7 @@ import {
   type RuntimeCommandHandler,
 } from "./command-router";
 import { reconcileReviews } from "./review-support";
+import { handlePreMergeConfidenceCommand } from "./pre-merge-confidence-command";
 import {
   mapWithinSourceControlDeadline,
   settleSourceControlInspections,
@@ -110,28 +96,6 @@ function commitReviewAuthorityBinding(
   ];
 }
 
-function sameCanonicalPath(left: string, right: string): boolean {
-  const normalizedLeft = resolve(left);
-  const normalizedRight = resolve(right);
-  return process.platform === "win32"
-    ? normalizedLeft.toLocaleLowerCase("en-US")
-      === normalizedRight.toLocaleLowerCase("en-US")
-    : normalizedLeft === normalizedRight;
-}
-
-async function sameFilesystemPath(left: string, right: string): Promise<boolean> {
-  if (sameCanonicalPath(left, right)) return true;
-  try {
-    const [canonicalLeft, canonicalRight] = await Promise.all([
-      realpath(left),
-      realpath(right),
-    ]);
-    return sameCanonicalPath(canonicalLeft, canonicalRight);
-  } catch {
-    return false;
-  }
-}
-
 export function createSourceControlCommandHandler(
   dependencies: SourceControlCommandDependencies,
 ): RuntimeCommandHandler {
@@ -140,7 +104,7 @@ export function createSourceControlCommandHandler(
     conversationId?: string;
     repositoryPath?: string;
     authorityRef?: string;
-  }, options: { requireAuthority?: boolean } = {}) => {
+  }, options: { requireAuthority?: boolean; deadlineAt?: number; signal?: AbortSignal } = {}) => {
     const workspaceRoot = dependencies.workspacePath(
       payload.projectId,
       payload.conversationId,
@@ -149,7 +113,7 @@ export function createSourceControlCommandHandler(
       if (options.requireAuthority) {
         throw new RuntimeRequestError("Refresh repository status before changing this repository.");
       }
-      const canonicalWorkspace = await realpath(workspaceRoot);
+      const canonicalWorkspace = await canonicalDirectoryPath(workspaceRoot, options);
       return {
         workspaceRoot,
         repositoryRoot: workspaceRoot,
@@ -165,8 +129,8 @@ export function createSourceControlCommandHandler(
     }
     const repository = payload.repositoryPath === "."
       ? await (async () => {
-          const canonicalWorkspace = await realpath(workspaceRoot);
-          const owningRoot = await repositoryRoot(canonicalWorkspace);
+          const canonicalWorkspace = await canonicalDirectoryPath(workspaceRoot, options);
+          const owningRoot = await repositoryRoot(canonicalWorkspace, options);
           if (!isContained(owningRoot, canonicalWorkspace)) {
             throw new RuntimeRequestError(
               "The project workspace no longer belongs to its Git repository. Refresh and try again.",
@@ -176,12 +140,14 @@ export function createSourceControlCommandHandler(
             owningRoot,
             ".",
             dependencies.secureFiles,
+            options.signal,
           );
         })()
       : await resolveWorkspaceGitRepositoryIdentity(
           workspaceRoot,
           payload.repositoryPath,
           dependencies.secureFiles,
+          options.signal,
         );
     const issuedRoot = await dependencies.secureFileAuthorities.resolve(
       socket,
@@ -194,6 +160,7 @@ export function createSourceControlCommandHandler(
         payload.repositoryPath,
         repository.metadataMarkerIdentity,
       ),
+      { signal: options.signal },
     );
     // Windows may report the same directory through case or 8.3 aliases on
     // separate realpath calls. The broker's retained filesystem identity and
@@ -212,7 +179,7 @@ export function createSourceControlCommandHandler(
     return {
       workspaceRoot,
       repositoryRoot: issuedRoot.root,
-      serializationRoot: await realpath(issuedRoot.root),
+      serializationRoot: await repositoryRoot(issuedRoot.root, options),
       secureRoot: issuedRoot,
       metadataMarkerIdentity: repository.metadataMarkerIdentity,
     };
@@ -228,6 +195,7 @@ export function createSourceControlCommandHandler(
       !await sameFilesystemPath(
         await repositoryRoot(secureRoot.root, options),
         secureRoot.root,
+        options,
       )
       || await repositoryMetadataMarkerIdentity(secureRoot.root, options)
         !== metadataMarkerIdentity
@@ -240,10 +208,11 @@ export function createSourceControlCommandHandler(
   const runVerifiedRepositoryOperation = async <Result>(
     repository: Awaited<ReturnType<typeof resolveCommandRepository>>,
     operation: (root: string) => Promise<Result>,
+    options: { deadlineAt?: number; signal?: AbortSignal } = {},
   ): Promise<Result> => {
-    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity);
+    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity, options);
     const result = await operation(repository.repositoryRoot);
-    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity);
+    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity, options);
     return result;
   };
   const trackedRepositoryOptions = (
@@ -303,6 +272,7 @@ export function createSourceControlCommandHandler(
     "git.commit",
     "git.push",
     "git.pr.open",
+    "git.pr.confidence",
     "git.pr.create",
   ], async (socket, command) => {
     switch (command.type) {
@@ -1151,6 +1121,15 @@ export function createSourceControlCommandHandler(
           },
         });
         return "handled";
+      }
+      case "git.pr.confidence": {
+        return await handlePreMergeConfidenceCommand({
+          socket,
+          command,
+          resolveRepository: resolveCommandRepository,
+          runVerified: runVerifiedRepositoryOperation,
+          send: dependencies.send,
+        });
       }
       case "git.pr.open": {
         const repository = await resolveCommandRepository(

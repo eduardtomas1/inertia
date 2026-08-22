@@ -11,6 +11,7 @@ import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { usageDashboardSchema } from "./usage-dashboard-schema";
 import { dailyWorkDashboardSchema } from "./daily-work-schema";
 import { providerFastModeField } from "./provider-fast-mode-schema";
+import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
 import { COLOR_THEME_IDS } from "./app";
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
@@ -60,11 +61,9 @@ function authoritativeRunState(value: unknown, status: AgentTurnStatus): boolean
 function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownRecord {
   return record(value) && keys.every((key) => stringField(value, key));
 }
-
 function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean {
   return Array.isArray(value) && value.every(validate);
 }
-
 function uniqueRecordField(values: unknown[], key: string): boolean {
   return new Set(values.map((value) => (value as UnknownRecord)[key])).size === values.length;
 }
@@ -1132,6 +1131,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "git.action": (value) => stringField(value, "message"),
   "external.url": (value) => recordWithStrings(value, "url", "label"),
   "git.branches": (value) => arrayOf(value.branches, gitBranch),
+  "git.pr.confidence": (value) => validatePreMergeConfidence(value.confidence),
   "workspace.entries": (value) => workspaceEntriesPage(value),
   "workspace.file": (value) => workspaceFile(value.file) && booleanField(value, "usedFallback"),
   "project.actions": (value) => arrayOf(value.actions, projectAction)

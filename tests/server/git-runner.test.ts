@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   runGit,
+  settleGitInspections,
   withPreparedGitRefReservation,
   withPreparedGitRefUpdate,
 } from "../../src/server/git/runner";
@@ -46,6 +47,53 @@ function processExists(pid: number): boolean {
     return false;
   }
 }
+
+function deferred(): { promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => { resolve = settle; });
+  return { promise, resolve };
+}
+
+describe("Git inspection settlement", () => {
+  it("cancels and awaits every sibling cleanup after the first rejection", async () => {
+    const controller = new AbortController();
+    const cleanupStarted = deferred();
+    const releaseCleanup = deferred();
+    let cleaningSiblings = 0;
+    let aggregateSettled = false;
+    let triggeringFailure: unknown;
+    const statusFailure = new GitError("operation-failed", "Status parsing failed.");
+    const sibling = async (signal: AbortSignal): Promise<string> => {
+      if (!signal.aborted) {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      }
+      cleaningSiblings += 1;
+      if (cleaningSiblings === 2) cleanupStarted.resolve();
+      await releaseCleanup.promise;
+      throw new GitError("timeout", "Sibling inspection was cancelled.");
+    };
+    const aggregate = settleGitInspections(
+      controller.signal,
+      async () => await Promise.reject(statusFailure),
+      sibling,
+      sibling,
+      (reason) => { triggeringFailure = reason; },
+    );
+    void aggregate.then(
+      () => { aggregateSettled = true; },
+      () => { aggregateSettled = true; },
+    );
+
+    await cleanupStarted.promise;
+    expect(aggregateSettled).toBe(false);
+    expect(triggeringFailure).toBe(statusFailure);
+    releaseCleanup.resolve();
+    await expect(aggregate).rejects.toThrow("Status parsing failed.");
+    expect(aggregateSettled).toBe(true);
+  });
+});
 
 describe("Git runner locale", () => {
   it("preserves Git's EMAIL identity fallback without restoring unrelated state", () => {

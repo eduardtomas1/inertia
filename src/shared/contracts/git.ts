@@ -35,6 +35,113 @@ export interface GitPullRequestCapability {
   unavailableReason: GitPullRequestUnavailableReason | null;
 }
 
+export type GitPreMergeEvidenceState =
+  | "passed"
+  | "failed"
+  | "pending"
+  | "skipped"
+  | "cancelled"
+  | "neutral"
+  | "missing"
+  | "unknown";
+
+export interface GitPreMergeCheck {
+  name: string;
+  workflow: string | null;
+  state: GitPreMergeEvidenceState;
+  detailsUrl: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface GitPreMergeReviewThread {
+  id: string;
+  path: string;
+  line: number | null;
+  author: string;
+  body: string;
+  url: string | null;
+  codex: boolean;
+  outdated: boolean;
+}
+
+export interface GitPreMergeFile {
+  path: string;
+  area: string;
+  insertions: number;
+  deletions: number;
+}
+
+export interface GitPreMergeArea {
+  name: string;
+  files: number;
+}
+
+export interface GitPreMergePlatformCoverage {
+  platform: "Linux" | "Windows" | "macOS";
+  state: GitPreMergeEvidenceState;
+  checks: string[];
+}
+
+export interface GitPreMergeConfidence {
+  generatedAt: string;
+  state: "ready" | "no-pull-request" | "unavailable";
+  unavailableReason: string | null;
+  local: {
+    branch: string | null;
+    head: string | null;
+    dirty: boolean;
+    files: string[];
+    filesTruncated: boolean;
+  };
+  github: {
+    repository: string;
+    number: number;
+    url: string;
+    title: string;
+    state: string;
+    draft: boolean;
+    headBranch: string;
+    head: string;
+    baseBranch: string;
+    mergeState: string;
+    reviewDecision: string | null;
+    updatedAt: string;
+  } | null;
+  identity: {
+    state: "exact" | "mismatch" | "changed" | "unavailable";
+    detail: string;
+  };
+  checks: GitPreMergeCheck[];
+  checksTruncated: boolean;
+  platforms: GitPreMergePlatformCoverage[];
+  reviewThreads: GitPreMergeReviewThread[];
+  reviewThreadsTruncated: boolean;
+  files: GitPreMergeFile[];
+  totalFiles: number;
+  filesTruncated: boolean;
+  areas: GitPreMergeArea[];
+  changedTestFiles: string[];
+  focusedTestChecks: string[];
+  bundle: {
+    state: "published" | "not-published";
+    summary: string;
+  };
+  authorClaim: {
+    source: "pull-request-body";
+    body: string;
+    truncated: boolean;
+  } | null;
+  mergeReadiness: {
+    state: "ready" | "blocked" | "pending" | "unknown";
+    blockers: string[];
+  };
+  releaseReadiness: {
+    state: "not-proven";
+    detail: string;
+  };
+}
+
 export interface GitStatusSnapshot {
   isRepository: boolean;
   /** Ephemeral runtime-owned reference for diffs from this status snapshot. */

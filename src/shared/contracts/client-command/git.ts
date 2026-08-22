@@ -323,6 +323,15 @@ export const gitCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("git.pr.confidence"),
+      payload: z.object(projectWithOptionalConversationAndRepository)
+        .strict()
+        .superRefine(requireRepositoryAuthority),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("git.pr.create"),
       payload: z.object({
         ...projectWithOptionalConversationAndRepository,

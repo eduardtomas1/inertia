@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  RestrictedCliError,
   restrictedCliEnvironment,
   runRestrictedCli,
 } from "../../src/server/restricted-cli-runner";
@@ -117,5 +118,34 @@ describe("restricted CLI runner", () => {
         windowsVerbatimArguments: true,
       }),
     );
+  });
+
+  it("terminates an owned process tree when a read is cancelled", async () => {
+    const controller = new AbortController();
+    const terminateProcessTree = vi.fn(async () => true);
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams;
+    Object.assign(child, {
+      pid: 4242,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+    });
+    const pending = runRestrictedCli(
+      "gh",
+      ["pr", "view"],
+      {
+        cwd: process.cwd(),
+        environment: { PATH: process.env.PATH },
+        signal: controller.signal,
+        failureMessage: "Fixture failed.",
+      },
+      { spawn: () => child, terminateProcessTree },
+    );
+
+    controller.abort();
+    await expect(pending).rejects.toEqual(expect.objectContaining({
+      code: "timeout",
+    } satisfies Partial<RestrictedCliError>));
+    expect(terminateProcessTree).toHaveBeenCalledWith(child, true);
   });
 });

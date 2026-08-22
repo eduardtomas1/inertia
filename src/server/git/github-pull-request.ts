@@ -26,6 +26,29 @@ export interface GitHubPullRequestInput {
   draft: boolean;
 }
 
+function cliDiscoveryCancelled(): RestrictedCliError {
+  return new RestrictedCliError("timeout", "GitHub CLI discovery was cancelled.");
+}
+
+async function beforeCliDiscoveryAbort<T>(
+  operation: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return await operation();
+  let rejectCancellation!: (error: RestrictedCliError) => void;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const onAbort = (): void => rejectCancellation(cliDiscoveryCancelled());
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    if (signal.aborted) throw cliDiscoveryCancelled();
+    return await Promise.race([operation(), cancellation]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 export function githubRepositorySlug(repositoryBaseUrl: string): string {
   const url = new URL(repositoryBaseUrl);
   const slug = url.pathname.replace(/^\/+|\/+$/gu, "");
@@ -38,8 +61,9 @@ export function githubRepositorySlug(repositoryBaseUrl: string): string {
 export function verifiedGitHubPullRequestUrl(
   value: string,
   repositoryBaseUrl: string,
+  expectedNumber?: number,
 ): string | null {
-  const match = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*/gu.exec(value);
+  const match = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/([1-9][0-9]*)/u.exec(value);
   if (!match) return null;
   const url = new URL(match[0]);
   const repository = new URL(repositoryBaseUrl);
@@ -47,17 +71,23 @@ export function verifiedGitHubPullRequestUrl(
     && url.pathname.toLowerCase().startsWith(
       `${repository.pathname.toLowerCase()}/pull/`,
     )
+    && (expectedNumber === undefined || Number(match[1]) === expectedNumber)
     ? url.toString()
     : null;
 }
 
 export async function resolveGitHubCli(
   dependencies: GitHubPullRequestDependencies = {},
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ executable: string; environment: NodeJS.ProcessEnv }> {
-  const environment = await (dependencies.environment ?? providerEnvironment)();
-  const candidates = await (
-    dependencies.executableCandidates ?? executableCandidates
-  )("gh", environment);
+  const environment = await beforeCliDiscoveryAbort(
+    dependencies.environment ?? providerEnvironment,
+    options.signal,
+  );
+  const candidates = await beforeCliDiscoveryAbort(
+    async () => await (dependencies.executableCandidates ?? executableCandidates)("gh", environment),
+    options.signal,
+  );
   const executable = candidates[0];
   if (!executable) {
     throw new RestrictedCliError(

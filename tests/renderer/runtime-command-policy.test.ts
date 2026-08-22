@@ -44,6 +44,10 @@ describe("runtime command delivery policy", () => {
       timeoutMs: GIT_READ_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "rejected",
     });
+    expect(runtimeCommandPolicy("git.pr.confidence")).toEqual({
+      timeoutMs: GIT_READ_REQUEST_TIMEOUT_MS,
+      timeoutDelivery: "rejected",
+    });
     expect(runtimeCommandPolicy("workspace.file.read")).toEqual({
       timeoutMs: WORKSPACE_FILE_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "rejected",

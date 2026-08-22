@@ -84,6 +84,57 @@ export function gitInspectionSettlementValues<First, Second>(
   )) as [First, Second];
 }
 
+/**
+ * Cancels sibling Git inspections after the first rejection, but retains
+ * ownership until every inspection and process-tree cleanup has settled.
+ */
+export async function settleGitInspections<First, Second, Third>(
+  signal: AbortSignal,
+  first: (signal: AbortSignal) => Promise<First>,
+  second: (signal: AbortSignal) => Promise<Second>,
+  third: (signal: AbortSignal) => Promise<Third>,
+  recordTriggeringFailure: (reason: unknown) => void = () => undefined,
+): Promise<[First, Second, Third]> {
+  const controller = new AbortController();
+  const cancel = (): void => controller.abort();
+  let triggeringFailure: unknown;
+  let hasTriggeringFailure = false;
+  if (signal.aborted) cancel();
+  else signal.addEventListener("abort", cancel, { once: true });
+  const runInspection = async <T>(
+    inspection: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await inspection(controller.signal);
+    } catch (error) {
+      if (!hasTriggeringFailure) {
+        hasTriggeringFailure = true;
+        triggeringFailure = error;
+        recordTriggeringFailure(error);
+      }
+      cancel();
+      throw error;
+    }
+  };
+  try {
+    const results = await Promise.allSettled([
+      runInspection(first),
+      runInspection(second),
+      runInspection(third),
+    ] as const);
+    const terminationFailure = results.find((result) =>
+      result.status === "rejected"
+      && isGitProcessTreeTerminationFailure(result.reason));
+    if (terminationFailure?.status === "rejected") throw terminationFailure.reason;
+    if (hasTriggeringFailure) throw triggeringFailure;
+    return results.map((result) => (
+      (result as PromiseFulfilledResult<First | Second | Third>).value
+    )) as [First, Second, Third];
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
+}
+
 function inspectionArguments(args: readonly string[]): string[] {
   const [command, ...rest] = args;
   if (!command || command.startsWith("-")) {

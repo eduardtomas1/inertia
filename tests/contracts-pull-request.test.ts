@@ -68,6 +68,7 @@ describe("pull request command contract", () => {
         },
       },
       { type: "git.push", payload: { projectId, repositoryPath, authorityRef } },
+      { type: "git.pr.confidence", payload: { projectId, repositoryPath, authorityRef } },
       { type: "git.pr.open", payload: { projectId, repositoryPath, authorityRef } },
       {
         type: "git.pr.create",

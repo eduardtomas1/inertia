@@ -44,6 +44,7 @@ export interface RestrictedCliOptions {
   cwd: string;
   environment?: NodeJS.ProcessEnv;
   input?: string;
+  signal?: AbortSignal;
   timeoutMs?: number;
   maxOutputBytes?: number;
   failureMessage: string;
@@ -83,6 +84,12 @@ export async function runRestrictedCli(
   options: RestrictedCliOptions,
   dependencies: RestrictedCliDependencies = {},
 ): Promise<RestrictedCliResult> {
+  if (options.signal?.aborted) {
+    throw new RestrictedCliError(
+      "timeout",
+      `${executable} was cancelled before it started.`,
+    );
+  }
   const platform = dependencies.platform ?? process.platform;
   const timeoutMs = Math.max(
     1_000,
@@ -140,14 +147,21 @@ export async function runRestrictedCli(
       `${executable} process tree`,
       dependencies.terminateProcessTree ?? terminateProcessTreeAndWait,
     );
-    let timer: NodeJS.Timeout;
+    let timer: NodeJS.Timeout | undefined;
+    const onAbort = (): void => {
+      void terminateAndReject(new RestrictedCliError(
+        "timeout",
+        `${executable} was cancelled.`,
+      ));
+    };
     const finish = (
       error?: RestrictedCliError,
       result?: RestrictedCliResult,
     ): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
       if (error) rejectRun(error);
       else if (result) resolveRun(result);
     };
@@ -190,6 +204,8 @@ export async function runRestrictedCli(
       ));
     }, timeoutMs);
     timer.unref();
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
     child.stdout.on("data", (chunk: Buffer) => append(stdout, chunk));
     child.stderr.on("data", (chunk: Buffer) => append(stderr, chunk));
     child.once("error", (error: NodeJS.ErrnoException) => {

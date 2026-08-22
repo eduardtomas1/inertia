@@ -35,7 +35,13 @@ describe("GitHub pull request URL verification", () => {
     expect(verifiedGitHubPullRequestUrl(
       "Created https://github.com/openai/codex/pull/42\n",
       "https://github.com/openai/codex",
+      42,
     )).toBe("https://github.com/openai/codex/pull/42");
+    expect(verifiedGitHubPullRequestUrl(
+      "Created https://github.com/openai/codex/pull/41\n",
+      "https://github.com/openai/codex",
+      42,
+    )).toBeNull();
     expect(verifiedGitHubPullRequestUrl(
       "https://github.com/attacker/repo/pull/42",
       "https://github.com/openai/codex",
@@ -65,6 +71,36 @@ describe("GitHub pull request URL verification", () => {
     })).resolves.toEqual({
       executable: await realpath(executable),
       environment: { PATH: [directory, "/usr/bin", "/bin"].join(delimiter) },
+    });
+  });
+
+  it("abandons stalled environment discovery when the caller cancels", async () => {
+    const controller = new AbortController();
+    const resolution = resolveGitHubCli({
+      environment: async () => await new Promise(() => undefined),
+    }, { signal: controller.signal });
+
+    controller.abort();
+
+    await expect(resolution).rejects.toMatchObject({
+      code: "timeout",
+      message: "GitHub CLI discovery was cancelled.",
+    });
+  });
+
+  it("abandons stalled executable discovery when the caller cancels", async () => {
+    const controller = new AbortController();
+    const resolution = resolveGitHubCli({
+      environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
+      executableCandidates: async () => await new Promise(() => undefined),
+    }, { signal: controller.signal });
+    await Promise.resolve();
+
+    controller.abort();
+
+    await expect(resolution).rejects.toMatchObject({
+      code: "timeout",
+      message: "GitHub CLI discovery was cancelled.",
     });
   });
 });

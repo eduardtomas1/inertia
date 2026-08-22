@@ -86,6 +86,9 @@ export {
   type GitHubPullRequestInput,
 } from "./git/github-pull-request";
 export {
+  inspectGitHubPreMergeConfidence,
+} from "./git/github-pre-merge";
+export {
   inspectGitRemoteRouting,
   parseGitRemoteWebTarget,
   type GitPullRequestTarget,

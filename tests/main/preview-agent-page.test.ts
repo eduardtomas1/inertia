@@ -1211,6 +1211,7 @@ describe("agent browser semantic snapshots", () => {
       document: withSemanticIterator({
         title: "ARIA disabled controls",
         body: bodyWithText("Managed action"),
+        activeElement: button,
         querySelectorAll: (selector: string) => selector === "input" ? [] : [button],
         elementFromPoint: () => button,
       }),
@@ -1236,6 +1237,7 @@ describe("agent browser semantic snapshots", () => {
     expect(snapshot.elements[0]?.disabled).toBe(true);
     await expect(locateAgentPageRef(contents as never, "e1"))
       .resolves.toMatchObject({ found: true, disabled: true });
+    await expect(agentPageActivationBlocked(contents as never)).resolves.toBe("disabled");
   });
 
   it("excludes file inputs and blocks refs that change into file inputs", async () => {
@@ -1285,9 +1287,9 @@ describe("agent browser semantic snapshots", () => {
       elements: unknown[];
     };
     expect(excluded.elements).toEqual([]);
-    await expect(agentPageActivationBlocked(contents as never)).resolves.toBe(true);
+    await expect(agentPageActivationBlocked(contents as never)).resolves.toBe("file");
     input.type = "text";
-    await expect(agentPageActivationBlocked(contents as never)).resolves.toBe(false);
+    await expect(agentPageActivationBlocked(contents as never)).resolves.toBe(null);
     const actionable = JSON.parse(await semanticPageSnapshot(contents as never)) as {
       elements: Array<{ ref: string }>;
     };

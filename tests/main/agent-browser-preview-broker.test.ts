@@ -202,7 +202,7 @@ vi.mock("electron", () => {
 
 const pageTools = vi.hoisted(() => ({
   AGENT_BROWSER_WORLD_ID: 999,
-  agentPageActivationBlocked: vi.fn(async () => false),
+  agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
   agentPageHasSensitiveEvidence: vi.fn(async () => false),
   agentPageRefHasFocus: vi.fn(async () => true),
   installAgentPagePrivacyGuard: vi.fn(async () => undefined),
@@ -535,7 +535,7 @@ describe("agent-owned native Browser", () => {
       contextId: conversationId,
       url: "http://127.0.0.1:3000/upload",
     });
-    pageTools.agentPageActivationBlocked.mockResolvedValueOnce(true);
+    pageTools.agentPageActivationBlocked.mockResolvedValueOnce("file");
     const contents = electronState.contents[contentsOffset]!;
 
     await expect(broker.perform(conversationId, { action: "press", key: "Enter" }))

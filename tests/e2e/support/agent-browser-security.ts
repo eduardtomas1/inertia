@@ -104,7 +104,10 @@ export async function expectSemanticClickBoundaries(
 ): Promise<void> {
   const evidence = await app.electronApp.evaluate(
     async ({ webContents }, request) => {
-      type Command = { action: "snapshot" } | { action: "click"; ref: string };
+      type Command =
+        | { action: "snapshot" }
+        | { action: "click"; ref: string }
+        | { action: "press"; key: "Enter" | "Space" | "Tab" };
       type Result = { code?: string; ok: boolean; text?: string };
       const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
         agentBrowser: (id: string, command: Command) => Promise<Result>;
@@ -131,13 +134,30 @@ export async function expectSemanticClickBoundaries(
       const hiddenNames = hiddenSnapshot.text
         ? (JSON.parse(hiddenSnapshot.text) as { elements: Array<{ name: string }> }).elements.map((element) => element.name)
         : [];
+      await contents?.executeJavaScript("document.activeElement?.blur()", true);
+      const tabResults = [];
+      let focused = "";
+      for (let index = 0; index < 8; index += 1) {
+        tabResults.push(await runtime.agentBrowser(request.conversationId, { action: "press", key: "Tab" }));
+        focused = await contents?.executeJavaScript("document.activeElement?.id") as string || "";
+        if (focused === "aria-disabled-action") break;
+      }
+      const disabledEnter = await runtime.agentBrowser(request.conversationId, {
+        action: "press", key: "Enter",
+      });
+      const disabledSpace = await runtime.agentBrowser(request.conversationId, {
+        action: "press", key: "Space",
+      });
       const state = await contents?.executeJavaScript(`({
         outer: window.__outerActionClicked === true,
         inner: window.__innerActionClicked === true,
         opacity: window.__opacityActionClicked === true,
         ariaDisabled: window.__ariaDisabledActionClicked === true,
       })`);
-      return { ariaDisabled, hidden, hiddenNames, hiddenSnapshot, inheritedDisabled, nested, state };
+      return {
+        ariaDisabled, disabledEnter, disabledSpace, focused, hidden, hiddenNames,
+        hiddenSnapshot, inheritedDisabled, nested, state, tabResults,
+      };
     },
     { conversationId, url },
   );
@@ -146,10 +166,17 @@ export async function expectSemanticClickBoundaries(
     nested: { ok: false, code: "not-found" },
     ariaDisabled: { disabled: true },
     inheritedDisabled: { ok: false, code: "invalid" },
+    disabledEnter: { ok: false, code: "invalid" },
+    disabledSpace: { ok: false, code: "invalid" },
+    focused: "aria-disabled-action",
     hiddenSnapshot: { ok: true },
     hidden: { ok: false, code: "not-found" },
     state: { outer: false, inner: false, opacity: false, ariaDisabled: false },
   });
+  const tabResults = evidence.tabResults ?? [];
+  expect(tabResults.length).toBeGreaterThan(0);
+  expect(tabResults.length).toBeLessThanOrEqual(8);
+  expect(tabResults.every((result) => result.ok)).toBe(true);
   expect(evidence.hiddenNames).not.toContain("Temporarily visible action");
 }
 

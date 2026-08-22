@@ -691,14 +691,25 @@ export async function agentPageRefHasFocus(
   return value === true;
 }
 
-export async function agentPageActivationBlocked(contents: WebContents): Promise<boolean> {
+export async function agentPageActivationBlocked(
+  contents: WebContents,
+): Promise<"disabled" | "file" | null> {
   const value = await execute(contents, `(() => {
     let active = document.activeElement;
     while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
-    return active?.tagName === "INPUT"
-      && String(active.type || "").toLowerCase() === "file";
+    if (active?.tagName === "INPUT"
+      && String(active.type || "").toLowerCase() === "file") return "file";
+    let current = active;
+    for (let depth = 0; current && depth < ${MAX_SEMANTIC_SCAN_NODES}; depth += 1) {
+      if (current.matches?.(":disabled") || current.disabled
+        || String(current.getAttribute?.("aria-disabled") || "").toLowerCase() === "true") {
+        return "disabled";
+      }
+      current = current.parentElement || current.getRootNode?.()?.host || null;
+    }
+    return current ? "disabled" : null;
   })()`);
-  return value === true;
+  return value === "file" || value === "disabled" ? value : null;
 }
 
 export async function showAgentPageCursor(

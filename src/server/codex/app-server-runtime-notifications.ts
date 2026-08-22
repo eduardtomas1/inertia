@@ -175,8 +175,18 @@ function projectAutoApprovalReview(
   if (
     method !== "item/autoApprovalReview/started"
     && method !== "item/autoApprovalReview/completed"
+    && method !== "autoApprovalReview/strictReviewRequired"
   ) return "not-handled";
   if (!ownsTurn(host, params)) return "handled";
+
+  if (method === "autoApprovalReview/strictReviewRequired") {
+    host.emitActivity(
+      "system",
+      "info",
+      "Approval auto-review escalated to strict review",
+    );
+    return "handled";
+  }
 
   const reviewId = boundedText(params.reviewId, 1_000);
   const review = objectValue(params.review);

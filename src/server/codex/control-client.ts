@@ -20,6 +20,11 @@ import {
   type JsonLineDecoderFailure,
   type JsonObject,
 } from "./protocol";
+import {
+  codexCurrentTimeReadResult,
+  isCodexCurrentTimeReadMethod,
+  parseCodexCurrentTimeRead,
+} from "./app-server-requests";
 
 export const CODEX_CONTROL_MAX_FRAME_BYTES = 4 * 1024 * 1024;
 export const CODEX_CONTROL_MAX_PROTOCOL_BYTES = 16 * 1024 * 1024;
@@ -200,6 +205,22 @@ export async function withCodexControlClient<T>(
       ? message.method
       : undefined;
     if (messageId !== undefined && method !== undefined) {
+      const params = objectValue(message?.params) ?? {};
+      const currentTimeRead = parseCodexCurrentTimeRead(method, params);
+      if (currentTimeRead) {
+        writeMessage({ id: messageId, result: codexCurrentTimeReadResult() });
+        return;
+      }
+      if (isCodexCurrentTimeReadMethod(method)) {
+        writeMessage({
+          id: messageId,
+          error: { code: -32602, message: "Malformed current-time request." },
+        });
+        failConnection(new Error(
+          "Codex control received a malformed current-time request.",
+        ));
+        return;
+      }
       // This one-shot control client has no UI/durable-turn route for server
       // requests such as approvals or elicitation. Never confuse a colliding
       // server request ID with the response to one of our pending requests.

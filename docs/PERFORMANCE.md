@@ -190,6 +190,13 @@ The renderer bundle measurements were unchanged to 0.1 KiB. Coarse cold start,
 Files first-open, terminal, and split timings varied across runs and are not
 claimed as improvements.
 
+The final-tree Electron capture below is visual no-regression evidence for the
+affected streaming surface. It uses the deterministic README fixture and shows
+the real dark-theme Work view during an active streamed response; latency
+claims come from the instrumented desktop reports above, not from the image.
+
+![Inertia Work view during an active streamed response](screenshots/inertia-performance-streaming-no-regression.png)
+
 The investigation rejected these hypotheses:
 
 - Loopback WebSocket deflate reduced bytes but took 11.8–29.4 ms versus

@@ -54,6 +54,7 @@ type LifecycleScenario =
   | "utf8-oversized"
   | "event-flood"
   | "descendant-liveness"
+  | "inactive-descendant"
   | "unrelated-liveness"
   | "descendant-cancel"
   | "slow"
@@ -130,7 +131,7 @@ const server = http.createServer((req, res) => {
         }, 75);
         return;
       }
-      if (["descendant-liveness", "unrelated-liveness", "descendant-cancel"].includes(scenario)) {
+      if (["descendant-liveness", "inactive-descendant", "unrelated-liveness", "descendant-cancel"].includes(scenario)) {
         json(res, undefined, 204);
         const childID = "opencode-child-session";
         const grandchildID = "opencode-grandchild-session";
@@ -162,14 +163,41 @@ const server = http.createServer((req, res) => {
           return;
         }
         setTimeout(() => sendEvent({
+          id: "child-created",
           type: "session.created",
           properties: {
             sessionID: childID,
             info: { ...session, id: childID, parentID: sessionID },
           },
         }), 30);
+        if (scenario === "inactive-descendant") {
+          let inactiveEvent = 0;
+          setInterval(() => {
+            inactiveEvent += 1;
+            sendEvent({
+              id: "child-idle-" + inactiveEvent,
+              type: "session.idle",
+              properties: { sessionID: childID },
+            });
+            sendEvent({
+              id: "child-metadata-" + inactiveEvent,
+              type: "session.updated",
+              properties: {
+                info: { ...session, id: childID, parentID: sessionID },
+              },
+            });
+            sendEvent({
+              id: "child-unknown-" + inactiveEvent,
+              type: "session.telemetry",
+              properties: { sessionID: childID },
+            });
+          }, 80);
+          return;
+        }
         if (scenario === "descendant-cancel") {
+          let childEvent = 0;
           setInterval(() => sendEvent({
+            id: "child-work-" + (++childEvent),
             type: "message.updated",
             properties: {
               sessionID: childID,
@@ -184,6 +212,7 @@ const server = http.createServer((req, res) => {
           return;
         }
         setTimeout(() => sendEvent({
+          id: "grandchild-created",
           type: "session.created",
           properties: {
             info: { ...session, id: grandchildID, parentID: childID },
@@ -191,11 +220,12 @@ const server = http.createServer((req, res) => {
         }), 80);
         for (const delay of [180, 330, 480, 630, 780]) {
           setTimeout(() => sendEvent({
+            id: "grandchild-work-" + delay,
             type: "message.part.updated",
             properties: {
               sessionID: grandchildID,
               part: {
-                id: "private-child-text",
+                id: "private-child-text-" + delay,
                 sessionID: grandchildID,
                 messageID: "private-child-assistant",
                 type: "text",
@@ -2034,6 +2064,41 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       text: "Parent resumed after descendant completion",
     });
     expect(result.text).not.toContain("Private descendant output");
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("does not let inactive descendant events refresh owned-run liveness", async () => {
+    const root = portableFixtureRoot("OpenCode inactive descendant");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "inactive-descendant"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 300,
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-inactive-descendant",
+      cwd: root,
+      prompt: "Ignore inactive child events",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "rpc-timeout",
+        terminalEvent: "event/inactivity-deadline",
+      },
+    });
     expect(manager.activeConversationIds()).toEqual([]);
   });
 

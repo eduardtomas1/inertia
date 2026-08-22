@@ -30,39 +30,86 @@ describe("OpenCode descendant session ownership", () => {
     expect(ownership.observe(event({
       type: "session.status",
       properties: { sessionID: "root-session", status: { type: "busy" } },
-    }))).toBe("root");
+    }))).toEqual({ scope: "root", active: false });
     expect(ownership.observe(created(
       "mismatched-child",
       "root-session",
       "different-session",
-    ))).toBe("unrelated");
+    ))).toEqual({ scope: "unrelated", active: false });
     expect(ownership.observe(created(
       "foreign-child",
       "foreign-parent",
-    ))).toBe("unrelated");
+    ))).toEqual({ scope: "unrelated", active: false });
     expect(ownership.observe(created("child-session", "root-session")))
-      .toBe("descendant");
+      .toEqual({ scope: "descendant", active: true });
     expect(ownership.observe(created(
       "grandchild-session",
       "child-session",
       null,
-    ))).toBe("descendant");
+    ))).toEqual({ scope: "descendant", active: true });
     expect(ownership.observe(event({
       type: "message.part.updated",
       properties: {
-        sessionID: "grandchild-session",
-        part: { type: "text", text: "private" },
+        part: {
+          id: "private-part",
+          messageID: "private-message",
+          sessionID: "grandchild-session",
+          type: "text",
+          text: "private",
+        },
       },
-    }))).toBe("descendant");
+    }))).toEqual({ scope: "descendant", active: true });
+  });
+
+  it("refreshes only validated, non-duplicate descendant work", () => {
+    const ownership = new OpenCodeSessionOwnership("root-session");
+    const childCreated = created("child-session", "root-session");
+    const activeMessage = event({
+      type: "message.updated",
+      properties: {
+        sessionID: "child-session",
+        info: {
+          id: "child-message",
+          sessionID: "child-session",
+          role: "assistant",
+        },
+      },
+    });
+
+    expect(ownership.observe(childCreated))
+      .toEqual({ scope: "descendant", active: true });
+    expect(ownership.observe(childCreated))
+      .toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(activeMessage))
+      .toEqual({ scope: "descendant", active: true });
+    expect(ownership.observe(activeMessage))
+      .toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(event({
+      id: "idle-event",
+      type: "session.idle",
+      properties: { sessionID: "child-session" },
+    }))).toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(event({
+      id: "metadata-event",
+      type: "session.updated",
+      properties: {
+        info: { id: "child-session", parentID: "root-session" },
+      },
+    }))).toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(event({
+      id: "unknown-event",
+      type: "session.telemetry",
+      properties: { sessionID: "child-session" },
+    }))).toEqual({ scope: "descendant", active: false });
   });
 
   it("rejects unsafe identities and bounds the verified session graph", () => {
     const ownership = new OpenCodeSessionOwnership("root-session");
     expect(ownership.observe(created("unsafe\nchild", "root-session")))
-      .toBe("unrelated");
+      .toEqual({ scope: "unrelated", active: false });
     for (let index = 0; index < 255; index += 1) {
       expect(ownership.observe(created(`child-${index}`, "root-session")))
-        .toBe("descendant");
+        .toEqual({ scope: "descendant", active: true });
     }
     expect(() => ownership.observe(created("child-overflow", "root-session")))
       .toThrow("bounded owned-session budget");

@@ -1096,10 +1096,10 @@ async function pumpOpenCodeEvents(
   );
   for await (const event of stream) {
     eventBudget.observe(event);
-    const scope = sessionOwnership.observe(event);
+    const { scope, active } = sessionOwnership.observe(event);
     if (scope === "unrelated") continue;
     if (scope === "descendant") {
-      handlers.onDescendantActivity();
+      if (active) handlers.onDescendantActivity();
       continue;
     }
     await handlers.onEvent(event);

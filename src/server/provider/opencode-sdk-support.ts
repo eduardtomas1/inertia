@@ -138,8 +138,10 @@ export function imageMime(path: string): string {
 export function openCodeEventSessionId(event: Event): string | undefined {
   const properties = event.properties as Record<string, unknown>;
   const info = objectValue(properties.info);
+  const part = objectValue(properties.part);
   return stringValue(properties.sessionID)
     ?? stringValue(info?.sessionID)
+    ?? stringValue(part?.sessionID)
     ?? (event.type === "session.created"
       || event.type === "session.updated"
       || event.type === "session.deleted"

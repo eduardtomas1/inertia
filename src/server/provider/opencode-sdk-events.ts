@@ -115,7 +115,7 @@ export function handleOpenCodeInteractionEvent(
     && !ownsOpenCodeInteractionSource(event.type, properties, ownership)
   ) return true;
   if (event.type === "permission.asked" || event.type === "permission.v2.asked") {
-    promptLifecycle.activityObserved = true;
+    if (sourceScope === "root") promptLifecycle.activityObserved = true;
     const nativeId = openCodeInteractionId(properties.id, "permission");
     const protocol = event.type === "permission.v2.asked" ? "v2" : "legacy";
     const sessionId = stringValue(properties.sessionID);
@@ -191,7 +191,7 @@ export function handleOpenCodeInteractionEvent(
     return true;
   }
   if (event.type === "question.asked" || event.type === "question.v2.asked") {
-    promptLifecycle.activityObserved = true;
+    if (sourceScope === "root") promptLifecycle.activityObserved = true;
     const nativeId = openCodeInteractionId(properties.id, "question");
     const protocol = event.type === "question.v2.asked" ? "v2" : "legacy";
     const sessionId = stringValue(properties.sessionID);

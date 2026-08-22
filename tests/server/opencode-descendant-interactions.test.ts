@@ -13,7 +13,11 @@ import {
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-function descendantInteractionServer(root: string, capturePath: string): string {
+function descendantInteractionServer(
+  root: string,
+  capturePath: string,
+  emitRootActivity = true,
+): string {
   return `
 const http = require("node:http");
 const fs = require("node:fs");
@@ -22,6 +26,7 @@ let port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
 const captured = [];
 const sessionID = "opencode-root-session";
 const childID = "opencode-child-session";
+const emitRootActivity = ${JSON.stringify(emitRootActivity)};
 let events;
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
@@ -48,7 +53,7 @@ const server = http.createServer((req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
       json(res, undefined, 204);
-      setTimeout(() => sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "root-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } }), 10);
+      if (emitRootActivity) setTimeout(() => sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "root-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } }), 10);
       setTimeout(() => sendEvent({ type: "session.created", properties: { sessionID: childID, info: { ...session, id: childID, parentID: sessionID } } }), 20);
       setTimeout(() => sendEvent({ type: "permission.v2.asked", properties: { id: "child-permission", sessionID: "unrelated-session", action: "edit", resources: ["foreign.ts"], source: { type: "tool", messageID: "foreign-assistant", callID: "foreign-call" } } }), 30);
       setTimeout(() => sendEvent({ type: "permission.v2.asked", properties: { id: "child-permission", sessionID: childID, action: "edit", resources: ["src/child.ts"], source: { type: "tool", messageID: "child-assistant", callID: "child-call" } } }), 40);
@@ -64,7 +69,7 @@ const server = http.createServer((req, res) => {
       json(res, true);
       sendEvent({ type: "question.v2.replied", properties: { sessionID: childID, requestID: "child-question", answers: [["Yes"]] } });
       sendEvent({ type: "message.part.updated", properties: { sessionID: childID, part: { id: "private-child-text", sessionID: childID, messageID: "child-assistant", type: "text", text: "Private child interaction output" } } });
-      sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "root-text", sessionID, messageID: "root-assistant", type: "text", text: "Parent resumed after child interaction" } } });
+      if (emitRootActivity) sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "root-text", sessionID, messageID: "root-assistant", type: "text", text: "Parent resumed after child interaction" } } });
       sendEvent({ type: "session.idle", properties: { sessionID } });
       return;
     }
@@ -154,6 +159,56 @@ describe("OpenCode descendant interactions", () => {
     }));
     expect(capture.captured.some(({ path }) =>
       path.includes("/api/session/unrelated-session/"))).toBe(false);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("does not let child interactions satisfy root completion activity", async () => {
+    const root = portableFixtureRoot("OpenCode child-only interaction");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      descendantInteractionServer(root, capturePath, false),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 250,
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-child-only-interaction",
+      cwd: root,
+      prompt: "Do not let child activity finish the root",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (approval) => {
+        expect(manager.respondToApproval(
+          approval.conversationId,
+          approval.request.requestId,
+          "approve",
+        )).toBe(true);
+      },
+      onInput: (input) => {
+        expect(manager.respondToInput(
+          input.conversationId,
+          input.request.requestId,
+          { [input.request.questions[0]!.id]: ["Yes"] },
+        )).toBe(true);
+      },
+    })).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "rpc-timeout",
+        terminalEvent: "event/inactivity-deadline",
+      },
+    });
     expect(manager.activeConversationIds()).toEqual([]);
   });
 });

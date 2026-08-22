@@ -5,6 +5,13 @@ import { previewNavigationTarget } from "../shared/preview-url.js";
 const INPUT_NAVIGATION_GRACE_MS = 250;
 const NAVIGATION_TIMEOUT_MS = 30_000;
 
+interface AgentPageBoundaryState {
+  mainFrameId: string | null;
+  nestedContentObserved: boolean;
+}
+
+const agentPageBoundaryStates = new WeakMap<WebContents, AgentPageBoundaryState>();
+
 function stopForAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("browser-action-cancelled");
 }
@@ -13,8 +20,36 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
   if (contents.debugger.isAttached()) {
     throw new Error("The Browser page is already attached to another debugger.");
   }
+  if (!contents.getURL()) await contents.loadURL("about:blank");
   contents.debugger.attach("1.3");
+  const state: AgentPageBoundaryState = {
+    mainFrameId: null,
+    nestedContentObserved: false,
+  };
+  agentPageBoundaryStates.set(contents, state);
+  contents.debugger.on("message", (_event, method, params) => {
+    const payload = objectRecord(params);
+    if (method === "Page.frameNavigated") {
+      const frame = objectRecord(payload?.frame);
+      const id = frame?.id;
+      if (typeof id === "string" && typeof frame?.parentId !== "string") {
+        state.mainFrameId = id;
+        state.nestedContentObserved = false;
+      }
+      return;
+    }
+    if (method === "Page.frameAttached") {
+      if (typeof payload?.parentFrameId === "string") state.nestedContentObserved = true;
+      return;
+    }
+    if (method === "DOM.shadowRootPushed") {
+      const root = objectRecord(payload?.root);
+      if (root?.shadowRootType !== "user-agent") state.nestedContentObserved = true;
+    }
+  });
   try {
+    await contents.debugger.sendCommand("Page.enable");
+    await contents.debugger.sendCommand("DOM.enable");
     await contents.debugger.sendCommand("Page.setInterceptFileChooserDialog", {
       enabled: true,
       cancel: true,
@@ -90,6 +125,7 @@ export function hasUnguardedAgentPageContent(
 export async function agentPageHasUnguardedNestedContent(
   contents: WebContents,
 ): Promise<boolean> {
+  if (agentPageBoundaryStates.get(contents)?.nestedContentObserved !== false) return true;
   if (!contents.debugger.isAttached()) {
     throw new Error("The Browser security debugger is unavailable.");
   }

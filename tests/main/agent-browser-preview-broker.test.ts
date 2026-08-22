@@ -11,6 +11,7 @@ const electronState = vi.hoisted(() => ({
       mockImplementationOnce(implementation: () => Promise<unknown>): unknown;
     };
     debugger: {
+      emitMessage(method: string, params: Record<string, unknown>): void;
       isAttached: () => boolean;
       sendCommand: ReturnType<typeof vi.fn<(method: string) => Promise<unknown>>>;
     };
@@ -77,11 +78,26 @@ vi.mock("electron", () => {
     private url = "";
     private title = "";
     private destroyed = false;
+    private readonly debuggerMessageHandlers: Array<(
+      event: unknown,
+      method: string,
+      params: Record<string, unknown>,
+    ) => void> = [];
     readonly debugger = {
       attached: false,
       attach: vi.fn(() => { this.debugger.attached = true; }),
       detach: vi.fn(() => { this.debugger.attached = false; }),
       isAttached: vi.fn(() => this.debugger.attached),
+      on: vi.fn((name: string, handler: (
+        event: unknown,
+        method: string,
+        params: Record<string, unknown>,
+      ) => void) => {
+        if (name === "message") this.debuggerMessageHandlers.push(handler);
+      }),
+      emitMessage: (method: string, params: Record<string, unknown>): void => {
+        for (const handler of this.debuggerMessageHandlers) handler({}, method, params);
+      },
       sendCommand: vi.fn(async (method: string) => {
         if (method === "Page.getFrameTree") {
           return { frameTree: { frame: { id: "main" } } };
@@ -241,8 +257,11 @@ describe("agent-owned native Browser", () => {
         preload: expect.stringMatching(/preview-agent-privacy\.cjs$/u),
       },
     });
-    expect(electronState.contents[0]!.debugger.sendCommand).not.toHaveBeenCalled();
-    expect(electronState.contents[0]!.debugger.isAttached()).toBe(false);
+    expect(electronState.contents[0]!.debugger.sendCommand)
+      .toHaveBeenCalledWith("Page.enable");
+    expect(electronState.contents[0]!.debugger.sendCommand)
+      .toHaveBeenCalledWith("DOM.enable");
+    expect(electronState.contents[0]!.debugger.isAttached()).toBe(true);
     await expect(broker.perform(conversationId, { action: "snapshot" }))
       .resolves.toMatchObject({ ok: true });
     expect(electronState.contents[0]!.debugger.sendCommand).toHaveBeenCalledWith(
@@ -552,6 +571,33 @@ describe("agent-owned native Browser", () => {
         message: "Screenshots are unavailable for nested page content.",
       });
     expect(contents.capturePage).not.toHaveBeenCalled();
+  });
+
+  it("retains privileged lifetime taint after a declarative closed root disappears", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/declarative-shadow",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    contents.debugger.emitMessage("DOM.shadowRootPushed", {
+      root: { nodeId: 12, shadowRootType: "closed" },
+    });
+
+    await expect(broker.perform(conversationId, { action: "snapshot" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "invalid",
+        message: "Page evidence is unavailable for nested page content.",
+      });
+    expect(contents.capturePage).not.toHaveBeenCalled();
+    contents.debugger.emitMessage("Page.frameNavigated", {
+      frame: { id: "replacement-main", url: "http://127.0.0.1:3000/clean" },
+    });
+    await expect(broker.perform(conversationId, { action: "snapshot" }))
+      .resolves.toMatchObject({ ok: true });
   });
 
   it("freezes visual capture and discards a screenshot when credential evidence races it", async () => {

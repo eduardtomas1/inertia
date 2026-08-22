@@ -1136,12 +1136,12 @@ export class PreviewBroker {
       event.preventDefault();
     }
   }
-
   async #loadURL(
     contents: PreviewTab["view"]["webContents"],
     url: string,
     signal?: AbortSignal,
   ): Promise<void> {
+    await this.#rendererOperation(contents, () => ensureAgentFileChooserBlock(contents), { signal });
     await this.#rendererOperation(
       contents,
       async () => { await contents.loadURL(url); },

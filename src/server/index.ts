@@ -719,8 +719,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
       }),
       createAgentWorkflowCommandHandler({
-        workflows: agentWorkflows,
-        providerTerminalResumes,
+        workflows: agentWorkflows, providerTerminalResumes,
+        conversationWork: store.conversationWork,
         broadcast,
         send,
       }),

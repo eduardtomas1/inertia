@@ -28,6 +28,10 @@ function dependencies(
       refresh: vi.fn(),
     } as unknown as AgentWorkflowController,
     providerTerminalResumes: { isActive: vi.fn(() => false) },
+    conversationWork: {
+      reserve: vi.fn(() => true),
+      release: vi.fn(),
+    },
     broadcast: vi.fn(),
     send: vi.fn(),
   };
@@ -42,6 +46,10 @@ describe("agent workflow commands", () => {
     const runtime = {
       workflows: { state, refresh } as unknown as AgentWorkflowController,
       providerTerminalResumes: { isActive: vi.fn(() => false) },
+      conversationWork: {
+        reserve: vi.fn(() => true),
+        release: vi.fn(),
+      },
       broadcast: vi.fn(),
       send: vi.fn(),
     };
@@ -92,7 +100,7 @@ describe("agent workflow commands", () => {
     const handler = createAgentWorkflowCommandHandler(runtime);
 
     await expect(handler({} as never, clearCommand)).rejects.toThrow(
-      /End the resumed provider terminal/u,
+      /End the active provider session/u,
     );
     expect(runtime.workflows.clearGoal).not.toHaveBeenCalled();
     await expect(handler({} as never, {
@@ -102,7 +110,51 @@ describe("agent workflow commands", () => {
         conversationId: clearCommand.payload.conversationId,
         refresh: true,
       },
-    })).rejects.toThrow(/End the resumed provider terminal/u);
+    })).rejects.toThrow(/End the active provider session/u);
     expect(runtime.workflows.refresh).not.toHaveBeenCalled();
+  });
+
+  it("holds provider-session authority until a native refresh settles", async () => {
+    let settle!: () => void;
+    const refresh = vi.fn(async () => await new Promise<void>((resolve) => {
+      settle = resolve;
+    }));
+    const runtime = dependencies(true);
+    runtime.workflows.refresh = refresh as never;
+    const handler = createAgentWorkflowCommandHandler(runtime);
+    const command: Extract<ClientCommand, { type: "agent.workflow.load" }> = {
+      type: "agent.workflow.load",
+      requestId: clearCommand.requestId,
+      payload: {
+        conversationId: clearCommand.payload.conversationId,
+        refresh: true,
+      },
+    };
+
+    const pending = handler({} as never, command);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+
+    expect(runtime.conversationWork.reserve).toHaveBeenCalledWith(
+      clearCommand.payload.conversationId,
+    );
+    expect(runtime.conversationWork.release).not.toHaveBeenCalled();
+
+    settle();
+    await expect(pending).resolves.toBe("handled");
+    expect(runtime.conversationWork.release).toHaveBeenCalledWith(
+      clearCommand.payload.conversationId,
+    );
+  });
+
+  it("rejects native workflow operations when provider-session authority is reserved", async () => {
+    const runtime = dependencies(true);
+    vi.mocked(runtime.conversationWork.reserve).mockReturnValue(false);
+    const handler = createAgentWorkflowCommandHandler(runtime);
+
+    await expect(handler({} as never, clearCommand)).rejects.toThrow(
+      /End the active provider session/u,
+    );
+    expect(runtime.workflows.clearGoal).not.toHaveBeenCalled();
+    expect(runtime.conversationWork.release).not.toHaveBeenCalled();
   });
 });

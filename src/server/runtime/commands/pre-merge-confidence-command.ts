@@ -22,6 +22,7 @@ interface PreMergeConfidenceCommandContext<Repository> {
   runVerified: <Result>(
     repository: Repository,
     operation: (root: string) => Promise<Result>,
+    options: { deadlineAt: number; signal: AbortSignal },
   ) => Promise<Result>;
   send: (socket: WebSocket, event: ServerEvent) => void;
 }
@@ -50,6 +51,7 @@ export async function handlePreMergeConfidenceCommand<Repository>({
             repository,
             async (root): Promise<GitPreMergeConfidence> =>
               await inspectGitHubPreMergeConfidence(root, { signal }),
+            { deadlineAt: deadline.deadlineAt, signal },
           );
         } catch (error) {
           recordTriggeringFailure(error);

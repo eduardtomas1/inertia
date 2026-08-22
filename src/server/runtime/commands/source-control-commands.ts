@@ -227,10 +227,11 @@ export function createSourceControlCommandHandler(
   const runVerifiedRepositoryOperation = async <Result>(
     repository: Awaited<ReturnType<typeof resolveCommandRepository>>,
     operation: (root: string) => Promise<Result>,
+    options: { deadlineAt?: number; signal?: AbortSignal } = {},
   ): Promise<Result> => {
-    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity);
+    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity, options);
     const result = await operation(repository.repositoryRoot);
-    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity);
+    await verifyCommandRepository(repository.secureRoot, repository.metadataMarkerIdentity, options);
     return result;
   };
   const trackedRepositoryOptions = (

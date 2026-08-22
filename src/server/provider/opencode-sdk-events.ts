@@ -95,6 +95,138 @@ export function openCodeEventRequiresPromptAdmission(event: Event): boolean {
     || event.type === "question.v2.rejected";
 }
 
+export function handleOpenCodeInteractionEvent(
+  event: Event,
+  options: AgentHarnessStartOptions,
+  client: OpencodeClient,
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
+  approvals: Map<string, OpenCodePendingApproval>,
+  inputs: Map<string, OpenCodePendingInput>,
+  interactionState: OpenCodeInteractionState,
+  promptLifecycle: OpenCodePromptLifecycle,
+  ownership: OpenCodeRunOwnership,
+  sourceScope: "root" | "verified-descendant",
+  onFailure: (error: unknown) => void,
+): boolean {
+  if (!openCodeEventRequiresPromptAdmission(event)) return false;
+  const properties = event.properties as Record<string, unknown>;
+  if (
+    sourceScope === "root"
+    && !ownsOpenCodeInteractionSource(event.type, properties, ownership)
+  ) return true;
+  if (event.type === "permission.asked" || event.type === "permission.v2.asked") {
+    if (sourceScope === "root") promptLifecycle.activityObserved = true;
+    const nativeId = openCodeInteractionId(properties.id, "permission");
+    const protocol = event.type === "permission.v2.asked" ? "v2" : "legacy";
+    const sessionId = stringValue(properties.sessionID);
+    if (!sessionId) {
+      throw new Error("OpenCode sent a permission without a session identity.");
+    }
+    if (!observeOpenCodeInteraction(
+      interactionState.approvals,
+      sessionId,
+      nativeId,
+    )) return true;
+    const permission = stringValue(properties.permission)
+      ?? stringValue(properties.action)
+      ?? "tool";
+    if (
+      options.input.access === "full"
+      || (options.input.access === "auto-edit" && permission === "edit")
+    ) {
+      void replyOpenCodePermission(client, protocol, sessionId, nativeId, "once")
+        .catch(onFailure);
+      return true;
+    }
+    const display = openCodeApprovalDisplay(properties, permission);
+    if (!display) {
+      void replyOpenCodePermission(client, protocol, sessionId, nativeId, "reject")
+        .catch(onFailure);
+      return true;
+    }
+    const { detail, resources, title } = display;
+    const requestId = randomUUID();
+    if (approvals.size >= MAX_PENDING_INTERACTIONS) {
+      throw new Error("OpenCode exceeded the bounded approval budget.");
+    }
+    approvals.set(requestId, {
+      nativeId,
+      protocol,
+      sessionId,
+      settled: false,
+      ...openCodeExternalResolution(),
+    });
+    emitter.rich({
+      type: "approval",
+      request: {
+        requestId,
+        kind: permission === "bash"
+          ? "command"
+          : permission === "edit"
+            ? "file-change"
+            : "permissions",
+        title: bounded(title),
+        detail: bounded(detail),
+        cwd: options.input.cwd,
+        permissionRoots: resources
+          .map((path) => ({ path: bounded(path), access: "write" as const }))
+          .slice(0, 20),
+        availableDecisions: ["approve", "deny", "cancel"],
+      },
+    });
+    return true;
+  }
+  if (event.type === "permission.replied" || event.type === "permission.v2.replied") {
+    const nativeId = stringValue(properties.requestID);
+    const sessionId = stringValue(properties.sessionID);
+    if (nativeId && sessionId) {
+      resolveOpenCodeApproval(
+        nativeId,
+        sessionId,
+        properties.reply,
+        approvals,
+        emitter,
+      );
+    }
+    return true;
+  }
+  if (event.type === "question.asked" || event.type === "question.v2.asked") {
+    if (sourceScope === "root") promptLifecycle.activityObserved = true;
+    const nativeId = openCodeInteractionId(properties.id, "question");
+    const protocol = event.type === "question.v2.asked" ? "v2" : "legacy";
+    const sessionId = stringValue(properties.sessionID);
+    if (!sessionId) {
+      throw new Error("OpenCode sent a question without a session identity.");
+    }
+    if (!observeOpenCodeInteraction(
+      interactionState.inputs,
+      sessionId,
+      nativeId,
+    )) return true;
+    const questions = openCodeQuestionPayload(properties.questions);
+    const requestId = randomUUID();
+    if (inputs.size >= MAX_PENDING_INTERACTIONS) {
+      throw new Error("OpenCode exceeded the bounded question budget.");
+    }
+    inputs.set(requestId, {
+      nativeId,
+      protocol,
+      sessionId,
+      questions,
+      settled: false,
+      ...openCodeExternalResolution(),
+    });
+    emitter.rich({ type: "input", request: openCodeQuestions(requestId, questions) });
+    return true;
+  }
+  const nativeId = stringValue(properties.requestID);
+  const sessionId = stringValue(properties.sessionID);
+  if (nativeId && sessionId) {
+    resolveOpenCodeInput(nativeId, sessionId, inputs, emitter);
+  }
+  return true;
+}
+
 export function handleOpenCodeEvent(
   event: Event,
   options: AgentHarnessStartOptions,
@@ -124,6 +256,19 @@ export function handleOpenCodeEvent(
       }
     }
   }
+  if (handleOpenCodeInteractionEvent(
+    event,
+    options,
+    client,
+    emitter,
+    approvals,
+    inputs,
+    interactionState,
+    promptLifecycle,
+    ownership,
+    "root",
+    onFailure,
+  )) return;
   if (event.type === "message.updated") {
     const info = objectValue(properties.info);
     const messageId = stringValue(info?.id);
@@ -425,85 +570,6 @@ export function handleOpenCodeEvent(
     promptLifecycle.activityObserved = true;
     const todos = Array.isArray(properties.todos) ? properties.todos : [];
     emitter.rich({ type: "plan", explanation: null, steps: todos.flatMap(todoStep) });
-  } else if (event.type === "permission.asked" || event.type === "permission.v2.asked") {
-    if (!ownsOpenCodeInteractionSource(event.type, properties, ownership)) return;
-    promptLifecycle.activityObserved = true;
-    const nativeId = openCodeInteractionId(properties.id, "permission");
-    if (!observeOpenCodeInteraction(interactionState.approvals, nativeId)) return;
-    const protocol = event.type === "permission.v2.asked" ? "v2" : "legacy";
-    const sessionId = stringValue(properties.sessionID);
-    if (!sessionId) throw new Error("OpenCode sent a permission without a session identity.");
-    const permission = stringValue(properties.permission) ?? stringValue(properties.action) ?? "tool";
-    if (options.input.access === "full" || (options.input.access === "auto-edit" && permission === "edit")) {
-      void replyOpenCodePermission(client, protocol, sessionId, nativeId, "once")
-        .catch(onFailure);
-      return;
-    }
-    const display = openCodeApprovalDisplay(properties, permission);
-    if (!display) {
-      void replyOpenCodePermission(client, protocol, sessionId, nativeId, "reject")
-        .catch(onFailure);
-      return;
-    }
-    const { detail, resources, title } = display;
-    const requestId = randomUUID();
-    if (approvals.size >= MAX_PENDING_INTERACTIONS) {
-      throw new Error("OpenCode exceeded the bounded approval budget.");
-    }
-    approvals.set(requestId, {
-      nativeId,
-      protocol,
-      sessionId,
-      settled: false,
-      ...openCodeExternalResolution(),
-    });
-    emitter.rich({
-      type: "approval",
-      request: {
-        requestId,
-        kind: permission === "bash" ? "command" : permission === "edit" ? "file-change" : "permissions",
-        title: bounded(title),
-        detail: bounded(detail),
-        cwd: options.input.cwd,
-        permissionRoots: resources.map((path) => ({ path: bounded(path), access: "write" as const })).slice(0, 20),
-        availableDecisions: ["approve", "deny", "cancel"],
-      },
-    });
-  } else if (event.type === "permission.replied" || event.type === "permission.v2.replied") {
-    if (!ownsOpenCodeInteractionSource(event.type, properties, ownership)) return;
-    const nativeId = stringValue(properties.requestID);
-    if (nativeId) resolveOpenCodeApproval(nativeId, properties.reply, approvals, emitter);
-  } else if (event.type === "question.asked" || event.type === "question.v2.asked") {
-    if (!ownsOpenCodeInteractionSource(event.type, properties, ownership)) return;
-    promptLifecycle.activityObserved = true;
-    const nativeId = openCodeInteractionId(properties.id, "question");
-    if (!observeOpenCodeInteraction(interactionState.inputs, nativeId)) return;
-    const protocol = event.type === "question.v2.asked" ? "v2" : "legacy";
-    const sessionId = stringValue(properties.sessionID);
-    if (!sessionId) throw new Error("OpenCode sent a question without a session identity.");
-    const questions = openCodeQuestionPayload(properties.questions);
-    const requestId = randomUUID();
-    if (inputs.size >= MAX_PENDING_INTERACTIONS) {
-      throw new Error("OpenCode exceeded the bounded question budget.");
-    }
-    inputs.set(requestId, {
-      nativeId,
-      protocol,
-      sessionId,
-      questions,
-      settled: false,
-      ...openCodeExternalResolution(),
-    });
-    emitter.rich({ type: "input", request: openCodeQuestions(requestId, questions) });
-  } else if (
-    event.type === "question.replied"
-    || event.type === "question.v2.replied"
-    || event.type === "question.rejected"
-    || event.type === "question.v2.rejected"
-  ) {
-    if (!ownsOpenCodeInteractionSource(event.type, properties, ownership)) return;
-    const nativeId = stringValue(properties.requestID);
-    if (nativeId) resolveOpenCodeInput(nativeId, inputs, emitter);
   } else if (event.type === "session.deleted") {
     const message = "OpenCode deleted the active session before the run completed.";
     failureState.terminal = {
@@ -607,13 +673,15 @@ function ownsOpenCodeInteractionSource(
 
 function observeOpenCodeInteraction(
   observed: Set<string>,
+  sessionId: string,
   nativeId: string,
 ): boolean {
-  if (observed.has(nativeId)) return false;
+  const identity = `${sessionId.length}:${sessionId}${nativeId}`;
+  if (observed.has(identity)) return false;
   if (observed.size >= MAX_OBSERVED_INTERACTIONS) {
     throw new Error("OpenCode exceeded the bounded interaction replay budget.");
   }
-  observed.add(nativeId);
+  observed.add(identity);
   return true;
 }
 
@@ -630,12 +698,16 @@ function openCodeExternalResolution(): Pick<
 
 function resolveOpenCodeApproval(
   nativeId: string,
+  sessionId: string,
   reply: unknown,
   approvals: Map<string, OpenCodePendingApproval>,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
 ): void {
   for (const [requestId, pending] of approvals) {
-    if (pending.nativeId !== nativeId) continue;
+    if (
+      pending.nativeId !== nativeId
+      || pending.sessionId !== sessionId
+    ) continue;
     pending.settled = true;
     approvals.delete(requestId);
     pending.resolveExternal();
@@ -649,11 +721,15 @@ function resolveOpenCodeApproval(
 
 function resolveOpenCodeInput(
   nativeId: string,
+  sessionId: string,
   inputs: Map<string, OpenCodePendingInput>,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
 ): void {
   for (const [requestId, pending] of inputs) {
-    if (pending.nativeId !== nativeId) continue;
+    if (
+      pending.nativeId !== nativeId
+      || pending.sessionId !== sessionId
+    ) continue;
     pending.settled = true;
     inputs.delete(requestId);
     pending.resolveExternal();

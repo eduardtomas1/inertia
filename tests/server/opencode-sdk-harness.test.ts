@@ -53,6 +53,10 @@ type LifecycleScenario =
   | "oversized"
   | "utf8-oversized"
   | "event-flood"
+  | "descendant-liveness"
+  | "inactive-descendant"
+  | "unrelated-liveness"
+  | "descendant-cancel"
   | "slow"
   | "endless"
   | "no-image";
@@ -125,6 +129,137 @@ const server = http.createServer((req, res) => {
             ? { type: "session.status", properties: { sessionID, status: { type: "idle" } } }
             : { type: "session.idle", properties: { sessionID } });
         }, 75);
+        return;
+      }
+      if (["descendant-liveness", "inactive-descendant", "unrelated-liveness", "descendant-cancel"].includes(scenario)) {
+        json(res, undefined, 204);
+        const childID = "opencode-child-session";
+        const grandchildID = "opencode-grandchild-session";
+        setTimeout(() => sendEvent({
+          type: "message.updated",
+          properties: {
+            sessionID,
+            info: {
+              id: "root-assistant",
+              parentID: parsed.messageID,
+              sessionID,
+              role: "assistant",
+            },
+          },
+        }), 10);
+        if (scenario === "unrelated-liveness") {
+          setInterval(() => sendEvent({
+            type: "message.updated",
+            properties: {
+              sessionID: "unrelated-session",
+              info: {
+                id: "unrelated-assistant",
+                parentID: "unrelated-prompt",
+                sessionID: "unrelated-session",
+                role: "assistant",
+              },
+            },
+          }), 80);
+          return;
+        }
+        setTimeout(() => sendEvent({
+          id: "child-created",
+          type: "session.created",
+          properties: {
+            sessionID: childID,
+            info: { ...session, id: childID, parentID: sessionID },
+          },
+        }), 30);
+        if (scenario === "inactive-descendant") {
+          let inactiveEvent = 0;
+          setInterval(() => {
+            inactiveEvent += 1;
+            sendEvent({
+              id: "child-idle-" + inactiveEvent,
+              type: "session.idle",
+              properties: { sessionID: childID },
+            });
+            sendEvent({
+              id: "child-metadata-" + inactiveEvent,
+              type: "session.updated",
+              properties: {
+                info: { ...session, id: childID, parentID: sessionID },
+              },
+            });
+            sendEvent({
+              id: "child-unknown-" + inactiveEvent,
+              type: "session.telemetry",
+              properties: { sessionID: childID },
+            });
+            sendEvent({
+              id: "child-malformed-work-" + inactiveEvent,
+              type: "session.next.text.delta",
+              properties: { sessionID: childID, timestamp: Date.now() },
+            });
+          }, 80);
+          return;
+        }
+        if (scenario === "descendant-cancel") {
+          let childEvent = 0;
+          setInterval(() => sendEvent({
+            id: "child-work-" + (++childEvent),
+            type: "message.updated",
+            properties: {
+              sessionID: childID,
+              info: {
+                id: "child-assistant",
+                parentID: "child-prompt",
+                sessionID: childID,
+                role: "assistant",
+                tokens: { output: childEvent },
+              },
+            },
+          }), 80);
+          return;
+        }
+        setTimeout(() => sendEvent({
+          id: "grandchild-created",
+          type: "session.created",
+          properties: {
+            info: { ...session, id: grandchildID, parentID: childID },
+          },
+        }), 80);
+        for (const delay of [180, 330, 480, 630, 780]) {
+          setTimeout(() => sendEvent({
+            id: "grandchild-work-" + delay,
+            type: "message.part.updated",
+            properties: {
+              sessionID: grandchildID,
+              part: {
+                id: "private-child-text-" + delay,
+                sessionID: grandchildID,
+                messageID: "private-child-assistant",
+                type: "text",
+                text: "Private descendant output must not project",
+              },
+            },
+          }), delay);
+        }
+        setTimeout(() => sendEvent({
+          type: "session.idle",
+          properties: { sessionID: grandchildID },
+        }), 820);
+        setTimeout(() => {
+          sendEvent({
+            type: "message.part.updated",
+            properties: {
+              sessionID,
+              part: {
+                id: "root-text",
+                sessionID,
+                messageID: "root-assistant",
+                type: "text",
+                text: "Parent resumed after descendant completion",
+              },
+            },
+          });
+          sendEvent({ type: "session.idle", properties: { sessionID } });
+        }, 900);
         return;
       }
       if (scenario === "early-permission-follow-up") {
@@ -1897,6 +2032,161 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capture = JSON.parse(readFileSync(capturePath, "utf8")) as { port: number };
     await waitFor(
       "the unresponsive OpenCode server port to close",
+      async () => !(await loopbackPortIsOpen(capture.port)),
+    );
+    expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
+    expect(manager.activeConversationIds()).toEqual([]);
+  }, 10_000);
+
+  it("uses verified transitive descendant activity for liveness without projecting it", async () => {
+    const root = portableFixtureRoot("OpenCode descendant liveness");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "descendant-liveness"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 300,
+      })]),
+    );
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-descendant-liveness",
+      cwd: root,
+      prompt: "Delegate and resume",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+
+    expect(result).toMatchObject({
+      status: "completed",
+      text: "Parent resumed after descendant completion",
+    });
+    expect(result.text).not.toContain("Private descendant output");
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("does not let inactive descendant events refresh owned-run liveness", async () => {
+    const root = portableFixtureRoot("OpenCode inactive descendant");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "inactive-descendant"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 300,
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-inactive-descendant",
+      cwd: root,
+      prompt: "Ignore inactive child events",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "rpc-timeout",
+        terminalEvent: "event/inactivity-deadline",
+      },
+    });
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("does not let unrelated directory sessions refresh owned-run liveness", async () => {
+    const root = portableFixtureRoot("OpenCode unrelated liveness");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "unrelated-liveness"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 300,
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-unrelated-liveness",
+      cwd: root,
+      prompt: "Ignore foreign sessions",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "rpc-timeout",
+        terminalEvent: "event/inactivity-deadline",
+      },
+    });
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("cancels and closes the owned process tree while a descendant stays active", async () => {
+    const root = portableFixtureRoot("OpenCode descendant cancellation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "descendant-cancel"),
+    );
+    const terminateOwnedProcessTree = vi.fn(
+      async (child, force) => await terminateProcessTreeAndWait(child, force),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 300,
+        terminateProcessTree: terminateOwnedProcessTree,
+      })]),
+    );
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => { markRunning = resolve; });
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-descendant-cancel",
+      cwd: root,
+      prompt: "Delegate until cancelled",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onStatus: ({ status }) => { if (status === "running") markRunning(); },
+    });
+
+    await running;
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(manager.activeConversationIds()).toContain(
+      "opencode-descendant-cancel",
+    );
+    expect(manager.cancel("opencode-descendant-cancel")).toBe(true);
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    const capture = readStableCapture<{ port: number }>(capturePath);
+    await waitFor(
+      "the descendant-active OpenCode server to close",
       async () => !(await loopbackPortIsOpen(capture.port)),
     );
     expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();

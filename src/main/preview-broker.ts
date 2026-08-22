@@ -40,6 +40,7 @@ interface PreviewSlot {
   activeTabId: string;
   bounds: Rectangle | null;
   activity: AgentBrowserActivity | null;
+  agentQueue: Promise<void>;
 }
 
 interface PreviewBrokerOptions {
@@ -228,7 +229,8 @@ export class PreviewBroker {
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult> {
     try {
-      const owned = this.#slotForContext(previewContext(conversationId));
+      const contextId = previewContext(conversationId);
+      const owned = this.#slotForContext(contextId);
       if (!owned) {
         return failure(
           "unavailable",
@@ -236,40 +238,52 @@ export class PreviewBroker {
         );
       }
       const [ownerId, slot] = owned;
-      stopForAbort(signal);
-      switch (command.action) {
-        case "snapshot":
-          return await this.#snapshot(ownerId, slot, signal);
-        case "screenshot":
-          return await this.#screenshot(ownerId, slot, signal);
-        case "navigate":
-          return await this.#agentNavigate(ownerId, slot, command.url, signal);
-        case "click":
-          return await this.#click(ownerId, slot, command.ref, signal);
-        case "type":
-          return await this.#type(ownerId, slot, command.ref, command.text, command.replace, signal);
-        case "press":
-          return this.#press(ownerId, slot, command.key, signal);
-        case "scroll":
-          return this.#scroll(ownerId, slot, command.deltaY, signal);
-        case "tabs":
-          return this.#success(slot, JSON.stringify(this.#agentState(slot)));
-        case "tab-open":
-          return await this.#agentOpenTab(ownerId, slot, command.url, signal);
-        case "tab-activate":
-          if (!slot.tabs.has(command.tabId)) {
-            return failure("not-found", "That Inertia Browser tab no longer exists.");
-          }
-          this.#activateTab(ownerId, slot, command.tabId);
-          this.#record(ownerId, slot, "tab-activate", "Agent switched pages");
-          return this.#success(slot, JSON.stringify(this.#agentState(slot)));
-        case "tab-close":
-          if (!slot.tabs.has(command.tabId)) {
-            return failure("not-found", "That Inertia Browser tab no longer exists.");
-          }
-          this.#closeTab(ownerId, slot, command.tabId);
-          this.#record(ownerId, slot, "tab-close", "Agent closed a page");
-          return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+      const previous = slot.agentQueue;
+      let release = (): void => undefined;
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      slot.agentQueue = previous.then(() => current);
+      await previous;
+      try {
+        if (this.#ownedSlot(ownerId, contextId) !== slot) {
+          return failure("unavailable", "This chat's Inertia Browser was closed.");
+        }
+        stopForAbort(signal);
+        switch (command.action) {
+          case "snapshot":
+            return await this.#snapshot(ownerId, slot, signal);
+          case "screenshot":
+            return await this.#screenshot(ownerId, slot, signal);
+          case "navigate":
+            return await this.#agentNavigate(ownerId, slot, command.url, signal);
+          case "click":
+            return await this.#click(ownerId, slot, command.ref, signal);
+          case "type":
+            return await this.#type(ownerId, slot, command.ref, command.text, command.replace, signal);
+          case "press":
+            return this.#press(ownerId, slot, command.key, signal);
+          case "scroll":
+            return this.#scroll(ownerId, slot, command.deltaY, signal);
+          case "tabs":
+            return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+          case "tab-open":
+            return await this.#agentOpenTab(ownerId, slot, command.url, signal);
+          case "tab-activate":
+            if (!slot.tabs.has(command.tabId)) {
+              return failure("not-found", "That Inertia Browser tab no longer exists.");
+            }
+            this.#activateTab(ownerId, slot, command.tabId);
+            this.#record(ownerId, slot, "tab-activate", "Agent switched pages");
+            return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+          case "tab-close":
+            if (!slot.tabs.has(command.tabId)) {
+              return failure("not-found", "That Inertia Browser tab no longer exists.");
+            }
+            this.#closeTab(ownerId, slot, command.tabId);
+            this.#record(ownerId, slot, "tab-close", "Agent closed a page");
+            return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+        }
+      } finally {
+        release();
       }
     } catch (error) {
       return error instanceof Error && error.message === "browser-action-cancelled"
@@ -448,6 +462,7 @@ export class PreviewBroker {
       activeTabId: "",
       bounds: null,
       activity: null,
+      agentQueue: Promise.resolve(),
     };
     const tab = this.#openTab(ownerId, slot);
     slot.activeTabId = tab.id;
@@ -551,11 +566,12 @@ export class PreviewBroker {
     action: AgentBrowserActivity["action"],
     label: string,
     point?: { x: number; y: number },
+    tabId = slot.activeTabId,
   ): void {
     slot.activity = {
       action,
       label,
-      tabId: slot.activeTabId,
+      tabId,
       at: new Date().toISOString(),
       ...point,
     };
@@ -585,21 +601,26 @@ export class PreviewBroker {
   }
 
   async #screenshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {
-    const contents = this.#active(slot).view.webContents;
+    const tab = this.#active(slot);
+    const tabId = tab.id;
+    const contents = tab.view.webContents;
     if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
     let image = await contents.capturePage();
     stopForAbort(signal);
+    if (slot.tabs.get(tabId) !== tab || contents.isDestroyed()) {
+      return failure("not-found", "The captured Browser tab was closed before its screenshot completed.");
+    }
     image = this.#boundedImage(image);
     const png = image.toPNG();
     if (png.byteLength > MAX_AGENT_BROWSER_SCREENSHOT_BYTES) {
       return failure("too-large", "The Browser screenshot exceeded its bounded image size.");
     }
-    this.#record(ownerId, slot, "screenshot", "Agent captured this page");
+    this.#record(ownerId, slot, "screenshot", "Agent captured this page", undefined, tabId);
     return this.#success(
       slot,
       JSON.stringify({
         captured: true,
-        tabId: slot.activeTabId,
+        tabId,
         url: contents.getURL(),
         width: image.getSize().width,
         height: image.getSize().height,

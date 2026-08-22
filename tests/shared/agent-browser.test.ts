@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_AGENT_BROWSER_SCREENSHOT_BYTES,
+  MAX_AGENT_BROWSER_TEXT_BYTES,
   parseAgentBrowserCommand,
   parseAgentBrowserResult,
 } from "../../src/shared/agent-browser";
@@ -44,6 +45,11 @@ describe("agent browser boundary", () => {
     });
     expect(parseAgentBrowserResult({ ok: true, text: "snapshot", state: { ...state, tabs: [] } }))
       .toBeNull();
+    expect(parseAgentBrowserResult({
+      ok: true,
+      text: "é".repeat(Math.floor(MAX_AGENT_BROWSER_TEXT_BYTES / 2) + 1),
+      state,
+    })).toBeNull();
     expect(parseAgentBrowserResult({
       ok: true,
       text: "snapshot",

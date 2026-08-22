@@ -1,4 +1,6 @@
-export const MAX_AGENT_BROWSER_TEXT_CHARS = 64_000;
+import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "./provider-host-tools";
+
+export const MAX_AGENT_BROWSER_TEXT_BYTES = MAX_PROVIDER_HOST_TOOL_RESULT_BYTES;
 export const MAX_AGENT_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 export const MAX_AGENT_BROWSER_TYPE_CHARS = 4_000;
 
@@ -252,6 +254,10 @@ function decodedBase64Bytes(value: string): number | null {
   return value.length / 4 * 3 - padding;
 }
 
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
 export function parseAgentBrowserResult(value: unknown): AgentBrowserResult | null {
   if (!plainObject(value) || typeof value.ok !== "boolean") return null;
   if (!value.ok) {
@@ -270,7 +276,7 @@ export function parseAgentBrowserResult(value: unknown): AgentBrowserResult | nu
   if (
     !exactKeys(value, ["ok", "text", "state"], ["image"])
     || typeof value.text !== "string"
-    || value.text.length > MAX_AGENT_BROWSER_TEXT_CHARS
+    || utf8Bytes(value.text) > MAX_AGENT_BROWSER_TEXT_BYTES
     || value.text.includes("\0")
     || !safeState(value.state)
   ) return null;

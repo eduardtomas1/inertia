@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { MAX_AGENT_BROWSER_SCREENSHOT_BYTES } from "../../shared/agent-browser";
+import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "../../shared/provider-host-tools";
 import type {
   ProviderHostToolApprovalRequest,
   ProviderHostToolBridge,
@@ -15,7 +16,6 @@ const HOST_TOOL_APPROVAL_ID_PREFIX = "inertia-host-tool:";
 const HOST_TOOL_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 const MAX_HOST_TOOL_CALLS = 128;
 const MAX_PENDING_HOST_TOOL_CALLS = 8;
-const MAX_HOST_TOOL_RESULT_BYTES = 32 * 1024;
 
 interface PendingApproval {
   callId: string;
@@ -68,7 +68,7 @@ function boundedUtf8(value: string, maximumBytes: number): string {
 function failure(message: string): ProviderHostToolResult {
   return {
     success: false,
-    text: boundedUtf8(JSON.stringify({ error: { code: "host_tool_rejected", message } }), MAX_HOST_TOOL_RESULT_BYTES),
+    text: boundedUtf8(JSON.stringify({ error: { code: "host_tool_rejected", message } }), MAX_PROVIDER_HOST_TOOL_RESULT_BYTES),
   };
 }
 
@@ -174,7 +174,7 @@ export class ProviderHostToolRuntime {
           ? failure("The Inertia chat-tool returned invalid visual evidence.")
           : {
               success: result.success,
-              text: boundedUtf8(result.text, MAX_HOST_TOOL_RESULT_BYTES),
+              text: boundedUtf8(result.text, MAX_PROVIDER_HOST_TOOL_RESULT_BYTES),
               ...(image ? { image } : {}),
             };
       },

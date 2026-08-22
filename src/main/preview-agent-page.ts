@@ -1,5 +1,7 @@
 import type { WebContents } from "electron";
 
+import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
+
 const AGENT_BROWSER_WORLD_ID = 1001;
 const MAX_SEMANTIC_ELEMENTS = 200;
 const MAX_PAGE_TEXT_CHARS = 12_000;
@@ -18,6 +20,71 @@ function plainObject(value: unknown): value is Record<string, unknown> {
 
 function boundedString(value: unknown, maximum: number): string {
   return typeof value === "string" ? value.slice(0, maximum) : "";
+}
+
+function viewport(value: unknown): Record<string, number> {
+  if (!plainObject(value)) return {};
+  const entries = ["width", "height", "scrollX", "scrollY"]
+    .flatMap((key) => {
+      const candidate = value[key];
+      return typeof candidate === "number" && Number.isFinite(candidate)
+        ? [[key, candidate] as const]
+        : [];
+    });
+  return Object.fromEntries(entries);
+}
+
+function serializedSnapshot(
+  value: Record<string, unknown>,
+  text: string,
+  elements: readonly unknown[],
+  truncated: boolean,
+): string {
+  return JSON.stringify({
+    title: boundedString(value.title, 300),
+    url: boundedString(value.url, 4_096),
+    viewport: viewport(value.viewport),
+    text,
+    elements,
+    truncated,
+  });
+}
+
+/** Keep semantic JSON intact at the exact downstream host-tool byte limit. */
+export function serializeAgentPageSnapshot(value: unknown): string {
+  if (!plainObject(value) || !Array.isArray(value.elements)) {
+    throw new Error("The semantic browser snapshot was malformed.");
+  }
+  const sourceText = boundedString(value.text, MAX_PAGE_TEXT_CHARS);
+  const sourceElements = value.elements;
+  const byteLength = (candidate: string): number => Buffer.byteLength(candidate, "utf8");
+  let text = sourceText;
+  let elements = sourceElements;
+  let truncated = value.truncated === true;
+  let serialized = serializedSnapshot(value, text, elements, truncated);
+  if (byteLength(serialized) <= MAX_AGENT_BROWSER_TEXT_BYTES) return serialized;
+
+  truncated = true;
+  text = text.slice(0, 4_000);
+  let low = 0;
+  let high = sourceElements.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const candidate = serializedSnapshot(
+      value,
+      text,
+      sourceElements.slice(0, middle),
+      true,
+    );
+    if (byteLength(candidate) <= MAX_AGENT_BROWSER_TEXT_BYTES) low = middle;
+    else high = middle - 1;
+  }
+  elements = sourceElements.slice(0, low);
+  serialized = serializedSnapshot(value, text, elements, truncated);
+  if (byteLength(serialized) > MAX_AGENT_BROWSER_TEXT_BYTES) {
+    throw new Error("The semantic browser snapshot exceeded its bounded result size.");
+  }
+  return serialized;
 }
 
 function target(value: unknown): PreviewAgentTarget {
@@ -117,11 +184,7 @@ export async function semanticPageSnapshot(
       truncated: elements.length >= ${MAX_SEMANTIC_ELEMENTS},
     };
   })()`);
-  const serialized = JSON.stringify(value);
-  if (serialized.length > 64_000) {
-    throw new Error("The semantic browser snapshot exceeded its bounded result size.");
-  }
-  return serialized;
+  return serializeAgentPageSnapshot(value);
 }
 
 export async function locateAgentPageRef(

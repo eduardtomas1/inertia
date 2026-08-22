@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 const electronState = vi.hoisted(() => ({
   viewOptions: [] as Array<Record<string, unknown>>,
+  contents: [] as Array<{
+    capturePage: {
+      getMockImplementation(): (() => Promise<unknown>) | undefined;
+      mockImplementationOnce(implementation: () => Promise<unknown>): unknown;
+    };
+  }>,
   sessions: [] as Array<{
     permissionChecks: number;
     permissionRequests: number;
@@ -53,6 +59,10 @@ vi.mock("electron", () => {
     private title = "";
     private destroyed = false;
 
+    constructor() {
+      electronState.contents.push(this);
+    }
+
     setWindowOpenHandler(): void {}
     on(name: string, handler: (...args: unknown[]) => void): void {
       const handlers = this.handlers.get(name) ?? [];
@@ -73,7 +83,7 @@ vi.mock("electron", () => {
     close(): void { this.destroyed = true; }
     sendInputEvent(input: Record<string, unknown>): void { this.sentInputs.push(input); }
     async insertText(text: string): Promise<void> { this.insertedText.push(text); }
-    async capturePage(): Promise<FakeImage> { return new FakeImage(); }
+    readonly capturePage = vi.fn(async (): Promise<FakeImage> => new FakeImage());
   }
 
   class FakeWebContentsView {
@@ -214,6 +224,69 @@ describe("agent-owned native Browser", () => {
       action: "type", ref: "e2", text: "hello", replace: true,
     })).resolves.toMatchObject({ ok: true });
     expect(children[0]!.webContents.insertedText).toEqual(["hello"]);
+  });
+
+  it("serializes parallel agent commands and binds visual evidence to its captured tab", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    const first = await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    const second = await broker.tab({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "open",
+      url: "http://127.0.0.1:3000/settings",
+    });
+    const firstTabId = first.activeTabId!;
+    const secondTabId = second.activeTabId!;
+    await broker.tab({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "activate",
+      tabId: firstTabId,
+    });
+
+    const contents = electronState.contents[contentsOffset]!;
+    const originalCapture = contents.capturePage.getMockImplementation() as () => Promise<unknown>;
+    let captureStarted = (): void => undefined;
+    let releaseCapture = (): void => undefined;
+    const started = new Promise<void>((resolve) => { captureStarted = resolve; });
+    const blocked = new Promise<void>((resolve) => { releaseCapture = resolve; });
+    contents.capturePage.mockImplementationOnce(async () => {
+      captureStarted();
+      await blocked;
+      return await originalCapture();
+    });
+
+    const screenshotPromise = broker.perform(conversationId, { action: "screenshot" });
+    await started;
+    let activationSettled = false;
+    const activationPromise = broker.perform(conversationId, {
+      action: "tab-activate",
+      tabId: secondTabId,
+    }).finally(() => { activationSettled = true; });
+    await Promise.resolve();
+    expect(activationSettled).toBe(false);
+
+    releaseCapture();
+    const screenshot = await screenshotPromise;
+    expect(screenshot.ok).toBe(true);
+    if (screenshot.ok) {
+      expect(JSON.parse(screenshot.text)).toMatchObject({
+        captured: true,
+        tabId: firstTabId,
+        url: "http://127.0.0.1:3000/",
+      });
+      expect(screenshot.state.activeTabId).toBe(firstTabId);
+      expect(screenshot.state.activity?.tabId).toBe(firstTabId);
+    }
+    await expect(activationPromise).resolves.toMatchObject({
+      ok: true,
+      state: { activeTabId: secondTabId },
+    });
   });
 
   it("fails closed for remote agent navigation, stale ownership, and tab overflow", async () => {

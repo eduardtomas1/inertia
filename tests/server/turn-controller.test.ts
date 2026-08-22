@@ -546,6 +546,7 @@ describe("TurnController authoritative lifecycle", () => {
     const trace = runtime.store.conversationDetail(
       runtime.conversationId,
     )!.subagents[0]!;
+    expect(runtime.store.agentTurn(queued.turn.id).runState?.state).toBe("delegated");
     let settleStop!: (outcome: "accepted" | "rejected" | "timeout") => void;
     const stopSubagent = vi.spyOn(runtime.provider, "stopSubagent")
       .mockImplementation(async () =>
@@ -577,6 +578,7 @@ describe("TurnController authoritative lifecycle", () => {
       status: "cancelled",
       progress: "Stopped by the user.",
     });
+    expect(runtime.store.agentTurn(queued.turn.id).runState?.state).toBe("running");
 
     for (const [index, outcome] of [
       "accepted", "rejected", "timeout",

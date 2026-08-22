@@ -969,6 +969,7 @@ export class TurnController {
         type: "agent.subagent.updated",
         trace: stopped.trace,
       });
+      this.observeSubagent(currentActive, stopped.trace);
     }
     return true;
   }

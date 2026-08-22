@@ -115,6 +115,11 @@ export class AuthoritativeRunStateEngine {
     providerState?: string | null,
   ): boolean {
     if (!this.acceptsProviderEvents() || !identity) return false;
+    // An accepted descendant edge proves the owned provider run progressed
+    // beyond startup, even when that transport omitted a root-running event.
+    if (this.transport === "queued" || this.transport === "starting") {
+      this.transport = "running";
+    }
     if (live) this.liveDescendants.add(identity);
     else this.liveDescendants.delete(identity);
     return this.refresh(providerState);

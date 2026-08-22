@@ -129,15 +129,18 @@ describe("agent browser semantic snapshots", () => {
     }
     class FakeElement extends FakeEventTarget {
       attachShadow(): object { return {}; }
+      setHTML(_html: string): void {}
       setHTMLUnsafe(_html: string): void {}
     }
     class FakeHTMLElement extends FakeElement {
       attachInternals(): object { return { shadowRoot: null }; }
     }
     class FakeDocument {
+      static parseHTML(_html: string): object { return {}; }
       static parseHTMLUnsafe(_html: string): object { return {}; }
     }
     class FakeShadowRoot {
+      setHTML(_html: string): void {}
       setHTMLUnsafe(_html: string): void {}
     }
     const context = {
@@ -154,9 +157,16 @@ describe("agent browser semantic snapshots", () => {
       `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
       context,
     );
-    runInNewContext("new Element().setHTMLUnsafe('<template shadowrootmode=closed>private</template>')", context);
+    runInNewContext(`
+      new Element().setHTML('<template shadowrootmode=closed>private</template>');
+      new Element().setHTMLUnsafe('<template shadowrootmode=closed>private</template>');
+      Document.parseHTML('<template shadowrootmode=closed>private</template>');
+      Document.parseHTMLUnsafe('<template shadowrootmode=closed>private</template>');
+      new ShadowRoot().setHTML('<template shadowrootmode=closed>private</template>');
+      new ShadowRoot().setHTMLUnsafe('<template shadowrootmode=closed>private</template>');
+    `, context);
 
-    expect(dispatched).toEqual(["nested-boundary"]);
+    expect(dispatched).toEqual(Array(6).fill("nested-boundary"));
   });
 
   it("keeps oversized Unicode snapshots valid within the provider byte limit", () => {
@@ -405,6 +415,64 @@ describe("agent browser semantic snapshots", () => {
     expect(parsed).toMatchObject({ elements: [], truncated: true });
     expect(nextNodeCalls).toBe(4_001);
     expect(querySelectorAll).not.toHaveBeenCalled();
+  });
+
+  it("caches effective opacity across deeply nested semantic controls", async () => {
+    const nodes: Array<Record<string, unknown>> = [];
+    for (let index = 0; index < 4_000; index += 1) {
+      nodes.push({
+        nodeType: 1,
+        tagName: "BUTTON",
+        parentElement: nodes[index - 1] ?? null,
+        firstChild: null,
+        disabled: false,
+        checked: false,
+        value: undefined,
+        getAttribute: () => null,
+        hasAttribute: () => false,
+        matches: () => false,
+        getBoundingClientRect: () => ({
+          x: 10, y: 10, left: 10, top: 10,
+          right: 210, bottom: 40, width: 200, height: 30,
+        }),
+      });
+    }
+    let next = 0;
+    const body = bodyWithText("");
+    const document = {
+      title: "Hidden controls",
+      body,
+      documentElement: nodes[0],
+      createNodeIterator: () => ({ nextNode: () => nodes[next++] ?? null }),
+    };
+    const getComputedStyle = vi.fn((element: unknown) => ({
+      visibility: "visible",
+      display: "block",
+      opacity: element === nodes[0] ? "0" : "1",
+    }));
+    const context = {
+      document,
+      location: { href: "http://127.0.0.1:3000/hidden" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle,
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: unknown[];
+    };
+    expect(parsed.elements).toEqual([]);
+    expect(getComputedStyle).toHaveBeenCalledTimes(nodes.length + 1);
   });
 
   it("fails sensitive-evidence inspection closed at the bounded DOM scan limit", async () => {

@@ -49,7 +49,7 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       },
     });
   }
-  const signalUnsafeParser = (prototype: object, name: string): void => {
+  const signalDeclarativeParser = (prototype: object, name: string): void => {
     const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
     const parser = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
     if (!descriptor || typeof parser !== "function") return;
@@ -64,12 +64,15 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       },
     });
   };
-  signalUnsafeParser(Element.prototype, "setHTMLUnsafe");
+  signalDeclarativeParser(Element.prototype, "setHTML");
+  signalDeclarativeParser(Element.prototype, "setHTMLUnsafe");
   if (typeof Document !== "undefined") {
-    signalUnsafeParser(Document, "parseHTMLUnsafe");
+    signalDeclarativeParser(Document, "parseHTML");
+    signalDeclarativeParser(Document, "parseHTMLUnsafe");
   }
   if (typeof ShadowRoot !== "undefined") {
-    signalUnsafeParser(ShadowRoot.prototype, "setHTMLUnsafe");
+    signalDeclarativeParser(ShadowRoot.prototype, "setHTML");
+    signalDeclarativeParser(ShadowRoot.prototype, "setHTMLUnsafe");
   }
 }
 

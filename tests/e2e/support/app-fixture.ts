@@ -255,7 +255,7 @@ async function createPreviewServer(): Promise<{
       response.end(
         "<!doctype html><title>Detached declarative privacy probe</title><body>"
         + "<script>const host=document.createElement('div');"
-        + "host.setHTMLUnsafe(\"<template shadowrootmode='closed'><p>private</p></template>\");"
+        + "host.setHTML(\"<template shadowrootmode='closed'><p>private</p></template>\");"
         + "document.body.append(host);const mirror=document.createElement('p');"
         + `mirror.textContent=${JSON.stringify(secret)};document.body.replaceChildren(mirror)</script>`,
       );

@@ -163,29 +163,52 @@ export async function semanticPageSnapshot(
     if (scannedElementNodes.length >= ${MAX_SEMANTIC_SCAN_NODES}
       && elementIterator?.nextNode()) elementScanTruncated = true;
     const scannedInputs = scannedElementNodes.filter((element) => element.tagName === "INPUT");
-    const visible = (element, rect) => {
-      const style = getComputedStyle(element);
-      let ancestor = element.parentElement;
-      while (ancestor) {
-        if (Number(getComputedStyle(ancestor).opacity || "1") <= 0) return false;
-        ancestor = ancestor.parentElement;
+    const elementStyles = new WeakMap();
+    const effectiveOpacity = new WeakMap();
+    const effectiveAriaDisabled = new WeakMap();
+    const styleFor = (element) => {
+      let style = elementStyles.get(element);
+      if (!style) {
+        style = getComputedStyle(element);
+        elementStyles.set(element, style);
       }
+      return style;
+    };
+    const cacheEffectiveState = (element) => {
+      const chain = [];
+      let current = element;
+      while (current && !effectiveOpacity.has(current)
+        && chain.length < ${MAX_SEMANTIC_SCAN_NODES}) {
+        chain.push(current);
+        current = current.parentElement;
+      }
+      let opacityAllowed = current ? effectiveOpacity.get(current) !== false : true;
+      let ariaBlocked = current ? effectiveAriaDisabled.get(current) === true : false;
+      if (current && !effectiveOpacity.has(current)) {
+        opacityAllowed = false;
+        ariaBlocked = true;
+        elementScanTruncated = true;
+      }
+      for (let index = chain.length - 1; index >= 0; index -= 1) {
+        const candidate = chain[index];
+        const style = styleFor(candidate);
+        opacityAllowed = opacityAllowed && Number(style.opacity || "1") > 0;
+        ariaBlocked = ariaBlocked
+          || String(candidate.getAttribute?.("aria-disabled") || "").toLowerCase() === "true";
+        effectiveOpacity.set(candidate, opacityAllowed);
+        effectiveAriaDisabled.set(candidate, ariaBlocked);
+      }
+    };
+    for (const element of scannedElementNodes) cacheEffectiveState(element);
+    const visible = (element, rect) => {
+      const style = styleFor(element);
       return rect.width > 0 && rect.height > 0
         && rect.bottom > 0 && rect.right > 0
         && rect.top < innerHeight && rect.left < innerWidth
         && style.visibility !== "hidden" && style.display !== "none"
-        && Number(style.opacity || "1") > 0;
+        && effectiveOpacity.get(element) !== false;
     };
-    const ariaDisabled = (element) => {
-      let current = element;
-      while (current) {
-        if (String(current.getAttribute?.("aria-disabled") || "").toLowerCase() === "true") {
-          return true;
-        }
-        current = current.parentElement;
-      }
-      return false;
-    };
+    const ariaDisabled = (element) => effectiveAriaDisabled.get(element) === true;
     const boundedElementText = (element) => {
       const chunks = [];
       let characters = 0;
@@ -339,7 +362,7 @@ export async function semanticPageSnapshot(
       let allowed = current ? textStructureVisibility.get(current) !== false : true;
       for (let index = chain.length - 1; index >= 0; index -= 1) {
         const candidate = chain[index];
-        const style = getComputedStyle(candidate);
+        const style = styleFor(candidate);
         allowed = allowed
           && !["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(candidate.tagName)
           && candidate.hidden !== true
@@ -350,7 +373,7 @@ export async function semanticPageSnapshot(
       return allowed;
     };
     const textVisible = (element) => textStructureVisible(element)
-      && getComputedStyle(element).visibility !== "hidden";
+      && styleFor(element).visibility !== "hidden";
     const textChunks = [];
     let sourceCharacters = 0;
     let visitedNodes = 0;

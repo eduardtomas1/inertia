@@ -48,17 +48,17 @@ describe("FilesPanel", () => {
     }));
 
     expect(html).toContain('role="tree"');
-    expect(html).toContain('aria-label="Workspace files"');
+    expect(html).toContain('aria-label="Files"');
     expect(html).toContain('role="treeitem"');
     expect(html).toContain('aria-level="1"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('aria-current="true"');
     expect(html).toContain('title="README.md"');
-    expect(html).toContain('aria-label="Rendered preview of README.md"');
+    expect(html).toContain('aria-label="Preview of README.md"');
     expect(html).toContain('data-language-family="markup"');
     expect(html).toContain("Markdown recognized locally");
-    expect(html).toContain("Rendering Markdown");
+    expect(html).toContain("Rendering");
     expect(html).not.toContain("<h1");
     expect(html).not.toContain('role="list"');
   });
@@ -75,7 +75,7 @@ describe("FilesPanel", () => {
       onLoadEntries: vi.fn(),
     }));
     expect(loadingHtml).toContain('role="status"');
-    expect(loadingHtml).toContain("Loading files");
+    expect(loadingHtml).toContain("Loading");
 
     const errorHtml = renderToStaticMarkup(createElement(FilesPanel, {
       ...FILES_PROJECT,
@@ -87,7 +87,7 @@ describe("FilesPanel", () => {
       onLoadEntries: vi.fn(),
     }));
     expect(errorHtml).toContain('role="alert"');
-    expect(errorHtml).toContain("Could not preview file.ts");
+    expect(errorHtml).toContain("Preview failed: file.ts");
     expect(errorHtml).toContain("This file is not valid UTF-8 text.");
   });
 
@@ -111,7 +111,7 @@ describe("FilesPanel", () => {
     }));
 
     expect(html).toContain(
-      'aria-label="large.txt is too large to edit safely in Inertia"',
+      'aria-label="large.txt is too large to edit"',
     );
     expect(html).toContain("disabled");
   });
@@ -136,10 +136,10 @@ describe("FilesPanel", () => {
     }));
 
     expect(html).toContain(
-      'aria-label="Edit ordinary.txt in Inertia"',
+      'aria-label="Edit ordinary.txt"',
     );
     expect(html).not.toContain(
-      'aria-label="ordinary.txt is too large to edit safely in Inertia"',
+      'aria-label="ordinary.txt is too large to edit"',
     );
   });
 });

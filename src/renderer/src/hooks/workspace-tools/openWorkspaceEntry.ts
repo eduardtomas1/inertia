@@ -39,7 +39,7 @@ type OpenWorkspaceFileOptions = readonly [
   location: WorkspaceFileLocation | undefined,
   literalPath: boolean | undefined,
   headingId: string | undefined,
-  authorityRef: { current: string },
+  authorityRef: { current: string; open?: object },
   authority: string,
   inspectDirectory: (options: { directory: string }) => Promise<unknown>,
   projectId: string,
@@ -53,7 +53,7 @@ type OpenWorkspaceFileOptions = readonly [
   setActiveTool: (tool: "files") => void,
 ];
 
-export async function openWorkspaceFile([
+export function openWorkspaceFile([
   path,
   location,
   literalPath,
@@ -65,18 +65,19 @@ export async function openWorkspaceFile([
   conversationId,
   openFile,
   setActiveTool,
-]: OpenWorkspaceFileOptions): Promise<void> {
-  await openWorkspaceEntry(path, {
-    isCurrent: () => authorityRef.current === authority,
-    inspectDirectory: async (directory) =>
-      await inspectDirectory({ directory }),
-    openDirectory: async (directory) =>
-      await window.inertia.openProjectPath({
-        projectId,
-        ...(conversationId ? { conversationId } : {}),
-        relativePath: directory,
-        action: "reveal",
-      }),
+]: OpenWorkspaceFileOptions) {
+  const open = authorityRef.open = {};
+  return openWorkspaceEntry(path, {
+    isCurrent: () => (
+      authorityRef.current === authority && authorityRef.open === open
+    ),
+    inspectDirectory: (directory) => inspectDirectory({ directory }),
+    openDirectory: (directory) => window.inertia.openProjectPath({
+      projectId,
+      ...(conversationId ? { conversationId } : {}),
+      relativePath: directory,
+      action: "reveal",
+    }),
     openFile: (file, fileLocation, exactPath, fileHeadingId) => {
       openFile(file, fileLocation, exactPath, fileHeadingId);
       setActiveTool("files");

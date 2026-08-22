@@ -1,6 +1,62 @@
 const sourceLocationSuffix = /:([1-9]\d{0,8})(?::([1-9]\d{0,8}))?(?:-([1-9]\d{0,8})(?::([1-9]\d{0,8}))?)?$/u;
 const sourceLocationFragment = /^#L([1-9]\d{0,8})(?:C([1-9]\d{0,8}))?(?:-L?([1-9]\d{0,8})(?:C([1-9]\d{0,8}))?)?$/iu;
 
+type WorkspaceFileSearchEdit = [
+  editEpoch: number,
+  requestedPath: string,
+  requestEpoch: number,
+  resolvedPath: string,
+];
+
+const workspaceFileSearchEdits = new Map<string, WorkspaceFileSearchEdit>();
+
+function workspaceFileSearchEdit(
+  projectId: string,
+  conversationId?: string,
+): WorkspaceFileSearchEdit {
+  const key = projectId + "\0" + (conversationId ?? "");
+  let state = workspaceFileSearchEdits.get(key);
+  if (!state) {
+    state = [0, "", 0, ""];
+    workspaceFileSearchEdits.set(key, state);
+  }
+  return state;
+}
+
+export function markWorkspaceFileSearchEdit(
+  projectId: string,
+  conversationId?: string,
+): void {
+  ++workspaceFileSearchEdit(projectId, conversationId)[0];
+}
+
+export function beginWorkspaceFileOpen(
+  projectId: string,
+  conversationId: string | undefined,
+  path: string,
+  literalPath?: boolean,
+): void {
+  const state = workspaceFileSearchEdit(projectId, conversationId);
+  state[1] = path;
+  state[2] = state[0];
+  state[3] = literalPath ? path : workspaceFileReferenceFallback(path) ?? path;
+}
+
+// `undefined` is unrelated, `true` preserves the current query, and `false`
+// lets the final selection use the normal completed-search disclosure rule.
+export function consumeWorkspaceFileOpenEdit(
+  projectId: string,
+  conversationId: string | undefined,
+  path: string | null,
+  previewPath: string | null,
+): boolean | undefined {
+  const state = workspaceFileSearchEdit(projectId, conversationId);
+  if (state[1] !== path && state[3] !== path) return;
+  if (previewPath !== path) return true;
+  state[1] = state[3] = "";
+  return state[0] !== state[2];
+}
+
 export interface WorkspaceFileLocation {
   startLine: number;
   startColumn?: number;
@@ -60,11 +116,10 @@ export function validatedWorkspaceFileLocation(
   content: string,
 ): WorkspaceFileLocation | null {
   if (!location) return null;
-  const lineCount = content.split("\n").length;
-  if (location.startLine > lineCount || location.endLine > lineCount) {
+  const lines = content.split("\n");
+  if (location.startLine > lines.length || location.endLine > lines.length) {
     return null;
   }
-  const lines = content.split("\n");
   const columnExists = (line: number, column: number | undefined): boolean => (
     column === undefined
     || column <= (lines[line - 1]?.replace(/\r$/u, "").length ?? 0) + 1
@@ -79,11 +134,12 @@ export function validatedWorkspaceFileLocation(
 export function workspaceFileLocationLabel(
   location: WorkspaceFileLocation,
 ): string {
-  const range = location.startLine === location.endLine
+  const singleLine = location.startLine === location.endLine;
+  const range = singleLine
     ? `Line ${location.startLine}`
     : `Lines ${location.startLine}–${location.endLine}`;
   if (location.startColumn === undefined) return range;
-  return location.startLine === location.endLine
+  return singleLine
     ? `${range}, column ${location.startColumn}`
     : range;
 }

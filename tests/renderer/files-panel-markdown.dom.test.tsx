@@ -52,7 +52,7 @@ describe("FilesPanel Markdown preview", () => {
     );
 
     const failure = await screen.findByRole("alert");
-    expect(failure).toHaveTextContent("Markdown preview couldn't load");
+    expect(failure).toHaveTextContent("Preview failed");
     fireEvent.click(screen.getByRole("button", { name: "Source" }));
     expect(onShowSource).toHaveBeenCalledOnce();
 
@@ -93,7 +93,7 @@ describe("FilesPanel Markdown preview", () => {
     );
 
     const document = screen.getByRole("document", {
-      name: "Rendered preview of docs/README.md",
+      name: "Preview of docs/README.md",
     });
     expect(await within(document).findByRole("heading", { name: "Project guide" }))
       .toBeInTheDocument();
@@ -130,7 +130,7 @@ describe("FilesPanel Markdown preview", () => {
       />,
     );
 
-    const viewToggle = screen.getByRole("group", { name: "Markdown view" });
+    const viewToggle = screen.getByRole("group", { name: "Markdown" });
     expect(within(viewToggle).getByRole("button", { name: "Preview" }))
       .toHaveAttribute("aria-pressed", "true");
 
@@ -142,7 +142,7 @@ describe("FilesPanel Markdown preview", () => {
 
     fireEvent.click(within(viewToggle).getByRole("button", { name: "Preview" }));
     expect(screen.getByRole("document", {
-      name: "Rendered preview of README.markdown",
+      name: "Preview of README.markdown",
     })).toBeInTheDocument();
   });
 
@@ -165,7 +165,7 @@ describe("FilesPanel Markdown preview", () => {
 
     expect(screen.getByLabelText("Contents of README.md")).toBeInTheDocument();
     expect(screen.queryByRole("document", {
-      name: "Rendered preview of README.md",
+      name: "Preview of README.md",
     })).toBeNull();
     expect(container.querySelector('[data-source-line="3"]'))
       .toHaveClass("is-referenced");
@@ -189,7 +189,7 @@ describe("FilesPanel Markdown preview", () => {
     );
 
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
-    expect(screen.getByText(/Rendered preview is limited to 100,000 characters/u))
+    expect(screen.getByText(/Limit: 100,000 characters/u))
       .toBeInTheDocument();
     overCharacterLimit.unmount();
 
@@ -205,7 +205,7 @@ describe("FilesPanel Markdown preview", () => {
     );
 
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
-    expect(screen.getByText(/Rendered preview is limited to 2,000 lines/u))
+    expect(screen.getByText(/Limit: 2,000 lines/u))
       .toBeInTheDocument();
     expect(container.querySelectorAll(".file-preview-line")).toHaveLength(2_000);
   });

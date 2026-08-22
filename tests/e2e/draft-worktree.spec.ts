@@ -138,7 +138,7 @@ test("keeps Environment available while an isolated draft worktree materializes"
       .toBeVisible();
     await selectWorkspaceTool(workspaceTools, "Files");
     await expect(
-      workspaceTools.getByRole("tree", { name: "Workspace files" }),
+      workspaceTools.getByRole("tree", { name: "Files" }),
     ).toBeVisible();
     await expect(
       workspaceTools.getByRole("treeitem", {

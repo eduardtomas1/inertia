@@ -46,6 +46,8 @@ import {
   type MarkdownHeadingRequest,
 } from "../utils/markdownHeading";
 import {
+  consumeWorkspaceFileOpenEdit,
+  markWorkspaceFileSearchEdit,
   workspaceFileLocationLabel,
   type WorkspaceFileLocation,
 } from "../utils/workspaceFileReference";
@@ -60,6 +62,16 @@ type ResponseMarkdownLoader = (attempt: number) => Promise<{
 
 const loadResponseMarkdown: ResponseMarkdownLoader = (_attempt) =>
   import("./ResponseMarkdown");
+const FILE_PREVIEW_CLASS = "file-preview";
+const FILE_ENTRY_CLASS = "file-entry";
+const FILE_TREE_CLASS = "file-tree";
+const FILE_PANEL_ERROR_CLASS = "file-panel-error";
+const FILE_PREVIEW_TRUNCATED_CLASS = "file-preview-truncated";
+const FILE_LIST_TRUNCATED_CLASS = "file-list-truncated";
+const FILE_LANGUAGE_CLASS = "file-language";
+const PANEL_LOADING_CLASS = "panel-loading";
+const PANEL_EMPTY_CLASS = "panel-empty";
+const PANEL_NOTICE_CLASS = "panel-notice";
 
 class MarkdownPreviewErrorBoundary extends Component<{
   children: ReactNode;
@@ -91,10 +103,9 @@ export function MarkdownPreviewSurface({
     default: (await loader(attempt)).ResponseMarkdown,
   })), [attempt, loader]);
   const failure = (
-    <div className="file-preview-markdown-failure" role="alert">
+    <div className={`${FILE_PREVIEW_CLASS}-markdown-failure`} role="alert">
       <AlertCircle size={20} aria-hidden="true" />
-      <strong>Markdown preview couldn&apos;t load</strong>
-      <span>The source is still available.</span>
+      <strong>Preview failed</strong>
       <div>
         <button type="button" onClick={() => setAttempt((value) => value + 1)}>
           <RefreshCw size={12} aria-hidden="true" />
@@ -183,14 +194,12 @@ export function freshWorkspaceDirectoryPages(
 interface SearchState {
   entries: WorkspaceEntry[] | null;
   truncated: boolean;
-  loading: boolean;
   error: string | null;
 }
 
 const EMPTY_SEARCH: SearchState = {
   entries: null,
   truncated: false,
-  loading: false,
   error: null,
 };
 
@@ -266,13 +275,32 @@ function safeError(error: unknown, fallback: string): string {
     : fallback;
 }
 
-function parentLabel(path: string): string {
-  return workspaceParentPath(path);
+function directoryChain(path: string): string[] {
+  return path
+    ? path.split("/").map((_, index, segments) =>
+        segments.slice(0, index + 1).join("/"))
+    : [];
 }
 
-function directoryChain(path: string): string[] {
-  const segments = path.split("/");
-  return segments.map((_, index) => segments.slice(0, index + 1).join("/"));
+function visibleDirectoryEntries(
+  pages: ReadonlyMap<string, DirectoryPage>,
+  selectedPath: string | null,
+): Map<string, readonly WorkspaceEntry[]> {
+  const entries = new Map<string, readonly WorkspaceEntry[]>(
+    [...pages].map(([path, page]) => [path, page.entries]),
+  );
+  if (!selectedPath || !isSafeWorkspaceEntryPath(selectedPath)) return entries;
+  for (const path of directoryChain(selectedPath)) {
+    const parent = workspaceParentPath(path);
+    const page = pages.get(parent);
+    if (page?.truncated && !page.entries.some((entry) => entry.path === path)) {
+      entries.set(parent, [...page.entries, {
+        path,
+        kind: path === selectedPath ? "file" : "directory",
+      }]);
+    }
+  }
+  return entries;
 }
 
 export function FilesPanel({
@@ -323,8 +351,10 @@ export function FilesPanel({
   const previewLineRefs = useRef(new Map<number, HTMLSpanElement>());
   const previewCodeRef = useRef<HTMLPreElement>(null);
   const previewMarkdownRef = useRef<HTMLDivElement>(null);
+  const fileListRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchGeneration = useRef(0);
+  const previousSelectedPathRef = useRef(selectedPath);
   const mounted = useRef(true);
   const previewEditable = preview !== null
     && !preview.truncated
@@ -346,11 +376,11 @@ export function FilesPanel({
   const markdownPreview = previewLanguage?.id === "markdown";
   const markdownPreviewBlockedReason = markdownPreview && preview
     ? preview.truncated
-      ? "Rendered preview is unavailable because this file preview is incomplete."
+      ? "Full file needed."
       : preview.content.length > MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS
-        ? `Rendered preview is limited to ${MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS.toLocaleString("en-US")} characters to keep the Files panel responsive.`
+        ? `Limit: ${MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS.toLocaleString("en-US")} characters.`
         : previewWindow.totalLines > MAX_RENDERED_PREVIEW_LINES
-          ? `Rendered preview is limited to ${MAX_RENDERED_PREVIEW_LINES.toLocaleString("en-US")} lines to keep the Files panel responsive.`
+          ? `Limit: ${MAX_RENDERED_PREVIEW_LINES.toLocaleString("en-US")} lines.`
           : null
     : null;
   const previewViewIdentity = preview
@@ -561,7 +591,7 @@ export function FilesPanel({
 
   const storePage = useCallback((path: string, page: WorkspaceEntriesPage): void => {
     if (page.directory !== path) {
-      throw new Error("The workspace returned a folder outside the requested tree location.");
+      throw new Error("Folder left tree");
     }
     const next = new Map(directoryPagesRef.current);
     next.set(path, {
@@ -589,7 +619,7 @@ export function FilesPanel({
       if (!mounted.current || directoryGeneration.current !== generation) return;
       setDirectoryErrors((current) => new Map(current).set(
         path,
-        safeError(loadError, "This folder could not be loaded."),
+        safeError(loadError, "Load failed."),
       ));
     } finally {
       if (mounted.current && directoryGeneration.current === generation) {
@@ -608,17 +638,25 @@ export function FilesPanel({
       && rootInputRef.current.entriesTruncated === entriesTruncated
     ) return;
     rootInputRef.current = { entries, entriesTruncated };
-    directoryGeneration.current += 1;
+    ++directoryGeneration.current;
     const next = freshWorkspaceDirectoryPages(entries, entriesTruncated);
     const rootDirectories = new Set(
       entries
         .filter(({ kind }) => kind === "directory")
         .map(({ path }) => path),
     );
+    const selectedParent = entriesTruncated
+      && selectedPath
+      && isSafeWorkspaceEntryPath(selectedPath)
+      ? workspaceParentPath(selectedPath)
+      : "";
     const retainedExpandedPaths = new Set(
-      [...expandedPathsRef.current].filter((path) =>
-        rootDirectories.has(path.split("/")[0] ?? "")
-      ),
+      [
+        ...[...expandedPathsRef.current].filter((path) =>
+          rootDirectories.has(path.split("/")[0] ?? "")
+        ),
+        ...directoryChain(selectedParent),
+      ],
     );
     expandedPathsRef.current = retainedExpandedPaths;
     directoryPagesRef.current = next;
@@ -629,19 +667,21 @@ export function FilesPanel({
     for (const path of retainedExpandedPaths) {
       void loadDirectory(path);
     }
-  }, [entries, entriesTruncated, loadDirectory]);
+  }, [entries, entriesTruncated, loadDirectory, selectedPath]);
 
-  const updateQuery = (value: string): void => {
-    searchGeneration.current += 1;
+  const updateQuery = useCallback((value: string): void => {
+    ++searchGeneration.current;
+    markWorkspaceFileSearchEdit(projectId, conversationId);
+    previousSelectedPathRef.current = selectedPath;
     setQuery(value);
-    if (!value.trim()) setSearch(EMPTY_SEARCH);
-  };
+    setSearch(EMPTY_SEARCH);
+  }, [conversationId, projectId, selectedPath]);
 
   useEffect(() => {
     const normalized = query.trim();
     if (!normalized) return;
     const generation = ++searchGeneration.current;
-    setSearch({ entries: null, truncated: false, loading: true, error: null });
+    setSearch({ entries: null, truncated: false, error: null });
     const timer = window.setTimeout(() => {
       void onLoadEntries({ query: normalized })
         .then((page) => {
@@ -649,7 +689,6 @@ export function FilesPanel({
           setSearch({
             entries: sortWorkspaceEntries(page.entries),
             truncated: page.truncated,
-            loading: false,
             error: null,
           });
         })
@@ -658,8 +697,7 @@ export function FilesPanel({
           setSearch({
             entries: [],
             truncated: false,
-            loading: false,
-            error: safeError(searchError, "The project search could not be completed."),
+            error: safeError(searchError, "Search failed."),
           });
         });
     }, 220);
@@ -667,10 +705,11 @@ export function FilesPanel({
   }, [onLoadEntries, query]);
 
   const treeRows = useMemo(() => {
-    const pages = new Map<string, readonly WorkspaceEntry[]>();
-    for (const [path, page] of directoryPages) pages.set(path, page.entries);
-    return flattenWorkspaceTree(pages, expandedPaths);
-  }, [directoryPages, expandedPaths]);
+    return flattenWorkspaceTree(
+      visibleDirectoryEntries(directoryPages, selectedPath),
+      expandedPaths,
+    );
+  }, [directoryPages, expandedPaths, selectedPath]);
 
   const searchRows = useMemo<WorkspaceTreeRow[]>(() => (
     (search.entries ?? []).map((entry) => ({
@@ -762,13 +801,69 @@ export function FilesPanel({
     }
   };
 
+  useEffect(() => {
+    const openEdit = consumeWorkspaceFileOpenEdit(
+      projectId,
+      conversationId,
+      selectedPath,
+      preview?.path ?? (previewError ? selectedPath : null),
+    );
+    if (
+      openEdit
+      || (
+        previousSelectedPathRef.current === selectedPath
+        && openEdit === undefined
+      )
+    ) {
+      previousSelectedPathRef.current = selectedPath;
+      return;
+    }
+    if (searchActive && selectedPath && isSafeWorkspaceEntryPath(selectedPath)) {
+      if (search.entries === null) return;
+      if (!visiblePaths.has(selectedPath)) updateQuery("");
+    }
+    previousSelectedPathRef.current = selectedPath;
+  }, [
+    conversationId,
+    projectId,
+    preview?.path,
+    previewError,
+    search.entries,
+    searchActive,
+    selectedPath,
+    updateQuery,
+    visiblePaths,
+  ]);
+
+  useEffect(() => {
+    if (!selectedPath || !isSafeWorkspaceEntryPath(selectedPath)) return;
+    const parent = workspaceParentPath(selectedPath);
+    const chain = directoryChain(parent);
+    updateExpandedPaths((current) => new Set([...current, ...chain]));
+    for (const directory of chain) {
+      if (!directoryPagesRef.current.has(directory)) void loadDirectory(directory);
+    }
+  }, [loadDirectory, selectedPath, updateExpandedPaths]);
+
+  useEffect(() => {
+    if (!selectedPath || !visiblePaths.has(selectedPath)) return;
+    const reveal = (): void => itemRefs.current.get(selectedPath)
+      ?.scrollIntoView({ block: "nearest" });
+    reveal();
+    const list = fileListRef.current;
+    if (!list || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [selectedPath, visiblePaths]);
+
   const treeBusy = loading
-    || search.loading
+    || (searchActive && search.entries === null)
     || loadingDirectories.size > 0;
   const hasRootFailure = !searchActive && Boolean(error) && treeRows.length === 0;
   const hasSearchFailure = searchActive && Boolean(search.error);
   const showTreeLoading = searchActive
-    ? search.loading || search.entries === null
+    ? search.entries === null
     : loading && treeRows.length === 0;
   const countLabel = searchActive
     ? `${search.entries?.length ?? 0} results`
@@ -785,56 +880,57 @@ export function FilesPanel({
           </div>
         </div>
         {onRefresh && (
-          <IconButton label="Refresh files" onClick={onRefresh} disabled={loading}>
-            {loading ? <LoadingMark label="Refreshing files" /> : <RefreshCw size={15} />}
+          <IconButton label="Refresh" onClick={onRefresh} disabled={loading}>
+            {loading ? <LoadingMark label="Refreshing" /> : <RefreshCw size={15} />}
           </IconButton>
         )}
       </header>
 
-      <div className="file-search-wrap">
-        <Search size={15} aria-hidden="true" />
-        <input
-          type="search"
-          ref={searchInputRef}
-          value={query}
-          aria-label="Search project files"
-          placeholder="Search files"
-          onChange={(event) => updateQuery(event.currentTarget.value)}
-        />
-        {query && (
-          <IconButton
-            label="Clear file search"
-            onClick={() => {
-              updateQuery("");
-              window.requestAnimationFrame(() => searchInputRef.current?.focus());
-            }}
-          >
-            <X size={14} />
-          </IconButton>
-        )}
-      </div>
-
       <div className="files-layout">
+        <div className="file-search-wrap">
+          <Search size={15} aria-hidden="true" />
+          <input
+            type="search"
+            ref={searchInputRef}
+            value={query}
+            aria-label="Search files"
+            placeholder="Search"
+            onChange={(event) => updateQuery(event.currentTarget.value)}
+          />
+          {query && (
+            <IconButton
+              label="Clear search"
+              onClick={() => {
+                updateQuery("");
+                window.requestAnimationFrame(() => searchInputRef.current?.focus());
+              }}
+            >
+              <X size={14} />
+            </IconButton>
+          )}
+        </div>
+
         <div
-          className="file-entry-list"
+          className={`${FILE_ENTRY_CLASS}-list`}
+          ref={fileListRef}
           role="tree"
-          aria-label={searchActive ? "Workspace file search results" : "Workspace files"}
+          aria-label={searchActive ? "Search results" : "Files"}
           aria-busy={treeBusy}
         >
           {showTreeLoading ? (
-            <div className="panel-loading" role="status">
-              <LoadingMark label={searchActive ? "Searching files" : "Loading files"} />
-              <span>{searchActive ? "Searching files…" : "Loading files…"}</span>
+            <div className={PANEL_LOADING_CLASS} role="status">
+              <LoadingMark label={searchActive ? "Searching" : "Loading"} />
+              <span>{searchActive ? "Searching…" : "Loading…"}</span>
             </div>
           ) : hasRootFailure || hasSearchFailure ? (
-            <div className="panel-empty compact file-panel-error" role="alert">
+            <div className={`${PANEL_EMPTY_CLASS} compact ${FILE_PANEL_ERROR_CLASS}`} role="alert">
               <AlertCircle size={20} aria-hidden="true" />
               <p>{searchActive ? search.error : error}</p>
             </div>
           ) : rows.length === 0 ? (
-            <div className="panel-empty compact">
+            <div className={`${PANEL_EMPTY_CLASS} compact`}>
               <FileSearch size={20} aria-hidden="true" />
-              <p>{searchActive ? "No files match this search." : "This project folder is empty."}</p>
+              <p>{searchActive ? "No matches." : "Empty project."}</p>
             </div>
           ) : rows.map((row) => {
             const { entry } = row;
@@ -842,7 +938,7 @@ export function FilesPanel({
             const entryLanguage = entry.kind === "file"
               ? sourceLanguageForFile(entry.path)
               : null;
-            const parent = searchActive ? parentLabel(entry.path) : "";
+            const parent = searchActive ? workspaceParentPath(entry.path) : "";
             const directoryPage = entry.kind === "directory"
               ? directoryPages.get(entry.path)
               : undefined;
@@ -858,12 +954,12 @@ export function FilesPanel({
                 || directoryPage?.truncated
               );
             return (
-              <div className="file-tree-row-group" key={entry.path}>
+              <div className={`${FILE_TREE_CLASS}-row-group`} key={entry.path}>
                 <button
                   type="button"
                   role="treeitem"
                   className={clsx(
-                    "file-entry",
+                    FILE_ENTRY_CLASS,
                     `is-${entry.kind}`,
                     selectedPath === entry.path && "is-selected",
                   )}
@@ -886,30 +982,30 @@ export function FilesPanel({
                 >
                   {entry.kind === "directory" && !searchActive ? (
                     <ChevronRight
-                      className="file-tree-chevron"
+                      className={`${FILE_TREE_CLASS}-chevron`}
                       size={13}
                       aria-hidden="true"
                     />
                   ) : (
-                    <span className="file-tree-chevron-spacer" aria-hidden="true" />
+                    <span className={`${FILE_TREE_CLASS}-chevron-spacer`} aria-hidden="true" />
                   )}
                   {entry.kind === "directory"
                     ? <Folder size={15} aria-hidden="true" />
                     : (
                         <File
-                          className="file-language-icon"
+                          className={`${FILE_LANGUAGE_CLASS}-icon`}
                           size={15}
                           aria-hidden="true"
                         />
                       )}
-                  <span className="file-entry-copy">
-                    <span className="file-entry-name">{name}</span>
-                    {parent && <span className="file-entry-path">{parent}</span>}
+                  <span className={`${FILE_ENTRY_CLASS}-copy`}>
+                    <span className={`${FILE_ENTRY_CLASS}-name`}>{name}</span>
+                    {parent && <span className={`${FILE_ENTRY_CLASS}-path`}>{parent}</span>}
                   </span>
                 </button>
                 {showDirectoryStatus && (
                   <div
-                    className={clsx("file-tree-status", directoryError && "is-error")}
+                    className={clsx(`${FILE_TREE_CLASS}-status`, directoryError && "is-error")}
                     role={directoryError ? "alert" : "status"}
                     style={{
                       "--file-tree-indent": `${Math.min(row.depth * 13, 104)}px`,
@@ -918,47 +1014,47 @@ export function FilesPanel({
                     {directoryLoading
                       ? `Loading ${name}…`
                       : directoryError
-                        ? `${directoryError} Press Enter to retry.`
-                        : directoryPage?.entries.length === 0
-                          ? `${name} is empty.`
-                          : `Showing the first ${directoryPage?.entries.length ?? 0} entries in ${name}.`}
+                        ? `${directoryError} Enter retries.`
+                        : directoryPage?.truncated
+                          ? `More in ${name}.`
+                          : `${name} is empty.`}
                   </div>
                 )}
               </div>
             );
           })}
           {!searchActive && error && treeRows.length > 0 && (
-            <p className="panel-notice file-panel-error" role="alert">{error}</p>
+            <p className={`${PANEL_NOTICE_CLASS} ${FILE_PANEL_ERROR_CLASS}`} role="alert">{error}</p>
           )}
           {!searchActive && directoryPages.get("")?.truncated && (
-            <p className="panel-notice file-list-truncated">
-              Showing the first {directoryPages.get("")?.entries.length ?? 0} items in the project root.
+            <p className={`${PANEL_NOTICE_CLASS} ${FILE_LIST_TRUNCATED_CLASS}`}>
+              More files.
             </p>
           )}
           {searchActive && search.truncated && (
-            <p className="panel-notice file-list-truncated">
-              Refine your search to see results beyond this limit.
+            <p className={`${PANEL_NOTICE_CLASS} ${FILE_LIST_TRUNCATED_CLASS}`}>
+              Refine for more.
             </p>
           )}
         </div>
 
-        <div className="file-preview">
+        <div className={FILE_PREVIEW_CLASS}>
           {previewLoading && selectedPath ? (
-            <div className="panel-loading" role="status" aria-live="polite">
-              <LoadingMark label="Loading file" />
+            <div className={PANEL_LOADING_CLASS} role="status" aria-live="polite">
+              <LoadingMark label="Loading" />
               <span>Loading {workspacePathName(selectedPath)}…</span>
             </div>
           ) : previewError && selectedPath ? (
-            <div className="panel-empty file-panel-error" role="alert">
+            <div className={`${PANEL_EMPTY_CLASS} ${FILE_PANEL_ERROR_CLASS}`} role="alert">
               <AlertCircle size={22} aria-hidden="true" />
-              <h3>Could not preview {workspacePathName(selectedPath)}</h3>
+              <h3>Preview failed: {workspacePathName(selectedPath)}</h3>
               <p>{previewError}</p>
             </div>
           ) : preview ? (
             <>
-              <header className="file-preview-header">
+              <header className={`${FILE_PREVIEW_CLASS}-header`}>
                 <div
-                  className="file-preview-identity"
+                  className={`${FILE_PREVIEW_CLASS}-identity`}
                   title={preview.path}
                   role="status"
                   aria-live="polite"
@@ -968,7 +1064,7 @@ export function FilesPanel({
                 </div>
                 {previewLanguage && (
                   <span
-                    className="file-language"
+                    className={FILE_LANGUAGE_CLASS}
                     data-language-family={previewLanguage.family}
                     title={`${previewLanguage.label} recognized locally`}
                   >
@@ -982,15 +1078,15 @@ export function FilesPanel({
                 )}
                 {markdownPreview && (
                   <div
-                    className="file-preview-view-toggle"
+                    className={`${FILE_PREVIEW_CLASS}-view-toggle`}
                     role="group"
-                    aria-label="Markdown view"
+                    aria-label="Markdown"
                   >
                     <button
                       type="button"
                       aria-pressed={renderedMarkdownPreview}
                       disabled={markdownPreviewBlockedReason !== null}
-                      title={markdownPreviewBlockedReason ?? "Show rendered Markdown"}
+                      title={markdownPreviewBlockedReason ?? "Preview"}
                       onClick={() => setPreviewViewState({
                         identity: previewViewIdentity,
                         view: "preview",
@@ -1002,7 +1098,7 @@ export function FilesPanel({
                     <button
                       type="button"
                       aria-pressed={!renderedMarkdownPreview}
-                      title="Show Markdown source"
+                      title="Source"
                       onClick={() => setPreviewViewState({
                         identity: previewViewIdentity,
                         view: "source",
@@ -1016,8 +1112,8 @@ export function FilesPanel({
                 {onSaveFile && (
                   <IconButton
                     label={previewEditable
-                      ? `Edit ${preview.path} in Inertia`
-                      : `${preview.path} is too large to edit safely in Inertia`}
+                      ? `Edit ${preview.path}`
+                      : `${preview.path} is too large to edit`}
                     disabled={!previewEditable}
                     onClick={() => setEditingFile(preview)}
                   >
@@ -1026,7 +1122,7 @@ export function FilesPanel({
                 )}
                 {onOpenFile && (
                   <IconButton
-                    label="Open file in default editor"
+                    label="Open file"
                     onClick={() => onOpenFile(preview.path)}
                   >
                     <ExternalLink size={14} />
@@ -1036,10 +1132,10 @@ export function FilesPanel({
               {renderedMarkdownPreview ? (
                 <div
                   ref={previewMarkdownRef}
-                  className="file-preview-markdown"
+                  className={`${FILE_PREVIEW_CLASS}-markdown`}
                   role="document"
                   tabIndex={0}
-                  aria-label={`Rendered preview of ${preview.path}`}
+                  aria-label={`Preview of ${preview.path}`}
                 >
                   <MarkdownPreviewSurface
                     key={previewViewIdentity}
@@ -1055,15 +1151,15 @@ export function FilesPanel({
                       view: "source",
                     })}
                     loadingFallback={(
-                      <div className="panel-loading" role="status">
-                        <LoadingMark label="Rendering Markdown" />
-                        <span>Rendering Markdown…</span>
+                      <div className={PANEL_LOADING_CLASS} role="status">
+                        <LoadingMark label="Rendering" />
+                        <span>Rendering…</span>
                       </div>
                     )}
                   />
                 </div>
               ) : (
-                <pre ref={previewCodeRef} className="file-preview-code" tabIndex={0} aria-label={`Contents of ${preview.path}`}>
+                <pre ref={previewCodeRef} className={`${FILE_PREVIEW_CLASS}-code`} tabIndex={0} aria-label={`Contents of ${preview.path}`}>
                   <code className={highlightedPreviewLines ? "hljs" : undefined}>
                     {previewWindow.lines.map(({ lineNumber, text }) => {
                       const referenced = selectedLocation !== null
@@ -1074,7 +1170,7 @@ export function FilesPanel({
                       return (
                         <span
                           className={clsx(
-                            "file-preview-line",
+                            `${FILE_PREVIEW_CLASS}-line`,
                             referenced && "is-referenced",
                           )}
                           data-source-line={lineNumber}
@@ -1088,7 +1184,7 @@ export function FilesPanel({
                             ? `${workspaceFileLocationLabel(selectedLocation)} in ${preview.path}`
                             : undefined}
                         >
-                          <span className="file-preview-line-number" aria-hidden="true">{lineNumber}</span>
+                          <span className={`${FILE_PREVIEW_CLASS}-line-number`} aria-hidden="true">{lineNumber}</span>
                           {highlightedLine !== undefined
                             ? (
                                 <span
@@ -1105,26 +1201,25 @@ export function FilesPanel({
                 </pre>
               )}
               {!renderedMarkdownPreview && previewWindow.lines.length < previewWindow.totalLines && (
-                <p className="panel-notice file-preview-truncated">
-                  Showing lines {previewWindow.lines[0]?.lineNumber ?? 1}–{previewWindow.lines.at(-1)?.lineNumber ?? 1} of {previewWindow.totalLines} to keep this preview responsive.
+                <p className={`${PANEL_NOTICE_CLASS} ${FILE_PREVIEW_TRUNCATED_CLASS}`}>
+                  Lines {previewWindow.lines[0]?.lineNumber ?? 1}–{previewWindow.lines.at(-1)?.lineNumber ?? 1} / {previewWindow.totalLines}.
                 </p>
               )}
               {markdownPreviewBlockedReason && (
-                <p className="panel-notice file-preview-truncated" role="status">
-                  {markdownPreviewBlockedReason} Source view remains available.
+                <p className={`${PANEL_NOTICE_CLASS} ${FILE_PREVIEW_TRUNCATED_CLASS}`} role="status">
+                  {markdownPreviewBlockedReason} Use Source.
                 </p>
               )}
               {preview.truncated && (
-                <p className="panel-notice file-preview-truncated">
-                  This preview shows only the beginning of the file.
+                <p className={`${PANEL_NOTICE_CLASS} ${FILE_PREVIEW_TRUNCATED_CLASS}`}>
+                  Beginning only.
                 </p>
               )}
             </>
           ) : (
-            <div className="panel-empty">
+            <div className={PANEL_EMPTY_CLASS}>
               <FileSearch size={22} aria-hidden="true" />
-              <h3>Select a file</h3>
-              <p>Choose a file to preview its contents without leaving the workspace.</p>
+              <p>Select a file.</p>
             </div>
           )}
         </div>

@@ -18,6 +18,7 @@ import type {
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
+import { useWorkspaceTools } from "../../src/renderer/src/hooks/useWorkspaceTools";
 import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
 import { openWorkspaceEntry } from "../../src/renderer/src/hooks/workspace-tools/openWorkspaceEntry";
 import {
@@ -32,6 +33,7 @@ import {
 import type {
   CommandWithoutId,
 } from "../../src/renderer/src/lib/runtimeCommands";
+import { markWorkspaceFileSearchEdit } from "../../src/renderer/src/utils/workspaceFileReference";
 import { parseUnifiedDiff } from "../../src/shared/diff-review";
 
 function project(id: string, name: string): Project {
@@ -470,6 +472,76 @@ describe("workspace pane authority", () => {
     await expect(pending).resolves.toBe("stale");
     expect(openDirectory).not.toHaveBeenCalled();
     expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("cancels an older external file open when probes settle out of order", async () => {
+    const inspectionRejectors = new Map<string, (reason?: unknown) => void>();
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "workspace.entries") {
+        return new Promise((_resolve, reject) => {
+          inspectionRejectors.set(command.payload.directory ?? "", reject);
+        });
+      }
+      if (command.type === "workspace.file.read") {
+        return Promise.resolve(result({
+          kind: "workspace.file",
+          usedFallback: false,
+          file: {
+            path: command.payload.path,
+            content: "export const ready = true;\n",
+            truncated: false,
+            language: "ts",
+            contentDigest: "a".repeat(64),
+            modifiedAt: "2026-08-22T12:00:00.000Z",
+          },
+        }));
+      }
+      return Promise.reject(new Error("Unexpected command"));
+    });
+    const setActiveTool = vi.fn();
+    const hook = renderHook(() => useWorkspaceTools({
+      enabled: false,
+      loadGitStatusOnMount: false,
+      loadGitOnMount: false,
+      loadFilesOnMount: false,
+      project: alpha,
+      conversation: alphaChat,
+      detail: null,
+      online: false,
+      ignoreWhitespace: false,
+      confirmDestructiveActions: true,
+      refreshVersion: 0,
+      request,
+      run: vi.fn((_key: string, command: CommandWithoutId) => request(command)),
+      subscribe: noopSubscribe,
+      setActionError: vi.fn(),
+      setActiveTool,
+    }));
+
+    act(() => hook.result.current.openTurnFile("src/First.ts"));
+    await waitFor(() => expect(inspectionRejectors.has("src/First.ts")).toBe(true));
+    markWorkspaceFileSearchEdit(alpha.id, alphaChat.id);
+    act(() => hook.result.current.openTurnFile("src/Second.ts"));
+    await waitFor(() => expect(inspectionRejectors.has("src/Second.ts")).toBe(true));
+
+    await act(async () => {
+      inspectionRejectors.get("src/First.ts")?.(new Error("not a directory"));
+      await Promise.resolve();
+    });
+    expect(hook.result.current.selectedFile).toBeNull();
+    expect(request.mock.calls.some(([command]) => (
+      command.type === "workspace.file.read"
+      && command.payload.path === "src/First.ts"
+    ))).toBe(false);
+
+    await act(async () => {
+      inspectionRejectors.get("src/Second.ts")?.(new Error("not a directory"));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(hook.result.current.filePreview?.path).toBe("src/Second.ts");
+    });
+    expect(setActiveTool).toHaveBeenCalledWith("files");
   });
 
   it("ignores a file-selection callback captured by an old owner", async () => {

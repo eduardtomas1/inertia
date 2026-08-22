@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  beginWorkspaceFileOpen,
+  consumeWorkspaceFileOpenEdit,
+  markWorkspaceFileSearchEdit,
   validatedWorkspaceFileLocation,
   workspaceFileLocationFromFragment,
   workspaceFileLocationLabel,
@@ -67,5 +70,69 @@ describe("workspace file references", () => {
     )).toBeNull();
     expect(workspaceFileLocationLabel({ startLine: 2, endLine: 3 }))
       .toBe("Lines 2–3");
+  });
+
+  it("scopes in-flight search edits to the matching workspace", () => {
+    beginWorkspaceFileOpen("project-a", "conversation-a", "src/App.tsx");
+    markWorkspaceFileSearchEdit("project-a", "conversation-b");
+    markWorkspaceFileSearchEdit("project-b", "conversation-a");
+    expect(consumeWorkspaceFileOpenEdit(
+      "project-a",
+      "conversation-a",
+      "src/App.tsx",
+      "src/App.tsx",
+    )).toBe(false);
+
+    beginWorkspaceFileOpen("project-a", "conversation-a", "src/Button.tsx");
+    markWorkspaceFileSearchEdit("project-a", "conversation-a");
+    expect(consumeWorkspaceFileOpenEdit(
+      "project-a",
+      "conversation-a",
+      "src/Other.tsx",
+      "src/Other.tsx",
+    )).toBeUndefined();
+    expect(consumeWorkspaceFileOpenEdit(
+      "project-a",
+      "conversation-a",
+      "src/Button.tsx",
+      "src/Button.tsx",
+    )).toBe(true);
+  });
+
+  it("retains search edits through fallback path resolution", () => {
+    beginWorkspaceFileOpen(
+      "fallback-project",
+      undefined,
+      "src/App.ts:42",
+    );
+    markWorkspaceFileSearchEdit("fallback-project");
+    expect(consumeWorkspaceFileOpenEdit(
+      "fallback-project",
+      undefined,
+      "src/App.ts:42",
+      null,
+    )).toBe(true);
+    expect(consumeWorkspaceFileOpenEdit(
+      "fallback-project",
+      undefined,
+      "src/App.ts",
+      "src/App.ts",
+    )).toBe(true);
+  });
+
+  it("finalizes a successful raw path when its preview arrives", () => {
+    beginWorkspaceFileOpen("raw-project", undefined, "src/App.ts:42");
+    expect(consumeWorkspaceFileOpenEdit(
+      "raw-project",
+      undefined,
+      "src/App.ts:42",
+      null,
+    )).toBe(true);
+    expect(consumeWorkspaceFileOpenEdit(
+      "raw-project",
+      undefined,
+      "src/App.ts:42",
+      "src/App.ts:42",
+    )).toBe(false);
   });
 });

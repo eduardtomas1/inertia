@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,6 +12,7 @@ import {
   FilesPanel,
   type WorkspaceEntriesPage,
 } from "../../src/renderer/src/components/FilesPanel";
+import { beginWorkspaceFileOpen } from "../../src/renderer/src/utils/workspaceFileReference";
 import type { WorkspaceEntry } from "../../src/shared/contracts";
 
 const FILES_PROJECT = {
@@ -21,15 +28,486 @@ const ROOT_ENTRIES: WorkspaceEntry[] = [
 function page(
   directory: string,
   entries: WorkspaceEntry[],
+  truncated = false,
 ): WorkspaceEntriesPage {
   return {
     directory,
     entries,
+    truncated,
+  };
+}
+
+function preview(path: string) {
+  return {
+    path,
+    content: "export const ready = true;",
     truncated: false,
+    language: "text",
+    contentDigest: "a".repeat(64),
+    modifiedAt: "2026-08-22T12:00:00.000Z",
   };
 }
 
 describe("FilesPanel root refresh", () => {
+  it("reveals an externally opened file through its lazy ancestor chain", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+    }: {
+      directory?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (directory === "src") {
+        return page(directory, [
+          { path: "src/components", kind: "directory" },
+        ]);
+      }
+      if (directory === "src/components") {
+        return page(directory, [
+          { path: "src/components/Button.tsx", kind: "file" },
+        ]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    const selected = await screen.findByRole("treeitem", {
+      name: "Button.tsx",
+    });
+    expect(selected).toHaveAttribute("aria-selected", "true");
+    expect(selected).toHaveAttribute("aria-level", "3");
+    expect(screen.getByRole("treeitem", { name: "src" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("treeitem", { name: "components" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(document.activeElement).toBe(document.body);
+    for (const directory of ["src", "src/components"]) {
+      expect(onLoadEntries.mock.calls.filter(
+        ([request]) => request.directory === directory,
+      )).toHaveLength(1);
+    }
+  });
+
+  it("clears a search that would hide a newly selected external file", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+      query,
+    }: {
+      directory?: string;
+      query?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (query === "readme") return page("", [ROOT_ENTRIES[1]!]);
+      if (directory === "src") {
+        return page(directory, [
+          { path: "src/components", kind: "directory" },
+        ]);
+      }
+      if (directory === "src/components") {
+        return page(directory, [
+          { path: "src/components/Button.tsx", kind: "file" },
+        ]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    const search = screen.getByRole("searchbox", {
+      name: "Search files",
+    });
+    fireEvent.change(search, { target: { value: "readme" } });
+    await screen.findByRole("treeitem", { name: "README.md" });
+
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    expect(await screen.findByRole("treeitem", { name: "Button.tsx" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(search).toHaveValue("");
+    expect(screen.getByRole("tree", { name: "Files" }))
+      .toBeInTheDocument();
+  });
+
+  it("preserves a pending search that will reveal an external selection", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+      query,
+    }: {
+      directory?: string;
+      query?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (query === "button") {
+        return page("", [{
+          path: "src/components/Button.tsx",
+          kind: "file",
+        }]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search files" });
+    fireEvent.change(search, { target: { value: "button" } });
+
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    expect(search).toHaveValue("button");
+    expect(await screen.findByRole("treeitem", { name: /Button\.tsx/u }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(search).toHaveValue("button");
+    expect(screen.getByRole("tree", { name: "Search results" }))
+      .toBeInTheDocument();
+  });
+
+  it("preserves a later query while selection disclosure is pending", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+      query,
+    }: {
+      directory?: string;
+      query?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (query === "button") {
+        return page("", [{
+          path: "src/components/Button.tsx",
+          kind: "file",
+        }]);
+      }
+      if (query === "readme") {
+        return page("", [{ path: "README.md", kind: "file" }]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search files" });
+    fireEvent.change(search, { target: { value: "button" } });
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    fireEvent.change(search, { target: { value: "readme" } });
+
+    expect(await screen.findByRole("treeitem", { name: "README.md" }))
+      .toBeInTheDocument();
+    expect(search).toHaveValue("readme");
+    expect(screen.getByRole("tree", { name: "Search results" }))
+      .toBeInTheDocument();
+  });
+
+  it("preserves a query edited while a fallback selection is resolving", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+      query,
+    }: {
+      directory?: string;
+      query?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (query === "readme") {
+        return page("", [{ path: "README.md", kind: "file" }]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search files" });
+    fireEvent.change(search, { target: { value: "button" } });
+
+    beginWorkspaceFileOpen(
+      FILES_PROJECT.projectId,
+      undefined,
+      "src/components/Button.tsx:12",
+    );
+    fireEvent.change(search, { target: { value: "readme" } });
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="src/components/Button.tsx:12"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    expect(await screen.findByRole("treeitem", { name: "README.md" }))
+      .toBeInTheDocument();
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={preview("src/components/Button.tsx")}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    await waitFor(() => expect(search).toHaveValue("readme"));
+    expect(screen.getByRole("tree", { name: "Search results" }))
+      .toBeInTheDocument();
+  });
+
+  it("discloses a successful raw path after its preview resolves", async () => {
+    const rawPath = "src/example.ts:42:7";
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+      query,
+    }: {
+      directory?: string;
+      query?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (query === "readme") {
+        return page("", [{ path: "README.md", kind: "file" }]);
+      }
+      if (directory === "src") {
+        return page(directory, [{ path: rawPath, kind: "file" }]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search files" });
+    fireEvent.change(search, { target: { value: "readme" } });
+    expect(await screen.findByRole("treeitem", { name: "README.md" }))
+      .toBeInTheDocument();
+
+    beginWorkspaceFileOpen(FILES_PROJECT.projectId, undefined, rawPath);
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath={rawPath}
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    expect(search).toHaveValue("readme");
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={preview(rawPath)}
+        selectedPath={rawPath}
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    await waitFor(() => expect(search).toHaveValue(""));
+    expect(await screen.findByRole("treeitem", { name: "example.ts:42:7" }))
+      .toHaveAttribute("aria-current", "true");
+  });
+
+  it("retains a selected chain across truncated root refreshes", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+    }: {
+      directory?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (directory === "src" || directory === "src/components") {
+        return page(directory, [], true);
+      }
+      return page(directory, [{ path: "README.md", kind: "file" }], true);
+    });
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={[{ path: "README.md", kind: "file" }]}
+        entriesTruncated
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    expect(await screen.findByRole("treeitem", { name: "Button.tsx" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("treeitem", { name: "src" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("treeitem", { name: "components" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("More files.")).toBeInTheDocument();
+    expect(screen.getByText("More in components."))
+      .toBeInTheDocument();
+
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={[{ path: "README.md", kind: "file" }]}
+        entriesTruncated
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onLoadEntries.mock.calls.filter(
+        ([request]) => request.directory === "src/components",
+      )).toHaveLength(2);
+    });
+    expect(screen.getByRole("treeitem", { name: "Button.tsx" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("treeitem", { name: "src" }))
+      .toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("does not reload the root for a top-level selection on truncated refresh", async () => {
+    const rootEntries = [{ path: "README.md", kind: "file" }] satisfies WorkspaceEntry[];
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+    }: {
+      directory?: string;
+    }): Promise<WorkspaceEntriesPage> => page(directory, rootEntries, true));
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={rootEntries}
+        entriesTruncated
+        preview={null}
+        selectedPath="LICENSE"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    expect(screen.getByRole("treeitem", { name: "LICENSE" }))
+      .toHaveAttribute("aria-selected", "true");
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={[...rootEntries]}
+        entriesTruncated
+        preview={null}
+        selectedPath="LICENSE"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    await act(async () => await Promise.resolve());
+    expect(onLoadEntries).not.toHaveBeenCalled();
+    expect(screen.getByRole("treeitem", { name: "LICENSE" }))
+      .toHaveAttribute("aria-selected", "true");
+  });
+
+  it("re-reveals the selected row when its tree container resizes", () => {
+    let notifyResize: (() => void) | null = null;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        notifyResize = () => callback([], this as unknown as ResizeObserver);
+      }
+
+      observe(target: Element): void {
+        observe(target);
+      }
+
+      disconnect(): void {
+        disconnect();
+      }
+    });
+    const scrollIntoView = vi.spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    try {
+      render(
+        <FilesPanel
+          {...FILES_PROJECT}
+          entries={ROOT_ENTRIES}
+          preview={null}
+          selectedPath="README.md"
+          onSelectFile={vi.fn()}
+          onLoadEntries={vi.fn()}
+        />,
+      );
+      const tree = screen.getByRole("tree", { name: "Files" });
+      expect(observe).toHaveBeenCalledWith(tree);
+      scrollIntoView.mockClear();
+
+      act(() => notifyResize?.());
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+      expect(document.activeElement).toBe(document.body);
+    } finally {
+      scrollIntoView.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("reveals a searched directory once when activated from the keyboard", async () => {
     const user = userEvent.setup();
     const onLoadEntries = vi.fn(async ({
@@ -73,7 +551,7 @@ describe("FilesPanel root refresh", () => {
     );
 
     const search = screen.getByRole("searchbox", {
-      name: "Search project files",
+      name: "Search files",
     });
     await user.type(search, "deep");
     const result = await screen.findByRole("treeitem", { name: /deep/u });
@@ -139,7 +617,7 @@ describe("FilesPanel root refresh", () => {
     );
 
     const search = screen.getByRole("searchbox", {
-      name: "Search project files",
+      name: "Search files",
     });
     fireEvent.change(search, { target: { value: "deep" } });
     const result = await screen.findByRole("treeitem", {

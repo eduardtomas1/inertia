@@ -38,6 +38,13 @@ test.beforeAll(async () => {
         java,
         "utf8",
       );
+      await Promise.all(Array.from({ length: 12 }, (_, index) =>
+        writeFile(
+          join(workspaceDirectory, `zz-fixture-${index + 1}.txt`),
+          `Stable fixture ${index + 1}\n`,
+          "utf8",
+        )
+      ));
 
       const databasePath = join(fixtureDirectory, "data", "inertia.sqlite");
       const store = new RuntimeStore(databasePath, workspaceDirectory, {
@@ -90,6 +97,13 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
   await expect(panel.getByTitle("Java recognized locally"))
     .toHaveText("Java");
   await expect(panel.getByText("Lines 41–43", { exact: true })).toBeVisible();
+  await expect(panel.getByRole("treeitem", {
+    name: "OrderService.java",
+  })).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("treeitem", { name: "src" }))
+    .toHaveAttribute("aria-expanded", "true");
+  await expect(panel.getByRole("treeitem", { name: "demo" }))
+    .toHaveAttribute("aria-expanded", "true");
   const firstReferencedLine = panel.locator('[data-source-line="41"]');
   await expect(firstReferencedLine).toHaveClass(/is-referenced/u);
   await expect(firstReferencedLine).toBeFocused();
@@ -97,6 +111,29 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
     .toHaveCount(3);
   await expect(panel.locator(".file-preview-code .hljs-keyword").first())
     .toBeVisible();
+  expect(await panel.evaluate((element) => {
+    const search = element.querySelector<HTMLElement>(".file-search-wrap")
+      ?.getBoundingClientRect();
+    const tree = element.querySelector<HTMLElement>(".file-entry-list")
+      ?.getBoundingClientRect();
+    const preview = element.querySelector<HTMLElement>(".file-preview")
+      ?.getBoundingClientRect();
+    const previewHeader = element.querySelector<HTMLElement>(
+      ".file-preview-header",
+    )?.getBoundingClientRect();
+    return search && tree && preview && previewHeader
+      ? {
+          browserColumnAligns: Math.abs(search.left - tree.left) <= 1
+            && Math.abs(search.right - tree.right) <= 1,
+          columnsMeet: Math.abs(tree.right - preview.left) <= 1,
+          localHeadersAlign: Math.abs(search.top - previewHeader.top) <= 1,
+        }
+      : null;
+  })).toEqual({
+    browserColumnAligns: true,
+    columnsMeet: true,
+    localHeadersAlign: true,
+  });
 }
 
 test("opens a language-aware project link at its exact validated Java range", async ({
@@ -184,25 +221,87 @@ test("opens a language-aware project link at its exact validated Java range", as
     contentType: "image/png",
   });
 
+  const toolsHandle = page.getByRole("separator", {
+    name: "Resize workspace tools",
+  });
+  await toolsHandle.focus();
+  await toolsHandle.press("Home");
+  await expect(toolsHandle).toHaveAttribute("aria-valuenow", "300");
+  const resizedTree = lightPanel.getByRole("tree", { name: "Files" });
+  const resizedSelection = resizedTree.getByRole("treeitem", {
+    name: "OrderService.java",
+  });
+  await resizedTree.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(async () => {
+    const treeBounds = await resizedTree.boundingBox();
+    const selectedBounds = await resizedSelection.boundingBox();
+    return Boolean(
+      treeBounds
+      && selectedBounds
+      && selectedBounds.y >= treeBounds.y - 1
+      && selectedBounds.y + selectedBounds.height
+        <= treeBounds.y + treeBounds.height + 1,
+    );
+  }).toBe(false);
+  await toolsHandle.press("ArrowLeft");
+  await expect(toolsHandle).toHaveAttribute("aria-valuenow", "312");
+  await expect.poll(async () => {
+    const treeBounds = await resizedTree.boundingBox();
+    const selectedBounds = await resizedSelection.boundingBox();
+    return Boolean(
+      treeBounds
+      && selectedBounds
+      && selectedBounds.y >= treeBounds.y - 1
+      && selectedBounds.y + selectedBounds.height
+        <= treeBounds.y + treeBounds.height + 1,
+    );
+  }).toBe(true);
+  const resizedPanelEvidence = testInfo.outputPath(
+    "language-aware-files-resized-panel-light.png",
+  );
+  await lightPanel.screenshot({
+    animations: "disabled",
+    path: resizedPanelEvidence,
+  });
+  await testInfo.attach("language-aware-files-resized-panel-light", {
+    path: resizedPanelEvidence,
+    contentType: "image/png",
+  });
+  await toolsHandle.press("Enter");
+  await expect(toolsHandle).toHaveAttribute("aria-valuenow", "520");
+
   await app.resizeWindow(760, 760);
   const narrowPanel = page.getByRole("region", { name: "Project files" });
   const geometry = await narrowPanel.evaluate((element) => {
     const panelBounds = element.getBoundingClientRect();
+    const tree = element.querySelector<HTMLElement>(".file-entry-list")
+      ?.getBoundingClientRect();
+    const selected = element.querySelector<HTMLElement>(
+      '.file-entry[aria-selected="true"]',
+    )?.getBoundingClientRect();
     const preview = element.querySelector<HTMLElement>(".file-preview")
       ?.getBoundingClientRect();
     const line = element.querySelector<HTMLElement>(
       '[data-source-line="41"]',
     )?.getBoundingClientRect();
-    return preview && line
+    return tree && selected && preview && line
       ? {
           previewInside: preview.left >= panelBounds.left - 1
             && preview.right <= panelBounds.right + 1,
           lineVisible: line.top >= preview.top - 1
             && line.bottom <= preview.bottom + 1,
+          selectedFileVisible: selected.top >= tree.top - 1
+            && selected.bottom <= tree.bottom + 1,
         }
       : null;
   });
-  expect(geometry).toEqual({ previewInside: true, lineVisible: true });
+  expect(geometry).toEqual({
+    previewInside: true,
+    lineVisible: true,
+    selectedFileVisible: true,
+  });
 
   const previewCode = narrowPanel.getByLabel(
     "Contents of src/demo/OrderService.java",
@@ -219,6 +318,17 @@ test("opens a language-aware project link at its exact validated Java range", as
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
   expect(await previewCode.evaluate((element) => element.scrollTop)).toBe(0);
+  const narrowEvidence = testInfo.outputPath(
+    "language-aware-files-narrow-light.png",
+  );
+  await narrowPanel.screenshot({
+    animations: "disabled",
+    path: narrowEvidence,
+  });
+  await testInfo.attach("language-aware-files-narrow-light", {
+    path: narrowEvidence,
+    contentType: "image/png",
+  });
   await app.expectNoViewportOverflow();
   expect(app.rendererErrors).toEqual([]);
 });

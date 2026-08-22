@@ -33,10 +33,35 @@ export interface GitPathInspectionOptions {
   signal?: AbortSignal;
 }
 
+export async function canonicalDirectoryPath(
+  path: string,
+  options: GitPathInspectionOptions = {},
+): Promise<string> {
+  return await requireDirectory(path, options);
+}
+
 function canonicalPathIdentity(path: string): string {
   return process.platform === "win32"
     ? path.toLocaleLowerCase("en-US")
     : path;
+}
+
+export async function sameFilesystemPath(
+  left: string,
+  right: string,
+  options: GitPathInspectionOptions = {},
+): Promise<boolean> {
+  if (canonicalPathIdentity(resolve(left)) === canonicalPathIdentity(resolve(right))) return true;
+  try {
+    const [canonicalLeft, canonicalRight] = await Promise.all([
+      awaitPathInspection(async () => await realpath(left), options),
+      awaitPathInspection(async () => await realpath(right), options),
+    ]);
+    return canonicalPathIdentity(canonicalLeft) === canonicalPathIdentity(canonicalRight);
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    return false;
+  }
 }
 
 function terminalPathOutput(output: Buffer): string {

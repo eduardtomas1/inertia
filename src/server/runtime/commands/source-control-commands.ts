@@ -1,5 +1,4 @@
 import { realpath } from "node:fs/promises";
-import { resolve } from "node:path";
 
 import WebSocket from "ws";
 
@@ -30,7 +29,7 @@ import { RuntimeRequestError } from "../../runtime-errors";
 import { changedFiles, emptyGitStatusSnapshot, gitStatusSnapshot } from "../../runtime-snapshots";
 import { TurnGitArtifactError, type TurnGitArtifactManager } from "../../turn-git-artifacts";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
-import { isContained, repositoryMetadataMarkerIdentity, repositoryRoot } from "../../git/paths";
+import { canonicalDirectoryPath, isContained, repositoryMetadataMarkerIdentity, repositoryRoot, sameFilesystemPath } from "../../git/paths";
 import {
   discoverWorkspaceGitRepositories,
   resolveWorkspaceGitRepository,
@@ -97,28 +96,6 @@ function commitReviewAuthorityBinding(
   ];
 }
 
-function sameCanonicalPath(left: string, right: string): boolean {
-  const normalizedLeft = resolve(left);
-  const normalizedRight = resolve(right);
-  return process.platform === "win32"
-    ? normalizedLeft.toLocaleLowerCase("en-US")
-      === normalizedRight.toLocaleLowerCase("en-US")
-    : normalizedLeft === normalizedRight;
-}
-
-async function sameFilesystemPath(left: string, right: string): Promise<boolean> {
-  if (sameCanonicalPath(left, right)) return true;
-  try {
-    const [canonicalLeft, canonicalRight] = await Promise.all([
-      realpath(left),
-      realpath(right),
-    ]);
-    return sameCanonicalPath(canonicalLeft, canonicalRight);
-  } catch {
-    return false;
-  }
-}
-
 export function createSourceControlCommandHandler(
   dependencies: SourceControlCommandDependencies,
 ): RuntimeCommandHandler {
@@ -127,7 +104,7 @@ export function createSourceControlCommandHandler(
     conversationId?: string;
     repositoryPath?: string;
     authorityRef?: string;
-  }, options: { requireAuthority?: boolean } = {}) => {
+  }, options: { requireAuthority?: boolean; deadlineAt?: number; signal?: AbortSignal } = {}) => {
     const workspaceRoot = dependencies.workspacePath(
       payload.projectId,
       payload.conversationId,
@@ -136,7 +113,7 @@ export function createSourceControlCommandHandler(
       if (options.requireAuthority) {
         throw new RuntimeRequestError("Refresh repository status before changing this repository.");
       }
-      const canonicalWorkspace = await realpath(workspaceRoot);
+      const canonicalWorkspace = await canonicalDirectoryPath(workspaceRoot, options);
       return {
         workspaceRoot,
         repositoryRoot: workspaceRoot,
@@ -152,8 +129,8 @@ export function createSourceControlCommandHandler(
     }
     const repository = payload.repositoryPath === "."
       ? await (async () => {
-          const canonicalWorkspace = await realpath(workspaceRoot);
-          const owningRoot = await repositoryRoot(canonicalWorkspace);
+          const canonicalWorkspace = await canonicalDirectoryPath(workspaceRoot, options);
+          const owningRoot = await repositoryRoot(canonicalWorkspace, options);
           if (!isContained(owningRoot, canonicalWorkspace)) {
             throw new RuntimeRequestError(
               "The project workspace no longer belongs to its Git repository. Refresh and try again.",
@@ -163,12 +140,14 @@ export function createSourceControlCommandHandler(
             owningRoot,
             ".",
             dependencies.secureFiles,
+            options.signal,
           );
         })()
       : await resolveWorkspaceGitRepositoryIdentity(
           workspaceRoot,
           payload.repositoryPath,
           dependencies.secureFiles,
+          options.signal,
         );
     const issuedRoot = await dependencies.secureFileAuthorities.resolve(
       socket,
@@ -181,6 +160,7 @@ export function createSourceControlCommandHandler(
         payload.repositoryPath,
         repository.metadataMarkerIdentity,
       ),
+      { signal: options.signal },
     );
     // Windows may report the same directory through case or 8.3 aliases on
     // separate realpath calls. The broker's retained filesystem identity and
@@ -199,7 +179,7 @@ export function createSourceControlCommandHandler(
     return {
       workspaceRoot,
       repositoryRoot: issuedRoot.root,
-      serializationRoot: await realpath(issuedRoot.root),
+      serializationRoot: await repositoryRoot(issuedRoot.root, options),
       secureRoot: issuedRoot,
       metadataMarkerIdentity: repository.metadataMarkerIdentity,
     };
@@ -215,6 +195,7 @@ export function createSourceControlCommandHandler(
       !await sameFilesystemPath(
         await repositoryRoot(secureRoot.root, options),
         secureRoot.root,
+        options,
       )
       || await repositoryMetadataMarkerIdentity(secureRoot.root, options)
         !== metadataMarkerIdentity

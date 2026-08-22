@@ -18,7 +18,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 import { GitError } from "../../src/server/git/types";
-import { repositoryRoot } from "../../src/server/git/paths";
+import { repositoryRoot, sameFilesystemPath } from "../../src/server/git/paths";
 import {
   settleSourceControlInspections,
   SourceControlDeadline,
@@ -78,6 +78,31 @@ describe("source-control inspection settlement", () => {
       expect(aggregateSettled).toBe(true);
     } finally {
       releaseCleanup.resolve();
+      deadline.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds stalled alias-path revalidation with the aggregate signal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T10:00:00.000Z"));
+    const deadline = new SourceControlDeadline(Date.now() + 100, "read");
+    try {
+      const comparison = deadline.runToSettlement(
+        async (signal) => await sameFilesystemPath(
+          filesystem.stalledPath,
+          "/",
+          { deadlineAt: deadline.deadlineAt, signal },
+        ),
+      );
+      const timedOut = expect(comparison).rejects.toThrow(
+        "Git inspection took too long.",
+      );
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      await timedOut;
+    } finally {
       deadline.dispose();
       vi.useRealTimers();
     }

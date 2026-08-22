@@ -17,7 +17,11 @@ interface PreMergeConfidenceCommandContext<Repository> {
   resolveRepository: (
     socket: WebSocket,
     payload: ConfidenceCommand["payload"],
-    options: { requireAuthority: true },
+    options: {
+      requireAuthority: true;
+      deadlineAt: number;
+      signal: AbortSignal;
+    },
   ) => Promise<Repository>;
   runVerified: <Result>(
     repository: Repository,
@@ -34,16 +38,25 @@ export async function handlePreMergeConfidenceCommand<Repository>({
   runVerified,
   send,
 }: PreMergeConfidenceCommandContext<Repository>): Promise<"handled"> {
-  const repository = await resolveRepository(
-    socket,
-    command.payload,
-    { requireAuthority: true },
-  );
   const deadline = new SourceControlDeadline(
     Date.now() + GIT_READ_OPERATION_TIMEOUT_MS,
     "read",
   );
   try {
+    const repository = await deadline.runToSettlement(
+      async (signal, recordTriggeringFailure) => {
+        try {
+          return await resolveRepository(
+            socket,
+            command.payload,
+            { requireAuthority: true, deadlineAt: deadline.deadlineAt, signal },
+          );
+        } catch (error) {
+          recordTriggeringFailure(error);
+          throw error;
+        }
+      },
+    );
     const confidence = await deadline.runToSettlement(
       async (signal, recordTriggeringFailure) => {
         try {

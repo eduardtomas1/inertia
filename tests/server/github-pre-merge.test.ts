@@ -304,6 +304,29 @@ describe("GitHub pre-merge confidence", () => {
     });
   });
 
+  it("withholds no-PR evidence when the local identity changes during discovery", async () => {
+    const { root } = await repository();
+    const runCli = vi.fn<typeof runRestrictedCli>(async () => {
+      await execFileAsync("git", ["checkout", "-qb", "feature/moved"], {
+        cwd: root,
+      });
+      return { stdout: "[]", stderr: "" };
+    });
+
+    const confidence = await inspectGitHubPreMergeConfidence(root, {}, {
+      environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
+      executableCandidates: async () => ["/fake/gh"],
+      runCli,
+    });
+
+    expect(confidence).toMatchObject({
+      state: "unavailable",
+      local: { branch: "feature/moved" },
+      identity: { state: "changed" },
+      unavailableReason: "The local head changed while GitHub was checked. Refresh before relying on this result.",
+    });
+  });
+
   it("keeps an associated open PR discoverable when its remote head moved", () => {
     const discovery = gitHubPreMergeTestSupport.parseAssociatedPullRequests(
       JSON.stringify([{

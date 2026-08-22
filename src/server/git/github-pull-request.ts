@@ -26,6 +26,29 @@ export interface GitHubPullRequestInput {
   draft: boolean;
 }
 
+function cliDiscoveryCancelled(): RestrictedCliError {
+  return new RestrictedCliError("timeout", "GitHub CLI discovery was cancelled.");
+}
+
+async function beforeCliDiscoveryAbort<T>(
+  operation: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return await operation();
+  let rejectCancellation!: (error: RestrictedCliError) => void;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const onAbort = (): void => rejectCancellation(cliDiscoveryCancelled());
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    if (signal.aborted) throw cliDiscoveryCancelled();
+    return await Promise.race([operation(), cancellation]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 export function githubRepositorySlug(repositoryBaseUrl: string): string {
   const url = new URL(repositoryBaseUrl);
   const slug = url.pathname.replace(/^\/+|\/+$/gu, "");
@@ -53,11 +76,16 @@ export function verifiedGitHubPullRequestUrl(
 
 export async function resolveGitHubCli(
   dependencies: GitHubPullRequestDependencies = {},
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ executable: string; environment: NodeJS.ProcessEnv }> {
-  const environment = await (dependencies.environment ?? providerEnvironment)();
-  const candidates = await (
-    dependencies.executableCandidates ?? executableCandidates
-  )("gh", environment);
+  const environment = await beforeCliDiscoveryAbort(
+    dependencies.environment ?? providerEnvironment,
+    options.signal,
+  );
+  const candidates = await beforeCliDiscoveryAbort(
+    async () => await (dependencies.executableCandidates ?? executableCandidates)("gh", environment),
+    options.signal,
+  );
   const executable = candidates[0];
   if (!executable) {
     throw new RestrictedCliError(

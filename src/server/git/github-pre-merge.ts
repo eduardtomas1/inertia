@@ -718,7 +718,7 @@ export async function inspectGitHubPreMergeConfidence(
   const runCli = dependencies.runCli ?? runRestrictedCli;
   let gh: Awaited<ReturnType<typeof resolveGitHubCli>>;
   try {
-    gh = await resolveGitHubCli(dependencies);
+    gh = await resolveGitHubCli(dependencies, { signal: options.signal });
   } catch (error) {
     return emptyConfidence(
       now,
@@ -776,7 +776,7 @@ export async function inspectGitHubPreMergeConfidence(
       now,
       finalStatus,
       finalHead,
-      "no-pull-request",
+      changed ? "unavailable" : "no-pull-request",
       changed
         ? "The local head changed while GitHub was checked. Refresh before relying on this result."
         : `GitHub has no open pull request for ${initialStatus.branch} at ${initialHead.slice(0, 8)}.`,

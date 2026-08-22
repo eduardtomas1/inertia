@@ -13,6 +13,11 @@ export type WorkspaceTreeKeyboardAction =
   | { type: "open"; path: string }
   | { type: "none" };
 
+const workspacePathCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+
 export function isSafeWorkspaceEntryPath(path: string): boolean {
   if (
     typeof path !== "string"
@@ -35,10 +40,7 @@ export function workspaceParentPath(path: string): string {
 }
 
 function compareText(left: string, right: string): number {
-  const primary = left.localeCompare(right, undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+  const primary = workspacePathCollator.compare(left, right);
   if (primary !== 0) return primary;
   return left < right ? -1 : left > right ? 1 : 0;
 }

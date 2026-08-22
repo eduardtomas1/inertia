@@ -42,6 +42,15 @@ export interface ObservedWorkspaceEntry {
   kind: WorkspaceEntryKind;
 }
 
+const workspaceEntryNameCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+const workspaceEntryPathCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "variant",
+});
+
 function isContained(root: string, target: string): boolean {
   const child = relative(root, target);
   return child === ""
@@ -114,15 +123,8 @@ export function compareWorkspaceEntries(
 ): number {
   if (left.kind === "directory" && right.kind !== "directory") return -1;
   if (left.kind !== "directory" && right.kind === "directory") return 1;
-  return left.name.localeCompare(
-    right.name,
-    undefined,
-    { numeric: true, sensitivity: "base" },
-  ) || left.path.localeCompare(
-    right.path,
-    undefined,
-    { numeric: true, sensitivity: "variant" },
-  );
+  return workspaceEntryNameCollator.compare(left.name, right.name)
+    || workspaceEntryPathCollator.compare(left.path, right.path);
 }
 
 export async function describeStableWorkspaceEntry(

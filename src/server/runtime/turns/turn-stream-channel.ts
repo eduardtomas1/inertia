@@ -4,7 +4,7 @@ import {
   type StreamDeltaFlush,
 } from "./turn-stream-coalescer";
 
-export const STREAM_PROJECTION_FIRST_FLUSH_MS = 24;
+export const STREAM_PROJECTION_FIRST_FLUSH_MS = 12;
 export const STREAM_PROJECTION_FLUSH_INTERVAL_MS = 64;
 export const STREAM_PROJECTION_CHAR_THRESHOLD = 16_384;
 

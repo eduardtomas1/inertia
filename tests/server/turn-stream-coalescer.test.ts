@@ -30,7 +30,10 @@ import {
   TurnStreamCoalescer,
   type StreamDeltaFlush,
 } from "../../src/server/runtime/turns/turn-stream-coalescer";
-import { TurnStreamChannel } from "../../src/server/runtime/turns/turn-stream-channel";
+import {
+  STREAM_PROJECTION_FIRST_FLUSH_MS,
+  TurnStreamChannel,
+} from "../../src/server/runtime/turns/turn-stream-channel";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const directories: string[] = [];
@@ -318,7 +321,9 @@ describe("TurnStreamCoalescer", () => {
     expect(flushes).toEqual([]);
     expect(scheduler.timers).toHaveLength(1);
 
-    scheduler.runThrough(24);
+    scheduler.runThrough(11);
+    expect(flushes).toEqual([]);
+    scheduler.runThrough(12);
     expect(flushes).toEqual([{ delta: " \nA", replacement: false }]);
     expect(coalescer.hasPending).toBe(false);
     expect(coalescer.hasScheduledFlush).toBe(false);
@@ -382,7 +387,7 @@ describe("TurnStreamCoalescer", () => {
     });
 
     coalescer.append("pending");
-    scheduler.runThrough(24);
+    scheduler.runThrough(12);
     expect(errors).toEqual([expect.objectContaining({ message: "persistence failed" })]);
     expect(coalescer.hasPending).toBe(true);
     expect(coalescer.hasScheduledFlush).toBe(false);
@@ -437,7 +442,7 @@ describe("TurnStreamChannel performance cadence", () => {
     expect(projected).toHaveLength(15);
     expect(oldFlushes).toHaveLength(6);
     expect(projected.length).toBeLessThan(100);
-    expect(projectedAt[0]).toBe(24);
+    expect(projectedAt[0]).toBe(STREAM_PROJECTION_FIRST_FLUSH_MS);
     for (let index = 1; index < projectedAt.length - 1; index += 1) {
       const gap = projectedAt[index]! - projectedAt[index - 1]!;
       expect(gap).toBeGreaterThanOrEqual(64);
@@ -461,15 +466,17 @@ describe("TurnStreamChannel performance cadence", () => {
     });
 
     channel.append("first🙂");
-    scheduler.advance(24);
+    scheduler.advance(11);
+    expect(projected).toEqual([]);
+    scheduler.advance(1);
     scheduler.advance(120);
     channel.append(" second🧠");
     scheduler.advance(63);
-    expect(projected).toEqual([{ delta: "first🙂", at: 24 }]);
+    expect(projected).toEqual([{ delta: "first🙂", at: 12 }]);
     scheduler.advance(1);
     expect(projected).toEqual([
-      { delta: "first🙂", at: 24 },
-      { delta: " second🧠", at: 208 },
+      { delta: "first🙂", at: 12 },
+      { delta: " second🧠", at: 196 },
     ]);
   });
 
@@ -512,7 +519,7 @@ describe("TurnStreamChannel performance cadence", () => {
     });
 
     channel.append("terminal");
-    scheduler.runThrough(24);
+    scheduler.runThrough(STREAM_PROJECTION_FIRST_FLUSH_MS);
 
     expect(order).toEqual(["persisted", "projected"]);
     channel.append(" suffix");
@@ -538,7 +545,7 @@ describe("TurnStreamChannel performance cadence", () => {
     });
 
     channel.append("not visible yet");
-    scheduler.runThrough(24);
+    scheduler.runThrough(STREAM_PROJECTION_FIRST_FLUSH_MS);
 
     expect(projected).toEqual([]);
     expect(channel.hasPending).toBe(true);
@@ -590,7 +597,7 @@ describe("TurnController coalesced streaming", () => {
       type: "text",
       text: "This visible prefix must survive.",
     });
-    runtime.scheduler.runThrough(24);
+    runtime.scheduler.runThrough(STREAM_PROJECTION_FIRST_FLUSH_MS);
     expect(runtime.events).toContainEqual(expect.objectContaining({
       type: "agent.text",
       text: "This visible prefix must survive.",
@@ -662,7 +669,7 @@ describe("TurnController coalesced streaming", () => {
       type: "reasoning-summary",
       text: "Reasoning is durable too.",
     });
-    runtime.scheduler.runThrough(24);
+    runtime.scheduler.runThrough(STREAM_PROJECTION_FIRST_FLUSH_MS);
 
     const existingLive = deliveries.get("existing")?.filter(
       (event) => event.type === "runtime.event"
@@ -739,7 +746,7 @@ describe("TurnController coalesced streaming", () => {
       type: "text",
       text: "Visible before the reconnect.",
     });
-    runtime.scheduler.runThrough(24);
+    runtime.scheduler.runThrough(STREAM_PROJECTION_FIRST_FLUSH_MS);
     expect(runtime.events).toContainEqual(expect.objectContaining({
       type: "agent.text",
       text: "Visible before the reconnect.",
@@ -1062,7 +1069,7 @@ describe("TurnController coalesced streaming", () => {
     runtime.controller.start(queued.turn.id);
     const identity = providerIdentity(runtime);
     runtime.provider.emit({ ...identity, type: "text", text: "draft value" });
-    runtime.scheduler.runThrough(24);
+    runtime.scheduler.runThrough(STREAM_PROJECTION_FIRST_FLUSH_MS);
     expect(runtime.events.filter(({ type }) => type === "agent.text")).toEqual([
       expect.objectContaining({ text: "draft value" }),
     ]);

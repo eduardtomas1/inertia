@@ -32,10 +32,7 @@ const REVIEW_DECISIONS = new Set(["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUI
 
 type UnknownRecord = Record<string, unknown>;
 
-interface GitHubPreMergeDependencies extends GitHubPullRequestDependencies {
-  now?: () => Date;
-  runCli?: typeof runRestrictedCli;
-}
+interface GitHubPreMergeDependencies extends GitHubPullRequestDependencies { now?: () => Date; runCli?: typeof runRestrictedCli }
 
 interface PullRequestDetails {
   number: number;
@@ -103,7 +100,7 @@ function boundedText(value: string, maxCharacters: number): {
   };
 }
 
-function safeGitHubUrl(value: unknown, repositoryBaseUrl: string): string | null {
+function safeGitHubUrl(value: unknown, repositoryBaseUrl: string, expectedPullNumber?: number): string | null {
   if (typeof value !== "string" || value.length > 4_096) return null;
   try {
     const candidate = new URL(value);
@@ -116,6 +113,9 @@ function safeGitHubUrl(value: unknown, repositoryBaseUrl: string): string | null
       || !candidate.pathname.toLowerCase().startsWith(
         `${repository.pathname.toLowerCase()}/`,
       )
+      || (expectedPullNumber !== undefined
+        && candidate.pathname.toLowerCase().split("/").slice(0, 5).join("/")
+          !== `${repository.pathname.toLowerCase()}/pull/${expectedPullNumber}`)
     ) {
       return null;
     }
@@ -486,7 +486,7 @@ function parseReviewThreads(
         : null,
       author: boundedText(author, 128).value,
       body,
-      url: safeGitHubUrl(source.url, repositoryBaseUrl),
+      url: safeGitHubUrl(source.url, repositoryBaseUrl, expectedNumber),
       codex: Boolean(codexComment),
       outdated: node.isOutdated,
     });

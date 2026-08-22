@@ -545,6 +545,43 @@ describe("GitHub pre-merge confidence", () => {
     ]);
   });
 
+  it("does not expose a review-thread URL for another pull request", () => {
+    const evidence = gitHubPreMergeTestSupport.parseReviewThreads(
+      JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              number: 7,
+              headRefOid: "b".repeat(40),
+              updatedAt: "2026-08-22T15:00:00Z",
+              reviewThreads: {
+                nodes: [{
+                  id: "cross-pull-request",
+                  isResolved: false,
+                  isOutdated: false,
+                  path: "src/current.ts",
+                  line: 12,
+                  comments: { nodes: [{
+                    author: { login: "chatgpt-codex-connector" },
+                    body: "Review this exact pull request.",
+                    url: "https://github.com/openai/codex/pull/8#discussion_r2",
+                  }] },
+                }],
+                pageInfo: { hasNextPage: false },
+              },
+            },
+          },
+        },
+      }),
+      "https://github.com/openai/codex",
+      7,
+    );
+
+    expect(evidence.threads).toEqual([
+      expect.objectContaining({ id: "cross-pull-request", url: null }),
+    ]);
+  });
+
   it("rejects malformed review-thread collections instead of treating them as empty", () => {
     const malformed = JSON.stringify({
       data: { repository: { pullRequest: {

@@ -158,21 +158,23 @@ export async function semanticPageSnapshot(
           || element.innerText
           || element.value,
         );
-    const pageText = () => {
-      let text = normalizeText(document.body?.innerText);
-      const redact = (candidate) => {
-        const sensitive = normalizeText(candidate);
-        if (sensitive) text = text.split(sensitive).join("[redacted]");
-      };
-      for (const input of document.querySelectorAll("input[type='password']")) {
-        for (const label of Array.from(input.labels || [])) redact(label.innerText);
-        redact(input.value);
+    const sensitiveText = [];
+    for (const input of document.querySelectorAll("input[type='password']")) {
+      for (const label of Array.from(input.labels || [])) {
+        sensitiveText.push(normalizeText(label.innerText));
       }
-      return text.slice(0, ${MAX_PAGE_TEXT_CHARS});
+      sensitiveText.push(normalizeText(input.value));
+    }
+    const redact = (value, maximum) => {
+      let text = normalizeText(value);
+      for (const sensitive of sensitiveText) {
+        if (sensitive) text = text.split(sensitive).join("[redacted]");
+      }
+      return text.slice(0, maximum);
     };
     const selector = [
       "a[href]", "button", "input", "textarea", "select", "summary",
-      "[role]", "[contenteditable='true']", "[tabindex]",
+      "[role]", "[contenteditable]", "[tabindex]",
     ].join(",");
     const elements = [];
     for (const element of document.querySelectorAll(selector)) {
@@ -201,10 +203,10 @@ export async function semanticPageSnapshot(
       });
     }
     return {
-      title: normalize(document.title, 300),
+      title: redact(document.title, 300),
       url: location.href,
       viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY },
-      text: pageText(),
+      text: redact(document.body?.innerText, ${MAX_PAGE_TEXT_CHARS}),
       elements,
       truncated: elements.length >= ${MAX_SEMANTIC_ELEMENTS},
     };
@@ -250,7 +252,10 @@ export async function locateAgentPageRef(
       || (element.tagName === "INPUT"
         && ["text", "search", "email", "url", "tel", "password", "number"].includes(inputType))
     );
-    if (${focus ? "true" : "false"} && editable) {
+    const disabled = Boolean(
+      element.disabled || element.getAttribute("aria-disabled") === "true"
+    );
+    if (${focus ? "true" : "false"} && editable && !disabled) {
       element.focus({ preventScroll: false });
       if (${replace ? "true" : "false"}) {
         if (typeof element.select === "function") element.select();
@@ -259,10 +264,14 @@ export async function locateAgentPageRef(
           selection?.selectAllChildren(element);
         }
       }
+      const active = document.activeElement;
+      if (active !== element && (!active || !element.contains(active))) {
+        return { found: false };
+      }
     }
     return {
       found: true,
-      disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
+      disabled,
       editable,
       label: String(
         password

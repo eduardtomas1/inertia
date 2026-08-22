@@ -400,6 +400,50 @@ describe("agent-owned native Browser", () => {
     expect(children[0]!.webContents.insertedText).toEqual([]);
   });
 
+  it("revalidates refs and focus after rendering the page cursor", async () => {
+    const { broker, children } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    pageTools.locateAgentPageRef
+      .mockResolvedValueOnce({
+        found: true, disabled: false, editable: false,
+        label: "Pay now", x: 42, y: 28,
+      })
+      .mockResolvedValueOnce({
+        found: false, disabled: false, editable: false, label: "", x: 0, y: 0,
+      });
+    await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "not-found",
+        message: "That page element changed before the click. Inspect the page again for current refs.",
+      });
+    expect(children[0]!.webContents.sentInputs).toEqual([]);
+
+    pageTools.locateAgentPageRef
+      .mockResolvedValueOnce({
+        found: true, disabled: false, editable: true,
+        label: "Email", x: 42, y: 28,
+      })
+      .mockResolvedValueOnce({
+        found: false, disabled: false, editable: false, label: "", x: 0, y: 0,
+      });
+    await expect(broker.perform(conversationId, {
+      action: "type",
+      ref: "e2",
+      text: "must stay out",
+      replace: true,
+    })).resolves.toMatchObject({
+      ok: false,
+      code: "not-found",
+      message: "That page element lost focus before typing. Inspect the page again for current refs.",
+    });
+    expect(children[0]!.webContents.insertedText).toEqual([]);
+  });
+
   it("rejects typing into a non-editable semantic ref", async () => {
     const { broker, children } = harness();
     await broker.navigate({

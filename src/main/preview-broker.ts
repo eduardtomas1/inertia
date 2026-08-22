@@ -878,19 +878,33 @@ export class PreviewBroker {
       { signal },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
-    const x = located.x;
-    const y = located.y;
+    let x = located.x;
+    let y = located.y;
     if (!located.found || x === undefined || y === undefined) {
       return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
     }
     if (located.disabled) return failure("invalid", "That page element is disabled.");
+    const cursorX = x;
+    const cursorY = y;
     stopForAbort(signal);
     await this.#rendererOperation(
       contents,
-      () => showAgentPageCursor(contents, x, y, `Agent · ${located.label || ref}`),
+      () => showAgentPageCursor(contents, cursorX, cursorY, `Agent · ${located.label || ref}`),
       { signal },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
+    const revalidated = await this.#rendererOperation(
+      contents,
+      () => locateAgentPageRef(contents, ref),
+      { signal },
+    );
+    if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
+    x = revalidated.x;
+    y = revalidated.y;
+    if (!revalidated.found || x === undefined || y === undefined) {
+      return failure("not-found", "That page element changed before the click. Inspect the page again for current refs.");
+    }
+    if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     stopForAbort(signal);
     contents.sendInputEvent({ type: "mouseMove", x, y });
     contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
@@ -915,20 +929,35 @@ export class PreviewBroker {
       { signal },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
-    const x = located.x;
-    const y = located.y;
+    let x = located.x;
+    let y = located.y;
     if (!located.found || x === undefined || y === undefined) {
       return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
     }
     if (located.disabled) return failure("invalid", "That page element is disabled.");
     if (!located.editable) return failure("invalid", "That page element does not accept text input.");
+    const cursorX = x;
+    const cursorY = y;
     stopForAbort(signal);
     await this.#rendererOperation(
       contents,
-      () => showAgentPageCursor(contents, x, y, `Agent typing · ${located.label || ref}`),
+      () => showAgentPageCursor(contents, cursorX, cursorY, `Agent typing · ${located.label || ref}`),
       { signal },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
+    const revalidated = await this.#rendererOperation(
+      contents,
+      () => locateAgentPageRef(contents, ref, true, replace),
+      { signal },
+    );
+    if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
+    x = revalidated.x;
+    y = revalidated.y;
+    if (!revalidated.found || x === undefined || y === undefined) {
+      return failure("not-found", "That page element lost focus before typing. Inspect the page again for current refs.");
+    }
+    if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
+    if (!revalidated.editable) return failure("invalid", "That page element does not accept text input.");
     stopForAbort(signal);
     await this.#rendererOperation(contents, () => contents.insertText(text), { signal });
     stopForAbort(signal);

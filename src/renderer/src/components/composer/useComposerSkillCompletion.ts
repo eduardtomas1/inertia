@@ -12,7 +12,7 @@ export function useComposerSkillCompletion(
   menuOpen: boolean,
 ) {
   const skillQuery = /(?:^|\s)\$([\w.:-]*)$/u
-    .exec(message)?.[1].toLocaleLowerCase() ?? null;
+    .exec(message)?.[1].toLowerCase() ?? null;
   const skillListboxId = `${useId()}-skills`;
   const [highlightedSkillId, setHighlightedSkillId] = useState<string | null>(null);
   const skillMatches = skillQuery === null

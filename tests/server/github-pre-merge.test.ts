@@ -323,7 +323,30 @@ describe("GitHub pre-merge confidence", () => {
       state: "unavailable",
       local: { branch: "feature/moved" },
       identity: { state: "changed" },
-      unavailableReason: "The local head changed while GitHub was checked. Refresh before relying on this result.",
+      unavailableReason: "The local identity or selected GitHub repository changed while GitHub was checked. Refresh before relying on this result.",
+    });
+  });
+
+  it("withholds no-PR evidence when the selected GitHub repository changes", async () => {
+    const { root } = await repository();
+    const runCli = vi.fn<typeof runRestrictedCli>(async () => {
+      await execFileAsync("git", [
+        "remote", "set-url", "origin", "https://github.com/other/codex.git",
+      ], { cwd: root });
+      return { stdout: "[]", stderr: "" };
+    });
+
+    const confidence = await inspectGitHubPreMergeConfidence(root, {}, {
+      environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
+      executableCandidates: async () => ["/fake/gh"],
+      runCli,
+    });
+
+    expect(confidence).toMatchObject({
+      state: "unavailable",
+      local: { branch: "feature/confidence" },
+      identity: { state: "changed" },
+      unavailableReason: "The local identity or selected GitHub repository changed while GitHub was checked. Refresh before relying on this result.",
     });
   });
 

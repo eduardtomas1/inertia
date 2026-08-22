@@ -701,11 +701,7 @@ export async function inspectGitHubPreMergeConfidence(
       "Check out a branch with a commit before loading pre-merge evidence.",
     );
   }
-  const routing = await inspectGitRemoteRouting(
-    repositoryPath,
-    initialStatus.branch,
-    { signal: options.signal },
-  );
+  const routing = await inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal: options.signal });
   if (!routing.target || routing.target.forge !== "github") {
     return emptyConfidence(
       now,
@@ -767,19 +763,23 @@ export async function inspectGitHubPreMergeConfidence(
     );
   }
   if (!discovery) {
-    const [finalStatus, finalHead] = await Promise.all([
+    const [finalStatus, finalHead, finalRouting] = await Promise.all([
       getRepositoryStatus(repositoryPath, { signal: options.signal }),
       currentHead(repositoryPath, options.signal),
+      inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal: options.signal }),
     ]);
+    const finalSourceRepositorySlug = finalRouting.target?.forge === "github" ? githubRepositorySlug(finalRouting.target.baseUrl) : null;
     const changed = initialHead !== finalHead
-      || initialStatus.branch !== finalStatus.branch;
+      || initialStatus.branch !== finalStatus.branch
+      || finalSourceRepositorySlug?.toLocaleLowerCase("en-US")
+        !== sourceRepositorySlug.toLocaleLowerCase("en-US");
     const confidence = emptyConfidence(
       now,
       finalStatus,
       finalHead,
       changed ? "unavailable" : "no-pull-request",
       changed
-        ? "The local head changed while GitHub was checked. Refresh before relying on this result."
+        ? "The local identity or selected GitHub repository changed while GitHub was checked. Refresh before relying on this result."
         : `GitHub has no open pull request for ${initialStatus.branch} at ${initialHead.slice(0, 8)}.`,
     );
     if (changed) confidence.identity.state = "changed";
@@ -886,13 +886,9 @@ export async function inspectGitHubPreMergeConfidence(
   const [finalStatus, finalHead, finalRouting] = await Promise.all([
     getRepositoryStatus(repositoryPath, { signal: options.signal }),
     currentHead(repositoryPath, options.signal),
-    inspectGitRemoteRouting(repositoryPath, initialStatus.branch, {
-      signal: options.signal,
-    }),
+    inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal: options.signal }),
   ]);
-  const finalSourceRepositorySlug = finalRouting.target?.forge === "github"
-    ? githubRepositorySlug(finalRouting.target.baseUrl)
-    : null;
+  const finalSourceRepositorySlug = finalRouting.target?.forge === "github" ? githubRepositorySlug(finalRouting.target.baseUrl) : null;
   const localChanged = initialHead !== finalHead
     || initialStatus.branch !== finalStatus.branch
     || finalSourceRepositorySlug?.toLocaleLowerCase("en-US")

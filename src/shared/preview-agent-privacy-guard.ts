@@ -50,9 +50,28 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     });
   }
   const maximumParserSourceCharacters = 4_096;
+  const createElement = typeof Document === "undefined"
+    ? undefined
+    : Document.prototype.createElement;
+  const setInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")?.set;
+  const templateContent = typeof HTMLTemplateElement === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(HTMLTemplateElement.prototype, "content")?.get;
+  const querySelector = typeof DocumentFragment === "undefined"
+    ? undefined
+    : DocumentFragment.prototype.querySelector;
   const mayCreateDeclarativeRoot = (value: unknown): boolean => {
     if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return true;
-    return /<template\b[\s\S]*\bshadowrootmode\s*=/iu.test(value);
+    if (typeof createElement !== "function" || typeof setInnerHTML !== "function"
+      || typeof templateContent !== "function" || typeof querySelector !== "function") return true;
+    try {
+      const template = Reflect.apply(createElement, document, ["template"]) as HTMLTemplateElement;
+      Reflect.apply(setInnerHTML, template, [value]);
+      const content = Reflect.apply(templateContent, template, []) as DocumentFragment;
+      return Reflect.apply(querySelector, content, ["template[shadowrootmode]"]) !== null;
+    } catch {
+      return true;
+    }
   };
   const signalDeclarativeParser = (prototype: object, name: string): void => {
     const descriptor = Object.getOwnPropertyDescriptor(prototype, name);

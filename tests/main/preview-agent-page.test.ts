@@ -127,27 +127,44 @@ describe("agent browser semantic snapshots", () => {
         return true;
       }
     }
+    class FakeDocumentFragment {
+      source = "";
+      querySelector(_selector: string): object | null {
+        const beforeClose = this.source.split("</template>", 1)[0] ?? "";
+        return beforeClose.startsWith("<template") && beforeClose.includes(" shadowrootmode")
+          ? {}
+          : null;
+      }
+    }
     class FakeElement extends FakeEventTarget {
+      fragment = new FakeDocumentFragment();
       attachShadow(): object { return {}; }
+      set innerHTML(source: string) { this.fragment.source = source; }
       setHTML(_html: string): void {}
       setHTMLUnsafe(_html: string): void {}
+    }
+    class FakeHTMLTemplateElement extends FakeElement {
+      get content(): FakeDocumentFragment { return this.fragment; }
     }
     class FakeHTMLElement extends FakeElement {
       attachInternals(): object { return { shadowRoot: null }; }
     }
-    class FakeDocument {
+    class FakeDocument extends FakeEventTarget {
       static parseHTML(_html: string): object { return {}; }
       static parseHTMLUnsafe(_html: string): object { return {}; }
+      createElement(): FakeHTMLTemplateElement { return new FakeHTMLTemplateElement(); }
     }
     class FakeShadowRoot {
       setHTML(_html: string): void {}
       setHTMLUnsafe(_html: string): void {}
     }
     const context = {
-      document: new FakeEventTarget(),
+      document: new FakeDocument(),
       Element: FakeElement,
       HTMLElement: FakeHTMLElement,
+      HTMLTemplateElement: FakeHTMLTemplateElement,
       Document: FakeDocument,
+      DocumentFragment: FakeDocumentFragment,
       ShadowRoot: FakeShadowRoot,
       EventTarget: FakeEventTarget,
       Event: FakeEvent,
@@ -175,6 +192,9 @@ describe("agent browser semantic snapshots", () => {
       Document.parseHTMLUnsafe('<p>ordinary</p>');
       new ShadowRoot().setHTML('<p>ordinary</p>');
       new ShadowRoot().setHTMLUnsafe('<p>ordinary</p>');
+      new Element().setHTML('<!-- <template shadowrootmode=open> -->');
+      new Element().setHTML('<template data-shadowrootmode=open></template>');
+      new Element().setHTML('<template></template><div shadowrootmode=open></div>');
     `, context);
     expect(dispatched).toHaveLength(6);
 

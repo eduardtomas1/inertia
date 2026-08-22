@@ -139,6 +139,7 @@ async function createPreviewServer(): Promise<{
         + "document.querySelector('#outer-action').addEventListener('click',()=>{window.__outerActionClicked=true});"
         + "document.querySelector('#inner-action').addEventListener('click',()=>{window.__innerActionClicked=true});"
         + "document.querySelector('#opacity-action').addEventListener('click',()=>{window.__opacityActionClicked=true});"
+        + "const ordinary=document.createElement('div');ordinary.setHTML('<p>Ordinary parser update</p>');document.body.append(ordinary);"
         + "document.querySelector('#aria-disabled-action').addEventListener('click',()=>{window.__ariaDisabledActionClicked=true})</script>",
       );
       return;

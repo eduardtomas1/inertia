@@ -5,9 +5,11 @@ import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
 const AGENT_BROWSER_WORLD_ID = 1001;
 const MAX_SEMANTIC_ELEMENTS = 200;
 const MAX_PAGE_TEXT_CHARS = 12_000;
+const MAX_REMEMBERED_PASSWORD_VALUES = 32;
 
 export interface PreviewAgentTarget {
   found: boolean;
+  blocked?: boolean;
   disabled?: boolean;
   editable?: boolean;
   label?: string;
@@ -99,6 +101,7 @@ function target(value: unknown): PreviewAgentTarget {
     : undefined;
   return {
     found: true,
+    blocked: value.blocked === true,
     disabled: value.disabled === true,
     editable: value.editable === true,
     label: boundedString(value.label, 300),
@@ -124,10 +127,12 @@ export async function semanticPageSnapshot(
       refs: new Map(),
       nodes: new WeakMap(),
       passwordNodes: new WeakSet(),
+      passwordValues: new Set(),
       next: 1,
     };
     state.refs.clear();
     const passwordNodes = state.passwordNodes ??= new WeakSet();
+    const passwordValues = state.passwordValues ??= new Set();
     const normalizeText = (value) => String(value ?? "")
       .replace(/\\s+/gu, " ").trim();
     const normalize = (value, maximum = 300) => normalizeText(value)
@@ -140,9 +145,21 @@ export async function semanticPageSnapshot(
         && style.visibility !== "hidden" && style.display !== "none"
         && Number(style.opacity || "1") > 0;
     };
+    const rememberPasswordValue = (value) => {
+      const normalized = normalizeText(value);
+      if (!normalized) return;
+      passwordValues.delete(normalized);
+      passwordValues.add(normalized);
+      while (passwordValues.size > ${MAX_REMEMBERED_PASSWORD_VALUES}) {
+        passwordValues.delete(passwordValues.values().next().value);
+      }
+    };
     for (const input of document.querySelectorAll?.("input") || []) {
-      if (String(input.type || "").toLowerCase() === "password") {
+      const value = normalizeText(input.value);
+      if (String(input.type || "").toLowerCase() === "password"
+        || (value && passwordValues.has(value))) {
         passwordNodes.add(input);
+        rememberPasswordValue(value);
       }
     }
     const passwordField = (element) => element.tagName === "INPUT"
@@ -150,13 +167,15 @@ export async function semanticPageSnapshot(
         String(element.type || "").toLowerCase() === "password"
         || passwordNodes.has(element)
       );
-    const sensitiveText = [];
+    const sensitiveText = Array.from(passwordValues);
     for (const input of document.querySelectorAll?.("input") || []) {
       if (!passwordField(input)) continue;
       for (const label of Array.from(input.labels || [])) {
         sensitiveText.push(normalizeText(label.innerText));
       }
-      sensitiveText.push(normalizeText(input.value));
+      const value = normalizeText(input.value);
+      rememberPasswordValue(value);
+      sensitiveText.push(value);
     }
     state.sensitiveText = sensitiveText;
     const redact = (value, maximum) => {
@@ -202,6 +221,8 @@ export async function semanticPageSnapshot(
     const elements = [];
     for (const element of document.querySelectorAll(selector)) {
       if (elements.length >= ${MAX_SEMANTIC_ELEMENTS}) break;
+      if (element.tagName === "INPUT"
+        && String(element.type || "").toLowerCase() === "file") continue;
       const rect = element.getBoundingClientRect();
       if (!visible(element, rect)) continue;
       let ref = state.nodes.get(element);
@@ -272,9 +293,24 @@ export async function locateAgentPageRef(
       return { found: false };
     }
     const passwordNodes = state.passwordNodes ??= new WeakSet();
+    const passwordValues = state.passwordValues ??= new Set();
+    const normalizeText = (value) => String(value ?? "")
+      .replace(/\\s+/gu, " ").trim();
+    const rememberPasswordValue = (value) => {
+      const normalized = normalizeText(value);
+      if (!normalized) return;
+      passwordValues.delete(normalized);
+      passwordValues.add(normalized);
+      while (passwordValues.size > ${MAX_REMEMBERED_PASSWORD_VALUES}) {
+        passwordValues.delete(passwordValues.values().next().value);
+      }
+    };
     for (const input of document.querySelectorAll?.("input") || []) {
-      if (String(input.type || "").toLowerCase() === "password") {
+      const value = normalizeText(input.value);
+      if (String(input.type || "").toLowerCase() === "password"
+        || (value && passwordValues.has(value))) {
         passwordNodes.add(input);
+        rememberPasswordValue(value);
       }
     }
     const password = element.tagName === "INPUT" && (
@@ -284,6 +320,7 @@ export async function locateAgentPageRef(
     const inputType = element.tagName === "INPUT"
       ? String(element.type || "text").toLowerCase()
       : "";
+    const blocked = inputType === "file";
     const editable = !element.readOnly && (
       element.tagName === "TEXTAREA"
       || element.isContentEditable
@@ -309,15 +346,15 @@ export async function locateAgentPageRef(
         return { found: false };
       }
     }
-    const normalizeText = (value) => String(value ?? "")
-      .replace(/\\s+/gu, " ").trim();
-    const sensitiveText = [];
+    const sensitiveText = Array.from(passwordValues);
     for (const input of document.querySelectorAll?.("input") || []) {
       if (!passwordNodes.has(input)) continue;
       for (const label of Array.from(input.labels || [])) {
         sensitiveText.push(normalizeText(label.innerText));
       }
-      sensitiveText.push(normalizeText(input.value));
+      const value = normalizeText(input.value);
+      rememberPasswordValue(value);
+      sensitiveText.push(value);
     }
     state.sensitiveText = sensitiveText;
     const redact = (value) => {
@@ -331,6 +368,7 @@ export async function locateAgentPageRef(
     };
     return {
       found: true,
+      blocked,
       disabled,
       editable,
       label: redact(

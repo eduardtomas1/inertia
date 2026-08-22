@@ -902,6 +902,7 @@ export class PreviewBroker {
     if (!located.found || x === undefined || y === undefined) {
       return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
     }
+    if (located.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (located.disabled) return failure("invalid", "That page element is disabled.");
     const cursorX = x;
     const cursorY = y;
@@ -923,6 +924,7 @@ export class PreviewBroker {
     if (!revalidated.found || x === undefined || y === undefined) {
       return failure("not-found", "That page element changed before the click. Inspect the page again for current refs.");
     }
+    if (revalidated.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     stopForAbort(signal);
     await this.#sendInputAndWait(contents, () => {
@@ -955,6 +957,7 @@ export class PreviewBroker {
     if (!located.found || x === undefined || y === undefined) {
       return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
     }
+    if (located.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (located.disabled) return failure("invalid", "That page element is disabled.");
     if (!located.editable) return failure("invalid", "That page element does not accept text input.");
     const cursorX = x;
@@ -977,6 +980,7 @@ export class PreviewBroker {
     if (!revalidated.found || x === undefined || y === undefined) {
       return failure("not-found", "That page element lost focus before typing. Inspect the page again for current refs.");
     }
+    if (revalidated.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     if (!revalidated.editable) return failure("invalid", "That page element does not accept text input.");
     stopForAbort(signal);

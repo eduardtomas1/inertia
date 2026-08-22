@@ -92,13 +92,14 @@ describe("agent browser semantic snapshots", () => {
   it("masks password values in semantic evidence and interaction labels", async () => {
     const secret = "token-that-must-never-leave-the-page";
     const callbackSecret = "oauth-code-that-never-enters-a-password-field";
+    let replacement: typeof input | null = null;
     const document = {
       title: `Account ${secret}`,
       body: { innerText: `Sign in\n${secret}\nKeep this account secure` },
       activeElement: null as unknown,
       querySelectorAll: (selector: string) => selector === "input"
-        ? [input]
-        : [input, mirror],
+        ? [replacement ?? input]
+        : [replacement ?? input, mirror],
       elementFromPoint: (_x: number, y: number) => y < 80 ? input : mirror,
     };
     const focus = vi.fn(() => { document.activeElement = input; });
@@ -212,6 +213,21 @@ describe("agent browser semantic snapshots", () => {
       name: "Password field",
       value: "[redacted]",
     });
+
+    replacement = {
+      ...input,
+      type: "text",
+      labels: [{ innerText: secret }],
+      contains: (candidate: unknown) => candidate === replacement,
+    };
+    const replacementSnapshot = await semanticPageSnapshot(contents as never);
+    expect(replacementSnapshot).not.toContain(secret);
+    replacement.value = changedSecret;
+    replacement.labels[0]!.innerText = changedSecret;
+    mirror.value = changedSecret;
+    mirror.innerText = changedSecret;
+    const editedReplacementSnapshot = await semanticPageSnapshot(contents as never);
+    expect(editedReplacementSnapshot).not.toContain(changedSecret);
   });
 
   it("includes every valid contenteditable form in semantic refs", async () => {
@@ -308,6 +324,63 @@ describe("agent browser semantic snapshots", () => {
     expect(snapshot.elements[0]?.disabled).toBe(true);
     await expect(locateAgentPageRef(contents as never, "e1"))
       .resolves.toMatchObject({ found: true, disabled: true });
+  });
+
+  it("excludes file inputs and blocks refs that change into file inputs", async () => {
+    const input = {
+      tagName: "INPUT",
+      type: "file",
+      value: "",
+      disabled: false,
+      readOnly: false,
+      checked: false,
+      labels: [{ innerText: "Upload private file" }],
+      innerText: "",
+      isConnected: true,
+      matches: () => false,
+      getAttribute: () => null,
+      getBoundingClientRect: () => ({
+        x: 20, y: 30, left: 20, top: 30,
+        right: 220, bottom: 70, width: 200, height: 40,
+      }),
+      contains: (candidate: unknown) => candidate === input,
+    };
+    const context = {
+      document: {
+        title: "Upload",
+        body: { innerText: "Upload private file" },
+        activeElement: null,
+        querySelectorAll: () => [input],
+        elementFromPoint: () => input,
+      },
+      location: { href: "http://127.0.0.1:3000/upload" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const excluded = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: unknown[];
+    };
+    expect(excluded.elements).toEqual([]);
+    input.type = "text";
+    const actionable = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ ref: string }>;
+    };
+    expect(actionable.elements).toEqual([expect.objectContaining({ ref: "e1" })]);
+    input.type = "file";
+    await expect(locateAgentPageRef(contents as never, "e1"))
+      .resolves.toMatchObject({ found: true, blocked: true });
   });
 
   it("rejects editable refs whose focus handler redirects ownership", async () => {

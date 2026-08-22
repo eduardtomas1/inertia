@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { PreviewAgentTarget } from "../../src/main/preview-agent-page";
+
 const electronState = vi.hoisted(() => ({
   interactionTimeline: [] as string[],
   viewOptions: [] as Array<Record<string, unknown>>,
@@ -136,8 +138,9 @@ vi.mock("electron", () => {
 });
 
 const pageTools = vi.hoisted(() => ({
-  locateAgentPageRef: vi.fn(async () => ({
-    found: true, disabled: false, editable: true, label: "Run checks", x: 42, y: 28,
+  locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({
+    found: true, blocked: false, disabled: false, editable: true,
+    label: "Run checks", x: 42, y: 28,
   })),
   semanticPageSnapshot: vi.fn(async () => JSON.stringify({ title: "Local app", elements: [] })),
   showAgentPageCursor: vi.fn(async () => undefined),
@@ -564,6 +567,32 @@ describe("agent-owned native Browser", () => {
     });
     expect(children[0]!.webContents.insertedText).toEqual([]);
     expect(pageTools.showAgentPageCursor).toHaveBeenCalledTimes(cursorCalls);
+  });
+
+  it("rejects browser elements that become host-controlled inputs", async () => {
+    const { broker, children } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({
+      found: true,
+      blocked: true,
+      disabled: false,
+      editable: false,
+      label: "Upload private file",
+      x: 42,
+      y: 28,
+    });
+
+    await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "invalid",
+        message: "That page element cannot be controlled by the Browser agent.",
+      });
+    expect(children[0]!.webContents.sentInputs).toEqual([]);
   });
 
   it("serializes renderer navigation and waits for history commands to settle", async () => {

@@ -11,7 +11,7 @@ interface AgentPageBoundaryState {
 }
 
 const agentPageBoundaryStates = new WeakMap<WebContents, AgentPageBoundaryState>();
-const agentPageDebuggerBootstraps = new WeakSet<WebContents>();
+const agentPageDebuggerBootstraps = new WeakMap<WebContents, number>();
 
 function stopForAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("browser-action-cancelled");
@@ -23,7 +23,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
   }
   if (!contents.getURL()) {
     await contents.loadURL("about:blank");
-    agentPageDebuggerBootstraps.add(contents);
+    agentPageDebuggerBootstraps.set(contents, contents.navigationHistory.getActiveIndex());
   }
   contents.debugger.attach("1.3");
   const state: AgentPageBoundaryState = {
@@ -69,8 +69,12 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
 }
 
 export function settleAgentPageDebuggerBootstrap(contents: WebContents): void {
-  if (!agentPageDebuggerBootstraps.delete(contents)) return;
-  contents.navigationHistory.clear();
+  const index = agentPageDebuggerBootstraps.get(contents);
+  agentPageDebuggerBootstraps.delete(contents);
+  if (index === undefined || index < 0 || index === contents.navigationHistory.getActiveIndex()) return;
+  if (contents.navigationHistory.getEntryAtIndex(index)?.url === "about:blank") {
+    contents.navigationHistory.removeEntryAtIndex(index);
+  }
 }
 
 const fileChooserBlocks = new WeakMap<WebContents, Promise<void>>();
@@ -168,6 +172,7 @@ export async function settleAgentPageInput(
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     let dispatchSettled = false;
+    let dispatchError: Error | undefined;
     let navigationStarted = false;
     let navigationSettled = false;
     let graceElapsed = false;
@@ -192,7 +197,7 @@ export async function settleAgentPageInput(
     };
     const completeIfReady = (): void => {
       if (!dispatchSettled) return;
-      if (navigationStarted ? navigationSettled : graceElapsed) finish();
+      if (navigationStarted ? navigationSettled : graceElapsed) finish(dispatchError);
     };
     const armGrace = (): void => {
       if (settled || navigationStarted || grace) return;
@@ -284,10 +289,15 @@ export async function settleAgentPageInput(
         if (navigationStarted) completeIfReady();
         else armGrace();
       }, (error: unknown) => {
-        finish(error instanceof Error ? error : new Error("The Browser input failed."));
+        dispatchSettled = true;
+        dispatchError = error instanceof Error ? error : new Error("The Browser input failed.");
+        if (navigationStarted) completeIfReady();
+        else armGrace();
       });
     } catch (error) {
-      finish(error instanceof Error ? error : new Error("The Browser input failed."));
+      dispatchSettled = true;
+      dispatchError = error instanceof Error ? error : new Error("The Browser input failed.");
+      armGrace();
     }
   });
 }

@@ -21,6 +21,7 @@ const electronState = vi.hoisted(() => ({
       getActiveIndex: ReturnType<typeof vi.fn>;
       getEntryAtIndex: ReturnType<typeof vi.fn>;
       goBack: ReturnType<typeof vi.fn>;
+      removeEntryAtIndex: ReturnType<typeof vi.fn>;
     };
     emit(name: string, ...args: unknown[]): void;
     insertedText: string[];
@@ -69,10 +70,14 @@ vi.mock("electron", () => {
       canGoBack: vi.fn(() => false),
       canGoForward: vi.fn(() => false),
       clear: vi.fn(),
-      getActiveIndex: vi.fn(() => 0),
-      getEntryAtIndex: vi.fn(() => ({ title: "", url: this.url })),
+      getActiveIndex: vi.fn(() => this.url === "about:blank" ? 0 : 2),
+      getEntryAtIndex: vi.fn((index: number) => ({
+        title: "",
+        url: index === 0 ? "about:blank" : this.url,
+      })),
       goBack: vi.fn(),
       goForward: vi.fn(),
+      removeEntryAtIndex: vi.fn(() => true),
     };
     readonly sentInputs: Array<Record<string, unknown>> = [];
     readonly insertedText: string[] = [];
@@ -264,7 +269,9 @@ describe("agent-owned native Browser", () => {
     expect(electronState.contents[0]!.debugger.sendCommand)
       .toHaveBeenCalledWith("DOM.enable");
     expect(electronState.contents[0]!.debugger.isAttached()).toBe(true);
-    expect(electronState.contents[0]!.navigationHistory.clear).toHaveBeenCalledOnce();
+    expect(electronState.contents[0]!.navigationHistory.clear).not.toHaveBeenCalled();
+    expect(electronState.contents[0]!.navigationHistory.removeEntryAtIndex)
+      .toHaveBeenCalledExactlyOnceWith(0);
     await expect(broker.perform(conversationId, { action: "snapshot" }))
       .resolves.toMatchObject({ ok: true });
     expect(electronState.contents[0]!.debugger.sendCommand).toHaveBeenCalledWith(

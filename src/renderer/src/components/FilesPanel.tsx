@@ -851,7 +851,7 @@ export function FilesPanel({
           </div>
         </div>
         {onRefresh && (
-          <IconButton label="Refresh files" onClick={onRefresh} disabled={loading}>
+          <IconButton label="Refresh" onClick={onRefresh} disabled={loading}>
             {loading ? <LoadingMark label="Refreshing files" /> : <RefreshCw size={15} />}
           </IconButton>
         )}
@@ -864,7 +864,7 @@ export function FilesPanel({
             type="search"
             ref={searchInputRef}
             value={query}
-            aria-label="Search project files"
+            aria-label="Search files"
             placeholder="Search files"
             onChange={(event) => updateQuery(event.currentTarget.value)}
           />
@@ -885,7 +885,7 @@ export function FilesPanel({
           className="file-entry-list"
           ref={fileListRef}
           role="tree"
-          aria-label={searchActive ? "Search results" : "Workspace files"}
+          aria-label={searchActive ? "Search results" : "Files"}
           aria-busy={treeBusy}
         >
           {showTreeLoading ? (
@@ -1106,7 +1106,7 @@ export function FilesPanel({
                   className="file-preview-markdown"
                   role="document"
                   tabIndex={0}
-                  aria-label={`Rendered preview of ${preview.path}`}
+                  aria-label={`Preview of ${preview.path}`}
                 >
                   <MarkdownPreviewSurface
                     key={previewViewIdentity}
@@ -1190,8 +1190,7 @@ export function FilesPanel({
           ) : (
             <div className="panel-empty">
               <FileSearch size={22} aria-hidden="true" />
-              <h3>Select a file</h3>
-              <p>Choose a file.</p>
+              <p>Select a file.</p>
             </div>
           )}
         </div>

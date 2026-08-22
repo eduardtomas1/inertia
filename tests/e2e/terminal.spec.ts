@@ -217,7 +217,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
   }
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
   const panel = page.getByRole("region", { name: "Project files" });
-  const tree = panel.getByRole("tree", { name: "Workspace files" });
+  const tree = panel.getByRole("tree", { name: "Files" });
   await expect(tree).toBeVisible();
   await expect(tree.getByText("CaseSensitiveLeaf.ts", { exact: true })).toHaveCount(0);
 
@@ -263,7 +263,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
     ),
   ).toContain("edited in Inertia");
 
-  const search = panel.getByRole("searchbox", { name: "Search project files" });
+  const search = panel.getByRole("searchbox", { name: "Search files" });
   await search.fill("deep");
   const searchTree = panel.getByRole("tree", { name: "Workspace file search results" });
   const deepResult = searchTree.getByRole("treeitem").filter({ hasText: "deep" }).first();

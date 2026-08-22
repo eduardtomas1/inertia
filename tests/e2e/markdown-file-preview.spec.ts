@@ -113,7 +113,7 @@ test("opens a rendered project Markdown file directly from the chat", async () =
   await expect(workspacePanel.getByRole("tab", { name: "Files" }))
     .toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("document", {
-    name: "Rendered preview of docs/guide.md",
+    name: "Preview of docs/guide.md",
   })).toBeVisible();
   const details = page.getByRole("heading", { name: "Details" });
   await expect(details).toBeVisible();
@@ -132,13 +132,13 @@ test("opens a rendered project Markdown file directly from the chat", async () =
 
   await page.getByRole("link", { name: "Open the nested guide" }).click();
   await expect(page.getByRole("document", {
-    name: "Rendered preview of docs/nested/next.md",
+    name: "Preview of docs/nested/next.md",
   })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Target" })).toBeFocused();
 
   await page.getByRole("link", { name: "Back to the guide" }).click();
   await expect(page.getByRole("document", {
-    name: "Rendered preview of docs/guide.md",
+    name: "Preview of docs/guide.md",
   })).toBeVisible();
   await expect(details).toBeFocused();
 
@@ -163,20 +163,20 @@ test("opens a rendered project Markdown file directly from the chat", async () =
     name: "Workspace tools",
   });
   await expect(primaryTools.getByRole("document", {
-    name: "Rendered preview of docs/guide.md",
+    name: "Preview of docs/guide.md",
   })).toBeVisible();
   await secondary.getByRole("link", { name: "companion guide" }).click();
   const secondaryTools = secondary.getByRole("complementary", {
     name: "Workspace tools",
   });
   await expect(secondaryTools.getByRole("document", {
-    name: "Rendered preview of docs/guide.md",
+    name: "Preview of docs/guide.md",
   })).toBeVisible();
   await expect(secondaryTools.getByRole("heading", {
     name: "Companion details",
   })).toBeFocused();
   await expect(primaryTools.getByRole("document", {
-    name: "Rendered preview of docs/guide.md",
+    name: "Preview of docs/guide.md",
   })).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });

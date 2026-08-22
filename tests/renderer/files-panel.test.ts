@@ -48,14 +48,14 @@ describe("FilesPanel", () => {
     }));
 
     expect(html).toContain('role="tree"');
-    expect(html).toContain('aria-label="Workspace files"');
+    expect(html).toContain('aria-label="Files"');
     expect(html).toContain('role="treeitem"');
     expect(html).toContain('aria-level="1"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('aria-current="true"');
     expect(html).toContain('title="README.md"');
-    expect(html).toContain('aria-label="Rendered preview of README.md"');
+    expect(html).toContain('aria-label="Preview of README.md"');
     expect(html).toContain('data-language-family="markup"');
     expect(html).toContain("Markdown recognized locally");
     expect(html).toContain("Rendering");

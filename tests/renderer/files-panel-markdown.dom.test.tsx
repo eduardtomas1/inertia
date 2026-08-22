@@ -93,7 +93,7 @@ describe("FilesPanel Markdown preview", () => {
     );
 
     const document = screen.getByRole("document", {
-      name: "Rendered preview of docs/README.md",
+      name: "Preview of docs/README.md",
     });
     expect(await within(document).findByRole("heading", { name: "Project guide" }))
       .toBeInTheDocument();
@@ -142,7 +142,7 @@ describe("FilesPanel Markdown preview", () => {
 
     fireEvent.click(within(viewToggle).getByRole("button", { name: "Preview" }));
     expect(screen.getByRole("document", {
-      name: "Rendered preview of README.markdown",
+      name: "Preview of README.markdown",
     })).toBeInTheDocument();
   });
 
@@ -165,7 +165,7 @@ describe("FilesPanel Markdown preview", () => {
 
     expect(screen.getByLabelText("Contents of README.md")).toBeInTheDocument();
     expect(screen.queryByRole("document", {
-      name: "Rendered preview of README.md",
+      name: "Preview of README.md",
     })).toBeNull();
     expect(container.querySelector('[data-source-line="3"]'))
       .toHaveClass("is-referenced");

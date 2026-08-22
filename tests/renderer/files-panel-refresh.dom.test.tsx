@@ -115,7 +115,7 @@ describe("FilesPanel root refresh", () => {
       />,
     );
     const search = screen.getByRole("searchbox", {
-      name: "Search project files",
+      name: "Search files",
     });
     fireEvent.change(search, { target: { value: "readme" } });
     await screen.findByRole("treeitem", { name: "README.md" });
@@ -134,7 +134,7 @@ describe("FilesPanel root refresh", () => {
     expect(await screen.findByRole("treeitem", { name: "Button.tsx" }))
       .toHaveAttribute("aria-selected", "true");
     expect(search).toHaveValue("");
-    expect(screen.getByRole("tree", { name: "Workspace files" }))
+    expect(screen.getByRole("tree", { name: "Files" }))
       .toBeInTheDocument();
   });
 
@@ -224,7 +224,7 @@ describe("FilesPanel root refresh", () => {
           onLoadEntries={vi.fn()}
         />,
       );
-      const tree = screen.getByRole("tree", { name: "Workspace files" });
+      const tree = screen.getByRole("tree", { name: "Files" });
       expect(observe).toHaveBeenCalledWith(tree);
       scrollIntoView.mockClear();
 
@@ -281,7 +281,7 @@ describe("FilesPanel root refresh", () => {
     );
 
     const search = screen.getByRole("searchbox", {
-      name: "Search project files",
+      name: "Search files",
     });
     await user.type(search, "deep");
     const result = await screen.findByRole("treeitem", { name: /deep/u });
@@ -347,7 +347,7 @@ describe("FilesPanel root refresh", () => {
     );
 
     const search = screen.getByRole("searchbox", {
-      name: "Search project files",
+      name: "Search files",
     });
     fireEvent.change(search, { target: { value: "deep" } });
     const result = await screen.findByRole("treeitem", {

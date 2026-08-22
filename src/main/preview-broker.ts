@@ -42,6 +42,7 @@ interface PreviewSlot {
   tabs: Map<string, PreviewTab>;
   activeTabId: string;
   bounds: Rectangle | null;
+  boundsGeneration: number;
   activity: AgentBrowserActivity | null;
   agentQueue: Promise<void>;
 }
@@ -128,6 +129,19 @@ function failure(
   message: string,
 ): AgentBrowserResult {
   return { ok: false, code, message };
+}
+
+function changedGeometry(): AgentBrowserResult {
+  return failure(
+    "not-found",
+    "The Browser page layout changed during this action. Inspect the page again for current refs.",
+  );
+}
+
+function sameBounds(left: Rectangle | null, right: Rectangle): boolean {
+  return left !== null
+    && left.x === right.x && left.y === right.y
+    && left.width === right.width && left.height === right.height;
 }
 
 function stopForAbort(signal?: AbortSignal): void {
@@ -348,7 +362,14 @@ export class PreviewBroker {
       if (pending?.contextId === contextId) this.#pendingBounds.delete(ownerId);
       const slot = this.#ownedSlot(ownerId, contextId);
       if (slot) {
-        slot.bounds = { x: 0, y: 0, width: 0, height: 0 };
+        const bounds = {
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+        };
+        if (!sameBounds(slot.bounds, bounds)) slot.boundsGeneration += 1;
+        slot.bounds = bounds;
         this.#active(slot).view.setBounds(slot.bounds);
       }
       return;
@@ -378,6 +399,7 @@ export class PreviewBroker {
     this.#pendingBounds.set(ownerId, { contextId, bounds });
     const slot = this.#ownedSlot(ownerId, contextId);
     if (slot) {
+      if (!sameBounds(slot.bounds, bounds)) slot.boundsGeneration += 1;
       slot.bounds = bounds;
       this.#active(slot).view.setBounds(bounds);
     }
@@ -594,6 +616,7 @@ export class PreviewBroker {
       tabs: new Map(),
       activeTabId: "",
       bounds: null,
+      boundsGeneration: 0,
       activity: null,
       agentQueue: Promise.resolve(),
     };
@@ -848,11 +871,13 @@ export class PreviewBroker {
 
   async #click(ownerId: PreviewOwner, slot: PreviewSlot, ref: string, signal?: AbortSignal): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
+    const boundsGeneration = slot.boundsGeneration;
     const located = await this.#rendererOperation(
       contents,
       () => locateAgentPageRef(contents, ref),
       { signal },
     );
+    if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     const x = located.x;
     const y = located.y;
     if (!located.found || x === undefined || y === undefined) {
@@ -865,6 +890,7 @@ export class PreviewBroker {
       () => showAgentPageCursor(contents, x, y, `Agent · ${located.label || ref}`),
       { signal },
     );
+    if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     stopForAbort(signal);
     contents.sendInputEvent({ type: "mouseMove", x, y });
     contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
@@ -882,11 +908,13 @@ export class PreviewBroker {
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
+    const boundsGeneration = slot.boundsGeneration;
     const located = await this.#rendererOperation(
       contents,
       () => locateAgentPageRef(contents, ref, true, replace),
       { signal },
     );
+    if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     const x = located.x;
     const y = located.y;
     if (!located.found || x === undefined || y === undefined) {
@@ -900,6 +928,7 @@ export class PreviewBroker {
       () => showAgentPageCursor(contents, x, y, `Agent typing · ${located.label || ref}`),
       { signal },
     );
+    if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     stopForAbort(signal);
     await this.#rendererOperation(contents, () => contents.insertText(text), { signal });
     stopForAbort(signal);

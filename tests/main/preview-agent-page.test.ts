@@ -52,7 +52,7 @@ describe("agent browser semantic snapshots", () => {
       labels: [{ innerText: secret }],
       innerText: "",
       isConnected: true,
-      getAttribute: (name: string) => name === "aria-label" ? secret : null,
+      getAttribute: (name: string) => ["aria-label", "role"].includes(name) ? secret : null,
       getBoundingClientRect: () => ({
         x: 20, y: 30, left: 20, top: 30,
         right: 220, bottom: 70, width: 200, height: 40,

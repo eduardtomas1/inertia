@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 const electronState = vi.hoisted(() => ({
+  interactionTimeline: [] as string[],
   viewOptions: [] as Array<Record<string, unknown>>,
   contents: [] as Array<{
     capturePage: {
@@ -106,7 +107,10 @@ vi.mock("electron", () => {
     reload(): void {}
     stop(): void {}
     close(): void { this.destroyed = true; }
-    sendInputEvent(input: Record<string, unknown>): void { this.sentInputs.push(input); }
+    sendInputEvent(input: Record<string, unknown>): void {
+      this.sentInputs.push(input);
+      electronState.interactionTimeline.push(String(input.type));
+    }
     async insertText(text: string): Promise<void> { this.insertedText.push(text); }
     readonly capturePage = vi.fn(async (): Promise<FakeImage> => new FakeImage());
   }
@@ -115,7 +119,12 @@ vi.mock("electron", () => {
     readonly webContents = new FakeWebContents();
     bounds = { x: 0, y: 0, width: 0, height: 0 };
     constructor(options: Record<string, unknown>) { electronState.viewOptions.push(options); }
-    setBounds(bounds: typeof this.bounds): void { this.bounds = bounds; }
+    setBounds(bounds: typeof this.bounds): void {
+      this.bounds = bounds;
+      electronState.interactionTimeline.push(
+        `bounds:${bounds.x},${bounds.y},${bounds.width},${bounds.height}`,
+      );
+    }
     getBounds(): typeof this.bounds { return this.bounds; }
     setBackgroundColor(): void {}
   }
@@ -315,6 +324,80 @@ describe("agent-owned native Browser", () => {
       expect(screenshot.state.activity?.tabId).toBe(firstTabId);
     }
     await expect(activationPromise).resolves.toMatchObject({ activeTabId: secondTabId });
+  });
+
+  it("invalidates exact agent interactions when Preview geometry changes", async () => {
+    const timelineOffset = electronState.interactionTimeline.length;
+    const { broker, children } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    broker.setBounds({
+      ownerId: "primary",
+      contextId: conversationId,
+      bounds: { x: 10, y: 20, width: 600, height: 400 },
+    });
+    await broker.perform(conversationId, { action: "tabs" });
+
+    let cursorStarted = (): void => undefined;
+    let releaseCursor = (): void => undefined;
+    const started = new Promise<void>((resolve) => { cursorStarted = resolve; });
+    const blocked = new Promise<void>((resolve) => { releaseCursor = resolve; });
+    pageTools.showAgentPageCursor.mockImplementationOnce(async () => {
+      cursorStarted();
+      await blocked;
+    });
+    const click = broker.perform(conversationId, { action: "click", ref: "e1" });
+    await started;
+
+    broker.setBounds({
+      ownerId: "primary",
+      contextId: conversationId,
+      bounds: { x: 30, y: 40, width: 420, height: 280 },
+    });
+    await Promise.resolve();
+    expect(Reflect.get(children[0]!, "bounds")).toEqual({
+      x: 30, y: 40, width: 420, height: 280,
+    });
+
+    releaseCursor();
+    await expect(click).resolves.toMatchObject({
+      ok: false,
+      code: "not-found",
+      message: "The Browser page layout changed during this action. Inspect the page again for current refs.",
+    });
+    expect(electronState.interactionTimeline.slice(timelineOffset)).toEqual([
+      "bounds:0,0,0,0",
+      "bounds:10,20,600,400",
+      "bounds:30,40,420,280",
+    ]);
+    expect(children[0]!.webContents.sentInputs).toEqual([]);
+
+    let typeCursorStarted = (): void => undefined;
+    let releaseTypeCursor = (): void => undefined;
+    const typeStarted = new Promise<void>((resolve) => { typeCursorStarted = resolve; });
+    const typeBlocked = new Promise<void>((resolve) => { releaseTypeCursor = resolve; });
+    pageTools.showAgentPageCursor.mockImplementationOnce(async () => {
+      typeCursorStarted();
+      await typeBlocked;
+    });
+    const type = broker.perform(conversationId, {
+      action: "type",
+      ref: "e2",
+      text: "must not reach the resized page",
+      replace: true,
+    });
+    await typeStarted;
+    broker.setBounds({
+      ownerId: "primary",
+      contextId: conversationId,
+      bounds: { x: 50, y: 60, width: 360, height: 240 },
+    });
+    releaseTypeCursor();
+    await expect(type).resolves.toMatchObject({ ok: false, code: "not-found" });
+    expect(children[0]!.webContents.insertedText).toEqual([]);
   });
 
   it("rejects typing into a non-editable semantic ref", async () => {

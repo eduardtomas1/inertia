@@ -137,15 +137,17 @@ export async function semanticPageSnapshot(
         && style.visibility !== "hidden" && style.display !== "none"
         && Number(style.opacity || "1") > 0;
     };
-    const roleFor = (element) => normalize(
-      element.getAttribute("role")
-      || ({ A: "link", BUTTON: "button", INPUT: "input", SELECT: "select", TEXTAREA: "textbox", SUMMARY: "button" })[element.tagName]
-      || element.tagName.toLowerCase(),
-      50,
-    );
     const passwordField = (element) =>
       element.tagName === "INPUT"
       && String(element.type || "").toLowerCase() === "password";
+    const roleFor = (element) => passwordField(element)
+      ? "input"
+      : normalize(
+          element.getAttribute("role")
+          || ({ A: "link", BUTTON: "button", INPUT: "input", SELECT: "select", TEXTAREA: "textbox", SUMMARY: "button" })[element.tagName]
+          || element.tagName.toLowerCase(),
+          50,
+        );
     const nameFor = (element) => passwordField(element)
       ? "Password field"
       : normalize(

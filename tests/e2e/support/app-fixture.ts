@@ -126,7 +126,8 @@ async function createPreviewServer(): Promise<{
         + "<div id='outer-action' role='button' aria-label='Outer nested action' "
         + "style='display:flex;width:240px;height:56px;align-items:center;justify-content:center'>"
         + "<button id='inner-action' type='button'>Inner nested action</button></div>"
-        + "<div id='opacity-parent'><button id='opacity-action' type='button'>Temporarily visible action</button></div>"
+        + "<div style='display:flex'><div id='opacity-parent'><button id='opacity-action' type='button'>Temporarily visible action</button></div>"
+        + "<div aria-disabled='true'><button id='aria-disabled-action' type='button'>Inherited disabled action</button></div></div>"
         + "<script>const target=document.querySelector('#hover-target');let hoverOffset=0;"
         + "const decoy=document.querySelector('#hover-decoy');"
         + "target.addEventListener('mousemove',()=>{const rect=target.getBoundingClientRect();"
@@ -137,7 +138,8 @@ async function createPreviewServer(): Promise<{
         + "decoy.addEventListener('click',()=>{window.__hoverDecoyClicked=true});"
         + "document.querySelector('#outer-action').addEventListener('click',()=>{window.__outerActionClicked=true});"
         + "document.querySelector('#inner-action').addEventListener('click',()=>{window.__innerActionClicked=true});"
-        + "document.querySelector('#opacity-action').addEventListener('click',()=>{window.__opacityActionClicked=true})</script>",
+        + "document.querySelector('#opacity-action').addEventListener('click',()=>{window.__opacityActionClicked=true});"
+        + "document.querySelector('#aria-disabled-action').addEventListener('click',()=>{window.__ariaDisabledActionClicked=true})</script>",
       );
       return;
     }

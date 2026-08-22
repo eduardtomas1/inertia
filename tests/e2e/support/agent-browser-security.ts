@@ -112,12 +112,18 @@ export async function expectSemanticClickBoundaries(
       const snapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
       if (!snapshot.ok || !snapshot.text) return { snapshot };
       const elements = (JSON.parse(snapshot.text) as {
-        elements: Array<{ name: string; ref: string }>;
+        elements: Array<{ disabled: boolean; name: string; ref: string }>;
       }).elements;
       const outerRef = elements.find((element) => element.name === "Outer nested action")?.ref;
       const opacityRef = elements.find((element) => element.name === "Temporarily visible action")?.ref;
-      if (!outerRef || !opacityRef) return { outerRef, opacityRef, snapshot };
+      const ariaDisabled = elements.find((element) => element.name === "Inherited disabled action");
+      if (!outerRef || !opacityRef || !ariaDisabled) {
+        return { ariaDisabled, names: elements.map((element) => element.name), outerRef, opacityRef, snapshot };
+      }
       const nested = await runtime.agentBrowser(request.conversationId, { action: "click", ref: outerRef });
+      const inheritedDisabled = await runtime.agentBrowser(request.conversationId, {
+        action: "click", ref: ariaDisabled.ref,
+      });
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === request.url);
       await contents?.executeJavaScript("document.querySelector('#opacity-parent').style.opacity='0'");
       const hidden = await runtime.agentBrowser(request.conversationId, { action: "click", ref: opacityRef });
@@ -129,16 +135,20 @@ export async function expectSemanticClickBoundaries(
         outer: window.__outerActionClicked === true,
         inner: window.__innerActionClicked === true,
         opacity: window.__opacityActionClicked === true,
+        ariaDisabled: window.__ariaDisabledActionClicked === true,
       })`);
-      return { hidden, hiddenNames, hiddenSnapshot, nested, state };
+      return { ariaDisabled, hidden, hiddenNames, hiddenSnapshot, inheritedDisabled, nested, state };
     },
     { conversationId, url },
   );
+  expect(evidence.ariaDisabled, JSON.stringify(evidence)).toBeDefined();
   expect(evidence).toMatchObject({
     nested: { ok: false, code: "not-found" },
+    ariaDisabled: { disabled: true },
+    inheritedDisabled: { ok: false, code: "invalid" },
     hiddenSnapshot: { ok: true },
     hidden: { ok: false, code: "not-found" },
-    state: { outer: false, inner: false, opacity: false },
+    state: { outer: false, inner: false, opacity: false, ariaDisabled: false },
   });
   expect(evidence.hiddenNames).not.toContain("Temporarily visible action");
 }

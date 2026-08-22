@@ -8,6 +8,8 @@ import { installPreviewAgentPrivacyGuard } from "../shared/preview-agent-privacy
 export const AGENT_BROWSER_WORLD_ID = 999;
 const MAX_SEMANTIC_ELEMENTS = 200;
 const MAX_PAGE_TEXT_CHARS = 12_000;
+const MAX_BODY_TEXT_SOURCE_CHARS = 24_000;
+const MAX_BODY_TEXT_NODES = 4_000;
 const MAX_REMEMBERED_PASSWORD_VALUES = 32;
 
 export interface PreviewAgentTarget {
@@ -157,6 +159,16 @@ export async function semanticPageSnapshot(
         && style.visibility !== "hidden" && style.display !== "none"
         && Number(style.opacity || "1") > 0;
     };
+    const ariaDisabled = (element) => {
+      let current = element;
+      while (current) {
+        if (String(current.getAttribute?.("aria-disabled") || "").toLowerCase() === "true") {
+          return true;
+        }
+        current = current.parentElement;
+      }
+      return false;
+    };
     const rememberPasswordValue = (value) => {
       const normalized = normalizeText(value);
       if (!normalized) return;
@@ -250,7 +262,7 @@ export async function semanticPageSnapshot(
         disabled: Boolean(
           element.matches?.(":disabled")
           || element.disabled
-          || element.getAttribute("aria-disabled") === "true"
+          || ariaDisabled(element)
         ),
         checked: typeof element.checked === "boolean" ? element.checked : undefined,
         value: typeof element.value === "string"
@@ -262,7 +274,58 @@ export async function semanticPageSnapshot(
         },
       });
     }
-    const bodyText = normalizeText(document.body?.innerText);
+    const textVisibility = new WeakMap();
+    const textVisible = (element) => {
+      const chain = [];
+      let current = element;
+      while (current && !textVisibility.has(current)) {
+        chain.push(current);
+        current = current.parentElement;
+      }
+      let allowed = current ? textVisibility.get(current) !== false : true;
+      for (let index = chain.length - 1; index >= 0; index -= 1) {
+        const candidate = chain[index];
+        const style = getComputedStyle(candidate);
+        allowed = allowed
+          && !["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(candidate.tagName)
+          && candidate.hidden !== true
+          && style.visibility !== "hidden" && style.display !== "none"
+          && Number(style.opacity || "1") > 0;
+        textVisibility.set(candidate, allowed);
+      }
+      return allowed;
+    };
+    const textChunks = [];
+    let sourceCharacters = 0;
+    let visitedNodes = 0;
+    let bodyTruncated = false;
+    const body = document.body;
+    let node = body?.firstChild || null;
+    while (node) {
+      visitedNodes += 1;
+      if (visitedNodes > ${MAX_BODY_TEXT_NODES}) { bodyTruncated = true; break; }
+      if (node?.nodeType === 3) {
+        if (!node.parentElement || textVisible(node.parentElement)) {
+          const value = String(node.nodeValue || "");
+          const remaining = ${MAX_BODY_TEXT_SOURCE_CHARS} - sourceCharacters;
+          if (value.length > remaining) {
+            textChunks.push(value.slice(0, Math.max(0, remaining)));
+            bodyTruncated = true;
+            break;
+          }
+          textChunks.push(value);
+          sourceCharacters += value.length;
+        }
+      } else if (node.nodeType === 1 && textVisible(node) && node.firstChild) {
+        node = node.firstChild;
+        continue;
+      }
+      while (node && node !== body && !node.nextSibling) node = node.parentNode;
+      node = node && node !== body ? node.nextSibling : null;
+    }
+    const normalizedBodyText = normalizeText(textChunks.join(" "));
+    if (normalizedBodyText.length > ${MAX_PAGE_TEXT_CHARS}) bodyTruncated = true;
+    const bodyText = normalizedBodyText.slice(0, ${MAX_PAGE_TEXT_CHARS});
     return {
       title: redact(document.title, 300),
       url: redact(routeUrl, 4096),
@@ -270,7 +333,7 @@ export async function semanticPageSnapshot(
       text: redact(bodyText, ${MAX_PAGE_TEXT_CHARS}),
       elements,
       truncated: elements.length >= ${MAX_SEMANTIC_ELEMENTS}
-        || bodyText.length > ${MAX_PAGE_TEXT_CHARS},
+        || bodyTruncated,
     };
   })()`);
   return serializeAgentPageSnapshot(value);
@@ -404,7 +467,16 @@ export async function locateAgentPageRef(
     const disabled = Boolean(
       element.matches?.(":disabled")
       || element.disabled
-      || element.getAttribute("aria-disabled") === "true"
+      || (() => {
+        let current = element;
+        while (current) {
+          if (String(current.getAttribute?.("aria-disabled") || "").toLowerCase() === "true") {
+            return true;
+          }
+          current = current.parentElement;
+        }
+        return false;
+      })()
     );
     if (${focus ? "true" : "false"} && editable && !disabled) {
       element.focus({ preventScroll: false });

@@ -14,6 +14,27 @@ import {
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../../src/shared/agent-browser";
 import { installPreviewAgentShadowBoundarySignal } from "../../src/shared/preview-agent-privacy-guard";
 
+function bodyWithText(text: string): {
+  firstChild: { nodeType: number; parentElement: unknown; parentNode: unknown; readonly nodeValue: string; nextSibling: null };
+  innerText: string;
+  parentElement: null;
+  tagName: string;
+} {
+  const body = {
+    innerText: text,
+    parentElement: null,
+    tagName: "BODY",
+  } as {
+    firstChild: { nodeType: number; parentElement: unknown; parentNode: unknown; readonly nodeValue: string; nextSibling: null };
+    innerText: string;
+    parentElement: null;
+    tagName: string;
+  };
+  body.firstChild = { nodeType: 3, parentElement: body, parentNode: body,
+    get nodeValue() { return body.innerText; }, nextSibling: null };
+  return body;
+}
+
 describe("agent browser semantic snapshots", () => {
   it("signals a parser-created closed shadow root when page code retrieves its internals", () => {
     const dispatched: string[] = [];
@@ -94,10 +115,22 @@ describe("agent browser semantic snapshots", () => {
   });
 
   it("reports text-only clipping from the semantic page collector", async () => {
+    const body = {
+      firstChild: null as unknown,
+      parentElement: null,
+      tagName: "BODY",
+    };
+    body.firstChild = {
+      nodeType: 3, nodeValue: "b".repeat(30_000), parentElement: body,
+      parentNode: body, nextSibling: null,
+    };
+    Object.defineProperty(body, "innerText", {
+      get: () => { throw new Error("semantic collection must not read unbounded innerText"); },
+    });
     const context = {
       document: {
         title: "Long local page",
-        body: { innerText: "b".repeat(12_001) },
+        body,
         querySelectorAll: () => [],
       },
       location: { href: "http://127.0.0.1:3000/long?private=value#secret" },
@@ -153,7 +186,7 @@ describe("agent browser semantic snapshots", () => {
     let nestedBoundaryListener: ((event: Record<string, unknown>) => void) | undefined;
     const document = {
       title: "Sign in",
-      body: { innerText: "Password" },
+      body: bodyWithText("Password"),
       documentElement: { nodeType: 1, tagName: "HTML", querySelectorAll: () => [input] },
       activeElement: null,
       addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
@@ -226,7 +259,7 @@ describe("agent browser semantic snapshots", () => {
     let replacement: typeof input | null = null;
     const document = {
       title: `Account ${secret}`,
-      body: { innerText: `Sign in\n${secret}\nKeep this account secure` },
+      body: bodyWithText(`Sign in\n${secret}\nKeep this account secure`),
       activeElement: null as unknown,
       querySelectorAll: (selector: string) => selector === "input"
         ? [replacement ?? input]
@@ -392,7 +425,7 @@ describe("agent browser semantic snapshots", () => {
     const context = {
       document: {
         title: "Editors",
-        body: { innerText: "rich text plaintext-only" },
+        body: bodyWithText("rich text plaintext-only"),
         querySelectorAll,
       },
       location: { href: "http://127.0.0.1:3000/editors" },
@@ -439,12 +472,65 @@ describe("agent browser semantic snapshots", () => {
     const context = {
       document: {
         title: "Disabled controls",
-        body: { innerText: "Submit" },
+        body: bodyWithText("Submit"),
         activeElement: null,
         querySelectorAll: (selector: string) => selector === "input" ? [] : [button],
         elementFromPoint: () => button,
       },
       location: { href: "http://127.0.0.1:3000/disabled" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ disabled: boolean }>;
+    };
+    expect(snapshot.elements[0]?.disabled).toBe(true);
+    await expect(locateAgentPageRef(contents as never, "e1"))
+      .resolves.toMatchObject({ found: true, disabled: true });
+  });
+
+  it("inherits aria-disabled from ancestor containers", async () => {
+    const container = {
+      parentElement: null,
+      getAttribute: (name: string) => name === "aria-disabled" ? "true" : null,
+    };
+    const button = {
+      tagName: "BUTTON",
+      type: "button",
+      value: "",
+      disabled: false,
+      checked: undefined,
+      innerText: "Managed action",
+      isConnected: true,
+      parentElement: container,
+      matches: () => false,
+      getAttribute: () => null,
+      getBoundingClientRect: () => ({
+        x: 20, y: 30, left: 20, top: 30,
+        right: 220, bottom: 70, width: 200, height: 40,
+      }),
+      contains: (candidate: unknown) => candidate === button,
+    };
+    const context = {
+      document: {
+        title: "ARIA disabled controls",
+        body: bodyWithText("Managed action"),
+        querySelectorAll: (selector: string) => selector === "input" ? [] : [button],
+        elementFromPoint: () => button,
+      },
+      location: { href: "http://127.0.0.1:3000/aria-disabled" },
       URL,
       encodeURIComponent,
       innerWidth: 1_200,
@@ -490,7 +576,7 @@ describe("agent browser semantic snapshots", () => {
     const context = {
       document: {
         title: "Upload",
-        body: { innerText: "Upload private file" },
+        body: bodyWithText("Upload private file"),
         activeElement: input,
         querySelectorAll: () => [input],
         elementFromPoint: () => input,

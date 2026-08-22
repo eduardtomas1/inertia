@@ -140,24 +140,6 @@ export async function semanticPageSnapshot(
     const passwordField = (element) =>
       element.tagName === "INPUT"
       && String(element.type || "").toLowerCase() === "password";
-    const roleFor = (element) => passwordField(element)
-      ? "input"
-      : normalize(
-          element.getAttribute("role")
-          || ({ A: "link", BUTTON: "button", INPUT: "input", SELECT: "select", TEXTAREA: "textbox", SUMMARY: "button" })[element.tagName]
-          || element.tagName.toLowerCase(),
-          50,
-        );
-    const nameFor = (element) => passwordField(element)
-      ? "Password field"
-      : normalize(
-          element.getAttribute("aria-label")
-          || element.getAttribute("title")
-          || element.getAttribute("placeholder")
-          || (element.labels && element.labels[0]?.innerText)
-          || element.innerText
-          || element.value,
-        );
     const sensitiveText = [];
     for (const input of document.querySelectorAll("input[type='password']")) {
       for (const label of Array.from(input.labels || [])) {
@@ -165,6 +147,7 @@ export async function semanticPageSnapshot(
       }
       sensitiveText.push(normalizeText(input.value));
     }
+    state.sensitiveText = sensitiveText;
     const redact = (value, maximum) => {
       let text = normalizeText(value);
       for (const sensitive of sensitiveText) {
@@ -172,6 +155,25 @@ export async function semanticPageSnapshot(
       }
       return text.slice(0, maximum);
     };
+    const roleFor = (element) => passwordField(element)
+      ? "input"
+      : redact(
+          element.getAttribute("role")
+          || ({ A: "link", BUTTON: "button", INPUT: "input", SELECT: "select", TEXTAREA: "textbox", SUMMARY: "button" })[element.tagName]
+          || element.tagName.toLowerCase(),
+          50,
+        );
+    const nameFor = (element) => passwordField(element)
+      ? "Password field"
+      : redact(
+          element.getAttribute("aria-label")
+          || element.getAttribute("title")
+          || element.getAttribute("placeholder")
+          || (element.labels && element.labels[0]?.innerText)
+          || element.innerText
+          || element.value,
+          300,
+        );
     const selector = [
       "a[href]", "button", "input", "textarea", "select", "summary",
       "[role]", "[contenteditable]", "[tabindex]",
@@ -194,7 +196,7 @@ export async function semanticPageSnapshot(
         disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
         checked: typeof element.checked === "boolean" ? element.checked : undefined,
         value: typeof element.value === "string"
-          ? passwordField(element) ? "[redacted]" : normalize(element.value, 500)
+          ? passwordField(element) ? "[redacted]" : redact(element.value, 500)
           : undefined,
         rect: {
           x: Math.round(rect.x), y: Math.round(rect.y),
@@ -204,7 +206,7 @@ export async function semanticPageSnapshot(
     }
     return {
       title: redact(document.title, 300),
-      url: location.href,
+      url: redact(location.href, 4096),
       viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY },
       text: redact(document.body?.innerText, ${MAX_PAGE_TEXT_CHARS}),
       elements,
@@ -221,7 +223,8 @@ export async function locateAgentPageRef(
   replace = false,
 ): Promise<PreviewAgentTarget> {
   const value = await execute(contents, `(() => {
-    const element = globalThis.__inertiaAgentBrowser?.refs?.get(${JSON.stringify(ref)});
+    const state = globalThis.__inertiaAgentBrowser;
+    const element = state?.refs?.get(${JSON.stringify(ref)});
     if (!element || !element.isConnected) return { found: false };
     const rect = element.getBoundingClientRect();
     const style = getComputedStyle(element);
@@ -269,19 +272,25 @@ export async function locateAgentPageRef(
         return { found: false };
       }
     }
+    const redact = (value) => {
+      let text = String(value ?? "").replace(/\\s+/gu, " ").trim();
+      for (const sensitive of state.sensitiveText || []) {
+        if (sensitive) text = text.split(sensitive).join("[redacted]");
+      }
+      return text.slice(0, 300);
+    };
     return {
       found: true,
       disabled,
       editable,
-      label: String(
+      label: redact(
         password
           ? "Password field"
           : element.getAttribute("aria-label")
             || element.innerText
             || element.value
         || "element"
-      )
-        .replace(/\\s+/gu, " ").trim().slice(0, 300),
+      ),
       x,
       y,
     };

@@ -144,6 +144,14 @@ function sameBounds(left: Rectangle | null, right: Rectangle): boolean {
     && left.width === right.width && left.height === right.height;
 }
 
+function providerVisiblePageUrl(value: string): string {
+  try {
+    return new URL("/", value).origin;
+  } catch {
+    return "";
+  }
+}
+
 function stopForAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("browser-action-cancelled");
 }
@@ -548,6 +556,16 @@ export class PreviewBroker {
     };
   }
 
+  #agentTab(tab: PreviewTab): AgentBrowserTab {
+    const contents = tab.view.webContents;
+    return {
+      id: tab.id,
+      title: "Local page",
+      url: providerVisiblePageUrl(contents.getURL()),
+      loading: contents.isLoading(),
+    };
+  }
+
   #state(ownerId: PreviewOwner, contextId: string): PreviewState {
     const slot = this.#ownedSlot(ownerId, contextId);
     const contents = slot ? this.#active(slot).view.webContents : undefined;
@@ -565,7 +583,7 @@ export class PreviewBroker {
   #agentState(slot: PreviewSlot): AgentBrowserState {
     return {
       activeTabId: slot.activeTabId,
-      tabs: [...slot.tabs.values()].map((tab) => this.#previewTab(tab)),
+      tabs: [...slot.tabs.values()].map((tab) => this.#agentTab(tab)),
       activity: slot.activity,
     };
   }
@@ -794,7 +812,7 @@ export class PreviewBroker {
       JSON.stringify({
         captured: true,
         tabId,
-        url: contents.getURL(),
+        url: providerVisiblePageUrl(contents.getURL()),
         width: image.getSize().width,
         height: image.getSize().height,
       }),

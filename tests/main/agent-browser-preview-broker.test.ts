@@ -15,6 +15,7 @@ const electronState = vi.hoisted(() => ({
       goBack: ReturnType<typeof vi.fn>;
     };
     emit(name: string, ...args: unknown[]): void;
+    setTitle(title: string): void;
   }>,
   sessions: [] as Array<{
     permissionChecks: number;
@@ -102,6 +103,7 @@ vi.mock("electron", () => {
     }
     getURL(): string { return this.url; }
     getTitle(): string { return this.title; }
+    setTitle(title: string): void { this.title = title; }
     isLoading(): boolean { return false; }
     isDestroyed(): boolean { return this.destroyed; }
     reload(): void {}
@@ -264,6 +266,39 @@ describe("agent-owned native Browser", () => {
     expect(children[0]!.webContents.insertedText).toEqual(["hello"]);
   });
 
+  it("omits page-controlled tab metadata from provider-visible state", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    const secret = "password-mirrored-by-page";
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: `http://127.0.0.1:3000/${secret}?draft=${secret}#${secret}`,
+    });
+    electronState.contents[contentsOffset]!.setTitle(secret);
+
+    const tabs = await broker.perform(conversationId, { action: "tabs" });
+    expect(tabs).toMatchObject({
+      ok: true,
+      state: {
+        tabs: [{
+          title: "Local page",
+          url: "http://127.0.0.1:3000",
+        }],
+      },
+    });
+    if (tabs.ok) expect(tabs.text).not.toContain(secret);
+
+    const screenshot = await broker.perform(conversationId, { action: "screenshot" });
+    expect(screenshot.ok).toBe(true);
+    if (screenshot.ok) {
+      expect(screenshot.text).not.toContain(secret);
+      expect(JSON.parse(screenshot.text)).toMatchObject({
+        url: "http://127.0.0.1:3000",
+      });
+    }
+  });
+
   it("serializes parallel agent commands and binds visual evidence to its captured tab", async () => {
     const contentsOffset = electronState.contents.length;
     const { broker } = harness();
@@ -318,7 +353,7 @@ describe("agent-owned native Browser", () => {
       expect(JSON.parse(screenshot.text)).toMatchObject({
         captured: true,
         tabId: firstTabId,
-        url: "http://127.0.0.1:3000/",
+        url: "http://127.0.0.1:3000",
       });
       expect(screenshot.state.activeTabId).toBe(firstTabId);
       expect(screenshot.state.activity?.tabId).toBe(firstTabId);
@@ -728,13 +763,13 @@ describe("agent-owned native Browser", () => {
     expect(Buffer.byteLength(result.text, "utf8"))
       .toBeLessThanOrEqual(MAX_AGENT_BROWSER_TEXT_BYTES);
     const text = JSON.parse(result.text) as {
-      truncated: boolean;
+      truncated?: boolean;
       tabs: Array<{ title: string; url: string }>;
     };
-    expect(text.truncated).toBe(true);
+    expect(text.truncated).toBeUndefined();
     expect(text.tabs).toHaveLength(8);
     expect(text.tabs.every((tab) =>
-      tab.title.length <= 120 && tab.url.length <= 1_024
+      tab.title === "Local page" && tab.url === "http://127.0.0.1:3000"
     )).toBe(true);
   });
 

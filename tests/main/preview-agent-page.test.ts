@@ -45,8 +45,10 @@ describe("agent browser semantic snapshots", () => {
       title: `Account ${secret}`,
       body: { innerText: `Sign in\n${secret}\nKeep this account secure` },
       activeElement: null as unknown,
-      querySelectorAll: () => [input],
-      elementFromPoint: () => input,
+      querySelectorAll: (selector: string) => selector === "input[type='password']"
+        ? [input]
+        : [input, mirror],
+      elementFromPoint: (_x: number, y: number) => y < 80 ? input : mirror,
     };
     const focus = vi.fn(() => { document.activeElement = input; });
     const select = vi.fn();
@@ -68,9 +70,25 @@ describe("agent browser semantic snapshots", () => {
       focus,
       select,
     };
+    const mirror = {
+      tagName: "INPUT",
+      type: "text",
+      value: secret,
+      disabled: false,
+      checked: false,
+      labels: [],
+      innerText: secret,
+      isConnected: true,
+      getAttribute: (name: string) => ["aria-label", "role"].includes(name) ? secret : null,
+      getBoundingClientRect: () => ({
+        x: 20, y: 80, left: 20, top: 80,
+        right: 220, bottom: 120, width: 200, height: 40,
+      }),
+      contains: (candidate: unknown) => candidate === mirror,
+    };
     const context = {
       document,
-      location: { href: "http://127.0.0.1:3000/login" },
+      location: { href: `http://127.0.0.1:3000/login?draft=${secret}` },
       innerWidth: 1_200,
       innerHeight: 800,
       scrollX: 0,
@@ -92,12 +110,12 @@ describe("agent browser semantic snapshots", () => {
     expect(serialized).not.toContain(secret);
     expect(JSON.parse(serialized)).toMatchObject({
       title: "Account [redacted]",
+      url: "http://127.0.0.1:3000/login?draft=[redacted]",
       text: "Sign in [redacted] Keep this account secure",
-      elements: [{
-        role: "input",
-        name: "Password field",
-        value: "[redacted]",
-      }],
+      elements: [
+        { role: "input", name: "Password field", value: "[redacted]" },
+        { role: "[redacted]", name: "[redacted]", value: "[redacted]" },
+      ],
     });
 
     await expect(locateAgentPageRef(contents as never, "e1", true, true))
@@ -110,6 +128,8 @@ describe("agent browser semantic snapshots", () => {
       });
     expect(focus).toHaveBeenCalledOnce();
     expect(select).toHaveBeenCalledOnce();
+    await expect(locateAgentPageRef(contents as never, "e2"))
+      .resolves.toMatchObject({ found: true, label: "[redacted]" });
   });
 
   it("includes every valid contenteditable form in semantic refs", async () => {

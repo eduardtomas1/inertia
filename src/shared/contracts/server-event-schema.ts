@@ -61,11 +61,9 @@ function authoritativeRunState(value: unknown, status: AgentTurnStatus): boolean
 function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownRecord {
   return record(value) && keys.every((key) => stringField(value, key));
 }
-
 function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean {
   return Array.isArray(value) && value.every(validate);
 }
-
 function uniqueRecordField(values: unknown[], key: string): boolean {
   return new Set(values.map((value) => (value as UnknownRecord)[key])).size === values.length;
 }

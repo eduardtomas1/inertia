@@ -221,12 +221,14 @@ function parsePullRequest(
   const url = verifiedGitHubPullRequestUrl(text(value.url), repositoryBaseUrl, number);
   const head = text(value.headRefOid).toLowerCase();
   const headBranch = text(value.headRefName);
+  const baseBranch = text(value.baseRefName).trim();
   const updatedAt = text(value.updatedAt).trim();
   const reviewDecision = parseReviewDecision(value.reviewDecision);
   if (
     number < 1
     || !url
     || !headBranch
+    || !baseBranch
     || !/^[0-9a-f]{40,64}$/u.test(head)
     || !Number.isFinite(Date.parse(updatedAt))
     || typeof value.isDraft !== "boolean"
@@ -261,7 +263,7 @@ function parsePullRequest(
     draft: value.isDraft === true,
     headBranch: boundedText(headBranch, 240).value,
     head,
-    baseBranch: boundedText(text(value.baseRefName, "unknown"), 240).value,
+    baseBranch: boundedText(baseBranch, 240).value,
     mergeState: boundedText(
       text(value.mergeStateStatus, "UNKNOWN"),
       64,

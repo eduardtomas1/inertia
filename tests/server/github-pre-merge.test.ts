@@ -711,6 +711,7 @@ describe("GitHub pre-merge confidence", () => {
         isDraft: false,
         reviewDecision: "",
         headRefName: "feature/confidence",
+        baseRefName: "main",
         headRefOid: "c".repeat(40),
         updatedAt: "2026-08-22T15:00:00Z",
         changedFiles: 0,
@@ -738,6 +739,7 @@ describe("GitHub pre-merge confidence", () => {
         isDraft: false,
         reviewDecision: "",
         headRefName: "feature/confidence",
+        baseRefName: "main",
         headRefOid: "c".repeat(40),
         updatedAt: "2026-08-22T15:00:00Z",
         changedFiles: 0,
@@ -765,6 +767,7 @@ describe("GitHub pre-merge confidence", () => {
       isDraft: false,
       reviewDecision: "",
       headRefName: "feature/confidence",
+      baseRefName: "main",
       headRefOid: "c".repeat(40),
       updatedAt: "2026-08-22T15:00:00Z",
       statusCheckRollup: [],
@@ -804,6 +807,7 @@ describe("GitHub pre-merge confidence", () => {
       isDraft: false,
       reviewDecision: "",
       headRefName: "feature/confidence",
+      baseRefName: "main",
       headRefOid: "c".repeat(40),
       updatedAt: "2026-08-22T15:00:00Z",
       statusCheckRollup: [],
@@ -825,6 +829,30 @@ describe("GitHub pre-merge confidence", () => {
     expect(parse(1, [file])?.filesTruncated).toBe(false);
   });
 
+  it("rejects missing, non-string, and empty base-branch evidence", () => {
+    for (const baseRefName of [undefined, 42, "", "   "]) {
+      const details = gitHubPreMergeTestSupport.parsePullRequestList(
+        JSON.stringify([{
+          number: 9,
+          url: "https://github.com/openai/codex/pull/9",
+          state: "OPEN",
+          isDraft: false,
+          reviewDecision: "",
+          headRefName: "feature/confidence",
+          baseRefName,
+          headRefOid: "c".repeat(40),
+          updatedAt: "2026-08-22T15:00:00Z",
+          changedFiles: 0,
+          files: [],
+          statusCheckRollup: [],
+        }]),
+        "https://github.com/openai/codex",
+        "feature/confidence",
+      );
+      expect(details).toBeNull();
+    }
+  });
+
   it("rejects malformed draft evidence instead of coercing it to non-draft", () => {
     const details = gitHubPreMergeTestSupport.parsePullRequestList(
       JSON.stringify([{
@@ -834,6 +862,7 @@ describe("GitHub pre-merge confidence", () => {
         isDraft: "false",
         reviewDecision: "",
         headRefName: "feature/confidence",
+        baseRefName: "main",
         headRefOid: "c".repeat(40),
         updatedAt: "2026-08-22T15:00:00Z",
         changedFiles: 0,
@@ -856,6 +885,7 @@ describe("GitHub pre-merge confidence", () => {
         isDraft: false,
         reviewDecision: "",
         headRefName: "feature/confidence",
+        baseRefName: "main",
         headRefOid: "c".repeat(40),
         updatedAt: "2026-08-22T15:00:00Z",
         changedFiles: 0,
@@ -879,6 +909,7 @@ describe("GitHub pre-merge confidence", () => {
           isDraft: false,
           reviewDecision,
           headRefName: "feature/confidence",
+          baseRefName: "main",
           headRefOid: "c".repeat(40),
           updatedAt: "2026-08-22T15:00:00Z",
           changedFiles: 0,

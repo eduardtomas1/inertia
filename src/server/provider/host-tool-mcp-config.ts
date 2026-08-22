@@ -7,6 +7,7 @@ export const INERTIA_HOST_MCP_NAME = "inertia-chat-manager";
 export const INERTIA_HOST_MCP_URL_ENV = "INERTIA_HOST_MCP_URL";
 export const INERTIA_HOST_MCP_TOKEN_ENV = "INERTIA_HOST_MCP_TOKEN";
 const MAX_STDIO_PROXY_RESPONSE_BYTES = 6 * 1024 * 1024;
+const OPENCODE_HOST_MCP_TIMEOUT_MS = 30_000;
 
 const STDIO_PROXY_SOURCE = String.raw`
 const url=process.env.INERTIA_HOST_MCP_URL;
@@ -83,6 +84,6 @@ export function openCodeHostMcpConfig(
     enabled: true,
     headers: { Authorization: authorization(connection) },
     oauth: false,
-    timeout: 10_000,
+    timeout: OPENCODE_HOST_MCP_TIMEOUT_MS,
   };
 }

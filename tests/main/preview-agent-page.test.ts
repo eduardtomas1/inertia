@@ -178,11 +178,14 @@ describe("agent browser semantic snapshots", () => {
   it("bounds semantic element discovery before a dense page can materialize candidates", async () => {
     let nextNodeCalls = 0;
     const body = bodyWithText("");
+    const querySelectorAll = vi.fn(() => {
+      throw new Error("semantic collection must not materialize password inputs");
+    });
     const document = {
       title: "Dense controls",
       body,
       documentElement: {},
-      querySelectorAll: () => [],
+      querySelectorAll,
       createNodeIterator: () => ({
         nextNode: () => {
           nextNodeCalls += 1;
@@ -216,6 +219,117 @@ describe("agent browser semantic snapshots", () => {
       truncated: boolean;
     };
     expect(parsed).toMatchObject({ elements: [], truncated: true });
+    expect(nextNodeCalls).toBe(4_001);
+    expect(querySelectorAll).not.toHaveBeenCalled();
+  });
+
+  it("fails sensitive-evidence inspection closed at the bounded DOM scan limit", async () => {
+    let nextNodeCalls = 0;
+    const context = {
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true,
+        nestedContentObserved: false,
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set(),
+      },
+      document: {
+        documentElement: {},
+        createNodeIterator: () => ({
+          nextNode: () => {
+            nextNodeCalls += 1;
+            return { tagName: "DIV" };
+          },
+        }),
+      },
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
+    expect(nextNodeCalls).toBe(4_001);
+  });
+
+  it("bounds document-start privacy discovery on a dense DOM", async () => {
+    let nextNodeCalls = 0;
+    class MutationObserver {
+      constructor(_callback: (records: unknown[]) => void) {}
+      observe(): void {}
+    }
+    const context = {
+      document: {
+        documentElement: { nodeType: 1, tagName: "HTML" },
+        addEventListener: vi.fn(),
+        createNodeIterator: () => ({
+          nextNode: () => {
+            nextNodeCalls += 1;
+            return { nodeType: 1, tagName: "DIV" };
+          },
+        }),
+      },
+      MutationObserver,
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await installAgentPagePrivacyGuard(contents as never);
+    expect(nextNodeCalls).toBe(4_001);
+    expect(runInNewContext(
+      "globalThis.__inertiaAgentBrowser.nestedContentObserved",
+      context,
+    )).toBe(true);
+  });
+
+  it("refuses interaction labels when their password scan budget is exhausted", async () => {
+    let nextNodeCalls = 0;
+    const element = {
+      tagName: "BUTTON",
+      type: "button",
+      value: "",
+      disabled: false,
+      readOnly: false,
+      isContentEditable: false,
+      innerText: "Continue",
+      isConnected: true,
+      getAttribute: () => null,
+      getBoundingClientRect: () => ({
+        x: 20, y: 30, left: 20, top: 30,
+        right: 220, bottom: 70, width: 200, height: 40,
+      }),
+      contains: (candidate: unknown) => candidate === element,
+    };
+    const context = {
+      __inertiaAgentBrowser: { refs: new Map([["e1", element]]) },
+      document: {
+        documentElement: {},
+        createNodeIterator: () => ({
+          nextNode: () => {
+            nextNodeCalls += 1;
+            return { tagName: "DIV" };
+          },
+        }),
+        elementFromPoint: () => element,
+      },
+      innerWidth: 1_200,
+      innerHeight: 800,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(locateAgentPageRef(contents as never, "e1"))
+      .resolves.toEqual({ found: false });
     expect(nextNodeCalls).toBe(4_001);
   });
 
@@ -473,7 +587,7 @@ describe("agent browser semantic snapshots", () => {
       text: "Sign in [redacted] Keep this account secure",
       elements: [
         { role: "input", name: "Password field", value: "[redacted]" },
-        { role: "[redacted]", name: "[redacted]", value: "[redacted]" },
+        { role: "input", name: "Password field", value: "[redacted]" },
       ],
     });
 
@@ -739,6 +853,8 @@ describe("agent browser semantic snapshots", () => {
     const redirected = {};
     const document = {
       activeElement: null as unknown,
+      documentElement: {},
+      createNodeIterator: () => ({ nextNode: () => null }),
       elementFromPoint: () => input,
     };
     const input = {
@@ -798,7 +914,11 @@ describe("agent browser semantic snapshots", () => {
     const overlay = {};
     const context = {
       __inertiaAgentBrowser: { refs: new Map([["e1", element]]) },
-      document: { elementFromPoint: vi.fn(() => overlay) },
+      document: {
+        documentElement: {},
+        createNodeIterator: () => ({ nextNode: () => null }),
+        elementFromPoint: vi.fn(() => overlay),
+      },
       innerWidth: 1_200,
       innerHeight: 800,
       getComputedStyle: () => ({
@@ -854,7 +974,11 @@ describe("agent browser semantic snapshots", () => {
       matches: (selector: string) => selector.includes("button"),
       getAttribute: () => null,
     };
-    const document = { elementFromPoint: vi.fn((): unknown => presentation) };
+    const document = {
+      documentElement: {},
+      createNodeIterator: () => ({ nextNode: () => null }),
+      elementFromPoint: vi.fn((): unknown => presentation),
+    };
     const context = {
       __inertiaAgentBrowser: { refs: new Map([["e1", outer]]) },
       document,
@@ -906,7 +1030,11 @@ describe("agent browser semantic snapshots", () => {
     };
     const context = {
       __inertiaAgentBrowser: { refs: new Map([["e1", button]]) },
-      document: { elementFromPoint: () => button },
+      document: {
+        documentElement: {},
+        createNodeIterator: () => ({ nextNode: () => null }),
+        elementFromPoint: () => button,
+      },
       innerWidth: 1_200,
       innerHeight: 800,
       getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),

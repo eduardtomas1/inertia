@@ -72,6 +72,7 @@ export function installPreviewAgentPrivacyGuard(): void {
   }
   if (state.privacyGuardInstalled) return;
   const maximumRememberedValues = 32;
+  const maximumScanNodes = 4_000;
   const normalize = (value: unknown): string => String(value ?? "")
     .replace(/\s+/gu, " ").trim();
   const remember = (value: unknown): void => {
@@ -102,23 +103,30 @@ export function installPreviewAgentPrivacyGuard(): void {
   const inspectTree = (node: Node): void => {
     if (node.nodeType !== 1) return;
     const element = node as Element;
-    if (element.matches?.("iframe,frame") || element.querySelector?.("iframe,frame")) {
+    const iterator = typeof document.createNodeIterator === "function"
+      ? document.createNodeIterator(element, 1)
+      : null;
+    if (!iterator) {
       state.nestedContentObserved = true;
+      return;
     }
-    if (element.shadowRoot
-      || Array.from(element.querySelectorAll?.("*") ?? [])
-        .some((descendant) => descendant.shadowRoot)) {
-      state.nestedContentObserved = true;
+    let scanned = 0;
+    while (scanned < maximumScanNodes) {
+      const descendant = iterator.nextNode() as Element | null;
+      if (!descendant) return;
+      scanned += 1;
+      if (descendant.matches?.("iframe,frame") || descendant.shadowRoot) {
+        state.nestedContentObserved = true;
+      }
+      const input = inputElement(descendant);
+      if (input) inspect(input);
     }
-    const directInput = inputElement(element);
-    if (directInput) inspect(directInput);
-    for (const input of element.querySelectorAll("input")) inspect(input);
+    if (iterator.nextNode()) state.nestedContentObserved = true;
   };
   document.addEventListener(nestedBoundaryEvent, () => {
     state.nestedContentObserved = true;
   }, true);
-  if (document.querySelector?.("iframe,frame")) state.nestedContentObserved = true;
-  for (const input of document.querySelectorAll("input")) inspect(input);
+  if (document.documentElement) inspectTree(document.documentElement);
   const inspectInputEvent = (event: Event): void => {
     let exposedControl = false;
     for (const node of event.composedPath()) {

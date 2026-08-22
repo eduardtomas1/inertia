@@ -590,6 +590,20 @@ export async function locateAgentPageRef(
   return target(value);
 }
 
+export async function agentPageRefHasFocus(
+  contents: WebContents,
+  ref: string,
+): Promise<boolean> {
+  const value = await execute(contents, `(() => {
+    const element = globalThis.__inertiaAgentBrowser?.refs?.get(${JSON.stringify(ref)});
+    if (!element || !element.isConnected) return false;
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    return active === element || Boolean(element.contains?.(active));
+  })()`);
+  return value === true;
+}
+
 export async function agentPageActivationBlocked(contents: WebContents): Promise<boolean> {
   const value = await execute(contents, `(() => {
     let active = document.activeElement;

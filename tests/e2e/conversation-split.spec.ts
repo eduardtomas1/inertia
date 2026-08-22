@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectSemanticClickBoundaries } from "./support/agent-browser-security";
+import { expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries } from "./support/agent-browser-security";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
@@ -551,6 +551,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     ),
     typeDestinationUrl,
   )).toBe(true);
+  await expectMicrotaskFocusTheftBlocked(app, primaryConversationId, typeDestinationUrl);
   expect(await app.electronApp.evaluate(
     async ({ webContents }, url) => {
       const contents = webContents.getAllWebContents().find(

@@ -1,6 +1,10 @@
 import type { NativeImage } from "electron";
 
-import { MAX_AGENT_BROWSER_SCREENSHOT_BYTES } from "../shared/agent-browser.js";
+import {
+  MAX_AGENT_BROWSER_SCREENSHOT_BYTES,
+  type AgentBrowserResult,
+  type AgentBrowserState,
+} from "../shared/agent-browser.js";
 
 export function boundedAgentScreenshot(source: NativeImage): NativeImage {
   let image = source;
@@ -21,4 +25,32 @@ export function boundedAgentScreenshot(source: NativeImage): NativeImage {
     });
   }
   return image;
+}
+
+export function capturedAgentScreenshotResult(
+  source: NativeImage,
+  tabId: string,
+  url: string,
+  state: AgentBrowserState,
+): AgentBrowserResult {
+  const image = boundedAgentScreenshot(source);
+  const png = image.toPNG();
+  if (png.byteLength === 0) {
+    return { ok: false, code: "unavailable", message: "The active Browser page had no drawable screenshot." };
+  }
+  if (png.byteLength > MAX_AGENT_BROWSER_SCREENSHOT_BYTES) {
+    return { ok: false, code: "too-large", message: "The Browser screenshot exceeded its bounded image size." };
+  }
+  return {
+    ok: true,
+    text: JSON.stringify({
+      captured: true,
+      tabId,
+      url,
+      width: image.getSize().width,
+      height: image.getSize().height,
+    }),
+    state,
+    image: { mimeType: "image/png", data: png.toString("base64") },
+  };
 }

@@ -203,3 +203,45 @@ export async function expectFocusNavigationSettlement(
     destinationUrl,
   )).toBe(true);
 }
+
+export async function expectMicrotaskFocusTheftBlocked(
+  app: AppFixture,
+  conversationId: string,
+  url: string,
+): Promise<void> {
+  const evidence = await app.electronApp.evaluate(
+    async ({ webContents }, request) => {
+      type Command =
+        | { action: "snapshot" }
+        | { action: "type"; ref: string; text: string; replace: boolean };
+      type Result = { code?: string; ok: boolean; text?: string };
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (id: string, command: Command) => Promise<Result>;
+      };
+      const snapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+      if (!snapshot.ok || !snapshot.text) return { snapshot };
+      const elements = (JSON.parse(snapshot.text) as {
+        elements: Array<{ name: string; ref: string }>;
+      }).elements;
+      const ref = elements.find((element) => element.name === "Microtask focus target")?.ref;
+      if (!ref) return { names: elements.map((element) => element.name), snapshot };
+      const typing = await runtime.agentBrowser(request.conversationId, {
+        action: "type", ref, text: "must not reach either field", replace: true,
+      });
+      const contents = webContents.getAllWebContents().find(
+        (candidate) => candidate.getURL() === request.url,
+      );
+      const state = await contents?.executeJavaScript(`(() => ({
+        target: document.querySelector('[aria-label="Microtask focus target"]')?.value,
+        decoy: document.querySelector('[aria-label="Microtask focus decoy"]')?.value,
+        focused: document.activeElement?.getAttribute('aria-label')
+      }))()`);
+      return { state, typing };
+    },
+    { conversationId, url },
+  );
+  expect(evidence).toMatchObject({
+    typing: { ok: false, code: "not-found" },
+    state: { target: "", decoy: "", focused: "Microtask focus decoy" },
+  });
+}

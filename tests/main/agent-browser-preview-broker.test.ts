@@ -13,7 +13,10 @@ const electronState = vi.hoisted(() => ({
     debugger: {
       emitMessage(method: string, params: Record<string, unknown>): void;
       isAttached: () => boolean;
-      sendCommand: ReturnType<typeof vi.fn<(method: string) => Promise<unknown>>>;
+      sendCommand: ReturnType<typeof vi.fn<(
+        method: string,
+        params?: Record<string, unknown>,
+      ) => Promise<unknown>>>;
     };
     navigationHistory: {
       canGoBack: ReturnType<typeof vi.fn>;
@@ -24,9 +27,11 @@ const electronState = vi.hoisted(() => ({
       removeEntryAtIndex: ReturnType<typeof vi.fn>;
     };
     emit(name: string, ...args: unknown[]): void;
+    getURL(): string;
     insertedText: string[];
     sentInputs: Array<Record<string, unknown>>;
     setTitle(title: string): void;
+    setURL(url: string): void;
   }>,
   sessions: [] as Array<{
     permissionChecks: number;
@@ -141,6 +146,7 @@ vi.mock("electron", () => {
       this.emit("did-navigate", {}, url);
     }
     getURL(): string { return this.url; }
+    setURL(url: string): void { this.url = url; }
     getTitle(): string { return this.title; }
     async executeJavaScriptInIsolatedWorld(): Promise<boolean> { return false; }
     setTitle(title: string): void { this.title = title; }
@@ -178,6 +184,7 @@ vi.mock("electron", () => {
 const pageTools = vi.hoisted(() => ({
   agentPageActivationBlocked: vi.fn(async () => false),
   agentPageHasSensitiveEvidence: vi.fn(async () => false),
+  agentPageRefHasFocus: vi.fn(async () => true),
   installAgentPagePrivacyGuard: vi.fn(async () => undefined),
   locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({
     found: true, blocked: false, disabled: false, editable: true,
@@ -341,6 +348,26 @@ describe("agent-owned native Browser", () => {
       action: "type", ref: "e2", text: "hello", replace: true,
     })).resolves.toMatchObject({ ok: true });
     expect(children[0]!.webContents.insertedText).toEqual(["hello"]);
+  });
+
+  it("refuses typing when a focus-handler microtask moves focus to another element", async () => {
+    const { broker, children } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    pageTools.agentPageRefHasFocus.mockResolvedValueOnce(false);
+
+    await expect(broker.perform(conversationId, {
+      action: "type", ref: "e2", text: "must stay out", replace: true,
+    })).resolves.toMatchObject({
+      ok: false,
+      code: "not-found",
+      message: "That page element lost focus before typing. Inspect the page again for current refs.",
+    });
+    expect(pageTools.agentPageRefHasFocus).toHaveBeenCalledWith(expect.anything(), "e2");
+    expect(children[0]!.webContents.insertedText).toEqual([]);
   });
 
   it("holds queued work until click-triggered main-frame navigation settles", async () => {
@@ -748,6 +775,42 @@ describe("agent-owned native Browser", () => {
       expect(screenshot.state.activity?.tabId).toBe(firstTabId);
     }
     await expect(activationPromise).resolves.toMatchObject({ activeTabId: secondTabId });
+  });
+
+  it("binds screenshot metadata to the URL captured before page reactivation", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    const frozenUrl = "http://127.0.0.1:3000/captured";
+    const resumedUrl = "http://127.0.0.1:3001/after-capture";
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: frozenUrl,
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    const original = contents.debugger.sendCommand.getMockImplementation();
+    contents.debugger.sendCommand.mockImplementation(async (method, params) => {
+      const result = await original?.(method, params);
+      if (method === "Page.setWebLifecycleState" && params?.state === "active") {
+        contents.setURL(resumedUrl);
+      }
+      return result;
+    });
+
+    const screenshot = await broker.perform(conversationId, { action: "screenshot" });
+    expect(screenshot.ok).toBe(true);
+    if (screenshot.ok) {
+      expect(JSON.parse(screenshot.text)).toMatchObject({
+        captured: true,
+        url: "http://127.0.0.1:3000",
+      });
+      expect(screenshot.state).toMatchObject({
+        activeTabId: screenshot.state.tabs[0]?.id,
+        tabs: [{ url: "http://127.0.0.1:3000" }],
+        activity: { action: "screenshot" },
+      });
+    }
+    expect(contents.getURL()).toBe(resumedUrl);
   });
 
   it("invalidates exact agent interactions when Preview geometry changes", async () => {

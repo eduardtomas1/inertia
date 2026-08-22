@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   agentPageActivationBlocked,
   agentPageHasSensitiveEvidence,
+  agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef,
   semanticPageSnapshot,
@@ -50,6 +51,33 @@ function withSemanticIterator<
 }
 
 describe("agent browser semantic snapshots", () => {
+  it("rechecks the exact focused ref after page microtasks settle", async () => {
+    const targetElement = {
+      isConnected: true,
+      contains: (candidate: unknown) => candidate === targetElement,
+    };
+    const decoyElement = {
+      isConnected: true,
+      contains: (candidate: unknown) => candidate === decoyElement,
+    };
+    const document = { activeElement: targetElement };
+    const context = {
+      document,
+      __inertiaAgentBrowser: { refs: new Map([["e1", targetElement]]) },
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(agentPageRefHasFocus(contents as never, "e1")).resolves.toBe(true);
+    document.activeElement = decoyElement;
+    await expect(agentPageRefHasFocus(contents as never, "e1")).resolves.toBe(false);
+    await expect(agentPageRefHasFocus(contents as never, "missing")).resolves.toBe(false);
+  });
+
   it("signals a parser-created closed shadow root when page code retrieves its internals", () => {
     const dispatched: string[] = [];
     class FakeEvent {

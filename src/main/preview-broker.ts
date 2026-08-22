@@ -18,20 +18,18 @@ import type {
   AgentBrowserState,
   AgentBrowserTab,
 } from "../shared/agent-browser.js";
-import {
-  MAX_AGENT_BROWSER_SCREENSHOT_BYTES,
-  MAX_AGENT_BROWSER_TEXT_BYTES,
-} from "../shared/agent-browser.js";
+import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
-  agentPageActivationBlocked, agentPageHasSensitiveEvidence, installAgentPagePrivacyGuard,
+  agentPageActivationBlocked, agentPageHasSensitiveEvidence, agentPageRefHasFocus,
+  installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
   agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
-import { boundedAgentScreenshot } from "./preview-agent-screenshot.js";
+import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
 type PreviewOwner = "primary" | "secondary";
 
 interface PreviewTab {
@@ -824,6 +822,8 @@ export class PreviewBroker {
     await this.#prepareAgentPage(contents, signal);
     this.#captureLocked.add(contents);
     let image: NativeImage;
+    let capturedUrl = "";
+    let capturedState: AgentBrowserState | null = null;
     try {
       await this.#rendererOperation(contents, () => setAgentPageFrozen(contents, true), { signal });
       if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
@@ -839,6 +839,8 @@ export class PreviewBroker {
       if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
         return failure("invalid", "Screenshots are unavailable for nested page content.");
       }
+      capturedUrl = contents.getURL();
+      capturedState = this.#agentState(slot);
     } finally {
       try {
         if (!contents.isDestroyed()) {
@@ -852,29 +854,18 @@ export class PreviewBroker {
       }
     }
     stopForAbort(signal);
+    if (!capturedState) {
+      return failure("unavailable", "The Browser screenshot state could not be captured.");
+    }
     if (slot.tabs.get(tabId) !== tab || contents.isDestroyed()) {
       return failure("not-found", "The captured Browser tab was closed before its screenshot completed.");
     }
-    image = boundedAgentScreenshot(image);
-    const png = image.toPNG();
-    if (png.byteLength === 0) {
-      return failure("unavailable", "The active Browser page had no drawable screenshot.");
-    }
-    if (png.byteLength > MAX_AGENT_BROWSER_SCREENSHOT_BYTES) {
-      return failure("too-large", "The Browser screenshot exceeded its bounded image size.");
-    }
-    this.#record(ownerId, slot, "screenshot", "Agent captured this page", undefined, tabId);
-    return this.#success(
-      slot,
-      JSON.stringify({
-        captured: true,
-        tabId,
-        url: providerVisiblePageUrl(contents.getURL()),
-        width: image.getSize().width,
-        height: image.getSize().height,
-      }),
-      { mimeType: "image/png", data: png.toString("base64") },
+    const result = capturedAgentScreenshotResult(
+      image, tabId, providerVisiblePageUrl(capturedUrl), capturedState,
     );
+    if (!result.ok) return result;
+    this.#record(ownerId, slot, "screenshot", "Agent captured this page", undefined, tabId);
+    return { ...result, state: { ...result.state, activity: slot.activity } };
   }
 
   async #agentNavigate(
@@ -1073,6 +1064,15 @@ export class PreviewBroker {
         ));
         if (!finalTarget.editable) throw new AgentBrowserRefusal(failure(
           "invalid", "That page element does not accept text input.",
+        ));
+        const stillFocused = await this.#rendererOperation(
+          contents,
+          () => agentPageRefHasFocus(contents, ref),
+          { signal },
+        );
+        if (!stillFocused) throw new AgentBrowserRefusal(failure(
+          "not-found",
+          "That page element lost focus before typing. Inspect the page again for current refs.",
         ));
         await contents.insertText(text);
       }, signal);

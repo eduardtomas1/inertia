@@ -84,11 +84,8 @@ export class TurnRunStateCoordinator {
     active: ActiveTurn,
     trace: SubagentTrace,
   ): boolean {
-    const identity = trace.providerTaskId
-      ?? trace.providerAgentId;
-    if (!identity) return false;
     if (!active.runState.observeDescendant(
-      identity,
+      trace.id,
       trace.isLive,
       trace.providerStatus,
     )) return false;

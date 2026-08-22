@@ -573,6 +573,28 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     },
     primaryConversationId,
   )).resolves.toMatchObject({ ok: false, code: "invalid" });
+  await expect(app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      type Command =
+        | { action: "snapshot" }
+        | { action: "click"; ref: string };
+      type Result = { ok: boolean; text?: string };
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (id: string, command: Command) => Promise<Result>;
+      };
+      const snapshot = await runtime.agentBrowser(conversationId, { action: "snapshot" });
+      if (!snapshot.ok || !snapshot.text) return { ok: false, stage: "snapshot" };
+      const parsed = JSON.parse(snapshot.text) as {
+        elements: Array<{ name: string; ref: string }>;
+      };
+      const ref = parsed.elements.find(
+        (element) => element.name === "Choose through page handler",
+      )?.ref;
+      if (!ref) return { ok: false, stage: "ref" };
+      return await runtime.agentBrowser(conversationId, { action: "click", ref });
+    },
+    primaryConversationId,
+  )).resolves.toMatchObject({ ok: true });
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
   await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
   await testInfo.attach("inertia-browser-pages", {

@@ -45,7 +45,11 @@ Screenshots are resized to at most 1600 by 1000 pixels and rejected above 4
 MiB of decoded PNG data. Inertia does not write them to the repository,
 attachment store, diagnostics, or its application database. They cross the
 same bounded host-tool result path as the semantic text; each provider receives
-the format its audited native tool or MCP transport supports.
+the format its audited native tool or MCP transport supports. A document-level
+privacy guard starts before the first inspection. Once it observes a non-empty
+password value, semantic and visual evidence remain unavailable until that
+document navigates away, so reveal controls, replacement inputs, and page-made
+copies cannot turn a screenshot or snapshot into a credential channel.
 
 ## Permission behavior
 
@@ -85,4 +89,7 @@ exact provider turn
 
 The agent cannot use this surface to read arbitrary files, upload a file,
 grant a browser permission, start a download, retain cookies across ownership,
-or control a page belonging to another conversation.
+or control a page belonging to another conversation. File inputs never receive
+semantic refs, focused activation is rejected, and a document-start capture
+guard cancels file-input clicks triggered indirectly during agent input while
+leaving deliberate human interaction outside an agent action unchanged.

@@ -10,6 +10,7 @@ const electronState = vi.hoisted(() => ({
       getMockImplementation(): (() => Promise<unknown>) | undefined;
       mockImplementationOnce(implementation: () => Promise<unknown>): unknown;
     };
+    debugger: { sendCommand: ReturnType<typeof vi.fn> };
     navigationHistory: {
       canGoBack: ReturnType<typeof vi.fn>;
       getActiveIndex: ReturnType<typeof vi.fn>;
@@ -73,6 +74,13 @@ vi.mock("electron", () => {
     private url = "";
     private title = "";
     private destroyed = false;
+    readonly debugger = {
+      attached: false,
+      attach: vi.fn(() => { this.debugger.attached = true; }),
+      detach: vi.fn(() => { this.debugger.attached = false; }),
+      isAttached: vi.fn(() => this.debugger.attached),
+      sendCommand: vi.fn(async () => undefined),
+    };
 
     constructor() {
       electronState.contents.push(this);
@@ -103,6 +111,7 @@ vi.mock("electron", () => {
     async loadURL(url: string): Promise<void> {
       this.url = url;
       this.title = new URL(url).pathname === "/" ? "Local app" : new URL(url).pathname.slice(1);
+      this.emit("dom-ready");
       this.emit("did-navigate", {}, url);
     }
     getURL(): string { return this.url; }
@@ -140,13 +149,14 @@ vi.mock("electron", () => {
 
 const pageTools = vi.hoisted(() => ({
   agentPageActivationBlocked: vi.fn(async () => false),
+  agentPageHasSensitiveEvidence: vi.fn(async () => false),
+  installAgentPagePrivacyGuard: vi.fn(async () => undefined),
   locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({
     found: true, blocked: false, disabled: false, editable: true,
     label: "Run checks", x: 42, y: 28,
   })),
-  maskAgentPageSecrets: vi.fn(async () => undefined),
-  restoreAgentPageSecrets: vi.fn(async () => undefined),
   semanticPageSnapshot: vi.fn(async () => JSON.stringify({ title: "Local app", elements: [] })),
+  setAgentPageInputGuard: vi.fn(async () => undefined),
   showAgentPageCursor: vi.fn(async () => undefined),
 }));
 
@@ -201,6 +211,7 @@ describe("agent-owned native Browser", () => {
     });
     expect(initial.tabs).toHaveLength(1);
     expect(initial.url).toBe("http://127.0.0.1:3000/");
+    expect(pageTools.installAgentPagePrivacyGuard).toHaveBeenCalled();
     expect(electronState.viewOptions[0]).toMatchObject({
       webPreferences: {
         partition: expect.stringMatching(/^inertia-preview-/u),
@@ -208,6 +219,9 @@ describe("agent-owned native Browser", () => {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
+        devTools: false,
+        disableDialogs: true,
+        navigateOnDragDrop: false,
       },
     });
     expect((electronState.viewOptions[0]!.webPreferences as { partition: string }).partition)
@@ -246,6 +260,7 @@ describe("agent-owned native Browser", () => {
   });
 
   it("returns semantic and visual evidence and renders exact visible interaction input", async () => {
+    const contentsOffset = electronState.contents.length;
     const { broker, children } = harness();
     await broker.navigate({
       ownerId: "primary",
@@ -259,8 +274,7 @@ describe("agent-owned native Browser", () => {
       ok: true,
       image: { mimeType: "image/png", data: Buffer.from("bounded-png").toString("base64") },
     });
-    expect(pageTools.maskAgentPageSecrets).toHaveBeenCalled();
-    expect(pageTools.restoreAgentPageSecrets).toHaveBeenCalled();
+    expect(pageTools.agentPageHasSensitiveEvidence).toHaveBeenCalled();
     await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
       .resolves.toMatchObject({ ok: true });
     expect(pageTools.showAgentPageCursor).toHaveBeenCalledWith(
@@ -270,6 +284,12 @@ describe("agent-owned native Browser", () => {
       expect.objectContaining({ type: "mouseDown", x: 42, y: 28 }),
       expect.objectContaining({ type: "mouseUp", x: 42, y: 28 }),
     ]));
+    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(expect.anything(), true);
+    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(expect.anything(), false);
+    expect(electronState.contents[contentsOffset]!.debugger.sendCommand).toHaveBeenCalledWith(
+      "Page.setInterceptFileChooserDialog",
+      { enabled: true, cancel: true },
+    );
     await expect(broker.perform(conversationId, {
       action: "type", ref: "e2", text: "hello", replace: true,
     })).resolves.toMatchObject({ ok: true });
@@ -391,6 +411,27 @@ describe("agent-owned native Browser", () => {
         message: "File inputs cannot be activated by the Browser agent.",
       });
     expect(contents.sentInputs).toEqual([]);
+  });
+
+  it("refuses semantic and visual evidence after a password is observed", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/login",
+    });
+    const capturePage = electronState.contents[contentsOffset]!.capturePage as unknown as {
+      mock: { calls: unknown[][] };
+    };
+    const captures = capturePage.mock.calls.length;
+    pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
+    await expect(broker.perform(conversationId, { action: "snapshot" }))
+      .resolves.toMatchObject({ ok: false, code: "invalid" });
+    pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: false, code: "invalid" });
+    expect(capturePage).toHaveBeenCalledTimes(captures);
   });
 
   it("omits page-controlled tab metadata from provider-visible state", async () => {

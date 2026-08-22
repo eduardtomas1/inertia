@@ -162,12 +162,16 @@ async function createPreviewServer(): Promise<{
       setTimeout(() => {
         response.writeHead(200, {
           "Content-Type": "text/html",
-          "Content-Security-Policy": "default-src 'none'",
+          "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
         });
         response.end(
           "<!doctype html><title>Agent browser type destination</title>"
           + "<h1>Typing navigation settled</h1>"
-          + "<label>Private upload <input type='file' aria-label='Private upload'></label>",
+          + "<label>Private upload <input type='file' aria-label='Private upload'></label>"
+          + "<button type='button'>Choose through page handler</button>"
+          + "<script>document.querySelector('button').addEventListener('click',()=>{"
+          + "const input=document.querySelector('input[type=file]');"
+          + "if(typeof input.showPicker==='function')input.showPicker();else input.click()})</script>",
         );
       }, 450);
       return;

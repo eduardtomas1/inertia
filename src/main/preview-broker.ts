@@ -24,10 +24,12 @@ import {
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
-  agentPageActivationBlocked, locateAgentPageRef, maskAgentPageSecrets,
-  restoreAgentPageSecrets, semanticPageSnapshot, showAgentPageCursor,
+  agentPageActivationBlocked, agentPageHasSensitiveEvidence, installAgentPagePrivacyGuard,
+  locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
-
+import {
+  beginAgentFileChooserBlock, endAgentFileChooserBlock, settleAgentPageInput,
+} from "./preview-agent-input.js";
 type PreviewOwner = "primary" | "secondary";
 
 interface PreviewTab {
@@ -59,7 +61,6 @@ const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n"]);
 const MAX_BROWSER_TABS = 8;
 const PREVIEW_RENDERER_OPERATION_TIMEOUT_MS = 15_000;
 const PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS = 30_000;
-const PREVIEW_INPUT_NAVIGATION_GRACE_MS = 250;
 
 export function previewAppShortcutKey(input: Pick<
   Input,
@@ -314,7 +315,7 @@ export class PreviewBroker {
           case "press":
             return await this.#press(ownerId, slot, command.key, signal);
           case "scroll":
-            return this.#scroll(ownerId, slot, command.deltaY, signal);
+            return await this.#scroll(ownerId, slot, command.deltaY, signal);
           case "tabs":
             return this.#success(slot, this.#agentStateText(slot));
           case "tab-open":
@@ -665,6 +666,9 @@ export class PreviewBroker {
           sandbox: true,
           webSecurity: true,
           allowRunningInsecureContent: false,
+          devTools: false,
+          disableDialogs: true,
+          navigateOnDragDrop: false,
         },
       }),
     };
@@ -693,6 +697,7 @@ export class PreviewBroker {
     contents.on("did-start-loading", publish);
     contents.on("did-stop-loading", publish);
     contents.on("did-navigate", publish);
+    contents.on("dom-ready", () => { void installAgentPagePrivacyGuard(contents).catch(() => undefined); });
     contents.on("did-navigate-in-page", publish);
     contents.on("page-title-updated", publish);
     slot.tabs.set(tab.id, tab);
@@ -774,6 +779,10 @@ export class PreviewBroker {
   async #snapshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
     if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
+    await this.#prepareAgentPage(contents, signal);
+    if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
+      return failure("invalid", "Page evidence is unavailable until the password-bearing document navigates away.");
+    }
     const text = await this.#rendererOperation(
       contents,
       () => semanticPageSnapshot(contents),
@@ -789,17 +798,15 @@ export class PreviewBroker {
     const tabId = tab.id;
     const contents = tab.view.webContents;
     if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
-    await this.#rendererOperation(contents, () => maskAgentPageSecrets(contents), { signal });
-    let image: NativeImage;
-    try {
-      image = await this.#rendererOperation(
-        contents,
-        () => contents.capturePage(),
-        { signal },
-      );
-    } finally {
-      if (!contents.isDestroyed()) await this.#rendererOperation(contents, () => restoreAgentPageSecrets(contents));
+    await this.#prepareAgentPage(contents, signal);
+    if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
+      return failure("invalid", "Screenshots are unavailable until the password-bearing document navigates away.");
     }
+    let image: NativeImage = await this.#rendererOperation(
+      contents,
+      () => contents.capturePage(),
+      { signal },
+    );
     stopForAbort(signal);
     if (slot.tabs.get(tabId) !== tab || contents.isDestroyed()) {
       return failure("not-found", "The captured Browser tab was closed before its screenshot completed.");
@@ -895,6 +902,7 @@ export class PreviewBroker {
 
   async #click(ownerId: PreviewOwner, slot: PreviewSlot, ref: string, signal?: AbortSignal): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
+    await this.#prepareAgentPage(contents, signal);
     const boundsGeneration = slot.boundsGeneration;
     const located = await this.#rendererOperation(
       contents,
@@ -950,6 +958,7 @@ export class PreviewBroker {
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
+    await this.#prepareAgentPage(contents, signal);
     const boundsGeneration = slot.boundsGeneration;
     const located = await this.#rendererOperation(
       contents,
@@ -1003,6 +1012,7 @@ export class PreviewBroker {
   ): Promise<AgentBrowserResult> {
     stopForAbort(signal);
     const contents = this.#active(slot).view.webContents;
+    await this.#prepareAgentPage(contents, signal);
     if ((key === "Enter" || key === "Space") && await this.#rendererOperation(
       contents,
       () => agentPageActivationBlocked(contents),
@@ -1022,17 +1032,18 @@ export class PreviewBroker {
     return this.#success(slot, JSON.stringify({ pressed: key }));
   }
 
-  #scroll(ownerId: PreviewOwner, slot: PreviewSlot, deltaY: number, signal?: AbortSignal): AgentBrowserResult {
+  async #scroll(ownerId: PreviewOwner, slot: PreviewSlot, deltaY: number, signal?: AbortSignal): Promise<AgentBrowserResult> {
     stopForAbort(signal);
     const contents = this.#active(slot).view.webContents;
+    await this.#prepareAgentPage(contents, signal);
     const bounds = slot.bounds ?? { width: 800, height: 600 };
-    contents.sendInputEvent({
+    await this.#sendInputAndWait(contents, () => contents.sendInputEvent({
       type: "mouseWheel",
       x: Math.max(0, Math.floor(bounds.width / 2)),
       y: Math.max(0, Math.floor(bounds.height / 2)),
       deltaX: 0,
       deltaY,
-    });
+    }), signal);
     this.#record(ownerId, slot, "scroll", `Agent scrolled ${deltaY > 0 ? "down" : "up"}`);
     return this.#success(slot, JSON.stringify({ scrolled: deltaY }));
   }
@@ -1058,6 +1069,17 @@ export class PreviewBroker {
         cancel: () => contents.stop(),
         timeoutMessage: "The Browser page did not finish loading.",
       },
+    );
+  }
+
+  async #prepareAgentPage(
+    contents: PreviewTab["view"]["webContents"],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.#rendererOperation(
+      contents,
+      () => installAgentPagePrivacyGuard(contents),
+      { signal },
     );
   }
 
@@ -1114,136 +1136,29 @@ export class PreviewBroker {
     signal?: AbortSignal,
   ): Promise<void> {
     stopForAbort(signal);
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let dispatchSettled = false;
-      let navigationStarted = false;
-      let navigationSettled = false;
-      let graceElapsed = false;
-      let grace: ReturnType<typeof setTimeout> | undefined;
-      const cleanup = (): void => {
-        if (grace) clearTimeout(grace);
-        clearTimeout(timeout);
-        contents.removeListener("did-start-navigation", onStarted);
-        contents.removeListener("did-navigate-in-page", onInPage);
-        contents.removeListener("did-stop-loading", onStopped);
-        contents.removeListener("did-fail-load", onFailed);
-        contents.removeListener("destroyed", onDestroyed);
-        signal?.removeEventListener("abort", onAbort);
-      };
-      const finish = (error?: Error, stop = false): void => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        if (stop && navigationStarted && !contents.isDestroyed()) contents.stop();
-        if (error) reject(error);
-        else resolve();
-      };
-      const completeIfReady = (): void => {
-        if (!dispatchSettled) return;
-        if (navigationStarted ? navigationSettled : graceElapsed) finish();
-      };
-      const armGrace = (): void => {
-        if (settled || navigationStarted || grace) return;
-        grace = setTimeout(() => {
-          graceElapsed = true;
-          completeIfReady();
-        }, PREVIEW_INPUT_NAVIGATION_GRACE_MS);
-        grace.unref();
-      };
-      const onStarted = (
-        details: { isMainFrame?: boolean; isSameDocument?: boolean; url?: string },
-        legacyUrl?: string,
-        legacyInPlace?: boolean,
-        legacyMainFrame?: boolean,
-      ): void => {
-        const isMainFrame = typeof details.isMainFrame === "boolean"
-          ? details.isMainFrame
-          : legacyMainFrame === true;
-        if (!isMainFrame) return;
-        const url = typeof details.url === "string" ? details.url : legacyUrl ?? "";
-        try {
-          if (previewNavigationTarget(url).kind !== "embed") {
-            navigationStarted = true;
-            navigationSettled = true;
-            if (grace) clearTimeout(grace);
-            completeIfReady();
-            return;
-          }
-        } catch {
-          navigationStarted = true;
-          navigationSettled = true;
-          if (grace) clearTimeout(grace);
-          completeIfReady();
-          return;
-        }
-        navigationStarted = true;
-        if (grace) clearTimeout(grace);
-        const sameDocument = typeof details.isSameDocument === "boolean"
-          ? details.isSameDocument
-          : legacyInPlace === true;
-        if (sameDocument && contents.getURL() === url) {
-          navigationSettled = true;
-          completeIfReady();
-        }
-      };
-      const onInPage = (
-        _event: unknown,
-        _url: string,
-        isMainFrame: boolean,
-      ): void => {
-        if (navigationStarted && isMainFrame) {
-          navigationSettled = true;
-          completeIfReady();
-        }
-      };
-      const onStopped = (): void => {
-        if (navigationStarted) {
-          navigationSettled = true;
-          completeIfReady();
-        }
-      };
-      const onFailed = (
-        _event: unknown,
-        _errorCode: number,
-        description: string,
-        _url: string,
-        isMainFrame: boolean,
-      ): void => {
-        if (navigationStarted && isMainFrame) {
-          finish(new Error(`The Browser page failed after the input: ${description}`));
-        }
-      };
-      const onDestroyed = (): void => finish(
-        new Error("The active Browser tab was closed after the input."),
+    await this.#rendererOperation(
+      contents,
+      () => beginAgentFileChooserBlock(contents),
+      { signal },
+    );
+    try {
+      await this.#rendererOperation(
+        contents,
+        () => setAgentPageInputGuard(contents, true),
+        { signal },
       );
-      const onAbort = (): void => finish(new Error("browser-action-cancelled"), true);
-      const timeout = setTimeout(() => finish(
-        new Error("The Browser page did not settle after the input."),
-        true,
-      ), PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS);
-      timeout.unref();
-      contents.on("did-start-navigation", onStarted);
-      contents.on("did-navigate-in-page", onInPage);
-      contents.on("did-stop-loading", onStopped);
-      contents.on("did-fail-load", onFailed);
-      contents.once("destroyed", onDestroyed);
-      signal?.addEventListener("abort", onAbort, { once: true });
       try {
-        if (contents.isDestroyed()) {
-          finish(new Error("The active Browser tab was closed before the input."));
-          return;
+        await settleAgentPageInput(contents, dispatch, signal);
+      } finally {
+        if (!contents.isDestroyed()) {
+          await this.#rendererOperation(
+            contents,
+            () => setAgentPageInputGuard(contents, false),
+          ).catch(() => undefined);
         }
-        void Promise.resolve(dispatch()).then(() => {
-          dispatchSettled = true;
-          if (navigationStarted) completeIfReady();
-          else armGrace();
-        }, (error: unknown) => {
-          finish(error instanceof Error ? error : new Error("The Browser input failed."));
-        });
-      } catch (error) {
-        finish(error instanceof Error ? error : new Error("The Browser input failed."));
       }
-    });
+    } finally {
+      endAgentFileChooserBlock(contents);
+    }
   }
 }

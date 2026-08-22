@@ -264,6 +264,105 @@ export async function semanticPageSnapshot(
   return serializeAgentPageSnapshot(value);
 }
 
+export async function installAgentPagePrivacyGuard(contents: WebContents): Promise<void> {
+  await execute(contents, `(() => {
+    const state = globalThis.__inertiaAgentBrowser ??= {
+      refs: new Map(), nodes: new WeakMap(), passwordNodes: new WeakSet(),
+      passwordValues: new Set(), next: 1,
+    };
+    if (state.privacyGuardInstalled) return;
+    const normalize = (value) => String(value ?? "").replace(/\\s+/gu, " ").trim();
+    const remember = (value) => {
+      const normalized = normalize(value);
+      if (!normalized) return;
+      state.passwordValues.delete(normalized);
+      state.passwordValues.add(normalized);
+      while (state.passwordValues.size > ${MAX_REMEMBERED_PASSWORD_VALUES}) {
+        state.passwordValues.delete(state.passwordValues.values().next().value);
+      }
+    };
+    const inspect = (input) => {
+      const value = normalize(input.value);
+      if (String(input.type || "").toLowerCase() === "password"
+        || state.passwordNodes.has(input)
+        || (value && state.passwordValues.has(value))) {
+        state.passwordNodes.add(input);
+        remember(value);
+      }
+    };
+    const inspectTree = (node) => {
+      if (node?.nodeType !== 1) return;
+      if (node.tagName === "INPUT") inspect(node);
+      for (const input of node.querySelectorAll?.("input") || []) inspect(input);
+    };
+    for (const input of document.querySelectorAll?.("input") || []) inspect(input);
+    document.addEventListener("input", (event) => {
+      for (const node of event.composedPath?.() || [event.target]) {
+        if (node?.tagName === "INPUT") inspect(node);
+      }
+    }, true);
+    document.addEventListener("click", (event) => {
+      if (!state.agentInputActive) return;
+      const path = event.composedPath?.() || [event.target];
+      const fileInput = path.some((node) => node?.tagName === "INPUT"
+        && String(node.type || "").toLowerCase() === "file");
+      if (!fileInput) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === "attributes") inspectTree(record.target);
+        for (const node of record.removedNodes || []) inspectTree(node);
+        for (const node of record.addedNodes || []) inspectTree(node);
+      }
+    });
+    observer.observe(document.documentElement, {
+      attributes: true, attributeFilter: ["type"], childList: true, subtree: true,
+    });
+    state.privacyGuardInstalled = true;
+    state.privacyObserver = observer;
+  })()`);
+}
+
+export async function agentPageHasSensitiveEvidence(contents: WebContents): Promise<boolean> {
+  const value = await execute(contents, `(() => {
+    const state = globalThis.__inertiaAgentBrowser;
+    if (state?.privacyGuardInstalled !== true) {
+      throw new Error("The Browser privacy guard is unavailable.");
+    }
+    const normalize = (value) => String(value ?? "").replace(/\\s+/gu, " ").trim();
+    for (const input of document.querySelectorAll?.("input") || []) {
+      const value = normalize(input.value);
+      if (String(input.type || "").toLowerCase() !== "password"
+        && !state.passwordNodes.has(input)) continue;
+      state.passwordNodes.add(input);
+      if (value) {
+        state.passwordValues.delete(value);
+        state.passwordValues.add(value);
+        while (state.passwordValues.size > ${MAX_REMEMBERED_PASSWORD_VALUES}) {
+          state.passwordValues.delete(state.passwordValues.values().next().value);
+        }
+      }
+    }
+    return state.passwordValues.size > 0;
+  })()`);
+  return value === true;
+}
+
+export async function setAgentPageInputGuard(
+  contents: WebContents,
+  active: boolean,
+): Promise<void> {
+  const updated = await execute(contents, `(() => {
+    const state = globalThis.__inertiaAgentBrowser;
+    if (state?.privacyGuardInstalled !== true) return false;
+    state.agentInputActive = ${active ? "true" : "false"};
+    return true;
+  })()`);
+  if (updated !== true) throw new Error("The Browser privacy guard is unavailable.");
+}
+
 export async function locateAgentPageRef(
   contents: WebContents,
   ref: string,
@@ -371,14 +470,16 @@ export async function locateAgentPageRef(
       blocked,
       disabled,
       editable,
-      label: redact(
-        password
+      label: passwordValues.size > 0
+        ? "page element"
+        : redact(
+          password
           ? "Password field"
           : element.getAttribute("aria-label")
             || element.innerText
             || element.value
-        || "element"
-      ),
+          || "element"
+        ),
       x,
       y,
     };
@@ -394,60 +495,6 @@ export async function agentPageActivationBlocked(contents: WebContents): Promise
       && String(active.type || "").toLowerCase() === "file";
   })()`);
   return value === true;
-}
-
-export async function maskAgentPageSecrets(contents: WebContents): Promise<void> {
-  await execute(contents, `(async () => {
-    const state = globalThis.__inertiaAgentBrowser;
-    if (!state) return;
-    const passwordNodes = state.passwordNodes ??= new WeakSet();
-    const passwordValues = state.passwordValues ??= new Set();
-    for (const input of document.querySelectorAll?.("input") || []) {
-      const value = String(input.value ?? "").replace(/\\s+/gu, " ").trim();
-      if (String(input.type || "").toLowerCase() === "password"
-        || (value && passwordValues.has(value))) passwordNodes.add(input);
-    }
-    const masks = [];
-    for (const input of document.querySelectorAll?.("input") || []) {
-      if (!passwordNodes.has(input)) continue;
-      masks.push({
-        input,
-        security: input.style.getPropertyValue("-webkit-text-security"),
-        securityPriority: input.style.getPropertyPriority("-webkit-text-security"),
-        caret: input.style.getPropertyValue("caret-color"),
-        caretPriority: input.style.getPropertyPriority("caret-color"),
-      });
-      input.style.setProperty("-webkit-text-security", "disc", "important");
-      input.style.setProperty("caret-color", "transparent", "important");
-    }
-    state.screenshotMasks = masks;
-    if (masks.length > 0) {
-      await new Promise((resolve) => requestAnimationFrame(
-        () => requestAnimationFrame(resolve),
-      ));
-    }
-  })()`);
-}
-
-export async function restoreAgentPageSecrets(contents: WebContents): Promise<void> {
-  await execute(contents, `(() => {
-    const state = globalThis.__inertiaAgentBrowser;
-    for (const mask of state?.screenshotMasks || []) {
-      if (mask.security) {
-        mask.input.style.setProperty(
-          "-webkit-text-security", mask.security, mask.securityPriority,
-        );
-      } else {
-        mask.input.style.removeProperty("-webkit-text-security");
-      }
-      if (mask.caret) {
-        mask.input.style.setProperty("caret-color", mask.caret, mask.caretPriority);
-      } else {
-        mask.input.style.removeProperty("caret-color");
-      }
-    }
-    if (state) state.screenshotMasks = [];
-  })()`);
 }
 
 export async function showAgentPageCursor(

@@ -4,11 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   agentPageActivationBlocked,
+  agentPageHasSensitiveEvidence,
+  installAgentPagePrivacyGuard,
   locateAgentPageRef,
-  maskAgentPageSecrets,
-  restoreAgentPageSecrets,
   semanticPageSnapshot,
   serializeAgentPageSnapshot,
+  setAgentPageInputGuard,
 } from "../../src/main/preview-agent-page";
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../../src/shared/agent-browser";
 
@@ -90,6 +91,88 @@ describe("agent browser semantic snapshots", () => {
       url: "http://127.0.0.1:3000",
     });
     expect(parsed.text).toHaveLength(12_000);
+  });
+
+  it("tracks password identity before the first agent inspection", async () => {
+    const secret = "revealed-before-first-snapshot";
+    const input = {
+      nodeType: 1,
+      tagName: "INPUT",
+      type: "password",
+      value: "",
+      disabled: false,
+      checked: false,
+      labels: [{ innerText: "Password" }],
+      innerText: "",
+      isConnected: true,
+      getAttribute: () => null,
+      getBoundingClientRect: () => ({
+        x: 20, y: 30, left: 20, top: 30,
+        right: 220, bottom: 70, width: 200, height: 40,
+      }),
+      contains: (candidate: unknown) => candidate === input,
+      querySelectorAll: () => [],
+    };
+    let clickListener: ((event: Record<string, unknown>) => void) | undefined;
+    const document = {
+      title: "Sign in",
+      body: { innerText: "Password" },
+      documentElement: { nodeType: 1, tagName: "HTML", querySelectorAll: () => [input] },
+      activeElement: null,
+      addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
+        if (name === "click") clickListener = listener;
+      }),
+      querySelectorAll: () => [input],
+      elementFromPoint: () => input,
+    };
+    class MutationObserver {
+      constructor(_callback: (records: unknown[]) => void) {}
+      observe(): void {}
+    }
+    const context = {
+      document,
+      MutationObserver,
+      location: { href: "http://127.0.0.1:3000/login" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await installAgentPagePrivacyGuard(contents as never);
+    input.value = secret;
+    input.type = "text";
+    document.title = secret;
+    document.body.innerText = secret;
+    const firstSnapshot = await semanticPageSnapshot(contents as never);
+    expect(firstSnapshot).not.toContain(secret);
+    expect(JSON.parse(firstSnapshot)).toMatchObject({
+      title: "[redacted]",
+      text: "[redacted]",
+      elements: [{ name: "Password field", value: "[redacted]" }],
+    });
+    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
+    await setAgentPageInputGuard(contents as never, true);
+    const fileInput = { tagName: "INPUT", type: "file" };
+    const prevented = vi.fn();
+    const stopped = vi.fn();
+    clickListener?.({
+      composedPath: () => [fileInput],
+      preventDefault: prevented,
+      stopImmediatePropagation: stopped,
+    });
+    expect(prevented).toHaveBeenCalledOnce();
+    expect(stopped).toHaveBeenCalledOnce();
+    await setAgentPageInputGuard(contents as never, false);
   });
 
   it("masks password values in semantic evidence and interaction labels", async () => {
@@ -197,21 +280,21 @@ describe("agent browser semantic snapshots", () => {
       .resolves.toMatchObject({
         found: true,
         editable: true,
-        label: "Password field",
+        label: "page element",
         x: 120,
         y: 50,
       });
     expect(focus).toHaveBeenCalledOnce();
     expect(select).toHaveBeenCalledOnce();
     await expect(locateAgentPageRef(contents as never, "e2"))
-      .resolves.toMatchObject({ found: true, label: "[redacted]" });
+      .resolves.toMatchObject({ found: true, label: "page element" });
 
     const changedSecret = "changed-password-after-the-snapshot";
     input.value = changedSecret;
     input.labels[0]!.innerText = changedSecret;
     mirror.innerText = changedSecret;
     await expect(locateAgentPageRef(contents as never, "e2"))
-      .resolves.toMatchObject({ found: true, label: "[redacted]" });
+      .resolves.toMatchObject({ found: true, label: "page element" });
 
     input.value = secret;
     input.labels[0]!.innerText = secret;
@@ -242,11 +325,6 @@ describe("agent browser semantic snapshots", () => {
     mirror.innerText = changedSecret;
     const editedReplacementSnapshot = await semanticPageSnapshot(contents as never);
     expect(editedReplacementSnapshot).not.toContain(changedSecret);
-    await maskAgentPageSecrets(contents as never);
-    expect(style.getPropertyValue("-webkit-text-security")).toBe("disc");
-    expect(style.getPropertyPriority("-webkit-text-security")).toBe("important");
-    await restoreAgentPageSecrets(contents as never);
-    expect(style.getPropertyValue("-webkit-text-security")).toBe("");
   });
 
   it("includes every valid contenteditable form in semantic refs", async () => {

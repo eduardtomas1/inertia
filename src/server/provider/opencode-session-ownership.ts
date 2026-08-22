@@ -10,7 +10,6 @@ import {
 
 const MAX_OWNED_SESSIONS = 256;
 const MAX_SESSION_ID_CHARS = 512;
-const MAX_ACTIVITY_EVENT_KEYS = 8_192;
 
 function safeSessionId(value: unknown): string | undefined {
   const candidate = stringValue(value);
@@ -285,7 +284,16 @@ export class OpenCodeSessionOwnership {
   private readonly sessions = new Set<string>();
   private readonly activityEventKeys = new Set<string>();
 
-  constructor(private readonly rootSessionId: string) {
+  constructor(
+    private readonly rootSessionId: string,
+    private readonly maxActivityEventKeys: number,
+  ) {
+    if (
+      !Number.isSafeInteger(maxActivityEventKeys)
+      || maxActivityEventKeys < 1
+    ) {
+      throw new Error("The OpenCode activity-evidence budget is invalid.");
+    }
     this.sessions.add(rootSessionId);
   }
 
@@ -324,11 +332,10 @@ export class OpenCodeSessionOwnership {
     const eventKey = active ? activityEventKey(event) : undefined;
     if (!eventKey) return { scope, active: false };
     if (this.activityEventKeys.has(eventKey)) return { scope, active: false };
-    this.activityEventKeys.add(eventKey);
-    if (this.activityEventKeys.size > MAX_ACTIVITY_EVENT_KEYS) {
-      const oldest = this.activityEventKeys.values().next().value;
-      if (oldest) this.activityEventKeys.delete(oldest);
+    if (this.activityEventKeys.size >= this.maxActivityEventKeys) {
+      return { scope, active: false };
     }
+    this.activityEventKeys.add(eventKey);
     return { scope, active };
   }
 }

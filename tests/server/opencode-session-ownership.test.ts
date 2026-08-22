@@ -25,7 +25,7 @@ function created(
 
 describe("OpenCode descendant session ownership", () => {
   it("accepts only exact parent-linked descendants, including transitive ones", () => {
-    const ownership = new OpenCodeSessionOwnership("root-session");
+    const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
 
     expect(ownership.observe(event({
       type: "session.status",
@@ -62,7 +62,7 @@ describe("OpenCode descendant session ownership", () => {
   });
 
   it("refreshes only validated, non-duplicate descendant work", () => {
-    const ownership = new OpenCodeSessionOwnership("root-session");
+    const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
     const childCreated = created("child-session", "root-session");
     const activeMessage = event({
       type: "message.updated",
@@ -189,7 +189,7 @@ describe("OpenCode descendant session ownership", () => {
   });
 
   it("rejects unsafe identities and bounds the verified session graph", () => {
-    const ownership = new OpenCodeSessionOwnership("root-session");
+    const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
     expect(ownership.observe(created("unsafe\nchild", "root-session")))
       .toEqual({ scope: "unrelated", active: false });
     for (let index = 0; index < 255; index += 1) {
@@ -201,7 +201,7 @@ describe("OpenCode descendant session ownership", () => {
   });
 
   it("deduplicates replay payloads with canonically equivalent Unicode keys", () => {
-    const ownership = new OpenCodeSessionOwnership("root-session");
+    const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
     expect(ownership.observe(created("child-session", "root-session")))
       .toEqual({ scope: "descendant", active: true });
     const toolEvent = (input: Record<string, unknown>, id: string): Event => event({
@@ -224,8 +224,36 @@ describe("OpenCode descendant session ownership", () => {
       .toEqual({ scope: "descendant", active: false });
   });
 
+  it("retains replay evidence and fails closed at its cumulative capacity", () => {
+    const ownership = new OpenCodeSessionOwnership("root-session", 2);
+    expect(ownership.observe(created("child-session", "root-session")))
+      .toEqual({ scope: "descendant", active: true });
+    const messageEvent = (messageId: string, id: string): Event => event({
+      id,
+      type: "message.updated",
+      properties: {
+        sessionID: "child-session",
+        info: {
+          id: messageId,
+          sessionID: "child-session",
+          role: "assistant",
+        },
+      },
+    });
+    const first = messageEvent("child-message-1", "first");
+
+    expect(ownership.observe(first))
+      .toEqual({ scope: "descendant", active: true });
+    expect(ownership.observe(messageEvent("child-message-2", "second")))
+      .toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(event({ ...first, id: "replayed-first" })))
+      .toEqual({ scope: "descendant", active: false });
+    expect(() => new OpenCodeSessionOwnership("root-session", 0))
+      .toThrow("activity-evidence budget is invalid");
+  });
+
   it("fails closed when descendant activity cannot be canonicalized", () => {
-    const ownership = new OpenCodeSessionOwnership("root-session");
+    const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
     expect(ownership.observe(created("child-session", "root-session")))
       .toEqual({ scope: "descendant", active: true });
     const recursiveInput: Record<string, unknown> = {};

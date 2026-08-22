@@ -29,7 +29,11 @@ import {
   sanitizeProviderActivityDetail,
   sanitizeProviderFailureSummary,
 } from "./activity-detail";
-import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
+import {
+  CappedProviderBuffer,
+  ProviderRunEventBudget,
+  PROVIDER_RUN_BUDGET_BURSTS,
+} from "./io";
 import {
   createOwnedOpenCodeClient,
   ownedOpenCodeCredentials,
@@ -58,6 +62,7 @@ import { OpenCodeRunOwnership } from "./opencode-run-ownership";
 import { OpenCodeSessionOwnership } from "./opencode-session-ownership";
 import {
   createOpenCodeInteractionState,
+  handleOpenCodeInteractionEvent,
   handleOpenCodeEvent,
   openCodeEventRequiresPromptAdmission,
   replyOpenCodePermission,
@@ -596,6 +601,22 @@ function startOpenCodeRun(
       let sessionIdleObserved = false;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
         onDescendantActivity: armEventInactivityDeadline,
+        onDescendantInteraction: (event) => {
+          const safeEvent = hostTools?.redactPayload(event) ?? event;
+          handleOpenCodeInteractionEvent(
+            safeEvent,
+            options,
+            client!,
+            emitter,
+            approvals,
+            inputs,
+            interactionState,
+            promptLifecycle,
+            ownership,
+            "verified-descendant",
+            failInteraction,
+          );
+        },
         onEvent: async (event) => {
           if (openCodeEventRequiresPromptAdmission(event)) {
             const admission = ownership.pendingPromptAdmission();
@@ -1083,16 +1104,22 @@ async function pumpOpenCodeEvents(
   sessionId: string,
   handlers: {
     onDescendantActivity: () => void;
+    onDescendantInteraction: (event: Event) => void | Promise<void>;
     onEvent: (event: Event) => void | Promise<void>;
     isDone: (event: Event) => boolean | Promise<boolean>;
   },
 ): Promise<void> {
-  const sessionOwnership = new OpenCodeSessionOwnership(sessionId);
+  const maxRunEvents = MAX_RUN_EVENTS * PROVIDER_RUN_BUDGET_BURSTS;
+  const sessionOwnership = new OpenCodeSessionOwnership(
+    sessionId,
+    maxRunEvents,
+  );
   const eventBudget = new ProviderRunEventBudget(
     "OpenCode",
     MAX_EVENT_BYTES,
     MAX_RUN_EVENTS,
     MAX_RUN_EVENT_BYTES,
+    { maxRunEvents },
   );
   for await (const event of stream) {
     eventBudget.observe(event);
@@ -1100,6 +1127,9 @@ async function pumpOpenCodeEvents(
     if (scope === "unrelated") continue;
     if (scope === "descendant") {
       if (active) handlers.onDescendantActivity();
+      if (active && openCodeEventRequiresPromptAdmission(event)) {
+        await handlers.onDescendantInteraction(event);
+      }
       continue;
     }
     await handlers.onEvent(event);

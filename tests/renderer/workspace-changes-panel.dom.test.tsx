@@ -1017,6 +1017,76 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("closes edited pull request state when the conversation identity changes", async () => {
+    const initial = structuredClone(snapshot);
+    const nested = initial.repositories.find(
+      ({ repositoryPath }) => repositoryPath === "modules/alpha",
+    )!;
+    nested.upstream = "origin/feature/alpha";
+    nested.hasRemote = true;
+    nested.pullRequest = {
+      available: true,
+      remoteName: "origin",
+      forge: "github",
+      unavailableReason: null,
+    };
+    nested.authorityRef = "33333333-3333-4333-8333-333333333333";
+    const props = {
+      projectName: "Inertia",
+      projectId: crypto.randomUUID(),
+      conversationId: crypto.randomUUID(),
+      snapshot: initial,
+      summary: null,
+      onRefresh: vi.fn(),
+      run: vi.fn(async (): Promise<ServerEvent> => ({
+        type: "request.ok",
+        requestId: crypto.randomUUID(),
+      })),
+      onLoadRepositoryDiff: vi.fn(async (
+        repositoryPath: string,
+        filePath?: string,
+      ) => ({
+        repositoryPath,
+        patch: "",
+        truncated: false as const,
+        files: filePath ? [changedFile(filePath)] : [],
+      })),
+      onOpenWorkspaceFile: vi.fn(),
+      onAsk: vi.fn(async () => undefined),
+      onRequestRevision: vi.fn(async () => undefined),
+      onRevert: vi.fn(async () => undefined),
+      onSetReviewState: vi.fn(async () => undefined),
+      onCreateNote: vi.fn(async () => undefined),
+      onUpdateNote: vi.fn(async () => undefined),
+      onDeleteNote: vi.fn(async () => undefined),
+      onAddTextToPrompt: vi.fn(),
+      onAddToPrompt: vi.fn(),
+    };
+    const view = render(<WorkspaceChangesPanel {...props} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Repository scope" }), {
+      target: { value: "modules/alpha" },
+    });
+    fireEvent.click(await within(await screen.findByLabelText(
+      "Actions for modules/alpha",
+    )).findByRole("button", { name: "PR" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Create GitHub pull request",
+    });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Title" }), {
+      target: { value: "Stale title from the prior conversation" },
+    });
+
+    view.rerender(<WorkspaceChangesPanel
+      {...props}
+      conversationId={crypto.randomUUID()}
+    />);
+
+    await waitFor(() => expect(screen.queryByRole("dialog", {
+      name: "Create GitHub pull request",
+    })).not.toBeInTheDocument());
+    expect(props.run).not.toHaveBeenCalled();
+  });
+
   it("closes a pull request dialog when the same-path branch changes", async () => {
     const initial = structuredClone(snapshot);
     const nested = initial.repositories.find(

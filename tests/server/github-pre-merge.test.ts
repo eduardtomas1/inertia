@@ -463,6 +463,33 @@ describe("GitHub pre-merge confidence", () => {
     });
   });
 
+  it("marks every changed-file count or uniqueness mismatch incomplete", () => {
+    const identity = {
+      number: 9,
+      url: "https://github.com/openai/codex/pull/9",
+      state: "OPEN",
+      headRefName: "feature/confidence",
+      headRefOid: "c".repeat(40),
+      updatedAt: "2026-08-22T15:00:00Z",
+      statusCheckRollup: [],
+    };
+    const file = {
+      path: "src/server/git/github-pre-merge.ts",
+      additions: 4,
+      deletions: 1,
+    };
+    const parse = (changedFiles: number, files: unknown[]) =>
+      gitHubPreMergeTestSupport.parsePullRequestList(
+        JSON.stringify([{ ...identity, changedFiles, files }]),
+        "https://github.com/openai/codex",
+        "feature/confidence",
+      );
+
+    expect(parse(0, [file])?.filesTruncated).toBe(true);
+    expect(parse(2, [file, file])?.filesTruncated).toBe(true);
+    expect(parse(1, [file])?.filesTruncated).toBe(false);
+  });
+
   it("treats skipped and missing platform checks as visibly incomplete", () => {
     const coverage = gitHubPreMergeTestSupport.platformCoverage([
       {

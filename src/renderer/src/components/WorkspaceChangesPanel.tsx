@@ -689,7 +689,11 @@ export function WorkspaceChangesPanel({
             </button>
             <Suspense fallback={null}>
               <PreMergeConfidenceLauncher
-                key={activePullRequestActionRevision}
+                key={JSON.stringify([
+                  projectId,
+                  conversationId ?? null,
+                  activePullRequestActionRevision,
+                ])}
                 projectId={projectId}
                 conversationId={conversationId}
                 repositoryPath={activeRepository.repositoryPath}

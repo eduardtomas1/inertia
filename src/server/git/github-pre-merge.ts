@@ -248,6 +248,7 @@ function parsePullRequest(
     .map(parseFile)
     .filter((entry): entry is GitPreMergeFile => entry !== null)
     .slice(0, MAX_REMOTE_FILES);
+  const uniqueFilePaths = new Set(files.map(({ path }) => path));
   return {
     number,
     url,
@@ -271,8 +272,9 @@ function parsePullRequest(
     checksTruncated: rawChecks.length >= MAX_CHECKS || rawChecks.length > checks.length,
     files,
     filesTruncated: rawFiles.length >= MAX_REMOTE_FILES
-      || rawFiles.length > files.length
-      || value.changedFiles > files.length,
+      || rawFiles.length !== files.length
+      || files.length !== value.changedFiles
+      || uniqueFilePaths.size !== files.length,
   };
 }
 

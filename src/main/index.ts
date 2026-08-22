@@ -1185,6 +1185,7 @@ async function bootstrap(): Promise<void> {
         },
         recycle: () => runtimeSupervisor?.testOnlyRecycle()
           ?? Promise.reject(new Error("The test runtime is not running")),
+        agentBrowser: (id: string, command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);
@@ -1196,7 +1197,6 @@ async function bootstrap(): Promise<void> {
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
-
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {

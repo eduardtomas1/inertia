@@ -161,7 +161,7 @@ export async function semanticPageSnapshot(
     const routeUrl = (() => {
       try {
         const parsed = new URL(location.href);
-        return parsed.origin + parsed.pathname;
+        return parsed.origin;
       } catch {
         return "";
       }

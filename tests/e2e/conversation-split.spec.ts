@@ -10,6 +10,7 @@ import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
+let primaryConversationId = "";
 
 test.beforeAll(async () => {
   app = await createAppFixture({
@@ -27,6 +28,7 @@ test.beforeAll(async () => {
         const pane = conversation.title.endsWith("companion")
           ? "secondary"
           : "primary";
+        if (pane === "primary") primaryConversationId = conversation.id;
         store.createMessage(
           conversation.id,
           `\`\`\`ts\nconst pane = "${pane}";\n\`\`\``,
@@ -426,7 +428,50 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     secondPrimaryPreviewUrl,
   )).toBe(true);
   await expect(primaryPreview.locator(".preview-tab-shell.active"))
-    .toContainText("Inertia preview");
+    .toContainText("Agent browser source");
+  const semanticSnapshot = await app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          id: string,
+          command: { action: "snapshot" },
+        ) => Promise<{ ok: boolean; text?: string }>;
+      };
+      return await runtime.agentBrowser(conversationId, { action: "snapshot" });
+    },
+    primaryConversationId,
+  );
+  expect(semanticSnapshot.ok).toBe(true);
+  const semanticElements = JSON.parse(semanticSnapshot.text ?? "{}") as {
+    elements?: Array<{ ref?: string; name?: string }>;
+  };
+  const navigationRef = semanticElements.elements?.find(
+    (element) => element.name === "Continue in Browser",
+  )?.ref;
+  expect(navigationRef).toMatch(/^e\d+$/u);
+  const clickResult = await app.electronApp.evaluate(
+    async (_electron, request) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          id: string,
+          command: { action: "click"; ref: string },
+        ) => Promise<{ ok: boolean }>;
+      };
+      return await runtime.agentBrowser(request.conversationId, {
+        action: "click",
+        ref: request.ref,
+      });
+    },
+    { conversationId: primaryConversationId, ref: navigationRef! },
+  );
+  expect(clickResult.ok).toBe(true);
+  const browserDestinationUrl = `${app.previewUrl}agent-browser-destination`;
+  expect(await app.electronApp.evaluate(
+    ({ webContents }, url) => webContents.getAllWebContents().some(
+      (contents) => contents.getURL() === url,
+    ),
+    browserDestinationUrl,
+  )).toBe(true);
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
   await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
   await testInfo.attach("inertia-browser-pages", {

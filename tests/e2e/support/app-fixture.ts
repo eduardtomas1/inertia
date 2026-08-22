@@ -112,6 +112,32 @@ async function createPreviewServer(): Promise<{
       }, 450);
       return;
     }
+    if (request.url === "/agent-browser-page") {
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Agent browser source</title>"
+        + "<style>body{font-family:sans-serif;padding:40px}</style>"
+        + "<a href='/agent-browser-destination'>Continue in Browser</a>",
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-destination") {
+      setTimeout(() => {
+        response.writeHead(200, {
+          "Content-Type": "text/html",
+          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        });
+        response.end(
+          "<!doctype html><title>Agent browser destination</title>"
+          + "<style>body{font-family:sans-serif;padding:40px}</style>"
+          + "<h1>Browser navigation settled</h1>",
+        );
+      }, 450);
+      return;
+    }
     response.writeHead(200, {
       "Content-Type": "text/html",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",

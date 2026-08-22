@@ -84,7 +84,7 @@ describe("agent browser semantic snapshots", () => {
     };
     expect(parsed).toMatchObject({
       truncated: true,
-      url: "http://127.0.0.1:3000/long",
+      url: "http://127.0.0.1:3000",
     });
     expect(parsed.text).toHaveLength(12_000);
   });
@@ -170,7 +170,7 @@ describe("agent browser semantic snapshots", () => {
     expect(serialized).not.toContain(callbackSecret);
     expect(JSON.parse(serialized)).toMatchObject({
       title: "Account [redacted]",
-      url: "http://127.0.0.1:3000/login",
+      url: "http://127.0.0.1:3000",
       text: "Sign in [redacted] Keep this account secure",
       elements: [
         { role: "input", name: "Password field", value: "[redacted]" },

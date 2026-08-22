@@ -15,6 +15,7 @@ const electronState = vi.hoisted(() => ({
       goBack: ReturnType<typeof vi.fn>;
     };
     emit(name: string, ...args: unknown[]): void;
+    sentInputs: Array<Record<string, unknown>>;
     setTitle(title: string): void;
   }>,
   sessions: [] as Array<{
@@ -264,6 +265,37 @@ describe("agent-owned native Browser", () => {
       action: "type", ref: "e2", text: "hello", replace: true,
     })).resolves.toMatchObject({ ok: true });
     expect(children[0]!.webContents.insertedText).toEqual(["hello"]);
+  });
+
+  it("holds queued work until click-triggered main-frame navigation settles", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/source",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    const click = broker.perform(conversationId, { action: "click", ref: "e1" });
+    await vi.waitFor(() => expect(contents.sentInputs)
+      .toContainEqual(expect.objectContaining({ type: "mouseUp" })));
+    contents.emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: false,
+      url: "http://127.0.0.1:3000/destination",
+    });
+    let clickSettled = false;
+    let queuedSettled = false;
+    void click.finally(() => { clickSettled = true; });
+    const queued = broker.perform(conversationId, { action: "tabs" })
+      .finally(() => { queuedSettled = true; });
+    await Promise.resolve();
+    expect(clickSettled).toBe(false);
+    expect(queuedSettled).toBe(false);
+
+    contents.emit("did-stop-loading");
+    await expect(click).resolves.toMatchObject({ ok: true });
+    await expect(queued).resolves.toMatchObject({ ok: true });
   });
 
   it("omits page-controlled tab metadata from provider-visible state", async () => {

@@ -60,6 +60,7 @@ const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n"]);
 const MAX_BROWSER_TABS = 8;
 const PREVIEW_RENDERER_OPERATION_TIMEOUT_MS = 15_000;
 const PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS = 30_000;
+const PREVIEW_CLICK_NAVIGATION_GRACE_MS = 250;
 
 export function previewAppShortcutKey(input: Pick<
   Input,
@@ -924,9 +925,7 @@ export class PreviewBroker {
     }
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     stopForAbort(signal);
-    contents.sendInputEvent({ type: "mouseMove", x, y });
-    contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-    contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+    await this.#sendClickAndWait(contents, x, y, signal);
     this.#record(ownerId, slot, "click", `Agent clicked ${located.label || ref}`, { x, y });
     return this.#success(slot, this.#agentStateText(slot, { clicked: ref }));
   }
@@ -1075,6 +1074,113 @@ export class PreviewBroker {
         dispatch();
       } catch (error) {
         finish(error instanceof Error ? error : new Error("The Browser navigation command failed."));
+      }
+    });
+  }
+
+  async #sendClickAndWait(
+    contents: PreviewTab["view"]["webContents"],
+    x: number,
+    y: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    stopForAbort(signal);
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let navigationStarted = false;
+      const cleanup = (): void => {
+        clearTimeout(grace);
+        clearTimeout(timeout);
+        contents.removeListener("did-start-navigation", onStarted);
+        contents.removeListener("did-navigate-in-page", onInPage);
+        contents.removeListener("did-stop-loading", onStopped);
+        contents.removeListener("did-fail-load", onFailed);
+        contents.removeListener("destroyed", onDestroyed);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const finish = (error?: Error, stop = false): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (stop && navigationStarted && !contents.isDestroyed()) contents.stop();
+        if (error) reject(error);
+        else resolve();
+      };
+      const onStarted = (
+        details: { isMainFrame?: boolean; isSameDocument?: boolean; url?: string },
+        legacyUrl?: string,
+        legacyInPlace?: boolean,
+        legacyMainFrame?: boolean,
+      ): void => {
+        const isMainFrame = typeof details.isMainFrame === "boolean"
+          ? details.isMainFrame
+          : legacyMainFrame === true;
+        if (!isMainFrame) return;
+        const url = typeof details.url === "string" ? details.url : legacyUrl ?? "";
+        try {
+          if (previewNavigationTarget(url).kind !== "embed") {
+            finish();
+            return;
+          }
+        } catch {
+          finish();
+          return;
+        }
+        navigationStarted = true;
+        clearTimeout(grace);
+        const sameDocument = typeof details.isSameDocument === "boolean"
+          ? details.isSameDocument
+          : legacyInPlace === true;
+        if (sameDocument && contents.getURL() === url) finish();
+      };
+      const onInPage = (
+        _event: unknown,
+        _url: string,
+        isMainFrame: boolean,
+      ): void => {
+        if (navigationStarted && isMainFrame) finish();
+      };
+      const onStopped = (): void => {
+        if (navigationStarted) finish();
+      };
+      const onFailed = (
+        _event: unknown,
+        _errorCode: number,
+        description: string,
+        _url: string,
+        isMainFrame: boolean,
+      ): void => {
+        if (navigationStarted && isMainFrame) {
+          finish(new Error(`The Browser page failed after the click: ${description}`));
+        }
+      };
+      const onDestroyed = (): void => finish(
+        new Error("The active Browser tab was closed after the click."),
+      );
+      const onAbort = (): void => finish(new Error("browser-action-cancelled"), true);
+      const grace = setTimeout(() => finish(), PREVIEW_CLICK_NAVIGATION_GRACE_MS);
+      grace.unref();
+      const timeout = setTimeout(() => finish(
+        new Error("The Browser page did not settle after the click."),
+        true,
+      ), PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS);
+      timeout.unref();
+      contents.on("did-start-navigation", onStarted);
+      contents.on("did-navigate-in-page", onInPage);
+      contents.on("did-stop-loading", onStopped);
+      contents.on("did-fail-load", onFailed);
+      contents.once("destroyed", onDestroyed);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        if (contents.isDestroyed()) {
+          finish(new Error("The active Browser tab was closed before the click."));
+          return;
+        }
+        contents.sendInputEvent({ type: "mouseMove", x, y });
+        contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+        contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error("The Browser click failed."));
       }
     });
   }

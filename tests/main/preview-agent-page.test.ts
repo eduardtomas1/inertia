@@ -116,6 +116,49 @@ describe("agent browser semantic snapshots", () => {
     expect(dispatched).toEqual(["nested-boundary"]);
   });
 
+  it("signals declarative-root parsing before a detached host can disappear", () => {
+    const dispatched: string[] = [];
+    class FakeEvent {
+      constructor(readonly type: string) {}
+    }
+    class FakeEventTarget {
+      dispatchEvent(event: FakeEvent): boolean {
+        dispatched.push(event.type);
+        return true;
+      }
+    }
+    class FakeElement extends FakeEventTarget {
+      attachShadow(): object { return {}; }
+      setHTMLUnsafe(_html: string): void {}
+    }
+    class FakeHTMLElement extends FakeElement {
+      attachInternals(): object { return { shadowRoot: null }; }
+    }
+    class FakeDocument {
+      static parseHTMLUnsafe(_html: string): object { return {}; }
+    }
+    class FakeShadowRoot {
+      setHTMLUnsafe(_html: string): void {}
+    }
+    const context = {
+      document: new FakeEventTarget(),
+      Element: FakeElement,
+      HTMLElement: FakeHTMLElement,
+      Document: FakeDocument,
+      ShadowRoot: FakeShadowRoot,
+      EventTarget: FakeEventTarget,
+      Event: FakeEvent,
+    };
+
+    runInNewContext(
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
+      context,
+    );
+    runInNewContext("new Element().setHTMLUnsafe('<template shadowrootmode=closed>private</template>')", context);
+
+    expect(dispatched).toEqual(["nested-boundary"]);
+  });
+
   it("keeps oversized Unicode snapshots valid within the provider byte limit", () => {
     const serialized = serializeAgentPageSnapshot({
       title: "Dense local page",
@@ -207,6 +250,115 @@ describe("agent browser semantic snapshots", () => {
     expect(parsed.text).toHaveLength(12_000);
   });
 
+  it("bounds ordinary input values before normalization", async () => {
+    const input = {
+      nodeType: 1,
+      tagName: "INPUT",
+      type: "text",
+      value: "x".repeat(50_000),
+      labels: [],
+      firstChild: null,
+      parentElement: null,
+      disabled: false,
+      checked: false,
+      getAttribute: () => null,
+      hasAttribute: () => false,
+      matches: () => false,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 40, width: 200, height: 30,
+      }),
+    };
+    const context = {
+      document: withSemanticIterator({
+        title: "Bounded value",
+        body: bodyWithText(""),
+        documentElement: {},
+        querySelectorAll: () => [input],
+      }),
+      location: { href: "http://127.0.0.1:3000/value" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    runInNewContext(`{
+      const replace = String.prototype.replace;
+      String.prototype.replace = function (...args) {
+        if (this.length > 4096) throw new Error("unbounded normalization");
+        return Reflect.apply(replace, this, args);
+      };
+    }`, context);
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ value: string }>;
+    };
+    expect(parsed.elements[0]?.value).toHaveLength(500);
+  });
+
+  it("collects semantic labels through a bounded text-node walk", async () => {
+    const button = {
+      nodeType: 1,
+      tagName: "BUTTON",
+      firstChild: null as unknown,
+      parentElement: null,
+      disabled: false,
+      getAttribute: () => null,
+      hasAttribute: () => false,
+      matches: () => false,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 40, width: 200, height: 30,
+      }),
+    };
+    button.firstChild = {
+      nodeType: 3,
+      nodeValue: "Label ".repeat(10_000),
+      parentElement: button,
+      parentNode: button,
+      nextSibling: null,
+    };
+    Object.defineProperty(button, "innerText", {
+      get: () => { throw new Error("semantic labels must not read unbounded innerText"); },
+    });
+    const context = {
+      document: withSemanticIterator({
+        title: "Bounded label",
+        body: bodyWithText(""),
+        documentElement: {},
+        querySelectorAll: () => [button],
+      }),
+      location: { href: "http://127.0.0.1:3000/label" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ name: string }>;
+    };
+    expect(parsed.elements[0]?.name).toHaveLength(300);
+  });
+
   it("bounds semantic element discovery before a dense page can materialize candidates", async () => {
     let nextNodeCalls = 0;
     const body = bodyWithText("");
@@ -283,6 +435,36 @@ describe("agent browser semantic snapshots", () => {
 
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
     expect(nextNodeCalls).toBe(4_001);
+  });
+
+  it("does not read an ordinary input value during sensitive-evidence preflight", async () => {
+    const readValue = vi.fn(() => "x".repeat(50_000));
+    const input = { tagName: "INPUT", type: "text" } as { tagName: string; type: string; value: string };
+    Object.defineProperty(input, "value", { get: readValue });
+    let next = 0;
+    const context = {
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true,
+        nestedContentObserved: false,
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set(),
+      },
+      document: {
+        documentElement: {},
+        createNodeIterator: () => ({
+          nextNode: () => next++ === 0 ? input : null,
+        }),
+      },
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(false);
+    expect(readValue).not.toHaveBeenCalled();
   });
 
   it("bounds document-start privacy discovery on a dense DOM", async () => {
@@ -792,19 +974,30 @@ describe("agent browser semantic snapshots", () => {
   });
 
   it("includes every valid contenteditable form in semantic refs", async () => {
-    const editors = ["", "plaintext-only"].map((mode, index) => ({
-      tagName: "DIV",
-      value: undefined,
-      disabled: false,
-      checked: undefined,
-      innerText: mode || "rich text",
-      isContentEditable: true,
-      getAttribute: (name: string) => name === "contenteditable" ? mode : null,
-      getBoundingClientRect: () => ({
-        x: 20, y: 30 + index * 50, left: 20, top: 30 + index * 50,
-        right: 220, bottom: 70 + index * 50, width: 200, height: 40,
-      }),
-    }));
+    const editors = ["", "plaintext-only"].map((mode, index) => {
+      const editor = {
+        nodeType: 1,
+        tagName: "DIV",
+        value: undefined,
+        disabled: false,
+        checked: undefined,
+        firstChild: null as unknown,
+        isContentEditable: true,
+        getAttribute: (name: string) => name === "contenteditable" ? mode : null,
+        getBoundingClientRect: () => ({
+          x: 20, y: 30 + index * 50, left: 20, top: 30 + index * 50,
+          right: 220, bottom: 70 + index * 50, width: 200, height: 40,
+        }),
+      };
+      editor.firstChild = {
+        nodeType: 3,
+        nodeValue: mode || "rich text",
+        parentElement: editor,
+        parentNode: editor,
+        nextSibling: null,
+      };
+      return editor;
+    });
     const querySelectorAll = vi.fn(
       (selector: string) => selector === "input" ? [] : editors,
     );
@@ -1167,7 +1360,7 @@ describe("agent browser semantic snapshots", () => {
       disabled: false,
       readOnly: false,
       isContentEditable: false,
-      innerText: "Continue",
+      firstChild: null as unknown,
       isConnected: true,
       getAttribute: () => null,
       getBoundingClientRect: () => ({
@@ -1176,6 +1369,13 @@ describe("agent browser semantic snapshots", () => {
       }),
       contains: (candidate: unknown) => candidate === button,
       focus,
+    };
+    button.firstChild = {
+      nodeType: 3,
+      nodeValue: "Continue",
+      parentElement: button,
+      parentNode: button,
+      nextSibling: null,
     };
     const context = {
       __inertiaAgentBrowser: { refs: new Map([["e1", button]]) },

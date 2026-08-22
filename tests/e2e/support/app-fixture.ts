@@ -246,6 +246,21 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-declarative-detached-privacy") {
+      const secret = "detached-declarative-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Detached declarative privacy probe</title><body>"
+        + "<script>const host=document.createElement('div');"
+        + "host.setHTMLUnsafe(\"<template shadowrootmode='closed'><p>private</p></template>\");"
+        + "document.body.append(host);const mirror=document.createElement('p');"
+        + `mirror.textContent=${JSON.stringify(secret)};document.body.replaceChildren(mirror)</script>`,
+      );
+      return;
+    }
     if (request.url === "/agent-browser-declarative-shadow-frame") {
       const secret = "declarative-shadow-password-sentinel";
       response.writeHead(200, {

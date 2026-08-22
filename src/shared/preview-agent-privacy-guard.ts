@@ -49,6 +49,28 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       },
     });
   }
+  const signalUnsafeParser = (prototype: object, name: string): void => {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+    const parser = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
+    if (!descriptor || typeof parser !== "function") return;
+    Object.defineProperty(prototype, name, {
+      ...descriptor,
+      value(this: unknown, ...args: unknown[]): unknown {
+        // These APIs can create a closed declarative root entirely while its
+        // host is detached. Signal before author callbacks can mirror private
+        // content and remove the host from the observable document tree.
+        signal();
+        return Reflect.apply(parser, this, args);
+      },
+    });
+  };
+  signalUnsafeParser(Element.prototype, "setHTMLUnsafe");
+  if (typeof Document !== "undefined") {
+    signalUnsafeParser(Document, "parseHTMLUnsafe");
+  }
+  if (typeof ShadowRoot !== "undefined") {
+    signalUnsafeParser(ShadowRoot.prototype, "setHTMLUnsafe");
+  }
 }
 
 /**
@@ -73,7 +95,9 @@ export function installPreviewAgentPrivacyGuard(): void {
   if (state.privacyGuardInstalled) return;
   const maximumRememberedValues = 32;
   const maximumScanNodes = 4_000;
+  const maximumValueSourceCharacters = 4_096;
   const normalize = (value: unknown): string => String(value ?? "")
+    .slice(0, maximumValueSourceCharacters)
     .replace(/\s+/gu, " ").trim();
   const remember = (value: unknown): void => {
     const normalized = normalize(value);
@@ -87,11 +111,12 @@ export function installPreviewAgentPrivacyGuard(): void {
     }
   };
   const inspect = (input: HTMLInputElement, wasPassword = false): void => {
-    const value = normalize(input.value);
-    if (wasPassword
+    const knownPassword = wasPassword
       || String(input.type || "").toLowerCase() === "password"
-      || state.passwordNodes.has(input)
-      || (value && state.passwordValues.has(value))) {
+      || state.passwordNodes.has(input);
+    if (!knownPassword && state.passwordValues.size === 0) return;
+    const value = normalize(input.value);
+    if (knownPassword || (value && state.passwordValues.has(value))) {
       state.passwordNodes.add(input);
       remember(value);
     }

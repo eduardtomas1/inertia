@@ -631,6 +631,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     ["agent-browser-shadow-lifetime-privacy", "removed-shadow-password-sentinel"],
     ["agent-browser-declarative-shadow-privacy", "declarative-shadow-password-sentinel"],
     ["agent-browser-declarative-closed-privacy", "declarative-closed-password-sentinel"],
+    ["agent-browser-declarative-detached-privacy", "detached-declarative-password-sentinel"],
   ]) await expectDocumentStartPrivacyGuard(app, primaryConversationId, `${app.previewUrl}${path}`, secret);
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
   await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
@@ -641,7 +642,6 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await primaryPreview.locator(".preview-tab-shell.active .preview-tab-close").click();
   await expect(browserTabs).toHaveCount(1);
   await expect.poll(() => app.nativePreviewIsVisible(primaryPreviewUrl)).toBe(true);
-
   await app.electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({
       canceled: false,

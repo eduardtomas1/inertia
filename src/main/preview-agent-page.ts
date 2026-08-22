@@ -12,6 +12,9 @@ const MAX_PAGE_TEXT_CHARS = 12_000;
 const MAX_BODY_TEXT_SOURCE_CHARS = 24_000;
 const MAX_BODY_TEXT_NODES = 4_000;
 const MAX_REMEMBERED_PASSWORD_VALUES = 32;
+const MAX_PAGE_VALUE_SOURCE_CHARS = 4_096;
+const MAX_LABEL_TEXT_SOURCE_CHARS = 1_200;
+const MAX_LABEL_TEXT_NODES = 128;
 
 export interface PreviewAgentTarget {
   found: boolean;
@@ -143,10 +146,9 @@ export async function semanticPageSnapshot(
     state.refs.clear();
     const passwordNodes = state.passwordNodes ??= new WeakSet();
     const passwordValues = state.passwordValues ??= new Set();
-    const normalizeText = (value) => String(value ?? "")
+    const normalizeText = (value, maximum = ${MAX_PAGE_VALUE_SOURCE_CHARS}) => String(value ?? "")
+      .slice(0, maximum)
       .replace(/\\s+/gu, " ").trim();
-    const normalize = (value, maximum = 300) => normalizeText(value)
-      .slice(0, maximum);
     const elementRoot = document.documentElement || document.body;
     const elementIterator = elementRoot
       ? document.createNodeIterator(elementRoot, 1)
@@ -184,6 +186,32 @@ export async function semanticPageSnapshot(
       }
       return false;
     };
+    const boundedElementText = (element) => {
+      const chunks = [];
+      let characters = 0;
+      let visited = 0;
+      let node = element?.firstChild || null;
+      while (node) {
+        visited += 1;
+        if (visited > ${MAX_LABEL_TEXT_NODES}) break;
+        if (node.nodeType === 3) {
+          const value = String(node.nodeValue || "");
+          const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
+          if (remaining <= 0) break;
+          chunks.push(value.slice(0, remaining));
+          characters += Math.min(value.length, remaining);
+          if (value.length > remaining) break;
+        } else if (node.nodeType === 1
+          && !["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.tagName)
+          && node.firstChild) {
+          node = node.firstChild;
+          continue;
+        }
+        while (node && node !== element && !node.nextSibling) node = node.parentNode;
+        node = node && node !== element ? node.nextSibling : null;
+      }
+      return normalizeText(chunks.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
+    };
     const rememberPasswordValue = (value) => {
       const normalized = normalizeText(value);
       if (!normalized) return;
@@ -194,9 +222,11 @@ export async function semanticPageSnapshot(
       }
     };
     for (const input of scannedInputs) {
+      const knownPassword = String(input.type || "").toLowerCase() === "password"
+        || passwordNodes.has(input);
+      if (!knownPassword && passwordValues.size === 0) continue;
       const value = normalizeText(input.value);
-      if (String(input.type || "").toLowerCase() === "password"
-        || (value && passwordValues.has(value))) {
+      if (knownPassword || (value && passwordValues.has(value))) {
         passwordNodes.add(input);
         rememberPasswordValue(value);
       }
@@ -211,7 +241,7 @@ export async function semanticPageSnapshot(
       if (!passwordField(input)) continue;
       const labels = input.labels;
       for (let index = 0; index < Math.min(labels?.length || 0, 16); index += 1) {
-        sensitiveText.push(normalizeText(labels[index]?.innerText));
+        sensitiveText.push(boundedElementText(labels[index]));
       }
       const value = normalizeText(input.value);
       rememberPasswordValue(value);
@@ -219,7 +249,7 @@ export async function semanticPageSnapshot(
     }
     state.sensitiveText = sensitiveText;
     const redact = (value, maximum) => {
-      let text = normalizeText(value);
+      let text = normalizeText(value, Math.max(${MAX_LABEL_TEXT_SOURCE_CHARS}, maximum * 4));
       for (const sensitive of sensitiveText) {
         if (!sensitive) continue;
         text = text.split(sensitive).join("[redacted]");
@@ -249,8 +279,8 @@ export async function semanticPageSnapshot(
           element.getAttribute("aria-label")
           || element.getAttribute("title")
           || element.getAttribute("placeholder")
-          || (element.labels && element.labels[0]?.innerText)
-          || element.innerText
+          || (element.labels && boundedElementText(element.labels[0]))
+          || boundedElementText(element)
           || element.value,
           300,
         );
@@ -349,7 +379,10 @@ export async function semanticPageSnapshot(
       while (node && node !== body && !node.nextSibling) node = node.parentNode;
       node = node && node !== body ? node.nextSibling : null;
     }
-    const normalizedBodyText = normalizeText(textChunks.join(" "));
+    const normalizedBodyText = normalizeText(
+      textChunks.join(" "),
+      ${MAX_BODY_TEXT_SOURCE_CHARS},
+    );
     if (normalizedBodyText.length > ${MAX_PAGE_TEXT_CHARS}) bodyTruncated = true;
     const bodyText = normalizedBodyText.slice(0, ${MAX_PAGE_TEXT_CHARS});
     return {
@@ -376,7 +409,9 @@ export async function agentPageHasSensitiveEvidence(contents: WebContents): Prom
     if (state?.privacyGuardInstalled !== true) {
       throw new Error("The Browser privacy guard is unavailable.");
     }
-    const normalize = (value) => String(value ?? "").replace(/\\s+/gu, " ").trim();
+    const normalize = (value) => String(value ?? "")
+      .slice(0, ${MAX_PAGE_VALUE_SOURCE_CHARS})
+      .replace(/\\s+/gu, " ").trim();
     const root = document.documentElement || document.body;
     const iterator = root && typeof document.createNodeIterator === "function"
       ? document.createNodeIterator(root, 1)
@@ -387,9 +422,9 @@ export async function agentPageHasSensitiveEvidence(contents: WebContents): Prom
       if (!input) break;
       scanned += 1;
       if (input.tagName !== "INPUT") continue;
-      const value = normalize(input.value);
       if (String(input.type || "").toLowerCase() !== "password"
         && !state.passwordNodes.has(input)) continue;
+      const value = normalize(input.value);
       state.passwordNodes.add(input);
       if (value) {
         state.passwordValues.delete(value);
@@ -470,8 +505,35 @@ export async function locateAgentPageRef(
     }
     const passwordNodes = state.passwordNodes ??= new WeakSet();
     const passwordValues = state.passwordValues ??= new Set();
-    const normalizeText = (value) => String(value ?? "")
+    const normalizeText = (value, maximum = ${MAX_PAGE_VALUE_SOURCE_CHARS}) => String(value ?? "")
+      .slice(0, maximum)
       .replace(/\\s+/gu, " ").trim();
+    const boundedElementText = (root) => {
+      const chunks = [];
+      let characters = 0;
+      let visited = 0;
+      let node = root?.firstChild || null;
+      while (node) {
+        visited += 1;
+        if (visited > ${MAX_LABEL_TEXT_NODES}) break;
+        if (node.nodeType === 3) {
+          const value = String(node.nodeValue || "");
+          const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
+          if (remaining <= 0) break;
+          chunks.push(value.slice(0, remaining));
+          characters += Math.min(value.length, remaining);
+          if (value.length > remaining) break;
+        } else if (node.nodeType === 1
+          && !["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.tagName)
+          && node.firstChild) {
+          node = node.firstChild;
+          continue;
+        }
+        while (node && node !== root && !node.nextSibling) node = node.parentNode;
+        node = node && node !== root ? node.nextSibling : null;
+      }
+      return normalizeText(chunks.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
+    };
     const scanRoot = document.documentElement || document.body;
     const scanIterator = scanRoot && typeof document.createNodeIterator === "function"
       ? document.createNodeIterator(scanRoot, 1)
@@ -498,9 +560,11 @@ export async function locateAgentPageRef(
       }
     };
     for (const input of scannedInputs) {
+      const knownPassword = String(input.type || "").toLowerCase() === "password"
+        || passwordNodes.has(input);
+      if (!knownPassword && passwordValues.size === 0) continue;
       const value = normalizeText(input.value);
-      if (String(input.type || "").toLowerCase() === "password"
-        || (value && passwordValues.has(value))) {
+      if (knownPassword || (value && passwordValues.has(value))) {
         passwordNodes.add(input);
         rememberPasswordValue(value);
       }
@@ -552,7 +616,7 @@ export async function locateAgentPageRef(
       if (!passwordNodes.has(input)) continue;
       const labels = input.labels;
       for (let index = 0; index < Math.min(labels?.length || 0, 16); index += 1) {
-        sensitiveText.push(normalizeText(labels[index]?.innerText));
+        sensitiveText.push(boundedElementText(labels[index]));
       }
       const value = normalizeText(input.value);
       rememberPasswordValue(value);
@@ -560,7 +624,7 @@ export async function locateAgentPageRef(
     }
     state.sensitiveText = sensitiveText;
     const redact = (value) => {
-      let text = normalizeText(value);
+      let text = normalizeText(value, ${MAX_LABEL_TEXT_SOURCE_CHARS});
       for (const sensitive of sensitiveText) {
         if (!sensitive) continue;
         text = text.split(sensitive).join("[redacted]");
@@ -579,7 +643,7 @@ export async function locateAgentPageRef(
           password
           ? "Password field"
           : element.getAttribute("aria-label")
-            || element.innerText
+            || boundedElementText(element)
             || element.value
           || "element"
         ),

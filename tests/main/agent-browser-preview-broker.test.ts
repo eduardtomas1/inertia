@@ -83,7 +83,8 @@ vi.mock("electron", () => {
       this.handlers.set(name, handlers.filter((candidate) => candidate !== handler));
     }
     emit(name: string, ...args: unknown[]): void {
-      for (const handler of [...(this.handlers.get(name) ?? [])]) handler(...args);
+      const handlers = this.handlers.get(name)?.slice() ?? [];
+      for (const handler of handlers) handler(...args);
     }
     async loadURL(url: string): Promise<void> {
       this.url = url;

@@ -291,7 +291,7 @@ export async function agentPageHasSensitiveEvidence(contents: WebContents): Prom
         }
       }
     }
-    return state.passwordValues.size > 0;
+    return state.passwordValues.size > 0 || state.nestedContentObserved === true;
   })()`);
   return value === true;
 }

@@ -7,11 +7,30 @@ interface AgentBrowserPrivacyState {
   privacyGuardInstalled?: boolean;
   privacyObserver?: MutationObserver;
   agentInputActive?: boolean;
+  nestedContentObserved?: boolean;
 }
 
 type AgentBrowserPrivacyGlobal = typeof globalThis & {
   __inertiaAgentBrowser?: AgentBrowserPrivacyState;
 };
+
+export const PREVIEW_AGENT_NESTED_BOUNDARY_EVENT = "__inertia_agent_nested_boundary__";
+
+/** Runs in the page's main world before author scripts. */
+export function installPreviewAgentShadowBoundarySignal(eventName: string): void {
+  const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "attachShadow");
+  const attachShadow = descriptor?.value as Element["attachShadow"] | undefined;
+  if (!descriptor || typeof attachShadow !== "function") return;
+  const dispatch = EventTarget.prototype.dispatchEvent;
+  const EventConstructor = Event;
+  Object.defineProperty(Element.prototype, "attachShadow", {
+    ...descriptor,
+    value(this: Element, init: ShadowRootInit): ShadowRoot {
+      dispatch.call(document, new EventConstructor(eventName));
+      return Reflect.apply(attachShadow, this, [init]) as ShadowRoot;
+    },
+  });
+}
 
 /**
  * Runs from the Browser preload before page scripts. Keep this function
@@ -20,6 +39,7 @@ type AgentBrowserPrivacyGlobal = typeof globalThis & {
  */
 export function installPreviewAgentPrivacyGuard(): void {
   const owner = globalThis as AgentBrowserPrivacyGlobal;
+  const nestedBoundaryEvent = "__inertia_agent_nested_boundary__";
   let state = owner.__inertiaAgentBrowser;
   if (!state) {
     state = {
@@ -63,10 +83,17 @@ export function installPreviewAgentPrivacyGuard(): void {
   const inspectTree = (node: Node): void => {
     if (node.nodeType !== 1) return;
     const element = node as Element;
+    if (element.matches?.("iframe,frame") || element.querySelector?.("iframe,frame")) {
+      state.nestedContentObserved = true;
+    }
     const directInput = inputElement(element);
     if (directInput) inspect(directInput);
     for (const input of element.querySelectorAll("input")) inspect(input);
   };
+  document.addEventListener(nestedBoundaryEvent, () => {
+    state.nestedContentObserved = true;
+  }, true);
+  if (document.querySelector?.("iframe,frame")) state.nestedContentObserved = true;
   for (const input of document.querySelectorAll("input")) inspect(input);
   document.addEventListener("input", (event) => {
     for (const node of event.composedPath()) {

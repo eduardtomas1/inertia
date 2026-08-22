@@ -114,6 +114,7 @@ describe("agent browser semantic snapshots", () => {
       querySelectorAll: () => [],
     };
     let clickListener: ((event: Record<string, unknown>) => void) | undefined;
+    let nestedBoundaryListener: ((event: Record<string, unknown>) => void) | undefined;
     const document = {
       title: "Sign in",
       body: { innerText: "Password" },
@@ -121,6 +122,7 @@ describe("agent browser semantic snapshots", () => {
       activeElement: null,
       addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
         if (name === "click") clickListener = listener;
+        if (name === "__inertia_agent_nested_boundary__") nestedBoundaryListener = listener;
       }),
       querySelectorAll: () => [input],
       elementFromPoint: () => input,
@@ -173,6 +175,9 @@ describe("agent browser semantic snapshots", () => {
     expect(prevented).toHaveBeenCalledOnce();
     expect(stopped).toHaveBeenCalledOnce();
     await setAgentPageInputGuard(contents as never, false);
+    runInNewContext("globalThis.__inertiaAgentBrowser.passwordValues.clear()", context);
+    nestedBoundaryListener?.({});
+    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
   });
 
   it("masks password values in semantic evidence and interaction labels", async () => {

@@ -617,13 +617,11 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
 
   const privacyUrl = `${app.previewUrl}agent-browser-privacy-start`;
   await expectDocumentStartPrivacyGuard(app, primaryConversationId, privacyUrl);
-  const nestedPrivacyUrl = `${app.previewUrl}agent-browser-nested-privacy-start`;
-  await expectDocumentStartPrivacyGuard(
-    app,
-    primaryConversationId,
-    nestedPrivacyUrl,
-    "nested-password-sentinel",
-  );
+  for (const [path, secret] of [
+    ["agent-browser-nested-privacy-start", "nested-password-sentinel"],
+    ["agent-browser-frame-lifetime-privacy", "removed-frame-password-sentinel"],
+    ["agent-browser-shadow-lifetime-privacy", "removed-shadow-password-sentinel"],
+  ]) await expectDocumentStartPrivacyGuard(app, primaryConversationId, `${app.previewUrl}${path}`, secret);
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
   await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
   await testInfo.attach("inertia-browser-pages", {

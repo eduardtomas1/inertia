@@ -169,6 +169,38 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-frame-lifetime-privacy") {
+      const secret = "removed-frame-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Removed frame privacy probe</title><body></body>"
+        + "<script>const frame=document.createElement('iframe');document.body.append(frame);"
+        + "const input=frame.contentDocument.createElement('input');input.type='password';"
+        + `input.value=${JSON.stringify(secret)};frame.contentDocument.body.append(input);`
+        + "const mirror=document.createElement('p');mirror.textContent=input.value;"
+        + "document.body.append(mirror);frame.remove()</script>",
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-shadow-lifetime-privacy") {
+      const secret = "removed-shadow-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Removed shadow privacy probe</title><body></body>"
+        + "<script>const host=document.createElement('div');document.body.append(host);"
+        + "const root=host.attachShadow({mode:'closed'});const input=document.createElement('input');"
+        + `input.type='password';input.value=${JSON.stringify(secret)};root.append(input);`
+        + "const mirror=document.createElement('p');mirror.textContent=input.value;"
+        + "document.body.append(mirror);host.remove()</script>",
+      );
+      return;
+    }
     if (request.url === "/agent-browser-destination") {
       setTimeout(() => {
         response.writeHead(200, {

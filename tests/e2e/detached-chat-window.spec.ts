@@ -33,6 +33,7 @@ test.beforeAll(async () => {
       if (!snapshot.activeConversationId || !snapshot.activeProjectId) {
         throw new Error("Detached chat fixture requires an active chat.");
       }
+      store.updateSettings({ theme: "dark", colorTheme: "ocean" });
       conversationId = snapshot.activeConversationId;
       projectId = snapshot.activeProjectId;
       const source = store.createConversation(
@@ -115,7 +116,10 @@ async function openDetachedWindow(title: string): Promise<Page> {
   return popup;
 }
 
-test("moves one live chat between a remembered native window and the main app", async () => {
+test("moves one live chat between a remembered native window and the main app", async (
+  { browserName: _browserName },
+  testInfo,
+) => {
   const title = "detached-chat-window fixture";
   const draft = "Keep this exact draft while the view moves.";
   const popupDraft = `${draft} Updated inside the popup.`;
@@ -135,6 +139,28 @@ test("moves one live chat between a remembered native window and the main app", 
   await expect(popup.getByRole("heading", { name: title })).toBeVisible();
   await expect(popup.getByRole("textbox", { name: "Message" }))
     .toHaveValue(draft);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("html")).toHaveAttribute("data-color-theme", "ocean");
+  await expect(popup.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(popup.locator("html")).toHaveAttribute("data-color-theme", "ocean");
+  await expect.poll(() => popup.locator("html").evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return {
+      background: styles.getPropertyValue("--app-bg").trim(),
+      foreground: styles.getPropertyValue("--text").trim(),
+      terminal: styles.getPropertyValue("--terminal-bg").trim(),
+    };
+  })).toEqual({
+    background: "#0e171d",
+    foreground: "#eef7fb",
+    terminal: "#0c151a",
+  });
+  const themeEvidence = testInfo.outputPath("detached-chat-ocean-dark.png");
+  await popup.screenshot({ path: themeEvidence, animations: "disabled" });
+  await testInfo.attach("Detached chat · Ocean dark", {
+    path: themeEvidence,
+    contentType: "image/png",
+  });
   await expect(popup.locator('aside[aria-label="Project navigation"]'))
     .toHaveCount(0);
   await expect(popup.getByRole("button", { name: /new chat/iu }))

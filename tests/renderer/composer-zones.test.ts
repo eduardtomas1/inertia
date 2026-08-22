@@ -156,7 +156,7 @@ describe("composer input and control zones", () => {
       /\.composer-attachment-remove:focus-visible\s*\{[^}]*outline:\s*2px solid/su,
     );
     expect(css).toMatch(
-      /\.selected-model-chip:disabled\s*\{[^}]*opacity:\s*0\.62/su,
+      /\.selected-model-chip:disabled\s*\{[^}]*opacity:\s*var\(--disabled-opacity\)/su,
     );
     expect(css).toMatch(
       /\.usage-popover-trigger:hover,[\s\S]*?\.usage-popover-trigger\.is-open\s*\{[^}]*background:\s*var\(--surface-hover\)/su,

@@ -2,9 +2,15 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  COLOR_THEME_IDS,
+  type ColorThemeId,
+} from "../../src/shared/contracts";
+
 const css = [
   "../../src/renderer/src/styles.css",
   "../../src/renderer/public/color-themes.css",
+  "../../src/renderer/src/components/conversation-context/ConversationContextDialog.css",
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
   .join("\n")
   .replace(/\r\n?/gu, "\n");
@@ -17,11 +23,28 @@ function cssBlock(selector: string): string {
     ?.groups?.body ?? "";
 }
 
-function hexTokens(block: string): Map<string, string> {
+function tokenDeclarations(block: string): Map<string, string> {
   return new Map(
-    [...block.matchAll(/--(?<name>[\w-]+):\s*(?<value>#[\da-f]{6})\s*;/giu)]
-      .map((match) => [match.groups!.name!, match.groups!.value!] as const),
+    [...block.matchAll(/--(?<name>[\w-]+):\s*(?<value>[^;]+);/gu)]
+      .map((match) => [match.groups!.name!, match.groups!.value!.trim()] as const),
   );
+}
+
+function resolvedHexTokens(declarations: Map<string, string>): Map<string, string> {
+  const resolved = new Map<string, string>();
+  const resolve = (name: string, seen = new Set<string>()): string | undefined => {
+    if (seen.has(name)) return undefined;
+    const value = declarations.get(name);
+    if (!value) return undefined;
+    if (/^#[\da-f]{6}$/iu.test(value)) return value;
+    const alias = /^var\(--(?<name>[\w-]+)\)$/u.exec(value)?.groups?.name;
+    return alias ? resolve(alias, new Set([...seen, name])) : undefined;
+  };
+  for (const name of declarations.keys()) {
+    const value = resolve(name);
+    if (value) resolved.set(name, value);
+  }
+  return resolved;
 }
 
 function rgb(hex: string): Rgb {
@@ -49,49 +72,136 @@ function contrast(foreground: string, background: string): number {
     / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
 }
 
+function blend(foreground: string, background: string, opacity: number): string {
+  const foregroundChannels = rgb(foreground);
+  const backgroundChannels = rgb(background);
+  return `#${foregroundChannels.map((channel, index) => Math.round(
+    channel * opacity + backgroundChannels[index]! * (1 - opacity),
+  ).toString(16).padStart(2, "0")).join("")}`;
+}
+
 function themeTokens(
   theme: "light" | "dark",
-  colorTheme: "inertia" | "grove" | "ocean" | "ember" | "iris" = "inertia",
+  colorTheme: ColorThemeId = "inertia",
 ): Map<string, string> {
-  const tokens = hexTokens(cssBlock(":root"));
+  const declarations = tokenDeclarations(cssBlock(":root"));
   if (theme === "dark") {
-    for (const [name, value] of hexTokens(cssBlock(':root[data-theme="dark"]'))) {
-      tokens.set(name, value);
+    for (const [name, value] of tokenDeclarations(cssBlock(':root[data-theme="dark"]'))) {
+      declarations.set(name, value);
     }
   }
   if (colorTheme !== "inertia") {
     const selector = `:root[data-theme="${theme}"][data-color-theme="${colorTheme}"]`;
-    for (const [name, value] of hexTokens(cssBlock(selector))) {
-      tokens.set(name, value);
+    for (const [name, value] of tokenDeclarations(cssBlock(selector))) {
+      declarations.set(name, value);
     }
   }
-  return tokens;
+  return resolvedHexTokens(declarations);
 }
 
+const themeCases = COLOR_THEME_IDS.flatMap((colorTheme) =>
+  (["light", "dark"] as const).map((theme) => [colorTheme, theme] as const));
+
 describe("visual contrast system", () => {
-  it.each([
-    ["grove", "light"],
-    ["grove", "dark"],
-    ["ocean", "light"],
-    ["ocean", "dark"],
-    ["ember", "light"],
-    ["ember", "dark"],
-    ["iris", "light"],
-    ["iris", "dark"],
-  ] as const)("keeps the %s %s palette readable", (colorTheme, theme) => {
+  it.each(themeCases)("keeps the %s %s palette readable", (colorTheme, theme) => {
     const tokens = themeTokens(theme, colorTheme);
-    const surfaces = ["app-bg", "surface", "surface-strong", "surface-muted"];
-    for (const foregroundName of ["text", "text-soft", "text-muted", "accent"]) {
+    const surfaces = [
+      "app-bg",
+      "surface",
+      "surface-strong",
+      "surface-muted",
+      "surface-hover",
+    ];
+    for (const foregroundName of ["text", "text-soft", "text-muted", "status-idle"]) {
       for (const backgroundName of surfaces) {
         expect(contrast(
           tokens.get(foregroundName)!,
           tokens.get(backgroundName)!,
         ), `${colorTheme} ${theme} --${foregroundName} on --${backgroundName}`)
-          .toBeGreaterThanOrEqual(foregroundName === "accent" ? 3 : 4.5);
+          .toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    for (const backgroundName of surfaces) {
+      expect(contrast(
+        tokens.get("accent")!,
+        tokens.get(backgroundName)!,
+      ), `${colorTheme} ${theme} --accent on --${backgroundName}`)
+        .toBeGreaterThanOrEqual(3);
+      expect(contrast(
+        tokens.get("danger")!,
+        tokens.get(backgroundName)!,
+      ), `${colorTheme} ${theme} --danger on --${backgroundName}`)
+        .toBeGreaterThanOrEqual(4.5);
+    }
+    for (const foregroundName of [
+      "danger",
+      "warning",
+      "status-working",
+      "status-approval",
+      "status-input",
+      "status-failed",
+      "status-completed",
+    ]) {
+      for (const backgroundName of ["surface", "surface-strong", "surface-muted"]) {
+        expect(contrast(
+          tokens.get(foregroundName)!,
+          tokens.get(backgroundName)!,
+        ), `${colorTheme} ${theme} --${foregroundName} on --${backgroundName}`)
+          .toBeGreaterThanOrEqual(4.5);
       }
     }
     expect(contrast(tokens.get("accent-text")!, tokens.get("accent")!))
       .toBeGreaterThanOrEqual(4.5);
+    expect(contrast(tokens.get("danger")!, tokens.get("danger-soft")!))
+      .toBeGreaterThanOrEqual(4.5);
+
+    const codeSurface = tokens.get("code-surface")!;
+    for (const foregroundName of [
+      "syntax-keyword",
+      "syntax-string",
+      "syntax-number",
+      "syntax-function",
+      "syntax-variable",
+      "syntax-comment",
+      "syntax-meta",
+      "syntax-deletion",
+    ]) {
+      expect(contrast(tokens.get(foregroundName)!, codeSurface),
+        `${colorTheme} ${theme} --${foregroundName} on --code-surface`)
+        .toBeGreaterThanOrEqual(4.5);
+    }
+
+    const root = cssBlock(":root");
+    const faintWeight = Number.parseInt(
+      /--text-faint:\s*color-mix\(in srgb, var\(--text-muted\) (?<weight>\d+)%/u
+        .exec(root)?.groups?.weight ?? "0",
+      10,
+    ) / 100;
+    const faintText = blend(
+      tokens.get("text-muted")!,
+      tokens.get("surface")!,
+      faintWeight,
+    );
+    expect(contrast(faintText, tokens.get("surface")!),
+      `${colorTheme} ${theme} --text-faint on --surface`)
+      .toBeGreaterThanOrEqual(4.5);
+
+    const disabledOpacity = Number.parseFloat(
+      /--disabled-opacity:\s*(?<opacity>\d+(?:\.\d+)?)/u
+        .exec(root)?.groups?.opacity ?? "0",
+    );
+    const surface = tokens.get("surface")!;
+    expect(contrast(blend(tokens.get("text")!, surface, disabledOpacity), surface),
+      `${colorTheme} ${theme} disabled primary text`)
+      .toBeGreaterThanOrEqual(4.5);
+    expect(contrast(blend(tokens.get("text-muted")!, surface, disabledOpacity), surface),
+      `${colorTheme} ${theme} disabled secondary text`)
+      .toBeGreaterThanOrEqual(3);
+    expect(contrast(
+      blend(tokens.get("accent-text")!, surface, disabledOpacity),
+      blend(tokens.get("accent")!, surface, disabledOpacity),
+    ), `${colorTheme} ${theme} disabled accent action`)
+      .toBeGreaterThanOrEqual(3);
   });
 
   it("uses the readable application typography scale for Git file metadata", () => {
@@ -155,6 +265,31 @@ describe("visual contrast system", () => {
       }
     },
   );
+
+  it("uses defined semantic tokens and visible focus states for repaired controls", () => {
+    expect(css).not.toMatch(
+      /var\(--(?:accent-contrast|attention-state|input-bg|success-text)(?:[,)]|\s)/u,
+    );
+    expect(cssBlock(".c-xk")).toContain("color: var(--accent-text)");
+    expect(cssBlock(".c-s input")).toContain("border: 1px solid var(--interactive-border)");
+    expect(cssBlock(".c-s input")).toContain("background: var(--surface-strong)");
+    expect(cssBlock(".c-p textarea")).toContain("background: var(--surface-strong)");
+    expect(css).toMatch(
+      /\.c-w > aside:first-child > button:hover small,[\s\S]*?color:\s*var\(--text-muted\)/u,
+    );
+    expect(cssBlock(".private-connect-indicator.is-active"))
+      .toContain("color: var(--success-accent)");
+    expect(cssBlock(".private-connect-indicator.has-pending"))
+      .toContain("color: var(--warning-accent)");
+    expect(css).toMatch(
+      /\.new-branch-form input:focus-visible,[\s\S]*?outline:\s*2px solid var\(--focus-ring\)/u,
+    );
+    expect(cssBlock(".preview-address-form:focus-within"))
+      .toContain("box-shadow: 0 0 0 2px var(--focus-ring-soft)");
+    expect(css).not.toMatch(
+      /:disabled[^{]*\{[^}]*opacity:\s*0\./su,
+    );
+  });
 
   it.each(["light", "dark"] as const)(
     "keeps the %s syntax palette readable on its dedicated code surface",

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
+import { COLOR_THEME_IDS } from "../../src/shared/contracts";
 import {
   createAppFixture,
   type AppFixture,
@@ -10,6 +11,30 @@ import {
 
 let app!: AppFixture;
 let sourceConversationId = "";
+
+const THEME_CASES = COLOR_THEME_IDS
+  .flatMap((colorTheme) => (["light", "dark"] as const)
+    .map((theme) => ({ colorTheme, theme })));
+
+function contrastRatio(foreground: string, background: string): number {
+  const channels = (value: string): number[] => {
+    const values = value.match(/[\d.]+/gu)?.map(Number) ?? [];
+    return values.slice(0, 3).map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.04045
+        ? normalized / 12.92
+        : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+  };
+  const luminance = (value: string): number => {
+    const [red = 0, green = 0, blue = 0] = channels(value);
+    return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+  };
+  const foregroundLuminance = luminance(foreground);
+  const backgroundLuminance = luminance(background);
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05)
+    / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+}
 
 test.beforeAll(async () => {
   app = await createAppFixture({
@@ -129,6 +154,42 @@ test("chooses, previews, and preserves bounded cross-chat provenance", async ({
   await expect(dialog.getByLabel("Context preview").getByText(
     "Carry only this reviewed retry decision into the implementation chat.",
   )).toBeVisible();
+
+  const selectedCheck = dialog.locator('.c-x[aria-pressed="true"] .c-xk');
+  const search = dialog.getByRole("searchbox");
+  const note = dialog.getByPlaceholder("Optional context note");
+  for (const appearance of THEME_CASES) {
+    await page.locator("html").evaluate((element, nextAppearance) => {
+      const root = element as HTMLElement;
+      root.dataset.theme = nextAppearance.theme;
+      root.dataset.colorTheme = nextAppearance.colorTheme;
+      root.style.colorScheme = nextAppearance.theme;
+    }, appearance);
+    const metrics = await Promise.all([selectedCheck, search, note].map(
+      async (target) => target.evaluate((element) => {
+        const styles = getComputedStyle(element);
+        return {
+          color: styles.color,
+          background: styles.backgroundColor,
+        };
+      }),
+    ));
+    for (const [surface, metric] of ["selected checkmark", "search input", "note input"]
+      .map((surface, index) => [surface, metrics[index]!] as const)) {
+      expect(metric.background, `${appearance.colorTheme} ${appearance.theme} ${surface} fill`)
+        .not.toBe("rgba(0, 0, 0, 0)");
+      expect(
+        contrastRatio(metric.color, metric.background),
+        `${appearance.colorTheme} ${appearance.theme} ${surface}`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+  await page.locator("html").evaluate((element) => {
+    const root = element as HTMLElement;
+    root.dataset.theme = "light";
+    root.dataset.colorTheme = "inertia";
+    root.style.colorScheme = "light";
+  });
   await capture("conversation-context-default-1280x820");
 
   await electronApp.evaluate(({ BrowserWindow }) => {

@@ -55,6 +55,7 @@ import {
   openCodePermissions,
 } from "./opencode-host-tools";
 import { OpenCodeRunOwnership } from "./opencode-run-ownership";
+import { OpenCodeSessionOwnership } from "./opencode-session-ownership";
 import {
   createOpenCodeInteractionState,
   handleOpenCodeEvent,
@@ -71,7 +72,6 @@ import {
   imageMime,
   isOpenCodeIdleEvent,
   objectValue,
-  openCodeEventSessionId,
   openCodeRuntimeFailure,
   resolveOpenCodeAgent,
   resolveOpenCodeModel,
@@ -128,7 +128,7 @@ export interface OpenCodeSdkHarnessOptions {
   runDeadlineMs?: number;
   /**
    * May shorten, but never extend, the production owned-session inactivity
-   * window. Events for other sessions do not reset this deadline.
+   * window. Verified descendant activity resets it; unrelated sessions do not.
    */
   eventInactivityDeadlineMs?: number;
   /**
@@ -595,6 +595,7 @@ function startOpenCodeRun(
       };
       let sessionIdleObserved = false;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
+        onDescendantActivity: armEventInactivityDeadline,
         onEvent: async (event) => {
           if (openCodeEventRequiresPromptAdmission(event)) {
             const admission = ownership.pendingPromptAdmission();
@@ -1081,10 +1082,12 @@ async function pumpOpenCodeEvents(
   stream: AsyncGenerator<Event>,
   sessionId: string,
   handlers: {
+    onDescendantActivity: () => void;
     onEvent: (event: Event) => void | Promise<void>;
     isDone: (event: Event) => boolean | Promise<boolean>;
   },
 ): Promise<void> {
+  const sessionOwnership = new OpenCodeSessionOwnership(sessionId);
   const eventBudget = new ProviderRunEventBudget(
     "OpenCode",
     MAX_EVENT_BYTES,
@@ -1093,8 +1096,12 @@ async function pumpOpenCodeEvents(
   );
   for await (const event of stream) {
     eventBudget.observe(event);
-    const eventSessionId = openCodeEventSessionId(event);
-    if (eventSessionId !== sessionId) continue;
+    const scope = sessionOwnership.observe(event);
+    if (scope === "unrelated") continue;
+    if (scope === "descendant") {
+      handlers.onDescendantActivity();
+      continue;
+    }
     await handlers.onEvent(event);
     if (await handlers.isDone(event)) return;
   }

@@ -18,18 +18,37 @@ export const PREVIEW_AGENT_NESTED_BOUNDARY_EVENT = "__inertia_agent_nested_bound
 
 /** Runs in the page's main world before author scripts. */
 export function installPreviewAgentShadowBoundarySignal(eventName: string): void {
-  const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "attachShadow");
-  const attachShadow = descriptor?.value as Element["attachShadow"] | undefined;
-  if (!descriptor || typeof attachShadow !== "function") return;
   const dispatch = EventTarget.prototype.dispatchEvent;
   const EventConstructor = Event;
-  Object.defineProperty(Element.prototype, "attachShadow", {
-    ...descriptor,
-    value(this: Element, init: ShadowRootInit): ShadowRoot {
-      dispatch.call(document, new EventConstructor(eventName));
-      return Reflect.apply(attachShadow, this, [init]) as ShadowRoot;
-    },
-  });
+  const signal = (): void => {
+    dispatch.call(document, new EventConstructor(eventName));
+  };
+  const shadowDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "attachShadow");
+  const attachShadow = shadowDescriptor?.value as Element["attachShadow"] | undefined;
+  if (shadowDescriptor && typeof attachShadow === "function") {
+    Object.defineProperty(Element.prototype, "attachShadow", {
+      ...shadowDescriptor,
+      value(this: Element, init: ShadowRootInit): ShadowRoot {
+        signal();
+        return Reflect.apply(attachShadow, this, [init]) as ShadowRoot;
+      },
+    });
+  }
+  const internalsDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "attachInternals",
+  );
+  const attachInternals = internalsDescriptor?.value as HTMLElement["attachInternals"] | undefined;
+  if (internalsDescriptor && typeof attachInternals === "function") {
+    Object.defineProperty(HTMLElement.prototype, "attachInternals", {
+      ...internalsDescriptor,
+      value(this: HTMLElement): ElementInternals {
+        const internals = Reflect.apply(attachInternals, this, []) as ElementInternals;
+        if (internals.shadowRoot) signal();
+        return internals;
+      },
+    });
+  }
 }
 
 /**
@@ -86,6 +105,11 @@ export function installPreviewAgentPrivacyGuard(): void {
     if (element.matches?.("iframe,frame") || element.querySelector?.("iframe,frame")) {
       state.nestedContentObserved = true;
     }
+    if (element.shadowRoot
+      || Array.from(element.querySelectorAll?.("*") ?? [])
+        .some((descendant) => descendant.shadowRoot)) {
+      state.nestedContentObserved = true;
+    }
     const directInput = inputElement(element);
     if (directInput) inspect(directInput);
     for (const input of element.querySelectorAll("input")) inspect(input);
@@ -95,12 +119,26 @@ export function installPreviewAgentPrivacyGuard(): void {
   }, true);
   if (document.querySelector?.("iframe,frame")) state.nestedContentObserved = true;
   for (const input of document.querySelectorAll("input")) inspect(input);
-  document.addEventListener("input", (event) => {
+  const inspectInputEvent = (event: Event): void => {
+    let exposedControl = false;
     for (const node of event.composedPath()) {
       const input = inputElement(node);
-      if (input) inspect(input);
+      if (input) {
+        exposedControl = true;
+        inspect(input);
+        continue;
+      }
+      const candidate = node as Partial<HTMLElement> | null;
+      if (["TEXTAREA", "SELECT"].includes(candidate?.tagName ?? "")
+        || candidate?.isContentEditable === true) exposedControl = true;
     }
-  }, true);
+    // Closed declarative roots hide their controls from an outside composed
+    // path. Retain a lifetime taint before an author handler can mirror the
+    // newly entered value into the ordinary top-level DOM and remove the host.
+    if (!exposedControl) state.nestedContentObserved = true;
+  };
+  document.addEventListener("beforeinput", inspectInputEvent, true);
+  document.addEventListener("input", inspectInputEvent, true);
   document.addEventListener("click", (event) => {
     if (!state.agentInputActive) return;
     const fileInput = event.composedPath().some((node) => {

@@ -805,11 +805,11 @@ export class PreviewBroker {
     if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
       return failure("invalid", "Page evidence is unavailable for nested page content.");
     }
-    const text = await this.#rendererOperation(
-      contents,
-      () => semanticPageSnapshot(contents),
-      { signal },
-    );
+    const text = await this.#rendererOperation(contents, () => semanticPageSnapshot(contents), {
+      signal,
+    });
+    if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) return failure("invalid", "Page evidence is unavailable until the password-bearing document navigates away.");
+    if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) return failure("invalid", "Page evidence is unavailable for nested page content.");
     stopForAbort(signal);
     this.#record(ownerId, slot, "snapshot", "Agent inspected this page");
     return this.#success(slot, text);

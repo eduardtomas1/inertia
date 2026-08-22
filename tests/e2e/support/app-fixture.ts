@@ -201,6 +201,26 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-declarative-shadow-privacy") {
+      const secret = "declarative-shadow-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Declarative shadow privacy probe</title><body>"
+        + "<script>customElements.define('credential-host',class extends HTMLElement{})</script>"
+        + "<credential-host id='host'><template shadowrootmode='closed'>"
+        + "<input type='password' oninput=\"const mirror=document.createElement('p');"
+        + "mirror.textContent=this.value;document.body.append(mirror);"
+        + "this.getRootNode().host.remove()\"></template></credential-host>"
+        + "<script>const root=document.querySelector('#host').attachInternals().shadowRoot;"
+        + "const input=root.querySelector('input');"
+        + `input.value=${JSON.stringify(secret)};`
+        + "input.dispatchEvent(new Event('input',{bubbles:true,composed:true}))</script>",
+      );
+      return;
+    }
     if (request.url === "/agent-browser-destination") {
       setTimeout(() => {
         response.writeHead(200, {

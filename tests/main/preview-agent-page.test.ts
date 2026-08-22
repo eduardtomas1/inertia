@@ -12,8 +12,43 @@ import {
   setAgentPageInputGuard,
 } from "../../src/main/preview-agent-page";
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../../src/shared/agent-browser";
+import { installPreviewAgentShadowBoundarySignal } from "../../src/shared/preview-agent-privacy-guard";
 
 describe("agent browser semantic snapshots", () => {
+  it("signals a parser-created closed shadow root when page code retrieves its internals", () => {
+    const dispatched: string[] = [];
+    class FakeEvent {
+      constructor(readonly type: string) {}
+    }
+    class FakeEventTarget {
+      dispatchEvent(event: FakeEvent): boolean {
+        dispatched.push(event.type);
+        return true;
+      }
+    }
+    class FakeElement extends FakeEventTarget {
+      attachShadow(): object { return {}; }
+    }
+    class FakeHTMLElement extends FakeElement {
+      attachInternals(): object { return { shadowRoot: {} }; }
+    }
+    const context = {
+      document: new FakeEventTarget(),
+      Element: FakeElement,
+      HTMLElement: FakeHTMLElement,
+      EventTarget: FakeEventTarget,
+      Event: FakeEvent,
+    };
+
+    runInNewContext(
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
+      context,
+    );
+    runInNewContext("new HTMLElement().attachInternals()", context);
+
+    expect(dispatched).toEqual(["nested-boundary"]);
+  });
+
   it("keeps oversized Unicode snapshots valid within the provider byte limit", () => {
     const serialized = serializeAgentPageSnapshot({
       title: "Dense local page",
@@ -114,6 +149,7 @@ describe("agent browser semantic snapshots", () => {
       querySelectorAll: () => [],
     };
     let clickListener: ((event: Record<string, unknown>) => void) | undefined;
+    let inputListener: ((event: Record<string, unknown>) => void) | undefined;
     let nestedBoundaryListener: ((event: Record<string, unknown>) => void) | undefined;
     const document = {
       title: "Sign in",
@@ -122,6 +158,7 @@ describe("agent browser semantic snapshots", () => {
       activeElement: null,
       addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
         if (name === "click") clickListener = listener;
+        if (name === "input") inputListener = listener;
         if (name === "__inertia_agent_nested_boundary__") nestedBoundaryListener = listener;
       }),
       querySelectorAll: () => [input],
@@ -176,6 +213,9 @@ describe("agent browser semantic snapshots", () => {
     expect(stopped).toHaveBeenCalledOnce();
     await setAgentPageInputGuard(contents as never, false);
     runInNewContext("globalThis.__inertiaAgentBrowser.passwordValues.clear()", context);
+    inputListener?.({ composedPath: () => [{ tagName: "CREDENTIAL-HOST" }] });
+    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
+    runInNewContext("globalThis.__inertiaAgentBrowser.nestedContentObserved = false", context);
     nestedBoundaryListener?.({});
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
   });

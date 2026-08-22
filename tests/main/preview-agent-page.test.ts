@@ -158,7 +158,7 @@ describe("agent browser semantic snapshots", () => {
       context,
     );
     runInNewContext(`
-      new Element().setHTML('<template shadowrootmode=closed>private</template>');
+      new Element().setHTML("<template data-label='>' shadowrootmode=closed>private</template>");
       new Element().setHTMLUnsafe('<template shadowrootmode=closed>private</template>');
       Document.parseHTML('<template shadowrootmode=closed>private</template>');
       Document.parseHTMLUnsafe('<template shadowrootmode=closed>private</template>');
@@ -167,6 +167,19 @@ describe("agent browser semantic snapshots", () => {
     `, context);
 
     expect(dispatched).toEqual(Array(6).fill("nested-boundary"));
+
+    runInNewContext(`
+      new Element().setHTML('<p>ordinary</p>');
+      new Element().setHTMLUnsafe('<p>ordinary</p>');
+      Document.parseHTML('<p>ordinary</p>');
+      Document.parseHTMLUnsafe('<p>ordinary</p>');
+      new ShadowRoot().setHTML('<p>ordinary</p>');
+      new ShadowRoot().setHTMLUnsafe('<p>ordinary</p>');
+    `, context);
+    expect(dispatched).toHaveLength(6);
+
+    runInNewContext("new Element().setHTML('x'.repeat(4097))", context);
+    expect(dispatched).toEqual(Array(7).fill("nested-boundary"));
   });
 
   it("keeps oversized Unicode snapshots valid within the provider byte limit", () => {

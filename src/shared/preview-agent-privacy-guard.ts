@@ -49,6 +49,11 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       },
     });
   }
+  const maximumParserSourceCharacters = 4_096;
+  const mayCreateDeclarativeRoot = (value: unknown): boolean => {
+    if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return true;
+    return /<template\b[\s\S]*\bshadowrootmode\s*=/iu.test(value);
+  };
   const signalDeclarativeParser = (prototype: object, name: string): void => {
     const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
     const parser = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
@@ -58,8 +63,10 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       value(this: unknown, ...args: unknown[]): unknown {
         // These APIs can create a closed declarative root entirely while its
         // host is detached. Signal before author callbacks can mirror private
-        // content and remove the host from the observable document tree.
-        signal();
+        // content and remove the host from the observable document tree. Keep
+        // ordinary parser use available, but fail closed when bounded source
+        // inspection cannot prove that declarative-root syntax is absent.
+        if (mayCreateDeclarativeRoot(args[0])) signal();
         return Reflect.apply(parser, this, args);
       },
     });

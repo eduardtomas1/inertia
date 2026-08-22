@@ -28,9 +28,7 @@ describe("agent Browser nested evidence boundary", () => {
   it("tracks nested boundaries incrementally without serializing the page DOM", async () => {
     const debuggerEvents = new EventEmitter();
     let attached = false;
-    const sendCommand = vi.fn(async (method: string) => method === "DOM.performSearch"
-      ? { searchId: "boundary-search", resultCount: 3 }
-      : undefined);
+    const sendCommand = vi.fn(async () => undefined);
     const contents = {
       debugger: Object.assign(debuggerEvents, {
         attach: vi.fn(() => { attached = true; }),
@@ -40,7 +38,6 @@ describe("agent Browser nested evidence boundary", () => {
       }),
       getURL: () => "http://127.0.0.1:3000/",
       loadURL: vi.fn(async () => undefined),
-      executeJavaScriptInIsolatedWorld: vi.fn(async () => 3),
       navigationHistory: {
         getActiveIndex: () => 0,
         getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/" }),
@@ -51,13 +48,7 @@ describe("agent Browser nested evidence boundary", () => {
     expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(false);
     expect(sendCommand).not.toHaveBeenCalledWith("Page.getFrameTree");
     expect(sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
-    expect(sendCommand).toHaveBeenCalledWith("DOM.performSearch", {
-      query: "*",
-      includeUserAgentShadowDOM: false,
-    });
-    expect(sendCommand).toHaveBeenCalledWith("DOM.discardSearchResults", {
-      searchId: "boundary-search",
-    });
+    expect(sendCommand).not.toHaveBeenCalledWith("DOM.performSearch", expect.anything());
 
     debuggerEvents.emit("message", {}, "Page.frameAttached", {
       frameId: "child",
@@ -76,12 +67,10 @@ describe("agent Browser nested evidence boundary", () => {
     expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(true);
   });
 
-  it("fails closed when a bounded privileged search sees a closed shadow subtree", async () => {
+  it("does not run attacker-sized DOM searches while checking a clean boundary", async () => {
     const debuggerEvents = new EventEmitter();
     let attached = false;
-    const sendCommand = vi.fn(async (method: string) => method === "DOM.performSearch"
-      ? { searchId: "closed-root-search", resultCount: 4 }
-      : undefined);
+    const sendCommand = vi.fn(async () => undefined);
     const contents = {
       debugger: Object.assign(debuggerEvents, {
         attach: vi.fn(() => { attached = true; }),
@@ -91,7 +80,6 @@ describe("agent Browser nested evidence boundary", () => {
       }),
       getURL: () => "http://127.0.0.1:3000/closed-root",
       loadURL: vi.fn(async () => undefined),
-      executeJavaScriptInIsolatedWorld: vi.fn(async () => 3),
       navigationHistory: {
         getActiveIndex: () => 0,
         getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/closed-root" }),
@@ -99,10 +87,8 @@ describe("agent Browser nested evidence boundary", () => {
     };
 
     await installAgentFileChooserBlock(contents as never);
-    await expect(agentPageHasUnguardedNestedContent(contents as never)).resolves.toBe(true);
-    expect(sendCommand).toHaveBeenCalledWith("DOM.discardSearchResults", {
-      searchId: "closed-root-search",
-    });
+    await expect(agentPageHasUnguardedNestedContent(contents as never)).resolves.toBe(false);
+    expect(sendCommand).not.toHaveBeenCalledWith("DOM.performSearch", expect.anything());
   });
 });
 

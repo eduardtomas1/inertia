@@ -126,7 +126,12 @@ export function installPreviewAgentPrivacyGuard(): void {
       const descendant = iterator.nextNode() as Element | null;
       if (!descendant) return;
       if (!consume(budget)) return;
-      if (descendant.matches?.("iframe,frame") || descendant.shadowRoot) {
+      // A declarative shadow template is consumed by the HTML parser before
+      // ordinary page code can query it. Mutation records retain the added
+      // template node, so the document-start observer can taint the document
+      // without enumerating or serializing the closed subtree.
+      if (descendant.matches?.("iframe,frame,template[shadowrootmode]")
+        || descendant.shadowRoot) {
         state.nestedContentObserved = true;
       }
       const input = inputElement(descendant);

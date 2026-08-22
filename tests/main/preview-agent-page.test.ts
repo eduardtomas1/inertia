@@ -319,6 +319,57 @@ describe("agent browser semantic snapshots", () => {
     )).toBe(true);
   });
 
+  it("retains document-start taint for a consumed declarative shadow template", async () => {
+    let callback: ((records: unknown[]) => void) | undefined;
+    class MutationObserver {
+      constructor(observer: (records: unknown[]) => void) { callback = observer; }
+      observe(): void {}
+    }
+    const documentElement = { nodeType: 1, tagName: "HTML", matches: () => false };
+    const template = {
+      nodeType: 1,
+      tagName: "TEMPLATE",
+      matches: (selector: string) => selector.includes("template[shadowrootmode]"),
+    };
+    const context = {
+      document: {
+        documentElement,
+        addEventListener: vi.fn(),
+        createNodeIterator: (root: unknown) => {
+          let next = root;
+          return {
+            nextNode: () => {
+              const value = next;
+              next = null;
+              return value;
+            },
+          };
+        },
+      },
+      MutationObserver,
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await installAgentPagePrivacyGuard(contents as never);
+    expect(callback).toBeTypeOf("function");
+    callback!([{
+      type: "childList",
+      target: documentElement,
+      oldValue: null,
+      removedNodes: [template],
+      addedNodes: [],
+    }]);
+    expect(runInNewContext(
+      "globalThis.__inertiaAgentBrowser.nestedContentObserved",
+      context,
+    )).toBe(true);
+  });
+
   it("shares one fail-closed scan budget across each mutation callback", async () => {
     let callback: ((records: unknown[]) => void) | undefined;
     let attributeTargetsInspected = 0;

@@ -1,9 +1,5 @@
 import type { WebContents } from "electron";
 
-import { AGENT_BROWSER_WORLD_ID } from "./preview-agent-page.js";
-
-const MAX_AGENT_PAGE_BOUNDARY_ELEMENTS = 4_000;
-
 interface AgentPageBoundaryState {
   mainFrameId: string | null;
   nestedContentObserved: boolean;
@@ -77,51 +73,13 @@ export function settleAgentPageDebuggerBootstrap(contents: WebContents): void {
   }
 }
 
-/** Fail closed unless privileged and isolated-world boundary views agree. */
-async function hasUnreachableAgentPageElements(contents: WebContents): Promise<boolean> {
-  const lightCount = await contents.executeJavaScriptInIsolatedWorld(
-    AGENT_BROWSER_WORLD_ID,
-    [{ code: `(() => { // __inertia_boundary_count__
-      const root = document.documentElement;
-      const iterator = root && typeof document.createNodeIterator === "function"
-        ? document.createNodeIterator(root, 1)
-        : null;
-      if (!iterator) return null;
-      let count = 0;
-      while (iterator.nextNode()) {
-        count += 1;
-        if (count > ${MAX_AGENT_PAGE_BOUNDARY_ELEMENTS}) return null;
-      }
-      return count;
-    })()` }],
-    true,
-  );
-  if (!Number.isInteger(lightCount)
-    || lightCount < 0
-    || lightCount > MAX_AGENT_PAGE_BOUNDARY_ELEMENTS) return true;
-
-  const search = objectRecord(await contents.debugger.sendCommand("DOM.performSearch", {
-    query: "*",
-    includeUserAgentShadowDOM: false,
-  }));
-  const searchId = search?.searchId;
-  if (typeof searchId !== "string") return true;
-  try {
-    const resultCount = search?.resultCount;
-    return !Number.isInteger(resultCount)
-      || (resultCount as number) !== lightCount
-      || (resultCount as number) > MAX_AGENT_PAGE_BOUNDARY_ELEMENTS;
-  } finally {
-    await contents.debugger.sendCommand("DOM.discardSearchResults", { searchId });
-  }
-}
-
 /**
- * Browser evidence currently has document-start credential ownership only for
- * the top-level document. Fail closed when a page contains author-controlled
- * nested documents or shadow roots rather than capture pixels from an
- * unguarded DOM boundary. User-agent shadow roots are excluded because their
- * contents are owned by Chromium, not the page.
+ * Browser evidence has document-start credential ownership only for the
+ * top-level document. CDP lifecycle events retain a privileged lifetime taint
+ * for frames and shadow roots that appear after DOM.enable. The isolated-world
+ * preload independently observes bounded parser mutations, including consumed
+ * declarative-shadow templates, before evidence is allowed. Do not use CDP DOM
+ * searches or snapshots here: those APIs materialize attacker-sized results.
  */
 export function hasUnguardedAgentPageContent(boundaryState: unknown): boolean {
   return objectRecord(boundaryState)?.nestedContentObserved !== false;
@@ -134,15 +92,6 @@ export async function agentPageHasUnguardedNestedContent(
   if (state?.nestedContentObserved !== false) return true;
   if (!contents.debugger.isAttached()) {
     throw new Error("The Browser security debugger is unavailable.");
-  }
-  const frameId = state.mainFrameId;
-  try {
-    if (await hasUnreachableAgentPageElements(contents)
-      || state.mainFrameId !== frameId) {
-      state.nestedContentObserved = true;
-    }
-  } catch {
-    state.nestedContentObserved = true;
   }
   return hasUnguardedAgentPageContent(state);
 }

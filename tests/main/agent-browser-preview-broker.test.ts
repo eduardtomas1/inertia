@@ -110,9 +110,7 @@ vi.mock("electron", () => {
       emitMessage: (method: string, params: Record<string, unknown>): void => {
         for (const handler of this.debuggerMessageHandlers) handler({}, method, params);
       },
-      sendCommand: vi.fn(async (method: string) => method === "DOM.performSearch"
-        ? { searchId: "fake-boundary-search", resultCount: 3 }
-        : undefined),
+      sendCommand: vi.fn(async () => undefined),
     };
 
     constructor() {

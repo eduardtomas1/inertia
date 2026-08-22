@@ -532,6 +532,53 @@ describe("agent-owned native Browser", () => {
       });
   });
 
+  it("attributes tab-close activity to the exact closed page", async () => {
+    const { broker } = harness();
+    const initial = await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    const firstTabId = initial.activeTabId!;
+    const opened = await broker.perform(conversationId, {
+      action: "tab-open",
+      url: "http://127.0.0.1:3000/settings",
+    });
+    expect(opened.ok).toBe(true);
+    if (!opened.ok) return;
+    const inactiveTabId = opened.state.activeTabId;
+    await expect(broker.perform(conversationId, {
+      action: "tab-activate",
+      tabId: firstTabId,
+    })).resolves.toMatchObject({ ok: true });
+
+    await expect(broker.perform(conversationId, {
+      action: "tab-close",
+      tabId: inactiveTabId,
+    })).resolves.toMatchObject({
+      ok: true,
+      state: {
+        activeTabId: firstTabId,
+        activity: { action: "tab-close", tabId: inactiveTabId },
+      },
+    });
+
+    const replacement = await broker.perform(conversationId, { action: "tab-open" });
+    expect(replacement.ok).toBe(true);
+    if (!replacement.ok) return;
+    const activeClosedTabId = replacement.state.activeTabId;
+    await expect(broker.perform(conversationId, {
+      action: "tab-close",
+      tabId: activeClosedTabId,
+    })).resolves.toMatchObject({
+      ok: true,
+      state: {
+        activeTabId: firstTabId,
+        activity: { action: "tab-close", tabId: activeClosedTabId },
+      },
+    });
+  });
+
   it("keeps maximum tab state valid within the broker text boundary", async () => {
     const { broker } = harness();
     const longPath = "x".repeat(3_900);

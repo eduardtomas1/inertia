@@ -309,7 +309,14 @@ export class PreviewBroker {
               return failure("not-found", "That Inertia Browser tab no longer exists.");
             }
             this.#closeTab(ownerId, slot, command.tabId);
-            this.#record(ownerId, slot, "tab-close", "Agent closed a page");
+            this.#record(
+              ownerId,
+              slot,
+              "tab-close",
+              "Agent closed a page",
+              undefined,
+              command.tabId,
+            );
             return this.#success(slot, this.#agentStateText(slot));
         }
       });

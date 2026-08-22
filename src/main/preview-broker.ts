@@ -57,6 +57,7 @@ const UUID_PATTERN =
 const hardenedSessions = new WeakSet<Session>();
 const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n"]);
 const MAX_BROWSER_TABS = 8;
+const PREVIEW_RENDERER_OPERATION_TIMEOUT_MS = 15_000;
 const PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS = 30_000;
 
 export function previewAppShortcutKey(input: Pick<
@@ -154,7 +155,8 @@ export class PreviewBroker {
       if (this.#ownedSlot(request.ownerId, request.contextId) !== slot) {
         return this.#state(request.ownerId, request.contextId);
       }
-      await this.#active(slot).view.webContents.loadURL(target.url.toString());
+      const contents = this.#active(slot).view.webContents;
+      await this.#loadURL(contents, target.url.toString());
       return this.#state(request.ownerId, request.contextId);
     });
   }
@@ -182,17 +184,25 @@ export class PreviewBroker {
       }
       const contents = this.#active(slot).view.webContents;
       if (action === "back" && contents.navigationHistory.canGoBack()) {
+        const targetUrl = contents.navigationHistory.getEntryAtIndex(
+          contents.navigationHistory.getActiveIndex() - 1,
+        )?.url;
         await this.#waitForNavigationCommand(
           contents,
           () => contents.navigationHistory.goBack(),
+          targetUrl,
         );
       } else if (
         action === "forward"
         && contents.navigationHistory.canGoForward()
       ) {
+        const targetUrl = contents.navigationHistory.getEntryAtIndex(
+          contents.navigationHistory.getActiveIndex() + 1,
+        )?.url;
         await this.#waitForNavigationCommand(
           contents,
           () => contents.navigationHistory.goForward(),
+          targetUrl,
         );
       } else if (action === "reload") {
         await this.#waitForNavigationCommand(contents, () => contents.reload());
@@ -230,7 +240,7 @@ export class PreviewBroker {
         this.#activateTab(ownerId, slot, tab.id);
         if (target?.kind === "embed") {
           try {
-            await tab.view.webContents.loadURL(target.url.toString());
+            await this.#loadURL(tab.view.webContents, target.url.toString());
           } catch (error) {
             this.#closeTab(ownerId, slot, tab.id);
             throw error;
@@ -406,6 +416,62 @@ export class PreviewBroker {
     } finally {
       release();
     }
+  }
+
+  async #rendererOperation<Result>(
+    contents: PreviewTab["view"]["webContents"],
+    operation: () => Promise<Result>,
+    options: {
+      signal?: AbortSignal;
+      cancel?: () => void;
+      timeoutMessage?: string;
+    } = {},
+  ): Promise<Result> {
+    stopForAbort(options.signal);
+    if (contents.isDestroyed()) {
+      throw new Error("The active Browser tab was closed before the operation started.");
+    }
+    return await new Promise<Result>((resolve, reject) => {
+      let settled = false;
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+        contents.removeListener("destroyed", onDestroyed);
+        options.signal?.removeEventListener("abort", onAbort);
+      };
+      const succeed = (value: Result): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      };
+      const fail = (error: Error, cancel = false): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (cancel) {
+          try {
+            options.cancel?.();
+          } catch {
+            // Cancellation is best-effort; the bounded queue release is authoritative.
+          }
+        }
+        reject(error);
+      };
+      const onAbort = (): void => fail(new Error("browser-action-cancelled"), true);
+      const onDestroyed = (): void => fail(
+        new Error("The active Browser tab was closed during the operation."),
+      );
+      const timeout = setTimeout(() => fail(
+        new Error(options.timeoutMessage ?? "The Browser page stopped responding."),
+        true,
+      ), PREVIEW_RENDERER_OPERATION_TIMEOUT_MS);
+      timeout.unref();
+      contents.once("destroyed", onDestroyed);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      Promise.resolve().then(operation).then(succeed, (error: unknown) => fail(
+        error instanceof Error ? error : new Error("The Browser renderer operation failed."),
+      ));
+    });
   }
 
   #request(value: unknown): {
@@ -660,7 +726,11 @@ export class PreviewBroker {
   async #snapshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
     if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
-    const text = await semanticPageSnapshot(contents);
+    const text = await this.#rendererOperation(
+      contents,
+      () => semanticPageSnapshot(contents),
+      { signal },
+    );
     stopForAbort(signal);
     this.#record(ownerId, slot, "snapshot", "Agent inspected this page");
     return this.#success(slot, text);
@@ -671,7 +741,11 @@ export class PreviewBroker {
     const tabId = tab.id;
     const contents = tab.view.webContents;
     if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
-    let image = await contents.capturePage();
+    let image = await this.#rendererOperation(
+      contents,
+      () => contents.capturePage(),
+      { signal },
+    );
     stopForAbort(signal);
     if (slot.tabs.get(tabId) !== tab || contents.isDestroyed()) {
       return failure("not-found", "The captured Browser tab was closed before its screenshot completed.");
@@ -767,18 +841,28 @@ export class PreviewBroker {
 
   async #click(ownerId: PreviewOwner, slot: PreviewSlot, ref: string, signal?: AbortSignal): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
-    const located = await locateAgentPageRef(contents, ref);
-    if (!located.found || located.x === undefined || located.y === undefined) {
+    const located = await this.#rendererOperation(
+      contents,
+      () => locateAgentPageRef(contents, ref),
+      { signal },
+    );
+    const x = located.x;
+    const y = located.y;
+    if (!located.found || x === undefined || y === undefined) {
       return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
     }
     if (located.disabled) return failure("invalid", "That page element is disabled.");
     stopForAbort(signal);
-    await showAgentPageCursor(contents, located.x, located.y, `Agent · ${located.label || ref}`);
+    await this.#rendererOperation(
+      contents,
+      () => showAgentPageCursor(contents, x, y, `Agent · ${located.label || ref}`),
+      { signal },
+    );
     stopForAbort(signal);
-    contents.sendInputEvent({ type: "mouseMove", x: located.x, y: located.y });
-    contents.sendInputEvent({ type: "mouseDown", x: located.x, y: located.y, button: "left", clickCount: 1 });
-    contents.sendInputEvent({ type: "mouseUp", x: located.x, y: located.y, button: "left", clickCount: 1 });
-    this.#record(ownerId, slot, "click", `Agent clicked ${located.label || ref}`, { x: located.x, y: located.y });
+    contents.sendInputEvent({ type: "mouseMove", x, y });
+    contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+    contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+    this.#record(ownerId, slot, "click", `Agent clicked ${located.label || ref}`, { x, y });
     return this.#success(slot, this.#agentStateText(slot, { clicked: ref }));
   }
 
@@ -791,18 +875,28 @@ export class PreviewBroker {
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
-    const located = await locateAgentPageRef(contents, ref, true, replace);
-    if (!located.found || located.x === undefined || located.y === undefined) {
+    const located = await this.#rendererOperation(
+      contents,
+      () => locateAgentPageRef(contents, ref, true, replace),
+      { signal },
+    );
+    const x = located.x;
+    const y = located.y;
+    if (!located.found || x === undefined || y === undefined) {
       return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
     }
     if (located.disabled) return failure("invalid", "That page element is disabled.");
     if (!located.editable) return failure("invalid", "That page element does not accept text input.");
     stopForAbort(signal);
-    await showAgentPageCursor(contents, located.x, located.y, `Agent typing · ${located.label || ref}`);
+    await this.#rendererOperation(
+      contents,
+      () => showAgentPageCursor(contents, x, y, `Agent typing · ${located.label || ref}`),
+      { signal },
+    );
     stopForAbort(signal);
-    await contents.insertText(text);
+    await this.#rendererOperation(contents, () => contents.insertText(text), { signal });
     stopForAbort(signal);
-    this.#record(ownerId, slot, "type", `Agent typed in ${located.label || ref}`, { x: located.x, y: located.y });
+    this.#record(ownerId, slot, "type", `Agent typed in ${located.label || ref}`, { x, y });
     return this.#success(slot, JSON.stringify({ typed: ref, characters: text.length }));
   }
 
@@ -844,30 +938,21 @@ export class PreviewBroker {
     url: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (!signal) {
-      await contents.loadURL(url);
-      return;
-    }
-    stopForAbort(signal);
-    let rejectAbort!: (error: Error) => void;
-    const aborted = new Promise<never>((_resolve, reject) => {
-      rejectAbort = reject;
-    });
-    const onAbort = (): void => {
-      contents.stop();
-      rejectAbort(new Error("browser-action-cancelled"));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    try {
-      await Promise.race([contents.loadURL(url).then(() => undefined), aborted]);
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-    }
+    await this.#rendererOperation(
+      contents,
+      async () => { await contents.loadURL(url); },
+      {
+        signal,
+        cancel: () => contents.stop(),
+        timeoutMessage: "The Browser page did not finish loading.",
+      },
+    );
   }
 
   async #waitForNavigationCommand(
     contents: PreviewTab["view"]["webContents"],
     dispatch: () => void,
+    inPageTargetUrl?: string,
   ): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -876,11 +961,19 @@ export class PreviewBroker {
         settled = true;
         clearTimeout(timeout);
         contents.removeListener("did-stop-loading", onStopped);
+        contents.removeListener("did-navigate-in-page", onInPage);
         contents.removeListener("destroyed", onDestroyed);
         if (error) reject(error);
         else resolve();
       };
       const onStopped = (): void => finish();
+      const onInPage = (
+        _event: unknown,
+        url: string,
+        isMainFrame: boolean,
+      ): void => {
+        if (isMainFrame && inPageTargetUrl && url === inPageTargetUrl) finish();
+      };
       const onDestroyed = (): void => finish(
         new Error("The active Browser tab was closed during navigation."),
       );
@@ -889,6 +982,7 @@ export class PreviewBroker {
         if (!contents.isDestroyed()) contents.stop();
       }, PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS);
       contents.once("did-stop-loading", onStopped);
+      if (inPageTargetUrl) contents.on("did-navigate-in-page", onInPage);
       contents.once("destroyed", onDestroyed);
       try {
         if (contents.isDestroyed()) {

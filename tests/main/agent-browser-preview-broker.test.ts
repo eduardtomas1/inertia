@@ -7,6 +7,12 @@ const electronState = vi.hoisted(() => ({
       getMockImplementation(): (() => Promise<unknown>) | undefined;
       mockImplementationOnce(implementation: () => Promise<unknown>): unknown;
     };
+    navigationHistory: {
+      canGoBack: ReturnType<typeof vi.fn>;
+      getActiveIndex: ReturnType<typeof vi.fn>;
+      getEntryAtIndex: ReturnType<typeof vi.fn>;
+      goBack: ReturnType<typeof vi.fn>;
+    };
     emit(name: string, ...args: unknown[]): void;
   }>,
   sessions: [] as Array<{
@@ -48,8 +54,10 @@ vi.mock("electron", () => {
   class FakeWebContents {
     readonly session = new FakeSession();
     readonly navigationHistory = {
-      canGoBack: () => false,
-      canGoForward: () => false,
+      canGoBack: vi.fn(() => false),
+      canGoForward: vi.fn(() => false),
+      getActiveIndex: vi.fn(() => 0),
+      getEntryAtIndex: vi.fn(() => ({ title: "", url: this.url })),
       goBack: vi.fn(),
       goForward: vi.fn(),
     };
@@ -394,6 +402,110 @@ describe("agent-owned native Browser", () => {
     electronState.contents[contentsOffset]!.emit("did-stop-loading");
     await expect(commandPromise).resolves.toMatchObject({
       url: "http://127.0.0.1:3000/settings",
+    });
+  });
+
+  it("releases queued browser work when a renderer operation is cancelled", async () => {
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    let snapshotStarted = (): void => undefined;
+    const started = new Promise<void>((resolve) => { snapshotStarted = resolve; });
+    pageTools.semanticPageSnapshot.mockImplementationOnce(async () => {
+      snapshotStarted();
+      return await new Promise<string>(() => undefined);
+    });
+    const controller = new AbortController();
+    const stalled = broker.perform(
+      conversationId,
+      { action: "snapshot" },
+      controller.signal,
+    );
+    await started;
+    let queuedSettled = false;
+    const queued = broker.perform(conversationId, { action: "tabs" })
+      .finally(() => { queuedSettled = true; });
+    await Promise.resolve();
+    expect(queuedSettled).toBe(false);
+
+    controller.abort();
+    await expect(stalled).resolves.toMatchObject({ ok: false, code: "cancelled" });
+    await expect(queued).resolves.toMatchObject({ ok: true });
+  });
+
+  it("bounds an unresponsive renderer even without upstream cancellation", async () => {
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    vi.useFakeTimers();
+    try {
+      let snapshotStarted = (): void => undefined;
+      const started = new Promise<void>((resolve) => { snapshotStarted = resolve; });
+      pageTools.semanticPageSnapshot.mockImplementationOnce(async () => {
+        snapshotStarted();
+        return await new Promise<string>(() => undefined);
+      });
+      const stalled = broker.perform(conversationId, { action: "snapshot" });
+      await started;
+      const queued = broker.perform(conversationId, { action: "tabs" });
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(stalled).resolves.toMatchObject({
+        ok: false,
+        code: "unavailable",
+        message: "The Browser page stopped responding.",
+      });
+      await expect(queued).resolves.toMatchObject({ ok: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("settles matching same-document history navigation without a load cycle", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/current",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    const targetUrl = "http://127.0.0.1:3000/current#previous";
+    contents.navigationHistory.canGoBack.mockReturnValue(true);
+    contents.navigationHistory.getActiveIndex.mockReturnValue(1);
+    contents.navigationHistory.getEntryAtIndex.mockReturnValue({
+      title: "Previous", url: targetUrl,
+    });
+    let settled = false;
+    const command = broker.command({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "back",
+    }).finally(() => { settled = true; });
+    await vi.waitFor(() => expect(contents.navigationHistory.goBack).toHaveBeenCalledOnce());
+
+    contents.emit("did-navigate-in-page", {}, targetUrl, false, 1, 1);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    contents.emit(
+      "did-navigate-in-page",
+      {},
+      "http://127.0.0.1:3000/current#unrelated",
+      true,
+      1,
+      1,
+    );
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    contents.emit("did-navigate-in-page", {}, targetUrl, true, 1, 1);
+    await expect(command).resolves.toMatchObject({
+      url: "http://127.0.0.1:3000/current",
     });
   });
 

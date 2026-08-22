@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   AlertTriangle,
@@ -8,7 +8,6 @@ import {
   FolderGit2,
   GitBranch,
   GitCommitHorizontal,
-  GitPullRequest,
   Info,
   Upload,
 } from "lucide-react";
@@ -17,7 +16,6 @@ import type {
   ChangedFile,
   DiffReviewNote,
   DiffReviewState,
-  GitForge,
   WorkspaceGitDiffSnapshot,
   WorkspaceGitRepositorySnapshot,
   WorkspaceGitSnapshot,
@@ -43,7 +41,11 @@ import {
 } from "./ChangesPanel";
 import { IconButton } from "./ui";
 import { CommitDialog } from "./CommitDialog";
-import PullRequestDialog from "./PullRequestDialog";
+
+const PreMergeConfidenceLauncher = lazy(async () => {
+  const module = await import("./PreMergeConfidenceLauncher");
+  return { default: module.PreMergeConfidenceLauncher };
+});
 
 type ForwardedChangesProps = Omit<
   ChangesPanelProps,
@@ -83,16 +85,6 @@ export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
   onActionError?: (message: string) => void;
   changesRequest?: WorkspaceChangesRequest | null;
   onChangesRequestHandled?: (revision: number) => void;
-}
-
-interface PullRequestDialogScope {
-  projectId: string;
-  conversationId?: string;
-  repositoryPath: string;
-  actionRevision: string;
-  authorityRef: string;
-  initialTitle: string;
-  forge: GitForge;
 }
 
 function fileStatus(file: ChangedFile): string {
@@ -239,9 +231,6 @@ export function WorkspaceChangesPanel({
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
-  const [pullRequestDialogScope, setPullRequestDialogScope] = useState<
-    PullRequestDialogScope | null
-  >(null);
   const [commitDiff, setCommitDiff] = useState<WorkspaceGitDiffSnapshot | null>(null);
   const [commitDiffLoading, setCommitDiffLoading] = useState(false);
   const [commitDiffError, setCommitDiffError] = useState<string | null>(null);
@@ -370,21 +359,6 @@ export function WorkspaceChangesPanel({
     setCommitDiffLoading(false);
     setCommitDiffError(null);
   }, [activeRepositoryActionRevision, activeRepositoryPath]);
-
-  useEffect(() => {
-    setPullRequestDialogScope((current) => current
-      && current.projectId === projectId
-      && current.conversationId === conversationId
-      && current.repositoryPath === activeRepositoryPath
-      && current.actionRevision === activePullRequestActionRevision
-      ? current
-      : null);
-  }, [
-    activePullRequestActionRevision,
-    activeRepositoryPath,
-    conversationId,
-    projectId,
-  ]);
 
   useEffect(() => {
     if (!changesRequest || !snapshot) return;
@@ -713,31 +687,29 @@ export function WorkspaceChangesPanel({
             >
               <Upload size={12} aria-hidden="true" /><span>{pushAction?.label ?? "Push"}</span>
             </button>
-            <button
-              type="button"
-              disabled={!authorityRef || (pullRequestAction?.disabled ?? true)}
-              title={!authorityRef ? "Refresh this repository before changing it." : pullRequestAction?.detail}
-              onClick={() => {
-                if (!authorityRef) return;
-                setPullRequestDialogScope({
-                  projectId,
-                  conversationId,
-                  repositoryPath: activeRepository.repositoryPath,
-                  actionRevision: pullRequestActionRevision(activeRepository)!,
-                  authorityRef,
-                  initialTitle: activeRepository.branch ?? "Pull request",
-                  forge: activeRepository.pullRequest?.forge ?? "github",
-                });
-              }}
-            >
-              <GitPullRequest size={12} aria-hidden="true" /><span>PR</span>
-            </button>
+            <Suspense fallback={null}>
+              <PreMergeConfidenceLauncher
+                key={activePullRequestActionRevision}
+                projectId={projectId}
+                conversationId={conversationId}
+                repositoryPath={activeRepository.repositoryPath}
+                authorityRef={authorityRef}
+                forge={activeRepository.pullRequest?.forge ?? undefined}
+                initialTitle={activeRepository.branch ?? "Pull request"}
+                pullRequestBusy={busyAction === "git.pr.create" || busyAction === "git.pr.open"}
+                pullRequestDisabled={pullRequestAction?.disabled ?? true}
+                pullRequestDetail={pullRequestAction?.detail}
+                run={run}
+              />
+            </Suspense>
           </span>
         )}
       </div>
     );
   }, [
+    activePullRequestActionRevision,
     activeRepository,
+    busyAction,
     commitDiffLoading,
     conversationId,
     nestedGitActions,
@@ -1021,25 +993,6 @@ export function WorkspaceChangesPanel({
             setCommitDiffError(null);
             onRefresh();
           }}
-        />
-      )}
-      {pullRequestDialogScope
-        && pullRequestDialogScope.projectId === projectId
-        && pullRequestDialogScope.conversationId === conversationId
-        && pullRequestDialogScope.repositoryPath === activeRepositoryPath
-        && pullRequestDialogScope.actionRevision === activePullRequestActionRevision
-        && run && (
-        <PullRequestDialog
-          open
-          initialTitle={pullRequestDialogScope.initialTitle}
-          busy={busyAction === "git.pr.create" || busyAction === "git.pr.open"}
-          projectId={pullRequestDialogScope.projectId}
-          conversationId={pullRequestDialogScope.conversationId}
-          repositoryPath={pullRequestDialogScope.repositoryPath}
-          authorityRef={pullRequestDialogScope.authorityRef}
-          forge={pullRequestDialogScope.forge}
-          run={run}
-          onClose={() => setPullRequestDialogScope(null)}
         />
       )}
     </>

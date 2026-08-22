@@ -23,6 +23,7 @@ describe("source-control command authority", () => {
       reviewReceipt,
     }],
     ["git.push", {}],
+    ["git.pr.confidence", {}],
     ["git.pr.open", {}],
   ] as const)("validates chat ownership before tracking %s", async (
     type,
@@ -60,6 +61,7 @@ describe("source-control command authority", () => {
     ["git.branch.switch", { name: "main" }],
     ["git.pull", {}],
     ["git.push", {}],
+    ["git.pr.confidence", {}],
     ["git.pr.open", {}],
     ["git.pr.create", {
       title: "Reviewed pull request",

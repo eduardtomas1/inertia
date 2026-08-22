@@ -12,6 +12,9 @@ export const loadGoalPanel = createSurfaceLoader(() => import("./GoalPanel"));
 export const loadHistoricalDiffPanel = createSurfaceLoader(() => import("./HistoricalDiffPanel"));
 export const loadMultiSpawnDialog = createSurfaceLoader(() => import("./MultiSpawnDialog"));
 export const loadPlanPanel = createSurfaceLoader(() => import("./PlanPanel"));
+export const loadPreMergeConfidenceLauncher = createSurfaceLoader(
+  () => import("./PreMergeConfidenceLauncher"),
+);
 export const loadPreviewPanel = createSurfaceLoader(() => import("./PreviewPanel"));
 export const loadProviderAuthDialog = createSurfaceLoader(() => import("./ProviderAuthDialog"));
 export const loadSettingsView = createSurfaceLoader(async () => ({
@@ -37,6 +40,7 @@ export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
   } else if (tab === "changes") {
     void loadWorkspaceChangesPanel();
     void loadHistoricalDiffPanel();
+    void loadPreMergeConfidenceLauncher();
   } else if (tab === "files") {
     void loadFilesPanel();
   } else if (tab === "terminal") {

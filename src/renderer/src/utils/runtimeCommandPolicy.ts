@@ -146,6 +146,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "git.commit": gitMutation,
   "git.diff": gitRead,
   "git.pr.open": gitMutation,
+  "git.pr.confidence": gitRead,
   "git.pr.create": gitMutation,
   "git.pull": gitMutation,
   "git.push": gitMutation,

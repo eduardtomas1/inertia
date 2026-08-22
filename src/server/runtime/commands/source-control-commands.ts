@@ -3,10 +3,7 @@ import { resolve } from "node:path";
 
 import WebSocket from "ws";
 
-import type {
-  GitStatusSnapshot,
-  ServerEvent,
-} from "../../../shared/contracts";
+import type { GitStatusSnapshot, ServerEvent } from "../../../shared/contracts";
 import {
   GIT_READ_OPERATION_TIMEOUT_MS,
   WORKSPACE_GIT_DISCOVERY_TIMEOUT_MS,
@@ -30,21 +27,10 @@ import {
   switchBranch,
 } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
-import {
-  changedFiles,
-  emptyGitStatusSnapshot,
-  gitStatusSnapshot,
-} from "../../runtime-snapshots";
-import {
-  TurnGitArtifactError,
-  type TurnGitArtifactManager,
-} from "../../turn-git-artifacts";
+import { changedFiles, emptyGitStatusSnapshot, gitStatusSnapshot } from "../../runtime-snapshots";
+import { TurnGitArtifactError, type TurnGitArtifactManager } from "../../turn-git-artifacts";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
-import {
-  isContained,
-  repositoryMetadataMarkerIdentity,
-  repositoryRoot,
-} from "../../git/paths";
+import { isContained, repositoryMetadataMarkerIdentity, repositoryRoot } from "../../git/paths";
 import {
   discoverWorkspaceGitRepositories,
   resolveWorkspaceGitRepository,
@@ -59,6 +45,7 @@ import {
   type RuntimeCommandHandler,
 } from "./command-router";
 import { reconcileReviews } from "./review-support";
+import { handlePreMergeConfidenceCommand } from "./pre-merge-confidence-command";
 import {
   mapWithinSourceControlDeadline,
   settleSourceControlInspections,
@@ -303,6 +290,7 @@ export function createSourceControlCommandHandler(
     "git.commit",
     "git.push",
     "git.pr.open",
+    "git.pr.confidence",
     "git.pr.create",
   ], async (socket, command) => {
     switch (command.type) {
@@ -1151,6 +1139,15 @@ export function createSourceControlCommandHandler(
           },
         });
         return "handled";
+      }
+      case "git.pr.confidence": {
+        return await handlePreMergeConfidenceCommand({
+          socket,
+          command,
+          resolveRepository: resolveCommandRepository,
+          runVerified: runVerifiedRepositoryOperation,
+          send: dependencies.send,
+        });
       }
       case "git.pr.open": {
         const repository = await resolveCommandRepository(

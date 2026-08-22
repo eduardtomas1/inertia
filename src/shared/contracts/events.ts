@@ -41,6 +41,7 @@ import type {
   DiffReviewSummary,
   DiffSelectionReviewAnswer,
   GitDiffSnapshot,
+  GitPreMergeConfidence,
   GitStatusSnapshot,
   TurnGitDiffSnapshot,
   WorkspaceGitDiffSnapshot,
@@ -175,6 +176,7 @@ export type ServerEvent =
         | { kind: "review.selection.answer"; answer: DiffSelectionReviewAnswer }
         | { kind: "review.summary"; summary: DiffReviewSummary }
         | { kind: "git.branches"; branches: GitBranchInfo[] }
+        | { kind: "git.pr.confidence"; confidence: GitPreMergeConfidence }
         | ({ kind: "workspace.entries" } & WorkspaceEntriesPage)
         | {
             kind: "workspace.file";

@@ -71,6 +71,7 @@ describe("workspace Git command contracts", () => {
     for (const command of [
       { type: "git.pull", requestId, payload: scoped },
       { type: "git.push", requestId, payload: scoped },
+      { type: "git.pr.confidence", requestId, payload: scoped },
       { type: "git.pr.open", requestId, payload: scoped },
       {
         type: "git.pr.create",
@@ -88,6 +89,7 @@ describe("workspace Git command contracts", () => {
       "git.branch.switch",
       "git.pull",
       "git.push",
+      "git.pr.confidence",
       "git.pr.open",
       "git.pr.create",
     ] as const) {

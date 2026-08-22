@@ -22,6 +22,7 @@ const budgets = {
   deferredSpreadsheetJavaScript: 510 * kibibyte,
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
+  preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
   // Rare deferred surfaces have strict ceilings below, while their shared
@@ -118,6 +119,9 @@ const mainWorkbenchJavaScript = assetNames.find(
 const detachedChatJavaScript = assetNames.find(
   (name) => /^DetachedChatApp-.*\.js$/u.test(name),
 );
+const preMergeConfidenceJavaScript = assetNames.find(
+  (name) => /^PreMergeConfidenceLauncher-.*\.js$/u.test(name),
+);
 const detachedChatCss = assetNames.find(
   (name) => /^DetachedChatApp-.*\.css$/u.test(name),
 );
@@ -175,6 +179,11 @@ if (!detachedChatJavaScript) {
     "Renderer bundle check could not find the detached-chat surface.",
   );
 }
+if (!preMergeConfidenceJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred pre-merge confidence surface.",
+  );
+}
 if (!detachedChatCss) {
   throw new Error(
     "Renderer bundle check could not find the detached-chat stylesheet.",
@@ -201,6 +210,9 @@ const mainWorkbenchJavaScriptClosure = await javaScriptClosure(
 const detachedChatJavaScriptClosure = await javaScriptClosure(
   detachedChatJavaScript,
 );
+const preMergeConfidenceJavaScriptClosure = await javaScriptClosure(
+  preMergeConfidenceJavaScript,
+);
 if (mainWorkbenchJavaScriptClosure.has(detachedChatJavaScript)) {
   throw new Error(
     "Renderer bundle check found the detached-chat surface in the main workbench route.",
@@ -209,6 +221,11 @@ if (mainWorkbenchJavaScriptClosure.has(detachedChatJavaScript)) {
 if (detachedChatJavaScriptClosure.has(mainWorkbenchJavaScript)) {
   throw new Error(
     "Renderer bundle check found the main workbench surface in the detached-chat route.",
+  );
+}
+if (mainWorkbenchJavaScriptClosure.has(preMergeConfidenceJavaScript)) {
+  throw new Error(
+    "Renderer bundle check found the pre-merge confidence surface in the main workbench route.",
   );
 }
 const filesJavaScriptClosure = await javaScriptClosure(filesJavaScript);
@@ -262,6 +279,10 @@ const detachedChatJavaScriptBytes = await closureBytes(
   detachedChatJavaScriptClosure,
   mainWorkbenchJavaScriptClosure,
 );
+const preMergeConfidenceJavaScriptBytes = await closureBytes(
+  preMergeConfidenceJavaScriptClosure,
+  mainWorkbenchJavaScriptClosure,
+);
 const morphiconsJavaScriptBytes = await assetBytes(
   `assets/${morphiconsJavaScript}`,
 );
@@ -294,6 +315,7 @@ const coreJavaScriptBytes =
   - deferredSpreadsheetJavaScriptBytes
   - deferredDiscordSettingsJavaScriptBytes
   - detachedChatJavaScriptBytes
+  - preMergeConfidenceJavaScriptBytes
   // The dependency and feature adapter each have strict ceilings above, so do
   // not charge the same isolated bytes to multiple independent budgets.
   - morphiconsJavaScriptBytes
@@ -315,6 +337,7 @@ const measurements = {
   deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,
   deferredDiscordSettingsJavaScript: deferredDiscordSettingsJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,
+  preMergeConfidenceJavaScript: preMergeConfidenceJavaScriptBytes,
   morphiconsJavaScript: morphiconsJavaScriptBytes,
   morphingIconFeedbackJavaScript: morphingIconFeedbackJavaScriptBytes,
   coreJavaScript: coreJavaScriptBytes,

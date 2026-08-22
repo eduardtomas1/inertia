@@ -370,6 +370,59 @@ const gitStatus = { isRepository: true, authorityRef: "authority-1", root: "/rep
   branch: "main", upstream: "origin/main", ahead: 0, behind: 0, hasRemote: true,
   pullRequest, files: [changedFile], insertions: 2, deletions: 1,
 };
+const preMergeConfidence = {
+  generatedAt: checkedAt,
+  state: "ready",
+  unavailableReason: null,
+  local: {
+    branch: "feature/confidence",
+    head: "a".repeat(40),
+    dirty: false,
+    files: [],
+    filesTruncated: false,
+  },
+  github: {
+    repository: "openai/codex",
+    number: 42,
+    url: "https://github.com/openai/codex/pull/42",
+    title: "Confidence",
+    state: "OPEN",
+    draft: false,
+    headBranch: "feature/confidence",
+    head: "a".repeat(40),
+    baseBranch: "main",
+    mergeState: "CLEAN",
+    reviewDecision: "APPROVED",
+    updatedAt: checkedAt,
+  },
+  identity: { state: "exact", detail: "Exact head." },
+  checks: [{
+    name: "Linux x64",
+    workflow: "CI",
+    state: "passed",
+    detailsUrl: null,
+    startedAt: checkedAt,
+    completedAt: checkedAt,
+  }],
+  checksTruncated: false,
+  platforms: [
+    { platform: "Linux", state: "passed", checks: ["Linux x64"] },
+    { platform: "Windows", state: "missing", checks: [] },
+    { platform: "macOS", state: "missing", checks: [] },
+  ],
+  reviewThreads: [],
+  reviewThreadsTruncated: false,
+  files: [{ path: "src/example.ts", area: "Shared contracts", insertions: 2, deletions: 1 }],
+  totalFiles: 1,
+  filesTruncated: false,
+  areas: [{ name: "Shared contracts", files: 1 }],
+  changedTestFiles: [],
+  focusedTestChecks: ["Linux x64"],
+  bundle: { state: "not-published", summary: "No delta." },
+  authorClaim: null,
+  mergeReadiness: { state: "blocked", blockers: ["Windows coverage is missing."] },
+  releaseReadiness: { state: "not-proven", detail: "Tag workflow required." },
+};
 describe("server event request-result trust boundary", () => {
   it.each([
     { kind: "backend.profile", profile: backendProfile },
@@ -397,6 +450,7 @@ describe("server event request-result trust boundary", () => {
       kind: "git.branches",
       branches: [{ name: "main", current: true, remote: false, worktreePath: null }],
     },
+    { kind: "git.pr.confidence", confidence: preMergeConfidence },
     {
       kind: "project.actions",
       actions: [{ id: "test", label: "Test", command: "npm test", preview: false }],
@@ -612,6 +666,13 @@ describe("server event request-result trust boundary", () => {
       },
     },
     { kind: "git.branches", branches: [{ name: "main", current: "yes" }] },
+    {
+      kind: "git.pr.confidence",
+      confidence: {
+        ...preMergeConfidence,
+        checks: [{ ...preMergeConfidence.checks[0], state: "green-ish" }],
+      },
+    },
     { kind: "project.actions", actions: [{ id: "test", label: "Test", command: "x", preview: "no" }] },
     { kind: "duo.pending", launchIds: [7], hasMore: false },
     {

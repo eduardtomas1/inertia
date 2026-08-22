@@ -627,9 +627,9 @@ describe("WorkspaceChangesPanel repository scope", () => {
       ({ repositoryPath }) => repositoryPath === "modules/alpha",
     )!.behind = 0;
     view.rerender(panel(synchronized));
-    fireEvent.click(within(await screen.findByLabelText(
+    fireEvent.click(await within(await screen.findByLabelText(
       "Actions for modules/alpha",
-    )).getByRole("button", { name: "PR" }));
+    )).findByRole("button", { name: "PR" }));
     const pullRequestDialog = await screen.findByRole("dialog", {
       name: "Create GitHub pull request",
     });
@@ -983,9 +983,9 @@ describe("WorkspaceChangesPanel repository scope", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Repository scope" }), {
       target: { value: "modules/alpha" },
     });
-    fireEvent.click(within(await screen.findByLabelText(
+    fireEvent.click(await within(await screen.findByLabelText(
       "Actions for modules/alpha",
-    )).getByRole("button", { name: "PR" }));
+    )).findByRole("button", { name: "PR" }));
     const dialog = await screen.findByRole("dialog", {
       name: "Create GitHub pull request",
     });
@@ -1066,9 +1066,9 @@ describe("WorkspaceChangesPanel repository scope", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Repository scope" }), {
       target: { value: "modules/alpha" },
     });
-    fireEvent.click(within(await screen.findByLabelText(
+    fireEvent.click(await within(await screen.findByLabelText(
       "Actions for modules/alpha",
-    )).getByRole("button", { name: "PR" }));
+    )).findByRole("button", { name: "PR" }));
     expect(await screen.findByRole("dialog", {
       name: "Create GitHub pull request",
     })).toBeInTheDocument();

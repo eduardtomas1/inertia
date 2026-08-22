@@ -59,6 +59,11 @@ interface AppFixtureOptions {
   codexAppServerSource?: string;
   codexResumeSource?: string;
   claudeAuthSource?: string;
+  githubCliSources?: {
+    pr: string;
+    api: string;
+    excludedFiles?: string[];
+  };
   beforeLaunch?: (fixture: {
     testDirectory: string;
     workspaceDirectory: string;
@@ -382,9 +387,12 @@ export async function createAppFixture(
         ]),
     );
   }
-  if (options.claudeAuthSource) {
+  if (options.claudeAuthSource || options.githubCliSources) {
     providerBinDirectory = join(testDirectory, "provider-bin");
     await mkdir(providerBinDirectory, { recursive: true });
+  }
+  if (options.claudeAuthSource) {
+    if (!providerBinDirectory) throw new Error("Provider fixture bin was not created.");
     portableNodeExecutable(providerBinDirectory, "claude");
     await Promise.all([
       writeFile(
@@ -395,6 +403,32 @@ export async function createAppFixture(
       writeFile(
         join(workspace.workspaceDirectory, ".git", "info", "exclude"),
         "auth\n",
+        { encoding: "utf8", flag: "a" },
+      ),
+    ]);
+  }
+  if (options.githubCliSources) {
+    if (!providerBinDirectory) throw new Error("GitHub fixture bin was not created.");
+    portableNodeExecutable(providerBinDirectory, "gh");
+    await Promise.all([
+      writeFile(
+        join(workspace.workspaceDirectory, "pr"),
+        options.githubCliSources.pr,
+        "utf8",
+      ),
+      writeFile(
+        join(workspace.workspaceDirectory, "api"),
+        options.githubCliSources.api,
+        "utf8",
+      ),
+      writeFile(
+        join(workspace.workspaceDirectory, ".git", "info", "exclude"),
+        [
+          "pr",
+          "api",
+          ...(options.githubCliSources.excludedFiles ?? []),
+          "",
+        ].join("\n"),
         { encoding: "utf8", flag: "a" },
       ),
     ]);

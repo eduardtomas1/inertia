@@ -1218,7 +1218,7 @@ async function openAndCloseToolCycle(page: Page): Promise<void> {
   await openWorkspaceTools(page);
   const tools = page.getByRole("complementary", { name: "Workspace tools" });
   await selectWorkspaceTool(tools, "Files");
-  await tools.getByRole("tree", { name: "Workspace files" }).waitFor();
+  await tools.getByRole("tree", { name: "Files" }).waitFor();
   await selectWorkspaceTool(tools, "Terminal");
   await tools.locator(".terminal-panel[data-terminal-id]").waitFor();
   await tools.getByRole("button", { name: "Close terminal" }).first().click();
@@ -1411,7 +1411,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     const tools = cold.page.getByRole("complementary", { name: "Workspace tools" });
     const fileTreeStartedAt = performance.now();
     await selectWorkspaceTool(tools, "Files");
-    await tools.getByRole("tree", { name: "Workspace files" }).waitFor();
+    await tools.getByRole("tree", { name: "Files" }).waitFor();
     const fileTreeMs = performance.now() - fileTreeStartedAt;
 
     const terminalStartedAt = performance.now();

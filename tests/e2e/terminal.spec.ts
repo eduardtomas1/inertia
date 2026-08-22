@@ -265,7 +265,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
 
   const search = panel.getByRole("searchbox", { name: "Search files" });
   await search.fill("deep");
-  const searchTree = panel.getByRole("tree", { name: "Workspace file search results" });
+  const searchTree = panel.getByRole("tree", { name: "Search results" });
   const deepResult = searchTree.getByRole("treeitem").filter({ hasText: "deep" }).first();
   await expect(deepResult).toHaveAttribute("title", "src/components/deep");
   await deepResult.press("Enter");
@@ -281,7 +281,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
 
   await search.fill("guide");
   await expect(searchTree.getByRole("treeitem").filter({ hasText: "guide.md" })).toBeVisible();
-  await panel.getByRole("button", { name: "Clear file search" }).click();
+  await panel.getByRole("button", { name: "Clear search" }).click();
   await expect(search).toBeFocused();
   await expect(components).toHaveAttribute("aria-expanded", "true");
   await expect(deep).toHaveAttribute("aria-expanded", "true");

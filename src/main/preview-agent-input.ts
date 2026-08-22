@@ -40,6 +40,68 @@ export function ensureAgentFileChooserBlock(contents: WebContents): Promise<void
   return ready;
 }
 
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+/**
+ * Browser evidence currently has document-start credential ownership only for
+ * the top-level document. Fail closed when a page contains author-controlled
+ * nested documents or shadow roots rather than capture pixels from an
+ * unguarded DOM boundary. User-agent shadow roots are excluded because their
+ * contents are owned by Chromium, not the page.
+ */
+export function hasUnguardedAgentPageContent(
+  frameTreeResult: unknown,
+  snapshotResult: unknown,
+): boolean {
+  const frameTree = objectRecord(objectRecord(frameTreeResult)?.frameTree);
+  if (!frameTree) return true;
+  const childFrames = frameTree.childFrames;
+  if (childFrames !== undefined && (!Array.isArray(childFrames) || childFrames.length > 0)) {
+    return true;
+  }
+
+  const snapshot = objectRecord(snapshotResult);
+  const strings = snapshot?.strings;
+  const documents = snapshot?.documents;
+  if (!Array.isArray(strings) || !strings.every((value) => typeof value === "string")
+      || !Array.isArray(documents)) return true;
+  for (const document of documents) {
+    const nodes = objectRecord(objectRecord(document)?.nodes);
+    const shadowRootType = objectRecord(nodes?.shadowRootType);
+    if (!shadowRootType) continue;
+    const indexes = shadowRootType.index;
+    const values = shadowRootType.value;
+    if (!Array.isArray(indexes) || !Array.isArray(values) || indexes.length !== values.length) {
+      return true;
+    }
+    for (const value of values) {
+      if (!Number.isInteger(value)) return true;
+      const type = strings[value as number];
+      if (type === "open" || type === "closed") return true;
+    }
+  }
+  return false;
+}
+
+export async function agentPageHasUnguardedNestedContent(
+  contents: WebContents,
+): Promise<boolean> {
+  if (!contents.debugger.isAttached()) {
+    throw new Error("The Browser security debugger is unavailable.");
+  }
+  const frameTree = await contents.debugger.sendCommand("Page.getFrameTree");
+  const snapshot = await contents.debugger.sendCommand("DOMSnapshot.captureSnapshot", {
+    computedStyles: [],
+    includeDOMRects: false,
+    includePaintOrder: false,
+  });
+  return hasUnguardedAgentPageContent(frameTree, snapshot);
+}
+
 export async function setAgentPageFrozen(
   contents: WebContents,
   frozen: boolean,

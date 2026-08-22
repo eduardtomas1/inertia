@@ -6,6 +6,7 @@ export async function expectDocumentStartPrivacyGuard(
   app: AppFixture,
   conversationId: string,
   url: string,
+  forbiddenText = "document-start-password-sentinel",
 ): Promise<void> {
   const evidence = await app.electronApp.evaluate(
     async (_electron, request) => {
@@ -58,7 +59,5 @@ export async function expectDocumentStartPrivacyGuard(
     closed: { ok: true },
     restored: { ok: true },
   });
-  expect(JSON.stringify(evidence)).not.toContain(
-    "document-start-password-sentinel",
-  );
+  expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
 }

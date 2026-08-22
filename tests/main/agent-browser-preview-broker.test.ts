@@ -12,7 +12,7 @@ const electronState = vi.hoisted(() => ({
     };
     debugger: {
       isAttached: () => boolean;
-      sendCommand: ReturnType<typeof vi.fn>;
+      sendCommand: ReturnType<typeof vi.fn<(method: string) => Promise<unknown>>>;
     };
     navigationHistory: {
       canGoBack: ReturnType<typeof vi.fn>;
@@ -82,7 +82,18 @@ vi.mock("electron", () => {
       attach: vi.fn(() => { this.debugger.attached = true; }),
       detach: vi.fn(() => { this.debugger.attached = false; }),
       isAttached: vi.fn(() => this.debugger.attached),
-      sendCommand: vi.fn(async () => undefined),
+      sendCommand: vi.fn(async (method: string) => {
+        if (method === "Page.getFrameTree") {
+          return { frameTree: { frame: { id: "main" } } };
+        }
+        if (method === "DOMSnapshot.captureSnapshot") {
+          return {
+            strings: [],
+            documents: [{ nodes: { shadowRootType: { index: [], value: [] } } }],
+          };
+        }
+        return undefined;
+      }),
     };
 
     constructor() {
@@ -447,6 +458,45 @@ describe("agent-owned native Browser", () => {
     await expect(broker.perform(conversationId, { action: "screenshot" }))
       .resolves.toMatchObject({ ok: false, code: "invalid" });
     expect(capturePage).toHaveBeenCalledTimes(captures);
+  });
+
+  it("refuses evidence from unguarded nested page boundaries", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/nested-login",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    contents.debugger.sendCommand.mockImplementation(async (method: string) => {
+      if (method === "Page.getFrameTree") {
+        return {
+          frameTree: {
+            frame: { id: "main" },
+            childFrames: [{ frame: { id: "credential-frame" } }],
+          },
+        };
+      }
+      if (method === "DOMSnapshot.captureSnapshot") {
+        return { strings: [], documents: [{ nodes: {} }] };
+      }
+      return undefined;
+    });
+
+    await expect(broker.perform(conversationId, { action: "snapshot" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "invalid",
+        message: "Page evidence is unavailable for nested page content.",
+      });
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "invalid",
+        message: "Screenshots are unavailable for nested page content.",
+      });
+    expect(contents.capturePage).not.toHaveBeenCalled();
   });
 
   it("freezes visual capture and discards a screenshot when credential evidence races it", async () => {

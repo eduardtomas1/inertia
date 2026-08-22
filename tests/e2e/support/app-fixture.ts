@@ -140,6 +140,35 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-nested-privacy-start") {
+      const secret = "nested-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; frame-src 'self'",
+      });
+      response.end(
+        "<!doctype html><title>Nested privacy probe</title>"
+        + "<div id='closed-host'></div>"
+        + "<iframe title='Credential frame' src='/agent-browser-nested-privacy-frame'></iframe>"
+        + "<script>const root=document.querySelector('#closed-host').attachShadow({mode:'closed'});"
+        + "const input=document.createElement('input');input.type='password';"
+        + `input.value=${JSON.stringify(secret)};root.append(input)</script>`,
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-nested-privacy-frame") {
+      const secret = "nested-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Nested credential frame</title>"
+        + "<input id='credential' type='password'>"
+        + `<script>document.querySelector('#credential').value=${JSON.stringify(secret)}</script>`,
+      );
+      return;
+    }
     if (request.url === "/agent-browser-destination") {
       setTimeout(() => {
         response.writeHead(200, {

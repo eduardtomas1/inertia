@@ -20,12 +20,19 @@ import {
   type JsonLineDecoderFailure,
   type JsonObject,
 } from "./protocol";
+import {
+  codexCurrentTimeReadResult,
+  isCodexCurrentTimeReadMethod,
+  parseCodexCurrentTimeRead,
+  parseCodexProviderThreadId,
+} from "./app-server-requests";
 
 export const CODEX_CONTROL_MAX_FRAME_BYTES = 4 * 1024 * 1024;
 export const CODEX_CONTROL_MAX_PROTOCOL_BYTES = 16 * 1024 * 1024;
 
 interface PendingRequest {
   method: string;
+  providerThreadId?: string;
   resolve: (value: JsonObject) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
@@ -179,7 +186,14 @@ export async function withCodexControlClient<T>(
       reject(new Error(`${method} timed out.`));
     }, timeoutMs);
     timer.unref();
-    pending.set(id, { method, resolve, reject, timer });
+    const providerThreadId = parseCodexProviderThreadId(params);
+    pending.set(id, {
+      method,
+      ...(providerThreadId ? { providerThreadId } : {}),
+      resolve,
+      reject,
+      timer,
+    });
     writeMessage({ id, method, params });
   });
   const notify = (method: string, params: JsonObject = {}): void => {
@@ -200,6 +214,29 @@ export async function withCodexControlClient<T>(
       ? message.method
       : undefined;
     if (messageId !== undefined && method !== undefined) {
+      const params = objectValue(message?.params) ?? {};
+      const currentTimeRead = parseCodexCurrentTimeRead(method, params);
+      if (
+        currentTimeRead
+        && [...pending.values()].some(
+          ({ providerThreadId }) =>
+            providerThreadId === currentTimeRead.threadId,
+        )
+      ) {
+        writeMessage({ id: messageId, result: codexCurrentTimeReadResult() });
+        return;
+      }
+      if (isCodexCurrentTimeReadMethod(method)) {
+        const requestFailure = currentTimeRead
+          ? "Codex control requested the current time for an unowned provider thread."
+          : "Codex control received a malformed current-time request.";
+        writeMessage({
+          id: messageId,
+          error: { code: -32602, message: requestFailure },
+        });
+        failConnection(new Error(requestFailure));
+        return;
+      }
       // This one-shot control client has no UI/durable-turn route for server
       // requests such as approvals or elicitation. Never confuse a colliding
       // server request ID with the response to one of our pending requests.

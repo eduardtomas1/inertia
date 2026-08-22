@@ -156,6 +156,83 @@ describe("Codex control client", () => {
     );
   });
 
+  it("answers a valid current-time server request without losing pending control work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2027-01-15T08:00:00.900Z"));
+    try {
+      const currentTimeResponses: unknown[] = [];
+      const fixture = fakeChild((text) => {
+        const message = JSON.parse(text) as {
+          id?: number | string;
+          method?: string;
+          result?: unknown;
+        };
+        if (message.method === undefined) {
+          currentTimeResponses.push(message);
+          fixture.stdout.write(`${JSON.stringify({ id: 2, result: { ok: true } })}\n`);
+          return;
+        }
+        if (message.id === undefined) return;
+        if (message.method === "initialize") {
+          fixture.stdout.write(`${JSON.stringify({ id: message.id, result: {} })}\n`);
+          return;
+        }
+        fixture.stdout.write(`${JSON.stringify({
+          id: message.id,
+          method: "currentTime/read",
+          params: { threadId: "thread-1" },
+        })}\n`);
+      });
+
+      await expect(withCodexControlClient(
+        options(fixture.child),
+        async ({ request }) => await request("thread/read", {
+          threadId: "thread-1",
+        }),
+      )).resolves.toEqual({ ok: true });
+      expect(currentTimeResponses).toEqual([{
+        id: 2,
+        result: { currentTimeAt: 1_800_000_000 },
+      }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["owns no thread", "skills/list", { cwds: ["/workspace"] }],
+    ["owns a different thread", "thread/read", { threadId: "thread-owned" }],
+  ])("rejects current-time reads when pending control work %s", async (
+    _label,
+    controlMethod,
+    controlParams,
+  ) => {
+    const fixture = fakeChild((text) => {
+      const message = JSON.parse(text) as {
+        id?: number;
+        method: string;
+      };
+      if (message.id === undefined) return;
+      if (message.method === "initialize") {
+        fixture.stdout.write(`${JSON.stringify({
+          id: message.id,
+          result: {},
+        })}\n`);
+        return;
+      }
+      fixture.stdout.write(`${JSON.stringify({
+        id: message.id,
+        method: "currentTime/read",
+        params: { threadId: "thread-unowned" },
+      })}\n`);
+    });
+
+    await expect(withCodexControlClient(
+      options(fixture.child),
+      async ({ request }) => await request(controlMethod, controlParams),
+    )).rejects.toThrow("unowned provider thread");
+  });
+
   it("fails closed on a server request even when its ID collides", async () => {
     const fixture = fakeChild((text) => {
       const message = JSON.parse(text) as {

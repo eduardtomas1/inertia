@@ -81,6 +81,105 @@ function interactionHarness() {
 }
 
 describe("Codex App Server interaction ownership", () => {
+  it("answers current-time reads only for an owned provider thread", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2027-01-15T08:00:00.900Z"));
+    try {
+      const owned = interactionHarness();
+      try {
+        owned.events.handleServerRequest(
+          "current-time",
+          "currentTime/read",
+          { threadId: ROOT_THREAD_ID },
+        );
+        expect(owned.writes).toEqual([{
+          id: "current-time",
+          result: { currentTimeAt: 1_800_000_000 },
+        }]);
+        expect(owned.cancel).not.toHaveBeenCalled();
+      } finally {
+        owned.events.dispose();
+      }
+
+      const foreign = interactionHarness();
+      try {
+        foreign.events.handleServerRequest(
+          "foreign-current-time",
+          "currentTime/read",
+          { threadId: "foreign-thread" },
+        );
+        expect(foreign.writes).toContainEqual({
+          id: "foreign-current-time",
+          error: expect.objectContaining({ code: -32602 }),
+        });
+        expect(foreign.cancel).toHaveBeenCalledOnce();
+      } finally {
+        foreign.events.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("declines owned MCP elicitation without pretending question parity", () => {
+    const harness = interactionHarness();
+    try {
+      harness.events.handleServerRequest(
+        "mcp-elicitation",
+        "mcpServer/elicitation/request",
+        {
+          threadId: ROOT_THREAD_ID,
+          turnId: ROOT_TURN_ID,
+          serverName: "example-mcp",
+          mode: "form",
+          message: "Enter a constrained value",
+          requestedSchema: {
+            type: "object",
+            properties: { count: { type: "integer", minimum: 1 } },
+          },
+          _meta: null,
+        },
+      );
+
+      expect(harness.inputs).toEqual([]);
+      expect(harness.writes).toContainEqual({
+        id: "mcp-elicitation",
+        result: { action: "decline", content: null, _meta: null },
+      });
+      expect(harness.cancel).not.toHaveBeenCalled();
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
+  it("rejects MCP elicitation outside the exact owned provider turn", () => {
+    const harness = interactionHarness();
+    try {
+      harness.events.handleServerRequest(
+        "foreign-mcp-elicitation",
+        "mcpServer/elicitation/request",
+        {
+          threadId: ROOT_THREAD_ID,
+          turnId: "foreign-turn",
+          serverName: "example-mcp",
+          mode: "url",
+          message: "Open the authorization page",
+          url: "https://example.test/authorize",
+          elicitationId: "elicitation-1",
+          _meta: null,
+        },
+      );
+
+      expect(harness.writes).toContainEqual({
+        id: "foreign-mcp-elicitation",
+        error: expect.objectContaining({ code: -32602 }),
+      });
+      expect(harness.cancel).toHaveBeenCalledOnce();
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
   it.each([
     ["foreign-thread", ROOT_TURN_ID],
     [ROOT_THREAD_ID, "foreign-turn"],

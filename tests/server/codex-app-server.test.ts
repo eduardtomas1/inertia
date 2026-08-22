@@ -310,6 +310,7 @@ describe.sequential("Codex App Server runtime", () => {
       expect.objectContaining({ phase: "failed", label: "MCP server failed to start · workspace-tools", detail: expect.stringContaining("Authentication must be renewed") }),
       expect.objectContaining({ phase: "started", label: "Approval auto-review started", activityId: "review-rich", detail: expect.stringContaining("npm run check") }),
       expect.objectContaining({ phase: "completed", label: "Approval auto-review approved", activityId: "review-rich", detail: expect.stringContaining("Risk: low") }),
+      expect.objectContaining({ phase: "info", label: "Approval auto-review escalated to strict review" }),
       expect.objectContaining({ phase: "started", label: "Codex is applying a safety review", detail: expect.stringContaining("Verifying trusted access") }),
       expect.objectContaining({ phase: "info", label: "Additional model verification required", detail: expect.stringContaining("trustedAccessForCyber") }),
       expect.objectContaining({ phase: "completed", label: "Codex safety review completed" }),

@@ -286,7 +286,7 @@ async function main() {
       }
     });
 
-    await check("Codex generated notification discriminants are exhaustively reviewed", async () => {
+    await check("Codex generated server discriminants are exhaustively reviewed", async () => {
       const generatedRoot = join(options.workspace, "codex-app-server-types");
       await mkdir(generatedRoot, { recursive: true });
       await requireSuccessfulCommand(
@@ -299,41 +299,51 @@ async function main() {
           allowEmpty: true,
         },
       );
-      const generated = await readFile(
-        join(generatedRoot, "ServerNotification.ts"),
-        "utf8",
-      );
-      const generatedMethods = [...generated.matchAll(
-        /"method"\s*:\s*"([^"]+)"/gu,
-      )].map((match) => match[1]).sort();
-      const dispositions = await readFile(
-        join(
-          repositoryRoot,
-          "src",
-          "server",
-          "codex",
-          "app-server-notifications.ts",
-        ),
-        "utf8",
-      );
-      const table = dispositions.match(
-        /CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS\s*=\s*\{([\s\S]*?)\}\s*as const/u,
-      )?.[1] ?? "";
-      const reviewedMethods = [...table.matchAll(
-        /^\s*(?:"([^"]+)"|([A-Za-z][A-Za-z0-9]*))\s*:/gmu,
-      )].map((match) => match[1] ?? match[2]).sort();
-      if (generatedMethods.length === 0) {
-        throw new Error("Codex generated no ServerNotification discriminants.");
-      }
-      if (JSON.stringify(generatedMethods) !== JSON.stringify(reviewedMethods)) {
-        const generatedSet = new Set(generatedMethods);
-        const reviewedSet = new Set(reviewedMethods);
-        const added = generatedMethods.filter((method) => !reviewedSet.has(method));
-        const removed = reviewedMethods.filter((method) => !generatedSet.has(method));
-        throw new Error(
-          `Codex notification surface drifted. Added: ${added.join(", ") || "none"}; removed: ${removed.join(", ") || "none"}.`,
+      const compareGeneratedMethods = async ({
+        generatedFile,
+        dispositionFile,
+        tableName,
+        surface,
+      }) => {
+        const generated = await readFile(join(generatedRoot, generatedFile), "utf8");
+        const generatedMethods = [...generated.matchAll(
+          /"method"\s*:\s*"([^"]+)"/gu,
+        )].map((match) => match[1]).sort();
+        const dispositions = await readFile(
+          join(repositoryRoot, "src", "server", "codex", dispositionFile),
+          "utf8",
         );
-      }
+        const table = dispositions.match(
+          new RegExp(`${tableName}\\s*=\\s*\\{([\\s\\S]*?)\\}\\s*as const`, "u"),
+        )?.[1] ?? "";
+        const reviewedMethods = [...table.matchAll(
+          /^\s*(?:"([^"]+)"|([A-Za-z][A-Za-z0-9]*))\s*:/gmu,
+        )].map((match) => match[1] ?? match[2]).sort();
+        if (generatedMethods.length === 0) {
+          throw new Error(`Codex generated no ${surface} discriminants.`);
+        }
+        if (JSON.stringify(generatedMethods) !== JSON.stringify(reviewedMethods)) {
+          const generatedSet = new Set(generatedMethods);
+          const reviewedSet = new Set(reviewedMethods);
+          const added = generatedMethods.filter((method) => !reviewedSet.has(method));
+          const removed = reviewedMethods.filter((method) => !generatedSet.has(method));
+          throw new Error(
+            `Codex ${surface} surface drifted. Added: ${added.join(", ") || "none"}; removed: ${removed.join(", ") || "none"}.`,
+          );
+        }
+      };
+      await compareGeneratedMethods({
+        generatedFile: "ServerNotification.ts",
+        dispositionFile: "app-server-notifications.ts",
+        tableName: "CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS",
+        surface: "notification",
+      });
+      await compareGeneratedMethods({
+        generatedFile: "ServerRequest.ts",
+        dispositionFile: "app-server-requests.ts",
+        tableName: "CODEX_APP_SERVER_REQUEST_DISPOSITIONS",
+        surface: "request",
+      });
     });
 
     await check("Claude latest CLI exposes version and authentication help", async () => {

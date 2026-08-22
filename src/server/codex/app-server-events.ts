@@ -41,6 +41,9 @@ import {
   parseCodexOwnedInputRequest,
 } from "./questions";
 import {
+  handleCodexAuxiliaryServerRequest,
+} from "./app-server-requests";
+import {
   handleCodexHook,
   handleCodexItem,
   type CodexItemActivity,
@@ -493,6 +496,20 @@ export class CodexAppServerEvents {
       this.host.cancel();
       return;
     }
+
+    if (handleCodexAuxiliaryServerRequest({
+      id,
+      method,
+      params,
+      isOwnedProviderThread: (threadId) => this.isOwnedProviderThread(threadId),
+      isOwnedProviderTurn: (threadId, turnId) =>
+        this.subagents.isOwnedProviderTurn(threadId, turnId),
+      writeMessage: this.host.writeMessage,
+      setLastError: this.host.setLastError,
+      emitActivity: (activityPhase, label) =>
+        this.emitActivity("system", activityPhase, label),
+      cancel: this.host.cancel,
+    })) return;
 
     this.host.writeMessage({
       id,

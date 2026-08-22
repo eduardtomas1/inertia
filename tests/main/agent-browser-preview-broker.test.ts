@@ -109,6 +109,10 @@ const pageTools = vi.hoisted(() => ({
 vi.mock("../../src/main/preview-agent-page", () => pageTools);
 
 import { PreviewBroker } from "../../src/main/preview-broker";
+import {
+  MAX_AGENT_BROWSER_TEXT_BYTES,
+  parseAgentBrowserResult,
+} from "../../src/shared/agent-browser";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 
@@ -287,6 +291,38 @@ describe("agent-owned native Browser", () => {
       ok: true,
       state: { activeTabId: secondTabId },
     });
+  });
+
+  it("keeps maximum tab state valid within the broker text boundary", async () => {
+    const { broker } = harness();
+    const longPath = "x".repeat(3_900);
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/" + longPath,
+    });
+    for (let index = 1; index < 8; index += 1) {
+      await expect(broker.perform(conversationId, {
+        action: "tab-open",
+        url: "http://127.0.0.1:3000/" + longPath + index,
+      })).resolves.toMatchObject({ ok: true });
+    }
+
+    const result = await broker.perform(conversationId, { action: "tabs" });
+    expect(result.ok).toBe(true);
+    expect(parseAgentBrowserResult(result)).not.toBeNull();
+    if (!result.ok) return;
+    expect(Buffer.byteLength(result.text, "utf8"))
+      .toBeLessThanOrEqual(MAX_AGENT_BROWSER_TEXT_BYTES);
+    const text = JSON.parse(result.text) as {
+      truncated: boolean;
+      tabs: Array<{ title: string; url: string }>;
+    };
+    expect(text.truncated).toBe(true);
+    expect(text.tabs).toHaveLength(8);
+    expect(text.tabs.every((tab) =>
+      tab.title.length <= 120 && tab.url.length <= 1_024
+    )).toBe(true);
   });
 
   it("fails closed for remote agent navigation, stale ownership, and tab overflow", async () => {

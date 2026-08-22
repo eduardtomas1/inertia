@@ -139,13 +139,16 @@ export async function semanticPageSnapshot(
       || element.tagName.toLowerCase(),
       50,
     );
+    const passwordField = (element) =>
+      element.tagName === "INPUT"
+      && String(element.type || "").toLowerCase() === "password";
     const nameFor = (element) => normalize(
       element.getAttribute("aria-label")
       || element.getAttribute("title")
       || element.getAttribute("placeholder")
       || (element.labels && element.labels[0]?.innerText)
       || element.innerText
-      || element.value,
+      || (passwordField(element) ? "Password field" : element.value),
     );
     const selector = [
       "a[href]", "button", "input", "textarea", "select", "summary",
@@ -168,7 +171,9 @@ export async function semanticPageSnapshot(
         name: nameFor(element),
         disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
         checked: typeof element.checked === "boolean" ? element.checked : undefined,
-        value: typeof element.value === "string" ? normalize(element.value, 500) : undefined,
+        value: typeof element.value === "string"
+          ? passwordField(element) ? "[redacted]" : normalize(element.value, 500)
+          : undefined,
         rect: {
           x: Math.round(rect.x), y: Math.round(rect.y),
           width: Math.round(rect.width), height: Math.round(rect.height),
@@ -203,6 +208,17 @@ export async function locateAgentPageRef(
       || rect.top >= innerHeight || rect.left >= innerWidth
       || style.visibility === "hidden" || style.display === "none"
       || Number(style.opacity || "1") <= 0) return { found: false };
+    const left = Math.max(0, rect.left);
+    const top = Math.max(0, rect.top);
+    const right = Math.min(innerWidth, rect.right);
+    const bottom = Math.min(innerHeight, rect.bottom);
+    if (right <= left || bottom <= top) return { found: false };
+    const x = left + (right - left) / 2;
+    const y = top + (bottom - top) / 2;
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || (hit !== element && !element.contains(hit))) {
+      return { found: false };
+    }
     if (${focus ? "true" : "false"}) {
       element.focus({ preventScroll: false });
       if (${replace ? "true" : "false"}) {
@@ -216,10 +232,17 @@ export async function locateAgentPageRef(
     return {
       found: true,
       disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
-      label: String(element.getAttribute("aria-label") || element.innerText || element.value || "element")
+      label: String(
+        element.getAttribute("aria-label")
+        || element.innerText
+        || (element.tagName === "INPUT" && String(element.type || "").toLowerCase() === "password"
+          ? "Password field"
+          : element.value)
+        || "element"
+      )
         .replace(/\\s+/gu, " ").trim().slice(0, 300),
-      x: rect.x + rect.width / 2,
-      y: rect.y + rect.height / 2,
+      x,
+      y,
     };
   })()`);
   return target(value);

@@ -17,7 +17,10 @@ import type {
   AgentBrowserState,
   AgentBrowserTab,
 } from "../shared/agent-browser.js";
-import { MAX_AGENT_BROWSER_SCREENSHOT_BYTES } from "../shared/agent-browser.js";
+import {
+  MAX_AGENT_BROWSER_SCREENSHOT_BYTES,
+  MAX_AGENT_BROWSER_TEXT_BYTES,
+} from "../shared/agent-browser.js";
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
@@ -264,7 +267,7 @@ export class PreviewBroker {
           case "scroll":
             return this.#scroll(ownerId, slot, command.deltaY, signal);
           case "tabs":
-            return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+            return this.#success(slot, this.#agentStateText(slot));
           case "tab-open":
             return await this.#agentOpenTab(ownerId, slot, command.url, signal);
           case "tab-activate":
@@ -273,14 +276,14 @@ export class PreviewBroker {
             }
             this.#activateTab(ownerId, slot, command.tabId);
             this.#record(ownerId, slot, "tab-activate", "Agent switched pages");
-            return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+            return this.#success(slot, this.#agentStateText(slot));
           case "tab-close":
             if (!slot.tabs.has(command.tabId)) {
               return failure("not-found", "That Inertia Browser tab no longer exists.");
             }
             this.#closeTab(ownerId, slot, command.tabId);
             this.#record(ownerId, slot, "tab-close", "Agent closed a page");
-            return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+            return this.#success(slot, this.#agentStateText(slot));
         }
       } finally {
         release();
@@ -441,6 +444,32 @@ export class PreviewBroker {
     };
   }
 
+  #agentStateText(
+    slot: PreviewSlot,
+    detail?: Record<string, unknown>,
+  ): string {
+    const state = this.#agentState(slot);
+    const payload = detail ? { ...detail, state } : state;
+    const serialized = JSON.stringify(payload);
+    if (Buffer.byteLength(serialized, "utf8") <= MAX_AGENT_BROWSER_TEXT_BYTES) {
+      return serialized;
+    }
+    const compactState = {
+      ...state,
+      tabs: state.tabs.map((tab) => ({
+        ...tab,
+        title: tab.title.slice(0, 120),
+        url: tab.url.slice(0, 1_024),
+      })),
+      activity: state.activity
+        ? { ...state.activity, label: state.activity.label.slice(0, 160) }
+        : null,
+    };
+    return JSON.stringify(detail
+      ? { ...detail, state: compactState, truncated: true }
+      : { ...compactState, truncated: true });
+  }
+
   #publish(ownerId: PreviewOwner, contextId: string): void {
     const window = this.options.getWindow();
     if (!window || window.webContents.isDestroyed() || !this.#ownedSlot(ownerId, contextId)) return;
@@ -583,6 +612,12 @@ export class PreviewBroker {
     text: string,
     image?: { mimeType: "image/png"; data: string },
   ): AgentBrowserResult {
+    if (Buffer.byteLength(text, "utf8") > MAX_AGENT_BROWSER_TEXT_BYTES) {
+      return failure(
+        "too-large",
+        "The Browser result exceeded its bounded text size.",
+      );
+    }
     return {
       ok: true,
       text,
@@ -664,7 +699,7 @@ export class PreviewBroker {
     await this.#loadURL(contents, target.url.toString(), signal);
     stopForAbort(signal);
     this.#record(ownerId, slot, "navigate", `Agent opened ${target.url.host}`);
-    return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+    return this.#success(slot, this.#agentStateText(slot));
   }
 
   async #agentOpenTab(
@@ -693,7 +728,7 @@ export class PreviewBroker {
     }
     stopForAbort(signal);
     this.#record(ownerId, slot, "tab-open", "Agent opened a new page");
-    return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+    return this.#success(slot, this.#agentStateText(slot));
   }
 
   async #click(ownerId: PreviewOwner, slot: PreviewSlot, ref: string, signal?: AbortSignal): Promise<AgentBrowserResult> {
@@ -710,7 +745,7 @@ export class PreviewBroker {
     contents.sendInputEvent({ type: "mouseDown", x: located.x, y: located.y, button: "left", clickCount: 1 });
     contents.sendInputEvent({ type: "mouseUp", x: located.x, y: located.y, button: "left", clickCount: 1 });
     this.#record(ownerId, slot, "click", `Agent clicked ${located.label || ref}`, { x: located.x, y: located.y });
-    return this.#success(slot, JSON.stringify({ clicked: ref, state: this.#agentState(slot) }));
+    return this.#success(slot, this.#agentStateText(slot, { clicked: ref }));
   }
 
   async #type(

@@ -1,10 +1,11 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { captureAgentBrowserSnapshot, expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, expectWindowCapturePrivacyGuard, typeAgentBrowserField } from "./support/agent-browser-security";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import { verifyBrowserEvidence } from "./support/browser-evidence";
+import { openConversationPaneTool } from "./support/workspace-tools";
 let app!: AppFixture;
 let page!: AppFixture["page"];
 let primaryConversationId = "";
@@ -57,21 +58,6 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await app?.close();
 });
-
-async function openPaneTool(
-  pane: Locator,
-  chatTitle: string,
-  tab: "Changes" | "Files" | "Terminal" | "Goal" | "Preview",
-): Promise<Locator> {
-  const tools = pane.getByRole("complementary", { name: "Workspace tools" });
-  if (!await tools.isVisible().catch(() => false)) {
-    await pane.getByRole("button", {
-      name: `Open tools for ${chatTitle}`,
-    }).click();
-  }
-  await selectWorkspaceTool(tools, tab);
-  return tools;
-}
 
 test("keeps cross-project chats, tools, and terminals independently scoped", async (
   { browserName: _browserName },
@@ -214,8 +200,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   ).toBeVisible();
   await secondaryMessage.fill("Draft owned by Companion");
 
-  const primaryGoal = await openPaneTool(primary, primaryTitle, "Goal");
-  const secondaryGoal = await openPaneTool(
+  const primaryGoal = await openConversationPaneTool(primary, primaryTitle, "Goal");
+  const secondaryGoal = await openConversationPaneTool(
     secondary,
     secondaryTitle,
     "Goal",
@@ -254,7 +240,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     contentType: "image/png",
   });
 
-  const primaryFiles = await openPaneTool(primary, primaryTitle, "Files");
+  const primaryFiles = await openConversationPaneTool(primary, primaryTitle, "Files");
   await expect(
     primaryFiles.getByRole("treeitem", { name: "sample.ts", exact: true }),
   ).toBeVisible();
@@ -262,7 +248,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     primaryFiles.getByRole("treeitem", { name: "beta-only.ts", exact: true }),
   ).toHaveCount(0);
 
-  const secondaryFiles = await openPaneTool(
+  const secondaryFiles = await openConversationPaneTool(
     secondary,
     secondaryTitle,
     "Files",
@@ -277,7 +263,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     secondaryFiles.getByRole("treeitem", { name: "sample.ts", exact: true }),
   ).toHaveCount(0);
 
-  const primaryChanges = await openPaneTool(primary, primaryTitle, "Changes");
+  const primaryChanges = await openConversationPaneTool(primary, primaryTitle, "Changes");
   const primaryChangedFiles = primaryChanges.getByRole("navigation", {
     name: "Git repositories and changed files",
   });
@@ -286,7 +272,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(primaryChangedFiles.getByText("beta-only.ts", { exact: true }))
     .toHaveCount(0);
 
-  const secondaryChanges = await openPaneTool(
+  const secondaryChanges = await openConversationPaneTool(
     secondary,
     secondaryTitle,
     "Changes",
@@ -299,12 +285,12 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(secondaryChangedFiles.getByText("sample.ts", { exact: true }))
     .toHaveCount(0);
 
-  const primaryTerminal = await openPaneTool(
+  const primaryTerminal = await openConversationPaneTool(
     primary,
     primaryTitle,
     "Terminal",
   );
-  const secondaryTerminal = await openPaneTool(
+  const secondaryTerminal = await openConversationPaneTool(
     secondary,
     secondaryTitle,
     "Terminal",
@@ -339,12 +325,12 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     contentType: "image/png",
   });
 
-  const primaryPreview = await openPaneTool(
+  const primaryPreview = await openConversationPaneTool(
     primary,
     primaryTitle,
     "Preview",
   );
-  const secondaryPreview = await openPaneTool(
+  const secondaryPreview = await openConversationPaneTool(
     secondary,
     secondaryTitle,
     "Preview",
@@ -590,6 +576,16 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     },
     typeDestinationUrl,
   )).toEqual({ attached: true, invoked: true, selectedFiles: 0 });
+  await verifyBrowserEvidence({
+    app,
+    page,
+    testInfo,
+    primary,
+    primaryPreview,
+    secondaryPreview,
+    primaryConversationId,
+    typeDestinationUrl,
+  });
   await expectFocusNavigationSettlement(app, primaryConversationId,
     `${app.previewUrl}agent-browser-focus-destination`);
   await expectClosedShadowActivationBlocked(app, primaryConversationId, `${app.previewUrl}agent-browser-closed-disabled-focus`);
@@ -746,9 +742,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(secondary.getByRole("button", { name: "Send message" }))
     .toBeVisible();
   await app.expectNoViewportOverflow();
-  const narrowScreenshot = testInfo.outputPath(
-    "cross-project-split-narrow.png",
-  );
+  const narrowScreenshot = testInfo.outputPath("cross-project-split-narrow.png");
   await page.screenshot({
     animations: "disabled",
     path: narrowScreenshot,

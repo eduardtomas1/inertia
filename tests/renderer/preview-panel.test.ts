@@ -63,11 +63,25 @@ describe("preview panel URL routing", () => {
         loading: false,
       }],
       activeTabId,
-      agentActivity: {
-        action: "click",
-        label: "Agent clicked Run checks",
-        tabId: activeTabId,
-        at: "2026-08-22T08:00:00.000Z",
+      evidence: {
+        revision: 1,
+        omitted: false,
+        entries: [{
+          id: "22222222-2222-4222-8222-222222222222",
+          sequence: 1,
+          kind: "agent-action",
+          tabId: activeTabId,
+          pageNumber: 1,
+          documentSequence: 1,
+          runId: "33333333-3333-4333-8333-333333333333",
+          turnId: "44444444-4444-4444-8444-444444444444",
+          occurredAt: "2026-08-22T08:00:00.000Z",
+          summary: "Agent clicked a page element",
+          detail: null,
+          origin: null,
+          redacted: false,
+          occurrences: 1,
+        }],
       },
       onNavigate: () => undefined,
       onOpenExternal: () => undefined,
@@ -80,7 +94,8 @@ describe("preview panel URL routing", () => {
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain("Local dashboard");
-    expect(html).toContain("Agent clicked Run checks");
+    expect(html).toContain("Evidence");
+    expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('aria-label="Open browser page"');
     expect(html).toContain('aria-label="Close Local dashboard"');
   });

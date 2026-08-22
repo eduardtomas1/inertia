@@ -4,6 +4,13 @@ export const MAX_AGENT_BROWSER_TEXT_BYTES = MAX_PROVIDER_HOST_TOOL_RESULT_BYTES;
 export const MAX_AGENT_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 export const MAX_AGENT_BROWSER_TYPE_CHARS = 4_000;
 
+/** Trusted Inertia ownership captured before a provider host-tool call runs. */
+export interface AgentBrowserRunIdentity {
+  conversationId: string;
+  runId: string;
+  turnId: string;
+}
+
 export type AgentBrowserActionKind =
   | "navigate"
   | "click"

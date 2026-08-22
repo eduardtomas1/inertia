@@ -59,8 +59,10 @@ describe("main preview URL boundary", () => {
       new URL("../../src/main/preview-broker.ts", import.meta.url),
       "utf8",
     );
-    const previewStart = broker.indexOf("#ensure(");
-    const embeddedBoundary = broker.slice(previewStart);
+    const embeddedBoundary = await readFile(
+      new URL("../../src/main/preview-tab.ts", import.meta.url),
+      "utf8",
+    );
     expect(embeddedBoundary).toContain(
       'setWindowOpenHandler(() => ({ action: "deny" }))',
     );
@@ -68,6 +70,7 @@ describe("main preview URL boundary", () => {
     expect(embeddedBoundary).toContain('on("will-redirect"');
     expect(embeddedBoundary).toContain("event.preventDefault()");
     expect(embeddedBoundary).not.toContain("shell.openExternal");
+    expect(broker).toContain("createPreviewTab({");
 
     const ipcStart = main.indexOf("ipcMain.handle(IPC.previewNavigate");
     const ipcEnd = main.indexOf(
@@ -81,13 +84,13 @@ describe("main preview URL boundary", () => {
   });
 
   it("bounds preview ownership to the two conversation panes", async () => {
-    const broker = await readFile(
-      new URL("../../src/main/preview-broker.ts", import.meta.url),
+    const identity = await readFile(
+      new URL("../../src/main/preview-identity.ts", import.meta.url),
       "utf8",
     );
-    const ownerStart = broker.indexOf("function previewOwner(");
-    const ownerEnd = broker.indexOf("\nfunction previewContext", ownerStart);
-    const ownerBoundary = broker.slice(ownerStart, ownerEnd);
+    const ownerStart = identity.indexOf("function previewOwner(");
+    const ownerEnd = identity.indexOf("\nexport function previewContext", ownerStart);
+    const ownerBoundary = identity.slice(ownerStart, ownerEnd);
 
     expect(ownerBoundary).toContain('value !== "primary"');
     expect(ownerBoundary).toContain('value !== "secondary"');
@@ -95,14 +98,14 @@ describe("main preview URL boundary", () => {
   });
 
   it("hardens each shared session once and cancels download fallbacks", async () => {
-    const broker = await readFile(
-      new URL("../../src/main/preview-broker.ts", import.meta.url),
+    const previewSession = await readFile(
+      new URL("../../src/main/preview-session.ts", import.meta.url),
       "utf8",
     );
-    expect(broker).toContain("new WeakSet<Session>()");
-    expect(broker).toContain("if (hardenedSessions.has(session)) return");
-    expect(broker).toContain('session.on("will-download"');
-    expect(broker).toContain("event.preventDefault()");
-    expect(broker).toContain("item.cancel()");
+    expect(previewSession).toContain("new WeakSet<Session>()");
+    expect(previewSession).toContain("if (hardenedSessions.has(session)) return");
+    expect(previewSession).toContain('session.on("will-download"');
+    expect(previewSession).toContain("event.preventDefault()");
+    expect(previewSession).toContain("item.cancel()");
   });
 });

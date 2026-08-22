@@ -24,6 +24,11 @@ const packageSmokePdfInput = resolve(tmpdir(), "inertia package smoke.pdf");
 const packageSmokePdfResult = resolve(tmpdir(), "inertia package smoke result.json");
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
+const browserIdentity = {
+  conversationId,
+  runId: "55555555-5555-4555-8555-555555555555",
+  turnId: "66666666-6666-4666-8666-666666666666",
+};
 const runtimeGenerationId = "33333333-3333-4333-8333-333333333333:1";
 const systemBootId = "test:44444444-4444-4444-8444-444444444444";
 
@@ -33,7 +38,7 @@ describe("runtime process protocol", () => {
     const request = {
       type: "runtime.agent-browser-request" as const,
       requestId,
-      conversationId,
+      identity: browserIdentity,
       command: { action: "click" as const, ref: "e7" },
     };
     expect(parseRuntimeWorkerEvent(request)).toEqual(request);
@@ -42,16 +47,16 @@ describe("runtime process protocol", () => {
     expect(parseRuntimeWorkerEvent({
       type: "runtime.agent-browser-cancel",
       requestId,
-      conversationId,
+      identity: browserIdentity,
     })).toEqual({
       type: "runtime.agent-browser-cancel",
       requestId,
-      conversationId,
+      identity: browserIdentity,
     });
     expect(parseRuntimeWorkerEvent({
       type: "runtime.agent-browser-cancel",
       requestId,
-      conversationId: projectId,
+      identity: { ...browserIdentity, conversationId: projectId },
       extra: true,
     })).toBeNull();
 

@@ -141,6 +141,7 @@ const IPC = {
   previewTab: "inertia:preview-tab",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
+  previewEvidenceImage: "inertia:preview-evidence-image",
   previewState: "inertia:preview-state",
   syncThemePreference: "inertia:sync-theme-preference",
 } as const;
@@ -674,35 +675,34 @@ function registerIpcHandlers(): void {
     assertTrustedIpc(event, args.length);
     return await collectAppHealth();
   });
-
   ipcMain.handle(IPC.clearAppCache, async (event, ...args) => {
     assertTrustedIpc(event, args.length);
     return await appHealthCollector.clearCache();
   });
-
   ipcMain.handle(IPC.previewNavigate, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     return previewBroker.navigate(args[0]);
   });
-
   ipcMain.handle(IPC.previewCommand, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     return await previewBroker.command(args[0]);
   });
-
   ipcMain.handle(IPC.previewTab, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1); return previewBroker.tab(args[0]);
+    assertTrustedIpc(event, args.length, 1);
+    return previewBroker.tab(args[0]);
   });
   ipcMain.handle(IPC.previewSetBounds, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     previewBroker.setBounds(args[0]);
   });
-
   ipcMain.handle(IPC.previewClose, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     previewBroker.closeRequest(args[0]);
   });
-
+  ipcMain.handle(IPC.previewEvidenceImage, (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    return previewBroker.evidenceImage(args[0]);
+  });
   ipcMain.handle(IPC.syncThemePreference, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     const [preference] = args;

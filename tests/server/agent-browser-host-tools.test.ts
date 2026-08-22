@@ -6,6 +6,11 @@ import type { ProviderHostToolCall } from "../../src/server/provider/contracts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const tabId = "22222222-2222-4222-8222-222222222222";
+const identity = {
+  conversationId,
+  runId: "33333333-3333-4333-8333-333333333333",
+  turnId: "44444444-4444-4444-8444-444444444444",
+};
 
 function conversation(accessMode: "supervised" | "auto-edit" | "full"): Conversation {
   return { id: conversationId, accessMode } as Conversation;
@@ -38,14 +43,14 @@ describe("agent browser host tools", () => {
     })) };
     const tools = new AgentBrowserHostTools(broker);
     const request = call("inertia_browser_screenshot", {});
-    await expect(tools.invoke(conversation("supervised"), request)).resolves.toEqual({
+    await expect(tools.invoke(conversation("supervised"), request, identity)).resolves.toEqual({
       success: true,
       text: "captured",
       image: { mimeType: "image/png", data: image },
     });
     expect(request.requestApproval).not.toHaveBeenCalled();
     expect(broker.perform).toHaveBeenCalledWith(
-      conversationId,
+      identity,
       { action: "screenshot" },
       request.signal,
     );
@@ -57,7 +62,7 @@ describe("agent browser host tools", () => {
     const request = call("inertia_browser_interact", {
       action: "type", ref: "e4", text: "hello", replace: true,
     }, "deny");
-    await expect(tools.invoke(conversation("supervised"), request))
+    await expect(tools.invoke(conversation("supervised"), request, identity))
       .resolves.toMatchObject({ success: false });
     expect(request.requestApproval).toHaveBeenCalledOnce();
     expect(broker.perform).not.toHaveBeenCalled();
@@ -71,11 +76,11 @@ describe("agent browser host tools", () => {
       })) };
       const tools = new AgentBrowserHostTools(broker);
       const request = call("inertia_browser_interact", { action: "click", ref: "e2" });
-      await expect(tools.invoke(conversation(accessMode), request))
+      await expect(tools.invoke(conversation(accessMode), request, identity))
         .resolves.toMatchObject({ success: false });
       expect(request.requestApproval).not.toHaveBeenCalled();
       expect(broker.perform).toHaveBeenCalledWith(
-        conversationId,
+        identity,
         { action: "click", ref: "e2" },
         request.signal,
       );

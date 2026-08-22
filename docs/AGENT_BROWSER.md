@@ -15,9 +15,10 @@ local runtime receives only a narrow command broker.
 - Only loopback development origins accepted by the existing preview URL
   policy may be embedded or agent-controlled. Remote HTTPS addresses continue
   to open in the system browser; remote plaintext HTTP is rejected.
-- The Browser chrome shows pages, the active page, and the latest agent action.
-  Click and type actions also render a pointer and bounded label inside the
-  visible page.
+- The Browser chrome shows pages and the active page. Its **Evidence** view
+  keeps a bounded local timeline of navigation, page failures, screenshots,
+  and fixed agent-action labels. Click and type actions also render a pointer
+  with a fixed bounded label inside the visible page.
 - Browser tools are injected automatically into the existing exact-turn host
   bridge for Codex, Claude, Cursor, Kimi Code, and OpenCode. No skill install is
   required.
@@ -51,6 +52,37 @@ password value, semantic and visual evidence remain unavailable until that
 document navigates away, so reveal controls, replacement inputs, and page-made
 copies cannot turn a screenshot or snapshot into a credential channel.
 
+## Local evidence
+
+The Evidence view is an inspectable main-process ledger for the exact live
+Browser slot. It is not provider context and is never written to SQLite, the
+project, attachments, diagnostics, or renderer storage. Closing or replacing
+the chat-owned Browser clears its entries, retained thumbnails, request
+correlation, browser storage, and session listeners.
+
+The ledger holds at most 100 descriptors in 128 KiB, eight PNG thumbnails of
+at most 256 KiB each, and 2 MiB of thumbnails in total. It also limits page
+events and in-flight request correlation before they reach the ledger. Older
+or repeated evidence is coalesced or marked omitted instead of growing without
+bound. Opening Evidence removes the native page from the visible geometry;
+closing it restores the exact page and keyboard focus.
+
+Navigation and failed-request rows retain only a sanitized HTTP(S) origin.
+Request methods and resource types come from closed allowlists. The ledger
+never reads or stores headers, cookies, authorization values, request or
+response bodies, status lines, referrers, filesystem paths, or URL paths,
+queries, and fragments. Page console errors are default-suppressed, bounded,
+and sanitized in the main process; credential-bearing or uncertain detail is
+replaced by a fixed message. Page titles, semantic labels, typed text, and raw
+provider output are not used as agent-action labels.
+
+Screenshot bytes remain in main-process memory behind an opaque evidence UUID.
+The preload bridge can retrieve one bounded PNG only for the exact live
+owner/conversation/evidence tuple. A stale chat, split owner, evicted image, or
+closed Browser receives no bytes. Timeline screenshots never cross back to a
+provider; the ordinary screenshot tool's single bounded result remains the
+only provider screenshot path.
+
 ## Permission behavior
 
 Snapshots, screenshots, and page listing are read-only. In a Supervised chat,
@@ -61,10 +93,10 @@ without adding a second Inertia approval.
 
 An aborted or settled call loses browser authority immediately. The utility
 runtime allows at most 16 pending browser requests and applies a 20-second
-deadline. Every request carries a fresh UUID plus the owning conversation UUID;
-the main process rejects reused identities, aborts duplicate in-flight work,
-and suppresses late results after cancellation, runtime replacement, or
-shutdown.
+deadline. Every request carries a fresh UUID plus the server-owned conversation,
+run, and turn UUIDs. Cancellation must match all three identities. The main
+process rejects reused request identities, aborts duplicate in-flight work, and
+suppresses late results after cancellation, runtime replacement, or shutdown.
 
 ## Security boundary
 
@@ -74,10 +106,11 @@ The main process denies permission checks and requests, downloads, new windows,
 remote navigation, and URLs containing credentials. Browser storage is cleared
 when the owning slot closes.
 
-The renderer can request navigation, page selection, and bounds through a
-strict preload API, but it never receives a `WebContents`, browser storage,
-raw page DOM, or screenshot capability. The supervised utility process cannot
-create Electron views directly. Its path is:
+The renderer can request navigation, page selection, bounds, and an exact
+opaque evidence image through a strict preload API, but it never receives a
+`WebContents`, browser storage, raw page DOM, or arbitrary capture capability.
+The supervised utility process cannot create Electron views directly. Its path
+is:
 
 ```text
 exact provider turn

@@ -382,12 +382,9 @@ async function createPreviewServer(): Promise<{
     }
     if (request.url?.startsWith("/agent-browser-type-destination")) {
       setTimeout(() => {
-        response.writeHead(200, {
-          "Content-Type": "text/html",
-          "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
-        });
+        response.writeHead(200, { "Content-Type": "text/html", "Content-Security-Policy": "default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'" });
         response.end(
-          "<!doctype html><title>Agent browser type destination</title>"
+          "<!doctype html><title>Agent browser type destination</title><style>body{font-family:sans-serif;padding:4px;margin:0;background:#f5f5f7;color:#17171b}h1{font-size:20px;margin:4px 0}label,button{display:inline-block;margin:2px}</style>"
           + "<h1>Typing navigation settled</h1>"
           + "<label>Microtask focus target <input aria-label='Microtask focus target'></label>"
           + "<label>Microtask focus decoy <input aria-label='Microtask focus decoy'></label>"
@@ -396,7 +393,7 @@ async function createPreviewServer(): Promise<{
           + "<label>Focus navigation <input aria-label='Focus navigation'></label>"
           + "<label>Private upload <input type='file' aria-label='Private upload'></label>"
           + "<button type='button'>Choose through page handler</button>"
-          + "<script>document.querySelector('[aria-label=\"Focus navigation\"]')"
+          + "<script>console.error('password=browser-e2e-console-sentinel');fetch('/agent-browser-evidence-failure?access_token=browser-e2e-query-sentinel',{method:'POST',body:'browser-e2e-body-sentinel'}).catch(()=>{});document.querySelector('[aria-label=\"Focus navigation\"]')"
           + ".addEventListener('focus',()=>{location.href='/agent-browser-focus-destination'});"
           + "document.querySelector('[aria-label=\"Microtask focus target\"]')"
           + ".addEventListener('focus',()=>queueMicrotask(()=>document.querySelector("
@@ -427,6 +424,7 @@ async function createPreviewServer(): Promise<{
       }, 450);
       return;
     }
+    if (request.url?.startsWith("/agent-browser-evidence-failure")) { response.writeHead(503, { "Content-Type": "text/plain" }); response.end("browser-e2e-response-sentinel"); return; }
     response.writeHead(200, {
       "Content-Type": "text/html",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",

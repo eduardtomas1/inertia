@@ -29,3 +29,18 @@ export async function selectWorkspaceTool(
   await panel.getByLabel("Choose workspace tool").click();
   await panel.getByRole("button", { name, exact: true }).click();
 }
+
+export async function openConversationPaneTool(
+  pane: Locator,
+  chatTitle: string,
+  tab: "Changes" | "Files" | "Terminal" | "Goal" | "Preview",
+): Promise<Locator> {
+  const tools = pane.getByRole("complementary", { name: "Workspace tools" });
+  if (!await tools.isVisible().catch(() => false)) {
+    await pane.getByRole("button", {
+      name: `Open tools for ${chatTitle}`,
+    }).click();
+  }
+  await selectWorkspaceTool(tools, tab);
+  return tools;
+}

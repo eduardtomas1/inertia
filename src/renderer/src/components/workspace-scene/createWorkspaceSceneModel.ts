@@ -904,13 +904,14 @@ export function createWorkspaceSceneModel({
         } : {}),
       },
       preview: {
+        contextId: conversation?.id ?? "",
         url: desktopTools.previewUrl,
         loading: desktopTools.previewNavigation.loading,
         canGoBack: desktopTools.previewNavigation.canGoBack,
         canGoForward: desktopTools.previewNavigation.canGoForward,
         tabs: desktopTools.previewNavigation.tabs,
         activeTabId: desktopTools.previewNavigation.activeTabId,
-        agentActivity: desktopTools.previewNavigation.agentActivity,
+        evidence: desktopTools.previewNavigation.evidence,
         onNavigate: desktopTools.navigatePreview,
         onBack: () => desktopTools.previewCommand("back"),
         onForward: () => desktopTools.previewCommand("forward"),
@@ -918,6 +919,7 @@ export function createWorkspaceSceneModel({
         onOpenTab: () => desktopTools.previewTab("open"),
         onActivateTab: (tabId) => desktopTools.previewTab("activate", tabId),
         onCloseTab: (tabId) => desktopTools.previewTab("close", tabId),
+        onLoadEvidenceImage: desktopTools.loadPreviewEvidenceImage,
         onBoundsChange: desktopTools.setPreviewBounds,
         onOpenExternal: (url) => {
           void window.inertia.openExternal(url).catch((error) => {

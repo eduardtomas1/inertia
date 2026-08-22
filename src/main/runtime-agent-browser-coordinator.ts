@@ -19,8 +19,17 @@ type BrowserCancel = Extract<
 
 interface PendingBrowserRequest {
   record: RuntimeProcessRecord;
-  conversationId: string;
+  identity: BrowserRequest["identity"];
   controller: AbortController;
+}
+
+function sameIdentity(
+  left: BrowserRequest["identity"],
+  right: BrowserRequest["identity"],
+): boolean {
+  return left.conversationId === right.conversationId
+    && left.runId === right.runId
+    && left.turnId === right.turnId;
 }
 
 interface RuntimeAgentBrowserCoordinatorOptions {
@@ -42,7 +51,7 @@ export class RuntimeAgentBrowserCoordinator {
       const pending = this.pending.get(event.requestId);
       if (
         pending?.record === record
-        && pending.conversationId === event.conversationId
+        && sameIdentity(pending.identity, event.identity)
       ) {
         this.pending.delete(event.requestId);
         pending.controller.abort();
@@ -78,12 +87,12 @@ export class RuntimeAgentBrowserCoordinator {
     const controller = new AbortController();
     const pending = {
       record,
-      conversationId: event.conversationId,
+      identity: event.identity,
       controller,
     };
     this.pending.set(event.requestId, pending);
     void this.options.broker.perform(
-      event.conversationId,
+      event.identity,
       event.command,
       controller.signal,
     ).then(

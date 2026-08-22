@@ -414,7 +414,11 @@ export class AgentThreadManager {
       const current = this.assertSource(source);
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
-        return await this.agentBrowser.invoke(current, call);
+        return await this.agentBrowser.invoke(current, call, {
+          conversationId: current.id,
+          runId: source.turn.runId,
+          turnId: source.turn.id,
+        });
       }
       switch (call.tool) {
         case "inertia_list_conversations":

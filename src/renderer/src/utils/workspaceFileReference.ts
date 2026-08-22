@@ -14,7 +14,7 @@ function workspaceFileSearchEdit(
   projectId: string,
   conversationId?: string,
 ): WorkspaceFileSearchEdit {
-  const key = `${projectId}\0${conversationId ?? ""}`;
+  const key = projectId + "\0" + (conversationId ?? "");
   let state = workspaceFileSearchEdits.get(key);
   if (!state) {
     state = [0, "", 0, ""];
@@ -27,7 +27,7 @@ export function markWorkspaceFileSearchEdit(
   projectId: string,
   conversationId?: string,
 ): void {
-  workspaceFileSearchEdit(projectId, conversationId)[0] += 1;
+  ++workspaceFileSearchEdit(projectId, conversationId)[0];
 }
 
 export function beginWorkspaceFileOpen(
@@ -116,11 +116,10 @@ export function validatedWorkspaceFileLocation(
   content: string,
 ): WorkspaceFileLocation | null {
   if (!location) return null;
-  const lineCount = content.split("\n").length;
-  if (location.startLine > lineCount || location.endLine > lineCount) {
+  const lines = content.split("\n");
+  if (location.startLine > lines.length || location.endLine > lines.length) {
     return null;
   }
-  const lines = content.split("\n");
   const columnExists = (line: number, column: number | undefined): boolean => (
     column === undefined
     || column <= (lines[line - 1]?.replace(/\r$/u, "").length ?? 0) + 1
@@ -135,11 +134,12 @@ export function validatedWorkspaceFileLocation(
 export function workspaceFileLocationLabel(
   location: WorkspaceFileLocation,
 ): string {
-  const range = location.startLine === location.endLine
+  const singleLine = location.startLine === location.endLine;
+  const range = singleLine
     ? `Line ${location.startLine}`
     : `Lines ${location.startLine}–${location.endLine}`;
   if (location.startColumn === undefined) return range;
-  return location.startLine === location.endLine
+  return singleLine
     ? `${range}, column ${location.startColumn}`
     : range;
 }

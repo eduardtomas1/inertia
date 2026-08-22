@@ -275,13 +275,11 @@ function safeError(error: unknown, fallback: string): string {
     : fallback;
 }
 
-function parentLabel(path: string): string {
-  return workspaceParentPath(path);
-}
-
 function directoryChain(path: string): string[] {
-  const segments = path.split("/");
-  return segments.map((_, index) => segments.slice(0, index + 1).join("/"));
+  return path
+    ? path.split("/").map((_, index, segments) =>
+        segments.slice(0, index + 1).join("/"))
+    : [];
 }
 
 function visibleDirectoryEntries(
@@ -640,7 +638,7 @@ export function FilesPanel({
       && rootInputRef.current.entriesTruncated === entriesTruncated
     ) return;
     rootInputRef.current = { entries, entriesTruncated };
-    directoryGeneration.current += 1;
+    ++directoryGeneration.current;
     const next = freshWorkspaceDirectoryPages(entries, entriesTruncated);
     const rootDirectories = new Set(
       entries
@@ -657,7 +655,7 @@ export function FilesPanel({
         ...[...expandedPathsRef.current].filter((path) =>
           rootDirectories.has(path.split("/")[0] ?? "")
         ),
-        ...(selectedParent ? directoryChain(selectedParent) : []),
+        ...directoryChain(selectedParent),
       ],
     );
     expandedPathsRef.current = retainedExpandedPaths;
@@ -672,7 +670,7 @@ export function FilesPanel({
   }, [entries, entriesTruncated, loadDirectory, selectedPath]);
 
   const updateQuery = useCallback((value: string): void => {
-    searchGeneration.current += 1;
+    ++searchGeneration.current;
     markWorkspaceFileSearchEdit(projectId, conversationId);
     previousSelectedPathRef.current = selectedPath;
     setQuery(value);
@@ -840,7 +838,7 @@ export function FilesPanel({
   useEffect(() => {
     if (!selectedPath || !isSafeWorkspaceEntryPath(selectedPath)) return;
     const parent = workspaceParentPath(selectedPath);
-    const chain = parent ? directoryChain(parent) : [];
+    const chain = directoryChain(parent);
     updateExpandedPaths((current) => new Set([...current, ...chain]));
     for (const directory of chain) {
       if (!directoryPagesRef.current.has(directory)) void loadDirectory(directory);
@@ -940,7 +938,7 @@ export function FilesPanel({
             const entryLanguage = entry.kind === "file"
               ? sourceLanguageForFile(entry.path)
               : null;
-            const parent = searchActive ? parentLabel(entry.path) : "";
+            const parent = searchActive ? workspaceParentPath(entry.path) : "";
             const directoryPage = entry.kind === "directory"
               ? directoryPages.get(entry.path)
               : undefined;

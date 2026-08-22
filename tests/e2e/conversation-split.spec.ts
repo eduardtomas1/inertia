@@ -6,7 +6,7 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
-import { expectDocumentStartPrivacyGuard } from "./support/agent-browser-security";
+import { expectDocumentStartPrivacyGuard, expectHoverRetargetingGuard } from "./support/agent-browser-security";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
@@ -451,6 +451,9 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const semanticElements = JSON.parse(semanticSnapshot.text ?? "{}") as {
     elements?: Array<{ ref?: string; name?: string }>;
   };
+  const hoverRef = semanticElements.elements?.find((element) => element.name === "Hover-moving action")?.ref;
+  expect(hoverRef).toMatch(/^e\d+$/u);
+  await expectHoverRetargetingGuard(app, primaryConversationId, secondPrimaryPreviewUrl, hoverRef!);
   const navigationRef = semanticElements.elements?.find(
     (element) => element.name === "Continue in Browser",
   )?.ref;

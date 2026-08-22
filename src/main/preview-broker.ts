@@ -29,7 +29,7 @@ import {
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
-  agentPageHasUnguardedNestedContent, ensureAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
+  agentPageHasUnguardedNestedContent, ensureAgentFileChooserBlock, hoverAgentPageRef, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import { boundedAgentScreenshot } from "./preview-agent-screenshot.js";
 type PreviewOwner = "primary" | "secondary";
@@ -966,7 +966,7 @@ export class PreviewBroker {
       await this.#sendInputAndWait(contents, async () => {
         const finalTarget = await this.#rendererOperation(
           contents,
-          () => locateAgentPageRef(contents, ref),
+          () => hoverAgentPageRef(contents, ref, x!, y!, signal),
           { signal },
         );
         if (slot.boundsGeneration !== boundsGeneration) {
@@ -986,7 +986,6 @@ export class PreviewBroker {
         if (finalTarget.disabled) throw new AgentBrowserRefusal(failure(
           "invalid", "That page element is disabled.",
         ));
-        contents.sendInputEvent({ type: "mouseMove", x, y });
         contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
         contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
       }, signal);

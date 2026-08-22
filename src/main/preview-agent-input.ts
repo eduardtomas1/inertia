@@ -1,8 +1,10 @@
 import type { WebContents } from "electron";
 
 import { previewNavigationTarget } from "../shared/preview-url.js";
+import { locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
 
 const INPUT_NAVIGATION_GRACE_MS = 250;
+const HOVER_INPUT_TIMEOUT_MS = 15_000;
 const NAVIGATION_TIMEOUT_MS = 30_000;
 
 interface AgentPageBoundaryState {
@@ -15,6 +17,75 @@ const agentPageDebuggerBootstraps = new WeakMap<WebContents, number>();
 
 function stopForAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("browser-action-cancelled");
+}
+
+async function dispatchAgentPageHover(
+  contents: WebContents,
+  x: number,
+  y: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  stopForAbort(signal);
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      contents.removeListener("input-event", onInput);
+      contents.removeListener("destroyed", onDestroyed);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error); else resolve();
+    };
+    const onInput = (_event: unknown, input: { type?: string; x?: number; y?: number }): void => {
+      if (input.type === "mouseMove" && Math.round(input.x ?? NaN) === Math.round(x)
+          && Math.round(input.y ?? NaN) === Math.round(y)) finish();
+    };
+    const onDestroyed = (): void => finish(new Error("The active Browser tab closed during hover."));
+    const onAbort = (): void => finish(new Error("browser-action-cancelled"));
+    const timeout = setTimeout(
+      () => finish(new Error("The Browser page did not acknowledge the hover.")),
+      HOVER_INPUT_TIMEOUT_MS,
+    );
+    timeout.unref();
+    contents.on("input-event", onInput);
+    contents.once("destroyed", onDestroyed);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      if (contents.isDestroyed()) finish(new Error("The active Browser tab closed before hover."));
+      else contents.sendInputEvent({ type: "mouseMove", x, y });
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error("The Browser hover failed."));
+    }
+  });
+}
+
+export async function hoverAgentPageRef(
+  contents: WebContents,
+  ref: string,
+  x: number,
+  y: number,
+  signal?: AbortSignal,
+): Promise<PreviewAgentTarget> {
+  let hoverX = x;
+  let hoverY = y;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await dispatchAgentPageHover(contents, hoverX, hoverY, signal);
+    stopForAbort(signal);
+    await waitForAgentPageHover(contents);
+    stopForAbort(signal);
+    const target = await locateAgentPageRef(contents, ref);
+    if (!target.found || target.x === undefined || target.y === undefined) return target;
+    if (Math.round(target.x) === Math.round(hoverX)
+        && Math.round(target.y) === Math.round(hoverY)) return target;
+    hoverX = target.x;
+    hoverY = target.y;
+  }
+  stopForAbort(signal);
+  return { found: false };
 }
 
 export async function installAgentFileChooserBlock(contents: WebContents): Promise<void> {

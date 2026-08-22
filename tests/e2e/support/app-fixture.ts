@@ -115,12 +115,21 @@ async function createPreviewServer(): Promise<{
     if (request.url === "/agent-browser-page") {
       response.writeHead(200, {
         "Content-Type": "text/html",
-        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
       });
       response.end(
         "<!doctype html><title>Agent browser source</title>"
         + "<style>body{font-family:sans-serif;padding:40px}</style>"
-        + "<a href='/agent-browser-destination'>Continue in Browser</a>",
+        + "<a href='/agent-browser-destination'>Continue in Browser</a>"
+        + "<button id='hover-target' type='button'>Hover-moving action</button>"
+        + "<button id='hover-decoy' type='button' style='display:none'>Hover decoy</button>"
+        + "<script>const target=document.querySelector('#hover-target');"
+        + "const decoy=document.querySelector('#hover-decoy');"
+        + "target.addEventListener('mouseover',()=>{const rect=target.getBoundingClientRect();"
+        + "decoy.style.cssText=`display:block;position:fixed;left:${rect.left}px;top:${rect.top}px;"
+        + "width:${rect.width}px;height:${rect.height}px`;target.style.transform='translateX(240px)'});"
+        + "target.addEventListener('click',()=>{window.__hoverTargetClicked=true});"
+        + "decoy.addEventListener('click',()=>{window.__hoverDecoyClicked=true})</script>",
       );
       return;
     }

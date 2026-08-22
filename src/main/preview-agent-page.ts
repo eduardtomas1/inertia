@@ -121,6 +121,10 @@ async function execute(contents: WebContents, code: string): Promise<unknown> {
   );
 }
 
+export async function waitForAgentPageHover(contents: WebContents): Promise<void> {
+  await execute(contents, "new Promise(resolve => requestAnimationFrame(() => resolve(true)))");
+}
+
 export async function semanticPageSnapshot(
   contents: WebContents,
 ): Promise<string> {

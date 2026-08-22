@@ -162,6 +162,7 @@ vi.mock("electron", () => {
     sendInputEvent(input: Record<string, unknown>): void {
       this.sentInputs.push(input);
       electronState.interactionTimeline.push(String(input.type));
+      this.emit("input-event", {}, input);
     }
     async insertText(text: string): Promise<void> { this.insertedText.push(text); }
     readonly capturePage = vi.fn(async (): Promise<FakeImage> => new FakeImage());
@@ -198,6 +199,7 @@ const pageTools = vi.hoisted(() => ({
     active: boolean,
   ) => Promise<void>>(async () => undefined),
   showAgentPageCursor: vi.fn(async () => undefined),
+  waitForAgentPageHover: vi.fn(async () => undefined),
 }));
 
 vi.mock("../../src/main/preview-agent-page", () => pageTools);
@@ -380,6 +382,46 @@ describe("agent-owned native Browser", () => {
     contents.emit("did-stop-loading");
     await expect(click).resolves.toMatchObject({ ok: true });
     await expect(queued).resolves.toMatchObject({ ok: true });
+  });
+
+  it("revalidates the exact ref after trusted hover handlers move the target", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/source",
+    });
+    pageTools.locateAgentPageRef
+      .mockResolvedValueOnce({
+        found: true, blocked: false, disabled: false, editable: false,
+        label: "Hover-moving action", x: 42, y: 28,
+      })
+      .mockResolvedValueOnce({
+        found: true, blocked: false, disabled: false, editable: false,
+        label: "Hover-moving action", x: 42, y: 28,
+      })
+      .mockResolvedValueOnce({
+        found: true, blocked: false, disabled: false, editable: false,
+        label: "Hover-moving action", x: 282, y: 28,
+      })
+      .mockResolvedValueOnce({
+        found: true, blocked: false, disabled: false, editable: false,
+        label: "Hover-moving action", x: 282, y: 28,
+      });
+
+    await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
+      .resolves.toMatchObject({ ok: true });
+    const inputs = electronState.contents[contentsOffset]!.sentInputs;
+    expect(inputs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "mouseMove", x: 42, y: 28 }),
+      expect.objectContaining({ type: "mouseMove", x: 282, y: 28 }),
+      expect.objectContaining({ type: "mouseDown", x: 282, y: 28 }),
+      expect.objectContaining({ type: "mouseUp", x: 282, y: 28 }),
+    ]));
+    expect(inputs).not.toContainEqual(expect.objectContaining({
+      type: "mouseDown", x: 42, y: 28,
+    }));
   });
 
   it("holds queued work until key-triggered main-frame navigation settles", async () => {
@@ -874,7 +916,7 @@ describe("agent-owned native Browser", () => {
         label: "Pay now", x: 42, y: 28,
       };
     }).mockImplementationOnce(async () => {
-      order.push("post-setup-revalidation");
+      order.push("post-hover-revalidation");
       return { found: false };
     });
     pageTools.setAgentPageInputGuard.mockImplementationOnce(async (_contents, active) => {
@@ -887,9 +929,11 @@ describe("agent-owned native Browser", () => {
       "initial",
       "cursor-revalidation",
       "guard:true",
-      "post-setup-revalidation",
+      "post-hover-revalidation",
     ]);
-    expect(children[0]!.webContents.sentInputs).toEqual([]);
+    expect(children[0]!.webContents.sentInputs).toEqual([
+      { type: "mouseMove", x: 42, y: 28 },
+    ]);
   });
 
   it("rejects typing into a non-editable semantic ref", async () => {

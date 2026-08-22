@@ -61,3 +61,38 @@ export async function expectDocumentStartPrivacyGuard(
   });
   expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
 }
+
+export async function expectHoverRetargetingGuard(
+  app: AppFixture,
+  conversationId: string,
+  url: string,
+  ref: string,
+): Promise<void> {
+  const evidence = await app.electronApp.evaluate(
+    async ({ webContents }, request) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          id: string,
+          command: { action: "click"; ref: string },
+        ) => Promise<{ code?: string; ok: boolean }>;
+      };
+      const result = await runtime.agentBrowser(request.conversationId, {
+        action: "click",
+        ref: request.ref,
+      });
+      const contents = webContents.getAllWebContents().find(
+        (candidate) => candidate.getURL() === request.url,
+      );
+      const state = await contents?.executeJavaScript(`({
+        target: window.__hoverTargetClicked === true,
+        decoy: window.__hoverDecoyClicked === true,
+      })`);
+      return { result, state };
+    },
+    { conversationId, ref, url },
+  );
+  expect(evidence).toMatchObject({
+    result: { ok: false, code: "not-found" },
+    state: { target: false, decoy: false },
+  });
+}

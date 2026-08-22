@@ -25,7 +25,7 @@ import {
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
-  agentPageActivationBlocked, agentPageHasSensitiveEvidence, agentPageHasTransientUserActivation, installAgentPagePrivacyGuard,
+  agentPageActivationBlocked, agentPageHasSensitiveEvidence, installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
@@ -471,6 +471,7 @@ export class PreviewBroker {
     options: {
       signal?: AbortSignal;
       cancel?: () => void;
+      lateSuccess?: (value: Result) => void;
       timeoutMessage?: string;
     } = {},
   ): Promise<Result> {
@@ -486,7 +487,7 @@ export class PreviewBroker {
         options.signal?.removeEventListener("abort", onAbort);
       };
       const succeed = (value: Result): void => {
-        if (settled) return;
+        if (settled) { options.lateSuccess?.(value); return; }
         settled = true;
         cleanup();
         resolve(value);
@@ -1010,7 +1011,7 @@ export class PreviewBroker {
     const boundsGeneration = slot.boundsGeneration;
     const located = await this.#rendererOperation(
       contents,
-      () => locateAgentPageRef(contents, ref, true, replace),
+      () => locateAgentPageRef(contents, ref),
       { signal },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
@@ -1033,7 +1034,7 @@ export class PreviewBroker {
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     const revalidated = await this.#rendererOperation(
       contents,
-      () => locateAgentPageRef(contents, ref, true, replace),
+      () => locateAgentPageRef(contents, ref),
       { signal },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
@@ -1224,7 +1225,7 @@ export class PreviewBroker {
     const chooserGeneration = await this.#rendererOperation(
       contents,
       () => beginAgentFileChooserBlock(contents),
-      { signal },
+      { signal, lateSuccess: (generation) => { void releaseAgentFileChooserBlock(contents, generation).catch(() => undefined); } },
     );
     try {
       await this.#rendererOperation(
@@ -1239,8 +1240,7 @@ export class PreviewBroker {
           contents,
           () => setAgentPageInputGuard(contents, false),
         ).catch(() => undefined);
-        void releaseAgentFileChooserBlock(contents, chooserGeneration,
-          () => agentPageHasTransientUserActivation(contents)).catch(() => undefined);
+        void releaseAgentFileChooserBlock(contents, chooserGeneration).catch(() => undefined);
       }
     }
   }

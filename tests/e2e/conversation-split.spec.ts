@@ -2,11 +2,8 @@ import { expect, test, type Locator } from "@playwright/test";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
-import {
-  createAppFixture,
-  type AppFixture,
-} from "./support/app-fixture";
-import { expectDocumentStartPrivacyGuard, expectHoverRetargetingGuard } from "./support/agent-browser-security";
+import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectSemanticClickBoundaries } from "./support/agent-browser-security";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
@@ -454,6 +451,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const hoverRef = semanticElements.elements?.find((element) => element.name === "Hover-moving action")?.ref;
   expect(hoverRef).toMatch(/^e\d+$/u);
   await expectHoverRetargetingGuard(app, primaryConversationId, secondPrimaryPreviewUrl, hoverRef!);
+  await expectSemanticClickBoundaries(app, primaryConversationId, secondPrimaryPreviewUrl);
   const navigationRef = semanticElements.elements?.find(
     (element) => element.name === "Continue in Browser",
   )?.ref;
@@ -622,7 +620,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     },
     typeDestinationUrl,
   )).toEqual({ attached: true, invoked: true, selectedFiles: 0 });
-
+  await expectFocusNavigationSettlement(app, primaryConversationId,
+    `${app.previewUrl}agent-browser-focus-destination`);
   const privacyUrl = `${app.previewUrl}agent-browser-privacy-start`;
   await expectDocumentStartPrivacyGuard(app, primaryConversationId, privacyUrl);
   for (const [path, secret] of [

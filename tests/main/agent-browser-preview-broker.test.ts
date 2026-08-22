@@ -153,6 +153,7 @@ vi.mock("electron", () => {
     }
     getURL(): string { return this.url; }
     getTitle(): string { return this.title; }
+    async executeJavaScriptInIsolatedWorld(): Promise<boolean> { return false; }
     setTitle(title: string): void { this.title = title; }
     isLoading(): boolean { return false; }
     isDestroyed(): boolean { return this.destroyed; }
@@ -188,7 +189,6 @@ vi.mock("electron", () => {
 const pageTools = vi.hoisted(() => ({
   agentPageActivationBlocked: vi.fn(async () => false),
   agentPageHasSensitiveEvidence: vi.fn(async () => false),
-  agentPageHasTransientUserActivation: vi.fn(async () => false),
   installAgentPagePrivacyGuard: vi.fn(async () => undefined),
   locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({
     found: true, blocked: false, disabled: false, editable: true,
@@ -935,6 +935,42 @@ describe("agent-owned native Browser", () => {
     expect(children[0]!.webContents.sentInputs).toEqual([
       { type: "mouseMove", x: 42, y: 28 },
     ]);
+  });
+
+  it("releases chooser interception when setup finishes after cancellation", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    const original = contents.debugger.sendCommand.getMockImplementation();
+    let finishEnable = (): void => undefined;
+    const delayedEnable = new Promise<void>((resolve) => { finishEnable = resolve; });
+    contents.debugger.sendCommand.mockImplementation(async (method) => {
+      if (method === "Page.setInterceptFileChooserDialog") await delayedEnable;
+      return await original?.(method);
+    });
+    const controller = new AbortController();
+    const action = broker.perform(
+      conversationId,
+      { action: "click", ref: "e1" },
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(contents.debugger.sendCommand).toHaveBeenCalledWith(
+      "Page.setInterceptFileChooserDialog",
+      { enabled: true, cancel: true },
+    ));
+
+    controller.abort();
+    await expect(action).resolves.toMatchObject({ ok: false, code: "cancelled" });
+    finishEnable();
+    await vi.waitFor(() => expect(contents.debugger.sendCommand).toHaveBeenCalledWith(
+      "Page.setInterceptFileChooserDialog",
+      { enabled: false },
+    ));
   });
 
   it("rejects typing into a non-editable semantic ref", async () => {

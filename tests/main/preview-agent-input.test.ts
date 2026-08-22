@@ -88,6 +88,7 @@ describe("agent Browser file chooser boundary", () => {
           sendCommand,
         },
         getURL: () => "http://127.0.0.1:3000/",
+        executeJavaScriptInIsolatedWorld: vi.fn(async () => false),
         isDestroyed: () => false,
         navigationHistory: {
           getActiveIndex: () => 0,
@@ -102,7 +103,7 @@ describe("agent Browser file chooser boundary", () => {
     const { contents, sendCommand } = chooserContents();
     const generation = await beginAgentFileChooserBlock(contents as never);
 
-    await releaseAgentFileChooserBlock(contents as never, generation, async () => false);
+    await releaseAgentFileChooserBlock(contents as never, generation);
 
     expect(sendCommand).toHaveBeenNthCalledWith(
       4,
@@ -120,7 +121,7 @@ describe("agent Browser file chooser boundary", () => {
     const first = await beginAgentFileChooserBlock(contents as never);
     const second = await beginAgentFileChooserBlock(contents as never);
 
-    await releaseAgentFileChooserBlock(contents as never, first, async () => false);
+    await releaseAgentFileChooserBlock(contents as never, first);
 
     expect(first).toBe(1);
     expect(second).toBe(2);

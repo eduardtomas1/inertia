@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   agentPageActivationBlocked,
   agentPageHasSensitiveEvidence,
-  agentPageHasTransientUserActivation,
   installAgentPagePrivacyGuard,
   locateAgentPageRef,
   semanticPageSnapshot,
@@ -16,20 +15,6 @@ import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../../src/shared/agent-browser";
 import { installPreviewAgentShadowBoundarySignal } from "../../src/shared/preview-agent-privacy-guard";
 
 describe("agent browser semantic snapshots", () => {
-  it("reads transient activation only from the isolated browser world", async () => {
-    const contents = {
-      executeJavaScriptInIsolatedWorld: vi.fn(async () => true),
-    };
-
-    await expect(agentPageHasTransientUserActivation(contents as never))
-      .resolves.toBe(true);
-    expect(contents.executeJavaScriptInIsolatedWorld).toHaveBeenCalledWith(
-      999,
-      [{ code: "navigator.userActivation?.isActive === true" }],
-      true,
-    );
-  });
-
   it("signals a parser-created closed shadow root when page code retrieves its internals", () => {
     const dispatched: string[] = [];
     class FakeEvent {
@@ -629,6 +614,67 @@ describe("agent browser semantic snapshots", () => {
     await expect(locateAgentPageRef(contents as never, "e1"))
       .resolves.toMatchObject({ found: true, x: 5, y: 35 });
     expect(context.document.elementFromPoint).toHaveBeenLastCalledWith(5, 35);
+  });
+
+  it("rejects nested actionable hits and refs hidden by ancestor opacity", async () => {
+    const hiddenParent = { parentElement: null };
+    const outer = {
+      tagName: "DIV",
+      type: "",
+      value: "",
+      disabled: false,
+      readOnly: false,
+      isContentEditable: false,
+      innerText: "Outer action",
+      isConnected: true,
+      parentElement: null as unknown,
+      getAttribute: (name: string) => name === "role" ? "button" : null,
+      getBoundingClientRect: () => ({
+        x: 20, y: 30, left: 20, top: 30,
+        right: 220, bottom: 90, width: 200, height: 60,
+      }),
+      contains: (candidate: unknown) => candidate === outer
+        || candidate === presentation || candidate === inner,
+    };
+    const presentation = {
+      parentElement: outer,
+      matches: () => false,
+      getAttribute: (name: string) => name === "role" ? "presentation" : null,
+    };
+    const inner = {
+      parentElement: outer,
+      matches: (selector: string) => selector.includes("button"),
+      getAttribute: () => null,
+    };
+    const document = { elementFromPoint: vi.fn((): unknown => presentation) };
+    const context = {
+      __inertiaAgentBrowser: { refs: new Map([["e1", outer]]) },
+      document,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      getComputedStyle: (element: unknown) => ({
+        visibility: "visible",
+        display: "block",
+        opacity: element === hiddenParent ? "0" : "1",
+      }),
+      Set,
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(locateAgentPageRef(contents as never, "e1"))
+      .resolves.toMatchObject({ found: true });
+    document.elementFromPoint.mockReturnValue(inner);
+    await expect(locateAgentPageRef(contents as never, "e1"))
+      .resolves.toEqual({ found: false });
+    outer.parentElement = hiddenParent;
+    document.elementFromPoint.mockReturnValue(presentation);
+    await expect(locateAgentPageRef(contents as never, "e1"))
+      .resolves.toEqual({ found: false });
   });
 
   it("reports non-editable refs without focusing them", async () => {

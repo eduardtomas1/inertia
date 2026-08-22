@@ -123,6 +123,10 @@ async function createPreviewServer(): Promise<{
         + "<a href='/agent-browser-destination'>Continue in Browser</a>"
         + "<button id='hover-target' type='button'>Hover-moving action</button>"
         + "<button id='hover-decoy' type='button' style='display:none'>Hover decoy</button>"
+        + "<div id='outer-action' role='button' aria-label='Outer nested action' "
+        + "style='display:flex;width:240px;height:56px;align-items:center;justify-content:center'>"
+        + "<button id='inner-action' type='button'>Inner nested action</button></div>"
+        + "<div id='opacity-parent'><button id='opacity-action' type='button'>Temporarily visible action</button></div>"
         + "<script>const target=document.querySelector('#hover-target');let hoverOffset=0;"
         + "const decoy=document.querySelector('#hover-decoy');"
         + "target.addEventListener('mousemove',()=>{const rect=target.getBoundingClientRect();"
@@ -130,7 +134,10 @@ async function createPreviewServer(): Promise<{
         + "width:${rect.width}px;height:${rect.height}px`;hoverOffset=hoverOffset===0?240:0;"
         + "target.style.transform=`translateX(${hoverOffset}px)`});"
         + "target.addEventListener('click',()=>{window.__hoverTargetClicked=true});"
-        + "decoy.addEventListener('click',()=>{window.__hoverDecoyClicked=true})</script>",
+        + "decoy.addEventListener('click',()=>{window.__hoverDecoyClicked=true});"
+        + "document.querySelector('#outer-action').addEventListener('click',()=>{window.__outerActionClicked=true});"
+        + "document.querySelector('#inner-action').addEventListener('click',()=>{window.__innerActionClicked=true});"
+        + "document.querySelector('#opacity-action').addEventListener('click',()=>{window.__opacityActionClicked=true})</script>",
       );
       return;
     }
@@ -282,14 +289,30 @@ async function createPreviewServer(): Promise<{
         response.end(
           "<!doctype html><title>Agent browser type destination</title>"
           + "<h1>Typing navigation settled</h1>"
+          + "<label>Focus navigation <input aria-label='Focus navigation'></label>"
           + "<label>Private upload <input type='file' aria-label='Private upload'></label>"
           + "<button type='button'>Choose through page handler</button>"
-          + "<script>document.querySelector('button').addEventListener('click',()=>{"
+          + "<script>document.querySelector('[aria-label=\"Focus navigation\"]')"
+          + ".addEventListener('focus',()=>{location.href='/agent-browser-focus-destination'});"
+          + "document.querySelector('button').addEventListener('click',()=>{"
           + "setTimeout(()=>{const input=document.querySelector('input[type=file]');"
           + "window.__delayedPickerInvoked=true;"
           + "try{if(typeof input.showPicker==='function')input.showPicker();else input.click()}"
           + "catch(error){window.__delayedPickerRejected=String(error)}"
           + "},600)})</script>",
+        );
+      }, 450);
+      return;
+    }
+    if (request.url === "/agent-browser-focus-destination") {
+      setTimeout(() => {
+        response.writeHead(200, {
+          "Content-Type": "text/html",
+          "Content-Security-Policy": "default-src 'none'",
+        });
+        response.end(
+          "<!doctype html><title>Agent browser focus destination</title>"
+          + "<h1>Focus navigation settled</h1>",
         );
       }, 450);
       return;

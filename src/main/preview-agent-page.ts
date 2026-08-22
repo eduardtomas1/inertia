@@ -5,7 +5,7 @@ import { installPreviewAgentPrivacyGuard } from "../shared/preview-agent-privacy
 
 // Electron's context-isolated preload world. This is the only world that owns
 // credential identity; the untrusted page cannot read or mutate its state.
-const AGENT_BROWSER_WORLD_ID = 999;
+export const AGENT_BROWSER_WORLD_ID = 999;
 const MAX_SEMANTIC_ELEMENTS = 200;
 const MAX_PAGE_TEXT_CHARS = 12_000;
 const MAX_REMEMBERED_PASSWORD_VALUES = 32;
@@ -146,6 +146,11 @@ export async function semanticPageSnapshot(
       .slice(0, maximum);
     const visible = (element, rect) => {
       const style = getComputedStyle(element);
+      let ancestor = element.parentElement;
+      while (ancestor) {
+        if (Number(getComputedStyle(ancestor).opacity || "1") <= 0) return false;
+        ancestor = ancestor.parentElement;
+      }
       return rect.width > 0 && rect.height > 0
         && rect.bottom > 0 && rect.right > 0
         && rect.top < innerHeight && rect.left < innerWidth
@@ -313,15 +318,6 @@ export async function setAgentPageInputGuard(
   if (updated !== true) throw new Error("The Browser privacy guard is unavailable.");
 }
 
-export async function agentPageHasTransientUserActivation(
-  contents: WebContents,
-): Promise<boolean> {
-  return await execute(
-    contents,
-    "navigator.userActivation?.isActive === true",
-  ) === true;
-}
-
 export async function locateAgentPageRef(
   contents: WebContents,
   ref: string,
@@ -349,6 +345,26 @@ export async function locateAgentPageRef(
     const hit = document.elementFromPoint(x, y);
     if (!hit || (hit !== element && !element.contains(hit))) {
       return { found: false };
+    }
+    let ancestor = element.parentElement;
+    while (ancestor) {
+      if (Number(getComputedStyle(ancestor).opacity || "1") <= 0) {
+        return { found: false };
+      }
+      ancestor = ancestor.parentElement;
+    }
+    const actionableRoles = new Set([
+      "button", "checkbox", "combobox", "link", "menuitem", "menuitemcheckbox",
+      "menuitemradio", "option", "radio", "searchbox", "slider", "spinbutton",
+      "switch", "tab", "textbox", "treeitem",
+    ]);
+    const actionable = (candidate) => candidate.matches?.(
+      "a[href],button,input,textarea,select,summary,[contenteditable]:not([contenteditable='false']),[tabindex]",
+    ) || actionableRoles.has(String(candidate.getAttribute?.("role") || "").toLowerCase());
+    let hitOwner = hit;
+    while (hitOwner && hitOwner !== element) {
+      if (actionable(hitOwner)) return { found: false };
+      hitOwner = hitOwner.parentElement;
     }
     const passwordNodes = state.passwordNodes ??= new WeakSet();
     const passwordValues = state.passwordValues ??= new Set();

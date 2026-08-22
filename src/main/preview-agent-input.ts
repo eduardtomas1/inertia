@@ -1,7 +1,7 @@
 import type { WebContents } from "electron";
 
 import { previewNavigationTarget } from "../shared/preview-url.js";
-import { locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
+import { AGENT_BROWSER_WORLD_ID, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
 
 const INPUT_NAVIGATION_GRACE_MS = 250;
 const HOVER_INPUT_TIMEOUT_MS = 15_000;
@@ -200,7 +200,6 @@ function chooserPollDelay(): Promise<void> {
 export async function releaseAgentFileChooserBlock(
   contents: WebContents,
   generation: number,
-  hasTransientUserActivation: () => Promise<boolean>,
 ): Promise<void> {
   const state = fileChooserBlocks.get(contents);
   if (!state) return;
@@ -208,7 +207,11 @@ export async function releaseAgentFileChooserBlock(
   while (state.generation === generation && !contents.isDestroyed()) {
     let active = true;
     try {
-      active = await hasTransientUserActivation();
+      active = await contents.executeJavaScriptInIsolatedWorld(
+        AGENT_BROWSER_WORLD_ID,
+        [{ code: "navigator.userActivation?.isActive === true" }],
+        true,
+      ) === true;
     } catch {
       // Keep the boundary fail-closed until the bounded activation window ends.
     }

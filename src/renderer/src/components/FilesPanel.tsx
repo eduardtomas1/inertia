@@ -657,7 +657,7 @@ export function FilesPanel({
         ...[...expandedPathsRef.current].filter((path) =>
           rootDirectories.has(path.split("/")[0] ?? "")
         ),
-        ...directoryChain(selectedParent),
+        ...(selectedParent ? directoryChain(selectedParent) : []),
       ],
     );
     expandedPathsRef.current = retainedExpandedPaths;

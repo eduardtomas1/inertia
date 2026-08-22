@@ -425,6 +425,45 @@ describe("FilesPanel root refresh", () => {
       .toHaveAttribute("aria-expanded", "true");
   });
 
+  it("does not reload the root for a top-level selection on truncated refresh", async () => {
+    const rootEntries = [{ path: "README.md", kind: "file" }] satisfies WorkspaceEntry[];
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+    }: {
+      directory?: string;
+    }): Promise<WorkspaceEntriesPage> => page(directory, rootEntries, true));
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={rootEntries}
+        entriesTruncated
+        preview={null}
+        selectedPath="LICENSE"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    expect(screen.getByRole("treeitem", { name: "LICENSE" }))
+      .toHaveAttribute("aria-selected", "true");
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={[...rootEntries]}
+        entriesTruncated
+        preview={null}
+        selectedPath="LICENSE"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    await act(async () => await Promise.resolve());
+    expect(onLoadEntries).not.toHaveBeenCalled();
+    expect(screen.getByRole("treeitem", { name: "LICENSE" }))
+      .toHaveAttribute("aria-selected", "true");
+  });
+
   it("re-reveals the selected row when its tree container resizes", () => {
     let notifyResize: (() => void) | null = null;
     const observe = vi.fn();

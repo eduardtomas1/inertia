@@ -39,7 +39,7 @@ type OpenWorkspaceFileOptions = readonly [
   location: WorkspaceFileLocation | undefined,
   literalPath: boolean | undefined,
   headingId: string | undefined,
-  authorityRef: { current: string },
+  authorityRef: { current: string; open?: number },
   authority: string,
   inspectDirectory: (options: { directory: string }) => Promise<unknown>,
   projectId: string,
@@ -66,8 +66,12 @@ export async function openWorkspaceFile([
   openFile,
   setActiveTool,
 ]: OpenWorkspaceFileOptions): Promise<void> {
+  const open = (authorityRef.open ?? 0) + 1;
+  authorityRef.open = open;
   await openWorkspaceEntry(path, {
-    isCurrent: () => authorityRef.current === authority,
+    isCurrent: () => (
+      authorityRef.current === authority && authorityRef.open === open
+    ),
     inspectDirectory: async (directory) =>
       await inspectDirectory({ directory }),
     openDirectory: async (directory) =>

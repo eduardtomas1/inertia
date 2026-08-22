@@ -367,6 +367,9 @@ export class TurnController {
       this.settle(exactActive, "cancelled", "user-cancelled", "Stopped");
     }
     if (exactActive?.providerRunStarted) {
+      if (this.transition(exactActive, "cancelling", "duo-quarantine")) {
+        broadcastTurnConversationShell(this.hooks, exactActive);
+      }
       quarantineActiveDuoTurn(exactActive, {
         scheduler: this.scheduler,
         pendingApprovals: this.pendingApprovals,

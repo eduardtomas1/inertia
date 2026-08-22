@@ -369,7 +369,7 @@ export function FilesPanel({
   const markdownPreview = previewLanguage?.id === "markdown";
   const markdownPreviewBlockedReason = markdownPreview && preview
     ? preview.truncated
-      ? "Complete file required."
+      ? "Full file required."
       : preview.content.length > MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS
         ? `Limit: ${MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS.toLocaleString("en-US")} characters.`
         : previewWindow.totalLines > MAX_RENDERED_PREVIEW_LINES
@@ -612,7 +612,7 @@ export function FilesPanel({
       if (!mounted.current || directoryGeneration.current !== generation) return;
       setDirectoryErrors((current) => new Map(current).set(
         path,
-        safeError(loadError, "Folder load failed."),
+        safeError(loadError, "Load failed."),
       ));
     } finally {
       if (mounted.current && directoryGeneration.current === generation) {
@@ -638,10 +638,18 @@ export function FilesPanel({
         .filter(({ kind }) => kind === "directory")
         .map(({ path }) => path),
     );
+    const selectedParent = entriesTruncated
+      && selectedPath
+      && isSafeWorkspaceEntryPath(selectedPath)
+      ? workspaceParentPath(selectedPath)
+      : "";
     const retainedExpandedPaths = new Set(
-      [...expandedPathsRef.current].filter((path) =>
-        rootDirectories.has(path.split("/")[0] ?? "")
-      ),
+      [
+        ...[...expandedPathsRef.current].filter((path) =>
+          rootDirectories.has(path.split("/")[0] ?? "")
+        ),
+        ...(selectedParent ? directoryChain(selectedParent) : []),
+      ],
     );
     expandedPathsRef.current = retainedExpandedPaths;
     directoryPagesRef.current = next;
@@ -652,7 +660,7 @@ export function FilesPanel({
     for (const path of retainedExpandedPaths) {
       void loadDirectory(path);
     }
-  }, [entries, entriesTruncated, loadDirectory]);
+  }, [entries, entriesTruncated, loadDirectory, selectedPath]);
 
   const updateQuery = useCallback((value: string): void => {
     searchGeneration.current += 1;
@@ -682,7 +690,7 @@ export function FilesPanel({
             entries: [],
             truncated: false,
             loading: false,
-            error: safeError(searchError, "Project search failed."),
+            error: safeError(searchError, "Search failed."),
           });
         });
     }, 220);
@@ -877,13 +885,13 @@ export function FilesPanel({
           className="file-entry-list"
           ref={fileListRef}
           role="tree"
-          aria-label={searchActive ? "File search results" : "Workspace files"}
+          aria-label={searchActive ? "Search results" : "Workspace files"}
           aria-busy={treeBusy}
         >
           {showTreeLoading ? (
             <div className="panel-loading" role="status">
-              <LoadingMark label={searchActive ? "Searching files" : "Loading files"} />
-              <span>{searchActive ? "Searching files…" : "Loading files…"}</span>
+              <LoadingMark label={searchActive ? "Searching" : "Loading"} />
+              <span>{searchActive ? "Searching…" : "Loading…"}</span>
             </div>
           ) : hasRootFailure || hasSearchFailure ? (
             <div className="panel-empty compact file-panel-error" role="alert">
@@ -996,7 +1004,7 @@ export function FilesPanel({
           )}
           {searchActive && search.truncated && (
             <p className="panel-notice file-list-truncated">
-              Refine search for more.
+              Refine for more.
             </p>
           )}
         </div>

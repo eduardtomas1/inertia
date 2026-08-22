@@ -75,7 +75,7 @@ describe("FilesPanel", () => {
       onLoadEntries: vi.fn(),
     }));
     expect(loadingHtml).toContain('role="status"');
-    expect(loadingHtml).toContain("Loading files");
+    expect(loadingHtml).toContain("Loading");
 
     const errorHtml = renderToStaticMarkup(createElement(FilesPanel, {
       ...FILES_PROJECT,

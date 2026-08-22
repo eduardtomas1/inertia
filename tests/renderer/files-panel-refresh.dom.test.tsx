@@ -138,7 +138,7 @@ describe("FilesPanel root refresh", () => {
       .toBeInTheDocument();
   });
 
-  it("materializes a selected chain omitted from bounded directory pages", async () => {
+  it("retains a selected chain across truncated root refreshes", async () => {
     const onLoadEntries = vi.fn(async ({
       directory = "",
     }: {
@@ -149,7 +149,7 @@ describe("FilesPanel root refresh", () => {
       }
       return page(directory, [{ path: "README.md", kind: "file" }], true);
     });
-    render(
+    const view = render(
       <FilesPanel
         {...FILES_PROJECT}
         entries={[{ path: "README.md", kind: "file" }]}
@@ -170,6 +170,28 @@ describe("FilesPanel root refresh", () => {
     expect(screen.getByText("More root items.")).toBeInTheDocument();
     expect(screen.getByText("More in components."))
       .toBeInTheDocument();
+
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={[{ path: "README.md", kind: "file" }]}
+        entriesTruncated
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onLoadEntries.mock.calls.filter(
+        ([request]) => request.directory === "src/components",
+      )).toHaveLength(2);
+    });
+    expect(screen.getByRole("treeitem", { name: "Button.tsx" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("treeitem", { name: "src" }))
+      .toHaveAttribute("aria-expanded", "true");
   });
 
   it("re-reveals the selected row when its tree container resizes", () => {

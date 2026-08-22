@@ -6,6 +6,7 @@ import type { ProviderHostToolMcpConnection } from "./host-tool-mcp-http";
 export const INERTIA_HOST_MCP_NAME = "inertia-chat-manager";
 export const INERTIA_HOST_MCP_URL_ENV = "INERTIA_HOST_MCP_URL";
 export const INERTIA_HOST_MCP_TOKEN_ENV = "INERTIA_HOST_MCP_TOKEN";
+const MAX_STDIO_PROXY_RESPONSE_BYTES = 6 * 1024 * 1024;
 
 const STDIO_PROXY_SOURCE = String.raw`
 const url=process.env.INERTIA_HOST_MCP_URL;
@@ -13,7 +14,7 @@ const token=process.env.INERTIA_HOST_MCP_TOKEN;
 delete process.env.INERTIA_HOST_MCP_URL;
 delete process.env.INERTIA_HOST_MCP_TOKEN;
 if(!url||!token)process.exit(1);
-const MAX_LINE=131072,MAX_QUEUE=8,MAX_RESPONSE=65536;
+const MAX_LINE=131072,MAX_QUEUE=8,MAX_RESPONSE=${MAX_STDIO_PROXY_RESPONSE_BYTES};
 let pending=Buffer.alloc(0),queue=[],running=false;
 async function pump(){
  if(running)return;running=true;

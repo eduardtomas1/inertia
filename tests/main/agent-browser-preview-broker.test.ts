@@ -7,6 +7,7 @@ const electronState = vi.hoisted(() => ({
       getMockImplementation(): (() => Promise<unknown>) | undefined;
       mockImplementationOnce(implementation: () => Promise<unknown>): unknown;
     };
+    emit(name: string, ...args: unknown[]): void;
   }>,
   sessions: [] as Array<{
     permissionChecks: number;
@@ -69,10 +70,25 @@ vi.mock("electron", () => {
       handlers.push(handler);
       this.handlers.set(name, handlers);
     }
+    once(name: string, handler: (...args: unknown[]) => void): void {
+      const onceHandler = (...args: unknown[]): void => {
+        this.removeListener(name, onceHandler);
+        handler(...args);
+      };
+      this.on(name, onceHandler);
+    }
+    removeListener(name: string, handler: (...args: unknown[]) => void): void {
+      const handlers = this.handlers.get(name);
+      if (!handlers) return;
+      this.handlers.set(name, handlers.filter((candidate) => candidate !== handler));
+    }
+    emit(name: string, ...args: unknown[]): void {
+      for (const handler of [...(this.handlers.get(name) ?? [])]) handler(...args);
+    }
     async loadURL(url: string): Promise<void> {
       this.url = url;
       this.title = new URL(url).pathname === "/" ? "Local app" : new URL(url).pathname.slice(1);
-      for (const handler of this.handlers.get("did-navigate") ?? []) handler({}, url);
+      this.emit("did-navigate", {}, url);
     }
     getURL(): string { return this.url; }
     getTitle(): string { return this.title; }
@@ -316,7 +332,8 @@ describe("agent-owned native Browser", () => {
     expect(pageTools.showAgentPageCursor).toHaveBeenCalledTimes(cursorCalls);
   });
 
-  it("serializes renderer navigation and history commands with agent actions", async () => {
+  it("serializes renderer navigation and waits for history commands to settle", async () => {
+    const contentsOffset = electronState.contents.length;
     const { broker } = harness();
     await broker.navigate({
       ownerId: "primary",
@@ -371,6 +388,9 @@ describe("agent-owned native Browser", () => {
     expect(commandSettled).toBe(false);
     releaseSecond();
     await expect(secondSnapshot).resolves.toMatchObject({ ok: true });
+    await Promise.resolve();
+    expect(commandSettled).toBe(false);
+    electronState.contents[contentsOffset]!.emit("did-stop-loading");
     await expect(commandPromise).resolves.toMatchObject({
       url: "http://127.0.0.1:3000/settings",
     });

@@ -350,6 +350,45 @@ describe("provider host-tool MCP transport", () => {
     });
   });
 
+  it("carries bounded Browser PNG evidence through Cursor and Kimi's stdio fallback", async () => {
+    const image = Buffer.alloc(96 * 1024, 0x5a).toString("base64");
+    const { connection } = await started({
+      invoke: async () => ({
+        success: true,
+        text: "captured",
+        image: { mimeType: "image/png", data: image },
+      }),
+    });
+    const fallback = acpHostMcpServers(connection, false)[0]!;
+    if (!("command" in fallback)) throw new Error("Expected the shared ACP stdio fallback.");
+    const child = spawn(fallback.command, fallback.args, {
+      env: {
+        ...process.env,
+        ...Object.fromEntries(fallback.env.map(({ name, value }) => [name, value])),
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    child.stdin.end(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: "stdio-image",
+      method: "tools/call",
+      params: { name: "inertia_list_conversations", arguments: {} },
+    })}\n`);
+    const [code] = await once(child, "close") as [number | null, NodeJS.Signals | null];
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout.trim())).toMatchObject({
+      id: "stdio-image",
+      result: {
+        content: [
+          { type: "text", text: "captured" },
+          { type: "image", mimeType: "image/png", data: image },
+        ],
+      },
+    });
+  });
+
   it("shares a concurrent close failure instead of falsely confirming cleanup", async () => {
     const { owner } = runtime();
     const session = createProviderHostToolMcpSession(owner, {

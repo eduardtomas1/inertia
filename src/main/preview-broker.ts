@@ -57,6 +57,7 @@ const UUID_PATTERN =
 const hardenedSessions = new WeakSet<Session>();
 const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n"]);
 const MAX_BROWSER_TABS = 8;
+const PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS = 30_000;
 
 export function previewAppShortcutKey(input: Pick<
   Input,
@@ -175,20 +176,26 @@ export class PreviewBroker {
       !slot
       || (action !== "back" && action !== "forward" && action !== "reload")
     ) return this.#state(ownerId, contextId);
-    return await this.#serializeSlotAction(slot, () => {
+    return await this.#serializeSlotAction(slot, async () => {
       if (this.#ownedSlot(ownerId, contextId) !== slot) {
         return this.#state(ownerId, contextId);
       }
       const contents = this.#active(slot).view.webContents;
       if (action === "back" && contents.navigationHistory.canGoBack()) {
-        contents.navigationHistory.goBack();
+        await this.#waitForNavigationCommand(
+          contents,
+          () => contents.navigationHistory.goBack(),
+        );
       } else if (
         action === "forward"
         && contents.navigationHistory.canGoForward()
       ) {
-        contents.navigationHistory.goForward();
+        await this.#waitForNavigationCommand(
+          contents,
+          () => contents.navigationHistory.goForward(),
+        );
       } else if (action === "reload") {
-        contents.reload();
+        await this.#waitForNavigationCommand(contents, () => contents.reload());
       }
       return this.#state(ownerId, contextId);
     });
@@ -856,5 +863,42 @@ export class PreviewBroker {
     } finally {
       signal.removeEventListener("abort", onAbort);
     }
+  }
+
+  async #waitForNavigationCommand(
+    contents: PreviewTab["view"]["webContents"],
+    dispatch: () => void,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        contents.removeListener("did-stop-loading", onStopped);
+        contents.removeListener("destroyed", onDestroyed);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onStopped = (): void => finish();
+      const onDestroyed = (): void => finish(
+        new Error("The active Browser tab was closed during navigation."),
+      );
+      const timeout = setTimeout(() => {
+        finish(new Error("The Browser navigation command timed out."));
+        if (!contents.isDestroyed()) contents.stop();
+      }, PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS);
+      contents.once("did-stop-loading", onStopped);
+      contents.once("destroyed", onDestroyed);
+      try {
+        if (contents.isDestroyed()) {
+          finish(new Error("The active Browser tab was closed before navigation."));
+          return;
+        }
+        dispatch();
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error("The Browser navigation command failed."));
+      }
+    });
   }
 }

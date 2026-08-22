@@ -600,7 +600,14 @@ function startOpenCodeRun(
       };
       let sessionIdleObserved = false;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
-        onDescendantActivity: armEventInactivityDeadline,
+        onDescendantActivity: () => {
+          armEventInactivityDeadline();
+          emitter.status(
+            "running",
+            undefined,
+            "verified descendant session activity",
+          );
+        },
         onDescendantInteraction: (event) => {
           const safeEvent = hostTools?.redactPayload(event) ?? event;
           handleOpenCodeInteractionEvent(

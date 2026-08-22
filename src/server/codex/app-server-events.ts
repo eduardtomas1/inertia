@@ -805,6 +805,7 @@ export class CodexAppServerEvents {
         boundedText(error?.message, 4_000) ?? "Codex reported an error.";
       this.host.setLastError(message);
       if (params.willRetry === true) {
+        this.host.options.onStatus?.("retrying", "error/willRetry");
         this.emitActivity(
           "system",
           "info",

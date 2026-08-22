@@ -3,6 +3,7 @@ import type {
   AgentGoal,
   AgentActivity,
   AgentReasoning,
+  AgentRunState,
   AgentTurnAssociation,
   AgentTurnStatus,
   AppSettings,
@@ -106,6 +107,9 @@ export interface AgentTurnRow {
   started_at: string | null;
   completed_at: string | null;
   status: AgentTurnStatus;
+  run_state: AgentRunState;
+  provider_state: string | null;
+  run_state_revision: number;
   terminal_reason: string | null;
   checkpoint_id: string | null;
   usage_start_json: string | null;

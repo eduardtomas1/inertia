@@ -44,9 +44,9 @@ export class TurnSettlementCoordinator {
     message?: string,
     failure?: ProviderRunFailure,
   ): boolean {
-    if (active.settled) return false;
-    active.settled = true;
-    active.acceptingProviderEvents = false;
+    const authoritativeStatus = active.runState.settle(status);
+    if (!authoritativeStatus) return false;
+    status = authoritativeStatus;
     if (active.timeoutTimer !== null) {
       this.options.scheduler.clearTimeout(active.timeoutTimer);
       active.timeoutTimer = null;
@@ -145,12 +145,14 @@ export class TurnSettlementCoordinator {
       );
     } catch {
       try {
+        active.runState.repairSettlementFailure("stream-persistence-failed");
         const latest = this.options.store.agentTurn(active.turn.id);
         const repairedAt = this.options.now();
         active.turn = isAgentTurnTerminalStatus(latest.status)
           ? latest
           : this.options.store.settleAgentTurn(active.turn.id, {
               status: "failed",
+              runState: active.runState.snapshot(),
               terminalAssistantMessageId: active.latestAssistantMessageId,
               providerSessionAfter: active.sessionAfter,
               terminalReason: "stream-persistence-failed",
@@ -210,6 +212,7 @@ export class TurnSettlementCoordinator {
     const completedAt = this.options.now();
     const settlement = this.options.store.settleAgentTurn(active.turn.id, {
       status,
+      runState: active.runState.snapshot(),
       terminalAssistantMessageId: active.latestAssistantMessageId,
       providerSessionAfter: active.sessionAfter,
       terminalReason,

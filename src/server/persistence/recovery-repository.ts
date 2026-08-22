@@ -102,6 +102,9 @@ export class RecoveryRepository {
     const markInterruptedTurn = this.database.prepare(`
       UPDATE agent_turns
       SET status = 'interrupted',
+          run_state = 'interrupted',
+          provider_state = 'runtime-restart',
+          run_state_revision = run_state_revision + 1,
           started_at = COALESCE(started_at, requested_at),
           completed_at = ?,
           terminal_reason = COALESCE(terminal_reason, 'runtime-restart'),

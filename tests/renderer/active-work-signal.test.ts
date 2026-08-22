@@ -52,7 +52,7 @@ describe("Minimal Workstream active pixel signal", () => {
 
     expect(activeBranch).toContain('data-active-work-region=""');
     expect(activeBranch).toContain(
-      "data-active-work-state={turn.agentTurn.status}",
+      "data-active-work-state={runState}",
     );
     expect(activeBranch).toContain(
       "data-active-agent-phase={activePresentation.phase}",

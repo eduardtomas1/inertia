@@ -76,7 +76,10 @@ export interface CodexAppServerOptions {
     detail?: Pick<ProviderActivityEvent, "activityId" | "detail">,
   ) => void;
   onSession?: (sessionId: string) => void;
-  onStatus?: (status: "running") => void;
+  onStatus?: (
+    status: "running" | "retrying",
+    providerState?: string,
+  ) => void;
   onApproval?: (request: AgentApprovalRequest) => void;
   onApprovalResolved?: (requestId: string, decision: AgentApprovalDecision | "cancelled") => void;
   onInputRequest?: (request: AgentInputRequest) => void;

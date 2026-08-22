@@ -16,6 +16,7 @@ import type {
   AgentTurnAssociation,
   AgentTurnStatus,
 } from "../turn-lifecycle";
+import type { AgentRunStateSnapshot } from "../run-state";
 import type {
   AgentConversationContextRequest,
   MaterializedConversationContext,
@@ -169,6 +170,8 @@ export interface AgentTurn {
   startedAt: string | null;
   completedAt: string | null;
   status: AgentTurnStatus;
+  /** Optional only for snapshots written before the run-state ledger existed. */
+  runState?: AgentRunStateSnapshot;
   terminalReason: string | null;
   checkpointId: string | null;
   usageAtStart: AgentTurnUsageSnapshot | null;

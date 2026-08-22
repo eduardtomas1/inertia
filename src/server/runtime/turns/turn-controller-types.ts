@@ -25,6 +25,7 @@ import type {
   ProviderMetadataEvent,
   ProviderHostToolBridge,
   ProviderRunCallbacks,
+  ProviderRunFailure,
   ProviderRunInput,
   ProviderRunResult,
   ProviderSteerInput,
@@ -34,6 +35,7 @@ import type { DocumentAttachmentContext } from "../attachments/document-attachme
 import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
 import type { TurnStreamChannel } from "./turn-stream-channel";
 import type { StreamingTrace } from "../test-streaming-trace";
+import type { AuthoritativeRunStateEngine } from "../run-state-engine";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -252,8 +254,14 @@ export interface ActiveTurn {
   /** FIFO admission tail for parent follow-ups on this exact active turn. */
   followUpAdmissionTail: Promise<void>;
   supportsFollowUpImages: boolean;
-  acceptingProviderEvents: boolean;
-  settled: boolean;
+  runState: AuthoritativeRunStateEngine;
+  deferredSettlement: {
+    status: AgentTurnTerminalStatus;
+    cause: TurnTerminalCause;
+    message?: string;
+    failure?: ProviderRunFailure;
+  } | null;
+  providerStopStarted: boolean;
   sessionAfter: string | null;
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;

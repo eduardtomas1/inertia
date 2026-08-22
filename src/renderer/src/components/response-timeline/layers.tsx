@@ -1,10 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { MessagesSquare, RotateCcw } from "lucide-react";
 import clsx from "clsx";
-import type {
-  ChatMessage,
-  SubagentTrace,
-} from "@shared/contracts";
+import { agentRunStateForTurn } from "@shared/run-state";
+import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { formatClockTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
@@ -161,6 +159,8 @@ export function AgentExecutionLayer({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
+  const runState = agentRunStateForTurn(turn.agentTurn);
+  const stopping = runState === "cancelling";
   const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
   const activePresentation = activeAgentPresentation({
     turn,
@@ -180,7 +180,7 @@ export function AgentExecutionLayer({
         <div
           className="turn-execution-rail is-live"
           data-active-work-region=""
-          data-active-work-state={turn.agentTurn.status}
+          data-active-work-state={runState}
           data-active-agent-phase={activePresentation.phase}
           data-work-identity-source="persisted-model-selection"
         >
@@ -207,9 +207,10 @@ export function AgentExecutionLayer({
               type="button"
               className="turn-stop-action"
               aria-label={`Stop ${providerLabel} run`}
+              disabled={stopping}
               onClick={props.onStop}
             >
-              <span>Stop</span>
+              <span>{stopping ? "Stopping" : "Stop"}</span>
             </button>
           </header>
           <WorkLog

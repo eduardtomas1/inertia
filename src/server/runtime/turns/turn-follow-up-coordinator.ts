@@ -24,8 +24,7 @@ export class TurnFollowUpCoordinator {
   acquire(active: ActiveTurn | undefined): FollowUpAdmissionLease | null {
     if (
       !active
-      || active.settled
-      || !active.acceptingProviderEvents
+      || !active.runState.acceptsProviderEvents()
       || !this.options.providers.steer
       || ![
         "codex-app-server",
@@ -80,8 +79,7 @@ export class TurnFollowUpCoordinator {
     if (
       !active
       || current !== active
-      || active.settled
-      || !active.acceptingProviderEvents
+      || !active.runState.acceptsProviderEvents()
       || active.turn.runId !== lease.runId
       || active.turn.id !== lease.turnId
       || !followUp
@@ -100,8 +98,7 @@ export class TurnFollowUpCoordinator {
     if (
       !accepted
       || ownerAfterSteer !== active
-      || active.settled
-      || !active.acceptingProviderEvents
+      || !active.runState.acceptsProviderEvents()
       || active.turn.runId !== lease.runId
       || active.turn.id !== lease.turnId
     ) return null;

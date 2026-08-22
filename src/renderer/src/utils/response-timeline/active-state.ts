@@ -1,4 +1,5 @@
-import type { AgentActivity, AgentTurnStatus } from "@shared/contracts";
+import { agentRunStateForTurn } from "@shared/run-state";
+import type { AgentActivity } from "@shared/contracts";
 
 import type { ResponseTurn } from "./model";
 
@@ -22,13 +23,16 @@ export type ActiveAgentPhase =
   | "tool"
   | "responding"
   | "working"
+  | "delegated"
+  | "retrying"
+  | "cancelling"
   | "waiting-for-approval"
   | "waiting-for-input";
 
 export interface ActiveAgentPresentation {
   phase: ActiveAgentPhase;
   label: string;
-  detail: string | null;
+  detail?: string | null;
   animated: boolean;
 }
 
@@ -100,45 +104,6 @@ function latestRunningActivity(
   return latest;
 }
 
-function lifecyclePresentation(
-  status: Extract<
-    AgentTurnStatus,
-    "queued" | "starting" | "waiting-for-approval" | "waiting-for-input"
-  >,
-  providerLabel: string,
-): ActiveAgentPresentation {
-  switch (status) {
-    case "queued":
-      return {
-        phase: "queued",
-        label: `${providerLabel} is queued`,
-        detail: null,
-        animated: true,
-      };
-    case "starting":
-      return {
-        phase: "starting",
-        label: `${providerLabel} is starting`,
-        detail: null,
-        animated: true,
-      };
-    case "waiting-for-approval":
-      return {
-        phase: "waiting-for-approval",
-        label: `${providerLabel} needs approval`,
-        detail: null,
-        animated: false,
-      };
-    case "waiting-for-input":
-      return {
-        phase: "waiting-for-input",
-        label: `${providerLabel} is waiting for input`,
-        detail: null,
-        animated: false,
-      };
-  }
-}
-
 /**
  * Derives the active presentation from authoritative turn lifecycle, running
  * provider actions, and the currently open live stream segment. Persisted
@@ -149,14 +114,22 @@ export function activeAgentPresentation(input: {
   providerLabel: string;
   streamingChannel: StreamingAgentChannel;
 }): ActiveAgentPresentation {
-  const { status } = input.turn.agentTurn;
-  if (
-    status === "queued"
-    || status === "starting"
-    || status === "waiting-for-approval"
-    || status === "waiting-for-input"
-  ) {
-    return lifecyclePresentation(status, input.providerLabel);
+  const status = agentRunStateForTurn(input.turn.agentTurn);
+  const lifecycle = status === "running"
+    ? null
+    : status[0] === "w"
+      ? status.endsWith("input") ? "is waiting for input" : "needs approval"
+      : status === "queued" || status === "starting"
+        ? `is ${status}`
+        : status === "delegated"
+          ? "delegating"
+          : status === "cancelling" ? "stopping" : status;
+  if (lifecycle) {
+    return {
+      phase: status as ActiveAgentPhase,
+      label: `${input.providerLabel} ${lifecycle}`,
+      animated: status[0] !== "w",
+    };
   }
 
   const activity = latestRunningActivity(input.turn.activities);

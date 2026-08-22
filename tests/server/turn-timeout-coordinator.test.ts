@@ -6,6 +6,7 @@ import type {
   TurnTimerScheduler,
 } from "../../src/server/runtime/turns/turn-controller-types";
 import { TurnTimeoutCoordinator } from "../../src/server/runtime/turns/turn-timeout-coordinator";
+import { AuthoritativeRunStateEngine } from "../../src/server/runtime/run-state-engine";
 
 class FakeScheduler implements TurnTimerScheduler {
   readonly callbacks = new Map<object, () => void>();
@@ -26,12 +27,17 @@ class FakeScheduler implements TurnTimerScheduler {
 
 function activeTurn(): ActiveTurn {
   return {
-    settled: false,
+    runState: new AuthoritativeRunStateEngine({
+      conversationId: "conversation-1",
+      runId: "run-1",
+      turnId: "turn-1",
+      providerId: "codex",
+    }),
     timeoutTimer: null,
     lifetimeTimer: null,
     conversation: { id: "conversation-1" },
     turn: { id: "turn-1" },
-  } as ActiveTurn;
+  } as unknown as ActiveTurn;
 }
 
 function timeoutRuntime(initialStatus: AgentTurnStatus = "running") {

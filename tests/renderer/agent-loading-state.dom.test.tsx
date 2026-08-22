@@ -12,7 +12,10 @@ import type {
 
 const conversationId = "33333333-3333-4333-8333-333333333333";
 
-function agentTurn(status: AgentTurn["status"] = "running"): AgentTurn {
+function agentTurn(
+  status: AgentTurn["status"] = "running",
+  runState?: AgentTurn["runState"],
+): AgentTurn {
   return {
     id: "turn-agent-loading",
     conversationId,
@@ -52,6 +55,7 @@ function agentTurn(status: AgentTurn["status"] = "running"): AgentTurn {
     startedAt: status === "queued" ? null : "2026-08-12T12:00:02.000Z",
     completedAt: null,
     status,
+    ...(runState ? { runState } : {}),
     terminalReason: null,
     checkpointId: null,
     usageAtStart: null,
@@ -115,6 +119,7 @@ function reasoning(): AgentReasoning {
 
 interface StateInput {
   status?: AgentTurn["status"];
+  runState?: AgentTurn["runState"];
   activities?: AgentActivity[];
   reasonings?: AgentReasoning[];
   showThinking?: boolean;
@@ -129,7 +134,7 @@ function stateProps(
   onStop: () => void,
 ): React.ComponentProps<typeof ResponseTimeline> {
   return {
-    turns: [agentTurn(input.status)],
+    turns: [agentTurn(input.status, input.runState)],
     messages: [
       userMessage(),
       ...(input.commentaryContent
@@ -483,5 +488,50 @@ describe("agent loading and trace DOM", () => {
     expect(grid).toHaveAttribute("data-phase", "waiting-for-approval");
     expect(container.querySelector(".turn-working-elapsed"))
       .toHaveAttribute("aria-live", "off");
+  });
+
+  it("renders delegated, retrying, and exact-process cancellation as live states", () => {
+    const { container, onStop, rerender } = renderState({
+      runState: {
+        state: "delegated",
+        providerState: "thread/running",
+        revision: 3,
+      },
+    });
+    expect(container.querySelector("[data-active-work-region]"))
+      .toHaveAttribute("data-active-work-state", "delegated");
+    expect(container.querySelector(".turn-working-status"))
+      .toHaveTextContent("Codex · Codex App Server delegating");
+
+    rerender(<ResponseTimeline {...stateProps({
+      runState: {
+        state: "retrying",
+        providerState: "error/willRetry",
+        revision: 4,
+      },
+    }, onStop)} />);
+    expect(container.querySelector("[data-active-agent-phase=retrying]"))
+      .toBeInTheDocument();
+    expect(container.querySelector(".turn-working-status"))
+      .toHaveTextContent("Codex · Codex App Server retrying");
+
+    rerender(<ResponseTimeline {...stateProps({
+      runState: {
+        state: "cancelling",
+        providerState: "cancel/requested",
+        revision: 5,
+      },
+    }, onStop)} />);
+    expect(container.querySelector("[data-active-work-state=cancelling]"))
+      .toBeInTheDocument();
+    expect(container.querySelector(".turn-working-status"))
+      .toHaveTextContent("Codex · Codex App Server stopping");
+    const stopping = screen.getByRole("button", {
+      name: "Stop Codex · Codex App Server run",
+    });
+    expect(stopping).toBeDisabled();
+    expect(stopping).toHaveTextContent("Stopping");
+    fireEvent.click(stopping);
+    expect(onStop).not.toHaveBeenCalled();
   });
 });

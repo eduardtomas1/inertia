@@ -13,6 +13,7 @@ import {
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
 import type { ProviderActivityEvent } from "../../provider/contracts";
+import { AuthoritativeRunStateEngine } from "../run-state-engine";
 import { assembleTurnRequest } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import type {
@@ -287,8 +288,14 @@ export function resolveTurnRequest(
           followUpAdmissions: new Set<Promise<void>>(),
           followUpAdmissionTail: Promise.resolve(),
           supportsFollowUpImages: Boolean(supportsImages),
-          acceptingProviderEvents: true,
-          settled: false,
+          runState: new AuthoritativeRunStateEngine({
+            conversationId: conversation.id,
+            runId: queued.turn.runId,
+            turnId: queued.turn.id,
+            providerId: route.providerId,
+          }),
+          deferredSettlement: null,
+          providerStopStarted: false,
           sessionAfter: canResume ? conversation.providerSessionId : null,
           lastUsage: null,
           assistantText: "",

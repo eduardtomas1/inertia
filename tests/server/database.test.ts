@@ -368,6 +368,20 @@ describe("RuntimeStore conversation lifecycle", () => {
 
     store.updateAgentTurnLifecycle(turn.id, { status: "starting", updatedAt: at(1_000) });
     store.updateAgentTurnLifecycle(turn.id, { status: "running", updatedAt: at(2_000) });
+    const retrying = store.updateAgentTurnLifecycle(turn.id, {
+      status: "running",
+      runState: {
+        state: "retrying",
+        providerState: "error/willRetry",
+        revision: 3,
+      },
+      updatedAt: at(2_500),
+    });
+    expect(retrying.runState).toEqual({
+      state: "retrying",
+      providerState: "error/willRetry",
+      revision: 3,
+    });
     store.updateAgentTurnLifecycle(turn.id, { status: "waiting-for-approval", updatedAt: at(3_000) });
     store.updateAgentTurnLifecycle(turn.id, { status: "running", updatedAt: at(4_000) });
     store.updateAgentTurnLifecycle(turn.id, { status: "waiting-for-input", updatedAt: at(5_000) });
@@ -533,6 +547,24 @@ describe("RuntimeStore conversation lifecycle", () => {
       startedAt: at(1_000),
       updatedAt: at(1_000),
     });
+    expect(() => store.updateAgentTurnLifecycle(turn.id, {
+      status: "starting",
+      runState: {
+        state: "starting",
+        providerState: "late/starting",
+        revision: 0,
+      },
+      updatedAt: at(2_000),
+    })).toThrow(/run state is invalid/iu);
+    expect(() => store.updateAgentTurnLifecycle(turn.id, {
+      status: "starting",
+      runState: {
+        state: "completed",
+        providerState: null,
+        revision: 2,
+      },
+      updatedAt: at(2_000),
+    })).toThrow(/does not match/iu);
     expect(() => store.updateAgentTurnLifecycle(turn.id, {
       status: "queued",
       updatedAt: at(2_000),

@@ -1,3 +1,4 @@
+import { agentRunStateForTurn, isAgentRunTerminalState } from "@shared/run-state";
 import type {
   AgentActivity,
   AgentApprovalRequest,
@@ -5,19 +6,11 @@ import type {
   AgentPlan,
   AgentReasoning,
   AgentTurn,
-  AgentTurnStatus,
   ChatMessage,
   CheckpointSummary,
   TurnGitArtifact,
 } from "@shared/contracts";
 import { activityNeedsAttention } from "./activity-attention";
-
-const TERMINAL_TURN_STATUSES: ReadonlySet<AgentTurnStatus> = new Set([
-  "completed",
-  "failed",
-  "cancelled",
-  "interrupted",
-]);
 
 /** Current workspace status is intentionally not accepted by the timeline. */
 export type TurnGitArtifactSummary = TurnGitArtifact;
@@ -246,7 +239,7 @@ function buildTurn(
     requestedAt: agentTurn.requestedAt,
     startedAt: agentTurn.startedAt,
     completedAt: agentTurn.completedAt,
-    isActive: !TERMINAL_TURN_STATUSES.has(agentTurn.status),
+    isActive: !isAgentRunTerminalState(agentRunStateForTurn(agentTurn)),
     toolCallCount: activities.filter(({ kind }) =>
       kind === "tool" || kind === "command" || kind === "file").length,
     importantActivities,

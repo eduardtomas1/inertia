@@ -14,6 +14,7 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
+import type { OwnedProviderStopResult } from "../../src/server/providers";
 import type {
   ProviderRunCallbacks,
   ProviderRunInput,
@@ -78,6 +79,7 @@ class PairProvider implements TurnProviderRuntime {
     resolve: (result: ProviderRunResult) => void;
   }> = [];
   deferOwnedStops = false;
+  ownedStopResult: OwnedProviderStopResult = "settled";
   synchronousResults: string[] = [];
   throwOnRun: number | null = null;
   rejectOnRun: number | null = null;
@@ -149,8 +151,11 @@ class PairProvider implements TurnProviderRuntime {
     return true;
   }
 
-  stopOwned(conversationId: string): Promise<"settled"> {
+  stopOwned(conversationId: string): Promise<OwnedProviderStopResult> {
     this.cancellations.push(conversationId);
+    if (this.ownedStopResult !== "settled") {
+      return Promise.resolve(this.ownedStopResult);
+    }
     if (!this.deferOwnedStops) {
       this.activeConversations.delete(conversationId);
       return Promise.resolve("settled");
@@ -350,6 +355,34 @@ afterEach(async () => {
 });
 
 describe("Duo third-model comparison", () => {
+  it("persists and broadcasts active-turn quarantine when provider cleanup is unconfirmed", async () => {
+    const broadcastSnapshot = vi.fn();
+    const runtime = await createRuntime({ broadcastSnapshot });
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(preparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    const side = prepared.sides[0];
+    runtime.provider.ownedStopResult = "force-detached";
+    broadcastSnapshot.mockClear();
+
+    await expect(runtime.controller.reconcileInactiveDuoTurn(
+      prepared.launchId,
+      side.conversationId,
+      side.turnId,
+    )).resolves.toBe(false);
+
+    expect(runtime.store.agentTurn(side.turnId)).toMatchObject({
+      status: "running",
+      runState: {
+        state: "cancelling",
+        providerState: "duo-quarantine",
+      },
+    });
+    expect(broadcastSnapshot).toHaveBeenCalled();
+    expect(runtime.provider.isRunning(side.conversationId)).toBe(true);
+    runtime.store.close();
+  });
+
   it("waits for both locked terminal turns and sends only bounded attributed evidence", async () => {
     const runtime = await createRuntime();
     const launches = comparisonCoordinator(runtime);
@@ -647,10 +680,10 @@ describe("Duo third-model comparison", () => {
 
     expect(runtime.provider.ownedStopResolvers.has(cancelledConversationId))
       .toBe(true);
-    expect(cleanupWait).toHaveBeenCalledWith(expect.arrayContaining([
-      cancelledConversationId,
-      prepared.sides[1].conversationId,
-    ]));
+    // A cancelling source is not terminal comparison input until its exact
+    // owned provider has stopped, so comparison cleanup admission has not yet
+    // begun.
+    expect(cleanupWait).not.toHaveBeenCalled();
     expect(launches.status(prepared.launchId).comparison).toMatchObject({
       state: "waiting",
       attempt: 0,

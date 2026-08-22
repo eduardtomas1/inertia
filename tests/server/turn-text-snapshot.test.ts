@@ -121,6 +121,7 @@ async function snapshotRuntime() {
     interactions: {} as never,
     now: () => "2030-01-01T00:00:00.000Z",
     transition: () => false,
+    observeSubagent: () => false,
   });
   const event = (value: ProviderEventInput): ProviderEvent => ({
     providerId: "codex",

@@ -1,7 +1,5 @@
-import type {
-  AgentTurn,
-  SubagentTrace,
-} from "@shared/contracts";
+import { agentRunStateForTurn } from "@shared/run-state";
+import type { AgentTurn, SubagentTrace } from "@shared/contracts";
 import { supportsActiveParentFollowUp } from "./composerPrimaryAction";
 
 export interface SubagentDisclosureRow {
@@ -27,6 +25,12 @@ export function subagentNeedsReview(trace: SubagentTrace): boolean {
     && ["failed", "interrupted", "lost", "unknown"].includes(trace.status);
 }
 
+function activeParent(turn: AgentTurn): boolean {
+  // The finite run-state union uses r/d/w only for live parents that have
+  // started and can accept descendant controls.
+  return /^[rdw]/u.test(agentRunStateForTurn(turn));
+}
+
 export function canStopSubagentTrace(
   trace: SubagentTrace,
   turns: readonly AgentTurn[],
@@ -34,7 +38,7 @@ export function canStopSubagentTrace(
   const turn = turns.find(({ id }) => id === trace.turnId);
   return Boolean(
     turn
-    && !/^(?:completed|failed|cancelled|interrupted)$/u.test(turn.status)
+    && activeParent(turn)
     && turn.harnessId === "claude-agent-sdk"
     && trace.providerId === "claude"
     && trace.providerTaskId
@@ -49,11 +53,7 @@ export function canFollowUpSubagentTrace(
   const turn = turns.find(({ id }) => id === trace.turnId);
   return Boolean(
     turn
-    && (
-      turn.status === "running"
-      || turn.status === "waiting-for-approval"
-      || turn.status === "waiting-for-input"
-    )
+    && activeParent(turn)
     && supportsActiveParentFollowUp(turn.harnessId)
     && isLiveSubagentTrace(trace),
   );

@@ -134,6 +134,11 @@ const conversationShell = {
     id: "turn-1",
     runId: "run-1",
     status: "running",
+    runState: {
+      state: "retrying",
+      providerState: "error/willRetry",
+      revision: 2,
+    },
     providerId: "codex",
     harnessId: selection.harnessId,
     backendProfileId: selection.backendProfileId,
@@ -174,6 +179,11 @@ const conversationDetail = {
     startedAt: conversation.createdAt,
     completedAt: null,
     status: "running",
+    runState: {
+      state: "retrying",
+      providerState: "error/willRetry",
+      revision: 2,
+    },
     terminalReason: null,
     checkpointId: "checkpoint-1",
     usageAtStart: null,
@@ -986,6 +996,10 @@ describe("server event conversation discriminant boundary", () => {
   it.each([
     ["providerId", "gemini"],
     ["status", "sleeping"],
+    ["runState", { state: "completed", providerState: null, revision: 3 }],
+    ["runState", { state: "retrying", providerState: "", revision: 3 }],
+    ["runState", { state: "retrying", providerState: "x".repeat(201), revision: 3 }],
+    ["runState", { state: "retrying", providerState: null, revision: -1 }],
   ])("rejects malformed shell latestTurn.%s", (key, invalidValue) => {
     expect(() => parseServerEvent(snapshotEvent({
       ...conversationShell,
@@ -1362,6 +1376,10 @@ describe("server event remaining discriminant and identity boundary", () => {
     ["turn route", "agentTurns", { ...conversationDetail.agentTurns[0], modelSelection: claudeSelection }],
     ["turn model", "agentTurns", { ...conversationDetail.agentTurns[0], model: "other-model" }], ["turn alias", "agentTurns", { ...conversationDetail.agentTurns[0], modelAlias: "other" }],
     ["turn reasoning", "agentTurns", { ...conversationDetail.agentTurns[0], reasoningEffort: "low" }], ["turn revision", "agentTurns", { ...conversationDetail.agentTurns[0], configurationRevision: 99 }],
+    ["turn run-state projection", "agentTurns", {
+      ...conversationDetail.agentTurns[0],
+      runState: { state: "failed", providerState: null, revision: 3 },
+    }],
     ["turn usage session binding", "agentTurns", {
       ...conversationDetail.agentTurns[0],
       usageAtStart: {

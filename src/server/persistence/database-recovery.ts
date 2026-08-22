@@ -12,9 +12,9 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
-
 import Database from "better-sqlite3";
 
+import { authoritativeRunStateSchemaIsValid } from "./authoritative-run-state-schema";
 import { validAttachmentCapabilities } from "./attachment-capability-schema";
 import {
   regularOwnedFile,
@@ -38,7 +38,6 @@ export const DATABASE_INITIAL_BACKUP_MAX_RETRIES = 5;
 export const DATABASE_BACKUP_MAX_COUNT = 5;
 export const DATABASE_BACKUP_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 export const DATABASE_BACKUP_VALIDATION_TIMEOUT_MS = 120_000;
-
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 const REQUIRED_TABLES_BY_SCHEMA_VERSION = [
@@ -186,7 +185,7 @@ function validateOpenDatabase(
   )[],
   providerRunOwnershipSchemaIsValid: DatabaseSchemaValidator,
   attachmentCapabilitiesAreValid: DatabaseSchemaValidator,
-  usageDashboardIndexIsValid: DatabaseSchemaValidator,
+  usageDashboardIndexIsValid: DatabaseSchemaValidator, runStateSchemaIsValid: DatabaseSchemaValidator,
 ): DatabaseValidation {
   const integrityResult = database.prepare(`PRAGMA ${check}`).get() as
     | Record<string, unknown>
@@ -454,6 +453,7 @@ function validateOpenDatabase(
     return "corrupt";
   }
   if (version >= 57 && !usageDashboardIndexIsValid(database)) return "corrupt";
+  if (version >= 64 && !runStateSchemaIsValid(database)) return "corrupt";
   return "valid-current";
 }
 
@@ -472,7 +472,7 @@ function validateDatabase(
       REQUIRED_TABLES_BY_SCHEMA_VERSION,
       validProviderRunOwnershipSchema,
       validAttachmentCapabilities,
-      validUsageDashboardIndex,
+      validUsageDashboardIndex, authoritativeRunStateSchemaIsValid,
     );
   } catch {
     return "corrupt";
@@ -493,7 +493,7 @@ function validateDatabaseOffThread(
     const indexColumns = ${indexColumns.toString()};
     const validProviderRunOwnershipSchema = ${validProviderRunOwnershipSchema.toString()};
     const validAttachmentCapabilities = ${validAttachmentCapabilities.toString()};
-    const validUsageDashboardIndex = ${validUsageDashboardIndex.toString()};
+    const validUsageDashboardIndex = ${validUsageDashboardIndex.toString()}; const authoritativeRunStateSchemaIsValid = ${authoritativeRunStateSchemaIsValid.toString()};
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
     let result = "corrupt";
@@ -506,7 +506,7 @@ function validateDatabaseOffThread(
         workerData.requiredTablesBySchemaVersion,
         validProviderRunOwnershipSchema,
         validAttachmentCapabilities,
-        validUsageDashboardIndex,
+        validUsageDashboardIndex, authoritativeRunStateSchemaIsValid,
       );
     } catch {
       result = "corrupt";

@@ -13,6 +13,7 @@ import * as eventExports from "../src/shared/contracts/events";
 import * as modelRoutingExports from "../src/shared/model-routing";
 import * as providerMaintenanceExports from "../src/shared/provider-maintenance";
 import * as providerTerminalResumeExports from "../src/shared/provider-terminal-resume";
+import * as runStateExports from "../src/shared/run-state";
 import * as usageDashboardExports from "../src/shared/contracts/usage-dashboard";
 import * as workspaceExports from "../src/shared/contracts/workspace";
 import { clientCommandSchema } from "../src/shared/contracts/client-command";
@@ -25,6 +26,7 @@ describe("shared contracts boundary", () => {
       ...attachmentExports,
       ...providerMaintenanceExports,
       ...providerTerminalResumeExports,
+      ...runStateExports,
       ...agentExports,
       ...agentWorkflowExports,
       ...appExports,

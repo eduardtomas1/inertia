@@ -57,7 +57,7 @@ export class TurnStreamProjection {
       },
       onTimerError: (error) => {
         const current = active();
-        if (current.settled) return;
+        if (current.runState.isTerminal()) return;
         this.options.onPersistenceFailure(current, error);
       },
     });

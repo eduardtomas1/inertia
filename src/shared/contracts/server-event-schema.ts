@@ -4,7 +4,7 @@ import { APP_SHORTCUT_KEYS, DEFAULT_APP_KEYBINDINGS } from "../keybindings";
 import { continuationIdentitySchema, modelSelectionSchema } from "../model-routing";
 import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
 import { CHAT_ATTACHMENT_MIME_TYPES } from "../attachments";
-import { AGENT_TURN_STATUSES } from "../turn-lifecycle";
+import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
 import { DUO_COMPARISON_STATES, DUO_DISPATCH_STATES, DUO_LAUNCH_STATES } from "./duo";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
@@ -30,35 +30,33 @@ function nullableStringField(value: UnknownRecord, key: string): boolean {
 function booleanField(value: UnknownRecord, key: string): boolean {
   return typeof value[key] === "boolean";
 }
-
 function numberField(value: UnknownRecord, key: string): boolean {
   return typeof value[key] === "number" && Number.isFinite(value[key]);
 }
 function integerField(value: UnknownRecord, key: string): boolean {
   return Number.isSafeInteger(value[key]);
 }
-
 function nullableNumberField(value: UnknownRecord, key: string): boolean {
   return value[key] === null || numberField(value, key);
 }
 function optionalStringField(value: UnknownRecord, key: string): boolean {
   return value[key] === undefined || stringField(value, key);
 }
-
 function optionalNullableStringField(value: UnknownRecord, key: string): boolean {
   return value[key] === undefined || nullableStringField(value, key);
 }
 function optionalBooleanField(value: UnknownRecord, key: string): boolean {
   return value[key] === undefined || booleanField(value, key);
 }
-
 function oneOf(value: UnknownRecord, key: string, options: readonly string[]): boolean {
   return typeof value[key] === "string" && options.includes(value[key] as string);
 }
-
 function providerId(value: UnknownRecord, key: string): boolean {
   return oneOf(value, key, PROVIDER_IDS);
 }
+function authoritativeRunState(value: unknown, status: AgentTurnStatus): boolean {
+  if (!record(value)) return value === undefined; const { state, providerState, revision } = value as UnknownRecord & { revision: number };
+  return (state === status || status === "running" && /^(delegated|retrying|cancelling)$/.test(state as string)) && (providerState === null || typeof providerState === "string" && !!providerState && !providerState[200]) && revision === ~~revision && revision >= 0; }
 function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownRecord {
   return record(value) && keys.every((key) => stringField(value, key));
 }
@@ -183,6 +181,7 @@ function latestTurn(value: unknown): boolean {
   )
     && providerId(value, "providerId")
     && oneOf(value, "status", AGENT_TURN_STATUSES)
+    && authoritativeRunState(value.runState, value.status as AgentTurnStatus)
     && nullableStringField(value, "startedAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "terminalReason")
@@ -937,6 +936,7 @@ function agentTurn(value: unknown): boolean {
     && nullableStringField(value, "terminalReason")
     && nullableStringField(value, "checkpointId")
     && oneOf(value, "status", AGENT_TURN_STATUSES)
+    && authoritativeRunState(value.runState, value.status as AgentTurnStatus)
     && (value.usageAtStart === null || turnUsage(value.usageAtStart))
     && (value.usageAtCompletion === null || turnUsage(value.usageAtCompletion))
     && integerField(value, "configurationRevision")
@@ -1235,7 +1235,7 @@ export function parseServerEvent(value: unknown): ServerEvent {
 
 export const serverEventSchema = Object.freeze({
   parse: parseServerEvent,
-  safeParse(value: unknown): | { success: true; data: ServerEvent }
+  safeParse(value: unknown): { success: true; data: ServerEvent }
     | { success: false; error: Error } {
     try {
       return { success: true, data: parseServerEvent(value) };

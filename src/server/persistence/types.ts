@@ -4,6 +4,7 @@ import type {
   AgentGoal,
   AgentPlan,
   AgentReasoning,
+  AgentRunStateSnapshot,
   AgentTurn,
   AgentTurnAssociation,
   AgentTurnStatus,
@@ -115,6 +116,8 @@ export interface CreateAgentTurnInput {
 
 export interface AgentTurnLifecycleUpdate {
   status: AgentTurnStatus;
+  /** Exact execution state; omitted only by compatibility callers. */
+  runState?: AgentRunStateSnapshot;
   terminalAssistantMessageId?: string | null;
   providerSessionAfter?: string | null;
   terminalReason?: string | null;

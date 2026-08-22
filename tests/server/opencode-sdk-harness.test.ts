@@ -1302,6 +1302,11 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       text: "Checked",
     }));
     expect(events).toContainEqual(expect.objectContaining({
+      type: "status",
+      status: "retrying",
+      providerState: "session.status/retry attempt 2",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
       kind: "command",
       phase: "completed",
@@ -2056,6 +2061,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       })]),
     );
 
+    const statuses: Array<{ status: string; providerState?: string }> = [];
     const result = await manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-descendant-liveness",
@@ -2063,13 +2069,19 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       prompt: "Delegate and resume",
       interactionMode: "build",
       access: "supervised",
-    }));
+    }), {
+      onStatus: (event) => statuses.push(event),
+    });
 
     expect(result).toMatchObject({
       status: "completed",
       text: "Parent resumed after descendant completion",
     });
     expect(result.text).not.toContain("Private descendant output");
+    expect(statuses).toContainEqual(expect.objectContaining({
+      status: "running",
+      providerState: "verified descendant session activity",
+    }));
     expect(manager.activeConversationIds()).toEqual([]);
   });
 

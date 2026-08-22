@@ -126,6 +126,8 @@ export interface ProviderSteerInput {
 export type ProviderRunStatus =
   | "starting"
   | "running"
+  | "delegated"
+  | "retrying"
   | "cancelling"
   | "completed"
   | "failed"
@@ -201,6 +203,8 @@ export interface ProviderActivityEvent extends ProviderEventBase {
 export interface ProviderStatusEvent extends ProviderEventBase {
   type: "status";
   status: ProviderRunStatus;
+  /** Bounded provider-native phase; never used as a cross-provider synonym. */
+  providerState?: string;
   message?: string;
 }
 

@@ -1488,6 +1488,85 @@ describe("runtime migration catalog", () => {
       .toThrow(/runtime schema catalog/iu);
   });
 
+  it("upgrades schema 63 turn rows into coherent authoritative run states", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "schema-63-run-state.sqlite");
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const store = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Run-state migration", workspacePath);
+    const createTurn = (title: string, id: string) => {
+      const conversation = store.createConversation(project.id, title, {
+        providerId: "codex",
+        model: "gpt-test",
+        reasoningEffort: "high",
+        interactionMode: "build",
+        accessMode: "supervised",
+      });
+      return store.beginAgentTurn({
+        id,
+        conversationId: conversation.id,
+        runId: `run-${id}`,
+        content: title,
+        providerId: "codex",
+        harnessId: "codex-app-server",
+        backendProfileId: "builtin:openai",
+        model: "gpt-test",
+        reasoningEffort: "high",
+        interactionMode: "build",
+        accessMode: "supervised",
+        configurationRevision: 0,
+        association: "authoritative",
+      }).turn;
+    };
+    const running = createTurn("Running before migration", "legacy-running-turn");
+    store.updateAgentTurnLifecycle(running.id, { status: "starting" });
+    store.updateAgentTurnLifecycle(running.id, { status: "running" });
+    const completed = createTurn("Completed before migration", "legacy-completed-turn");
+    store.updateAgentTurnLifecycle(completed.id, { status: "completed" });
+    store.close();
+
+    const schema63 = new Database(databasePath);
+    schema63.exec(`
+      DROP INDEX agent_turns_run_state_requested_idx;
+      ALTER TABLE agent_turns DROP COLUMN run_state;
+      ALTER TABLE agent_turns DROP COLUMN provider_state;
+      ALTER TABLE agent_turns DROP COLUMN run_state_revision;
+      DELETE FROM schema_migrations WHERE version >= 64;
+    `);
+    expect((schema63.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(63);
+    migrateRuntimeDatabase(schema63);
+    expect(schema63.prepare(`
+      SELECT status, run_state, provider_state, run_state_revision
+      FROM agent_turns WHERE id = ?
+    `).get(running.id)).toEqual({
+      status: "running",
+      run_state: "running",
+      provider_state: null,
+      run_state_revision: 0,
+    });
+    expect(schema63.prepare(`
+      SELECT status, run_state FROM agent_turns WHERE id = ?
+    `).get(completed.id)).toEqual({ status: "completed", run_state: "completed" });
+    expect(schema63.pragma("quick_check")).toEqual([{ quick_check: "ok" }]);
+    schema63.close();
+
+    const migrated = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    expect(migrated.agentTurn(running.id).runState).toEqual({
+      state: "running",
+      providerState: null,
+      revision: 0,
+    });
+    expect(migrated.agentTurn(completed.id).runState?.state).toBe("completed");
+    migrated.close();
+  });
+
   it("invalidates only pre-tool Codex sessions while preserving conversations", async () => {
     const directory = await temporaryDirectory();
     const databasePath = join(directory, "schema-59-codex-tools.sqlite");
@@ -1846,6 +1925,7 @@ describe("runtime migration catalog", () => {
       { version: 61 },
       { version: 62 },
       { version: 63 },
+      { version: 64 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

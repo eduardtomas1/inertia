@@ -455,15 +455,38 @@ export function createTurnInteractionCommandHandler(
             conversation.id,
             resolvedSkills.routeKey,
           );
-          if (
-            dependencies.enableProviders
-            && !dependencies.providerTerminalResumes.acquire(conversation.id)
-          ) {
-            throw new RuntimeRequestError(
-              "End the resumed provider terminal for this chat before sending another message.",
+          if (dependencies.enableProviders) {
+            const acquisition =
+              dependencies.providerTerminalResumes.acquireWhenAvailable(
+                conversation.id,
+                Math.max(0, preparationDeadlineAt - Date.now()),
+              );
+            let acquired: boolean;
+            try {
+              acquired = await awaitMessageSendPreparation(
+                acquisition,
+                preparationDeadlineAt,
+              );
+            } catch (error) {
+              void acquisition.then((lateAcquired) => {
+                if (lateAcquired) {
+                  dependencies.providerTerminalResumes.release(conversation.id);
+                }
+              }, () => undefined);
+              throw error;
+            }
+            providerTransitionReserved = acquired;
+            assertMessageSendPreparationPending(preparationDeadlineAt);
+            if (!acquired) {
+              throw new RuntimeRequestError(
+                "End the resumed provider terminal for this chat before sending another message.",
+              );
+            }
+            dependencies.workflows.assertTurnSkillsCurrent(
+              conversation.id,
+              resolvedSkills.routeKey,
             );
           }
-          providerTransitionReserved = dependencies.enableProviders;
         } catch (error) {
           if (providerTransitionReserved) {
             dependencies.providerTerminalResumes.release(conversation.id);

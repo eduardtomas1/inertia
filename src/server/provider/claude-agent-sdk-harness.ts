@@ -65,6 +65,7 @@ const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
+const MAX_PENDING_INTERACTIONS = 64;
 const CLAUDE_STOP_TASK_TIMEOUT_MS = 2_000;
 const MIN_CLAUDE_STOP_TASK_TIMEOUT_MS = 25;
 const CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 2_000;
@@ -396,6 +397,7 @@ function startClaudeRun(
   let acceptedFollowUp = false;
   const pendingFollowUpIds = new Set<string>();
   let sessionId = options.input.sessionId;
+  let authoritativeSessionId = options.input.sessionId;
   let latestContextUsage: unknown;
   let contextUsageRequest: Promise<void> | null = null;
   let stagedSkillPlugin: Awaited<ReturnType<
@@ -472,10 +474,14 @@ function startClaudeRun(
   };
 
   const canUseTool: CanUseTool = async (toolName, toolInput, callbackOptions) => {
+    if (callbackOptions.signal.aborted || cancelRequested) return deny("User cancelled the request.", true);
     if (claudeHostTools?.providerToolNames.has(toolName)) {
       return { behavior: "allow", updatedInput: toolInput };
     }
     if (toolName === "AskUserQuestion") {
+      if (inputs.size >= MAX_PENDING_INTERACTIONS) {
+        return deny("Claude exceeded the bounded question budget.", true);
+      }
       const requestId = randomUUID();
       const request = claudeQuestions(requestId, callbackOptions.toolUseID, toolInput);
       if (request.questions.length === 0) return deny("Claude sent an invalid question request.");
@@ -532,6 +538,9 @@ function startClaudeRun(
       return deny("Claude sent unsafe permission display text.");
     }
 
+    if (approvals.size >= MAX_PENDING_INTERACTIONS) {
+      return deny("Claude exceeded the bounded approval budget.", true);
+    }
     const requestId = randomUUID();
     const decision = await new Promise<AgentApprovalDecision>((resolve) => {
       approvals.set(requestId, { resolve, settled: false });
@@ -555,6 +564,9 @@ function startClaudeRun(
         },
       });
     });
+    if (callbackOptions.signal.aborted || cancelRequested) {
+      return deny("User cancelled the request.", true);
+    }
     if (decision === "approve") {
       return {
         behavior: "allow",
@@ -706,6 +718,26 @@ function startClaudeRun(
         const childOwned = record.parent_tool_use_id !== null
           && record.parent_tool_use_id !== undefined;
         const messageSessionId = stringValue(record.session_id);
+        const requiresSessionAttestation = !childOwned && (
+          (message.type === "system" && message.subtype === "init")
+          || message.type === "result"
+        );
+        if (requiresSessionAttestation && !messageSessionId) {
+          throw new Error("Claude did not attest the requested provider session.");
+        }
+        if (!childOwned && messageSessionId) {
+          if (authoritativeSessionId && messageSessionId !== authoritativeSessionId) {
+            const attestationFailure = requestedFastModeState === "on"
+              ? "Claude did not confirm Fast mode because it did not attest the requested provider session."
+              : requestedFastModeState === "off"
+                ? "Claude did not confirm Standard speed because it did not attest the requested provider session."
+                : options.input.operation?.kind === "compact"
+                  ? "Claude did not confirm context compaction for the exact selected session because it did not attest the requested provider session."
+                  : "Claude did not attest the requested provider session.";
+            throw new Error(attestationFailure);
+          }
+          authoritativeSessionId = messageSessionId;
+        }
         const initAttestsRequestedSession = messageSessionId !== undefined
           && (options.input.sessionId === undefined
             || messageSessionId === options.input.sessionId);

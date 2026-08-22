@@ -24,6 +24,7 @@ type LifecycleScenario =
   | "resume"
   | "resume-rejected-steer"
   | "resume-stuck-steer"
+  | "resume-admitted-stuck-steer"
   | "early-permission-follow-up"
   | "idle-before-prompt-receipt"
   | "status-idle-before-prompt-receipt"
@@ -35,6 +36,7 @@ type LifecycleScenario =
   | "assistant-error"
   | "unowned-session-error"
   | "external-interactions"
+  | "v2-local-interaction-race"
   | "session-deleted"
   | "message-role-mutation"
   | "compact"
@@ -100,6 +102,17 @@ const server = http.createServer((req, res) => {
     if (url.pathname === "/session/" + sessionID && req.method !== "GET") return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
+      if (scenario === "v2-local-interaction-race") {
+        json(res, undefined, 204);
+        setTimeout(() => {
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "v2-owned-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+          sendEvent({ type: "permission.v2.asked", properties: { id: "foreign-permission", sessionID, action: "edit", resources: ["foreign.ts"], source: { type: "tool", messageID: "foreign-assistant", callID: "foreign-call" } } });
+          const permission = { type: "permission.v2.asked", properties: { id: "owned-permission", sessionID, action: "edit", resources: ["src/app.ts"], source: { type: "tool", messageID: "v2-owned-assistant", callID: "owned-call" } } };
+          sendEvent(permission);
+          sendEvent(permission);
+        }, 10);
+        return;
+      }
       if (["idle-before-prompt-receipt", "status-idle-before-prompt-receipt"].includes(scenario)) {
         setTimeout(() => sendEvent(scenario === "idle-before-prompt-receipt"
           ? { type: "session.idle", properties: { sessionID } }
@@ -209,7 +222,7 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "mutating-message", sessionID, role: "user" } } });
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "mutating-message", parentID: parsed.messageID, sessionID, role: "assistant" } } });
       }, 10);
-      if (["resume", "resume-rejected-steer", "resume-stuck-steer"].includes(scenario)) setTimeout(() => {
+      if (["resume", "resume-rejected-steer", "resume-stuck-steer", "resume-admitted-stuck-steer"].includes(scenario)) setTimeout(() => {
         sendEvent({ type: "session.idle", properties: { sessionID: "stale-session" } });
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", parentID: parsed.messageID, sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "text", sessionID, messageID: "assistant", type: "text", text: "Resumed OpenCode response" } } });
@@ -230,6 +243,28 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "heartbeat", sessionID, role: "assistant" } } });
       }, 50);
       return;
+    }
+    if (
+      scenario === "v2-local-interaction-race"
+      && req.method === "POST"
+      && url.pathname === "/api/session/" + sessionID + "/permission/owned-permission/reply"
+    ) {
+      sendEvent({ type: "permission.v2.replied", properties: { sessionID, requestID: "owned-permission", reply: "once" } });
+      sendEvent({ type: "question.v2.asked", properties: { id: "foreign-question", sessionID, questions: [{ header: "Foreign", question: "Ignore?", options: [{ label: "Yes", description: "Ignore" }] }], tool: { messageID: "foreign-assistant", callID: "foreign-question-call" } } });
+      const question = { type: "question.v2.asked", properties: { id: "owned-question", sessionID, questions: [{ header: "Scope", question: "Which scope?", options: [{ label: "Focused", description: "Only this package" }] }], tool: { messageID: "v2-owned-assistant", callID: "owned-question-call" } } };
+      sendEvent(question);
+      sendEvent(question);
+      return json(res, { error: "already answered through SSE" }, 404);
+    }
+    if (
+      scenario === "v2-local-interaction-race"
+      && req.method === "POST"
+      && url.pathname === "/api/session/" + sessionID + "/question/owned-question/reply"
+    ) {
+      sendEvent({ type: "question.v2.replied", properties: { sessionID, requestID: "owned-question", answers: [["Focused"]] } });
+      sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "v2-text", sessionID, messageID: "v2-owned-assistant", type: "text", text: "V2 interaction response" } } });
+      sendEvent({ type: "session.idle", properties: { sessionID } });
+      return json(res, { error: "already answered through SSE" }, 404);
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/prompt") {
       if (scenario === "resume-stuck-steer") return;
@@ -314,6 +349,9 @@ const server = http.createServer((req, res) => {
         sendEvent({ id: "compact-missing-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, reason: "manual", text: "Missing", recent: "" } });
       }, 10);
       return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/interrupt") {
+      return json(res, undefined, 204);
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/abort") {
       if (scenario === "stuck-cancel") return;
@@ -786,14 +824,15 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       })]),
     );
 
-    await expect(manager.run(nativeProviderRunInput({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-stalled-initialization",
       cwd: root,
       prompt: "Do not prompt",
       interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({
+    }));
+    expect(result).toMatchObject({
       status: "failed",
       error: expect.stringContaining("provider and agent discovery"),
     });
@@ -1277,6 +1316,72 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(events).toContainEqual(expect.objectContaining({ type: "input-resolved" }));
   });
 
+  it("routes owned v2 interactions once and tolerates an external reply winning the HTTP race", async () => {
+    const root = portableFixtureRoot("OpenCode v2 interaction race");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "v2-local-interaction-race"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let approvals = 0;
+    let questions = 0;
+
+    const runResult = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-v2-local-interaction-race",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onApproval: (event) => {
+        approvals += 1;
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+        )).toBe(true);
+      },
+      onInput: (event) => {
+        questions += 1;
+        expect(manager.respondToInput(
+          event.conversationId,
+          event.request.requestId,
+          { [event.request.questions[0]!.id]: ["Focused"] },
+        )).toBe(true);
+      },
+    });
+    expect(runResult.error).toBeUndefined();
+    expect(runResult).toMatchObject({
+      status: "completed",
+      text: "V2 interaction response",
+    });
+    expect(approvals).toBe(1);
+    expect(questions).toBe(1);
+    const capture = readStableCapture<{
+      captured: Array<{ path: string; body?: unknown }>;
+    }>(capturePath);
+    expect(capture.captured).toContainEqual(expect.objectContaining({
+      path: "/api/session/opencode-lifecycle-session/permission/owned-permission/reply",
+      body: { reply: "once" },
+    }));
+    expect(capture.captured).toContainEqual(expect.objectContaining({
+      path: "/api/session/opencode-lifecycle-session/question/owned-question/reply",
+      body: { answers: [["Focused"]] },
+    }));
+    expect(capture.captured.some(({ path }) =>
+      path.includes("foreign-permission") || path.includes("foreign-question")))
+      .toBe(false);
+  });
+
   it("fails promptly when OpenCode deletes the active session", async () => {
     const root = portableFixtureRoot("OpenCode deleted session");
     roots.push(root);
@@ -1404,6 +1509,60 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     await cancelRequested;
     await expect(result).resolves.toMatchObject({ status: "cancelled" });
     await expect(followUp).resolves.toBe(false);
+    const capture = readStableCapture<{
+      captured: Array<{ path: string }>;
+    }>(capturePath);
+    expect(capture.captured.some(({ path }) =>
+      path === "/api/session/opencode-lifecycle-session/interrupt"))
+      .toBe(true);
+  }, 10_000);
+
+  it("interrupts admitted v2 follow-up work when cancellation follows its receipt", async () => {
+    const root = portableFixtureRoot("OpenCode admitted steer cancellation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "resume-admitted-stuck-steer"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let followUp: Promise<boolean> | null = null;
+    let running!: () => void;
+    const runningReady = new Promise<void>((resolve) => { running = resolve; });
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-admitted-steer-cancel",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || followUp) return;
+        followUp = manager.steer(event.conversationId, {
+          content: "Admit this follow-up and keep it running.",
+          imagePaths: [],
+        }, { runId: event.runId, turnId: event.turnId! });
+        running();
+      },
+    });
+
+    await runningReady;
+    await expect(followUp).resolves.toBe(true);
+    expect(manager.cancel("opencode-admitted-steer-cancel")).toBe(true);
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    const capture = readStableCapture<{
+      captured: Array<{ path: string }>;
+    }>(capturePath);
+    expect(capture.captured.some(({ path }) =>
+      path === "/api/session/opencode-lifecycle-session/interrupt"))
+      .toBe(true);
   }, 10_000);
 
   it("uses the native v2 compaction endpoint and waits for its completion event", async () => {
@@ -1443,6 +1602,46 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     )).toBe(true);
     expect(capture.captured.some(({ path }) => path.endsWith("/prompt_async")))
       .toBe(false);
+  });
+
+  it("interrupts an in-flight native v2 compaction through the matching v2 endpoint", async () => {
+    const root = portableFixtureRoot("OpenCode compact cancellation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "compact-stale"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let cancelled = false;
+    const result = manager.compact(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-compact-cancel",
+      cwd: root,
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), undefined, {
+      onStatus: (event) => {
+        if (event.status !== "running" || cancelled) return;
+        cancelled = true;
+        expect(manager.cancel(event.conversationId)).toBe(true);
+      },
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    const capture = readStableCapture<{
+      captured: Array<{ path: string }>;
+    }>(capturePath);
+    expect(capture.captured.some(({ path }) =>
+      path === "/api/session/opencode-lifecycle-session/interrupt"))
+      .toBe(true);
   });
 
   it.each([

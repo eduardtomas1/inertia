@@ -68,6 +68,7 @@ import {
   toolActivityPhase,
   validateKimiInitialize,
 } from "./kimi-acp-projection";
+import { parseAcpSessionNotification } from "./acp-json-rpc";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -285,7 +286,17 @@ function startKimiRun(
         );
       },
     )
-    .onNotification(acp.methods.client.session.update, ({ params: rawParams }) => {
+    .onNotification(acp.methods.client.session.update, (value) => {
+      try {
+        return parseAcpSessionNotification(value) as SessionNotification;
+      } catch (error) {
+        wireError = error instanceof Error
+          ? error
+          : new Error("Kimi ACP sent an invalid session update.");
+        requestProcessTermination(true);
+        throw wireError;
+      }
+    }, ({ params: rawParams }) => {
       try {
         const params = redactHostMcpPayload(rawParams);
         if (
@@ -533,6 +544,7 @@ function startKimiRun(
       ).finally(() => {
         promptInFlight = false;
       }));
+      if (wireError) throw wireError;
       if (response.usage) {
         emitKimiPromptUsage(response.usage, contextUsage, emitter.rich);
       }
@@ -1112,7 +1124,11 @@ function handleKimiUpdate(
       return;
   }
   const unsupportedUpdate: never = update;
-  return unsupportedUpdate;
+  throw new Error(
+    `Kimi ACP sent an unsupported session update: ${String(
+      (unsupportedUpdate as { sessionUpdate?: unknown }).sessionUpdate,
+    )}.`,
+  );
 }
 
 function failedKimiRun(

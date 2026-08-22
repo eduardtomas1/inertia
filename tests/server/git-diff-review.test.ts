@@ -349,6 +349,23 @@ describe("safe selected diff reversal", () => {
     expect(git(root, "show", ":example.txt")).toBe("alpha\r\nbeta\r\ndelta");
   }, 30_000);
 
+  it("reverts mixed-EOL lines without rewriting unrelated terminators", async () => {
+    const original = Buffer.from("alpha\r\nbeta\ngamma\r\n");
+    const edited = Buffer.from("alpha\r\nBETA\ngamma\r\n");
+    const root = repository(original.toString("utf8"));
+    writeFileSync(join(root, "example.txt"), edited);
+    const selection = await selectionFor(root, (line) => (
+      (line.kind === "deletion" && line.content === "beta")
+      || (line.kind === "addition" && line.content === "BETA")
+    ));
+
+    const { result } = await apply(root, selection);
+
+    expect(readFileSync(join(root, "example.txt"))).toEqual(original);
+    await undoDiffSelection(root, result.operation.id);
+    expect(readFileSync(join(root, "example.txt"))).toEqual(edited);
+  });
+
   it("persists an independent operation registry and deletes only its backup refs after Undo", async () => {
     const root = repository();
     writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");

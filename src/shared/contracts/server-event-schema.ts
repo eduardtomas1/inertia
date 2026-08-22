@@ -1066,9 +1066,9 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
         && uniqueRecordField(value.providers as unknown[], "providerId");
     case "provider.maintenance.operation":
       return providerMaintenanceOperation(value.operation);
-    case "agent.started":
-    case "agent.completed":
-      return recordWithStrings(value, "conversationId", "runId", "turnId");
+    case "agent.started": return recordWithStrings(value, "conversationId", "runId", "turnId");
+    case "agent.completed": return recordWithStrings(value, "conversationId", "runId", "turnId", "terminalReason")
+      && oneOf(value, "status", ["completed", "cancelled"]);
     case "agent.text":
     case "agent.reasoning":
       return recordWithStrings(value, "conversationId", "runId", "turnId", "text");
@@ -1101,8 +1101,8 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
     case "agent.goal.cleared":
       return recordWithStrings(value, "conversationId", "source")
         && oneOf(value, "source", SERVER_EVENT_OPTIONS.goalSources);
-    case "agent.failed":
-      return recordWithStrings(value, "conversationId", "runId", "turnId", "message");
+    case "agent.failed": return recordWithStrings(value, "conversationId", "runId", "turnId", "terminalReason", "message")
+      && oneOf(value, "status", ["failed", "interrupted"]);
     default:
       return false;
   }

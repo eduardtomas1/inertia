@@ -185,6 +185,7 @@ describe("Claude Agent SDK harness", () => {
           const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
           capturedMessage = (await iterator.next()).value;
           yield claudeSystem("init", {
+            session_id: "33333333-3333-4333-8333-333333333333",
             plugins: [{
               name: CLAUDE_ISOLATED_SKILL_PLUGIN_NAME,
               path: stagedPluginPath,

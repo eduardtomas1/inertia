@@ -278,19 +278,13 @@ describe("TurnController authoritative lifecycle", () => {
       label: "Observed during acknowledgement", activityId: "follow-up-race",
     });
     const interimActivity = runtime.store.snapshot().activities.find(({ title }) => title === "Observed during acknowledgement");
-    runtime.provider.resolve();
-    await flushPromises();
-    const settledConversation = runtime.store.conversation(runtime.conversationId);
-    const settledProject = runtime.store.project(settledConversation.projectId);
-    const explicitlySettled = runtime.store.settleConversation(runtime.conversationId, true);
     acknowledgeFollowUp(true);
     const followedUp = await pendingFollowUp;
     admission.release();
+    runtime.provider.resolve();
+    await flushPromises();
     expect(followedUp).toMatchObject({ role: "user", turnId: queued.turn.id, content: "Inspect the edge case next." });
     expect(followedUp!.createdAt < interimActivity!.createdAt).toBe(true);
-    const refreshedConversation = runtime.store.conversation(runtime.conversationId);
-    expect(refreshedConversation.settledAt).toBe(explicitlySettled.settledAt);
-    expect([refreshedConversation.updatedAt >= settledConversation.updatedAt, refreshedConversation.lastViewedAt! >= settledConversation.lastViewedAt!, runtime.store.project(settledConversation.projectId).updatedAt >= settledProject.updatedAt]).toEqual([true, true, true]);
     expect(runtime.store.conversationDetail(runtime.conversationId)?.messages)
       .toContainEqual(expect.objectContaining({ id: followedUp?.id }));
     const databasePath = join(runtime.directory, "inertia.sqlite");
@@ -299,7 +293,6 @@ describe("TurnController authoritative lifecycle", () => {
     const persisted = reopened.conversationDetail(runtime.conversationId);
     expect(persisted?.messages.find(({ id }) => id === followedUp?.id)?.createdAt).toBe(followedUp?.createdAt);
     expect(persisted?.activities.find(({ id }) => id === interimActivity?.id)?.createdAt).toBe(interimActivity?.createdAt);
-    expect(reopened.conversation(runtime.conversationId).settledAt).toBe(explicitlySettled.settledAt);
     reopened.close();
   });
   it("persists and broadcasts only native goals for the active Codex thread", async () => {

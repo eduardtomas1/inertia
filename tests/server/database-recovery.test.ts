@@ -25,6 +25,7 @@ import {
   DatabaseBackupManager,
   DATABASE_BACKUP_INTERVAL_MS,
   databaseRecoveryPaths,
+  recoverDatabaseOnStartup,
 } from "../../src/server/persistence/database-recovery";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 
@@ -969,6 +970,38 @@ describe("database backup and startup recovery", () => {
     expect(statSync(join(corruptDirectory, preservedShm!)).size).toBeGreaterThan(0);
   });
 
+  it("keeps a collided corrupt primary, WAL, and SHM in one database family", () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const now = new Date("2026-08-21T10:00:00.000Z");
+    const paths = databaseRecoveryPaths(databasePath);
+    mkdirSync(paths.corruptDirectory, { recursive: true });
+    writeFileSync(
+      join(paths.corruptDirectory, "inertia-20260821T100000000Z.sqlite"),
+      "older corrupt primary",
+    );
+    writeFileSync(databasePath, "new corrupt primary");
+    writeFileSync(`${databasePath}-wal`, "new corrupt wal");
+    writeFileSync(`${databasePath}-shm`, "new corrupt shm");
+
+    expect(recoverDatabaseOnStartup(databasePath, { now: () => now }))
+      .toMatchObject({
+        outcome: "created-empty",
+        trigger: "primary-corrupt",
+        preservedCorruptPrimary: true,
+      });
+    expect(readdirSync(paths.corruptDirectory).sort()).toEqual([
+      "inertia-20260821T100000000Z-1.sqlite",
+      "inertia-20260821T100000000Z-1.sqlite-shm",
+      "inertia-20260821T100000000Z-1.sqlite-wal",
+      "inertia-20260821T100000000Z.sqlite",
+    ]);
+    expect(readFileSync(
+      join(paths.corruptDirectory, "inertia-20260821T100000000Z.sqlite"),
+      "utf8",
+    )).toBe("older corrupt primary");
+  });
+
   it("closes cleanly without beginning a full backup inside the shutdown deadline", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1075,7 +1108,13 @@ describe("database backup and startup recovery", () => {
     recovered.close();
   });
 
-  it.each(["agent_turns", "workspace_runs", "prompt_presets"] as const)(
+  it.each([
+    "agent_turns",
+    "workspace_runs",
+    "prompt_presets",
+    "agent_managed_conversations",
+    "agent_thread_operations",
+  ] as const)(
     "restores a valid backup when a current-schema primary lost %s",
     async (missingTable) => {
       const directory = temporaryDirectory();

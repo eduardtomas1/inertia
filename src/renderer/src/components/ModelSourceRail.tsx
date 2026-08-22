@@ -8,20 +8,15 @@ import {
   Star,
   type LucideIcon,
 } from "lucide-react";
-import {
-  useRef,
-  type JSX,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import type { JSX, KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
   isModelSourceRailActivationKey,
-  nextModelSourceRailIndex,
   type ModelSourceFilter,
   type ModelSourceRailItem,
-  type ModelSourceRailNavigationKey,
   type ModelSourceSetupAction,
 } from "../utils/modelSourceRail";
+import { navigateMenuItems } from "../utils/menuKeyboard";
 
 export interface ModelSourceRailProps {
   items: readonly ModelSourceRailItem[];
@@ -90,7 +85,6 @@ export function ModelSourceRail({
   label = "Model sources",
   resultsId,
 }: ModelSourceRailProps): JSX.Element {
-  const toolbarRef = useRef<HTMLDivElement>(null);
   const selectedIndex = items.findIndex((item) =>
     item.id === selectedId && item.setupAction === null);
   const firstEnabledIndex = items.findIndex((item) =>
@@ -101,29 +95,14 @@ export function ModelSourceRail({
 
   const handleNavigation = (
     event: ReactKeyboardEvent<HTMLDivElement>,
-  ): void => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const buttons = [
-      ...(toolbarRef.current?.querySelectorAll<HTMLButtonElement>(
-        "[data-model-source-rail-item]:not(:disabled)",
-      ) ?? []),
-    ];
-    if (buttons.length === 0) return;
-    const currentIndex = buttons.findIndex((button) =>
-      button === document.activeElement);
-    const nextIndex = nextModelSourceRailIndex(
-      currentIndex,
-      event.key as ModelSourceRailNavigationKey,
-      buttons.length,
-    );
-    event.preventDefault();
-    buttons[nextIndex]?.focus();
-  };
+  ): void => navigateMenuItems(
+    event,
+    "[data-model-source-rail-item]:not(:disabled)",
+  );
 
   return (
     <nav className="model-source-rail" aria-label={label}>
       <div
-        ref={toolbarRef}
         className="model-source-rail-toolbar"
         role="toolbar"
         aria-label={`${label} filters`}

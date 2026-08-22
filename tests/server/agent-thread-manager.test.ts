@@ -44,6 +44,24 @@ async function runtime() {
     association: "authoritative",
   }).turn;
   const active = new Set<string>();
+  const terminalResumes = new Set<string>();
+  let reservationHeldDuringStart = false;
+  const providerTerminalResumes = {
+    isActive: (conversationId: string) => terminalResumes.has(conversationId),
+    acquire: vi.fn((conversationId: string) => {
+      if (terminalResumes.has(conversationId)) return false;
+      terminalResumes.add(conversationId);
+      return true;
+    }),
+    release: vi.fn((conversationId: string) => {
+      terminalResumes.delete(conversationId);
+    }),
+    setActive: (conversationId: string, value: boolean) => {
+      if (value) terminalResumes.add(conversationId);
+      else terminalResumes.delete(conversationId);
+    },
+    reservationHeldDuringStart: () => reservationHeldDuringStart,
+  };
   const starts: string[] = [];
   let followUps = 0;
   let followUpAdmission = true;
@@ -79,6 +97,7 @@ async function runtime() {
     },
     start: (turnId: string) => {
       const turn = store.agentTurn(turnId);
+      reservationHeldDuringStart ||= terminalResumes.has(turn.conversationId);
       starts.push(turnId);
       active.add(turn.conversationId);
       return true;
@@ -122,6 +141,7 @@ async function runtime() {
     } as never,
     creation: creation as never,
     turns: turns as never,
+    providerTerminalResumes,
     contextRequests,
     providerInfo: () => [{
       id: "codex",
@@ -158,6 +178,7 @@ async function runtime() {
     manager,
     contextRequests,
     pendingInputs,
+    providerTerminalResumes,
     project,
     source,
     sourceTurn,
@@ -577,6 +598,59 @@ describe("AgentThreadManager", () => {
       });
 
       expect(turns.isActive(child.id)).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("does not dispatch or archive across an active provider terminal", async () => {
+    const {
+      manager,
+      project,
+      providerTerminalResumes,
+      source,
+      sourceTurn,
+      starts,
+      store,
+    } = await runtime();
+    try {
+      const child = store.createConversation(project.id, "Terminal-owned child", {
+        activate: false,
+      });
+      store.agentThreadManagement.attachManaged({
+        childConversationId: child.id,
+        sourceConversationId: source.id,
+        sourceTurnId: sourceTurn.id,
+        sourceRunId: sourceTurn.runId,
+        sourceHarnessId: sourceTurn.harnessId,
+        now: "2026-08-19T10:00:00.000Z",
+      });
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      providerTerminalResumes.setActive(child.id, true);
+
+      const send = await bridge!.invoke(call("inertia_send_message", {
+        conversationId: child.id,
+        content: "Do not race the resumed native session.",
+      }));
+      const archive = await bridge!.invoke(call("inertia_archive_conversation", {
+        conversationId: child.id,
+        archived: true,
+      }));
+
+      expect(send.success).toBe(false);
+      expect(send.text).toContain("resumed provider terminal");
+      expect(archive.success).toBe(false);
+      expect(starts).toEqual([]);
+      expect(store.conversation(child.id).archivedAt).toBeNull();
+
+      providerTerminalResumes.setActive(child.id, false);
+      const accepted = await bridge!.invoke(call("inertia_send_message", {
+        conversationId: child.id,
+        content: "Start only after terminal ownership ends.",
+      }));
+      expect(accepted.success).toBe(true);
+      expect(providerTerminalResumes.reservationHeldDuringStart()).toBe(true);
+      expect(providerTerminalResumes.isActive(child.id)).toBe(false);
     } finally {
       store.close();
     }

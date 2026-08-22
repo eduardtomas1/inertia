@@ -41,6 +41,7 @@ export interface ComposerProps {
   backendProfiles?: ModelBackendProfileView[];
   latestTurn?: AgentTurn | null;
   latestTurnSummary?: ConversationLatestTurnSummary | null;
+  queuedTurnAuthoritative?: boolean;
   mentionResults: WorkspaceEntry[];
   usage: ThreadUsageSnapshot | null;
   usageDisplayMode: UsageDisplayMode;

@@ -249,6 +249,84 @@ describe("useAgentWorkflows", () => {
     });
   });
 
+  it("does not let an overlapping skills refresh discard reconnect workflow state", async () => {
+    let emit!: (event: ServerEvent) => void;
+    let resolveReconnect!: (event: ServerEvent) => void;
+    const reconnect = new Promise<ServerEvent>((resolve) => {
+      resolveReconnect = resolve;
+    });
+    let workflowLoads = 0;
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "agent.skills.list") {
+        return Promise.resolve({
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "agent.skills",
+            conversationId: "conversation-1",
+            skills: [],
+            skillDiscovery: {
+              truncated: false,
+              warningCount: 0,
+              synchronizedAt: "2030-01-01T00:00:01.000Z",
+            },
+          },
+        });
+      }
+      if (command.type !== "agent.workflow.load") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      workflowLoads += 1;
+      if (workflowLoads > 1) return reconnect;
+      return Promise.resolve({
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "agent.workflow",
+          workflow: workflow({
+            kind: "inertia-local",
+            available: true,
+            label: "Inertia local goal",
+            reason: "Saved state",
+          }),
+        },
+      });
+    });
+    const hook = renderHook(() => useAgentWorkflows({
+      conversationId: "conversation-1",
+      routeIdentity: "codex-app-server\0thread-1",
+      status: "online",
+      request,
+      subscribe: (listener) => {
+        emit = listener;
+        return () => undefined;
+      },
+    }));
+    await waitFor(() => expect(hook.result.current.state?.goalCapability.label)
+      .toBe("Inertia local goal"));
+
+    act(() => emit({ type: "server.welcome" } as ServerEvent));
+    await waitFor(() => expect(workflowLoads).toBe(2));
+    await act(async () => hook.result.current.listSkills(true));
+    expect(hook.result.current.loading).toBe(true);
+    resolveReconnect({
+      type: "request.result",
+      requestId: crypto.randomUUID(),
+      result: {
+        kind: "agent.workflow",
+        workflow: workflow({
+          kind: "codex-native",
+          available: true,
+          label: "Codex native goal",
+        }),
+      },
+    });
+
+    await waitFor(() => expect(hook.result.current.state?.goalCapability.label)
+      .toBe("Codex native goal"));
+    expect(hook.result.current.loading).toBe(false);
+  });
+
   it("rehydrates saved goals when recovery safety blocks provider refresh", async () => {
     const saved = {
       ...workflow({

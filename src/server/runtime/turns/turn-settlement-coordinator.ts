@@ -74,14 +74,18 @@ export class TurnSettlementCoordinator {
       notePersistenceError(error);
     }
     try {
+      const completed = status === "completed";
       this.options.activities.settleRunning(
         active,
-        status === "failed" || status === "interrupted"
-          ? "failed"
-          : "completed",
-        failure && failure.reason !== "codex-error"
-          ? failure.message
-          : undefined,
+        completed ? "completed" : "failed",
+        completed
+          ? undefined
+          : status === "cancelled"
+            ? message ?? "The turn was stopped."
+            : failure && failure.reason !== "codex-error"
+              ? failure.message
+              : message ?? "The turn did not complete.",
+        status === "cancelled" ? "cancelled" : undefined,
       );
     } catch (error) {
       notePersistenceError(error);
@@ -105,9 +109,7 @@ export class TurnSettlementCoordinator {
       try {
         this.options.store.updateReasoning(active.reasoningId, {
           content: active.reasoningText,
-          status: status === "failed" || status === "interrupted"
-            ? "failed"
-            : "completed",
+          status: status === "completed" ? "completed" : "failed",
         });
       } catch (error) {
         notePersistenceError(error);
@@ -182,6 +184,8 @@ export class TurnSettlementCoordinator {
           conversationId: active.conversation.id,
           runId: active.turn.runId,
           turnId: active.turn.id,
+          status: "failed",
+          terminalReason: "stream-persistence-failed",
           message: "The turn could not be finalized cleanly.",
         });
         this.options.hooks.broadcast({
@@ -279,6 +283,8 @@ export class TurnSettlementCoordinator {
         conversationId: active.conversation.id,
         runId: active.turn.runId,
         turnId: active.turn.id,
+        status,
+        terminalReason,
         message: failureMessage,
       });
     } else {
@@ -287,6 +293,8 @@ export class TurnSettlementCoordinator {
         conversationId: active.conversation.id,
         runId: active.turn.runId,
         turnId: active.turn.id,
+        status,
+        terminalReason,
       });
     }
     this.options.hooks.testOnlyStreamingTrace?.mark("terminal-event-projected");

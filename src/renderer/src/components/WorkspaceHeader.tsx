@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ChevronDown, FolderOpen, GitBranch, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -12,6 +12,7 @@ import {
   loadCommitDialog,
 } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
+import { navigateMenuItems } from "../utils/menuKeyboard";
 
 const loadWorkspaceGitActionMenu = () => import("./WorkspaceGitActionMenu");
 const WorkspaceGitActionMenu = lazy(loadWorkspaceGitActionMenu);
@@ -117,24 +118,6 @@ export function WorkspaceHeader({
     else if (action === "push") onPush();
     else onOpenPullRequest();
   };
-  const moveMenuFocus = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = [...event.currentTarget.querySelectorAll<HTMLElement>(
-      '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])',
-    )];
-    if (items.length === 0) return;
-    event.preventDefault();
-    const current = items.indexOf(document.activeElement as HTMLElement);
-    const next = event.key === "Home"
-      ? 0
-      : event.key === "End"
-        ? items.length - 1
-        : event.key === "ArrowUp"
-          ? current <= 0 ? items.length - 1 : current - 1
-          : current < 0 || current === items.length - 1 ? 0 : current + 1;
-    items[next]?.focus();
-  };
-
   useEffect(() => {
     if (!menu) return;
     const activeAnchor = headerActionsRef.current?.querySelector<HTMLElement>(
@@ -242,7 +225,7 @@ export function WorkspaceHeader({
                   <Plus size={14} /><span>Add action</span>
                 </button>
                 {menu === "action" && (
-                  <div className="header-popover action-header-popover" id="workspace-header-action-menu" role="menu" aria-label="Project actions" onKeyDown={moveMenuFocus}>
+                  <div className="header-popover action-header-popover" id="workspace-header-action-menu" role="menu" aria-label="Project actions" onKeyDown={navigateMenuItems}>
                     {actions.map((action) => <button type="button" role="menuitem" key={action.id} onClick={() => { setMenu(null); onRunAction(action); }}><strong>{action.label}</strong><small>{action.command}</small></button>)}
                   </div>
                 )}
@@ -284,7 +267,7 @@ export function WorkspaceHeader({
                   <GitBranch size={14} /><span>{gitStatus.branch ?? "Detached"}</span>{contextMismatch && <span className="checkout-context-dot" aria-hidden="true" />}<ChevronDown size={12} />
                 </button>
                 {menu === "branch" && (
-                  <div className="header-popover branch-popover" id="workspace-header-branch-menu" role="menu" aria-label="Branches" onKeyDown={moveMenuFocus}>
+                  <div className="header-popover branch-popover" id="workspace-header-branch-menu" role="menu" aria-label="Branches" onKeyDown={navigateMenuItems}>
                     <div className="header-popover-title">Branches</div>
                     {contextMismatch && (
                       <div className="checkout-context-note" role="status">

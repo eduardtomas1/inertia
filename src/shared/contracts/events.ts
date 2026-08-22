@@ -114,8 +114,23 @@ export type RuntimeMutationEvent =
       conversationId: string;
       source: AgentGoal["source"];
     }
-  | { type: "agent.completed"; conversationId: string; runId: string; turnId: string }
-  | { type: "agent.failed"; conversationId: string; runId: string; turnId: string; message: string };
+  | {
+      type: "agent.completed";
+      conversationId: string;
+      runId: string;
+      turnId: string;
+      status: "completed" | "cancelled";
+      terminalReason: string;
+    }
+  | {
+      type: "agent.failed";
+      conversationId: string;
+      runId: string;
+      turnId: string;
+      status: "failed" | "interrupted";
+      terminalReason: string;
+      message: string;
+    };
 
 export type RuntimeSequencedFrame =
   | {

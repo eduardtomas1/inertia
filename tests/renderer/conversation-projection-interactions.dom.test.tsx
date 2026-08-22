@@ -909,7 +909,12 @@ describe("useConversationProjection pending interactions", () => {
     emitReasoning("Provider resumed after input.");
     expect(hook.result.current.streamingChannel).toBe("reasoning");
 
-    source.emit({ type: "agent.completed", ...owner });
+    source.emit({
+      type: "agent.completed",
+      ...owner,
+      status: "completed",
+      terminalReason: "provider-completed",
+    });
     expect(hook.result.current.streamingChannel).toBeNull();
   });
 
@@ -1026,8 +1031,8 @@ describe("useConversationProjection pending interactions", () => {
 
   for (const scenario of [
     {
-      label: "completion",
-      status: "completed" as const,
+      label: "cancellation",
+      status: "cancelled" as const,
       exactStatus: "cancelled" as const,
       exactConversationStatus: "idle" as const,
       exactReason: "The user stopped the turn.",
@@ -1036,11 +1041,13 @@ describe("useConversationProjection pending interactions", () => {
         conversationId: primaryId,
         runId: `${primaryId}-run-current`,
         turnId: `${primaryId}-turn-current`,
+        status: "cancelled" as const,
+        terminalReason: "The user stopped the turn.",
       },
     },
     {
       label: "failure or interruption",
-      status: "failed" as const,
+      status: "interrupted" as const,
       exactStatus: "interrupted" as const,
       exactConversationStatus: "failed" as const,
       exactReason: "The agent turn was interrupted.",
@@ -1049,6 +1056,8 @@ describe("useConversationProjection pending interactions", () => {
         conversationId: primaryId,
         runId: `${primaryId}-run-current`,
         turnId: `${primaryId}-turn-current`,
+        status: "interrupted" as const,
+        terminalReason: "The agent turn was interrupted.",
         message: "The agent turn was interrupted.",
       },
     },
@@ -1222,7 +1231,7 @@ describe("useConversationProjection pending interactions", () => {
       });
       expect(hook.result.current.turns.find(({ id }) => id === turn.id)
         ?.terminalReason).toBe(
-        scenario.event.type === "agent.failed" ? scenario.event.message : null,
+        scenario.event.terminalReason,
       );
       expect(hook.result.current.pendingApprovals.map(({ id }) => id))
         .toEqual(["stale-turn-approval"]);
@@ -1230,7 +1239,7 @@ describe("useConversationProjection pending interactions", () => {
         .toEqual(["stale-turn-input"]);
       expect(hook.result.current.conversation).toMatchObject({
         id: primaryId,
-        status: scenario.status,
+        status: scenario.exactConversationStatus,
         attentionKind: null,
         latestTurn: {
           id: turn.id,
@@ -1250,7 +1259,8 @@ describe("useConversationProjection pending interactions", () => {
       expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
         .toBe(scenario.status);
       expect(hook.result.current.streamingChannel).toBeNull();
-      expect(hook.result.current.conversation?.status).toBe(scenario.status);
+      expect(hook.result.current.conversation?.status)
+        .toBe(scenario.exactConversationStatus);
 
       const completedAt = "2026-07-28T12:02:00.000Z";
       hook.rerender({
@@ -1361,6 +1371,8 @@ describe("useConversationProjection pending interactions", () => {
       conversationId: primaryId,
       runId: `${primaryId}-run`,
       turnId: `${primaryId}-turn`,
+      status: "completed",
+      terminalReason: "provider-completed",
     });
     source.emit({
       type: "conversation.detail.invalidated",

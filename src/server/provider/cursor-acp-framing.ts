@@ -1,6 +1,34 @@
 import { Transform, type TransformCallback } from "node:stream";
 
 import type { ProviderRunEventBudget } from "./io";
+import { parseAcpSessionNotification, validAcpJsonRpcEnvelope } from "./acp-json-rpc";
+import {
+  parseCursorGenerateImageNotification,
+  parseCursorTaskNotification,
+  parseCursorTodosRequest,
+} from "./cursor-acp-extensions";
+
+export function validateCursorVendorFrame(frame: unknown, active: boolean): void {
+  const envelope = frame as { method?: unknown; params?: unknown };
+  const notificationOnly = envelope.method === "cursor/update_todos"
+    || envelope.method === "cursor/task"
+    || envelope.method === "cursor/generate_image";
+  if (!notificationOnly) return;
+  if (Object.prototype.hasOwnProperty.call(envelope, "id")) {
+    throw new Error("Cursor ACP sent a malformed notification as a JSON-RPC request.");
+  }
+  if (!active) return;
+  try {
+    if (envelope.method === "cursor/update_todos") parseCursorTodosRequest(envelope.params);
+    if (envelope.method === "cursor/task") parseCursorTaskNotification(envelope.params);
+    if (envelope.method === "cursor/generate_image") {
+      parseCursorGenerateImageNotification(envelope.params);
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "invalid payload";
+    throw new Error(`Cursor ACP sent a malformed vendor notification: ${detail}`);
+  }
+}
 
 /**
  * Validates Cursor's newline-delimited ACP transport before the SDK sees it.
@@ -16,6 +44,7 @@ export class BoundedJsonLineTransform extends Transform {
   constructor(
     private readonly maxLineBytes: number,
     private readonly eventBudget: ProviderRunEventBudget,
+    private readonly validateFrame?: (frame: unknown) => void,
   ) {
     super();
   }
@@ -70,9 +99,13 @@ export class BoundedJsonLineTransform extends Transform {
     this.pendingBytes = 0;
     if (lineBytes === 0) return;
     const parsed: unknown = JSON.parse(line);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (!validAcpJsonRpcEnvelope(parsed)) {
       throw new Error("Cursor ACP sent a malformed JSON-RPC frame.");
     }
+    if ((parsed as { method?: unknown }).method === "session/update") {
+      parseAcpSessionNotification((parsed as { params?: unknown }).params);
+    }
+    this.validateFrame?.(parsed);
     this.eventBudget.observeBytes(lineBytes);
     this.push(`${line}\n`);
   }

@@ -54,7 +54,11 @@ import {
   cursorPriorFailureDetail,
   cursorRuntimeFailure,
 } from "./cursor-acp-failures";
-import { BoundedJsonLineTransform } from "./cursor-acp-framing";
+import {
+  BoundedJsonLineTransform,
+  validateCursorVendorFrame,
+} from "./cursor-acp-framing";
+import { parseAcpSessionNotification } from "./acp-json-rpc";
 import {
   cursorQuestions,
   cursorTodoSteps,
@@ -78,10 +82,13 @@ const MAX_STDERR_CHARS = 32 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_PENDING_INTERACTIONS = 64;
 const MAX_TRACKED_TOOL_ACTIVITIES = 1_024;
+const MAX_TOOL_ACTIVITY_ID_CHARS = 1_000;
+const MAX_TOOL_STATE_TEXT_CHARS = 4_000;
 const MAX_AVAILABLE_COMMANDS = 256;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const COMMAND_ADVERTISEMENT_TIMEOUT_MS = 2_000;
+const CONTROL_RPC_TIMEOUT_MS = 30_000;
 
 export function cursorAcpProcessInvocation(
   executable: string,
@@ -123,6 +130,8 @@ export interface CursorAcpHarnessOptions {
   terminateProcessTree?: ProcessTreeTerminator;
   /** Test seam for the bounded post-load command advertisement wait. */
   commandAdvertisementTimeoutMs?: number;
+  /** Test seam for initialize, auth, session, and configuration RPC deadlines. */
+  controlRpcTimeoutMs?: number;
 }
 
 export function createCursorAcpHarness(
@@ -138,6 +147,7 @@ export function createCursorAcpHarness(
         startOptions,
         options.terminateProcessTree,
         options.commandAdvertisementTimeoutMs,
+        options.controlRpcTimeoutMs,
       ),
   };
 }
@@ -146,6 +156,7 @@ function startCursorRun(
   options: AgentHarnessStartOptions,
   terminateProcessTree?: ProcessTreeTerminator,
   commandAdvertisementTimeoutMs = COMMAND_ADVERTISEMENT_TIMEOUT_MS,
+  controlRpcTimeoutMs = CONTROL_RPC_TIMEOUT_MS,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
@@ -178,7 +189,7 @@ function startCursorRun(
     {
       kind: "command" | "tool";
       label: string;
-      rawInput?: unknown;
+      command?: string;
       status?: ToolCallStatus | null;
     }
   >();
@@ -206,6 +217,24 @@ function startCursorRun(
     : value;
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
+  let activeFailurePhase = "initialize";
+  let activeTerminalEvent = "initialize";
+  let providerEventError: Error | undefined;
+  let requestProcessTermination = (_force: boolean): void => undefined;
+
+  const handleCursorProviderEvent = <T>(
+    action: () => T,
+    fallback: string,
+  ): T => {
+    try {
+      return action();
+    } catch (error) {
+      const detail = safeError(error, fallback);
+      providerEventError = new Error(detail === fallback ? fallback : `${fallback} ${detail}`);
+      requestProcessTermination(true);
+      throw providerEventError;
+    }
+  };
 
   const ownsActivePrompt = (): boolean =>
     Boolean(sessionId) && sessionReady && promptInFlight && !cancelRequested;
@@ -252,7 +281,11 @@ function startCursorRun(
         approvals,
       );
     })
-    .onNotification(acp.methods.client.session.update, ({ params }) => {
+    .onNotification(acp.methods.client.session.update, (value) =>
+      handleCursorProviderEvent(
+        () => parseAcpSessionNotification(value) as SessionNotification,
+        "Cursor ACP sent an invalid session update.",
+      ), ({ params }) => {
       const safeParams = redactHostMcpPayload(params);
       if (!sessionId || safeParams.sessionId !== sessionId || cancelRequested) return;
       if (
@@ -277,14 +310,11 @@ function startCursorRun(
         return;
       }
       if (!ownsActivePrompt()) return;
-      handleCursorUpdate(
-        safeParams,
-        resultText,
-        emitter,
-        supportsImages,
-        contextUsage,
-        toolActivities,
-      );
+      handleCursorProviderEvent(() => {
+        handleCursorUpdate(
+          safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities,
+        );
+      }, "Cursor ACP sent an invalid update.");
     })
     .onRequest("cursor/ask_question", (value) => value, async ({ params: rawParams, signal }) => {
       if (!ownsActivePrompt()) return { outcome: "cancelled" };
@@ -330,57 +360,63 @@ function startCursorRun(
     })
     .onNotification("cursor/update_todos", (value) => value, ({ params: rawParams }) => {
       if (!ownsActivePrompt()) return;
-      const params = parseCursorTodosRequest(redactHostMcpPayload(rawParams));
-      emitter.rich({ type: "plan", explanation: null, steps: cursorTodoSteps(params.todos) });
+      handleCursorProviderEvent(() => {
+        const params = parseCursorTodosRequest(redactHostMcpPayload(rawParams));
+        emitter.rich({ type: "plan", explanation: null, steps: cursorTodoSteps(params.todos) });
+      }, "Cursor ACP sent an invalid todo update.");
     })
     .onNotification("cursor/task", (value) => value, ({ params: rawParams }) => {
       if (!ownsActivePrompt()) return;
-      const params = parseCursorTaskNotification(
-        redactHostMcpPayload(rawParams),
-      );
-      subagentSequence += 1;
-      emitter.subagent({
-        sequence: subagentSequence,
-        providerTaskId: params.toolCallId,
-        providerAgentId: params.agentId ?? null,
-        parentProviderAgentId: null,
-        parentProviderToolUseId: null,
-        providerToolUseId: params.toolCallId,
-        providerRole: params.subagentType,
-        providerName: params.model ?? null,
-        providerStatus: "completed",
-        status: "completed",
-        isLive: false,
-        description: params.description,
-        progress: params.durationMs === undefined
-          ? null
-          : `Completed in ${params.durationMs} ms`,
-        result: null,
-      });
+      handleCursorProviderEvent(() => {
+        const params = parseCursorTaskNotification(
+          redactHostMcpPayload(rawParams),
+        );
+        subagentSequence += 1;
+        emitter.subagent({
+          sequence: subagentSequence,
+          providerTaskId: params.toolCallId,
+          providerAgentId: params.agentId ?? null,
+          parentProviderAgentId: null,
+          parentProviderToolUseId: null,
+          providerToolUseId: params.toolCallId,
+          providerRole: params.subagentType,
+          providerName: params.model ?? null,
+          providerStatus: "completed",
+          status: "completed",
+          isLive: false,
+          description: params.description,
+          progress: params.durationMs === undefined
+            ? null
+            : `Completed in ${params.durationMs} ms`,
+          result: null,
+        });
+      }, "Cursor ACP sent an invalid task notification.");
     })
     .onNotification(
       "cursor/generate_image",
       (value) => value,
       ({ params: rawParams }) => {
         if (!ownsActivePrompt()) return;
-        const params = parseCursorGenerateImageNotification(
-          redactHostMcpPayload(rawParams),
-        );
-        const detail = [
-          params.filePath ? `Output: ${params.filePath}` : null,
-          params.referenceImagePaths.length > 0
-            ? `References: ${params.referenceImagePaths.join(", ")}`
-            : null,
-        ].filter((value): value is string => value !== null).join("\n");
-        emitter.activity(
-          "tool",
-          "completed",
-          `Generated image: ${params.description}`,
-          {
-            activityId: params.toolCallId,
-            ...(detail ? { detail } : {}),
-          },
-        );
+        handleCursorProviderEvent(() => {
+          const params = parseCursorGenerateImageNotification(
+            redactHostMcpPayload(rawParams),
+          );
+          const detail = [
+            params.filePath ? `Output: ${params.filePath}` : null,
+            params.referenceImagePaths.length > 0
+              ? `References: ${params.referenceImagePaths.join(", ")}`
+              : null,
+          ].filter((value): value is string => value !== null).join("\n");
+          emitter.activity(
+            "tool",
+            "completed",
+            `Generated image: ${params.description}`,
+            {
+              activityId: params.toolCallId,
+              ...(detail ? { detail } : {}),
+            },
+          );
+        }, "Cursor ACP sent an invalid generated-image notification.");
       },
     );
 
@@ -413,6 +449,7 @@ function startCursorRun(
       MAX_RUN_EVENTS,
       MAX_RUN_EVENT_BYTES,
     ),
+    (frame) => validateCursorVendorFrame(frame, ownsActivePrompt()),
   );
   child.stdout.pipe(wireGuard);
   const stream = acp.ndJsonStream(
@@ -424,18 +461,20 @@ function startCursorRun(
     "Cursor ACP process tree",
     terminateProcessTree,
   );
-  const requestProcessTermination = (force: boolean): void => {
+  requestProcessTermination = (force: boolean): void => {
     // The public result below always awaits this same memoized promise.
     void terminateOwnedProcessTree(force).catch(() => undefined);
   };
+  const requestControl = <T>(request: Promise<T>, method: string): Promise<T> =>
+    withCursorRpcDeadline(request, controlRpcTimeoutMs, method, () => requestProcessTermination(true))
+      .then(redactHostMcpPayload);
 
   const providerResult = client.connectWith(stream, async (context): Promise<ProviderRunResult> => {
     activeContext = context;
-    const initialized = await context.request(acp.methods.agent.initialize, {
-      protocolVersion: 1,
-      clientCapabilities: { plan: {} },
+    const initialized = await requestControl(context.request(acp.methods.agent.initialize, {
+      protocolVersion: 1, clientCapabilities: { plan: {} },
       clientInfo: { name: "Inertia", version: INERTIA_VERSION },
-    });
+    }), "initialize");
     validateCursorInitialize(initialized);
     supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
     hostMcpConnection = await hostMcpSession?.start();
@@ -446,17 +485,23 @@ function startCursorRun(
         )
       : [];
     const cursorLogin = initialized.authMethods?.find((method) => method.id === "cursor_login");
-    if (cursorLogin) await context.request(acp.methods.agent.authenticate, { methodId: cursorLogin.id });
+    if (cursorLogin) {
+      activeFailurePhase = "auth"; activeTerminalEvent = "authenticate";
+      await requestControl(
+        context.request(acp.methods.agent.authenticate, { methodId: cursorLogin.id }), "authenticate",
+      );
+    }
 
     let modes: SessionModeState | null | undefined;
     let configOptions: SessionConfigOption[] | null | undefined;
     if (options.input.sessionId) {
+      activeFailurePhase = "session"; activeTerminalEvent = "session/load";
       if (initialized.agentCapabilities?.loadSession !== true) throw new Error("This Cursor ACP server does not advertise session resume support.");
-      const loadRequest = context.request(acp.methods.agent.session.load, {
+      const loadRequest = requestControl(context.request(acp.methods.agent.session.load, {
         sessionId: options.input.sessionId,
         cwd: options.input.cwd,
         mcpServers: hostMcpServers,
-      });
+      }), "session/load");
       // The requested session ID is known before the connection starts, so a
       // same-session notification received before this request could be stale.
       // Only advertisements delivered after the resume request is on the wire
@@ -466,16 +511,18 @@ function startCursorRun(
       modes = loaded?.modes;
       configOptions = loaded?.configOptions;
     } else {
-      const created = redactHostMcpPayload(await context.request(acp.methods.agent.session.new, {
+      activeFailurePhase = "session"; activeTerminalEvent = "session/new";
+      const created = await requestControl(context.request(acp.methods.agent.session.new, {
         cwd: options.input.cwd,
         mcpServers: hostMcpServers,
-      }));
+      }), "session/new");
       sessionId = created.sessionId;
       emitter.session(sessionId);
       modes = created.modes;
       configOptions = created.configOptions;
     }
     if (!sessionId) throw new Error("Cursor ACP did not return a session ID.");
+    activeFailurePhase = "configuration"; activeTerminalEvent = "session/configuration";
     const configuredOptions = await configureCursorSession(
       context,
       sessionId,
@@ -485,6 +532,7 @@ function startCursorRun(
       options.input.model,
       options.input.reasoningEffort,
       redactHostMcpPayload,
+      requestControl,
     );
     emitCursorMetadata(configuredOptions, supportsImages, emitter.rich);
     if (options.input.operation?.kind === "compact") {
@@ -516,12 +564,14 @@ function startCursorRun(
     // that same resumed session authoritatively advertised the command above.
     // Only end_turn is accepted below; every other stop reason fails closed.
     promptInFlight = true;
+    activeFailurePhase = "turn"; activeTerminalEvent = "session/prompt";
     const response = redactHostMcpPayload(await context.request(
       acp.methods.agent.session.prompt,
       { sessionId, prompt },
     ).finally(() => {
       promptInFlight = false;
     }));
+    if (providerEventError) throw providerEventError;
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter.rich);
     const outcome = cancelRequested || response.stopReason === "cancelled"
       ? finish("cancelled")
@@ -546,13 +596,13 @@ function startCursorRun(
     const redactHostMcp = (value: string): string => redactHostMcpPayload(value);
     const diagnostic = redactHostMcp(stderr.toString().trim());
     const message = redactHostMcp(safeError(
-      error,
+      providerEventError ?? error,
       diagnostic ? `Cursor ACP stopped: ${diagnostic}` : "Cursor ACP stopped unexpectedly.",
     ));
     return finish(
       "failed",
       message,
-      cursorRuntimeFailure(message, child),
+      cursorRuntimeFailure(message, child, activeFailurePhase, activeTerminalEvent),
     );
   });
   const result = providerResult.then(async (outcome): Promise<ProviderRunResult> => {
@@ -765,7 +815,7 @@ function handleCursorUpdate(
     {
       kind: "command" | "tool";
       label: string;
-      rawInput?: unknown;
+      command?: string;
       status?: ToolCallStatus | null;
     }
   >,
@@ -791,7 +841,7 @@ function handleCursorUpdate(
       }
       return;
     case "tool_call": {
-      const activityId = update.toolCallId;
+      const activityId = boundedToolActivityId(update.toolCallId);
       if (
         !toolActivities.has(activityId)
         && toolActivities.size >= MAX_TRACKED_TOOL_ACTIVITIES
@@ -799,11 +849,14 @@ function handleCursorUpdate(
         throw new Error("Cursor exceeded the bounded tool activity budget.");
       }
       const kind = update.kind === "execute" ? "command" : "tool";
-      const label = bounded(update.title);
+      const label = boundedToolStateText(update.title || "Cursor tool");
       const phase = cursorToolActivityPhase(update.status);
       const rawInput = objectValue(update.rawInput);
+      const command = typeof rawInput?.command === "string"
+        ? boundedToolStateText(rawInput.command)
+        : undefined;
       const detail = providerActivityDetailSections({
-        command: rawInput?.command,
+        command,
         [phase === "failed" ? "error" : "output"]:
           update.rawOutput ?? update.content,
       });
@@ -817,14 +870,14 @@ function handleCursorUpdate(
         toolActivities.set(activityId, {
           kind,
           label,
-          rawInput: update.rawInput,
+          ...(command ? { command } : {}),
           status: update.status,
         });
       }
       return;
     }
     case "tool_call_update": {
-      const activityId = update.toolCallId;
+      const activityId = boundedToolActivityId(update.toolCallId);
       const existing = toolActivities.get(activityId);
       if (
         !existing
@@ -835,15 +888,17 @@ function handleCursorUpdate(
       const kind = update.kind === "execute"
         ? "command"
         : existing?.kind ?? "tool";
-      const label = bounded(
+      const label = boundedToolStateText(
         update.title ?? update.name ?? existing?.label ?? "Cursor tool",
       );
       const status = update.status ?? existing?.status;
       const phase = cursorToolActivityPhase(status);
-      const rawInputValue = update.rawInput ?? existing?.rawInput;
-      const rawInput = objectValue(rawInputValue);
+      const rawInput = objectValue(update.rawInput);
+      const command = typeof rawInput?.command === "string"
+        ? boundedToolStateText(rawInput.command)
+        : existing?.command;
       const detail = providerActivityDetailSections({
-        command: rawInput?.command,
+        command,
         [phase === "failed" ? "error" : "output"]:
           update.rawOutput ?? update.content,
       });
@@ -857,7 +912,7 @@ function handleCursorUpdate(
         toolActivities.set(activityId, {
           kind,
           label,
-          rawInput: rawInputValue,
+          ...(command ? { command } : {}),
           status,
         });
       }
@@ -937,7 +992,11 @@ function handleCursorUpdate(
       return;
   }
   const unsupportedUpdate: never = update;
-  return unsupportedUpdate;
+  throw new Error(
+    `Cursor ACP sent an unsupported session update: ${String(
+      (unsupportedUpdate as { sessionUpdate?: unknown }).sessionUpdate,
+    )}.`,
+  );
 }
 
 function cursorToolActivityPhase(
@@ -1004,15 +1063,19 @@ async function configureCursorSession(
   model?: string,
   effort?: string,
   redactResponse: <T>(value: T) => T = (value) => value,
+  requestControl: <T>(request: Promise<T>, method: string) => Promise<T> = (request) => request,
 ): Promise<SessionConfigOption[]> {
   let authoritativeConfigOptions = configOptions;
   const wantedMode = interactionMode === "plan" ? /plan|architect/iu : /build|agent|code/iu;
   const nativeMode = modes?.availableModes.find((mode) => wantedMode.test(`${mode.id} ${mode.name}`));
   const configMode = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "mode", interactionMode === "plan" ? "plan" : "build", wantedMode);
   if (nativeMode && modes?.currentModeId !== nativeMode.id) {
-    await context.request(acp.methods.agent.session.setMode, { sessionId, modeId: nativeMode.id });
+    await requestControl(
+      context.request(acp.methods.agent.session.setMode, { sessionId, modeId: nativeMode.id }),
+      "session/set_mode",
+    );
   } else if (!nativeMode && configMode) {
-    const response = redactResponse(await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: configMode.id, value: configMode.value }));
+    const response = redactResponse(await requestControl(context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: configMode.id, value: configMode.value }), "session/set_config_option"));
     authoritativeConfigOptions = response.configOptions;
   } else if (interactionMode === "plan" && !nativeMode) {
     throw new Error("This Cursor ACP server does not advertise a plan mode.");
@@ -1020,16 +1083,36 @@ async function configureCursorSession(
   if (model) {
     const selected = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "model", model);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected model '${model}'.`);
-    const response = redactResponse(await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }));
+    const response = redactResponse(await requestControl(context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }), "session/set_config_option"));
     authoritativeConfigOptions = response.configOptions;
   }
   if (effort) {
     const selected = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "thought_level", effort);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected reasoning effort '${effort}'.`);
-    const response = redactResponse(await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }));
+    const response = redactResponse(await requestControl(context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }), "session/set_config_option"));
     authoritativeConfigOptions = response.configOptions;
   }
   return authoritativeConfigOptions;
+}
+
+export async function withCursorRpcDeadline<T>(
+  request: Promise<T>, timeoutMs: number, method: string, onTimeout: () => void,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          onTimeout();
+          reject(new Error(`Cursor ACP ${method} RPC deadline exceeded after ${Math.max(0, timeoutMs)} ms.`));
+        }, Math.max(0, timeoutMs));
+        timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function findCursorAdvertisedConfigValue(
@@ -1136,6 +1219,13 @@ function imageMediaType(path: string): string | undefined {
   }
 }
 function bounded(value: string): string { return value.slice(0, MAX_EVENT_TEXT_CHARS); }
+function boundedToolStateText(value: string): string { return value.slice(0, MAX_TOOL_STATE_TEXT_CHARS); }
+function boundedToolActivityId(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_TOOL_ACTIVITY_ID_CHARS) {
+    throw new Error("Cursor ACP sent an invalid tool call identity.");
+  }
+  return value;
+}
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>

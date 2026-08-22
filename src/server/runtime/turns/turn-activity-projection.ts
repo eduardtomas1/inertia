@@ -107,6 +107,7 @@ export class TurnActivityProjection {
     active: ActiveTurn,
     status: AgentActivity["status"],
     interruptedMessage?: string,
+    commandStatus?: "failed" | "cancelled",
   ): void {
     for (const activities of active.runningActivities.values()) {
       for (const pending of activities) {
@@ -123,7 +124,7 @@ export class TurnActivityProjection {
               }
             : {}),
         });
-        this.syncCommandRun(active, activity);
+        this.syncCommandRun(active, activity, undefined, commandStatus);
         this.options.hooks.broadcast({ type: "agent.activity", activity });
       }
     }
@@ -149,13 +150,14 @@ export class TurnActivityProjection {
     active: ActiveTurn,
     activity: AgentActivity,
     phase?: ProviderActivityEvent["phase"],
+    terminalStatus?: "failed" | "cancelled",
   ): void {
     if (activity.kind !== "command" || phase === "info") return;
-    const status = activity.status === "running"
+    const status = terminalStatus ?? (activity.status === "running"
       ? "running"
       : activity.status === "failed"
         ? "failed"
-        : "succeeded";
+        : "succeeded");
     const label = activity.title === "Command"
       ? "Agent command"
       : activity.title;

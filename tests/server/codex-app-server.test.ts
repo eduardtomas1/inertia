@@ -563,6 +563,29 @@ describe.sequential("Codex App Server runtime", () => {
     expect(manager.isRunning("conversation-stale")).toBe(false);
   });
 
+  it("rejects a resume response for a different provider thread", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "mismatched-resume";
+    const manager = trackedManager(fake.command);
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-mismatched-resume",
+      cwd: fake.root,
+      prompt: "Keep the exact saved context.",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-expected",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("saved provider session is no longer available"),
+    });
+    const messages = captured(fake.capturePath);
+    expect(messages.filter(({ method }) => method === "thread/resume")).toHaveLength(1);
+    expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
+  });
+
   it("uses workspace-write for auto-edit build turns and maps denial", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;

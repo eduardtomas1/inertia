@@ -55,6 +55,7 @@ import type {
 interface ReversalState {
   root: string;
   plan: DiffReversalPlan;
+  headContent: Buffer;
   worktreeMode: number;
   worktreeContent: Buffer;
   index: IndexEntry;
@@ -141,13 +142,64 @@ function selectedLineSignature(line: DiffLine): string {
   return `addition\0${line.oldInsertionIndex}\0${line.content}`;
 }
 
-function reversalText(source: Buffer, selected: readonly DiffLine[]): Buffer {
+interface ReversalTextLine {
+  content: string;
+  ending: "" | "\n" | "\r\n";
+}
+
+function reversalTextLines(text: string): ReversalTextLine[] {
+  const lines: ReversalTextLine[] = [];
+  let start = 0;
+  while (true) {
+    const newline = text.indexOf("\n", start);
+    if (newline < 0) break;
+    const raw = text.slice(start, newline);
+    const crlf = raw.endsWith("\r");
+    lines.push({
+      content: crlf ? raw.slice(0, -1) : raw,
+      ending: crlf ? "\r\n" : "\n",
+    });
+    start = newline + 1;
+  }
+  if (start < text.length) lines.push({ content: text.slice(start), ending: "" });
+  return lines;
+}
+
+function adjacentLineEnding(
+  lines: readonly ReversalTextLine[],
+  index: number,
+): "\n" | "\r\n" {
+  const next = lines[index]?.ending;
+  if (next) return next;
+  const previous = lines[index - 1]?.ending;
+  return previous || "\n";
+}
+
+function deletedLineEnding(
+  original: readonly ReversalTextLine[],
+  line: DiffLine,
+  current: readonly ReversalTextLine[],
+  insertionIndex: number,
+): "" | "\n" | "\r\n" {
+  if (line.noFinalNewline) return "";
+  const originalLine = line.oldLineNumber === null
+    ? undefined
+    : original[line.oldLineNumber - 1];
+  if (originalLine?.content === line.content && originalLine.ending) {
+    return originalLine.ending;
+  }
+  return adjacentLineEnding(current, insertionIndex);
+}
+
+function reversalText(
+  source: Buffer,
+  selected: readonly DiffLine[],
+  originalSource: Buffer = source,
+): Buffer {
   const text = textBuffer(source);
   if (text.includes("\0")) throw new GitError("invalid-input", "Binary files cannot be reverted by selection.");
-  const newline = text.includes("\r\n") ? "\r\n" : "\n";
-  let trailingNewline = text.endsWith("\n");
-  const body = trailingNewline ? text.slice(0, text.length - newline.length) : text;
-  const fileLines = body ? body.split(newline) : [];
+  const fileLines = reversalTextLines(text);
+  const originalLines = reversalTextLines(textBuffer(originalSource));
 
   const ordered = selected
     .map((line, order) => ({
@@ -160,20 +212,44 @@ function reversalText(source: Buffer, selected: readonly DiffLine[]): Buffer {
   for (const line of ordered.reverse()) {
     if (line.kind === "addition") {
       const index = (line.newLineNumber ?? 0) - 1;
-      if (index < 0 || index >= fileLines.length || fileLines[index] !== line.content) {
+      if (
+        index < 0
+        || index >= fileLines.length
+        || fileLines[index]?.content !== line.content
+      ) {
         throw new GitError("conflict", "The selected lines no longer match the file or Git layer. Refresh the diff and try again.");
       }
-      const removedFinalLine = index === fileLines.length - 1;
       fileLines.splice(index, 1);
-      if (removedFinalLine && line.noFinalNewline) trailingNewline = fileLines.length > 0;
     } else if (line.kind === "deletion") {
       const index = Math.max(0, Math.min(line.newInsertionIndex, fileLines.length));
-      fileLines.splice(index, 0, line.content);
-      if (index === fileLines.length - 1 && line.noFinalNewline) trailingNewline = false;
+      const ending = deletedLineEnding(
+        originalLines,
+        line,
+        fileLines,
+        index,
+      );
+      if (index === fileLines.length && fileLines.at(-1)?.ending === "") {
+        fileLines.at(-1)!.ending = adjacentLineEnding(fileLines, index);
+      }
+      fileLines.splice(index, 0, { content: line.content, ending });
     }
   }
-  const next = `${fileLines.join(newline)}${trailingNewline && fileLines.length > 0 ? newline : ""}`;
+  const next = fileLines.map(({ content, ending }) => `${content}${ending}`).join("");
   return Buffer.from(next, "utf8");
+}
+
+async function headFileContent(root: string, path: string): Promise<Buffer> {
+  try {
+    return (await runGit(root, ["show", `HEAD:${path}`], {
+      maxOutputBytes: MAX_DIFF_BYTES,
+      failureMessage: "Unable to inspect the committed file.",
+    })).stdout;
+  } catch (error) {
+    if (error instanceof GitError && error.code !== "output-limit") {
+      return Buffer.alloc(0);
+    }
+    throw error;
+  }
 }
 
 function hunkFingerprint(header: string, lines: readonly DiffLine[]): string {
@@ -263,9 +339,10 @@ async function buildReversalState(
     MAX_DIFF_BYTES,
   );
 
-  const [index, stagedPatch] = await Promise.all([
+  const [index, stagedPatch, headContent] = await Promise.all([
     readIndexEntry(root, file.path),
     completeLayerPatch(root, "index", file.path, selection.ignoreWhitespace),
+    headFileContent(root, file.path),
   ]);
   const worktreeContent = worktree.content;
   textBuffer(worktreeContent);
@@ -309,8 +386,10 @@ async function buildReversalState(
     return staged ? [staged] : [];
   });
   // Validate both transformations before exposing the plan.
-  reversalText(worktreeContent, selectedWorktreeLines);
-  if (selectedIndexLines.length > 0) reversalText(index.content, selectedIndexLines);
+  reversalText(worktreeContent, selectedWorktreeLines, headContent);
+  if (selectedIndexLines.length > 0) {
+    reversalText(index.content, selectedIndexLines, headContent);
+  }
 
   const stateAfter = await repositoryStateFingerprint(
     root,
@@ -336,6 +415,7 @@ async function buildReversalState(
   };
   return {
     root,
+    headContent,
     worktreeMode: worktree.mode,
     worktreeContent,
     index,
@@ -460,9 +540,17 @@ async function revertDiffSelectionLocked(
   if (!sameValidation(state.plan.validation, selection.expected)) {
     throw new GitError("conflict", "The diff, file, hunk, selected lines, or staged state changed after confirmation. Refresh and try again.");
   }
-  const nextWorktree = reversalText(state.worktreeContent, state.selectedWorktreeLines);
+  const nextWorktree = reversalText(
+    state.worktreeContent,
+    state.selectedWorktreeLines,
+    state.headContent,
+  );
   const nextIndex = state.selectedIndexLines.length > 0
-    ? reversalText(state.index.content, state.selectedIndexLines)
+    ? reversalText(
+        state.index.content,
+        state.selectedIndexLines,
+        state.headContent,
+      )
     : state.index.content;
   const operationId = randomUUID();
   const [preWorktreeOid, postWorktreeOid, nextIndexOid] = await Promise.all([

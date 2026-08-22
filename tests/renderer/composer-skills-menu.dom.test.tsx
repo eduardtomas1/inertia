@@ -1,6 +1,7 @@
 import {
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -12,6 +13,7 @@ import {
   ComposerSkillsMenu,
   type ComposerSkillsMenuProps,
 } from "../../src/renderer/src/components/composer/ComposerSkillsMenu";
+import { useComposerSkillCompletion } from "../../src/renderer/src/components/composer/useComposerSkillCompletion";
 import { useComposerMenus } from "../../src/renderer/src/components/composer/useComposerMenus";
 import type { AgentSkillSummary } from "../../src/shared/contracts";
 
@@ -44,6 +46,7 @@ const defaults: Omit<ComposerSkillsMenuProps, "menuController"> = {
   },
   loading: false,
   error: null,
+  listboxId: "test-skill-menu",
   disabled: false,
   running: false,
   onList: vi.fn(async () => undefined),
@@ -51,6 +54,25 @@ const defaults: Omit<ComposerSkillsMenuProps, "menuController"> = {
 };
 
 describe("ComposerSkillsMenu", () => {
+  it("matches skill names independently of the renderer locale", () => {
+    const localeLowercase = vi.spyOn(String.prototype, "toLocaleLowerCase")
+      .mockImplementation(function (this: string): string {
+        return this.toLocaleLowerCase("tr-TR");
+      });
+    const inspect = { ...skill(0), name: "Inspect" };
+
+    try {
+      const { result } = renderHook(() => useComposerSkillCompletion(
+        [inspect],
+        "$I",
+        true,
+      ));
+      expect(result.current.activeSkill?.name).toBe("Inspect");
+    } finally {
+      localeLowercase.mockRestore();
+    }
+  });
+
   it("keeps unavailable skills visible and explains the runtime reason", () => {
     const reason = "This harness does not expose skills for this route.";
     render(
@@ -86,8 +108,8 @@ describe("ComposerSkillsMenu", () => {
   it("uses instance-scoped popup relationships in split composers", () => {
     render(
       <>
-        <Harness {...defaults} />
-        <Harness {...defaults} />
+        <Harness {...defaults} listboxId="split-skills-primary" />
+        <Harness {...defaults} listboxId="split-skills-secondary" />
       </>,
     );
     const triggers = screen.getAllByRole("button", {
@@ -148,7 +170,7 @@ describe("ComposerSkillsMenu", () => {
     render(
       <div className="composer">
         <textarea aria-label="Message" defaultValue="$skill" />
-        <Harness {...defaults} completionQuery="skill" onInsert={onInsert} />
+        <Harness {...defaults} completion="skill" onInsert={onInsert} />
       </div>,
     );
     const editor = screen.getByRole("textbox", { name: "Message" });

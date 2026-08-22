@@ -120,6 +120,7 @@ export function ComposerSendActions({
   running,
   latestTurnId,
   latestTurnStatus,
+  latestTurnAuthoritative = true,
   onSendQueued,
   onSubmit,
   onStop,
@@ -130,6 +131,7 @@ export function ComposerSendActions({
   running: boolean;
   latestTurnId: string | null;
   latestTurnStatus: AgentTurnStatus | null;
+  latestTurnAuthoritative?: boolean;
   onSendQueued: (content: string) => Promise<unknown>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
@@ -213,6 +215,7 @@ export function ComposerSendActions({
       || !queued
       || !latestTurnId
       || latestTurnStatus !== "completed"
+      || !latestTurnAuthoritative
     ) return;
     const terminalKey = `${conversationId}:${latestTurnId}`;
     if (autoQueuedTurnRef.current === terminalKey) return;
@@ -222,6 +225,7 @@ export function ComposerSendActions({
     canSendQueuedNow,
     conversationId,
     latestTurnId,
+    latestTurnAuthoritative,
     latestTurnStatus,
     queuedPrompts,
     running,

@@ -91,7 +91,9 @@ export interface ComposerToolbarProps {
   skillsCapability: AgentWorkflowSkillsCapability | null;
   skillsLoading: boolean;
   skillsError: string | null;
-  skillCompletionQuery: string | null;
+  skillQuery: string | null;
+  skillListboxId: string;
+  activeSkillId: string | null;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onInsertSkill: (skill: AgentSkillSummary) => void;
   promptPresets: readonly PromptPreset[];
@@ -143,6 +145,7 @@ export interface ComposerToolbarProps {
   canSendQueuedNow: boolean;
   queuedTurnId: string | null;
   queuedTurnStatus: AgentTurnStatus | null;
+  queuedTurnAuthoritative: boolean;
   onSendQueued: (content: string) => Promise<unknown>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
@@ -163,7 +166,9 @@ export function ComposerToolbar({
   skillsCapability,
   skillsLoading,
   skillsError,
-  skillCompletionQuery,
+  skillQuery,
+  skillListboxId,
+  activeSkillId,
   onListSkills,
   onInsertSkill,
   promptPresets,
@@ -207,6 +212,7 @@ export function ComposerToolbar({
   canSendQueuedNow,
   queuedTurnId,
   queuedTurnStatus,
+  queuedTurnAuthoritative,
   onSendQueued,
   onSubmit,
   onStop,
@@ -389,7 +395,9 @@ export function ComposerToolbar({
             capability={skillsCapability}
             loading={skillsLoading}
             error={skillsError}
-            completionQuery={skillCompletionQuery}
+            completion={skillQuery}
+            listboxId={skillListboxId}
+            activeSkillId={activeSkillId}
             disabled={disabled}
             running={running}
             menuController={menuController}
@@ -486,6 +494,7 @@ export function ComposerToolbar({
             running={running}
             latestTurnId={queuedTurnId}
             latestTurnStatus={queuedTurnStatus}
+            latestTurnAuthoritative={queuedTurnAuthoritative}
             onSendQueued={onSendQueued}
             onSubmit={onSubmit}
             onStop={onStop}

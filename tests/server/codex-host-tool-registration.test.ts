@@ -50,7 +50,7 @@ function turnHarness(sessionId?: string): {
         calls.push({ method, params });
         if (method === "initialize") return { userAgent: "fake" };
         if (method === "thread/start" || method === "thread/resume") {
-          return { thread: { id: THREAD_ID }, model: "fake" };
+          return { thread: { id: sessionId ?? THREAD_ID }, model: "fake" };
         }
         if (method === "turn/start") {
           return { turn: { id: TURN_ID, status: "inProgress" } };

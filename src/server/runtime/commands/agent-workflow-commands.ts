@@ -5,6 +5,9 @@ import type {
   ServerEvent,
 } from "../../../shared/contracts";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
+import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
+import type { ConversationWorkAuthority } from "../conversation-work-authority";
+import { RuntimeRequestError } from "../../runtime-errors";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -12,6 +15,8 @@ import {
 
 export interface AgentWorkflowCommandDependencies {
   workflows: AgentWorkflowController;
+  providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "isActive">;
+  conversationWork: Pick<ConversationWorkAuthority, "reserve" | "release">;
   broadcast(event: RuntimeMutationEvent): void;
   send(socket: WebSocket, event: ServerEvent): void;
 }
@@ -19,6 +24,24 @@ export interface AgentWorkflowCommandDependencies {
 export function createAgentWorkflowCommandHandler(
   dependencies: AgentWorkflowCommandDependencies,
 ): RuntimeCommandHandler {
+  const withNativeSessionReservation = async <T>(
+    conversationId: string,
+    blockedMessage: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    if (
+      dependencies.providerTerminalResumes.isActive(conversationId)
+      || !dependencies.conversationWork.reserve(conversationId)
+    ) {
+      throw new RuntimeRequestError(blockedMessage);
+    }
+    try {
+      return await operation();
+    } finally {
+      dependencies.conversationWork.release(conversationId);
+    }
+  };
+
   return defineRuntimeCommandHandler([
     "agent.workflow.load",
     "agent.workflow.saved.load",
@@ -29,7 +52,13 @@ export function createAgentWorkflowCommandHandler(
     switch (command.type) {
       case "agent.workflow.load": {
         const workflow = command.payload.refresh
-          ? await dependencies.workflows.refresh(command.payload.conversationId)
+          ? await withNativeSessionReservation(
+              command.payload.conversationId,
+              "End the active provider session before refreshing this chat's native workflow.",
+              async () => await dependencies.workflows.refresh(
+                command.payload.conversationId,
+              ),
+            )
           : dependencies.workflows.state(command.payload.conversationId);
         dependencies.send(socket, {
           type: "request.result",
@@ -51,7 +80,13 @@ export function createAgentWorkflowCommandHandler(
         return "handled";
       }
       case "agent.goal.set": {
-        const goal = await dependencies.workflows.setGoal(command.payload);
+        const goal = command.payload.source === "codex-native"
+          ? await withNativeSessionReservation(
+              command.payload.conversationId,
+              "End the active provider session before changing its native goal.",
+              async () => await dependencies.workflows.setGoal(command.payload),
+            )
+          : await dependencies.workflows.setGoal(command.payload);
         dependencies.broadcast({ type: "agent.goal.updated", goal });
         dependencies.send(socket, {
           type: "request.ok",
@@ -60,10 +95,17 @@ export function createAgentWorkflowCommandHandler(
         return "handled";
       }
       case "agent.goal.clear": {
-        const cleared = await dependencies.workflows.clearGoal(
+        const clear = async () => await dependencies.workflows.clearGoal(
           command.payload.conversationId,
           command.payload.source,
         );
+        const cleared = command.payload.source === "codex-native"
+          ? await withNativeSessionReservation(
+              command.payload.conversationId,
+              "End the active provider session before changing its native goal.",
+              clear,
+            )
+          : await clear();
         if (cleared) {
           dependencies.broadcast({
             type: "agent.goal.cleared",

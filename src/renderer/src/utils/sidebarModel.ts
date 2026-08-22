@@ -332,15 +332,35 @@ export function groupWorkThreads(
   ];
 }
 
+export type SidebarNavigationKey = "ArrowDown" | "ArrowUp" | "Home" | "End";
+
+export function isSidebarNavigationKey(key: string): key is SidebarNavigationKey {
+  return key === "ArrowDown" || key === "ArrowUp" || key === "Home" || key === "End";
+}
+
 export function nextSidebarNavigationIndex(
   currentIndex: number,
-  key: "ArrowDown" | "ArrowUp" | "Home" | "End",
+  key: SidebarNavigationKey,
   itemCount: number,
 ): number {
   if (itemCount <= 0) return -1;
   if (key === "Home") return 0;
   if (key === "End") return itemCount - 1;
-  const safeCurrent = currentIndex >= 0 && currentIndex < itemCount ? currentIndex : 0;
-  if (key === "ArrowDown") return (safeCurrent + 1) % itemCount;
-  return (safeCurrent - 1 + itemCount) % itemCount;
+  if (currentIndex < 0 || currentIndex >= itemCount) {
+    return key === "ArrowUp" ? itemCount - 1 : 0;
+  }
+  if (key === "ArrowDown") return (currentIndex + 1) % itemCount;
+  return (currentIndex - 1 + itemCount) % itemCount;
+}
+
+export function nextSelectableNavigationIndex(
+  indices: readonly number[],
+  currentIndex: number,
+  key: SidebarNavigationKey,
+): number {
+  return indices[nextSidebarNavigationIndex(
+    indices.indexOf(currentIndex),
+    key,
+    indices.length,
+  )] ?? -1;
 }

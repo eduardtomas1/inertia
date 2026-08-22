@@ -793,6 +793,7 @@ export class TurnController {
           // Codex truthfully `starting` until its protocol emits `running`.
           if (
             active.turn.harnessId !== "codex-app-server"
+            && active.turn.harnessId !== "claude-agent-sdk"
             && this.store.agentTurn(active.turn.id).status === "starting"
           ) {
             if (this.transition(active, "running")) {
@@ -800,9 +801,7 @@ export class TurnController {
             }
           }
         },
-        onEvent: (event) => {
-          this.handleProviderEvent(event);
-        },
+        onEvent: (event) => { this.handleProviderEvent(event); },
       });
       void result.then(
         (providerResult) => {
@@ -877,12 +876,14 @@ export class TurnController {
     input: ProviderSteerInput,
     attachments: readonly ChatAttachment[] = [],
     onProviderAcknowledged?: () => void,
+    signal?: AbortSignal,
   ): Promise<ChatMessage | null> {
     return this.followUps.steer(
       lease,
       input,
       attachments,
       onProviderAcknowledged,
+      signal,
     );
   }
 
@@ -1245,5 +1246,4 @@ export class TurnController {
   private now(): string {
     return this.clock().toISOString();
   }
-
 }

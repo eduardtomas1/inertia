@@ -931,6 +931,10 @@ export async function openCodexTurn({
   if (!openedThreadId) {
     throw new Error("Codex did not return a thread identifier.");
   }
+  if (options.sessionId && openedThreadId !== options.sessionId) {
+    setContinuationError("stale-provider-session");
+    throw new Error(staleProviderSessionDecision().reason);
+  }
   if (
     options.serviceTier !== undefined
     && !codexServiceTierMatches(options.serviceTier, opened.serviceTier)

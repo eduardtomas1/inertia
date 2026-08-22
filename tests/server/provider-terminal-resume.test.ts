@@ -141,6 +141,26 @@ describe("provider terminal resume mapping", () => {
     );
   });
 
+  it("waits for transient conversation work without joining an active resume", async () => {
+    let available = false;
+    const authority = {
+      reserve: vi.fn(() => available),
+      reserveAtCheckout: vi.fn(() => true),
+      release: vi.fn(),
+    };
+    const registry = new ProviderTerminalResumeRegistry(authority);
+    setTimeout(() => {
+      available = true;
+    }, 10);
+
+    await expect(registry.acquireWhenAvailable("conversation-1", 100))
+      .resolves.toBe(true);
+    await expect(registry.acquireWhenAvailable("conversation-1", 100))
+      .resolves.toBe(false);
+    expect(authority.reserve).toHaveBeenCalledTimes(2);
+    registry.release("conversation-1");
+  });
+
   it("uses exact interactive CLI argv for every native provider", () => {
     expect(providerTerminalResumeArguments("codex", sessionIds.codex)).toEqual([
       "resume",

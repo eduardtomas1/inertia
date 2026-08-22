@@ -171,7 +171,7 @@ describe("ModelChooser", () => {
       'document.addEventListener("keydown", handleKeyDown, true)',
     );
     expect(source).toContain("event.stopPropagation()");
-    expect(source).toContain('"ArrowDown", "ArrowUp", "Home", "End"');
+    expect(source).toContain("isSidebarNavigationKey(event.key)");
     expect(source).toContain('<ul');
     expect(source).toContain('className="model-chooser-list"');
     expect(source).not.toContain('role="listbox"');

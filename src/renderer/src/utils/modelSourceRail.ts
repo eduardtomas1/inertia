@@ -1,6 +1,10 @@
 import type { ProviderId } from "../../../shared/contracts";
 import { legacyProviderIdForHarness } from "../../../shared/model-routing";
 import type { ModelSearchRoute } from "./modelSearch";
+import {
+  nextSidebarNavigationIndex,
+  type SidebarNavigationKey,
+} from "./sidebarModel";
 
 export const MODEL_SOURCE_PROVIDER_ORDER = [
   "codex",
@@ -228,26 +232,8 @@ export function filterModelRoutesBySource<Route extends ModelSearchRoute>(
     && legacyProviderIdForHarness(route.harnessId) === filter.providerId);
 }
 
-export type ModelSourceRailNavigationKey =
-  | "ArrowDown"
-  | "ArrowUp"
-  | "Home"
-  | "End";
-
-export function nextModelSourceRailIndex(
-  currentIndex: number,
-  key: ModelSourceRailNavigationKey,
-  itemCount: number,
-): number {
-  if (itemCount <= 0) return -1;
-  if (key === "Home") return 0;
-  if (key === "End") return itemCount - 1;
-  if (currentIndex < 0 || currentIndex >= itemCount) {
-    return key === "ArrowUp" ? itemCount - 1 : 0;
-  }
-  if (key === "ArrowDown") return (currentIndex + 1) % itemCount;
-  return (currentIndex - 1 + itemCount) % itemCount;
-}
+export type ModelSourceRailNavigationKey = SidebarNavigationKey;
+export const nextModelSourceRailIndex = nextSidebarNavigationIndex;
 
 export type ModelSourceRailActivationEvent = Pick<
   KeyboardEvent,

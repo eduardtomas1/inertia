@@ -139,6 +139,10 @@ function dependencies(options: {
   checkpointCount?: Mock<() => number>;
   providerTerminalResumeActive?: boolean;
   providerTerminalResumeAcquire?: boolean;
+  providerTerminalResumeAcquireWhenAvailable?: Mock<(
+    conversationId: string,
+    timeoutMs?: number,
+  ) => Promise<boolean>>;
   enableProviders?: boolean;
   generatedAttachments?: PrivateGeneratedAttachmentStore;
   provider?: ProviderInfo;
@@ -257,6 +261,10 @@ function dependencies(options: {
       isActive: vi.fn(() => options.providerTerminalResumeActive ?? false),
       acquire: vi.fn(() => options.providerTerminalResumeAcquire
         ?? !(options.providerTerminalResumeActive ?? false)),
+      acquireWhenAvailable:
+        options.providerTerminalResumeAcquireWhenAvailable
+          ?? vi.fn(async () => options.providerTerminalResumeAcquire
+            ?? !(options.providerTerminalResumeActive ?? false)),
       release: vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
     providerInfo: () => [provider],
@@ -593,11 +601,73 @@ describe("message attachment ownership transfer", () => {
     );
     expect(queue).not.toHaveBeenCalled();
     expect(
-      handlerDependencies.providerTerminalResumes.acquire,
-    ).toHaveBeenCalledWith(conversationId);
+      handlerDependencies.providerTerminalResumes.acquireWhenAvailable,
+    ).toHaveBeenCalledWith(conversationId, expect.any(Number));
     expect(handlerDependencies.store.conversationPath).not.toHaveBeenCalled();
     expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
     expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+  });
+
+  it("waits for a transient workflow reservation before starting the turn", async () => {
+    let settleReservation!: (acquired: boolean) => void;
+    const acquireWhenAvailable = vi.fn(() => new Promise<boolean>((resolve) => {
+      settleReservation = resolve;
+    }));
+    const queue = vi.fn(() => queuedTurn());
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+      providerTerminalResumeAcquireWhenAvailable: acquireWhenAvailable,
+    });
+    const handling = createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    );
+
+    await vi.waitFor(() => expect(acquireWhenAvailable).toHaveBeenCalledWith(
+      conversationId,
+      expect.any(Number),
+    ));
+    expect(queue).not.toHaveBeenCalled();
+
+    settleReservation(true);
+    await expect(handling).resolves.toBe("handled");
+    expect(queue).toHaveBeenCalledOnce();
+  });
+
+  it("releases authority acquired after message preparation times out", async () => {
+    vi.useFakeTimers();
+    try {
+      let settleReservation!: (acquired: boolean) => void;
+      const acquireWhenAvailable = vi.fn(() =>
+        new Promise<boolean>((resolve) => { settleReservation = resolve; }));
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+        providerTerminalResumeAcquireWhenAvailable: acquireWhenAvailable,
+      });
+      const handling = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      )({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+
+      await vi.waitFor(() => expect(acquireWhenAvailable).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
+      await rejection;
+      expect(handlerDependencies.providerTerminalResumes.release)
+        .not.toHaveBeenCalled();
+
+      settleReservation(true);
+      await vi.waitFor(() => {
+        expect(handlerDependencies.providerTerminalResumes.release)
+          .toHaveBeenCalledWith(conversationId);
+      });
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("aborts attachment resolution at the aggregate deadline", async () => {
@@ -961,11 +1031,11 @@ describe("message attachment ownership transfer", () => {
       vi.mocked(handlerDependencies.workflows.assertTurnSkillsCurrent)
         .mock.invocationCallOrder[0],
     ).toBeLessThan(
-      vi.mocked(handlerDependencies.providerTerminalResumes.acquire)
+      vi.mocked(handlerDependencies.providerTerminalResumes.acquireWhenAvailable)
         .mock.invocationCallOrder[0]!,
     );
     expect(
-      vi.mocked(handlerDependencies.providerTerminalResumes.acquire)
+      vi.mocked(handlerDependencies.providerTerminalResumes.acquireWhenAvailable)
         .mock.invocationCallOrder[0],
     ).toBeLessThan(
       vi.mocked(handlerDependencies.store.conversationPath)

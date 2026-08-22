@@ -381,6 +381,17 @@ describe("composer asynchronous ownership", () => {
 
     view.rerender(<Composer {...composerProps(current, {
       latestTurn: { ...runningTurn, status: "completed" },
+      queuedTurnAuthoritative: false,
+      onSend,
+    })} />);
+
+    await act(async () => Promise.resolve());
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("Run the release checks next")).toBeInTheDocument();
+
+    view.rerender(<Composer {...composerProps(current, {
+      latestTurn: { ...runningTurn, status: "completed" },
+      queuedTurnAuthoritative: true,
       onSend,
     })} />);
 
@@ -515,6 +526,112 @@ describe("composer asynchronous ownership", () => {
     await user.type(textbox, "$missing");
     expect(screen.queryByRole("listbox", { name: "Skill suggestions" }))
       .not.toBeInTheDocument();
+  });
+
+  it("accepts visible skill completions from the editor without sending raw fragments", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => undefined);
+    const availableSkills: AgentSkillSummary[] = [
+      {
+        id: "skill-security-review",
+        conversationId: "conversation-skill-keyboard",
+        name: "security-review",
+        description: "Review the repository security posture.",
+        shortDescription: "Review security posture",
+        scope: "repo",
+        enabled: true,
+        source: "codex-native",
+      },
+      {
+        id: "skill-security-fix",
+        conversationId: "conversation-skill-keyboard",
+        name: "security-fix",
+        description: "Fix reviewed security findings.",
+        shortDescription: "Fix security findings",
+        scope: "repo",
+        enabled: true,
+        source: "codex-native",
+      },
+    ];
+    render(<Composer {...composerProps(conversation("conversation-skill-keyboard"), {
+      skills: availableSkills,
+      skillsCapability: {
+        kind: "codex-native",
+        available: true,
+        label: "Codex skills",
+      },
+      onSend,
+    })} />);
+    const editor = screen.getByRole("textbox", { name: "Message" });
+    await user.type(editor, "$security");
+    const suggestions = await screen.findByRole("listbox", {
+      name: "Skill suggestions",
+    });
+    expect(editor).toHaveAttribute("role", "combobox");
+
+    fireEvent.keyDown(editor, { key: "ArrowDown" });
+    await waitFor(() => expect(within(suggestions).getByRole("option", {
+      name: /\$security-fix/u,
+    })).toHaveAttribute("aria-selected", "true"));
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(editor).toHaveValue("$security-fix ");
+    expect(onSend).not.toHaveBeenCalled();
+
+    await user.clear(editor);
+    await user.type(editor, "$sec");
+    await screen.findByRole("listbox", { name: "Skill suggestions" });
+    fireEvent.keyDown(editor, { key: "Tab" });
+    expect(editor).toHaveValue("$security-review ");
+    expect(editor).toHaveFocus();
+    expect(onSend).not.toHaveBeenCalled();
+
+    await user.clear(editor);
+    await user.type(editor, "$sec");
+    await screen.findByRole("listbox", { name: "Skill suggestions" });
+    fireEvent.keyDown(editor, { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Skill suggestions" }))
+      .not.toBeInTheDocument();
+    expect(editor).toHaveValue("$sec");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("accepts file mentions from the keyboard and restores editor focus after clicks", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(conversation("conversation-file-mention"), {
+      mentionResults: [
+        { path: "src/first.ts", kind: "file" },
+        { path: "src/second.ts", kind: "file" },
+      ],
+      onSend,
+    })} />);
+    const editor = screen.getByRole("textbox", { name: "Message" });
+    await user.type(editor, "@src");
+    const suggestions = await screen.findByRole("listbox", {
+      name: "Project files",
+    });
+    expect(editor).toHaveAttribute("role", "combobox");
+    expect(editor).toHaveAttribute("aria-controls", suggestions.id);
+
+    fireEvent.keyDown(editor, { key: "ArrowDown" });
+    expect(within(suggestions).getByRole("option", {
+      name: /src\/second\.ts/u,
+    })).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(editor).toHaveValue("@src/second.ts ");
+    expect(onSend).not.toHaveBeenCalled();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(editor).toHaveFocus();
+
+    await user.clear(editor);
+    await user.type(editor, "@src");
+    fireEvent.click(await screen.findByRole("option", {
+      name: /src\/first\.ts/u,
+    }));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(editor).toHaveValue("@src/first.ts ");
+    expect(editor).toHaveFocus();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("presents a two-tier editor and keyboard-navigable grouped control rail", async () => {

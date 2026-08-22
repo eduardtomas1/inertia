@@ -71,6 +71,7 @@ const REQUIRED_TABLES_BY_SCHEMA_VERSION = [
   ]],
   [54, ["prompt_presets"]],
   [55, ["provider_run_ownership"]],
+  [60, ["agent_managed_conversations", "agent_thread_operations"]],
   [61, ["conversation_context_packets", "agent_context_requests"]],
 ] as const;
 
@@ -688,7 +689,13 @@ function availableName(directory: string, stem: string, suffix: string): string 
     index += 1;
   }
 }
-
+function availableDatabaseFamilyStem(directory: string, stem: string): string {
+  for (let index = 0; ; index += 1) {
+    const candidate = `${stem}${index === 0 ? "" : `-${index}`}`;
+    const familyAvailable = [".sqlite", ".sqlite-wal", ".sqlite-shm"].every((suffix) => !existsSync(join(directory, `${candidate}${suffix}`)));
+    if (familyAvailable) return candidate;
+  }
+}
 function cleanInterruptedFiles(databasePath: string): void {
   const paths = databaseRecoveryPaths(databasePath);
   removeDatabaseFileFamily(paths.restorePartialPath);
@@ -708,6 +715,7 @@ function quarantinePrimary(
   const { corruptDirectory } = databaseRecoveryPaths(databasePath);
   ensureOwnedDirectory(corruptDirectory);
   const timestamp = compactTimestamp(now);
+  const targetStem = availableDatabaseFamilyStem(corruptDirectory, `${safeDatabaseStem(databasePath)}-${timestamp}`);
   let preserved = false;
   for (const suffix of ["", "-wal", "-shm"] as const) {
     const source = `${databasePath}${suffix}`;
@@ -715,11 +723,7 @@ function quarantinePrimary(
     if (!regularOwnedFile(source)) {
       throw new Error("The database recovery source is not a local file.");
     }
-    const targetName = availableName(
-      corruptDirectory,
-      `${safeDatabaseStem(databasePath)}-${timestamp}`,
-      `.sqlite${suffix}`,
-    );
+    const targetName = `${targetStem}.sqlite${suffix}`;
     renameSync(source, join(corruptDirectory, targetName));
     chmodSync(join(corruptDirectory, targetName), FILE_MODE);
     if (suffix === "") preserved = true;

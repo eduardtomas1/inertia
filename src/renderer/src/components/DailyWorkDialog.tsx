@@ -150,6 +150,8 @@ export function DailyWorkDialog({
   const titleId = useId();
   const descriptionId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const loadGeneration = useRef(0);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [selectedDateKey, setSelectedDateKey] = useState(() =>
@@ -174,14 +176,14 @@ export function DailyWorkDialog({
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      onCloseRef.current();
     };
     document.addEventListener("keydown", closeOnEscape, true);
     return () => {
       document.removeEventListener("keydown", closeOnEscape, true);
       restoreFocus();
     };
-  }, [onClose]);
+  }, []);
 
   useEffect(() => {
     const generation = ++loadGeneration.current;

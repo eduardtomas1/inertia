@@ -278,6 +278,42 @@ describe("DailyWorkDialog", () => {
     trigger.remove();
   });
 
+  it("preserves focus across parent rerenders and uses the latest close callback", async () => {
+    const request = vi.fn(async () => result(dashboard()));
+    const firstClose = vi.fn();
+    const latestClose = vi.fn();
+    const onOpenConversation = vi.fn();
+    const view = render(<DailyWorkDialog
+      status="online"
+      request={request}
+      onClose={firstClose}
+      onOpenConversation={onOpenConversation}
+    />);
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Close daily work",
+    })).toHaveFocus());
+    const input = screen.getByLabelText("Daily work date", {
+      selector: "input",
+    });
+    input.focus();
+
+    view.rerender(<DailyWorkDialog
+      status="online"
+      request={request}
+      onClose={latestClose}
+      onOpenConversation={onOpenConversation}
+    />);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    expect(input).toHaveFocus();
+    document.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+    }));
+    expect(firstClose).not.toHaveBeenCalled();
+    expect(latestClose).toHaveBeenCalledOnce();
+  });
+
   it("shows an offline error without issuing a request", async () => {
     const request = vi.fn<DailyWorkDialogProps["request"]>();
     renderDialog({ status: "offline", request });

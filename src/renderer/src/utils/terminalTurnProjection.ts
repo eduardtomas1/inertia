@@ -2,6 +2,7 @@ import type {
   AgentPlan,
   AgentTurn,
   AgentTurnStatus,
+  AgentTurnTerminalStatus,
   ConversationDetailViewState,
   ConversationLatestTurnSummary,
   ConversationShell,
@@ -157,7 +158,7 @@ function isTerminalStatus(status: AgentTurnStatus): boolean {
 
 export interface TerminalTurnProjection {
   owner: string;
-  status: "completed" | "failed";
+  status: AgentTurnTerminalStatus;
   terminalReason: string | null;
 }
 
@@ -226,7 +227,11 @@ export function projectConversationTerminal(
   if (!projection) return conversation;
   return {
     ...conversation,
-    status: projection.status === "completed" ? "completed" : "failed",
+    status: projection.status === "completed"
+      ? "completed"
+      : projection.status === "cancelled"
+        ? "idle"
+        : "failed",
     attentionKind: null,
     latestTurn: {
       ...latestTurn,

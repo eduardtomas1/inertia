@@ -110,6 +110,9 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-resume" && message.method === "thread/resume") {
     return send({ id: message.id, error: { code: -32001, message: "thread not found" } });
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "mismatched-resume" && message.method === "thread/resume") {
+    return send({ id: message.id, result: { thread: { id: "thread-unrelated" }, cwd: process.cwd(), model: "fake", serviceTier: null } });
+  }
   threadId = message.params.threadId || "thread-new";
   send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fake", serviceTier: message.params.serviceTier ?? null } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-completion") {

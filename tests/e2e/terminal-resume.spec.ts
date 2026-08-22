@@ -154,6 +154,7 @@ test("resumes the selected provider session only in its owning split pane", asyn
   );
   await expect.poll(
     () => secondaryTerminal.getAttribute("data-terminal-id"),
+    { timeout: 10_000 },
   ).not.toBe(secondaryTerminalId);
   await expect.poll(
     () => readFile(

@@ -499,14 +499,16 @@ export function createProjectWorkspaceCommandHandler(
           dependencies.providers.isRunning(conversation.id)
           || dependencies.turns.isActive(conversation.id)
           || dependencies.turns.hasActiveCheckout(cwd)
-          || dependencies.store.hasActiveWorkspaceRunForConversation(conversation.id)
+          || dependencies.store.hasRecordedActiveWorkspaceRunForConversation(conversation.id)
           || dependencies.providerTerminalResumes.isActive(conversation.id)
         ) {
           throw new RuntimeRequestError(
             "Stop the active provider session for this chat before resuming it in another terminal.",
           );
         }
-        if (!dependencies.providerTerminalResumes.acquire(conversation.id)) {
+        if (!await dependencies.providerTerminalResumes.acquireWhenAvailable(
+          conversation.id,
+        )) {
           throw new RuntimeRequestError(
             "Stop the active provider session for this chat before resuming it in another terminal.",
           );

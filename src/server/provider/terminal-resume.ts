@@ -44,6 +44,24 @@ export class ProviderTerminalResumeRegistry {
     return true;
   }
 
+  async acquireWhenAvailable(
+    conversationId: string,
+    timeoutMs = 7_000,
+  ): Promise<boolean> {
+    if (this.conversationIds.has(conversationId)) return false;
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (!this.acquire(conversationId)) {
+      if (this.conversationIds.has(conversationId)) return false;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.min(50, remaining));
+        timer.unref();
+      });
+    }
+    return true;
+  }
+
   acquireAtCheckout(
     conversationId: string,
     projectId: string,

@@ -75,6 +75,7 @@ function dependencies(input: {
   activeCheckout?: boolean;
   activeCheckoutChecks?: boolean[];
   workspaceRunActive?: boolean;
+  providerTerminalResumes?: ProviderTerminalResumeRegistry;
 } = {}) {
   const current = input.current ?? conversation();
   const onExitCallbacks: Array<(exitCode: number) => void> = [];
@@ -99,7 +100,8 @@ function dependencies(input: {
     if (onExit) onExitCallbacks.push(onExit);
     return "66666666-6666-4666-8666-666666666666";
   });
-  const providerTerminalResumes = new ProviderTerminalResumeRegistry();
+  const providerTerminalResumes = input.providerTerminalResumes
+    ?? new ProviderTerminalResumeRegistry();
   const runningChecks = [...(input.runningChecks ?? [])];
   const activeCheckoutChecks = [...(input.activeCheckoutChecks ?? [])];
   const value: ProjectWorkspaceCommandDependencies = {
@@ -221,6 +223,26 @@ describe("terminal.provider.resume command", () => {
     expect(fixture.replaceProcess).toHaveBeenCalledTimes(2);
   });
 
+  it("waits for a transient workflow reservation before resuming", async () => {
+    let available = false;
+    const providerTerminalResumes = new ProviderTerminalResumeRegistry({
+      reserve: () => available,
+      reserveAtCheckout: () => true,
+      release: () => undefined,
+    });
+    const fixture = dependencies({ providerTerminalResumes });
+    const pending = createProjectWorkspaceCommandHandler(fixture.value)(
+      { readyState: 1 } as never,
+      resumeCommand(),
+    );
+    await Promise.resolve();
+    expect(fixture.terminalResumeLaunch).not.toHaveBeenCalled();
+
+    available = true;
+    await expect(pending).resolves.toBe("handled");
+    expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
+  });
+
   it("abandons the launch if an app provider turn starts during CLI detection", async () => {
     const fixture = dependencies({ runningChecks: [false, true] });
     const handler = createProjectWorkspaceCommandHandler(fixture.value);
@@ -246,6 +268,9 @@ describe("terminal.provider.resume command", () => {
     const socket = { readyState: 1 };
     const handler = createProjectWorkspaceCommandHandler(fixture.value);
     const pending = handler(socket as never, resumeCommand());
+    await vi.waitFor(() => {
+      expect(completeDiscovery).toBeTypeOf("function");
+    });
 
     socket.readyState = 3;
     completeDiscovery({

@@ -17,6 +17,7 @@ const electronState = vi.hoisted(() => ({
     };
     navigationHistory: {
       canGoBack: ReturnType<typeof vi.fn>;
+      clear: ReturnType<typeof vi.fn>;
       getActiveIndex: ReturnType<typeof vi.fn>;
       getEntryAtIndex: ReturnType<typeof vi.fn>;
       goBack: ReturnType<typeof vi.fn>;
@@ -67,6 +68,7 @@ vi.mock("electron", () => {
     readonly navigationHistory = {
       canGoBack: vi.fn(() => false),
       canGoForward: vi.fn(() => false),
+      clear: vi.fn(),
       getActiveIndex: vi.fn(() => 0),
       getEntryAtIndex: vi.fn(() => ({ title: "", url: this.url })),
       goBack: vi.fn(),
@@ -262,6 +264,7 @@ describe("agent-owned native Browser", () => {
     expect(electronState.contents[0]!.debugger.sendCommand)
       .toHaveBeenCalledWith("DOM.enable");
     expect(electronState.contents[0]!.debugger.isAttached()).toBe(true);
+    expect(electronState.contents[0]!.navigationHistory.clear).toHaveBeenCalledOnce();
     await expect(broker.perform(conversationId, { action: "snapshot" }))
       .resolves.toMatchObject({ ok: true });
     expect(electronState.contents[0]!.debugger.sendCommand).toHaveBeenCalledWith(

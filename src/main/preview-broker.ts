@@ -29,7 +29,7 @@ import {
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
-  agentPageHasUnguardedNestedContent, ensureAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageInput,
+  agentPageHasUnguardedNestedContent, ensureAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import { boundedAgentScreenshot } from "./preview-agent-screenshot.js";
 type PreviewOwner = "primary" | "secondary";
@@ -1144,7 +1144,7 @@ export class PreviewBroker {
     await this.#rendererOperation(contents, () => ensureAgentFileChooserBlock(contents), { signal });
     await this.#rendererOperation(
       contents,
-      async () => { await contents.loadURL(url); },
+      async () => { await contents.loadURL(url); settleAgentPageDebuggerBootstrap(contents); },
       {
         signal,
         cancel: () => contents.stop(),

@@ -11,6 +11,7 @@ interface AgentPageBoundaryState {
 }
 
 const agentPageBoundaryStates = new WeakMap<WebContents, AgentPageBoundaryState>();
+const agentPageDebuggerBootstraps = new WeakSet<WebContents>();
 
 function stopForAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("browser-action-cancelled");
@@ -20,7 +21,10 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
   if (contents.debugger.isAttached()) {
     throw new Error("The Browser page is already attached to another debugger.");
   }
-  if (!contents.getURL()) await contents.loadURL("about:blank");
+  if (!contents.getURL()) {
+    await contents.loadURL("about:blank");
+    agentPageDebuggerBootstraps.add(contents);
+  }
   contents.debugger.attach("1.3");
   const state: AgentPageBoundaryState = {
     mainFrameId: null,
@@ -62,6 +66,11 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
     }
     throw error;
   }
+}
+
+export function settleAgentPageDebuggerBootstrap(contents: WebContents): void {
+  if (!agentPageDebuggerBootstraps.delete(contents)) return;
+  contents.navigationHistory.clear();
 }
 
 const fileChooserBlocks = new WeakMap<WebContents, Promise<void>>();

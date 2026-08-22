@@ -378,6 +378,11 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
         contents.getURL() === url)),
     [primaryPreviewUrl, secondaryPreviewUrl],
   )).toBe(true);
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ webContents }, urls) => urls.map((url) => webContents.getAllWebContents()
+      .find((contents) => contents.getURL() === url)?.navigationHistory.canGoBack()),
+    [primaryPreviewUrl, secondaryPreviewUrl],
+  )).toEqual([false, false]);
   const previewStorageIsolation = await app.electronApp.evaluate(
     async ({ BrowserWindow }, urls) => {
       const window = BrowserWindow.getAllWindows()[0];

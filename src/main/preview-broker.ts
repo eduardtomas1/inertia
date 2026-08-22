@@ -1092,11 +1092,13 @@ export class PreviewBroker {
     const contents = this.#active(slot).view.webContents;
     await this.#prepareAgentPage(contents, signal);
     const keyCode = key === "Space" ? " " : key;
-    let activationBlocked: "disabled" | "file" | null = null;
+    let activationBlocked: "disabled" | "file" | "nested" | null = null;
     await this.#sendInputAndWait(contents, async () => {
       if (key === "Enter" || key === "Space") {
         activationBlocked = await this.#rendererOperation(contents,
           () => agentPageActivationBlocked(contents), { signal });
+        if (!activationBlocked && await this.#rendererOperation(contents,
+          () => agentPageHasUnguardedNestedContent(contents), { signal })) activationBlocked = "nested";
         if (activationBlocked) return;
       }
       contents.sendInputEvent({ type: "keyDown", keyCode });
@@ -1106,10 +1108,8 @@ export class PreviewBroker {
       contents.sendInputEvent({ type: "keyUp", keyCode });
     }, signal);
     if (activationBlocked) {
-      const message = activationBlocked === "file"
-        ? "File inputs cannot be activated by the Browser agent."
-        : "The focused page element is disabled.";
-      return failure("invalid", message);
+      return failure("invalid", activationBlocked === "file" ? "File inputs cannot be activated by the Browser agent."
+        : activationBlocked === "disabled" ? "The focused page element is disabled." : "Activation keys are unavailable for nested page content.");
     }
     this.#record(ownerId, slot, "press", `Agent pressed ${key}`);
     return successfulAgentBrowserResult(JSON.stringify({ pressed: key }), this.#agentState(slot));

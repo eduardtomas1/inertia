@@ -145,6 +145,21 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-closed-disabled-focus") {
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Closed shadow disabled focus</title><div id='closed-disabled-host'></div>"
+        + "<script>const host=document.querySelector('#closed-disabled-host');"
+        + "const root=host.attachShadow({mode:'closed'});const button=document.createElement('button');"
+        + "button.type='button';button.setAttribute('aria-disabled','true');"
+        + "button.addEventListener('click',()=>{window.__closedDisabledActionClicked=true});"
+        + "root.append(button);button.focus();window.__closedHostFocused=document.activeElement===host</script>",
+      );
+      return;
+    }
     if (request.url === "/agent-browser-privacy-start") {
       const secret = "document-start-password-sentinel";
       response.writeHead(200, {

@@ -3,9 +3,8 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries } from "./support/agent-browser-security";
+import { expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries } from "./support/agent-browser-security";
 import { selectWorkspaceTool } from "./support/workspace-tools";
-
 let app!: AppFixture;
 let page!: AppFixture["page"];
 let primaryConversationId = "";
@@ -622,6 +621,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   )).toEqual({ attached: true, invoked: true, selectedFiles: 0 });
   await expectFocusNavigationSettlement(app, primaryConversationId,
     `${app.previewUrl}agent-browser-focus-destination`);
+  await expectClosedShadowActivationBlocked(app, primaryConversationId, `${app.previewUrl}agent-browser-closed-disabled-focus`);
   const privacyUrl = `${app.previewUrl}agent-browser-privacy-start`;
   await expectDocumentStartPrivacyGuard(app, primaryConversationId, privacyUrl);
   for (const [path, secret] of [

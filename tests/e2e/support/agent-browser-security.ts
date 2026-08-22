@@ -180,6 +180,38 @@ export async function expectSemanticClickBoundaries(
   expect(evidence.hiddenNames).not.toContain("Temporarily visible action");
 }
 
+export async function expectClosedShadowActivationBlocked(
+  app: AppFixture,
+  conversationId: string,
+  url: string,
+): Promise<void> {
+  const evidence = await app.electronApp.evaluate(async ({ webContents }, request) => {
+    type Command =
+      | { action: "navigate"; url: string }
+      | { action: "press"; key: "Enter" | "Space" };
+    type Result = { code?: string; ok: boolean };
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+      agentBrowser: (id: string, command: Command) => Promise<Result>;
+    };
+    const navigation = await runtime.agentBrowser(request.conversationId, {
+      action: "navigate", url: request.url,
+    });
+    const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === request.url);
+    const hostFocused = await contents?.executeJavaScript("window.__closedHostFocused === true");
+    const enter = await runtime.agentBrowser(request.conversationId, { action: "press", key: "Enter" });
+    const space = await runtime.agentBrowser(request.conversationId, { action: "press", key: "Space" });
+    const clicked = await contents?.executeJavaScript("window.__closedDisabledActionClicked === true");
+    return { clicked, enter, hostFocused, navigation, space };
+  }, { conversationId, url });
+  expect(evidence).toMatchObject({
+    clicked: false,
+    enter: { code: "invalid", ok: false },
+    hostFocused: true,
+    navigation: { ok: true },
+    space: { code: "invalid", ok: false },
+  });
+}
+
 export async function expectFocusNavigationSettlement(
   app: AppFixture,
   conversationId: string,

@@ -105,7 +105,7 @@ export function MarkdownPreviewSurface({
   const failure = (
     <div className={`${FILE_PREVIEW_CLASS}-markdown-failure`} role="alert">
       <AlertCircle size={20} aria-hidden="true" />
-      <strong>Markdown preview failed</strong>
+      <strong>Preview failed</strong>
       <div>
         <button type="button" onClick={() => setAttempt((value) => value + 1)}>
           <RefreshCw size={12} aria-hidden="true" />
@@ -378,7 +378,7 @@ export function FilesPanel({
   const markdownPreview = previewLanguage?.id === "markdown";
   const markdownPreviewBlockedReason = markdownPreview && preview
     ? preview.truncated
-      ? "Full file required."
+      ? "Full file needed."
       : preview.content.length > MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS
         ? `Limit: ${MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS.toLocaleString("en-US")} characters.`
         : previewWindow.totalLines > MAX_RENDERED_PREVIEW_LINES
@@ -593,7 +593,7 @@ export function FilesPanel({
 
   const storePage = useCallback((path: string, page: WorkspaceEntriesPage): void => {
     if (page.directory !== path) {
-      throw new Error("Folder escaped tree.");
+      throw new Error("Folder left tree");
     }
     const next = new Map(directoryPagesRef.current);
     next.set(path, {
@@ -923,7 +923,7 @@ export function FilesPanel({
           ) : rows.length === 0 ? (
             <div className={`${PANEL_EMPTY_CLASS} compact`}>
               <FileSearch size={20} aria-hidden="true" />
-              <p>{searchActive ? "No matches." : "Project is empty."}</p>
+              <p>{searchActive ? "No matches." : "Empty project."}</p>
             </div>
           ) : rows.map((row) => {
             const { entry } = row;
@@ -1021,7 +1021,7 @@ export function FilesPanel({
           )}
           {!searchActive && directoryPages.get("")?.truncated && (
             <p className={`${PANEL_NOTICE_CLASS} ${FILE_LIST_TRUNCATED_CLASS}`}>
-              More root items.
+              More files.
             </p>
           )}
           {searchActive && search.truncated && (
@@ -1034,7 +1034,7 @@ export function FilesPanel({
         <div className={FILE_PREVIEW_CLASS}>
           {previewLoading && selectedPath ? (
             <div className={PANEL_LOADING_CLASS} role="status" aria-live="polite">
-              <LoadingMark label="Loading file" />
+              <LoadingMark label="Loading" />
               <span>Loading {workspacePathName(selectedPath)}…</span>
             </div>
           ) : previewError && selectedPath ? (
@@ -1073,13 +1073,13 @@ export function FilesPanel({
                   <div
                     className={`${FILE_PREVIEW_CLASS}-view-toggle`}
                     role="group"
-                    aria-label="Markdown view"
+                    aria-label="Markdown"
                   >
                     <button
                       type="button"
                       aria-pressed={renderedMarkdownPreview}
                       disabled={markdownPreviewBlockedReason !== null}
-                      title={markdownPreviewBlockedReason ?? "Render Markdown"}
+                      title={markdownPreviewBlockedReason ?? "Preview"}
                       onClick={() => setPreviewViewState({
                         identity: previewViewIdentity,
                         view: "preview",
@@ -1115,7 +1115,7 @@ export function FilesPanel({
                 )}
                 {onOpenFile && (
                   <IconButton
-                    label="Open in editor"
+                    label="Open file"
                     onClick={() => onOpenFile(preview.path)}
                   >
                     <ExternalLink size={14} />

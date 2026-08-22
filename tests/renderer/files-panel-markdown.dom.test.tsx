@@ -52,7 +52,7 @@ describe("FilesPanel Markdown preview", () => {
     );
 
     const failure = await screen.findByRole("alert");
-    expect(failure).toHaveTextContent("Markdown preview failed");
+    expect(failure).toHaveTextContent("Preview failed");
     fireEvent.click(screen.getByRole("button", { name: "Source" }));
     expect(onShowSource).toHaveBeenCalledOnce();
 
@@ -130,7 +130,7 @@ describe("FilesPanel Markdown preview", () => {
       />,
     );
 
-    const viewToggle = screen.getByRole("group", { name: "Markdown view" });
+    const viewToggle = screen.getByRole("group", { name: "Markdown" });
     expect(within(viewToggle).getByRole("button", { name: "Preview" }))
       .toHaveAttribute("aria-pressed", "true");
 

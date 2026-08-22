@@ -238,7 +238,7 @@ describe("FilesPanel root refresh", () => {
       .toBeInTheDocument();
   });
 
-  it("preserves a query edited while an external selection is resolving", async () => {
+  it("preserves a query edited while a fallback selection is resolving", async () => {
     const onLoadEntries = vi.fn(async ({
       directory = "",
       query,
@@ -267,9 +267,21 @@ describe("FilesPanel root refresh", () => {
     beginWorkspaceFileOpen(
       FILES_PROJECT.projectId,
       undefined,
-      "src/components/Button.tsx",
+      "src/components/Button.tsx:12",
     );
     fireEvent.change(search, { target: { value: "readme" } });
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="src/components/Button.tsx:12"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    expect(await screen.findByRole("treeitem", { name: "README.md" }))
+      .toBeInTheDocument();
     view.rerender(
       <FilesPanel
         {...FILES_PROJECT}
@@ -281,9 +293,7 @@ describe("FilesPanel root refresh", () => {
       />,
     );
 
-    expect(await screen.findByRole("treeitem", { name: "README.md" }))
-      .toBeInTheDocument();
-    expect(search).toHaveValue("readme");
+    await waitFor(() => expect(search).toHaveValue("readme"));
     expect(screen.getByRole("tree", { name: "Search results" }))
       .toBeInTheDocument();
   });
@@ -317,7 +327,7 @@ describe("FilesPanel root refresh", () => {
       .toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("treeitem", { name: "components" }))
       .toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("More root items.")).toBeInTheDocument();
+    expect(screen.getByText("More files.")).toBeInTheDocument();
     expect(screen.getByText("More in components."))
       .toBeInTheDocument();
 

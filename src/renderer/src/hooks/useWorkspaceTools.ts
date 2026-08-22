@@ -85,7 +85,12 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
   ): void => {
     const projectId = options.project?.id;
     if (!projectId) return;
-    beginWorkspaceFileOpen(projectId, options.conversation?.id, path);
+    beginWorkspaceFileOpen(
+      projectId,
+      options.conversation?.id,
+      path,
+      literalPath,
+    );
     void import("./workspace-tools/openWorkspaceEntry").then(
       ({ openWorkspaceFile }) => openWorkspaceFile([
         path,

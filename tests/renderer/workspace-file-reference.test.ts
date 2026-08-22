@@ -88,11 +88,30 @@ describe("workspace file references", () => {
       "project-a",
       "conversation-a",
       "src/Other.tsx",
-    )).toBe(false);
+    )).toBeUndefined();
     expect(consumeWorkspaceFileOpenEdit(
       "project-a",
       "conversation-a",
       "src/Button.tsx",
+    )).toBe(true);
+  });
+
+  it("retains search edits through fallback path resolution", () => {
+    beginWorkspaceFileOpen(
+      "fallback-project",
+      undefined,
+      "src/App.ts:42",
+    );
+    markWorkspaceFileSearchEdit("fallback-project");
+    expect(consumeWorkspaceFileOpenEdit(
+      "fallback-project",
+      undefined,
+      "src/App.ts:42",
+    )).toBe(true);
+    expect(consumeWorkspaceFileOpenEdit(
+      "fallback-project",
+      undefined,
+      "src/App.ts",
     )).toBe(true);
   });
 });

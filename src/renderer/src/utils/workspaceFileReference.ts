@@ -1,16 +1,23 @@
 const sourceLocationSuffix = /:([1-9]\d{0,8})(?::([1-9]\d{0,8}))?(?:-([1-9]\d{0,8})(?::([1-9]\d{0,8}))?)?$/u;
 const sourceLocationFragment = /^#L([1-9]\d{0,8})(?:C([1-9]\d{0,8}))?(?:-L?([1-9]\d{0,8})(?:C([1-9]\d{0,8}))?)?$/iu;
 
-const workspaceFileSearchEdits = new Map<string, [number, string, number]>();
+type WorkspaceFileSearchEdit = [
+  editEpoch: number,
+  requestedPath: string,
+  requestEpoch: number,
+  resolvedPath: string,
+];
+
+const workspaceFileSearchEdits = new Map<string, WorkspaceFileSearchEdit>();
 
 function workspaceFileSearchEdit(
   projectId: string,
   conversationId?: string,
-): [number, string, number] {
+): WorkspaceFileSearchEdit {
   const key = `${projectId}\0${conversationId ?? ""}`;
   let state = workspaceFileSearchEdits.get(key);
   if (!state) {
-    state = [0, "", 0];
+    state = [0, "", 0, ""];
     workspaceFileSearchEdits.set(key, state);
   }
   return state;
@@ -27,20 +34,25 @@ export function beginWorkspaceFileOpen(
   projectId: string,
   conversationId: string | undefined,
   path: string,
+  literalPath?: boolean,
 ): void {
   const state = workspaceFileSearchEdit(projectId, conversationId);
   state[1] = path;
   state[2] = state[0];
+  state[3] = literalPath ? path : workspaceFileReferenceFallback(path) ?? path;
 }
 
+// `undefined` is unrelated, `true` preserves the current query, and `false`
+// lets the resolved selection use the normal completed-search disclosure rule.
 export function consumeWorkspaceFileOpenEdit(
   projectId: string,
   conversationId: string | undefined,
   path: string | null,
-): boolean {
+): boolean | undefined {
   const state = workspaceFileSearchEdit(projectId, conversationId);
-  if (state[1] !== path) return false;
-  state[1] = "";
+  if (state[1] !== path && state[3] !== path) return;
+  if (state[3] !== path) return true;
+  state[1] = state[3] = "";
   return state[0] !== state[2];
 }
 

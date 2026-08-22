@@ -327,6 +327,87 @@ describe("GitHub pre-merge confidence", () => {
     });
   });
 
+  it("withholds green when the selected GitHub repository changes", async () => {
+    const { root, head } = await repository();
+    const pullRequest = {
+      number: 42,
+      url: "https://github.com/openai/codex/pull/42",
+      state: "OPEN",
+      isDraft: false,
+      headRefName: "feature/confidence",
+      headRefOid: head,
+      baseRefName: "main",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: "APPROVED",
+      updatedAt: "2026-08-22T15:00:00Z",
+      changedFiles: 1,
+      files: [{ path: "src/server/git/github-pre-merge.ts", additions: 1, deletions: 0 }],
+      statusCheckRollup: [
+        { name: "Linux x64", conclusion: "SUCCESS" },
+        { name: "Windows x64", conclusion: "SUCCESS" },
+        { name: "macOS arm64", conclusion: "SUCCESS" },
+      ],
+    };
+    const associated = [{
+      number: 42,
+      state: "open",
+      head: {
+        ref: "feature/confidence",
+        sha: head,
+        repo: { full_name: "openai/codex" },
+      },
+      base: {
+        ref: "main",
+        repo: {
+          full_name: "openai/codex",
+          html_url: "https://github.com/openai/codex",
+        },
+      },
+    }];
+    let pullRequestViews = 0;
+    const runCli = vi.fn<typeof runRestrictedCli>(async (_executable, args) => {
+      if (args[0] === "api" && args[1] === "--method") {
+        return { stdout: JSON.stringify(associated), stderr: "" };
+      }
+      if (args[0] === "pr") {
+        pullRequestViews += 1;
+        if (pullRequestViews === 2) {
+          await execFileAsync("git", [
+            "remote", "set-url", "origin", "https://github.com/other/codex.git",
+          ], { cwd: root });
+        }
+        return { stdout: JSON.stringify(pullRequest), stderr: "" };
+      }
+      return {
+        stdout: JSON.stringify({
+          data: { repository: { pullRequest: {
+            number: 42,
+            headRefOid: head,
+            updatedAt: pullRequest.updatedAt,
+            reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } },
+          } } },
+        }),
+        stderr: "",
+      };
+    });
+
+    const confidence = await inspectGitHubPreMergeConfidence(root, {}, {
+      environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
+      executableCandidates: async () => ["/fake/gh"],
+      runCli,
+    });
+
+    expect(confidence).toMatchObject({
+      identity: { state: "changed" },
+      mergeReadiness: {
+        state: "blocked",
+        blockers: expect.arrayContaining([
+          "The local and GitHub heads are not an exact stable match.",
+        ]),
+      },
+    });
+  });
+
   it("keeps an associated open PR discoverable when its remote head moved", () => {
     const discovery = gitHubPreMergeTestSupport.parseAssociatedPullRequests(
       JSON.stringify([{
@@ -430,6 +511,7 @@ describe("GitHub pre-merge confidence", () => {
         number: 9,
         url: "https://github.com/openai/codex/pull/9",
         state: "OPEN",
+        isDraft: false,
         headRefName: "feature/confidence",
         headRefOid: "c".repeat(40),
         updatedAt: "2026-08-22T15:00:00Z",
@@ -454,6 +536,7 @@ describe("GitHub pre-merge confidence", () => {
       number: 9,
       url: "https://github.com/openai/codex/pull/9",
       state: "OPEN",
+      isDraft: false,
       headRefName: "feature/confidence",
       headRefOid: "c".repeat(40),
       updatedAt: "2026-08-22T15:00:00Z",
@@ -491,6 +574,7 @@ describe("GitHub pre-merge confidence", () => {
       number: 9,
       url: "https://github.com/openai/codex/pull/9",
       state: "OPEN",
+      isDraft: false,
       headRefName: "feature/confidence",
       headRefOid: "c".repeat(40),
       updatedAt: "2026-08-22T15:00:00Z",
@@ -511,6 +595,27 @@ describe("GitHub pre-merge confidence", () => {
     expect(parse(0, [file])?.filesTruncated).toBe(true);
     expect(parse(2, [file, file])?.filesTruncated).toBe(true);
     expect(parse(1, [file])?.filesTruncated).toBe(false);
+  });
+
+  it("rejects malformed draft evidence instead of coercing it to non-draft", () => {
+    const details = gitHubPreMergeTestSupport.parsePullRequestList(
+      JSON.stringify([{
+        number: 9,
+        url: "https://github.com/openai/codex/pull/9",
+        state: "OPEN",
+        isDraft: "false",
+        headRefName: "feature/confidence",
+        headRefOid: "c".repeat(40),
+        updatedAt: "2026-08-22T15:00:00Z",
+        changedFiles: 0,
+        files: [],
+        statusCheckRollup: [],
+      }]),
+      "https://github.com/openai/codex",
+      "feature/confidence",
+    );
+
+    expect(details).toBeNull();
   });
 
   it("treats skipped and missing platform checks as visibly incomplete", () => {

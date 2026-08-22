@@ -227,6 +227,7 @@ function parsePullRequest(
     || !headBranch
     || !/^[0-9a-f]{40,64}$/u.test(head)
     || !Number.isFinite(Date.parse(updatedAt))
+    || typeof value.isDraft !== "boolean"
   ) {
     return null;
   }
@@ -882,12 +883,20 @@ export async function inspectGitHubPreMergeConfidence(
   } catch (error) {
     reviewEvidenceReason ??= githubUnavailableReason(error);
   }
-  const [finalStatus, finalHead] = await Promise.all([
+  const [finalStatus, finalHead, finalRouting] = await Promise.all([
     getRepositoryStatus(repositoryPath, { signal: options.signal }),
     currentHead(repositoryPath, options.signal),
+    inspectGitRemoteRouting(repositoryPath, initialStatus.branch, {
+      signal: options.signal,
+    }),
   ]);
+  const finalSourceRepositorySlug = finalRouting.target?.forge === "github"
+    ? githubRepositorySlug(finalRouting.target.baseUrl)
+    : null;
   const localChanged = initialHead !== finalHead
-    || initialStatus.branch !== finalStatus.branch;
+    || initialStatus.branch !== finalStatus.branch
+    || finalSourceRepositorySlug?.toLocaleLowerCase("en-US")
+      !== sourceRepositorySlug.toLocaleLowerCase("en-US");
   const remoteChanged = reviewEvidence !== null
     && (reviewEvidence.head !== details.head
       || reviewEvidence.updatedAt !== details.updatedAt);
@@ -900,7 +909,7 @@ export async function inspectGitHubPreMergeConfidence(
   const identityDetail = identityState === "exact"
     ? `Local ${finalHead?.slice(0, 8)} exactly matches GitHub PR #${details.number}.`
     : identityState === "changed"
-      ? "The local head or GitHub evidence changed while loading. Refresh before relying on any green state."
+      ? "The local identity, selected remote, or GitHub evidence changed while loading. Refresh before relying on any green state."
       : `Local ${finalHead?.slice(0, 8) ?? "head unavailable"} does not match GitHub ${details.head.slice(0, 8)}.`;
   const checks = details.checks;
   const platforms = platformCoverage(checks);

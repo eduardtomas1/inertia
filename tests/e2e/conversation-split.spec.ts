@@ -6,6 +6,7 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+import { expectDocumentStartPrivacyGuard } from "./support/agent-browser-security";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
@@ -595,6 +596,27 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     },
     primaryConversationId,
   )).resolves.toMatchObject({ ok: true });
+  await expect.poll(() => app.electronApp.evaluate(
+    async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find(
+        (candidate) => candidate.getURL() === url,
+      );
+      if (!contents) return null;
+      return {
+        attached: contents.debugger.isAttached(),
+        invoked: await contents.executeJavaScript(
+          "window.__delayedPickerInvoked === true",
+        ),
+        selectedFiles: await contents.executeJavaScript(
+          "document.querySelector('input[type=file]')?.files?.length ?? -1",
+        ),
+      };
+    },
+    typeDestinationUrl,
+  )).toEqual({ attached: true, invoked: true, selectedFiles: 0 });
+
+  const privacyUrl = `${app.previewUrl}agent-browser-privacy-start`;
+  await expectDocumentStartPrivacyGuard(app, primaryConversationId, privacyUrl);
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
   await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
   await testInfo.attach("inertia-browser-pages", {

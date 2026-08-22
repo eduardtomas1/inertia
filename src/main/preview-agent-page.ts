@@ -1,8 +1,11 @@
 import type { WebContents } from "electron";
 
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
+import { installPreviewAgentPrivacyGuard } from "../shared/preview-agent-privacy-guard.js";
 
-const AGENT_BROWSER_WORLD_ID = 1001;
+// Electron's context-isolated preload world. This is the only world that owns
+// credential identity; the untrusted page cannot read or mutate its state.
+const AGENT_BROWSER_WORLD_ID = 999;
 const MAX_SEMANTIC_ELEMENTS = 200;
 const MAX_PAGE_TEXT_CHARS = 12_000;
 const MAX_REMEMBERED_PASSWORD_VALUES = 32;
@@ -265,64 +268,7 @@ export async function semanticPageSnapshot(
 }
 
 export async function installAgentPagePrivacyGuard(contents: WebContents): Promise<void> {
-  await execute(contents, `(() => {
-    const state = globalThis.__inertiaAgentBrowser ??= {
-      refs: new Map(), nodes: new WeakMap(), passwordNodes: new WeakSet(),
-      passwordValues: new Set(), next: 1,
-    };
-    if (state.privacyGuardInstalled) return;
-    const normalize = (value) => String(value ?? "").replace(/\\s+/gu, " ").trim();
-    const remember = (value) => {
-      const normalized = normalize(value);
-      if (!normalized) return;
-      state.passwordValues.delete(normalized);
-      state.passwordValues.add(normalized);
-      while (state.passwordValues.size > ${MAX_REMEMBERED_PASSWORD_VALUES}) {
-        state.passwordValues.delete(state.passwordValues.values().next().value);
-      }
-    };
-    const inspect = (input) => {
-      const value = normalize(input.value);
-      if (String(input.type || "").toLowerCase() === "password"
-        || state.passwordNodes.has(input)
-        || (value && state.passwordValues.has(value))) {
-        state.passwordNodes.add(input);
-        remember(value);
-      }
-    };
-    const inspectTree = (node) => {
-      if (node?.nodeType !== 1) return;
-      if (node.tagName === "INPUT") inspect(node);
-      for (const input of node.querySelectorAll?.("input") || []) inspect(input);
-    };
-    for (const input of document.querySelectorAll?.("input") || []) inspect(input);
-    document.addEventListener("input", (event) => {
-      for (const node of event.composedPath?.() || [event.target]) {
-        if (node?.tagName === "INPUT") inspect(node);
-      }
-    }, true);
-    document.addEventListener("click", (event) => {
-      if (!state.agentInputActive) return;
-      const path = event.composedPath?.() || [event.target];
-      const fileInput = path.some((node) => node?.tagName === "INPUT"
-        && String(node.type || "").toLowerCase() === "file");
-      if (!fileInput) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }, true);
-    const observer = new MutationObserver((records) => {
-      for (const record of records) {
-        if (record.type === "attributes") inspectTree(record.target);
-        for (const node of record.removedNodes || []) inspectTree(node);
-        for (const node of record.addedNodes || []) inspectTree(node);
-      }
-    });
-    observer.observe(document.documentElement, {
-      attributes: true, attributeFilter: ["type"], childList: true, subtree: true,
-    });
-    state.privacyGuardInstalled = true;
-    state.privacyObserver = observer;
-  })()`);
+  await execute(contents, `(${installPreviewAgentPrivacyGuard.toString()})()`);
 }
 
 export async function agentPageHasSensitiveEvidence(contents: WebContents): Promise<boolean> {

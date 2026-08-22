@@ -124,6 +124,22 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-privacy-start") {
+      const secret = "document-start-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><html><head><title>Privacy preload probe</title>"
+        + "<script>const input=document.createElement('input');"
+        + "input.type='password';document.documentElement.append(input);"
+        + `input.value=${JSON.stringify(secret)};input.type='text';input.remove();`
+        + `document.title=${JSON.stringify(secret)}</script></head>`
+        + `<body>${secret}</body></html>`,
+      );
+      return;
+    }
     if (request.url === "/agent-browser-destination") {
       setTimeout(() => {
         response.writeHead(200, {
@@ -170,8 +186,11 @@ async function createPreviewServer(): Promise<{
           + "<label>Private upload <input type='file' aria-label='Private upload'></label>"
           + "<button type='button'>Choose through page handler</button>"
           + "<script>document.querySelector('button').addEventListener('click',()=>{"
-          + "const input=document.querySelector('input[type=file]');"
-          + "if(typeof input.showPicker==='function')input.showPicker();else input.click()})</script>",
+          + "setTimeout(()=>{const input=document.querySelector('input[type=file]');"
+          + "window.__delayedPickerInvoked=true;"
+          + "try{if(typeof input.showPicker==='function')input.showPicker();else input.click()}"
+          + "catch(error){window.__delayedPickerRejected=String(error)}"
+          + "},600)})</script>",
         );
       }, 450);
       return;

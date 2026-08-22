@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import {
   WebContentsView,
@@ -28,8 +29,9 @@ import {
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
-  beginAgentFileChooserBlock, endAgentFileChooserBlock, settleAgentPageInput,
+  ensureAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageInput,
 } from "./preview-agent-input.js";
+import { boundedAgentScreenshot } from "./preview-agent-screenshot.js";
 type PreviewOwner = "primary" | "secondary";
 
 interface PreviewTab {
@@ -132,6 +134,12 @@ function failure(
   return { ok: false, code, message };
 }
 
+class AgentBrowserRefusal extends Error {
+  constructor(readonly result: AgentBrowserResult) {
+    super(result.ok ? "The Browser action was refused." : result.message);
+  }
+}
+
 function changedGeometry(): AgentBrowserResult {
   return failure(
     "not-found",
@@ -163,6 +171,7 @@ export class PreviewBroker {
     contextId: string;
     bounds: Rectangle;
   }>();
+  readonly #captureLocked = new WeakSet<PreviewTab["view"]["webContents"]>();
 
   constructor(private readonly options: PreviewBrokerOptions) {}
 
@@ -669,6 +678,10 @@ export class PreviewBroker {
           devTools: false,
           disableDialogs: true,
           navigateOnDragDrop: false,
+          preload: fileURLToPath(new URL(
+            "../preload/preview-agent-privacy.cjs",
+            import.meta.url,
+          )),
         },
       }),
     };
@@ -679,6 +692,10 @@ export class PreviewBroker {
     contents.on("will-redirect", (event, url) => this.#guardNavigation(event, url));
     const ownedKeyUps = new Set<string>();
     contents.on("before-input-event", (event, input) => {
+      if (this.#captureLocked.has(contents)) {
+        event.preventDefault();
+        return;
+      }
       const shortcutKey = previewAppShortcutKey(input);
       const key = input.key.toLowerCase();
       const ownsKeyUp = input.type === "keyUp" && ownedKeyUps.delete(key);
@@ -692,12 +709,14 @@ export class PreviewBroker {
       if (!target || target.isDestroyed()) return;
       target.sendInputEvent(forwardedKeyboardInput(input));
     });
+    contents.on("before-mouse-event", (event) => {
+      if (this.#captureLocked.has(contents)) event.preventDefault();
+    });
     hardenDesktopSession(contents.session);
     const publish = () => this.#publish(ownerId, slot.contextId);
     contents.on("did-start-loading", publish);
     contents.on("did-stop-loading", publish);
     contents.on("did-navigate", publish);
-    contents.on("dom-ready", () => { void installAgentPagePrivacyGuard(contents).catch(() => undefined); });
     contents.on("did-navigate-in-page", publish);
     contents.on("page-title-updated", publish);
     slot.tabs.set(tab.id, tab);
@@ -799,19 +818,34 @@ export class PreviewBroker {
     const contents = tab.view.webContents;
     if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
     await this.#prepareAgentPage(contents, signal);
-    if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
-      return failure("invalid", "Screenshots are unavailable until the password-bearing document navigates away.");
+    this.#captureLocked.add(contents);
+    let image: NativeImage;
+    try {
+      await this.#rendererOperation(contents, () => setAgentPageFrozen(contents, true), { signal });
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
+        return failure("invalid", "Screenshots are unavailable until the password-bearing document navigates away.");
+      }
+      image = await this.#rendererOperation(contents, () => contents.capturePage(), { signal });
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
+        return failure("invalid", "Screenshots are unavailable until the password-bearing document navigates away.");
+      }
+    } finally {
+      try {
+        if (!contents.isDestroyed()) {
+          await this.#rendererOperation(
+            contents,
+            () => setAgentPageFrozen(contents, false),
+          );
+        }
+      } finally {
+        this.#captureLocked.delete(contents);
+      }
     }
-    let image: NativeImage = await this.#rendererOperation(
-      contents,
-      () => contents.capturePage(),
-      { signal },
-    );
     stopForAbort(signal);
     if (slot.tabs.get(tabId) !== tab || contents.isDestroyed()) {
       return failure("not-found", "The captured Browser tab was closed before its screenshot completed.");
     }
-    image = this.#boundedImage(image);
+    image = boundedAgentScreenshot(image);
     const png = image.toPNG();
     if (png.byteLength === 0) {
       return failure("unavailable", "The active Browser page had no drawable screenshot.");
@@ -831,27 +865,6 @@ export class PreviewBroker {
       }),
       { mimeType: "image/png", data: png.toString("base64") },
     );
-  }
-
-  #boundedImage(source: NativeImage): NativeImage {
-    let image = source;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const size = image.getSize();
-      const scale = Math.min(1, 1_600 / size.width, 1_000 / size.height);
-      if (scale < 1) {
-        image = image.resize({
-          width: Math.max(1, Math.floor(size.width * scale)),
-          height: Math.max(1, Math.floor(size.height * scale)),
-          quality: "good",
-        });
-      }
-      if (image.toPNG().byteLength <= MAX_AGENT_BROWSER_SCREENSHOT_BYTES) break;
-      image = image.resize({
-        width: Math.max(1, Math.floor(image.getSize().width * 0.72)),
-        quality: "good",
-      });
-    }
-    return image;
   }
 
   async #agentNavigate(
@@ -940,11 +953,38 @@ export class PreviewBroker {
     if (revalidated.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     stopForAbort(signal);
-    await this.#sendInputAndWait(contents, () => {
-      contents.sendInputEvent({ type: "mouseMove", x, y });
-      contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-      contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
-    }, signal);
+    try {
+      await this.#sendInputAndWait(contents, async () => {
+        const finalTarget = await this.#rendererOperation(
+          contents,
+          () => locateAgentPageRef(contents, ref),
+          { signal },
+        );
+        if (slot.boundsGeneration !== boundsGeneration) {
+          throw new AgentBrowserRefusal(changedGeometry());
+        }
+        x = finalTarget.x;
+        y = finalTarget.y;
+        if (!finalTarget.found || x === undefined || y === undefined) {
+          throw new AgentBrowserRefusal(failure(
+            "not-found",
+            "That page element changed before the click. Inspect the page again for current refs.",
+          ));
+        }
+        if (finalTarget.blocked) throw new AgentBrowserRefusal(failure(
+          "invalid", "That page element cannot be controlled by the Browser agent.",
+        ));
+        if (finalTarget.disabled) throw new AgentBrowserRefusal(failure(
+          "invalid", "That page element is disabled.",
+        ));
+        contents.sendInputEvent({ type: "mouseMove", x, y });
+        contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+        contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+      }, signal);
+    } catch (error) {
+      if (error instanceof AgentBrowserRefusal) return error.result;
+      throw error;
+    }
     this.#record(ownerId, slot, "click", `Agent clicked ${located.label || ref}`, { x, y });
     return this.#success(slot, this.#agentStateText(slot, { clicked: ref }));
   }
@@ -998,7 +1038,39 @@ export class PreviewBroker {
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     if (!revalidated.editable) return failure("invalid", "That page element does not accept text input.");
     stopForAbort(signal);
-    await this.#sendInputAndWait(contents, () => contents.insertText(text), signal);
+    try {
+      await this.#sendInputAndWait(contents, async () => {
+        const finalTarget = await this.#rendererOperation(
+          contents,
+          () => locateAgentPageRef(contents, ref, true, replace),
+          { signal },
+        );
+        if (slot.boundsGeneration !== boundsGeneration) {
+          throw new AgentBrowserRefusal(changedGeometry());
+        }
+        x = finalTarget.x;
+        y = finalTarget.y;
+        if (!finalTarget.found || x === undefined || y === undefined) {
+          throw new AgentBrowserRefusal(failure(
+            "not-found",
+            "That page element lost focus before typing. Inspect the page again for current refs.",
+          ));
+        }
+        if (finalTarget.blocked) throw new AgentBrowserRefusal(failure(
+          "invalid", "That page element cannot be controlled by the Browser agent.",
+        ));
+        if (finalTarget.disabled) throw new AgentBrowserRefusal(failure(
+          "invalid", "That page element is disabled.",
+        ));
+        if (!finalTarget.editable) throw new AgentBrowserRefusal(failure(
+          "invalid", "That page element does not accept text input.",
+        ));
+        await contents.insertText(text);
+      }, signal);
+    } catch (error) {
+      if (error instanceof AgentBrowserRefusal) return error.result;
+      throw error;
+    }
     stopForAbort(signal);
     this.#record(ownerId, slot, "type", `Agent typed in ${located.label || ref}`, { x, y });
     return this.#success(slot, JSON.stringify({ typed: ref, characters: text.length }));
@@ -1078,6 +1150,11 @@ export class PreviewBroker {
   ): Promise<void> {
     await this.#rendererOperation(
       contents,
+      () => ensureAgentFileChooserBlock(contents),
+      { signal },
+    );
+    await this.#rendererOperation(
+      contents,
       () => installAgentPagePrivacyGuard(contents),
       { signal },
     );
@@ -1138,27 +1215,26 @@ export class PreviewBroker {
     stopForAbort(signal);
     await this.#rendererOperation(
       contents,
-      () => beginAgentFileChooserBlock(contents),
+      () => ensureAgentFileChooserBlock(contents),
+      { signal },
+    );
+    await this.#rendererOperation(
+      contents,
+      () => setAgentPageInputGuard(contents, true),
       { signal },
     );
     try {
-      await this.#rendererOperation(
-        contents,
-        () => setAgentPageInputGuard(contents, true),
-        { signal },
-      );
-      try {
-        await settleAgentPageInput(contents, dispatch, signal);
-      } finally {
-        if (!contents.isDestroyed()) {
-          await this.#rendererOperation(
-            contents,
-            () => setAgentPageInputGuard(contents, false),
-          ).catch(() => undefined);
-        }
-      }
+      await settleAgentPageInput(contents, dispatch, signal);
     } finally {
-      endAgentFileChooserBlock(contents);
+      if (!contents.isDestroyed()) {
+        await this.#rendererOperation(
+          contents,
+          () => setAgentPageInputGuard(contents, false),
+        ).catch(() => undefined);
+      }
+      // Privileged file-chooser interception remains attached for the complete
+      // tab lifetime, including delayed callbacks after this action settles.
     }
   }
+
 }

@@ -9,7 +9,7 @@ function stopForAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("browser-action-cancelled");
 }
 
-export async function beginAgentFileChooserBlock(contents: WebContents): Promise<void> {
+export async function installAgentFileChooserBlock(contents: WebContents): Promise<void> {
   if (contents.debugger.isAttached()) {
     throw new Error("The Browser page is already attached to another debugger.");
   }
@@ -29,12 +29,27 @@ export async function beginAgentFileChooserBlock(contents: WebContents): Promise
   }
 }
 
-export function endAgentFileChooserBlock(contents: WebContents): void {
-  try {
-    if (contents.debugger.isAttached()) contents.debugger.detach();
-  } catch {
-    // The action has already settled; destroyed contents need no further cleanup.
+const fileChooserBlocks = new WeakMap<WebContents, Promise<void>>();
+
+export function ensureAgentFileChooserBlock(contents: WebContents): Promise<void> {
+  const existing = fileChooserBlocks.get(contents);
+  if (existing) return existing;
+  const ready = installAgentFileChooserBlock(contents);
+  fileChooserBlocks.set(contents, ready);
+  void ready.catch(() => undefined);
+  return ready;
+}
+
+export async function setAgentPageFrozen(
+  contents: WebContents,
+  frozen: boolean,
+): Promise<void> {
+  if (!contents.debugger.isAttached()) {
+    throw new Error("The Browser security debugger is unavailable.");
   }
+  await contents.debugger.sendCommand("Page.setWebLifecycleState", {
+    state: frozen ? "frozen" : "active",
+  });
 }
 
 export async function settleAgentPageInput(

@@ -31,7 +31,11 @@ export function PreMergeConfidenceLauncher({
   pullRequestDetail,
   run,
 }: PreMergeConfidenceLauncherProps): React.JSX.Element {
-  const [open, setOpen] = useState<"confidence" | "pull-request" | null>(null);
+  const [open, setOpen] = useState<
+    | { kind: "confidence" }
+    | { kind: "pull-request"; authorityRef: string }
+    | null
+  >(null);
   const confidenceEnabled = Boolean(authorityRef) && forge === "github";
   return <>
     <button
@@ -43,7 +47,9 @@ export function PreMergeConfidenceLauncher({
           ? "Exact-head confidence is currently available for GitHub repositories."
           : "Compare this local head with authoritative GitHub checks, reviews, and merge state."
       }
-      onClick={() => setOpen("confidence")}
+      onClick={() => {
+        if (authorityRef) setOpen({ kind: "confidence" });
+      }}
     >
       <GitPullRequest size={12} aria-hidden="true" /><span>Confidence</span>
     </button>
@@ -51,11 +57,13 @@ export function PreMergeConfidenceLauncher({
       type="button"
       disabled={!authorityRef || pullRequestDisabled}
       title={!authorityRef ? "Refresh this repository before changing it." : pullRequestDetail}
-      onClick={() => setOpen("pull-request")}
+      onClick={() => {
+        if (authorityRef) setOpen({ kind: "pull-request", authorityRef });
+      }}
     >
       <GitPullRequest size={12} aria-hidden="true" /><span>PR</span>
     </button>
-    {open === "confidence" && authorityRef && (
+    {open?.kind === "confidence" && authorityRef && (
       <PreMergeConfidenceDialog
         open
         projectId={projectId}
@@ -66,7 +74,7 @@ export function PreMergeConfidenceLauncher({
         onClose={() => setOpen(null)}
       />
     )}
-    {open === "pull-request" && authorityRef && (
+    {open?.kind === "pull-request" && (
       <PullRequestDialog
         open
         initialTitle={initialTitle}
@@ -74,7 +82,7 @@ export function PreMergeConfidenceLauncher({
         projectId={projectId}
         conversationId={conversationId}
         repositoryPath={repositoryPath}
-        authorityRef={authorityRef}
+        authorityRef={open.authorityRef}
         forge={forge}
         run={run}
         onClose={() => setOpen(null)}

@@ -1017,6 +1017,92 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("submits an open pull request draft only with its opening repository authority", async () => {
+    const initial = structuredClone(snapshot);
+    const nested = initial.repositories.find(
+      ({ repositoryPath }) => repositoryPath === "modules/alpha",
+    )!;
+    nested.upstream = "origin/feature/alpha";
+    nested.hasRemote = true;
+    nested.pullRequest = {
+      available: true,
+      remoteName: "origin",
+      forge: "github",
+      unavailableReason: null,
+    };
+    const openingAuthority = "33333333-3333-4333-8333-333333333333";
+    nested.authorityRef = openingAuthority;
+    const projectId = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.ok",
+      requestId: crypto.randomUUID(),
+    }));
+    const props = {
+      projectName: "Inertia",
+      projectId,
+      conversationId,
+      snapshot: initial,
+      summary: null,
+      onRefresh: vi.fn(),
+      run,
+      onLoadRepositoryDiff: vi.fn(async (
+        repositoryPath: string,
+        filePath?: string,
+      ) => ({
+        repositoryPath,
+        patch: "",
+        truncated: false as const,
+        files: filePath ? [changedFile(filePath)] : [],
+      })),
+      onOpenWorkspaceFile: vi.fn(),
+      onAsk: vi.fn(async () => undefined),
+      onRequestRevision: vi.fn(async () => undefined),
+      onRevert: vi.fn(async () => undefined),
+      onSetReviewState: vi.fn(async () => undefined),
+      onCreateNote: vi.fn(async () => undefined),
+      onUpdateNote: vi.fn(async () => undefined),
+      onDeleteNote: vi.fn(async () => undefined),
+      onAddTextToPrompt: vi.fn(),
+      onAddToPrompt: vi.fn(),
+    };
+    const view = render(<WorkspaceChangesPanel {...props} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Repository scope" }), {
+      target: { value: "modules/alpha" },
+    });
+    fireEvent.click(await within(await screen.findByLabelText(
+      "Actions for modules/alpha",
+    )).findByRole("button", { name: "PR" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Create GitHub pull request",
+    });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Title" }), {
+      target: { value: "Draft bound to opening authority" },
+    });
+
+    const refreshed = structuredClone(initial);
+    refreshed.repositories.find(
+      ({ repositoryPath }) => repositoryPath === "modules/alpha",
+    )!.authorityRef = "44444444-4444-4444-8444-444444444444";
+    view.rerender(<WorkspaceChangesPanel {...props} snapshot={refreshed} />);
+    fireEvent.click(within(dialog).getByRole("button", {
+      name: "Create pull request",
+    }));
+
+    await waitFor(() => expect(run).toHaveBeenCalledWith("git.pr.create", {
+      type: "git.pr.create",
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath: "modules/alpha",
+        authorityRef: openingAuthority,
+        title: "Draft bound to opening authority",
+        body: "",
+        draft: true,
+      },
+    }));
+  });
+
   it("closes edited pull request state when the conversation identity changes", async () => {
     const initial = structuredClone(snapshot);
     const nested = initial.repositories.find(

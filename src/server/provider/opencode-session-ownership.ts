@@ -322,7 +322,7 @@ export class OpenCodeSessionOwnership {
     if (scope !== "descendant") return { scope, active: false };
     const active = added || activeDescendantEvent(event, eventSessionId!);
     const eventKey = active ? activityEventKey(event) : undefined;
-    if (!eventKey) return { scope, active };
+    if (!eventKey) return { scope, active: false };
     if (this.activityEventKeys.has(eventKey)) return { scope, active: false };
     this.activityEventKeys.add(eventKey);
     if (this.activityEventKeys.size > MAX_ACTIVITY_EVENT_KEYS) {

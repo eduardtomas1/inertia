@@ -199,4 +199,26 @@ describe("OpenCode descendant session ownership", () => {
     expect(() => ownership.observe(created("child-overflow", "root-session")))
       .toThrow("bounded owned-session budget");
   });
+
+  it("fails closed when descendant activity cannot be canonicalized", () => {
+    const ownership = new OpenCodeSessionOwnership("root-session");
+    expect(ownership.observe(created("child-session", "root-session")))
+      .toEqual({ scope: "descendant", active: true });
+    const recursiveInput: Record<string, unknown> = {};
+    recursiveInput.self = recursiveInput;
+
+    expect(ownership.observe(event({
+      id: "uncanonicalizable-event",
+      type: "session.next.tool.called",
+      properties: {
+        sessionID: "child-session",
+        timestamp: Date.now(),
+        assistantMessageID: "child-assistant",
+        callID: "child-call",
+        tool: "read",
+        input: recursiveInput,
+        provider: { executed: false },
+      },
+    }))).toEqual({ scope: "descendant", active: false });
+  });
 });

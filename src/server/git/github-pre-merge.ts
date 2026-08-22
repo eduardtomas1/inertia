@@ -158,30 +158,32 @@ function affectedArea(path: string): string {
   return root ? root : "Repository root";
 }
 
-function checkState(value: UnknownRecord): GitPreMergeEvidenceState {
+function checkState(value: UnknownRecord): GitPreMergeEvidenceState | null {
   const status = text(value.status).toUpperCase();
-  const conclusion = text(value.conclusion || value.state).toUpperCase();
-  if (["QUEUED", "IN_PROGRESS", "PENDING", "EXPECTED", "WAITING", "REQUESTED"]
-    .includes(status || conclusion)) return "pending";
-  if (["SUCCESS", "SUCCESSFUL"].includes(conclusion)) return "passed";
-  if (["FAILURE", "FAILED", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"]
-    .includes(conclusion)) return "failed";
-  if (conclusion === "SKIPPED") return "skipped";
-  if (conclusion === "CANCELLED") return "cancelled";
-  if (conclusion === "NEUTRAL") return "neutral";
-  return status === "COMPLETED" ? "unknown" : "pending";
+  const conclusion = text(value.conclusion).toUpperCase();
+  const legacyState = text(value.state).toUpperCase();
+  if (status && !["COMPLETED", "IN_PROGRESS", "PENDING", "QUEUED", "REQUESTED", "WAITING"].includes(status)) return null;
+  if (status && status !== "COMPLETED") return conclusion ? null : "pending";
+  const lifecycle = status ? conclusion : legacyState;
+  if ((!status && conclusion) || !lifecycle) return null;
+  if (lifecycle === "SUCCESS") return "passed";
+  if (["ACTION_REQUIRED", "ERROR", "FAILURE", "STALE", "STARTUP_FAILURE", "TIMED_OUT"].includes(lifecycle)) return "failed";
+  if (lifecycle === "SKIPPED") return "skipped";
+  if (lifecycle === "CANCELLED") return "cancelled";
+  if (lifecycle === "NEUTRAL") return "neutral";
+  return !status && ["EXPECTED", "PENDING"].includes(lifecycle) ? "pending" : null;
 }
-
 function parseCheck(value: unknown, repositoryBaseUrl: string): GitPreMergeCheck | null {
   if (!record(value)) return null;
   const name = text(value.name || value.context).trim();
   if (!name) return null;
+  const state = checkState(value); if (!state) return null;
   return {
     name: boundedText(name, 240).value,
     workflow: text(value.workflowName).trim()
       ? boundedText(text(value.workflowName).trim(), 240).value
       : null,
-    state: checkState(value),
+    state,
     detailsUrl: safeGitHubUrl(
       value.detailsUrl || value.targetUrl,
       repositoryBaseUrl,
@@ -194,7 +196,6 @@ function parseCheck(value: unknown, repositoryBaseUrl: string): GitPreMergeCheck
       : null,
   };
 }
-
 function parseFile(value: unknown): GitPreMergeFile | null {
   if (!record(value)) return null;
   const path = safePath(value.path);

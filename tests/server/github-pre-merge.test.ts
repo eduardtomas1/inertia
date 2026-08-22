@@ -181,9 +181,9 @@ describe("GitHub pre-merge confidence", () => {
       changedFiles: 1,
       files: [{ path: "src/server/git/github-pre-merge.ts", additions: 1, deletions: 0 }],
       statusCheckRollup: [
-        { name: "Linux x64", conclusion: "SUCCESS" },
-        { name: "Windows x64", conclusion: "SUCCESS" },
-        { name: "macOS arm64", conclusion: "SUCCESS" },
+        { name: "Linux x64", status: "COMPLETED", conclusion: "SUCCESS" },
+        { name: "Windows x64", status: "COMPLETED", conclusion: "SUCCESS" },
+        { name: "macOS arm64", status: "COMPLETED", conclusion: "SUCCESS" },
       ],
     };
     const associated = [{
@@ -256,9 +256,9 @@ describe("GitHub pre-merge confidence", () => {
       body: "",
       files: [{ path: "src/server/git/github-pre-merge.ts", additions: 4, deletions: 1 }],
       statusCheckRollup: [
-        { name: "Linux x64", conclusion: "SUCCESS" },
-        { name: "Windows x64", conclusion: "SUCCESS" },
-        { name: "macOS arm64", conclusion: "SUCCESS" },
+        { name: "Linux x64", status: "COMPLETED", conclusion: "SUCCESS" },
+        { name: "Windows x64", status: "COMPLETED", conclusion: "SUCCESS" },
+        { name: "macOS arm64", status: "COMPLETED", conclusion: "SUCCESS" },
       ],
     };
     const associated = [{
@@ -459,9 +459,9 @@ describe("GitHub pre-merge confidence", () => {
       changedFiles: 1,
       files: [{ path: "src/server/git/github-pre-merge.ts", additions: 1, deletions: 0 }],
       statusCheckRollup: [
-        { name: "Linux x64", conclusion: "SUCCESS" },
-        { name: "Windows x64", conclusion: "SUCCESS" },
-        { name: "macOS arm64", conclusion: "SUCCESS" },
+        { name: "Linux x64", status: "COMPLETED", conclusion: "SUCCESS" },
+        { name: "Windows x64", status: "COMPLETED", conclusion: "SUCCESS" },
+        { name: "macOS arm64", status: "COMPLETED", conclusion: "SUCCESS" },
       ],
     };
     const associated = [{
@@ -727,6 +727,34 @@ describe("GitHub pre-merge confidence", () => {
 
     expect(details?.checks).toHaveLength(100);
     expect(details?.checksTruncated).toBe(true);
+  });
+
+  it("rejects successful checks with unknown lifecycle states", () => {
+    const details = gitHubPreMergeTestSupport.parsePullRequestList(
+      JSON.stringify([{
+        number: 9,
+        url: "https://github.com/openai/codex/pull/9",
+        state: "OPEN",
+        isDraft: false,
+        reviewDecision: "",
+        headRefName: "feature/confidence",
+        headRefOid: "c".repeat(40),
+        updatedAt: "2026-08-22T15:00:00Z",
+        changedFiles: 0,
+        files: [],
+        statusCheckRollup: [
+          { name: "malformed", status: "BOGUS", conclusion: "SUCCESS" },
+          { context: "legacy", state: "SUCCESS" },
+        ],
+      }]),
+      "https://github.com/openai/codex",
+      "feature/confidence",
+    );
+
+    expect(details).toMatchObject({
+      checks: [{ name: "legacy", state: "passed" }],
+      checksTruncated: true,
+    });
   });
 
   it("rejects missing file collections and marks rejected file rows incomplete", () => {

@@ -14,6 +14,7 @@ import {
   RestrictedCliError,
   type runRestrictedCli,
 } from "../../src/server/restricted-cli-runner";
+import { GitError } from "../../src/server/git/types";
 
 const execFileAsync = promisify(execFile);
 const directories: string[] = [];
@@ -354,6 +355,47 @@ describe("GitHub pre-merge confidence", () => {
     await expect(inspectGitHubPreMergeConfidence(root, {}, {
       environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
       executableCandidates: async () => ["/fake/gh"],
+      runCli,
+    })).rejects.toBe(cleanupFailure);
+  });
+
+  it("propagates an unconfirmed initial HEAD inspection cleanup", async () => {
+    const { root } = await repository();
+    const cleanupFailure = new GitError(
+      "operation-failed",
+      "Git stopped responding, and its process tree could not be confirmed stopped.",
+    );
+
+    await expect(inspectGitHubPreMergeConfidence(root, {}, {
+      runGitInspection: vi.fn(async () => { throw cleanupFailure; }),
+    })).rejects.toBe(cleanupFailure);
+  });
+
+  it("propagates an unconfirmed final HEAD inspection cleanup", async () => {
+    const { root, head } = await repository();
+    const cleanupFailure = new GitError(
+      "operation-failed",
+      "Git stopped responding, and its process tree could not be confirmed stopped.",
+    );
+    let headInspections = 0;
+    const runGitInspection = vi.fn(async () => {
+      headInspections += 1;
+      if (headInspections > 1) throw cleanupFailure;
+      return {
+        stdout: Buffer.from(`${head}\n`, "utf8"),
+        stderr: Buffer.alloc(0),
+        truncated: false,
+      };
+    });
+    const runCli = vi.fn<typeof runRestrictedCli>(async () => ({
+      stdout: "[]",
+      stderr: "",
+    }));
+
+    await expect(inspectGitHubPreMergeConfidence(root, {}, {
+      environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
+      executableCandidates: async () => ["/fake/gh"],
+      runGitInspection,
       runCli,
     })).rejects.toBe(cleanupFailure);
   });

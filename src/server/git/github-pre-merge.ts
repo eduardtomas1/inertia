@@ -15,7 +15,7 @@ import {
   type GitHubPullRequestDependencies,
 } from "./github-pull-request";
 import { inspectGitRemoteRouting } from "./remote-routing";
-import { runGitInspection, settleGitInspections } from "./runner";
+import { isGitProcessTreeTerminationFailure, runGitInspection, settleGitInspections } from "./runner";
 import { getRepositoryStatus } from "./status";
 import { GitError, type GitRepositoryStatus } from "./types";
 
@@ -32,7 +32,7 @@ const REVIEW_DECISIONS = new Set(["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUI
 
 type UnknownRecord = Record<string, unknown>;
 
-interface GitHubPreMergeDependencies extends GitHubPullRequestDependencies { now?: () => Date; runCli?: typeof runRestrictedCli }
+interface GitHubPreMergeDependencies extends GitHubPullRequestDependencies { now?: () => Date; runCli?: typeof runRestrictedCli; runGitInspection?: typeof runGitInspection }
 
 interface PullRequestDetails {
   number: number;
@@ -505,9 +505,10 @@ function parseReviewThreads(
 async function currentHead(
   root: string,
   signal?: AbortSignal,
+  runner: typeof runGitInspection = runGitInspection,
 ): Promise<string | null> {
   try {
-    const result = await runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
+    const result = await runner(root, ["rev-parse", "--verify", "HEAD"], {
       signal,
       maxOutputBytes: 256,
       failureMessage: "Unable to inspect the current commit.",
@@ -518,6 +519,7 @@ async function currentHead(
     }
     return head;
   } catch (error) {
+    if (isGitProcessTreeTerminationFailure(error)) throw error;
     if (error instanceof GitError && error.code === "operation-failed") return null;
     throw error;
   }
@@ -695,7 +697,7 @@ export async function inspectGitHubPreMergeConfidence(
   const initialStatus = await getRepositoryStatus(repositoryPath, {
     signal: options.signal,
   });
-  const initialHead = await currentHead(repositoryPath, options.signal);
+  const initialHead = await currentHead(repositoryPath, options.signal, dependencies.runGitInspection);
   if (!initialStatus.branch || !initialHead) {
     return emptyConfidence(
       now(),
@@ -718,7 +720,7 @@ export async function inspectGitHubPreMergeConfidence(
   const sourceRepositorySlug = githubRepositorySlug(routing.target.baseUrl);
   const settleFinalGit = () => settleGitInspections(options.signal ?? new AbortController().signal,
     (signal) => getRepositoryStatus(repositoryPath, { signal }),
-    (signal) => currentHead(repositoryPath, signal),
+    (signal) => currentHead(repositoryPath, signal, dependencies.runGitInspection),
     (signal) => inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal }), options.recordTriggeringFailure);
   const runCli = dependencies.runCli ?? runRestrictedCli;
   let gh: Awaited<ReturnType<typeof resolveGitHubCli>>;

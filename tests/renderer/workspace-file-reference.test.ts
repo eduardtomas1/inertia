@@ -80,6 +80,7 @@ describe("workspace file references", () => {
       "project-a",
       "conversation-a",
       "src/App.tsx",
+      "src/App.tsx",
     )).toBe(false);
 
     beginWorkspaceFileOpen("project-a", "conversation-a", "src/Button.tsx");
@@ -88,10 +89,12 @@ describe("workspace file references", () => {
       "project-a",
       "conversation-a",
       "src/Other.tsx",
+      "src/Other.tsx",
     )).toBeUndefined();
     expect(consumeWorkspaceFileOpenEdit(
       "project-a",
       "conversation-a",
+      "src/Button.tsx",
       "src/Button.tsx",
     )).toBe(true);
   });
@@ -107,11 +110,29 @@ describe("workspace file references", () => {
       "fallback-project",
       undefined,
       "src/App.ts:42",
+      null,
     )).toBe(true);
     expect(consumeWorkspaceFileOpenEdit(
       "fallback-project",
       undefined,
       "src/App.ts",
+      "src/App.ts",
     )).toBe(true);
+  });
+
+  it("finalizes a successful raw path when its preview arrives", () => {
+    beginWorkspaceFileOpen("raw-project", undefined, "src/App.ts:42");
+    expect(consumeWorkspaceFileOpenEdit(
+      "raw-project",
+      undefined,
+      "src/App.ts:42",
+      null,
+    )).toBe(true);
+    expect(consumeWorkspaceFileOpenEdit(
+      "raw-project",
+      undefined,
+      "src/App.ts:42",
+      "src/App.ts:42",
+    )).toBe(false);
   });
 });

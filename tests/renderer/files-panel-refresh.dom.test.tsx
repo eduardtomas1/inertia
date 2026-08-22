@@ -37,6 +37,17 @@ function page(
   };
 }
 
+function preview(path: string) {
+  return {
+    path,
+    content: "export const ready = true;",
+    truncated: false,
+    language: "text",
+    contentDigest: "a".repeat(64),
+    modifiedAt: "2026-08-22T12:00:00.000Z",
+  };
+}
+
 describe("FilesPanel root refresh", () => {
   it("reveals an externally opened file through its lazy ancestor chain", async () => {
     const onLoadEntries = vi.fn(async ({
@@ -286,7 +297,7 @@ describe("FilesPanel root refresh", () => {
       <FilesPanel
         {...FILES_PROJECT}
         entries={ROOT_ENTRIES}
-        preview={null}
+        preview={preview("src/components/Button.tsx")}
         selectedPath="src/components/Button.tsx"
         onSelectFile={vi.fn()}
         onLoadEntries={onLoadEntries}
@@ -296,6 +307,66 @@ describe("FilesPanel root refresh", () => {
     await waitFor(() => expect(search).toHaveValue("readme"));
     expect(screen.getByRole("tree", { name: "Search results" }))
       .toBeInTheDocument();
+  });
+
+  it("discloses a successful raw path after its preview resolves", async () => {
+    const rawPath = "src/example.ts:42:7";
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+      query,
+    }: {
+      directory?: string;
+      query?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (query === "readme") {
+        return page("", [{ path: "README.md", kind: "file" }]);
+      }
+      if (directory === "src") {
+        return page(directory, [{ path: rawPath, kind: "file" }]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search files" });
+    fireEvent.change(search, { target: { value: "readme" } });
+    expect(await screen.findByRole("treeitem", { name: "README.md" }))
+      .toBeInTheDocument();
+
+    beginWorkspaceFileOpen(FILES_PROJECT.projectId, undefined, rawPath);
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath={rawPath}
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    expect(search).toHaveValue("readme");
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={preview(rawPath)}
+        selectedPath={rawPath}
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    await waitFor(() => expect(search).toHaveValue(""));
+    expect(await screen.findByRole("treeitem", { name: "example.ts:42:7" }))
+      .toHaveAttribute("aria-current", "true");
   });
 
   it("retains a selected chain across truncated root refreshes", async () => {

@@ -804,12 +804,19 @@ export function FilesPanel({
   };
 
   useEffect(() => {
-    if (previousSelectedPathRef.current === selectedPath) return;
-    if (consumeWorkspaceFileOpenEdit(
+    const openEdit = consumeWorkspaceFileOpenEdit(
       projectId,
       conversationId,
       selectedPath,
-    )) {
+      preview?.path ?? (previewError ? selectedPath : null),
+    );
+    if (
+      openEdit
+      || (
+        previousSelectedPathRef.current === selectedPath
+        && openEdit === undefined
+      )
+    ) {
       previousSelectedPathRef.current = selectedPath;
       return;
     }
@@ -821,6 +828,8 @@ export function FilesPanel({
   }, [
     conversationId,
     projectId,
+    preview?.path,
+    previewError,
     search.entries,
     searchActive,
     selectedPath,

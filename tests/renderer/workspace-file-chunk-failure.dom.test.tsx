@@ -168,6 +168,7 @@ describe("workspace file action chunk failures", () => {
       alpha.project.id,
       alpha.conversation.id,
       "src/App.java",
+      "src/App.java",
     )).toBe(true);
     await waitFor(() => {
       expect(activeError).toHaveBeenCalledWith(

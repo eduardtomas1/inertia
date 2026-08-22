@@ -43,15 +43,16 @@ export function beginWorkspaceFileOpen(
 }
 
 // `undefined` is unrelated, `true` preserves the current query, and `false`
-// lets the resolved selection use the normal completed-search disclosure rule.
+// lets the final selection use the normal completed-search disclosure rule.
 export function consumeWorkspaceFileOpenEdit(
   projectId: string,
   conversationId: string | undefined,
   path: string | null,
+  previewPath: string | null,
 ): boolean | undefined {
   const state = workspaceFileSearchEdit(projectId, conversationId);
   if (state[1] !== path && state[3] !== path) return;
-  if (state[3] !== path) return true;
+  if (previewPath !== path) return true;
   state[1] = state[3] = "";
   return state[0] !== state[2];
 }

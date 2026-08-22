@@ -41,6 +41,7 @@
     "benchmark:desktop:built": "node scripts/run-desktop-benchmark.mjs",
     "benchmark:websocket-compression": "node scripts/benchmark-websocket-compression.mjs",
     "benchmark:data-throughput": "vitest run --config vitest.benchmark.config.ts benchmarks/data-throughput.test.ts",
+    "benchmark:renderer-primitives": "vitest run --config vitest.benchmark.config.ts benchmarks/renderer-primitives.test.ts",
     "test:e2e": "npm run build && playwright test",
     "test:package-smoke": "node scripts/package-smoke.mjs",
     "icons:generate": "node scripts/generate-icons.mjs",

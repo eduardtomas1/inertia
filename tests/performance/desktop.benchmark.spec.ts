@@ -683,8 +683,10 @@ async function compatibilityHistorySample(page: Page) {
   const summary = recoveredHistory.locator("summary");
   await summary.press("Enter");
   await expect(recoveredHistory).toHaveJSProperty("open", true);
+  await expect.poll(
+    () => recoveredHistory.locator(".message").count(),
+  ).toBeGreaterThan(0);
   const expandedCount = await recoveredHistory.locator(".message").count();
-  expect(expandedCount).toBeGreaterThan(0);
   await summary.press("Enter");
   await expect(recoveredHistory).toHaveJSProperty("open", false);
   await expect(recoveredHistory.locator(".message")).toHaveCount(0);

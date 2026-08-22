@@ -23,7 +23,7 @@ export interface TurnStreamCoalescerOptions {
   maxBufferedChars?: number;
 }
 
-export const DEFAULT_FIRST_STREAM_FLUSH_MS = 24;
+export const DEFAULT_FIRST_STREAM_FLUSH_MS = 12;
 export const DEFAULT_STREAM_FLUSH_INTERVAL_MS = 96;
 export const DEFAULT_STREAM_FLUSH_CHAR_THRESHOLD = 1_024;
 

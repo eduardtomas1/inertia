@@ -13,6 +13,7 @@ Use Node 22 from `.nvmrc` and the reviewed dependency graph:
 npm ci
 npm run benchmark:platform
 npm run benchmark:desktop
+npm run benchmark:renderer-primitives
 ```
 
 `benchmark:platform` measures product filesystem traversal, nested Git status,
@@ -51,11 +52,18 @@ runners catch catastrophic regressions without pretending to be a lab.
 The platform report separately compares first-flush candidates of 12, 16, and
 24 ms across the 64, 80, and 96 ms sustained persistence/projection cadences
 with exact write, byte, CPU, memory, and ordering evidence. The selected
-baseline remains 24 ms first flush and 64 ms sustained cadence because that is
-the current evidence-backed configuration.
+baseline is 12 ms first flush and 64 ms sustained cadence because the desktop
+provider-to-paint measurements below confirmed the candidate's lower first
+paint latency without increasing sustained update count or WAL growth.
+
+`benchmark:renderer-primitives` compares the production renderer workspace
+ordering path with its replaced per-comparison locale setup. It warms both
+paths, records seven samples of 25 repeated 540-entry sorts, and asserts that
+both produce the same directory-first, natural, case-preserving order. It is a
+profiler-friendly engineering benchmark rather than an absolute timing gate.
 
 `npm run benchmark:platform:smoke` adds deliberately generous catastrophic
-budgets to every exploratory cadence. Only the shipped 24/64 cadence also has
+budgets to every exploratory cadence. Only the shipped 12/64 cadence also has
 the tighter hosted first-projection and visible-gap ceilings. Hosted CI is too
 noisy for lab-grade latency gates, so the smoke gate also checks structural
 properties such as bounded terminal frames. CI runs both
@@ -148,6 +156,67 @@ stores raw display identifiers. The platform report is a separate Node-process
 observation and must not be used as a proxy for an Xvfb-wrapped desktop run.
 
 ## Same-host optimization evidence
+
+### 2026-08-22 benchmark-first pass
+
+The baseline was `3ab2be7d126a3ccd648889ed53145e481a3204ba` on
+macOS arm64 with Node 22.23.2. The server workspace result compares the median
+of three complete baseline report medians with the median of five optimized
+report medians. The renderer primitive result is the median of five independent
+benchmark invocations; every invocation contains seven measured samples after
+a warm-up. Each desktop result is the median of three complete reports, and
+each report contains five isolated streaming samples.
+
+| Scenario | Baseline | Optimized | Change |
+| --- | ---: | ---: | ---: |
+| 540-entry server workspace list | 17.016 ms | 9.766 ms | 42.6% faster |
+| 25 × 540-entry renderer workspace sort | 190.78 ms | 13.23 ms | 93.1% faster |
+| First provider delta → painted text | 32 ms | 20 ms | 37.5% faster |
+| Streaming visible-update p95 | 76.1 ms | 76.1 ms | unchanged |
+| Visible updates per stream | 11 | 11 | unchanged |
+| SQLite WAL after five streams | 4,198,312 bytes | 4,173,592 bytes | 0.6% lower |
+
+The workspace change reuses immutable `Intl.Collator` instances in the server
+page ordering and renderer tree ordering paths. It preserves the existing
+locale, numeric, case-sensitivity, directory-first, and path-tie semantics;
+the focused workspace contracts assert that order. The stream change moves
+only the first durable projection from 24 ms to 12 ms. The 64 ms sustained
+cadence, 16,384-character safety valve, persist-before-project ordering,
+terminal flush, and output limits are unchanged.
+
+Three final desktop runs at each stream setting kept long tasks at zero,
+mounted-row bounds intact, and cleanup/soak memory within the existing range.
+The renderer bundle measurements were unchanged to 0.1 KiB. Coarse cold start,
+Files first-open, terminal, and split timings varied across runs and are not
+claimed as improvements.
+
+The final-tree Electron capture below is visual no-regression evidence for the
+affected streaming surface. It uses the deterministic README fixture and shows
+the real dark-theme Work view during an active streamed response; latency
+claims come from the instrumented desktop reports above, not from the image.
+
+![Inertia Work view during an active streamed response](screenshots/inertia-performance-streaming-no-regression.png)
+
+The investigation rejected these hypotheses:
+
+- Loopback WebSocket deflate reduced bytes but took 11.8–29.4 ms versus
+  3.4–4.7 ms plain and consumed materially more CPU, so compression stays off.
+- Reusing timestamp formatters produced a large percentage microbenchmark win
+  but saved too little absolute work at the bounded mounted-row count; that
+  experiment was removed after desktop results stayed inconclusive.
+- Transcript virtualization already held six mounted rows across 300 turns at
+  approximately 120 Hz with no long tasks, so overscan, row estimates, and
+  subscription fanout were left unchanged.
+- Search, Git, database write, provider lifecycle, terminal framing, resource
+  cleanup, packaging, and bundle inspection did not reveal an evidence-backed
+  product change in this pass.
+
+The first untouched desktop baseline also exposed a benchmark race: native
+`<details>` became open before React committed recovered-history children. The
+harness now waits for those children before counting them; one pre-fix run
+failed and the next passed, while all six post-fix desktop runs passed.
+
+### Historical V0.0.21 to V0.0.24 evidence
 
 The implementation baseline was `4640bbab6a49ffabd4dc211ef9d70b3c8c47e1e9`
 (`v0.0.21`). Measurements used Node 22.23.2 on macOS arm64 25.6.0, an Apple M5

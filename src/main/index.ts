@@ -123,6 +123,7 @@ const IPC = {
   clearAppCache: "inertia:clear-app-cache",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
+  previewTab: "inertia:preview-tab",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
   previewState: "inertia:preview-state",
@@ -770,6 +771,9 @@ function registerIpcHandlers(): void {
     return previewBroker.command(args[0]);
   });
 
+  ipcMain.handle(IPC.previewTab, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1); return previewBroker.tab(args[0]);
+  });
   ipcMain.handle(IPC.previewSetBounds, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     previewBroker.setBounds(args[0]);
@@ -1047,6 +1051,7 @@ async function bootstrap(): Promise<void> {
   } = packageSmoke;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
+    agentBrowserBroker: previewBroker,
     systemBootId: bootstrapSafety.systemBootId,
     conversationAttachmentStoreRunner,
     conversationAttachmentStoreAuthority:

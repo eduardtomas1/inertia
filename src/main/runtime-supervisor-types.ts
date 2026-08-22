@@ -10,6 +10,10 @@ import type {
   RuntimeWorkerOptions,
 } from "../node/runtime-process-protocol.js";
 import type { SecureFileRequest, SecureFileResult } from "../node/secure-file-protocol.js";
+import type {
+  AgentBrowserCommand,
+  AgentBrowserResult,
+} from "../shared/agent-browser.js";
 import type { RuntimeAttachmentBroker } from "./runtime-attachment-broker.js";
 import type {
   ConversationAttachmentStoreAnyOperationRunner,
@@ -34,6 +38,7 @@ export interface RuntimeProcessRecord {
   reportedFailure: string | null;
   credentialRequestIds: Set<string>;
   secureFileRequestIds: Set<string>;
+  agentBrowserRequestIds: Set<string>;
   attachmentRequestIds: Set<string>;
   attachmentClaimCounts: Map<string, number>;
   deferredAttachmentReleaseIds: Set<string>;
@@ -88,6 +93,14 @@ export interface RuntimeSecureFileBroker {
   shutdown?(): Promise<boolean>;
 }
 
+export interface RuntimeAgentBrowserBroker {
+  perform(
+    conversationId: string,
+    command: AgentBrowserCommand,
+    signal?: AbortSignal,
+  ): Promise<AgentBrowserResult>;
+}
+
 export type RuntimeSupervisorPhase =
   | "idle"
   | "starting"
@@ -132,6 +145,7 @@ export interface RuntimeSupervisorOptions {
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;
+  agentBrowserBroker?: RuntimeAgentBrowserBroker;
   conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
   conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
   attachmentBroker?: RuntimeAttachmentBroker;

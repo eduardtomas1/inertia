@@ -146,7 +146,29 @@ export interface AttachmentImport {
 }
 
 export interface PreviewBounds { x: number; y: number; width: number; height: number }
-export interface PreviewState { url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }
+export interface PreviewTabState {
+  id: string;
+  title: string;
+  url: string;
+  loading: boolean;
+}
+export interface PreviewAgentActivity {
+  action: string;
+  label: string;
+  tabId: string;
+  at: string;
+  x?: number;
+  y?: number;
+}
+export interface PreviewState {
+  url: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  activeTabId: string | null;
+  tabs: PreviewTabState[];
+  agentActivity: PreviewAgentActivity | null;
+}
 export interface PreviewStateUpdate extends PreviewState {
   ownerId: "primary" | "secondary";
   contextId: string;
@@ -582,6 +604,13 @@ export interface DesktopBridge {
     ownerId: string;
     contextId: string;
     action: "back" | "forward" | "reload";
+  }) => Promise<PreviewState>;
+  previewTab: (request: {
+    ownerId: string;
+    contextId: string;
+    action: "open" | "activate" | "close";
+    tabId?: string;
+    url?: string;
   }) => Promise<PreviewState>;
   previewSetBounds: (request: {
     ownerId: string;

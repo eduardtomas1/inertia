@@ -125,7 +125,16 @@ async function handleRequest(
         signal,
       });
       return response(message.id, {
-        content: [{ type: "text", text: result.text }],
+        content: [
+          { type: "text", text: result.text },
+          ...(result.image
+            ? [{
+                type: "image",
+                mimeType: result.image.mimeType,
+                data: result.image.data,
+              }]
+            : []),
+        ],
         ...(result.success ? {} : { isError: true }),
       });
     }

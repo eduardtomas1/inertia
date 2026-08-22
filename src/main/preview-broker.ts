@@ -5,19 +5,41 @@ import {
   type BrowserWindow,
   type Input,
   type KeyboardInputEvent,
+  type NativeImage,
   type Rectangle,
   type Session,
 } from "electron";
 
+import type {
+  AgentBrowserActivity,
+  AgentBrowserCommand,
+  AgentBrowserResult,
+  AgentBrowserState,
+  AgentBrowserTab,
+} from "../shared/agent-browser.js";
+import { MAX_AGENT_BROWSER_SCREENSHOT_BYTES } from "../shared/agent-browser.js";
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
+import {
+  locateAgentPageRef,
+  semanticPageSnapshot,
+  showAgentPageCursor,
+} from "./preview-agent-page.js";
 
 type PreviewOwner = "primary" | "secondary";
 
-interface PreviewSlot {
+interface PreviewTab {
+  id: string;
   view: WebContentsView;
+}
+
+interface PreviewSlot {
   contextId: string;
+  partition: string;
+  tabs: Map<string, PreviewTab>;
+  activeTabId: string;
   bounds: Rectangle | null;
+  activity: AgentBrowserActivity | null;
 }
 
 interface PreviewBrokerOptions {
@@ -30,6 +52,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const hardenedSessions = new WeakSet<Session>();
 const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n"]);
+const MAX_BROWSER_TABS = 8;
 
 export function previewAppShortcutKey(input: Pick<
   Input,
@@ -87,6 +110,24 @@ function previewContext(value: unknown): string {
   return value;
 }
 
+function previewTabId(value: unknown): string {
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+    throw new Error("Invalid preview tab");
+  }
+  return value;
+}
+
+function failure(
+  code: Extract<AgentBrowserResult, { ok: false }>["code"],
+  message: string,
+): AgentBrowserResult {
+  return { ok: false, code, message };
+}
+
+function stopForAbort(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error("browser-action-cancelled");
+}
+
 export class PreviewBroker {
   readonly #slots = new Map<PreviewOwner, PreviewSlot>();
   readonly #pendingBounds = new Map<PreviewOwner, {
@@ -103,8 +144,8 @@ export class PreviewBroker {
       await this.options.openExternal(target.url.toString());
       return this.#state(request.ownerId, request.contextId);
     }
-    const view = this.#ensure(request.ownerId, request.contextId);
-    await view.webContents.loadURL(target.url.toString());
+    const slot = this.#ensure(request.ownerId, request.contextId);
+    await this.#active(slot).view.webContents.loadURL(target.url.toString());
     return this.#state(request.ownerId, request.contextId);
   }
 
@@ -119,7 +160,8 @@ export class PreviewBroker {
     };
     const ownerId = previewOwner(request.ownerId);
     const contextId = previewContext(request.contextId);
-    const contents = this.#ownedSlot(ownerId, contextId)?.view.webContents;
+    const slot = this.#ownedSlot(ownerId, contextId);
+    const contents = slot ? this.#active(slot).view.webContents : undefined;
     const action = request.action;
     if (
       !contents
@@ -136,6 +178,109 @@ export class PreviewBroker {
       contents.reload();
     }
     return this.#state(ownerId, contextId);
+  }
+
+  async tab(value: unknown): Promise<PreviewState> {
+    if (!value || typeof value !== "object") {
+      throw new Error("Invalid preview tab request");
+    }
+    const request = value as {
+      ownerId?: unknown;
+      contextId?: unknown;
+      action?: unknown;
+      tabId?: unknown;
+      url?: unknown;
+    };
+    const ownerId = previewOwner(request.ownerId);
+    const contextId = previewContext(request.contextId);
+    const slot = this.#ensure(ownerId, contextId);
+    if (request.action === "open") {
+      const target = request.url === undefined
+        ? null
+        : previewNavigationTarget(request.url);
+      if (target?.kind === "external") {
+        throw new Error("Only local development pages can open in Inertia Browser tabs.");
+      }
+      const tab = this.#openTab(ownerId, slot);
+      this.#activateTab(ownerId, slot, tab.id);
+      if (target?.kind === "embed") {
+        try {
+          await tab.view.webContents.loadURL(target.url.toString());
+        } catch (error) {
+          this.#closeTab(ownerId, slot, tab.id);
+          throw error;
+        }
+      }
+    } else if (request.action === "activate") {
+      this.#activateTab(ownerId, slot, previewTabId(request.tabId));
+    } else if (request.action === "close") {
+      this.#closeTab(ownerId, slot, previewTabId(request.tabId));
+    } else {
+      throw new Error("Invalid preview tab action");
+    }
+    this.#publish(ownerId, contextId);
+    return this.#state(ownerId, contextId);
+  }
+
+  async perform(
+    conversationId: string,
+    command: AgentBrowserCommand,
+    signal?: AbortSignal,
+  ): Promise<AgentBrowserResult> {
+    try {
+      const owned = this.#slotForContext(previewContext(conversationId));
+      if (!owned) {
+        return failure(
+          "unavailable",
+          "Open this chat's Preview once before asking the agent to use Inertia Browser.",
+        );
+      }
+      const [ownerId, slot] = owned;
+      stopForAbort(signal);
+      switch (command.action) {
+        case "snapshot":
+          return await this.#snapshot(ownerId, slot, signal);
+        case "screenshot":
+          return await this.#screenshot(ownerId, slot, signal);
+        case "navigate":
+          return await this.#agentNavigate(ownerId, slot, command.url, signal);
+        case "click":
+          return await this.#click(ownerId, slot, command.ref, signal);
+        case "type":
+          return await this.#type(ownerId, slot, command.ref, command.text, command.replace, signal);
+        case "press":
+          return this.#press(ownerId, slot, command.key, signal);
+        case "scroll":
+          return this.#scroll(ownerId, slot, command.deltaY, signal);
+        case "tabs":
+          return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+        case "tab-open":
+          return await this.#agentOpenTab(ownerId, slot, command.url, signal);
+        case "tab-activate":
+          if (!slot.tabs.has(command.tabId)) {
+            return failure("not-found", "That Inertia Browser tab no longer exists.");
+          }
+          this.#activateTab(ownerId, slot, command.tabId);
+          this.#record(ownerId, slot, "tab-activate", "Agent switched pages");
+          return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+        case "tab-close":
+          if (!slot.tabs.has(command.tabId)) {
+            return failure("not-found", "That Inertia Browser tab no longer exists.");
+          }
+          this.#closeTab(ownerId, slot, command.tabId);
+          this.#record(ownerId, slot, "tab-close", "Agent closed a page");
+          return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+      }
+    } catch (error) {
+      return error instanceof Error && error.message === "browser-action-cancelled"
+        ? failure("cancelled", "The browser action was cancelled.")
+        : failure(
+            "unavailable",
+            error instanceof Error
+              ? error.message.slice(0, 1_000)
+              : "The Inertia Browser action failed.",
+          );
+    }
   }
 
   setBounds(value: unknown): void {
@@ -155,7 +300,7 @@ export class PreviewBroker {
       const slot = this.#ownedSlot(ownerId, contextId);
       if (slot) {
         slot.bounds = { x: 0, y: 0, width: 0, height: 0 };
-        slot.view.setBounds(slot.bounds);
+        this.#active(slot).view.setBounds(slot.bounds);
       }
       return;
     }
@@ -163,14 +308,14 @@ export class PreviewBroker {
       throw new Error("Invalid preview bounds");
     }
     const candidate = request.bounds as Partial<Rectangle>;
-    if (
-      ![
-        candidate.x,
-        candidate.y,
-        candidate.width,
-        candidate.height,
-      ].every((entry) => Number.isInteger(entry))
-    ) throw new Error("Invalid preview bounds");
+    if (![
+      candidate.x,
+      candidate.y,
+      candidate.width,
+      candidate.height,
+    ].every((entry) => Number.isInteger(entry))) {
+      throw new Error("Invalid preview bounds");
+    }
     const content = this.options.getWindow()?.getContentBounds();
     if (!content) return;
     const x = Math.max(0, Math.min(candidate.x as number, content.width));
@@ -178,20 +323,14 @@ export class PreviewBroker {
     const bounds = {
       x,
       y,
-      width: Math.max(
-        0,
-        Math.min(candidate.width as number, content.width - x),
-      ),
-      height: Math.max(
-        0,
-        Math.min(candidate.height as number, content.height - y),
-      ),
+      width: Math.max(0, Math.min(candidate.width as number, content.width - x)),
+      height: Math.max(0, Math.min(candidate.height as number, content.height - y)),
     };
     this.#pendingBounds.set(ownerId, { contextId, bounds });
     const slot = this.#ownedSlot(ownerId, contextId);
     if (slot) {
       slot.bounds = bounds;
-      slot.view.setBounds(bounds);
+      this.#active(slot).view.setBounds(bounds);
     }
   }
 
@@ -199,14 +338,8 @@ export class PreviewBroker {
     if (!value || typeof value !== "object") {
       throw new Error("Invalid preview request");
     }
-    const request = value as {
-      ownerId?: unknown;
-      contextId?: unknown;
-    };
-    this.close(
-      previewOwner(request.ownerId),
-      previewContext(request.contextId),
-    );
+    const request = value as { ownerId?: unknown; contextId?: unknown };
+    this.close(previewOwner(request.ownerId), previewContext(request.contextId));
   }
 
   close(ownerId?: PreviewOwner, contextId?: string): void {
@@ -215,16 +348,15 @@ export class PreviewBroker {
       : [...this.#slots.entries()];
     for (const [id, slot] of slots) {
       const pending = this.#pendingBounds.get(id);
-      if (!contextId || pending?.contextId === contextId) {
-        this.#pendingBounds.delete(id);
-      }
+      if (!contextId || pending?.contextId === contextId) this.#pendingBounds.delete(id);
       if (!slot || (contextId && slot.contextId !== contextId)) continue;
       this.#slots.delete(id);
-      this.options.getWindow()?.contentView.removeChildView(slot.view);
-      void slot.view.webContents.session.clearStorageData().catch(() => {
-        // The non-persistent session is destroyed with its owning view.
+      const browserSession = slot.tabs.values().next().value
+        ?.view.webContents.session;
+      for (const tab of slot.tabs.values()) this.#destroyTab(tab);
+      void browserSession?.clearStorageData().catch(() => {
+        // The non-persistent session is destroyed with its owning slot.
       });
-      if (!slot.view.webContents.isDestroyed()) slot.view.webContents.close();
     }
   }
 
@@ -248,31 +380,56 @@ export class PreviewBroker {
     };
   }
 
-  #ownedSlot(
-    ownerId: PreviewOwner,
-    contextId: string,
-  ): PreviewSlot | undefined {
+  #ownedSlot(ownerId: PreviewOwner, contextId: string): PreviewSlot | undefined {
     const slot = this.#slots.get(ownerId);
     return slot?.contextId === contextId ? slot : undefined;
   }
 
+  #slotForContext(contextId: string): [PreviewOwner, PreviewSlot] | undefined {
+    return [...this.#slots.entries()].find(([, slot]) => slot.contextId === contextId);
+  }
+
+  #active(slot: PreviewSlot): PreviewTab {
+    const tab = slot.tabs.get(slot.activeTabId);
+    if (!tab) throw new Error("The active Inertia Browser tab is unavailable.");
+    return tab;
+  }
+
+  #previewTab(tab: PreviewTab): AgentBrowserTab {
+    const contents = tab.view.webContents;
+    return {
+      id: tab.id,
+      title: contents.getTitle().slice(0, 300),
+      url: contents.getURL().slice(0, 4_096),
+      loading: contents.isLoading(),
+    };
+  }
+
   #state(ownerId: PreviewOwner, contextId: string): PreviewState {
-    const contents = this.#ownedSlot(ownerId, contextId)?.view.webContents;
+    const slot = this.#ownedSlot(ownerId, contextId);
+    const contents = slot ? this.#active(slot).view.webContents : undefined;
     return {
       url: contents?.getURL() ?? "",
       loading: contents?.isLoading() ?? false,
       canGoBack: contents?.navigationHistory.canGoBack() ?? false,
       canGoForward: contents?.navigationHistory.canGoForward() ?? false,
+      activeTabId: slot?.activeTabId ?? null,
+      tabs: slot ? [...slot.tabs.values()].map((tab) => this.#previewTab(tab)) : [],
+      agentActivity: slot?.activity ?? null,
+    };
+  }
+
+  #agentState(slot: PreviewSlot): AgentBrowserState {
+    return {
+      activeTabId: slot.activeTabId,
+      tabs: [...slot.tabs.values()].map((tab) => this.#previewTab(tab)),
+      activity: slot.activity,
     };
   }
 
   #publish(ownerId: PreviewOwner, contextId: string): void {
     const window = this.options.getWindow();
-    if (
-      !window
-      || window.webContents.isDestroyed()
-      || !this.#ownedSlot(ownerId, contextId)
-    ) return;
+    if (!window || window.webContents.isDestroyed() || !this.#ownedSlot(ownerId, contextId)) return;
     window.webContents.send(this.options.stateChannel, {
       ownerId,
       contextId,
@@ -280,33 +437,55 @@ export class PreviewBroker {
     });
   }
 
-  #ensure(ownerId: PreviewOwner, contextId: string): WebContentsView {
+  #ensure(ownerId: PreviewOwner, contextId: string): PreviewSlot {
     const existing = this.#ownedSlot(ownerId, contextId);
-    if (existing) return existing.view;
+    if (existing) return existing;
     if (this.#slots.has(ownerId)) this.close(ownerId);
+    const slot: PreviewSlot = {
+      contextId,
+      partition: createPreviewPartition(),
+      tabs: new Map(),
+      activeTabId: "",
+      bounds: null,
+      activity: null,
+    };
+    const tab = this.#openTab(ownerId, slot);
+    slot.activeTabId = tab.id;
+    this.#slots.set(ownerId, slot);
+    const pending = this.#pendingBounds.get(ownerId);
+    const bounds = pending?.contextId === contextId ? pending.bounds : undefined;
+    tab.view.setBounds(bounds ?? { x: 0, y: 0, width: 0, height: 0 });
+    if (bounds) slot.bounds = bounds;
+    this.options.getWindow()?.contentView.addChildView(tab.view);
+    return slot;
+  }
+
+  #openTab(ownerId: PreviewOwner, slot: PreviewSlot): PreviewTab {
+    if (slot.tabs.size >= MAX_BROWSER_TABS) {
+      throw new Error("Inertia Browser allows at most eight tabs per chat.");
+    }
     const window = this.options.getWindow();
     if (!window) throw new Error("The preview window is unavailable");
-    const partition = createPreviewPartition();
-    const view = new WebContentsView({
-      webPreferences: {
-        partition,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        webSecurity: true,
-        allowRunningInsecureContent: false,
-      },
-    });
-    view.setBackgroundColor("#17171b");
-    view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    view.webContents.on("will-navigate", (event, url) => {
-      this.#guardNavigation(event, url);
-    });
-    view.webContents.on("will-redirect", (event, url) => {
-      this.#guardNavigation(event, url);
-    });
+    const tab: PreviewTab = {
+      id: randomUUID(),
+      view: new WebContentsView({
+        webPreferences: {
+          partition: slot.partition,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          webSecurity: true,
+          allowRunningInsecureContent: false,
+        },
+      }),
+    };
+    const contents = tab.view.webContents;
+    tab.view.setBackgroundColor("#17171b");
+    contents.setWindowOpenHandler(() => ({ action: "deny" }));
+    contents.on("will-navigate", (event, url) => this.#guardNavigation(event, url));
+    contents.on("will-redirect", (event, url) => this.#guardNavigation(event, url));
     const ownedKeyUps = new Set<string>();
-    view.webContents.on("before-input-event", (event, input) => {
+    contents.on("before-input-event", (event, input) => {
       const shortcutKey = previewAppShortcutKey(input);
       const key = input.key.toLowerCase();
       const ownsKeyUp = input.type === "keyUp" && ownedKeyUps.delete(key);
@@ -320,31 +499,278 @@ export class PreviewBroker {
       if (!target || target.isDestroyed()) return;
       target.sendInputEvent(forwardedKeyboardInput(input));
     });
-    hardenDesktopSession(view.webContents.session);
-    const publish = () => this.#publish(ownerId, contextId);
-    view.webContents.on("did-start-loading", publish);
-    view.webContents.on("did-stop-loading", publish);
-    view.webContents.on("did-navigate", publish);
-    view.webContents.on("did-navigate-in-page", publish);
-    window.contentView.addChildView(view);
-    const slot: PreviewSlot = { view, contextId, bounds: null };
-    this.#slots.set(ownerId, slot);
-    const pending = this.#pendingBounds.get(ownerId);
-    const bounds = pending?.contextId === contextId
-      ? pending.bounds
-      : undefined;
-    view.setBounds(bounds ?? { x: 0, y: 0, width: 0, height: 0 });
-    if (bounds) slot.bounds = bounds;
-    return view;
+    hardenDesktopSession(contents.session);
+    const publish = () => this.#publish(ownerId, slot.contextId);
+    contents.on("did-start-loading", publish);
+    contents.on("did-stop-loading", publish);
+    contents.on("did-navigate", publish);
+    contents.on("did-navigate-in-page", publish);
+    contents.on("page-title-updated", publish);
+    slot.tabs.set(tab.id, tab);
+    return tab;
+  }
+
+  #activateTab(ownerId: PreviewOwner, slot: PreviewSlot, tabId: string): void {
+    const next = slot.tabs.get(tabId);
+    if (!next) throw new Error("That Inertia Browser tab no longer exists.");
+    const window = this.options.getWindow();
+    if (!window) throw new Error("The preview window is unavailable");
+    const previous = slot.tabs.get(slot.activeTabId);
+    if (previous && previous !== next) {
+      window.contentView.removeChildView(previous.view);
+      previous.view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    }
+    slot.activeTabId = tabId;
+    window.contentView.addChildView(next.view);
+    next.view.setBounds(slot.bounds ?? { x: 0, y: 0, width: 0, height: 0 });
+  }
+
+  #closeTab(ownerId: PreviewOwner, slot: PreviewSlot, tabId: string): void {
+    const tab = slot.tabs.get(tabId);
+    if (!tab) throw new Error("That Inertia Browser tab no longer exists.");
+    const wasActive = slot.activeTabId === tabId;
+    slot.tabs.delete(tabId);
+    this.#destroyTab(tab);
+    if (slot.tabs.size === 0) {
+      const replacement = this.#openTab(ownerId, slot);
+      slot.activeTabId = replacement.id;
+    } else if (wasActive) {
+      slot.activeTabId = slot.tabs.keys().next().value as string;
+    }
+    this.#activateTab(ownerId, slot, slot.activeTabId);
+  }
+
+  #destroyTab(tab: PreviewTab): void {
+    this.options.getWindow()?.contentView.removeChildView(tab.view);
+    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+  }
+
+  #record(
+    ownerId: PreviewOwner,
+    slot: PreviewSlot,
+    action: AgentBrowserActivity["action"],
+    label: string,
+    point?: { x: number; y: number },
+  ): void {
+    slot.activity = {
+      action,
+      label,
+      tabId: slot.activeTabId,
+      at: new Date().toISOString(),
+      ...point,
+    };
+    this.#publish(ownerId, slot.contextId);
+  }
+
+  #success(
+    slot: PreviewSlot,
+    text: string,
+    image?: { mimeType: "image/png"; data: string },
+  ): AgentBrowserResult {
+    return {
+      ok: true,
+      text,
+      state: this.#agentState(slot),
+      ...(image ? { image } : {}),
+    };
+  }
+
+  async #snapshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {
+    const contents = this.#active(slot).view.webContents;
+    if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
+    const text = await semanticPageSnapshot(contents);
+    stopForAbort(signal);
+    this.#record(ownerId, slot, "snapshot", "Agent inspected this page");
+    return this.#success(slot, text);
+  }
+
+  async #screenshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {
+    const contents = this.#active(slot).view.webContents;
+    if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
+    let image = await contents.capturePage();
+    stopForAbort(signal);
+    image = this.#boundedImage(image);
+    const png = image.toPNG();
+    if (png.byteLength > MAX_AGENT_BROWSER_SCREENSHOT_BYTES) {
+      return failure("too-large", "The Browser screenshot exceeded its bounded image size.");
+    }
+    this.#record(ownerId, slot, "screenshot", "Agent captured this page");
+    return this.#success(
+      slot,
+      JSON.stringify({
+        captured: true,
+        tabId: slot.activeTabId,
+        url: contents.getURL(),
+        width: image.getSize().width,
+        height: image.getSize().height,
+      }),
+      { mimeType: "image/png", data: png.toString("base64") },
+    );
+  }
+
+  #boundedImage(source: NativeImage): NativeImage {
+    let image = source;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const size = image.getSize();
+      const scale = Math.min(1, 1_600 / size.width, 1_000 / size.height);
+      if (scale < 1) {
+        image = image.resize({
+          width: Math.max(1, Math.floor(size.width * scale)),
+          height: Math.max(1, Math.floor(size.height * scale)),
+          quality: "good",
+        });
+      }
+      if (image.toPNG().byteLength <= MAX_AGENT_BROWSER_SCREENSHOT_BYTES) break;
+      image = image.resize({
+        width: Math.max(1, Math.floor(image.getSize().width * 0.72)),
+        quality: "good",
+      });
+    }
+    return image;
+  }
+
+  async #agentNavigate(
+    ownerId: PreviewOwner,
+    slot: PreviewSlot,
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<AgentBrowserResult> {
+    const target = previewNavigationTarget(url);
+    if (target.kind !== "embed") {
+      return failure("invalid", "Only local development URLs can open inside Inertia Browser.");
+    }
+    const contents = this.#active(slot).view.webContents;
+    await this.#loadURL(contents, target.url.toString(), signal);
+    stopForAbort(signal);
+    this.#record(ownerId, slot, "navigate", `Agent opened ${target.url.host}`);
+    return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+  }
+
+  async #agentOpenTab(
+    ownerId: PreviewOwner,
+    slot: PreviewSlot,
+    url: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<AgentBrowserResult> {
+    if (slot.tabs.size >= MAX_BROWSER_TABS) {
+      return failure("too-large", "Inertia Browser allows at most eight tabs per chat.");
+    }
+    const target = url ? previewNavigationTarget(url) : null;
+    if (target?.kind === "external") {
+      return failure("invalid", "Only local development URLs can open inside Inertia Browser.");
+    }
+    stopForAbort(signal);
+    const tab = this.#openTab(ownerId, slot);
+    this.#activateTab(ownerId, slot, tab.id);
+    if (target?.kind === "embed") {
+      try {
+        await this.#loadURL(tab.view.webContents, target.url.toString(), signal);
+      } catch (error) {
+        this.#closeTab(ownerId, slot, tab.id);
+        throw error;
+      }
+    }
+    stopForAbort(signal);
+    this.#record(ownerId, slot, "tab-open", "Agent opened a new page");
+    return this.#success(slot, JSON.stringify(this.#agentState(slot)));
+  }
+
+  async #click(ownerId: PreviewOwner, slot: PreviewSlot, ref: string, signal?: AbortSignal): Promise<AgentBrowserResult> {
+    const contents = this.#active(slot).view.webContents;
+    const located = await locateAgentPageRef(contents, ref);
+    if (!located.found || located.x === undefined || located.y === undefined) {
+      return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
+    }
+    if (located.disabled) return failure("invalid", "That page element is disabled.");
+    stopForAbort(signal);
+    await showAgentPageCursor(contents, located.x, located.y, `Agent · ${located.label || ref}`);
+    stopForAbort(signal);
+    contents.sendInputEvent({ type: "mouseMove", x: located.x, y: located.y });
+    contents.sendInputEvent({ type: "mouseDown", x: located.x, y: located.y, button: "left", clickCount: 1 });
+    contents.sendInputEvent({ type: "mouseUp", x: located.x, y: located.y, button: "left", clickCount: 1 });
+    this.#record(ownerId, slot, "click", `Agent clicked ${located.label || ref}`, { x: located.x, y: located.y });
+    return this.#success(slot, JSON.stringify({ clicked: ref, state: this.#agentState(slot) }));
+  }
+
+  async #type(
+    ownerId: PreviewOwner,
+    slot: PreviewSlot,
+    ref: string,
+    text: string,
+    replace: boolean,
+    signal?: AbortSignal,
+  ): Promise<AgentBrowserResult> {
+    const contents = this.#active(slot).view.webContents;
+    const located = await locateAgentPageRef(contents, ref, true, replace);
+    if (!located.found || located.x === undefined || located.y === undefined) {
+      return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
+    }
+    if (located.disabled) return failure("invalid", "That page element is disabled.");
+    stopForAbort(signal);
+    await showAgentPageCursor(contents, located.x, located.y, `Agent typing · ${located.label || ref}`);
+    stopForAbort(signal);
+    await contents.insertText(text);
+    stopForAbort(signal);
+    this.#record(ownerId, slot, "type", `Agent typed in ${located.label || ref}`, { x: located.x, y: located.y });
+    return this.#success(slot, JSON.stringify({ typed: ref, characters: text.length }));
+  }
+
+  #press(ownerId: PreviewOwner, slot: PreviewSlot, key: string, signal?: AbortSignal): AgentBrowserResult {
+    stopForAbort(signal);
+    const contents = this.#active(slot).view.webContents;
+    const keyCode = key === "Space" ? " " : key;
+    contents.sendInputEvent({ type: "keyDown", keyCode });
+    contents.sendInputEvent({ type: "keyUp", keyCode });
+    this.#record(ownerId, slot, "press", `Agent pressed ${key}`);
+    return this.#success(slot, JSON.stringify({ pressed: key }));
+  }
+
+  #scroll(ownerId: PreviewOwner, slot: PreviewSlot, deltaY: number, signal?: AbortSignal): AgentBrowserResult {
+    stopForAbort(signal);
+    const contents = this.#active(slot).view.webContents;
+    const bounds = slot.bounds ?? { width: 800, height: 600 };
+    contents.sendInputEvent({
+      type: "mouseWheel",
+      x: Math.max(0, Math.floor(bounds.width / 2)),
+      y: Math.max(0, Math.floor(bounds.height / 2)),
+      deltaX: 0,
+      deltaY,
+    });
+    this.#record(ownerId, slot, "scroll", `Agent scrolled ${deltaY > 0 ? "down" : "up"}`);
+    return this.#success(slot, JSON.stringify({ scrolled: deltaY }));
   }
 
   #guardNavigation(event: { preventDefault: () => void }, url: string): void {
     try {
-      if (previewNavigationTarget(url).kind !== "embed") {
-        event.preventDefault();
-      }
+      if (previewNavigationTarget(url).kind !== "embed") event.preventDefault();
     } catch {
       event.preventDefault();
+    }
+  }
+
+  async #loadURL(
+    contents: PreviewTab["view"]["webContents"],
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!signal) {
+      await contents.loadURL(url);
+      return;
+    }
+    stopForAbort(signal);
+    let rejectAbort!: (error: Error) => void;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      rejectAbort = reject;
+    });
+    const onAbort = (): void => {
+      contents.stop();
+      rejectAbort(new Error("browser-action-cancelled"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      await Promise.race([contents.loadURL(url).then(() => undefined), aborted]);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
     }
   }
 }

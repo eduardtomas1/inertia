@@ -216,6 +216,40 @@ export function useDesktopTools({
       });
   }, [previewContextId, previewOwnerId, setActionError]);
 
+  const previewTab = useCallback((
+    action: "open" | "activate" | "close",
+    tabId?: string,
+  ) => {
+    const contextId = previewContextId;
+    if (!contextId) return;
+    void window.inertia.previewTab({
+      ownerId: previewOwnerId,
+      contextId,
+      action,
+      ...(tabId ? { tabId } : {}),
+    })
+      .then((state) => {
+        const authority = authorityRef.current;
+        if (
+          authority.previewOwnerId !== previewOwnerId
+          || authority.previewContextId !== contextId
+        ) return;
+        setOwnedPreview({ contextId, url: state.url, navigation: state });
+      })
+      .catch((error) => {
+        const authority = authorityRef.current;
+        if (
+          authority.previewOwnerId !== previewOwnerId
+          || authority.previewContextId !== contextId
+        ) return;
+        setActionError(
+          error instanceof Error
+            ? error.message
+            : "The Browser tab action failed.",
+        );
+      });
+  }, [previewContextId, previewOwnerId, setActionError]);
+
   const setPreviewBounds = useCallback((bounds: PreviewBounds | null) => {
     if (!previewContextId) return;
     void window.inertia.previewSetBounds({
@@ -241,6 +275,7 @@ export function useDesktopTools({
     releaseComposerAttachment,
     navigatePreview,
     previewCommand,
+    previewTab,
     setPreviewBounds,
   };
 }
@@ -251,5 +286,8 @@ function emptyPreviewState(): PreviewState {
     loading: false,
     canGoBack: false,
     canGoForward: false,
+    activeTabId: null,
+    tabs: [],
+    agentActivity: null,
   };
 }

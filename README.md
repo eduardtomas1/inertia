@@ -30,6 +30,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Save up to 30 reusable prompt presets, search and organize them, and insert one into the selected composer without sending it. Optional route binding stores only harness, backend, model, and reasoning identity—never attachments, chat context, endpoints, continuation state, or credentials.
 - Start from a compact Environment summary with Changes, worktree, branch, Git actions, validated local servers, provider context, repository, editor, sent attachments, and delegated work, while keeping the full workspace tools one click away.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
+- Open up to eight ephemeral pages in the chat-owned Inertia Browser, then let Codex, Claude, Cursor, Kimi Code, or OpenCode inspect the local app, navigate, click, type, scroll, switch pages, and return screenshots through the same visible surface.
 - Continue an eligible native Codex, Claude, Cursor, Kimi Code, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle.
 - Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
 - Generate a Discord release summary from the latest GitHub or GitLab release diff, grouped into improvements, implementations, bugs, and other changes.
@@ -51,7 +52,7 @@ Open a chat in a native window when it needs a separate screen or desktop space.
 
 ### Share only the context you choose
 
-**Add context from another chat** opens a source-and-preview flow for selecting exact visible user or assistant messages. Inertia stores an immutable bounded packet with source provenance—not the source session, tools, reasoning, credentials, or an open-ended transcript—and shows it beside the request after sending. Different workspaces require an explicit acknowledgement because referenced files may not exist in the destination. Codex, Claude, Cursor, and OpenCode can request this same chooser through a provider-neutral host action, but the agent cannot browse chats or select the messages itself.
+**Add context from another chat** opens a source-and-preview flow for selecting exact visible user or assistant messages. Inertia stores an immutable bounded packet with source provenance—not the source session, tools, reasoning, credentials, or an open-ended transcript—and shows it beside the request after sending. Different workspaces require an explicit acknowledgement because referenced files may not exist in the destination. Codex, Claude, Cursor, Kimi Code, and OpenCode can request this same chooser through a provider-neutral host action, but the agent cannot browse chats or select the messages itself.
 
 ![Choose exact messages to bring into another Inertia chat](docs/screenshots/inertia-context-handoff.png)
 
@@ -101,7 +102,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Codex-native goals and Inertia-local objectives are labeled separately, persisted across reconnects, and never substituted for one another.
 - Skills are discovered from the selected Codex or Claude route and attached only to the next turn after privileged revalidation; typing `$` autocompletes only the enabled names reported for that route, and the renderer never receives their filesystem path or content.
 - Delegated agent trees preserve provider-reported parentage, status, ownership, route identity, and elapsed time. Compact views keep separate live or failed branches represented; Guide parent prepares an ordinary supported follow-up, and direct Stop appears only for an exact live Claude Agent SDK task.
-- Codex, Claude, Cursor, and OpenCode chats can use host-owned tools to list, inspect, create, dispatch, follow up, observe, stop, and archive independent top-level Inertia chats after exact user approval. Inertia injects a scoped bridge through each provider's audited native tool or MCP surface, derives project authority locally, bounds recursion and per-turn work, revokes authority at turn settlement, and persists provenance without transcripts, credentials, or provider sessions.
+- Codex, Claude, Cursor, Kimi Code, and OpenCode chats can use host-owned tools to list, inspect, create, dispatch, follow up, observe, stop, and archive independent top-level Inertia chats after exact user approval. Inertia injects a scoped bridge through each provider's audited native tool or MCP surface, derives project authority locally, bounds recursion and per-turn work, revokes authority at turn settlement, and persists provenance without transcripts, credentials, or provider sessions.
 
 ![Goals and delegated agent work in Inertia](docs/screenshots/inertia-agent-workflows.png)
 
@@ -113,6 +114,12 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Work-first navigation surfaces chats that are running, waiting for approval or input, completed in the background, unread, failed, or settled.
 - Related checkouts and worktrees can group by their real Git identity, while repository folders remain clearly labeled and independently controllable.
 - Move between branches, use isolated worktrees for parallel threads, and open detected service previews from their owning workspace.
+
+### Let the agent use the browser you can see
+
+Open **Preview** for a chat and point it at a loopback development server. That chat now owns an ephemeral multi-page Inertia Browser: the selected agent can inspect a bounded semantic snapshot, navigate local pages, interact through stable element references, and capture a bounded PNG without launching a separate Playwright browser. Cursor movement and the latest action remain visible in the Browser chrome, while each page stays inside the exact owning chat.
+
+Read-only inspection and screenshots do not prompt again. In **Supervised** mode, navigation, typing, clicks, scrolling, and page changes require Inertia's ordinary approval; Auto-edit and Full Access follow their existing provider permission modes. Remote sites continue to open in the system browser and never become agent-controlled embedded content. Browser pages use a non-persistent hardened Electron session with permissions, downloads, popups, and file access denied, and all authority is cancelled when the owning turn or runtime ends. See the [agent browser design and security boundary](docs/AGENT_BROWSER.md).
 
 ![Search-first Work rows with provider, repository, branch, status, and time](docs/screenshots/inertia-work.png)
 

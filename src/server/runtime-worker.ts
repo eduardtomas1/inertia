@@ -15,6 +15,9 @@ import {
   DatabaseRecoveryOperationQueue,
 } from "./runtime/database-recovery-queue.js";
 import { RuntimeSecureFileBrokerClient } from "./runtime/secure-file-broker-client.js";
+import {
+  RuntimeAgentBrowserBrokerClient,
+} from "./runtime/agent-browser-broker-client.js";
 import { completeRuntimeWorkerShutdown } from "./runtime-worker-shutdown.js";
 import {
   activateRuntimeOwnedProcessRegistry,
@@ -73,6 +76,7 @@ const attachments = new RuntimeAttachmentBrokerClient(post);
 const conversationAttachmentStore =
   new RuntimeConversationAttachmentStoreBrokerClient(post);
 const secureFiles = new RuntimeSecureFileBrokerClient(post);
+const agentBrowser = new RuntimeAgentBrowserBrokerClient(post);
 
 async function finishShutdown(
   activeRuntime: RunningRuntime | null,
@@ -87,6 +91,7 @@ async function finishShutdown(
       attachments.close();
       conversationAttachmentStore.close();
       secureFiles.close();
+      agentBrowser.close();
     },
     ownedProcessCleanupConfirmed: awaitRuntimeOwnedProcessCleanupConfirmed,
     post,
@@ -141,6 +146,10 @@ parentPort.on("message", (messageEvent) => {
   }
   if (command.type === "runtime.secure-file-result") {
     secureFiles.handle(command);
+    return;
+  }
+  if (command.type === "runtime.agent-browser-result") {
+    agentBrowser.handle(command);
     return;
   }
   if (command.type === "runtime.shutdown") {
@@ -578,6 +587,7 @@ parentPort.on("message", (messageEvent) => {
     attachments,
     conversationAttachmentStoreOperations: conversationAttachmentStore.runner,
     secureFiles,
+    agentBrowser,
   }).then(async (startedRuntime) => {
     starting = false;
     if (stopping) {

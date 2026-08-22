@@ -695,6 +695,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
+    agentBrowser: options.agentBrowser,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(

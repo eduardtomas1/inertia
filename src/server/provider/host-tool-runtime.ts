@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { MAX_AGENT_BROWSER_SCREENSHOT_BYTES } from "../../shared/agent-browser";
 import type {
   ProviderHostToolApprovalRequest,
   ProviderHostToolBridge,
@@ -77,6 +78,24 @@ function validIdentity(value: string, maximum: number): boolean {
     && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
+function boundedHostImage(
+  image: ProviderHostToolResult["image"],
+): ProviderHostToolResult["image"] | null | undefined {
+  if (!image) return undefined;
+  const maximumBase64 = Math.ceil(MAX_AGENT_BROWSER_SCREENSHOT_BYTES / 3) * 4;
+  if (
+    image.mimeType !== "image/png"
+    || image.data.length === 0
+    || image.data.length > maximumBase64
+    || image.data.length % 4 !== 0
+    || !/^[A-Za-z0-9+/]*={0,2}$/u.test(image.data)
+  ) return null;
+  const padding = image.data.endsWith("==") ? 2 : image.data.endsWith("=") ? 1 : 0;
+  return image.data.length / 4 * 3 - padding <= MAX_AGENT_BROWSER_SCREENSHOT_BYTES
+    ? image
+    : null;
+}
+
 /**
  * Process-local authority for one exact Inertia turn's provider tool calls.
  * Provider transports may present calls, but cannot mint approvals or retain
@@ -146,12 +165,19 @@ export class ProviderHostToolRuntime {
       signal: controller.signal,
       requestApproval: (request) => this.requestApproval(input.callId, request),
     }).then(
-      (result) => this.settled || controller.signal.aborted
-        ? failure("The Inertia chat-tool call was cancelled.")
-        : {
-            success: result.success,
-            text: boundedUtf8(result.text, MAX_HOST_TOOL_RESULT_BYTES),
-          },
+      (result) => {
+        if (this.settled || controller.signal.aborted) {
+          return failure("The Inertia chat-tool call was cancelled.");
+        }
+        const image = boundedHostImage(result.image);
+        return image === null
+          ? failure("The Inertia chat-tool returned invalid visual evidence.")
+          : {
+              success: result.success,
+              text: boundedUtf8(result.text, MAX_HOST_TOOL_RESULT_BYTES),
+              ...(image ? { image } : {}),
+            };
+      },
       (error: unknown) => failure(
         error instanceof Error && error.message
           ? error.message.slice(0, 1_000)

@@ -137,6 +137,33 @@ describe("Codex App Server host tools", () => {
     }
   });
 
+  it("returns host-owned PNG evidence through Codex dynamic tool content", async () => {
+    const image = Buffer.from("png-evidence").toString("base64");
+    const harness = eventHarness({
+      invoke: async () => ({
+        success: true,
+        text: "captured",
+        image: { mimeType: "image/png", data: image },
+      }),
+    });
+    try {
+      harness.events.handleServerRequest("rpc-image", "item/tool/call", toolRequest());
+      await flush();
+      expect(harness.writes).toEqual([{
+        id: "rpc-image",
+        result: {
+          contentItems: [
+            { type: "inputText", text: "captured" },
+            { type: "inputImage", imageUrl: `data:image/png;base64,${image}` },
+          ],
+          success: true,
+        },
+      }]);
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
   it.each([
     ["wrong thread", { threadId: "thread-other" }],
     ["wrong turn", { turnId: "turn-other" }],

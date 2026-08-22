@@ -1,8 +1,6 @@
 import { isAbsolute } from "node:path";
-import {
-  parseOpenProjectPathRequest,
-  type OpenProjectPathRequest,
-} from "../shared/desktop";
+import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
+import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
 import {
   isBackendCredentialGeneration,
   isBackendCredentialSecret,
@@ -45,7 +43,6 @@ import {
 } from "./runtime-update-process-protocol";
 import { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
 export { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
-
 export type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "./runtime-update-process-protocol";
 
 export type { RuntimeConversationAttachmentStoreResult }
@@ -155,7 +152,7 @@ export type RuntimeWorkerCommand =
   | RuntimeAttachmentReleaseResult
   | RuntimeAttachmentRelinquishResult
   | RuntimeConversationAttachmentStoreResult
-  | RuntimeSecureFileResult;
+  | RuntimeSecureFileResult | RuntimeAgentBrowserResult;
 
 export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
 export type RuntimeCredentialFailureCode = "not-found" | "unavailable" | "invalid";
@@ -322,7 +319,8 @@ export type RuntimeWorkerEvent =
   | ({
       type: "runtime.secure-file-request";
       requestId: string;
-    } & SecureFileRequest);
+    } & SecureFileRequest)
+  | RuntimeAgentBrowserEvent;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -354,6 +352,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   if (value.type === "runtime.conversation-attachment-store-result") {
     return parseRuntimeConversationAttachmentStoreResult(value);
   }
+  const browserResult = parseRuntimeAgentBrowserResult(value); if (browserResult) return browserResult;
   if (
     value.type === "runtime.secure-file-result"
     && Object.keys(value).length === 3
@@ -652,6 +651,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
   const updateEvent = parseRuntimeUpdateWorkerEvent(value);
   if (updateEvent) return updateEvent;
+  const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;
   if (
     value.type === "runtime.cleanup-receipt-consumed"
     && Object.keys(value).length === 3

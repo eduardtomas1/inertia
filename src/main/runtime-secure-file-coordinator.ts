@@ -4,6 +4,7 @@ import type {
   RuntimeWorkerEvent,
 } from "../node/runtime-process-protocol.js";
 import type {
+  RuntimeAgentBrowserBroker,
   RuntimeProcessRecord,
   RuntimeSecureFileBroker,
 } from "./runtime-supervisor-types.js";
@@ -12,6 +13,7 @@ import type {
   ConversationAttachmentStoreAuthority,
 } from "../node/conversation-attachment-store-child.js";
 import { RuntimeConversationAttachmentStoreCoordinator } from "./runtime-conversation-attachment-store-coordinator.js";
+import { RuntimeAgentBrowserCoordinator } from "./runtime-agent-browser-coordinator.js";
 
 type SecureFileRequestEvent = Extract<
   RuntimeWorkerEvent,
@@ -25,6 +27,10 @@ type ConversationAttachmentStoreEvent = Extract<
       | "runtime.conversation-attachment-store-cancel";
   }
 >;
+type AgentBrowserEvent = Extract<
+  RuntimeWorkerEvent,
+  { type: "runtime.agent-browser-request" | "runtime.agent-browser-cancel" }
+>;
 
 interface PendingSecureFileRequest {
   readonly record: RuntimeProcessRecord;
@@ -35,6 +41,7 @@ interface RuntimeSecureFileCoordinatorOptions {
   readonly broker?: RuntimeSecureFileBroker;
   readonly conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
   readonly conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
+  readonly agentBrowserBroker?: RuntimeAgentBrowserBroker;
   readonly accepts: (record: RuntimeProcessRecord) => boolean;
   readonly post: (
     record: RuntimeProcessRecord,
@@ -49,6 +56,7 @@ export class RuntimeSecureFileCoordinator {
   private readonly pending = new Map<string, PendingSecureFileRequest>();
   private readonly conversationAttachmentStore:
     RuntimeConversationAttachmentStoreCoordinator;
+  private readonly agentBrowser: RuntimeAgentBrowserCoordinator;
 
   constructor(options: RuntimeSecureFileCoordinatorOptions) {
     this.broker = options.broker;
@@ -61,12 +69,24 @@ export class RuntimeSecureFileCoordinator {
         accepts: options.accepts,
         post: options.post,
       });
+    this.agentBrowser = new RuntimeAgentBrowserCoordinator({
+      broker: options.agentBrowserBroker,
+      accepts: options.accepts,
+      post: options.post,
+    });
   }
 
   handle(
     record: RuntimeProcessRecord,
-    event: SecureFileRequestEvent | ConversationAttachmentStoreEvent,
+    event: SecureFileRequestEvent | ConversationAttachmentStoreEvent | AgentBrowserEvent,
   ): void {
+    if (
+      event.type === "runtime.agent-browser-request"
+      || event.type === "runtime.agent-browser-cancel"
+    ) {
+      this.agentBrowser.handle(record, event);
+      return;
+    }
     if (event.type !== "runtime.secure-file-request") {
       this.conversationAttachmentStore.handle(record, event);
       return;
@@ -117,6 +137,7 @@ export class RuntimeSecureFileCoordinator {
   }
 
   clear(record: RuntimeProcessRecord | null): void {
+    this.agentBrowser.clear(record);
     this.conversationAttachmentStore.clear(record);
     if (!record) return;
     for (const [requestId, pending] of this.pending) {

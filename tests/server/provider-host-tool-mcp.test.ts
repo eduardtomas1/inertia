@@ -113,6 +113,32 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("provider host-tool MCP transport", () => {
+  it("returns host-owned PNG evidence through the shared Cursor, Kimi, and OpenCode transport", async () => {
+    const image = Buffer.from("png-evidence").toString("base64");
+    const { post } = await started({
+      invoke: async () => ({
+        success: true,
+        text: "captured",
+        image: { mimeType: "image/png", data: image },
+      }),
+    });
+    const response = await post({
+      jsonrpc: "2.0",
+      id: "browser-image",
+      method: "tools/call",
+      params: { name: "inertia_list_conversations", arguments: {} },
+    });
+    expect(await response.json()).toMatchObject({
+      id: "browser-image",
+      result: {
+        content: [
+          { type: "text", text: "captured" },
+          { type: "image", mimeType: "image/png", data: image },
+        ],
+      },
+    });
+  });
+
   it("negotiates Cursor HTTP with an owned stdio fallback and isolates OpenCode config", () => {
     const connection = {
       url: "http://127.0.0.1:41234/mcp",

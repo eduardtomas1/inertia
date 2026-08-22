@@ -162,10 +162,18 @@ export class CodexHostToolRuntime {
     const written = this.host.writeMessage({
       id: pending.rpcId,
       result: {
-        contentItems: [{
-          type: "inputText",
-          text: boundedHostToolResult(result.text),
-        }],
+        contentItems: [
+          {
+            type: "inputText",
+            text: boundedHostToolResult(result.text),
+          },
+          ...(result.image
+            ? [{
+                type: "inputImage",
+                imageUrl: `data:${result.image.mimeType};base64,${result.image.data}`,
+              }]
+            : []),
+        ],
         success: result.success,
       },
     });

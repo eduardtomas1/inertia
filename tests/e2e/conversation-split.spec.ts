@@ -411,6 +411,32 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     cookie: "",
   });
 
+  await primaryPreview.getByRole("button", { name: "Open browser page" }).click();
+  const browserTabs = primaryPreview.locator(".preview-tabs").getByRole("tab");
+  await expect(browserTabs).toHaveCount(2);
+  const secondPrimaryPreviewUrl = `${app.previewUrl}agent-browser-page`;
+  await primaryPreview.getByRole("textbox", {
+    name: "Preview address",
+  }).fill(secondPrimaryPreviewUrl);
+  await primaryPreview.getByRole("button", { name: "Go", exact: true }).click();
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ webContents }, url) => webContents.getAllWebContents().some(
+      (contents) => contents.getURL() === url,
+    ),
+    secondPrimaryPreviewUrl,
+  )).toBe(true);
+  await expect(primaryPreview.locator(".preview-tab-shell.active"))
+    .toContainText("Inertia preview");
+  const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
+  await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
+  await testInfo.attach("inertia-browser-pages", {
+    path: browserPagesScreenshot,
+    contentType: "image/png",
+  });
+  await primaryPreview.locator(".preview-tab-shell.active .preview-tab-close").click();
+  await expect(browserTabs).toHaveCount(1);
+  await expect.poll(() => app.nativePreviewIsVisible(primaryPreviewUrl)).toBe(true);
+
   await app.electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({
       canceled: false,

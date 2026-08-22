@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  beginWorkspaceFileOpen,
+  consumeWorkspaceFileOpenEdit,
+  markWorkspaceFileSearchEdit,
   validatedWorkspaceFileLocation,
   workspaceFileLocationFromFragment,
   workspaceFileLocationLabel,
@@ -67,5 +70,29 @@ describe("workspace file references", () => {
     )).toBeNull();
     expect(workspaceFileLocationLabel({ startLine: 2, endLine: 3 }))
       .toBe("Lines 2–3");
+  });
+
+  it("scopes in-flight search edits to the matching workspace", () => {
+    beginWorkspaceFileOpen("project-a", "conversation-a", "src/App.tsx");
+    markWorkspaceFileSearchEdit("project-a", "conversation-b");
+    markWorkspaceFileSearchEdit("project-b", "conversation-a");
+    expect(consumeWorkspaceFileOpenEdit(
+      "project-a",
+      "conversation-a",
+      "src/App.tsx",
+    )).toBe(false);
+
+    beginWorkspaceFileOpen("project-a", "conversation-a", "src/Button.tsx");
+    markWorkspaceFileSearchEdit("project-a", "conversation-a");
+    expect(consumeWorkspaceFileOpenEdit(
+      "project-a",
+      "conversation-a",
+      "src/Other.tsx",
+    )).toBe(false);
+    expect(consumeWorkspaceFileOpenEdit(
+      "project-a",
+      "conversation-a",
+      "src/Button.tsx",
+    )).toBe(true);
   });
 });

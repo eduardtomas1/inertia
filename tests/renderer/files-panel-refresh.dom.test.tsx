@@ -12,6 +12,7 @@ import {
   FilesPanel,
   type WorkspaceEntriesPage,
 } from "../../src/renderer/src/components/FilesPanel";
+import { beginWorkspaceFileOpen } from "../../src/renderer/src/utils/workspaceFileReference";
 import type { WorkspaceEntry } from "../../src/shared/contracts";
 
 const FILES_PROJECT = {
@@ -229,6 +230,56 @@ describe("FilesPanel root refresh", () => {
     );
 
     fireEvent.change(search, { target: { value: "readme" } });
+
+    expect(await screen.findByRole("treeitem", { name: "README.md" }))
+      .toBeInTheDocument();
+    expect(search).toHaveValue("readme");
+    expect(screen.getByRole("tree", { name: "Search results" }))
+      .toBeInTheDocument();
+  });
+
+  it("preserves a query edited while an external selection is resolving", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+      query,
+    }: {
+      directory?: string;
+      query?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (query === "readme") {
+        return page("", [{ path: "README.md", kind: "file" }]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search files" });
+    fireEvent.change(search, { target: { value: "button" } });
+
+    beginWorkspaceFileOpen(
+      FILES_PROJECT.projectId,
+      undefined,
+      "src/components/Button.tsx",
+    );
+    fireEvent.change(search, { target: { value: "readme" } });
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
 
     expect(await screen.findByRole("treeitem", { name: "README.md" }))
       .toBeInTheDocument();

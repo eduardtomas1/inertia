@@ -46,6 +46,8 @@ import {
   type MarkdownHeadingRequest,
 } from "../utils/markdownHeading";
 import {
+  consumeWorkspaceFileOpenEdit,
+  markWorkspaceFileSearchEdit,
   workspaceFileLocationLabel,
   type WorkspaceFileLocation,
 } from "../utils/workspaceFileReference";
@@ -60,6 +62,16 @@ type ResponseMarkdownLoader = (attempt: number) => Promise<{
 
 const loadResponseMarkdown: ResponseMarkdownLoader = (_attempt) =>
   import("./ResponseMarkdown");
+const FILE_PREVIEW_CLASS = "file-preview";
+const FILE_ENTRY_CLASS = "file-entry";
+const FILE_TREE_CLASS = "file-tree";
+const FILE_PANEL_ERROR_CLASS = "file-panel-error";
+const FILE_PREVIEW_TRUNCATED_CLASS = "file-preview-truncated";
+const FILE_LIST_TRUNCATED_CLASS = "file-list-truncated";
+const FILE_LANGUAGE_CLASS = "file-language";
+const PANEL_LOADING_CLASS = "panel-loading";
+const PANEL_EMPTY_CLASS = "panel-empty";
+const PANEL_NOTICE_CLASS = "panel-notice";
 
 class MarkdownPreviewErrorBoundary extends Component<{
   children: ReactNode;
@@ -91,7 +103,7 @@ export function MarkdownPreviewSurface({
     default: (await loader(attempt)).ResponseMarkdown,
   })), [attempt, loader]);
   const failure = (
-    <div className="file-preview-markdown-failure" role="alert">
+    <div className={`${FILE_PREVIEW_CLASS}-markdown-failure`} role="alert">
       <AlertCircle size={20} aria-hidden="true" />
       <strong>Markdown preview failed</strong>
       <div>
@@ -182,14 +194,12 @@ export function freshWorkspaceDirectoryPages(
 interface SearchState {
   entries: WorkspaceEntry[] | null;
   truncated: boolean;
-  loading: boolean;
   error: string | null;
 }
 
 const EMPTY_SEARCH: SearchState = {
   entries: null,
   truncated: false,
-  loading: false,
   error: null,
 };
 
@@ -583,7 +593,7 @@ export function FilesPanel({
 
   const storePage = useCallback((path: string, page: WorkspaceEntriesPage): void => {
     if (page.directory !== path) {
-      throw new Error("Folder escaped the requested tree.");
+      throw new Error("Folder escaped tree.");
     }
     const next = new Map(directoryPagesRef.current);
     next.set(path, {
@@ -663,16 +673,17 @@ export function FilesPanel({
 
   const updateQuery = useCallback((value: string): void => {
     searchGeneration.current += 1;
+    markWorkspaceFileSearchEdit(projectId, conversationId);
     previousSelectedPathRef.current = selectedPath;
     setQuery(value);
     setSearch(EMPTY_SEARCH);
-  }, [selectedPath]);
+  }, [conversationId, projectId, selectedPath]);
 
   useEffect(() => {
     const normalized = query.trim();
     if (!normalized) return;
     const generation = ++searchGeneration.current;
-    setSearch({ entries: null, truncated: false, loading: true, error: null });
+    setSearch({ entries: null, truncated: false, error: null });
     const timer = window.setTimeout(() => {
       void onLoadEntries({ query: normalized })
         .then((page) => {
@@ -680,7 +691,6 @@ export function FilesPanel({
           setSearch({
             entries: sortWorkspaceEntries(page.entries),
             truncated: page.truncated,
-            loading: false,
             error: null,
           });
         })
@@ -689,7 +699,6 @@ export function FilesPanel({
           setSearch({
             entries: [],
             truncated: false,
-            loading: false,
             error: safeError(searchError, "Search failed."),
           });
         });
@@ -796,12 +805,28 @@ export function FilesPanel({
 
   useEffect(() => {
     if (previousSelectedPathRef.current === selectedPath) return;
+    if (consumeWorkspaceFileOpenEdit(
+      projectId,
+      conversationId,
+      selectedPath,
+    )) {
+      previousSelectedPathRef.current = selectedPath;
+      return;
+    }
     if (searchActive && selectedPath && isSafeWorkspaceEntryPath(selectedPath)) {
       if (search.entries === null) return;
       if (!visiblePaths.has(selectedPath)) updateQuery("");
     }
     previousSelectedPathRef.current = selectedPath;
-  }, [search.entries, searchActive, selectedPath, updateQuery, visiblePaths]);
+  }, [
+    conversationId,
+    projectId,
+    search.entries,
+    searchActive,
+    selectedPath,
+    updateQuery,
+    visiblePaths,
+  ]);
 
   useEffect(() => {
     if (!selectedPath || !isSafeWorkspaceEntryPath(selectedPath)) return;
@@ -826,12 +851,12 @@ export function FilesPanel({
   }, [selectedPath, visiblePaths]);
 
   const treeBusy = loading
-    || search.loading
+    || (searchActive && search.entries === null)
     || loadingDirectories.size > 0;
   const hasRootFailure = !searchActive && Boolean(error) && treeRows.length === 0;
   const hasSearchFailure = searchActive && Boolean(search.error);
   const showTreeLoading = searchActive
-    ? search.loading || search.entries === null
+    ? search.entries === null
     : loading && treeRows.length === 0;
   const countLabel = searchActive
     ? `${search.entries?.length ?? 0} results`
@@ -849,7 +874,7 @@ export function FilesPanel({
         </div>
         {onRefresh && (
           <IconButton label="Refresh" onClick={onRefresh} disabled={loading}>
-            {loading ? <LoadingMark label="Refreshing files" /> : <RefreshCw size={15} />}
+            {loading ? <LoadingMark label="Refreshing" /> : <RefreshCw size={15} />}
           </IconButton>
         )}
       </header>
@@ -862,7 +887,7 @@ export function FilesPanel({
             ref={searchInputRef}
             value={query}
             aria-label="Search files"
-            placeholder="Search files"
+            placeholder="Search"
             onChange={(event) => updateQuery(event.currentTarget.value)}
           />
           {query && (
@@ -879,24 +904,24 @@ export function FilesPanel({
         </div>
 
         <div
-          className="file-entry-list"
+          className={`${FILE_ENTRY_CLASS}-list`}
           ref={fileListRef}
           role="tree"
           aria-label={searchActive ? "Search results" : "Files"}
           aria-busy={treeBusy}
         >
           {showTreeLoading ? (
-            <div className="panel-loading" role="status">
+            <div className={PANEL_LOADING_CLASS} role="status">
               <LoadingMark label={searchActive ? "Searching" : "Loading"} />
               <span>{searchActive ? "Searching…" : "Loading…"}</span>
             </div>
           ) : hasRootFailure || hasSearchFailure ? (
-            <div className="panel-empty compact file-panel-error" role="alert">
+            <div className={`${PANEL_EMPTY_CLASS} compact ${FILE_PANEL_ERROR_CLASS}`} role="alert">
               <AlertCircle size={20} aria-hidden="true" />
               <p>{searchActive ? search.error : error}</p>
             </div>
           ) : rows.length === 0 ? (
-            <div className="panel-empty compact">
+            <div className={`${PANEL_EMPTY_CLASS} compact`}>
               <FileSearch size={20} aria-hidden="true" />
               <p>{searchActive ? "No matches." : "Project is empty."}</p>
             </div>
@@ -922,12 +947,12 @@ export function FilesPanel({
                 || directoryPage?.truncated
               );
             return (
-              <div className="file-tree-row-group" key={entry.path}>
+              <div className={`${FILE_TREE_CLASS}-row-group`} key={entry.path}>
                 <button
                   type="button"
                   role="treeitem"
                   className={clsx(
-                    "file-entry",
+                    FILE_ENTRY_CLASS,
                     `is-${entry.kind}`,
                     selectedPath === entry.path && "is-selected",
                   )}
@@ -950,30 +975,30 @@ export function FilesPanel({
                 >
                   {entry.kind === "directory" && !searchActive ? (
                     <ChevronRight
-                      className="file-tree-chevron"
+                      className={`${FILE_TREE_CLASS}-chevron`}
                       size={13}
                       aria-hidden="true"
                     />
                   ) : (
-                    <span className="file-tree-chevron-spacer" aria-hidden="true" />
+                    <span className={`${FILE_TREE_CLASS}-chevron-spacer`} aria-hidden="true" />
                   )}
                   {entry.kind === "directory"
                     ? <Folder size={15} aria-hidden="true" />
                     : (
                         <File
-                          className="file-language-icon"
+                          className={`${FILE_LANGUAGE_CLASS}-icon`}
                           size={15}
                           aria-hidden="true"
                         />
                       )}
-                  <span className="file-entry-copy">
-                    <span className="file-entry-name">{name}</span>
-                    {parent && <span className="file-entry-path">{parent}</span>}
+                  <span className={`${FILE_ENTRY_CLASS}-copy`}>
+                    <span className={`${FILE_ENTRY_CLASS}-name`}>{name}</span>
+                    {parent && <span className={`${FILE_ENTRY_CLASS}-path`}>{parent}</span>}
                   </span>
                 </button>
                 {showDirectoryStatus && (
                   <div
-                    className={clsx("file-tree-status", directoryError && "is-error")}
+                    className={clsx(`${FILE_TREE_CLASS}-status`, directoryError && "is-error")}
                     role={directoryError ? "alert" : "status"}
                     style={{
                       "--file-tree-indent": `${Math.min(row.depth * 13, 104)}px`,
@@ -992,37 +1017,37 @@ export function FilesPanel({
             );
           })}
           {!searchActive && error && treeRows.length > 0 && (
-            <p className="panel-notice file-panel-error" role="alert">{error}</p>
+            <p className={`${PANEL_NOTICE_CLASS} ${FILE_PANEL_ERROR_CLASS}`} role="alert">{error}</p>
           )}
           {!searchActive && directoryPages.get("")?.truncated && (
-            <p className="panel-notice file-list-truncated">
+            <p className={`${PANEL_NOTICE_CLASS} ${FILE_LIST_TRUNCATED_CLASS}`}>
               More root items.
             </p>
           )}
           {searchActive && search.truncated && (
-            <p className="panel-notice file-list-truncated">
+            <p className={`${PANEL_NOTICE_CLASS} ${FILE_LIST_TRUNCATED_CLASS}`}>
               Refine for more.
             </p>
           )}
         </div>
 
-        <div className="file-preview">
+        <div className={FILE_PREVIEW_CLASS}>
           {previewLoading && selectedPath ? (
-            <div className="panel-loading" role="status" aria-live="polite">
+            <div className={PANEL_LOADING_CLASS} role="status" aria-live="polite">
               <LoadingMark label="Loading file" />
               <span>Loading {workspacePathName(selectedPath)}…</span>
             </div>
           ) : previewError && selectedPath ? (
-            <div className="panel-empty file-panel-error" role="alert">
+            <div className={`${PANEL_EMPTY_CLASS} ${FILE_PANEL_ERROR_CLASS}`} role="alert">
               <AlertCircle size={22} aria-hidden="true" />
               <h3>Preview failed: {workspacePathName(selectedPath)}</h3>
               <p>{previewError}</p>
             </div>
           ) : preview ? (
             <>
-              <header className="file-preview-header">
+              <header className={`${FILE_PREVIEW_CLASS}-header`}>
                 <div
-                  className="file-preview-identity"
+                  className={`${FILE_PREVIEW_CLASS}-identity`}
                   title={preview.path}
                   role="status"
                   aria-live="polite"
@@ -1032,7 +1057,7 @@ export function FilesPanel({
                 </div>
                 {previewLanguage && (
                   <span
-                    className="file-language"
+                    className={FILE_LANGUAGE_CLASS}
                     data-language-family={previewLanguage.family}
                     title={`${previewLanguage.label} recognized locally`}
                   >
@@ -1046,7 +1071,7 @@ export function FilesPanel({
                 )}
                 {markdownPreview && (
                   <div
-                    className="file-preview-view-toggle"
+                    className={`${FILE_PREVIEW_CLASS}-view-toggle`}
                     role="group"
                     aria-label="Markdown view"
                   >
@@ -1066,7 +1091,7 @@ export function FilesPanel({
                     <button
                       type="button"
                       aria-pressed={!renderedMarkdownPreview}
-                      title="Markdown source"
+                      title="Source"
                       onClick={() => setPreviewViewState({
                         identity: previewViewIdentity,
                         view: "source",
@@ -1100,7 +1125,7 @@ export function FilesPanel({
               {renderedMarkdownPreview ? (
                 <div
                   ref={previewMarkdownRef}
-                  className="file-preview-markdown"
+                  className={`${FILE_PREVIEW_CLASS}-markdown`}
                   role="document"
                   tabIndex={0}
                   aria-label={`Preview of ${preview.path}`}
@@ -1119,7 +1144,7 @@ export function FilesPanel({
                       view: "source",
                     })}
                     loadingFallback={(
-                      <div className="panel-loading" role="status">
+                      <div className={PANEL_LOADING_CLASS} role="status">
                         <LoadingMark label="Rendering" />
                         <span>Rendering…</span>
                       </div>
@@ -1127,7 +1152,7 @@ export function FilesPanel({
                   />
                 </div>
               ) : (
-                <pre ref={previewCodeRef} className="file-preview-code" tabIndex={0} aria-label={`Contents of ${preview.path}`}>
+                <pre ref={previewCodeRef} className={`${FILE_PREVIEW_CLASS}-code`} tabIndex={0} aria-label={`Contents of ${preview.path}`}>
                   <code className={highlightedPreviewLines ? "hljs" : undefined}>
                     {previewWindow.lines.map(({ lineNumber, text }) => {
                       const referenced = selectedLocation !== null
@@ -1138,7 +1163,7 @@ export function FilesPanel({
                       return (
                         <span
                           className={clsx(
-                            "file-preview-line",
+                            `${FILE_PREVIEW_CLASS}-line`,
                             referenced && "is-referenced",
                           )}
                           data-source-line={lineNumber}
@@ -1152,7 +1177,7 @@ export function FilesPanel({
                             ? `${workspaceFileLocationLabel(selectedLocation)} in ${preview.path}`
                             : undefined}
                         >
-                          <span className="file-preview-line-number" aria-hidden="true">{lineNumber}</span>
+                          <span className={`${FILE_PREVIEW_CLASS}-line-number`} aria-hidden="true">{lineNumber}</span>
                           {highlightedLine !== undefined
                             ? (
                                 <span
@@ -1169,23 +1194,23 @@ export function FilesPanel({
                 </pre>
               )}
               {!renderedMarkdownPreview && previewWindow.lines.length < previewWindow.totalLines && (
-                <p className="panel-notice file-preview-truncated">
+                <p className={`${PANEL_NOTICE_CLASS} ${FILE_PREVIEW_TRUNCATED_CLASS}`}>
                   Lines {previewWindow.lines[0]?.lineNumber ?? 1}–{previewWindow.lines.at(-1)?.lineNumber ?? 1} / {previewWindow.totalLines}.
                 </p>
               )}
               {markdownPreviewBlockedReason && (
-                <p className="panel-notice file-preview-truncated" role="status">
+                <p className={`${PANEL_NOTICE_CLASS} ${FILE_PREVIEW_TRUNCATED_CLASS}`} role="status">
                   {markdownPreviewBlockedReason} Use Source.
                 </p>
               )}
               {preview.truncated && (
-                <p className="panel-notice file-preview-truncated">
+                <p className={`${PANEL_NOTICE_CLASS} ${FILE_PREVIEW_TRUNCATED_CLASS}`}>
                   Beginning only.
                 </p>
               )}
             </>
           ) : (
-            <div className="panel-empty">
+            <div className={PANEL_EMPTY_CLASS}>
               <FileSearch size={22} aria-hidden="true" />
               <p>Select a file.</p>
             </div>

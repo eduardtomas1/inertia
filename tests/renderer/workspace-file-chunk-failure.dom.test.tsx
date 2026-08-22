@@ -10,6 +10,10 @@ import { nativeModelSelection } from "../../src/shared/model-routing";
 import { useWorkspaceTools } from "../../src/renderer/src/hooks/useWorkspaceTools";
 import { useWorkspaceFiles } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceFiles";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
+import {
+  consumeWorkspaceFileOpenEdit,
+  markWorkspaceFileSearchEdit,
+} from "../../src/renderer/src/utils/workspaceFileReference";
 
 vi.mock(
   "../../src/renderer/src/hooks/workspace-tools/openWorkspaceEntry",
@@ -159,6 +163,12 @@ describe("workspace file action chunk failures", () => {
     }));
 
     act(() => active.result.current.openTurnFile("src/App.java"));
+    markWorkspaceFileSearchEdit(alpha.project.id, alpha.conversation.id);
+    expect(consumeWorkspaceFileOpenEdit(
+      alpha.project.id,
+      alpha.conversation.id,
+      "src/App.java",
+    )).toBe(true);
     await waitFor(() => {
       expect(activeError).toHaveBeenCalledWith(
         "File open failed.",

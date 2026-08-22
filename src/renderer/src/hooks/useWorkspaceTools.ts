@@ -7,7 +7,10 @@ import type {
 } from "@shared/contracts";
 import type { WorkspacePanelTab } from "../components/WorkspacePanel";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
-import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
+import {
+  beginWorkspaceFileOpen,
+  type WorkspaceFileLocation,
+} from "../utils/workspaceFileReference";
 import { useTurnArtifacts } from "./workspace-tools/useTurnArtifacts";
 import { useWorkspaceFiles } from "./workspace-tools/useWorkspaceFiles";
 import { useWorkspaceGit } from "./workspace-tools/useWorkspaceGit";
@@ -82,6 +85,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
   ): void => {
     const projectId = options.project?.id;
     if (!projectId) return;
+    beginWorkspaceFileOpen(projectId, options.conversation?.id, path);
     void import("./workspace-tools/openWorkspaceEntry").then(
       ({ openWorkspaceFile }) => openWorkspaceFile([
         path,

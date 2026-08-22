@@ -1,6 +1,49 @@
 const sourceLocationSuffix = /:([1-9]\d{0,8})(?::([1-9]\d{0,8}))?(?:-([1-9]\d{0,8})(?::([1-9]\d{0,8}))?)?$/u;
 const sourceLocationFragment = /^#L([1-9]\d{0,8})(?:C([1-9]\d{0,8}))?(?:-L?([1-9]\d{0,8})(?:C([1-9]\d{0,8}))?)?$/iu;
 
+const workspaceFileSearchEdits = new Map<string, [number, string, number]>();
+
+function workspaceFileSearchEdit(
+  projectId: string,
+  conversationId?: string,
+): [number, string, number] {
+  const key = `${projectId}\0${conversationId ?? ""}`;
+  let state = workspaceFileSearchEdits.get(key);
+  if (!state) {
+    state = [0, "", 0];
+    workspaceFileSearchEdits.set(key, state);
+  }
+  return state;
+}
+
+export function markWorkspaceFileSearchEdit(
+  projectId: string,
+  conversationId?: string,
+): void {
+  workspaceFileSearchEdit(projectId, conversationId)[0] += 1;
+}
+
+export function beginWorkspaceFileOpen(
+  projectId: string,
+  conversationId: string | undefined,
+  path: string,
+): void {
+  const state = workspaceFileSearchEdit(projectId, conversationId);
+  state[1] = path;
+  state[2] = state[0];
+}
+
+export function consumeWorkspaceFileOpenEdit(
+  projectId: string,
+  conversationId: string | undefined,
+  path: string | null,
+): boolean {
+  const state = workspaceFileSearchEdit(projectId, conversationId);
+  if (state[1] !== path) return false;
+  state[1] = "";
+  return state[0] !== state[2];
+}
+
 export interface WorkspaceFileLocation {
   startLine: number;
   startColumn?: number;

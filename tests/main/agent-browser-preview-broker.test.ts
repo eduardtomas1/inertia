@@ -17,6 +17,7 @@ const electronState = vi.hoisted(() => ({
       goBack: ReturnType<typeof vi.fn>;
     };
     emit(name: string, ...args: unknown[]): void;
+    insertedText: string[];
     sentInputs: Array<Record<string, unknown>>;
     setTitle(title: string): void;
   }>,
@@ -138,10 +139,13 @@ vi.mock("electron", () => {
 });
 
 const pageTools = vi.hoisted(() => ({
+  agentPageActivationBlocked: vi.fn(async () => false),
   locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({
     found: true, blocked: false, disabled: false, editable: true,
     label: "Run checks", x: 42, y: 28,
   })),
+  maskAgentPageSecrets: vi.fn(async () => undefined),
+  restoreAgentPageSecrets: vi.fn(async () => undefined),
   semanticPageSnapshot: vi.fn(async () => JSON.stringify({ title: "Local app", elements: [] })),
   showAgentPageCursor: vi.fn(async () => undefined),
 }));
@@ -255,6 +259,8 @@ describe("agent-owned native Browser", () => {
       ok: true,
       image: { mimeType: "image/png", data: Buffer.from("bounded-png").toString("base64") },
     });
+    expect(pageTools.maskAgentPageSecrets).toHaveBeenCalled();
+    expect(pageTools.restoreAgentPageSecrets).toHaveBeenCalled();
     await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
       .resolves.toMatchObject({ ok: true });
     expect(pageTools.showAgentPageCursor).toHaveBeenCalledWith(
@@ -330,6 +336,61 @@ describe("agent-owned native Browser", () => {
     contents.emit("did-stop-loading");
     await expect(press).resolves.toMatchObject({ ok: true });
     await expect(queued).resolves.toMatchObject({ ok: true });
+  });
+
+  it("holds queued work until type-triggered main-frame navigation settles", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/form",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    const typing = broker.perform(conversationId, {
+      action: "type",
+      ref: "e1",
+      text: "navigate",
+      replace: true,
+    });
+    await vi.waitFor(() => expect(contents.insertedText).toContain("navigate"));
+    contents.emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: false,
+      url: "http://127.0.0.1:3000/results",
+    });
+    let typeSettled = false;
+    let queuedSettled = false;
+    void typing.finally(() => { typeSettled = true; });
+    const queued = broker.perform(conversationId, { action: "tabs" })
+      .finally(() => { queuedSettled = true; });
+    await Promise.resolve();
+    expect(typeSettled).toBe(false);
+    expect(queuedSettled).toBe(false);
+
+    contents.emit("did-stop-loading");
+    await expect(typing).resolves.toMatchObject({ ok: true });
+    await expect(queued).resolves.toMatchObject({ ok: true });
+  });
+
+  it("blocks activation keys while a file input owns focus", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/upload",
+    });
+    pageTools.agentPageActivationBlocked.mockResolvedValueOnce(true);
+    const contents = electronState.contents[contentsOffset]!;
+
+    await expect(broker.perform(conversationId, { action: "press", key: "Enter" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "invalid",
+        message: "File inputs cannot be activated by the Browser agent.",
+      });
+    expect(contents.sentInputs).toEqual([]);
   });
 
   it("omits page-controlled tab metadata from provider-visible state", async () => {

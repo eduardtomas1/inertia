@@ -145,11 +145,29 @@ async function createPreviewServer(): Promise<{
       setTimeout(() => {
         response.writeHead(200, {
           "Content-Type": "text/html",
-          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
         });
         response.end(
           "<!doctype html><title>Agent browser key destination</title>"
-          + "<h1>Keyboard navigation settled</h1>",
+          + "<h1>Keyboard navigation settled</h1>"
+          + "<label>Type destination <input name='type-query' aria-label='Type destination'></label>"
+          + "<script>document.querySelector('[name=type-query]').addEventListener('input',event=>{"
+          + "location.href='/agent-browser-type-destination?query='"
+          + "+encodeURIComponent(event.currentTarget.value)})</script>",
+        );
+      }, 450);
+      return;
+    }
+    if (request.url?.startsWith("/agent-browser-type-destination")) {
+      setTimeout(() => {
+        response.writeHead(200, {
+          "Content-Type": "text/html",
+          "Content-Security-Policy": "default-src 'none'",
+        });
+        response.end(
+          "<!doctype html><title>Agent browser type destination</title>"
+          + "<h1>Typing navigation settled</h1>"
+          + "<label>Private upload <input type='file' aria-label='Private upload'></label>",
         );
       }, 450);
       return;

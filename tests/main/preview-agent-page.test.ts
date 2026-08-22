@@ -3,7 +3,10 @@ import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  agentPageActivationBlocked,
   locateAgentPageRef,
+  maskAgentPageSecrets,
+  restoreAgentPageSecrets,
   semanticPageSnapshot,
   serializeAgentPageSnapshot,
 } from "../../src/main/preview-agent-page";
@@ -104,6 +107,15 @@ describe("agent browser semantic snapshots", () => {
     };
     const focus = vi.fn(() => { document.activeElement = input; });
     const select = vi.fn();
+    const inlineStyle = new Map<string, { priority: string; value: string }>();
+    const style = {
+      getPropertyPriority: (name: string) => inlineStyle.get(name)?.priority ?? "",
+      getPropertyValue: (name: string) => inlineStyle.get(name)?.value ?? "",
+      removeProperty: (name: string) => { inlineStyle.delete(name); },
+      setProperty: (name: string, value: string, priority = "") => {
+        inlineStyle.set(name, { priority, value });
+      },
+    };
     const input = {
       tagName: "INPUT",
       type: "password",
@@ -113,6 +125,7 @@ describe("agent browser semantic snapshots", () => {
       labels: [{ innerText: secret }],
       innerText: "",
       isConnected: true,
+      style,
       getAttribute: (name: string) => ["aria-label", "role"].includes(name)
         ? input.value
         : null,
@@ -153,6 +166,7 @@ describe("agent browser semantic snapshots", () => {
       innerHeight: 800,
       scrollX: 0,
       scrollY: 0,
+      requestAnimationFrame: (callback: () => void) => { callback(); return 1; },
       getComputedStyle: () => ({
         visibility: "visible",
         display: "block",
@@ -228,6 +242,11 @@ describe("agent browser semantic snapshots", () => {
     mirror.innerText = changedSecret;
     const editedReplacementSnapshot = await semanticPageSnapshot(contents as never);
     expect(editedReplacementSnapshot).not.toContain(changedSecret);
+    await maskAgentPageSecrets(contents as never);
+    expect(style.getPropertyValue("-webkit-text-security")).toBe("disc");
+    expect(style.getPropertyPriority("-webkit-text-security")).toBe("important");
+    await restoreAgentPageSecrets(contents as never);
+    expect(style.getPropertyValue("-webkit-text-security")).toBe("");
   });
 
   it("includes every valid contenteditable form in semantic refs", async () => {
@@ -349,7 +368,7 @@ describe("agent browser semantic snapshots", () => {
       document: {
         title: "Upload",
         body: { innerText: "Upload private file" },
-        activeElement: null,
+        activeElement: input,
         querySelectorAll: () => [input],
         elementFromPoint: () => input,
       },
@@ -373,7 +392,9 @@ describe("agent browser semantic snapshots", () => {
       elements: unknown[];
     };
     expect(excluded.elements).toEqual([]);
+    await expect(agentPageActivationBlocked(contents as never)).resolves.toBe(true);
     input.type = "text";
+    await expect(agentPageActivationBlocked(contents as never)).resolves.toBe(false);
     const actionable = JSON.parse(await semanticPageSnapshot(contents as never)) as {
       elements: Array<{ ref: string }>;
     };

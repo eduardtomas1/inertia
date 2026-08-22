@@ -510,6 +510,69 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     app.previewUrl,
   );
   expect(currentPreviewUrls).toContain(keyDestinationUrl);
+  const typeResult = await app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      type Command =
+        | { action: "snapshot" }
+        | { action: "type"; ref: string; text: string; replace: boolean };
+      type Result = { ok: boolean; text?: string };
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (id: string, command: Command) => Promise<Result>;
+      };
+      const snapshot = await runtime.agentBrowser(conversationId, { action: "snapshot" });
+      if (!snapshot.ok || !snapshot.text) return { ok: false, stage: "snapshot" };
+      const parsed = JSON.parse(snapshot.text) as {
+        elements: Array<{ name: string; ref: string }>;
+      };
+      const ref = parsed.elements.find((element) => element.name === "Type destination")?.ref;
+      if (!ref) return { ok: false, stage: "ref" };
+      return await runtime.agentBrowser(conversationId, {
+        action: "type",
+        ref,
+        text: "inertia",
+        replace: true,
+      });
+    },
+    primaryConversationId,
+  );
+  expect(typeResult).toMatchObject({ ok: true });
+  const typeDestinationUrl = `${app.previewUrl}agent-browser-type-destination?query=inertia`;
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ webContents }, url) => webContents.getAllWebContents().some(
+      (contents) => contents.getURL() === url
+        && contents.getTitle() === "Agent browser type destination",
+    ),
+    typeDestinationUrl,
+  )).toBe(true);
+  expect(await app.electronApp.evaluate(
+    async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find(
+        (candidate) => candidate.getURL() === url,
+      );
+      return await contents?.executeJavaScript(`(() => {
+        const input = document.querySelector("input[type='file']");
+        if (!(input instanceof HTMLInputElement)) return false;
+        input.focus();
+        return document.activeElement === input;
+      })()`);
+    },
+    typeDestinationUrl,
+  )).toBe(true);
+  await expect(app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          id: string,
+          command: { action: "press"; key: "Enter" },
+        ) => Promise<{ code?: string; ok: boolean }>;
+      };
+      return await runtime.agentBrowser(conversationId, {
+        action: "press",
+        key: "Enter",
+      });
+    },
+    primaryConversationId,
+  )).resolves.toMatchObject({ ok: false, code: "invalid" });
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
   await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
   await testInfo.attach("inertia-browser-pages", {

@@ -386,6 +386,70 @@ export async function locateAgentPageRef(
   return target(value);
 }
 
+export async function agentPageActivationBlocked(contents: WebContents): Promise<boolean> {
+  const value = await execute(contents, `(() => {
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    return active?.tagName === "INPUT"
+      && String(active.type || "").toLowerCase() === "file";
+  })()`);
+  return value === true;
+}
+
+export async function maskAgentPageSecrets(contents: WebContents): Promise<void> {
+  await execute(contents, `(async () => {
+    const state = globalThis.__inertiaAgentBrowser;
+    if (!state) return;
+    const passwordNodes = state.passwordNodes ??= new WeakSet();
+    const passwordValues = state.passwordValues ??= new Set();
+    for (const input of document.querySelectorAll?.("input") || []) {
+      const value = String(input.value ?? "").replace(/\\s+/gu, " ").trim();
+      if (String(input.type || "").toLowerCase() === "password"
+        || (value && passwordValues.has(value))) passwordNodes.add(input);
+    }
+    const masks = [];
+    for (const input of document.querySelectorAll?.("input") || []) {
+      if (!passwordNodes.has(input)) continue;
+      masks.push({
+        input,
+        security: input.style.getPropertyValue("-webkit-text-security"),
+        securityPriority: input.style.getPropertyPriority("-webkit-text-security"),
+        caret: input.style.getPropertyValue("caret-color"),
+        caretPriority: input.style.getPropertyPriority("caret-color"),
+      });
+      input.style.setProperty("-webkit-text-security", "disc", "important");
+      input.style.setProperty("caret-color", "transparent", "important");
+    }
+    state.screenshotMasks = masks;
+    if (masks.length > 0) {
+      await new Promise((resolve) => requestAnimationFrame(
+        () => requestAnimationFrame(resolve),
+      ));
+    }
+  })()`);
+}
+
+export async function restoreAgentPageSecrets(contents: WebContents): Promise<void> {
+  await execute(contents, `(() => {
+    const state = globalThis.__inertiaAgentBrowser;
+    for (const mask of state?.screenshotMasks || []) {
+      if (mask.security) {
+        mask.input.style.setProperty(
+          "-webkit-text-security", mask.security, mask.securityPriority,
+        );
+      } else {
+        mask.input.style.removeProperty("-webkit-text-security");
+      }
+      if (mask.caret) {
+        mask.input.style.setProperty("caret-color", mask.caret, mask.caretPriority);
+      } else {
+        mask.input.style.removeProperty("caret-color");
+      }
+    }
+    if (state) state.screenshotMasks = [];
+  })()`);
+}
+
 export async function showAgentPageCursor(
   contents: WebContents,
   x: number,

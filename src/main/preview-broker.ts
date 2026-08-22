@@ -24,9 +24,8 @@ import {
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
-  locateAgentPageRef,
-  semanticPageSnapshot,
-  showAgentPageCursor,
+  agentPageActivationBlocked, locateAgentPageRef, maskAgentPageSecrets,
+  restoreAgentPageSecrets, semanticPageSnapshot, showAgentPageCursor,
 } from "./preview-agent-page.js";
 
 type PreviewOwner = "primary" | "secondary";
@@ -790,11 +789,17 @@ export class PreviewBroker {
     const tabId = tab.id;
     const contents = tab.view.webContents;
     if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
-    let image = await this.#rendererOperation(
-      contents,
-      () => contents.capturePage(),
-      { signal },
-    );
+    await this.#rendererOperation(contents, () => maskAgentPageSecrets(contents), { signal });
+    let image: NativeImage;
+    try {
+      image = await this.#rendererOperation(
+        contents,
+        () => contents.capturePage(),
+        { signal },
+      );
+    } finally {
+      if (!contents.isDestroyed()) await this.#rendererOperation(contents, () => restoreAgentPageSecrets(contents));
+    }
     stopForAbort(signal);
     if (slot.tabs.get(tabId) !== tab || contents.isDestroyed()) {
       return failure("not-found", "The captured Browser tab was closed before its screenshot completed.");
@@ -984,7 +989,7 @@ export class PreviewBroker {
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     if (!revalidated.editable) return failure("invalid", "That page element does not accept text input.");
     stopForAbort(signal);
-    await this.#rendererOperation(contents, () => contents.insertText(text), { signal });
+    await this.#sendInputAndWait(contents, () => contents.insertText(text), signal);
     stopForAbort(signal);
     this.#record(ownerId, slot, "type", `Agent typed in ${located.label || ref}`, { x, y });
     return this.#success(slot, JSON.stringify({ typed: ref, characters: text.length }));
@@ -998,6 +1003,13 @@ export class PreviewBroker {
   ): Promise<AgentBrowserResult> {
     stopForAbort(signal);
     const contents = this.#active(slot).view.webContents;
+    if ((key === "Enter" || key === "Space") && await this.#rendererOperation(
+      contents,
+      () => agentPageActivationBlocked(contents),
+      { signal },
+    )) {
+      return failure("invalid", "File inputs cannot be activated by the Browser agent.");
+    }
     const keyCode = key === "Space" ? " " : key;
     await this.#sendInputAndWait(contents, () => {
       contents.sendInputEvent({ type: "keyDown", keyCode });
@@ -1098,15 +1110,19 @@ export class PreviewBroker {
 
   async #sendInputAndWait(
     contents: PreviewTab["view"]["webContents"],
-    dispatch: () => void,
+    dispatch: () => void | Promise<void>,
     signal?: AbortSignal,
   ): Promise<void> {
     stopForAbort(signal);
     await new Promise<void>((resolve, reject) => {
       let settled = false;
+      let dispatchSettled = false;
       let navigationStarted = false;
+      let navigationSettled = false;
+      let graceElapsed = false;
+      let grace: ReturnType<typeof setTimeout> | undefined;
       const cleanup = (): void => {
-        clearTimeout(grace);
+        if (grace) clearTimeout(grace);
         clearTimeout(timeout);
         contents.removeListener("did-start-navigation", onStarted);
         contents.removeListener("did-navigate-in-page", onInPage);
@@ -1123,6 +1139,18 @@ export class PreviewBroker {
         if (error) reject(error);
         else resolve();
       };
+      const completeIfReady = (): void => {
+        if (!dispatchSettled) return;
+        if (navigationStarted ? navigationSettled : graceElapsed) finish();
+      };
+      const armGrace = (): void => {
+        if (settled || navigationStarted || grace) return;
+        grace = setTimeout(() => {
+          graceElapsed = true;
+          completeIfReady();
+        }, PREVIEW_INPUT_NAVIGATION_GRACE_MS);
+        grace.unref();
+      };
       const onStarted = (
         details: { isMainFrame?: boolean; isSameDocument?: boolean; url?: string },
         legacyUrl?: string,
@@ -1136,29 +1164,44 @@ export class PreviewBroker {
         const url = typeof details.url === "string" ? details.url : legacyUrl ?? "";
         try {
           if (previewNavigationTarget(url).kind !== "embed") {
-            finish();
+            navigationStarted = true;
+            navigationSettled = true;
+            if (grace) clearTimeout(grace);
+            completeIfReady();
             return;
           }
         } catch {
-          finish();
+          navigationStarted = true;
+          navigationSettled = true;
+          if (grace) clearTimeout(grace);
+          completeIfReady();
           return;
         }
         navigationStarted = true;
-        clearTimeout(grace);
+        if (grace) clearTimeout(grace);
         const sameDocument = typeof details.isSameDocument === "boolean"
           ? details.isSameDocument
           : legacyInPlace === true;
-        if (sameDocument && contents.getURL() === url) finish();
+        if (sameDocument && contents.getURL() === url) {
+          navigationSettled = true;
+          completeIfReady();
+        }
       };
       const onInPage = (
         _event: unknown,
         _url: string,
         isMainFrame: boolean,
       ): void => {
-        if (navigationStarted && isMainFrame) finish();
+        if (navigationStarted && isMainFrame) {
+          navigationSettled = true;
+          completeIfReady();
+        }
       };
       const onStopped = (): void => {
-        if (navigationStarted) finish();
+        if (navigationStarted) {
+          navigationSettled = true;
+          completeIfReady();
+        }
       };
       const onFailed = (
         _event: unknown,
@@ -1175,8 +1218,6 @@ export class PreviewBroker {
         new Error("The active Browser tab was closed after the input."),
       );
       const onAbort = (): void => finish(new Error("browser-action-cancelled"), true);
-      const grace = setTimeout(() => finish(), PREVIEW_INPUT_NAVIGATION_GRACE_MS);
-      grace.unref();
       const timeout = setTimeout(() => finish(
         new Error("The Browser page did not settle after the input."),
         true,
@@ -1193,7 +1234,13 @@ export class PreviewBroker {
           finish(new Error("The active Browser tab was closed before the input."));
           return;
         }
-        dispatch();
+        void Promise.resolve(dispatch()).then(() => {
+          dispatchSettled = true;
+          if (navigationStarted) completeIfReady();
+          else armGrace();
+        }, (error: unknown) => {
+          finish(error instanceof Error ? error : new Error("The Browser input failed."));
+        });
       } catch (error) {
         finish(error instanceof Error ? error : new Error("The Browser input failed."));
       }

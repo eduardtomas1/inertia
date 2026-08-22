@@ -766,9 +766,9 @@ function registerIpcHandlers(): void {
     return previewBroker.navigate(args[0]);
   });
 
-  ipcMain.handle(IPC.previewCommand, (event, ...args) => {
+  ipcMain.handle(IPC.previewCommand, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    return previewBroker.command(args[0]);
+    return await previewBroker.command(args[0]);
   });
 
   ipcMain.handle(IPC.previewTab, async (event, ...args) => {

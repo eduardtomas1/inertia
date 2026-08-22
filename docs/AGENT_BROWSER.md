@@ -35,10 +35,11 @@ The provider-neutral bridge exposes five tools:
 - `inertia_browser_tabs` lists, opens, activates, or closes browser pages.
 
 Semantic snapshots include at most 200 visible interactive elements, 12,000
-characters of normalized visible text, current viewport data, and a total
-64,000-character process-boundary limit. Element references are generated in
-an isolated JavaScript world and become invalid when their DOM node disappears
-or is no longer visible.
+characters of normalized visible text, current viewport data, and a total 32
+KiB UTF-8 process-boundary limit. Oversized snapshots are structurally reduced
+and remain valid JSON. Element references are generated in an isolated
+JavaScript world and become invalid when their DOM node disappears or is no
+longer visible.
 
 Screenshots are resized to at most 1600 by 1000 pixels and rejected above 4
 MiB of decoded PNG data. Inertia does not write them to the repository,

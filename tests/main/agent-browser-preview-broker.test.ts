@@ -316,6 +316,89 @@ describe("agent-owned native Browser", () => {
     expect(pageTools.showAgentPageCursor).toHaveBeenCalledTimes(cursorCalls);
   });
 
+  it("serializes renderer navigation and history commands with agent actions", async () => {
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    let snapshotStarted = (): void => undefined;
+    let releaseSnapshot = (): void => undefined;
+    const started = new Promise<void>((resolve) => { snapshotStarted = resolve; });
+    const blocked = new Promise<void>((resolve) => { releaseSnapshot = resolve; });
+    pageTools.semanticPageSnapshot.mockImplementationOnce(async () => {
+      snapshotStarted();
+      await blocked;
+      return JSON.stringify({ title: "Local app", elements: [] });
+    });
+
+    const snapshotPromise = broker.perform(conversationId, { action: "snapshot" });
+    await started;
+    let navigationSettled = false;
+    const navigationPromise = broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/settings",
+    }).finally(() => { navigationSettled = true; });
+    await Promise.resolve();
+    expect(navigationSettled).toBe(false);
+
+    releaseSnapshot();
+    await expect(snapshotPromise).resolves.toMatchObject({ ok: true });
+    await expect(navigationPromise).resolves.toMatchObject({
+      url: "http://127.0.0.1:3000/settings",
+    });
+
+    let secondStarted = (): void => undefined;
+    let releaseSecond = (): void => undefined;
+    const secondStart = new Promise<void>((resolve) => { secondStarted = resolve; });
+    const secondBlock = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    pageTools.semanticPageSnapshot.mockImplementationOnce(async () => {
+      secondStarted();
+      await secondBlock;
+      return JSON.stringify({ title: "settings", elements: [] });
+    });
+    const secondSnapshot = broker.perform(conversationId, { action: "snapshot" });
+    await secondStart;
+    let commandSettled = false;
+    const commandPromise = broker.command({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "reload",
+    }).finally(() => { commandSettled = true; });
+    await Promise.resolve();
+    expect(commandSettled).toBe(false);
+    releaseSecond();
+    await expect(secondSnapshot).resolves.toMatchObject({ ok: true });
+    await expect(commandPromise).resolves.toMatchObject({
+      url: "http://127.0.0.1:3000/settings",
+    });
+  });
+
+  it("fails closed when a screenshot capture has no PNG data", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    electronState.contents[contentsOffset]!.capturePage
+      .mockImplementationOnce(async () => ({
+        getSize: () => ({ width: 0, height: 0 }),
+        resize() { return this; },
+        toPNG: () => Buffer.alloc(0),
+      }));
+
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "unavailable",
+        message: "The active Browser page had no drawable screenshot.",
+      });
+  });
+
   it("keeps maximum tab state valid within the broker text boundary", async () => {
     const { broker } = harness();
     const longPath = "x".repeat(3_900);

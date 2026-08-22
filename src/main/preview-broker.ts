@@ -149,11 +149,16 @@ export class PreviewBroker {
       return this.#state(request.ownerId, request.contextId);
     }
     const slot = this.#ensure(request.ownerId, request.contextId);
-    await this.#active(slot).view.webContents.loadURL(target.url.toString());
-    return this.#state(request.ownerId, request.contextId);
+    return await this.#serializeSlotAction(slot, async () => {
+      if (this.#ownedSlot(request.ownerId, request.contextId) !== slot) {
+        return this.#state(request.ownerId, request.contextId);
+      }
+      await this.#active(slot).view.webContents.loadURL(target.url.toString());
+      return this.#state(request.ownerId, request.contextId);
+    });
   }
 
-  command(value: unknown): PreviewState {
+  async command(value: unknown): Promise<PreviewState> {
     if (!value || typeof value !== "object") {
       throw new Error("Invalid preview request");
     }
@@ -165,23 +170,28 @@ export class PreviewBroker {
     const ownerId = previewOwner(request.ownerId);
     const contextId = previewContext(request.contextId);
     const slot = this.#ownedSlot(ownerId, contextId);
-    const contents = slot ? this.#active(slot).view.webContents : undefined;
     const action = request.action;
     if (
-      !contents
+      !slot
       || (action !== "back" && action !== "forward" && action !== "reload")
     ) return this.#state(ownerId, contextId);
-    if (action === "back" && contents.navigationHistory.canGoBack()) {
-      contents.navigationHistory.goBack();
-    } else if (
-      action === "forward"
-      && contents.navigationHistory.canGoForward()
-    ) {
-      contents.navigationHistory.goForward();
-    } else if (action === "reload") {
-      contents.reload();
-    }
-    return this.#state(ownerId, contextId);
+    return await this.#serializeSlotAction(slot, () => {
+      if (this.#ownedSlot(ownerId, contextId) !== slot) {
+        return this.#state(ownerId, contextId);
+      }
+      const contents = this.#active(slot).view.webContents;
+      if (action === "back" && contents.navigationHistory.canGoBack()) {
+        contents.navigationHistory.goBack();
+      } else if (
+        action === "forward"
+        && contents.navigationHistory.canGoForward()
+      ) {
+        contents.navigationHistory.goForward();
+      } else if (action === "reload") {
+        contents.reload();
+      }
+      return this.#state(ownerId, contextId);
+    });
   }
 
   async tab(value: unknown): Promise<PreviewState> {
@@ -661,6 +671,9 @@ export class PreviewBroker {
     }
     image = this.#boundedImage(image);
     const png = image.toPNG();
+    if (png.byteLength === 0) {
+      return failure("unavailable", "The active Browser page had no drawable screenshot.");
+    }
     if (png.byteLength > MAX_AGENT_BROWSER_SCREENSHOT_BYTES) {
       return failure("too-large", "The Browser screenshot exceeded its bounded image size.");
     }

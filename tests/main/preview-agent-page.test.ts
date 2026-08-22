@@ -60,7 +60,8 @@ describe("agent browser semantic snapshots", () => {
       isConnected: true,
       contains: (candidate: unknown) => candidate === decoyElement,
     };
-    const document = { activeElement: targetElement };
+    const nestedElement = { isConnected: true };
+    const document: { activeElement: unknown } = { activeElement: targetElement };
     const context = {
       document,
       __inertiaAgentBrowser: { refs: new Map([["e1", targetElement]]) },
@@ -73,6 +74,9 @@ describe("agent browser semantic snapshots", () => {
     };
 
     await expect(agentPageRefHasFocus(contents as never, "e1")).resolves.toBe(true);
+    document.activeElement = nestedElement;
+    targetElement.contains = (candidate: unknown) => candidate === nestedElement;
+    await expect(agentPageRefHasFocus(contents as never, "e1")).resolves.toBe(false);
     document.activeElement = decoyElement;
     await expect(agentPageRefHasFocus(contents as never, "e1")).resolves.toBe(false);
     await expect(agentPageRefHasFocus(contents as never, "missing")).resolves.toBe(false);

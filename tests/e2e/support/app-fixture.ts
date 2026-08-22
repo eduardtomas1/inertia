@@ -233,6 +233,19 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-declarative-closed-privacy") {
+      const secret = "declarative-closed-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Closed declarative privacy probe</title><body>"
+        + "<div><template shadowrootmode='closed'><style>p{font:20px sans-serif}</style>"
+        + `<p>${secret}</p></template></div>`,
+      );
+      return;
+    }
     if (request.url === "/agent-browser-declarative-shadow-frame") {
       const secret = "declarative-shadow-password-sentinel";
       response.writeHead(200, {
@@ -293,6 +306,8 @@ async function createPreviewServer(): Promise<{
           + "<h1>Typing navigation settled</h1>"
           + "<label>Microtask focus target <input aria-label='Microtask focus target'></label>"
           + "<label>Microtask focus decoy <input aria-label='Microtask focus decoy'></label>"
+          + "<div contenteditable='true' aria-label='Nested focus target'>"
+          + "<input aria-label='Nested focus decoy'></div>"
           + "<label>Focus navigation <input aria-label='Focus navigation'></label>"
           + "<label>Private upload <input type='file' aria-label='Private upload'></label>"
           + "<button type='button'>Choose through page handler</button>"
@@ -301,6 +316,9 @@ async function createPreviewServer(): Promise<{
           + "document.querySelector('[aria-label=\"Microtask focus target\"]')"
           + ".addEventListener('focus',()=>queueMicrotask(()=>document.querySelector("
           + "'[aria-label=\"Microtask focus decoy\"]')?.focus()));"
+          + "document.querySelector('[aria-label=\"Nested focus target\"]')"
+          + ".addEventListener('focus',()=>queueMicrotask(()=>document.querySelector("
+          + "'[aria-label=\"Nested focus decoy\"]')?.focus()));"
           + "document.querySelector('button').addEventListener('click',()=>{"
           + "setTimeout(()=>{const input=document.querySelector('input[type=file]');"
           + "window.__delayedPickerInvoked=true;"

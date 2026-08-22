@@ -110,7 +110,9 @@ vi.mock("electron", () => {
       emitMessage: (method: string, params: Record<string, unknown>): void => {
         for (const handler of this.debuggerMessageHandlers) handler({}, method, params);
       },
-      sendCommand: vi.fn(async () => undefined),
+      sendCommand: vi.fn(async (method: string) => method === "DOM.performSearch"
+        ? { searchId: "fake-boundary-search", resultCount: 3 }
+        : undefined),
     };
 
     constructor() {
@@ -148,7 +150,12 @@ vi.mock("electron", () => {
     getURL(): string { return this.url; }
     setURL(url: string): void { this.url = url; }
     getTitle(): string { return this.title; }
-    async executeJavaScriptInIsolatedWorld(): Promise<boolean> { return false; }
+    async executeJavaScriptInIsolatedWorld(
+      _worldId: number,
+      scripts: Array<{ code: string }>,
+    ): Promise<boolean | number> {
+      return scripts[0]?.code.includes("__inertia_boundary_count__") ? 3 : false;
+    }
     setTitle(title: string): void { this.title = title; }
     isLoading(): boolean { return false; }
     isDestroyed(): boolean { return this.destroyed; }
@@ -182,6 +189,7 @@ vi.mock("electron", () => {
 });
 
 const pageTools = vi.hoisted(() => ({
+  AGENT_BROWSER_WORLD_ID: 999,
   agentPageActivationBlocked: vi.fn(async () => false),
   agentPageHasSensitiveEvidence: vi.fn(async () => false),
   agentPageRefHasFocus: vi.fn(async () => true),

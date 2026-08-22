@@ -224,9 +224,13 @@ export async function expectMicrotaskFocusTheftBlocked(
         elements: Array<{ name: string; ref: string }>;
       }).elements;
       const ref = elements.find((element) => element.name === "Microtask focus target")?.ref;
-      if (!ref) return { names: elements.map((element) => element.name), snapshot };
+      const nestedRef = elements.find((element) => element.name === "Nested focus target")?.ref;
+      if (!ref || !nestedRef) return { names: elements.map((element) => element.name), snapshot };
       const typing = await runtime.agentBrowser(request.conversationId, {
         action: "type", ref, text: "must not reach either field", replace: true,
+      });
+      const nestedTyping = await runtime.agentBrowser(request.conversationId, {
+        action: "type", ref: nestedRef, text: "must not reach the nested field", replace: true,
       });
       const contents = webContents.getAllWebContents().find(
         (candidate) => candidate.getURL() === request.url,
@@ -234,14 +238,16 @@ export async function expectMicrotaskFocusTheftBlocked(
       const state = await contents?.executeJavaScript(`(() => ({
         target: document.querySelector('[aria-label="Microtask focus target"]')?.value,
         decoy: document.querySelector('[aria-label="Microtask focus decoy"]')?.value,
+        nestedDecoy: document.querySelector('[aria-label="Nested focus decoy"]')?.value,
         focused: document.activeElement?.getAttribute('aria-label')
       }))()`);
-      return { state, typing };
+      return { nestedTyping, state, typing };
     },
     { conversationId, url },
   );
   expect(evidence).toMatchObject({
     typing: { ok: false, code: "not-found" },
-    state: { target: "", decoy: "", focused: "Microtask focus decoy" },
+    nestedTyping: { ok: false, code: "not-found" },
+    state: { target: "", decoy: "", nestedDecoy: "", focused: "Nested focus decoy" },
   });
 }

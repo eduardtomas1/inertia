@@ -28,7 +28,9 @@ describe("agent Browser nested evidence boundary", () => {
   it("tracks nested boundaries incrementally without serializing the page DOM", async () => {
     const debuggerEvents = new EventEmitter();
     let attached = false;
-    const sendCommand = vi.fn(async () => undefined);
+    const sendCommand = vi.fn(async (method: string) => method === "DOM.performSearch"
+      ? { searchId: "boundary-search", resultCount: 3 }
+      : undefined);
     const contents = {
       debugger: Object.assign(debuggerEvents, {
         attach: vi.fn(() => { attached = true; }),
@@ -38,6 +40,7 @@ describe("agent Browser nested evidence boundary", () => {
       }),
       getURL: () => "http://127.0.0.1:3000/",
       loadURL: vi.fn(async () => undefined),
+      executeJavaScriptInIsolatedWorld: vi.fn(async () => 3),
       navigationHistory: {
         getActiveIndex: () => 0,
         getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/" }),
@@ -48,6 +51,13 @@ describe("agent Browser nested evidence boundary", () => {
     expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(false);
     expect(sendCommand).not.toHaveBeenCalledWith("Page.getFrameTree");
     expect(sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
+    expect(sendCommand).toHaveBeenCalledWith("DOM.performSearch", {
+      query: "*",
+      includeUserAgentShadowDOM: false,
+    });
+    expect(sendCommand).toHaveBeenCalledWith("DOM.discardSearchResults", {
+      searchId: "boundary-search",
+    });
 
     debuggerEvents.emit("message", {}, "Page.frameAttached", {
       frameId: "child",
@@ -64,6 +74,35 @@ describe("agent Browser nested evidence boundary", () => {
       root: { shadowRootType: "closed" },
     });
     expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(true);
+  });
+
+  it("fails closed when a bounded privileged search sees a closed shadow subtree", async () => {
+    const debuggerEvents = new EventEmitter();
+    let attached = false;
+    const sendCommand = vi.fn(async (method: string) => method === "DOM.performSearch"
+      ? { searchId: "closed-root-search", resultCount: 4 }
+      : undefined);
+    const contents = {
+      debugger: Object.assign(debuggerEvents, {
+        attach: vi.fn(() => { attached = true; }),
+        detach: vi.fn(() => { attached = false; }),
+        isAttached: vi.fn(() => attached),
+        sendCommand,
+      }),
+      getURL: () => "http://127.0.0.1:3000/closed-root",
+      loadURL: vi.fn(async () => undefined),
+      executeJavaScriptInIsolatedWorld: vi.fn(async () => 3),
+      navigationHistory: {
+        getActiveIndex: () => 0,
+        getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/closed-root" }),
+      },
+    };
+
+    await installAgentFileChooserBlock(contents as never);
+    await expect(agentPageHasUnguardedNestedContent(contents as never)).resolves.toBe(true);
+    expect(sendCommand).toHaveBeenCalledWith("DOM.discardSearchResults", {
+      searchId: "closed-root-search",
+    });
   });
 });
 

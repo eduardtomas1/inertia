@@ -599,7 +599,7 @@ export async function agentPageRefHasFocus(
     if (!element || !element.isConnected) return false;
     let active = document.activeElement;
     while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
-    return active === element || Boolean(element.contains?.(active));
+    return active === element;
   })()`);
   return value === true;
 }

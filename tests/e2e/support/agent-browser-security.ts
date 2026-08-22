@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
 
+import { AGENT_BROWSER_WORLD_ID } from "../../../src/main/preview-agent-page";
 import type { AppFixture } from "./app-fixture";
 
 export async function expectDocumentStartPrivacyGuard(
@@ -123,10 +124,10 @@ export async function expectSemanticClickBoundaries(
       if (!outerRef || !opacityRef || !ariaDisabled) {
         return { ariaDisabled, names: elements.map((element) => element.name), outerRef, opacityRef, snapshot };
       }
-      const nested = await runtime.agentBrowser(request.conversationId, { action: "click", ref: outerRef });
       const inheritedDisabled = await runtime.agentBrowser(request.conversationId, {
         action: "click", ref: ariaDisabled.ref,
       });
+      const nested = await runtime.agentBrowser(request.conversationId, { action: "click", ref: outerRef });
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === request.url);
       await contents?.executeJavaScript("document.querySelector('#opacity-parent').style.opacity='0'");
       const hidden = await runtime.agentBrowser(request.conversationId, { action: "click", ref: opacityRef });
@@ -212,14 +213,30 @@ export async function expectClosedShadowActivationBlocked(
     const interleavedEnter = await runtime.agentBrowser(request.conversationId, { action: "press", key: "Enter" });
     const interleavedClicked = await interleaveContents?.executeJavaScript("window.__lateDisabledClicked === true");
     const interleavedFocus = await interleaveContents?.executeJavaScript("document.activeElement?.id");
+    const finalPreflight = await interleaveContents?.executeJavaScript("document.querySelector('#safe-focus').focus();document.activeElement?.id", true);
+    await interleaveContents?.executeJavaScriptInIsolatedWorld(request.worldId, [{
+      code: "globalThis.__inertiaAgentBrowser.agentInputActive=true;document.activeElement?.id",
+    }], true);
+    const finalFocus = await interleaveContents?.executeJavaScript("document.querySelector('#late-disabled').focus();document.activeElement?.id", true);
+    interleaveContents?.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+    interleaveContents?.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+    await interleaveContents?.executeJavaScript("new Promise(resolve=>setTimeout(resolve,0))", true);
+    await interleaveContents?.executeJavaScriptInIsolatedWorld(request.worldId, [{
+      code: "globalThis.__inertiaAgentBrowser.agentInputActive=false;true",
+    }], true);
+    const finalInterleavedClicked = await interleaveContents?.executeJavaScript("window.__lateDisabledClicked === true");
     return {
       armed, clicked, enter, hostFocused, interleaveNavigation, interleavedClicked,
-      interleavedEnter, interleavedFocus, navigation, prepared, space,
+      finalFocus, finalInterleavedClicked, finalPreflight, interleavedEnter,
+      interleavedFocus, navigation, prepared, space,
     };
-  }, { conversationId, url });
+  }, { conversationId, url, worldId: AGENT_BROWSER_WORLD_ID });
   expect(evidence).toMatchObject({
     clicked: false,
     enter: { code: "invalid", ok: false },
+    finalFocus: "late-disabled",
+    finalInterleavedClicked: false,
+    finalPreflight: "safe-focus",
     hostFocused: true,
     interleaveNavigation: { ok: true },
     interleavedClicked: false,

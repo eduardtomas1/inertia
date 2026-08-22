@@ -857,6 +857,7 @@ describe("agent browser semantic snapshots", () => {
     };
     let clickListener: ((event: Record<string, unknown>) => void) | undefined;
     let inputListener: ((event: Record<string, unknown>) => void) | undefined;
+    let keydownListener: ((event: Record<string, unknown>) => void) | undefined;
     let nestedBoundaryListener: ((event: Record<string, unknown>) => void) | undefined;
     const document = withSemanticIterator({
       title: "Sign in",
@@ -866,6 +867,7 @@ describe("agent browser semantic snapshots", () => {
       addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
         if (name === "click") clickListener = listener;
         if (name === "input") inputListener = listener;
+        if (name === "keydown") keydownListener = listener;
         if (name === "__inertia_agent_nested_boundary__") nestedBoundaryListener = listener;
       }),
       querySelectorAll: () => [input],
@@ -918,6 +920,20 @@ describe("agent browser semantic snapshots", () => {
     });
     expect(prevented).toHaveBeenCalledOnce();
     expect(stopped).toHaveBeenCalledOnce();
+    const keyPrevented = vi.fn();
+    const keyStopped = vi.fn();
+    keydownListener?.({
+      composedPath: () => [{
+        disabled: false,
+        getAttribute: (name: string) => name === "aria-disabled" ? "true" : null,
+        matches: () => false,
+      }],
+      key: "Enter",
+      preventDefault: keyPrevented,
+      stopImmediatePropagation: keyStopped,
+    });
+    expect(keyPrevented).toHaveBeenCalledOnce();
+    expect(keyStopped).toHaveBeenCalledOnce();
     await setAgentPageInputGuard(contents as never, false);
     runInNewContext("globalThis.__inertiaAgentBrowser.passwordValues.clear()", context);
     inputListener?.({ composedPath: () => [{ tagName: "CREDENTIAL-HOST" }] });

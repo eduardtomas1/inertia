@@ -248,6 +248,21 @@ export function installPreviewAgentPrivacyGuard(): void {
     event.preventDefault();
     event.stopImmediatePropagation();
   }, true);
+  document.addEventListener("keydown", (event) => {
+    if (!state.agentInputActive
+      || !["Enter", " ", "Space", "Spacebar"].includes(event.key)) return;
+    const blocked = state.nestedContentObserved === true || event.composedPath().some((node) => {
+      const candidate = node as Partial<HTMLInputElement> | null;
+      const input = inputElement(node);
+      return input?.type.toLowerCase() === "file"
+        || candidate?.matches?.(":disabled") === true
+        || candidate?.disabled === true
+        || String(candidate?.getAttribute?.("aria-disabled") || "").toLowerCase() === "true";
+    });
+    if (!blocked) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
   const observer = new MutationObserver((records) => {
     const budget = scanBudget();
     for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {

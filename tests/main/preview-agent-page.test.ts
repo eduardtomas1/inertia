@@ -140,8 +140,8 @@ describe("agent browser semantic snapshots", () => {
       fragment = new FakeDocumentFragment();
       attachShadow(): object { return {}; }
       set innerHTML(source: string) { this.fragment.source = source; }
-      setHTML(_html: string): void {}
-      setHTMLUnsafe(_html: string): void {}
+      setHTML(source: string): void { this.fragment.source = source; }
+      setHTMLUnsafe(source: string): void { this.fragment.source = source; }
     }
     class FakeHTMLTemplateElement extends FakeElement {
       get content(): FakeDocumentFragment { return this.fragment; }
@@ -149,9 +149,13 @@ describe("agent browser semantic snapshots", () => {
     class FakeHTMLElement extends FakeElement {
       attachInternals(): object { return { shadowRoot: null }; }
     }
+    class FakeDOMImplementation {
+      createHTMLDocument(): FakeDocument { return new FakeDocument(); }
+    }
     class FakeDocument extends FakeEventTarget {
       static parseHTML(_html: string): object { return {}; }
       static parseHTMLUnsafe(_html: string): object { return {}; }
+      get implementation(): FakeDOMImplementation { return new FakeDOMImplementation(); }
       createElement(): FakeHTMLTemplateElement { return new FakeHTMLTemplateElement(); }
     }
     class FakeShadowRoot {
@@ -164,6 +168,7 @@ describe("agent browser semantic snapshots", () => {
       HTMLElement: FakeHTMLElement,
       HTMLTemplateElement: FakeHTMLTemplateElement,
       Document: FakeDocument,
+      DOMImplementation: FakeDOMImplementation,
       DocumentFragment: FakeDocumentFragment,
       ShadowRoot: FakeShadowRoot,
       EventTarget: FakeEventTarget,

@@ -262,6 +262,24 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-trusted-types-declarative-detached-privacy") {
+      const secret = "trusted-types-declarative-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; "
+          + "require-trusted-types-for 'script'; trusted-types default",
+      });
+      response.end(
+        "<!doctype html><title>Trusted Types declarative privacy probe</title><body>"
+        + "<script>trustedTypes.createPolicy('default',{createHTML:value=>"
+        + "value.replaceAll('shadowrootmode','data-shadowrootmode')});"
+        + "const host=document.createElement('div');"
+        + "host.setHTML(\"<template shadowrootmode='closed'><p>private</p></template>\");"
+        + "document.body.append(host);const mirror=document.createElement('p');"
+        + `mirror.textContent=${JSON.stringify(secret)};document.body.replaceChildren(mirror)</script>`,
+      );
+      return;
+    }
     if (request.url === "/agent-browser-declarative-shadow-frame") {
       const secret = "declarative-shadow-password-sentinel";
       response.writeHead(200, {

@@ -53,7 +53,15 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
   const createElement = typeof Document === "undefined"
     ? undefined
     : Document.prototype.createElement;
-  const setInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")?.set;
+  const getImplementation = typeof Document === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(Document.prototype, "implementation")?.get;
+  const createHTMLDocument = typeof DOMImplementation === "undefined"
+    ? undefined
+    : DOMImplementation.prototype.createHTMLDocument;
+  const parseSafeHTML = Object.getOwnPropertyDescriptor(Element.prototype, "setHTML")?.value as
+    | ((input: string, options?: unknown) => void)
+    | undefined;
   const templateContent = typeof HTMLTemplateElement === "undefined"
     ? undefined
     : Object.getOwnPropertyDescriptor(HTMLTemplateElement.prototype, "content")?.get;
@@ -62,11 +70,25 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     : DocumentFragment.prototype.querySelector;
   const mayCreateDeclarativeRoot = (value: unknown): boolean => {
     if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return true;
-    if (typeof createElement !== "function" || typeof setInnerHTML !== "function"
+    if (typeof createElement !== "function" || typeof getImplementation !== "function"
+      || typeof createHTMLDocument !== "function" || typeof parseSafeHTML !== "function"
       || typeof templateContent !== "function" || typeof querySelector !== "function") return true;
     try {
-      const template = Reflect.apply(createElement, document, ["template"]) as HTMLTemplateElement;
-      Reflect.apply(setInnerHTML, template, [value]);
+      // Parse in a fresh in-memory document with no browsing context or page
+      // CSP. Its Trusted Types state cannot invoke a page-owned default policy,
+      // while Chromium's tokenizer still decides exact start-tag attributes.
+      const implementation = Reflect.apply(getImplementation, document, []) as DOMImplementation;
+      const isolatedDocument = Reflect.apply(createHTMLDocument, implementation, [""]) as Document;
+      const template = Reflect.apply(
+        createElement,
+        isolatedDocument,
+        ["template"],
+      ) as HTMLTemplateElement;
+      Reflect.apply(parseSafeHTML, template, [value, {
+        sanitizer: {
+          elements: [{ name: "template", attributes: ["shadowrootmode"] }],
+        },
+      }]);
       const content = Reflect.apply(templateContent, template, []) as DocumentFragment;
       return Reflect.apply(querySelector, content, ["template[shadowrootmode]"]) !== null;
     } catch {

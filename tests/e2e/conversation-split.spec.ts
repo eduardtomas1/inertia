@@ -415,7 +415,6 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     local: null,
     cookie: "",
   });
-
   await primaryPreview.getByRole("button", { name: "Open browser page" }).click();
   const browserTabs = primaryPreview.locator(".preview-tabs").getByRole("tab");
   await expect(browserTabs).toHaveCount(2);
@@ -632,6 +631,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     ["agent-browser-declarative-shadow-privacy", "declarative-shadow-password-sentinel"],
     ["agent-browser-declarative-closed-privacy", "declarative-closed-password-sentinel"],
     ["agent-browser-declarative-detached-privacy", "detached-declarative-password-sentinel"],
+    ["agent-browser-trusted-types-declarative-detached-privacy", "trusted-types-declarative-password-sentinel"],
   ]) await expectDocumentStartPrivacyGuard(app, primaryConversationId, `${app.previewUrl}${path}`, secret);
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
   await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });

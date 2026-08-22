@@ -635,6 +635,41 @@ describe("message attachment ownership transfer", () => {
     expect(queue).toHaveBeenCalledOnce();
   });
 
+  it("releases authority acquired after message preparation times out", async () => {
+    vi.useFakeTimers();
+    try {
+      let settleReservation!: (acquired: boolean) => void;
+      const acquireWhenAvailable = vi.fn(() =>
+        new Promise<boolean>((resolve) => { settleReservation = resolve; }));
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+        providerTerminalResumeAcquireWhenAvailable: acquireWhenAvailable,
+      });
+      const handling = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      )({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+
+      await vi.waitFor(() => expect(acquireWhenAvailable).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
+      await rejection;
+      expect(handlerDependencies.providerTerminalResumes.release)
+        .not.toHaveBeenCalled();
+
+      settleReservation(true);
+      await vi.waitFor(() => {
+        expect(handlerDependencies.providerTerminalResumes.release)
+          .toHaveBeenCalledWith(conversationId);
+      });
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("aborts attachment resolution at the aggregate deadline", async () => {
     vi.useFakeTimers();
     try {

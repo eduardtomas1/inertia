@@ -1,8 +1,8 @@
 import type { WebContents } from "electron";
 
 import { previewNavigationTarget } from "../shared/preview-url.js";
-import { AGENT_BROWSER_WORLD_ID, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
-import { installAgentFileChooserBlock } from "./preview-agent-boundary.js";
+import { AGENT_BROWSER_WORLD_ID, agentPageActivationBlocked, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
+import { agentPageHasUnguardedNestedContent as hasUnguardedNestedContent, installAgentFileChooserBlock } from "./preview-agent-boundary.js";
 
 export {
   agentPageHasUnguardedNestedContent,
@@ -20,6 +20,15 @@ const FILE_CHOOSER_ACTIVATION_LIMIT_MS = 10_000;
 
 function stopForAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("browser-action-cancelled");
+}
+
+export async function agentPageActivationBlock(
+  contents: WebContents,
+): Promise<"disabled" | "file" | "nested" | null> {
+  const initial = await agentPageActivationBlocked(contents);
+  if (initial) return initial;
+  if (await hasUnguardedNestedContent(contents)) return "nested";
+  return await agentPageActivationBlocked(contents);
 }
 
 async function dispatchAgentPageHover(

@@ -16,12 +16,12 @@ import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
-  agentPageActivationBlocked, agentPageHasSensitiveEvidence, agentPageRefHasFocus,
+  agentPageHasSensitiveEvidence, agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
-  agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
+  agentPageActivationBlock, agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
 import { failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
@@ -1096,9 +1096,7 @@ export class PreviewBroker {
     await this.#sendInputAndWait(contents, async () => {
       if (key === "Enter" || key === "Space") {
         activationBlocked = await this.#rendererOperation(contents,
-          () => agentPageActivationBlocked(contents), { signal });
-        if (!activationBlocked && await this.#rendererOperation(contents,
-          () => agentPageHasUnguardedNestedContent(contents), { signal })) activationBlocked = "nested";
+          () => agentPageActivationBlock(contents), { signal });
         if (activationBlocked) return;
       }
       contents.sendInputEvent({ type: "keyDown", keyCode });

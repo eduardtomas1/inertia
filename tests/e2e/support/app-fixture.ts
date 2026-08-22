@@ -160,6 +160,22 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-focus-interleave") {
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Activation focus interleave</title>"
+        + "<button id='safe-focus' type='button'>Safe focus</button>"
+        + "<button id='late-disabled' type='button' aria-disabled='true'>Late disabled</button>"
+        + "<main>" + "<div></div>".repeat(1_900) + "</main>"
+        + "<script>const safe=document.querySelector('#safe-focus');const disabled=document.querySelector('#late-disabled');"
+        + "disabled.addEventListener('click',()=>{window.__lateDisabledClicked=true});"
+        + "window.__armDisabledFocus=()=>{safe.focus();setTimeout(()=>disabled.focus(),10);return document.activeElement===safe}</script>",
+      );
+      return;
+    }
     if (request.url === "/agent-browser-privacy-start") {
       const secret = "document-start-password-sentinel";
       response.writeHead(200, {

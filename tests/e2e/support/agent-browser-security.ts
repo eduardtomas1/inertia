@@ -188,7 +188,7 @@ export async function expectClosedShadowActivationBlocked(
   const evidence = await app.electronApp.evaluate(async ({ webContents }, request) => {
     type Command =
       | { action: "navigate"; url: string }
-      | { action: "press"; key: "Enter" | "Space" };
+      | { action: "press"; key: "Enter" | "Space" | "Tab" };
     type Result = { code?: string; ok: boolean };
     const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
       agentBrowser: (id: string, command: Command) => Promise<Result>;
@@ -201,13 +201,32 @@ export async function expectClosedShadowActivationBlocked(
     const enter = await runtime.agentBrowser(request.conversationId, { action: "press", key: "Enter" });
     const space = await runtime.agentBrowser(request.conversationId, { action: "press", key: "Space" });
     const clicked = await contents?.executeJavaScript("window.__closedDisabledActionClicked === true");
-    return { clicked, enter, hostFocused, navigation, space };
+    const interleaveNavigation = await runtime.agentBrowser(request.conversationId, {
+      action: "navigate", url: `${new URL(request.url).origin}/agent-browser-focus-interleave`,
+    });
+    const interleaveContents = webContents.getAllWebContents().find(
+      (candidate) => candidate.getURL().endsWith("/agent-browser-focus-interleave"),
+    );
+    const prepared = await runtime.agentBrowser(request.conversationId, { action: "press", key: "Tab" });
+    const armed = await interleaveContents?.executeJavaScript("window.__armDisabledFocus()", true);
+    const interleavedEnter = await runtime.agentBrowser(request.conversationId, { action: "press", key: "Enter" });
+    const interleavedClicked = await interleaveContents?.executeJavaScript("window.__lateDisabledClicked === true");
+    const interleavedFocus = await interleaveContents?.executeJavaScript("document.activeElement?.id");
+    return {
+      armed, clicked, enter, hostFocused, interleaveNavigation, interleavedClicked,
+      interleavedEnter, interleavedFocus, navigation, prepared, space,
+    };
   }, { conversationId, url });
   expect(evidence).toMatchObject({
     clicked: false,
     enter: { code: "invalid", ok: false },
     hostFocused: true,
+    interleaveNavigation: { ok: true },
+    interleavedClicked: false,
+    interleavedEnter: { code: "invalid", ok: false },
+    interleavedFocus: "late-disabled",
     navigation: { ok: true },
+    prepared: { ok: true },
     space: { code: "invalid", ok: false },
   });
 }

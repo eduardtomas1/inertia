@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  agentPageActivationBlock,
   agentPageHasUnguardedNestedContent,
   beginAgentFileChooserBlock,
   hasUnguardedAgentPageContent,
@@ -47,6 +48,32 @@ describe("agent Browser nested evidence boundary", () => {
       mainFrameId: "main",
       nestedContentObserved: false,
     })).toBe(false);
+  });
+
+  it("rechecks focused activation after the privileged nested-content scan", async () => {
+    const debuggerEvents = new EventEmitter();
+    let attached = false;
+    const activationStates = [null, "disabled"];
+    const contents = {
+      debugger: Object.assign(debuggerEvents, {
+        attach: vi.fn(() => { attached = true; }),
+        detach: vi.fn(() => { attached = false; }),
+        isAttached: vi.fn(() => attached),
+        sendCommand: boundaryCommands(),
+      }),
+      executeJavaScriptInIsolatedWorld: vi.fn(async () => activationStates.shift() ?? null),
+      getURL: () => "http://127.0.0.1:3000/focus-race",
+      loadURL: vi.fn(async () => undefined),
+      navigationHistory: {
+        getActiveIndex: () => 0,
+        getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/focus-race" }),
+      },
+    };
+    await installAgentFileChooserBlock(contents as never);
+    debuggerEvents.emit("message", {}, "Page.frameNavigated", { frame: { id: "main" } });
+
+    await expect(agentPageActivationBlock(contents as never)).resolves.toBe("disabled");
+    expect(contents.executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(2);
   });
 
   it("fails closed for tainted or malformed boundary state", () => {

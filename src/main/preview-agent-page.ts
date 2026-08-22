@@ -56,12 +56,13 @@ export function serializeAgentPageSnapshot(value: unknown): string {
   if (!plainObject(value) || !Array.isArray(value.elements)) {
     throw new Error("The semantic browser snapshot was malformed.");
   }
-  const sourceText = boundedString(value.text, MAX_PAGE_TEXT_CHARS);
+  const rawText = typeof value.text === "string" ? value.text : "";
+  const sourceText = boundedString(rawText, MAX_PAGE_TEXT_CHARS);
   const sourceElements = value.elements;
   const byteLength = (candidate: string): number => Buffer.byteLength(candidate, "utf8");
   let text = sourceText;
   let elements = sourceElements;
-  let truncated = value.truncated === true;
+  let truncated = value.truncated === true || rawText.length > MAX_PAGE_TEXT_CHARS;
   let serialized = serializedSnapshot(value, text, elements, truncated);
   if (byteLength(serialized) <= MAX_AGENT_BROWSER_TEXT_BYTES) return serialized;
 
@@ -141,7 +142,7 @@ export async function semanticPageSnapshot(
       element.tagName === "INPUT"
       && String(element.type || "").toLowerCase() === "password";
     const sensitiveText = [];
-    for (const input of document.querySelectorAll("input[type='password']")) {
+    for (const input of document.querySelectorAll?.("input[type='password']") || []) {
       for (const label of Array.from(input.labels || [])) {
         sensitiveText.push(normalizeText(label.innerText));
       }
@@ -151,10 +152,20 @@ export async function semanticPageSnapshot(
     const redact = (value, maximum) => {
       let text = normalizeText(value);
       for (const sensitive of sensitiveText) {
-        if (sensitive) text = text.split(sensitive).join("[redacted]");
+        if (!sensitive) continue;
+        text = text.split(sensitive).join("[redacted]");
+        text = text.split(encodeURIComponent(sensitive)).join("[redacted]");
       }
       return text.slice(0, maximum);
     };
+    const routeUrl = (() => {
+      try {
+        const parsed = new URL(location.href);
+        return parsed.origin + parsed.pathname;
+      } catch {
+        return "";
+      }
+    })();
     const roleFor = (element) => passwordField(element)
       ? "input"
       : redact(
@@ -204,13 +215,15 @@ export async function semanticPageSnapshot(
         },
       });
     }
+    const bodyText = normalizeText(document.body?.innerText);
     return {
       title: redact(document.title, 300),
-      url: redact(location.href, 4096),
+      url: redact(routeUrl, 4096),
       viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY },
-      text: redact(document.body?.innerText, ${MAX_PAGE_TEXT_CHARS}),
+      text: redact(bodyText, ${MAX_PAGE_TEXT_CHARS}),
       elements,
-      truncated: elements.length >= ${MAX_SEMANTIC_ELEMENTS},
+      truncated: elements.length >= ${MAX_SEMANTIC_ELEMENTS}
+        || bodyText.length > ${MAX_PAGE_TEXT_CHARS},
     };
   })()`);
   return serializeAgentPageSnapshot(value);
@@ -272,10 +285,22 @@ export async function locateAgentPageRef(
         return { found: false };
       }
     }
+    const normalizeText = (value) => String(value ?? "")
+      .replace(/\\s+/gu, " ").trim();
+    const sensitiveText = [];
+    for (const input of document.querySelectorAll?.("input[type='password']") || []) {
+      for (const label of Array.from(input.labels || [])) {
+        sensitiveText.push(normalizeText(label.innerText));
+      }
+      sensitiveText.push(normalizeText(input.value));
+    }
+    state.sensitiveText = sensitiveText;
     const redact = (value) => {
-      let text = String(value ?? "").replace(/\\s+/gu, " ").trim();
-      for (const sensitive of state.sensitiveText || []) {
-        if (sensitive) text = text.split(sensitive).join("[redacted]");
+      let text = normalizeText(value);
+      for (const sensitive of sensitiveText) {
+        if (!sensitive) continue;
+        text = text.split(sensitive).join("[redacted]");
+        text = text.split(encodeURIComponent(sensitive)).join("[redacted]");
       }
       return text.slice(0, 300);
     };

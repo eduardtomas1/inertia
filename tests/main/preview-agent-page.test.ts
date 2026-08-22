@@ -39,8 +39,59 @@ describe("agent browser semantic snapshots", () => {
     expect(parsed.elements.length).toBeLessThan(200);
   });
 
+  it("marks text-only snapshots truncated before clipping their body text", () => {
+    const serialized = serializeAgentPageSnapshot({
+      title: "Long local page",
+      url: "http://127.0.0.1:3000/long",
+      viewport: { width: 1_200, height: 800, scrollX: 0, scrollY: 0 },
+      text: "a".repeat(12_001),
+      elements: [],
+      truncated: false,
+    });
+
+    const parsed = JSON.parse(serialized) as { text: string; truncated: boolean };
+    expect(parsed.text).toHaveLength(12_000);
+    expect(parsed.truncated).toBe(true);
+  });
+
+  it("reports text-only clipping from the semantic page collector", async () => {
+    const context = {
+      document: {
+        title: "Long local page",
+        body: { innerText: "b".repeat(12_001) },
+        querySelectorAll: () => [],
+      },
+      location: { href: "http://127.0.0.1:3000/long?private=value#secret" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      text: string;
+      truncated: boolean;
+      url: string;
+    };
+    expect(parsed).toMatchObject({
+      truncated: true,
+      url: "http://127.0.0.1:3000/long",
+    });
+    expect(parsed.text).toHaveLength(12_000);
+  });
+
   it("masks password values in semantic evidence and interaction labels", async () => {
     const secret = "token-that-must-never-leave-the-page";
+    const callbackSecret = "oauth-code-that-never-enters-a-password-field";
     const document = {
       title: `Account ${secret}`,
       body: { innerText: `Sign in\n${secret}\nKeep this account secure` },
@@ -61,7 +112,9 @@ describe("agent browser semantic snapshots", () => {
       labels: [{ innerText: secret }],
       innerText: "",
       isConnected: true,
-      getAttribute: (name: string) => ["aria-label", "role"].includes(name) ? secret : null,
+      getAttribute: (name: string) => ["aria-label", "role"].includes(name)
+        ? input.value
+        : null,
       getBoundingClientRect: () => ({
         x: 20, y: 30, left: 20, top: 30,
         right: 220, bottom: 70, width: 200, height: 40,
@@ -79,7 +132,9 @@ describe("agent browser semantic snapshots", () => {
       labels: [],
       innerText: secret,
       isConnected: true,
-      getAttribute: (name: string) => ["aria-label", "role"].includes(name) ? secret : null,
+      getAttribute: (name: string) => ["aria-label", "role"].includes(name)
+        ? input.value
+        : null,
       getBoundingClientRect: () => ({
         x: 20, y: 80, left: 20, top: 80,
         right: 220, bottom: 120, width: 200, height: 40,
@@ -88,7 +143,11 @@ describe("agent browser semantic snapshots", () => {
     };
     const context = {
       document,
-      location: { href: `http://127.0.0.1:3000/login?draft=${secret}` },
+      location: {
+        href: `http://127.0.0.1:3000/login?code=${callbackSecret}#access_token=${callbackSecret}`,
+      },
+      URL,
+      encodeURIComponent,
       innerWidth: 1_200,
       innerHeight: 800,
       scrollX: 0,
@@ -108,9 +167,10 @@ describe("agent browser semantic snapshots", () => {
 
     const serialized = await semanticPageSnapshot(contents as never);
     expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain(callbackSecret);
     expect(JSON.parse(serialized)).toMatchObject({
       title: "Account [redacted]",
-      url: "http://127.0.0.1:3000/login?draft=[redacted]",
+      url: "http://127.0.0.1:3000/login",
       text: "Sign in [redacted] Keep this account secure",
       elements: [
         { role: "input", name: "Password field", value: "[redacted]" },
@@ -128,6 +188,13 @@ describe("agent browser semantic snapshots", () => {
       });
     expect(focus).toHaveBeenCalledOnce();
     expect(select).toHaveBeenCalledOnce();
+    await expect(locateAgentPageRef(contents as never, "e2"))
+      .resolves.toMatchObject({ found: true, label: "[redacted]" });
+
+    const changedSecret = "changed-password-after-the-snapshot";
+    input.value = changedSecret;
+    input.labels[0]!.innerText = changedSecret;
+    mirror.innerText = changedSecret;
     await expect(locateAgentPageRef(contents as never, "e2"))
       .resolves.toMatchObject({ found: true, label: "[redacted]" });
   });

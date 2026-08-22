@@ -111,7 +111,7 @@ describe("FilesPanel", () => {
     }));
 
     expect(html).toContain(
-      'aria-label="large.txt is too large to edit safely in Inertia"',
+      'aria-label="large.txt is too large to edit in Inertia"',
     );
     expect(html).toContain("disabled");
   });
@@ -139,7 +139,7 @@ describe("FilesPanel", () => {
       'aria-label="Edit ordinary.txt in Inertia"',
     );
     expect(html).not.toContain(
-      'aria-label="ordinary.txt is too large to edit safely in Inertia"',
+      'aria-label="ordinary.txt is too large to edit in Inertia"',
     );
   });
 });

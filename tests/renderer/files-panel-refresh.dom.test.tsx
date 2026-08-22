@@ -30,6 +30,52 @@ function page(
 }
 
 describe("FilesPanel root refresh", () => {
+  it("reveals an externally opened file through its lazy ancestor chain", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+    }: {
+      directory?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (directory === "src") {
+        return page(directory, [
+          { path: "src/components", kind: "directory" },
+        ]);
+      }
+      if (directory === "src/components") {
+        return page(directory, [
+          { path: "src/components/Button.tsx", kind: "file" },
+        ]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    const selected = await screen.findByRole("treeitem", {
+      name: "Button.tsx",
+    });
+    expect(selected).toHaveAttribute("aria-selected", "true");
+    expect(selected).toHaveAttribute("aria-level", "3");
+    expect(screen.getByRole("treeitem", { name: "src" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("treeitem", { name: "components" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(document.activeElement).toBe(document.body);
+    for (const directory of ["src", "src/components"]) {
+      expect(onLoadEntries.mock.calls.filter(
+        ([request]) => request.directory === directory,
+      )).toHaveLength(1);
+    }
+  });
+
   it("reveals a searched directory once when activated from the keyboard", async () => {
     const user = userEvent.setup();
     const onLoadEntries = vi.fn(async ({

@@ -108,4 +108,49 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       }),
     });
   });
+
+  it("does not feed a rejected late descendant revival into run state", () => {
+    const terminalTrace = {
+      ...event(2, "interrupted", "interrupted", false),
+      id: "trace-1",
+      parentTraceId: null,
+      providerStatus: "interrupted",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:01.000Z",
+    } as SubagentTrace;
+    const observeSubagent = vi.fn();
+    const broadcast = vi.fn();
+    const projector = new TurnProviderEventProjector({
+      store: {
+        upsertSubagentTrace: vi.fn(() => ({
+          changed: false,
+          trace: terminalTrace,
+        })),
+      } as unknown as RuntimeStore,
+      hooks: {
+        broadcast,
+        broadcastSnapshot: vi.fn(),
+      } as unknown as TurnControllerHooks,
+      agentPlans: new Map(),
+      streams: {} as never,
+      activities: {} as never,
+      interactions: {} as never,
+      now: () => "2030-01-01T00:00:02.000Z",
+      transition: () => false,
+      observeSubagent,
+    });
+    const active = {
+      conversation: { id: "conversation-1" },
+      turn: {
+        id: "turn-1",
+        runId: "run-1",
+        providerId: "codex",
+      },
+    } as ActiveTurn;
+
+    projector.project(active, event(3, "running", "running", true));
+
+    expect(broadcast).not.toHaveBeenCalled();
+    expect(observeSubagent).not.toHaveBeenCalled();
+  });
 });

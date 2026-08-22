@@ -1144,9 +1144,9 @@ export class TurnController {
 
   private observeSubagent(
     active: ActiveTurn,
-    event: Extract<ProviderEvent, { type: "subagent" }>,
+    trace: SubagentTrace,
   ): boolean {
-    return this.runStates.observeSubagent(active, event);
+    return this.runStates.observeSubagent(active, trace);
   }
 
   private settle(

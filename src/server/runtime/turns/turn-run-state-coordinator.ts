@@ -5,9 +5,10 @@ import {
   type AgentInputRequest,
   type AgentRunState,
   type AgentTurnTerminalStatus,
+  type SubagentTrace,
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
-import type { ProviderEvent, ProviderRunFailure } from "../../provider/contracts";
+import type { ProviderRunFailure } from "../../provider/contracts";
 import type { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
 import { broadcastTurnConversationShell } from "./turn-controller-support";
 import type {
@@ -81,15 +82,15 @@ export class TurnRunStateCoordinator {
 
   observeSubagent(
     active: ActiveTurn,
-    event: Extract<ProviderEvent, { type: "subagent" }>,
+    trace: SubagentTrace,
   ): boolean {
-    const identity = event.providerTaskId
-      ?? event.providerAgentId;
+    const identity = trace.providerTaskId
+      ?? trace.providerAgentId;
     if (!identity) return false;
     if (!active.runState.observeDescendant(
       identity,
-      event.isLive,
-      event.providerStatus,
+      trace.isLive,
+      trace.providerStatus,
     )) return false;
     this.persist(active);
     broadcastTurnConversationShell(this.options.hooks, active);

@@ -2,6 +2,7 @@ import type {
   AgentPlan,
   AgentRunState,
   AgentTurnTerminalStatus,
+  SubagentTrace,
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
 import type { ProviderEvent } from "../../provider/contracts";
@@ -36,7 +37,7 @@ export interface TurnProviderEventProjectorOptions {
   ): boolean;
   observeSubagent(
     active: ActiveTurn,
-    event: Extract<ProviderEvent, { type: "subagent" }>,
+    trace: SubagentTrace,
   ): boolean;
 }
 
@@ -282,8 +283,8 @@ export class TurnProviderEventProjector {
             type: "agent.subagent.updated",
             trace: persisted.trace,
           });
+          this.options.observeSubagent(active, persisted.trace);
         }
-        this.options.observeSubagent(active, event);
         break;
       }
     }

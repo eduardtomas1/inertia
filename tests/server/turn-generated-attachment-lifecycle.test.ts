@@ -93,6 +93,12 @@ describe("generated turn attachment lifecycle", () => {
       stopOwned: () => stopGate,
       isRunning: () => resolveRun !== null,
     } as unknown as TurnProviderRuntime;
+    let observeFirstGeneratedRelease!: (release: Promise<void>) => void;
+    const firstGeneratedRelease = new Promise<void>((resolve, reject) => {
+      observeFirstGeneratedRelease = (release) => {
+        void release.then(resolve, reject);
+      };
+    });
     let sequence = 0;
     const controller = new TurnController(
       store,
@@ -104,7 +110,11 @@ describe("generated turn attachment lifecycle", () => {
         broadcast: () => undefined,
         broadcastSnapshot: () => undefined,
         providerInfo: () => [providerInfo()],
-        releaseGeneratedAttachments: (paths) => generated.release(paths),
+        releaseGeneratedAttachments: (paths) => {
+          const release = generated.release(paths);
+          observeFirstGeneratedRelease(release);
+          return release;
+        },
       },
       { id: () => `generated-turn-${++sequence}` },
     );
@@ -133,7 +143,7 @@ describe("generated turn attachment lifecycle", () => {
     controller.start(cancelled.turn.id);
     expect(controller.cancel(conversation.id)).toBe(true);
     settleProvider("cancelled");
-    await flush();
+    await firstGeneratedRelease;
     await expect(access(cancelledPage)).rejects.toThrow();
     resolveStop();
     await controller.waitForProviderCleanup([conversation.id]);

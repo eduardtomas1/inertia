@@ -43,8 +43,14 @@ export function parseCodexCurrentTimeRead(
   params: JsonObject,
 ): CodexCurrentTimeRead | undefined {
   if (!isCodexCurrentTimeReadMethod(method)) return undefined;
-  const threadId = strictIdentifier(params.threadId);
+  const threadId = parseCodexProviderThreadId(params);
   return threadId ? { threadId } : undefined;
+}
+
+export function parseCodexProviderThreadId(
+  params: JsonObject,
+): string | undefined {
+  return strictIdentifier(params.threadId);
 }
 
 export function codexCurrentTimeReadResult(nowMs = Date.now()): {

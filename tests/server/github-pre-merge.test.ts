@@ -471,6 +471,29 @@ describe("GitHub pre-merge confidence", () => {
     });
   });
 
+  it("rejects unknown associated pull request states", () => {
+    expect(() => gitHubPreMergeTestSupport.parseAssociatedPullRequests(
+      JSON.stringify([{
+        number: 73,
+        state: "UNKNOWN",
+        head: {
+          ref: "feature/confidence",
+          sha: "d".repeat(40),
+          repo: { full_name: "contributor/codex" },
+        },
+        base: {
+          ref: "main",
+          repo: {
+            full_name: "openai/codex",
+            html_url: "https://github.com/openai/codex",
+          },
+        },
+      }]),
+      "contributor/codex",
+      "feature/confidence",
+    )).toThrowError("GitHub returned incomplete pull request discovery evidence.");
+  });
+
   it("keeps unresolved Codex threads actionable and detects a changed remote head", () => {
     const evidence = gitHubPreMergeTestSupport.parseReviewThreads(
       JSON.stringify({
@@ -537,6 +560,27 @@ describe("GitHub pre-merge confidence", () => {
       "https://github.com/openai/codex",
       7,
     )).toThrowError("GitHub returned incomplete review evidence.");
+  });
+
+  it("rejects partial GraphQL review evidence containing errors", () => {
+    const partial = JSON.stringify({
+      errors: [{ message: "Review threads could not be loaded." }],
+      data: { repository: { pullRequest: {
+        number: 7,
+        headRefOid: "b".repeat(40),
+        updatedAt: "2026-08-22T15:00:00Z",
+        reviewThreads: {
+          nodes: [],
+          pageInfo: { hasNextPage: false },
+        },
+      } } },
+    });
+
+    expect(() => gitHubPreMergeTestSupport.parseReviewThreads(
+      partial,
+      "https://github.com/openai/codex",
+      7,
+    )).toThrowError("GitHub returned malformed review evidence.");
   });
 
   it("treats a full bounded check page as truncated", () => {
@@ -641,6 +685,28 @@ describe("GitHub pre-merge confidence", () => {
         url: "https://github.com/openai/codex/pull/9",
         state: "OPEN",
         isDraft: "false",
+        reviewDecision: "",
+        headRefName: "feature/confidence",
+        headRefOid: "c".repeat(40),
+        updatedAt: "2026-08-22T15:00:00Z",
+        changedFiles: 0,
+        files: [],
+        statusCheckRollup: [],
+      }]),
+      "https://github.com/openai/codex",
+      "feature/confidence",
+    );
+
+    expect(details).toBeNull();
+  });
+
+  it("rejects a pull request URL whose number differs from its evidence", () => {
+    const details = gitHubPreMergeTestSupport.parsePullRequestList(
+      JSON.stringify([{
+        number: 9,
+        url: "https://github.com/openai/codex/pull/8",
+        state: "OPEN",
+        isDraft: false,
         reviewDecision: "",
         headRefName: "feature/confidence",
         headRefOid: "c".repeat(40),

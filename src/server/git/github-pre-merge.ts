@@ -7,10 +7,7 @@ import type {
   GitPreMergePlatformCoverage,
   GitPreMergeReviewThread,
 } from "../../shared/contracts";
-import {
-  RestrictedCliError,
-  runRestrictedCli,
-} from "../restricted-cli-runner";
+import { RestrictedCliError, runRestrictedCli } from "../restricted-cli-runner";
 import {
   githubRepositorySlug,
   resolveGitHubCli,
@@ -30,6 +27,7 @@ const MAX_REVIEW_THREADS = 100;
 const MAX_ASSOCIATED_PULL_REQUESTS = 100;
 const MAX_REVIEW_BODY_CHARS = 2_000;
 const MAX_AUTHOR_CLAIM_CHARS = 6_000;
+const ASSOCIATED_PULL_REQUEST_STATES = new Set(["OPEN", "CLOSED"]);
 const REVIEW_DECISIONS = new Set(["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"]);
 
 type UnknownRecord = Record<string, unknown>;
@@ -81,8 +79,7 @@ function text(value: unknown, fallback = ""): string {
 }
 
 function parseReviewDecision(value: unknown): PullRequestDetails["reviewDecision"] | undefined {
-  return value === null || value === "" ? null
-    : typeof value === "string" && REVIEW_DECISIONS.has(value) ? value : undefined;
+  return value === null || value === "" ? null : typeof value === "string" && REVIEW_DECISIONS.has(value) ? value : undefined;
 }
 
 function integer(value: unknown, fallback = 0): number {
@@ -220,7 +217,7 @@ function parsePullRequest(
 ): PullRequestDetails | null {
   if (!record(value)) return null;
   const number = integer(value.number);
-  const url = verifiedGitHubPullRequestUrl(text(value.url), repositoryBaseUrl);
+  const url = verifiedGitHubPullRequestUrl(text(value.url), repositoryBaseUrl, number);
   const head = text(value.headRefOid).toLowerCase();
   const headBranch = text(value.headRefName);
   const updatedAt = text(value.updatedAt).trim();
@@ -369,7 +366,7 @@ function parseAssociatedPullRequests(
       !/^[0-9a-f]{40,64}$/u.test(discoveredHead)
       || !discoveredBranch
       || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(discoveredSourceSlug)
-      || !state
+      || !ASSOCIATED_PULL_REQUEST_STATES.has(state)
     ) {
       throw new GitError("operation-failed", "GitHub returned incomplete pull request discovery evidence.");
     }
@@ -416,7 +413,10 @@ function parseReviewThreads(
   } catch {
     throw new GitError("operation-failed", "GitHub returned malformed review evidence.");
   }
-  if (!record(parsed) || !record(parsed.data) || !record(parsed.data.repository)) {
+  if (!record(parsed)
+    || (parsed.errors !== undefined && (!Array.isArray(parsed.errors) || parsed.errors.length > 0))
+    || !record(parsed.data) || !record(parsed.data.repository)
+  ) {
     throw new GitError("operation-failed", "GitHub returned malformed review evidence.");
   }
   const pullRequest = parsed.data.repository.pullRequest;

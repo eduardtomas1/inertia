@@ -61,8 +61,9 @@ export function githubRepositorySlug(repositoryBaseUrl: string): string {
 export function verifiedGitHubPullRequestUrl(
   value: string,
   repositoryBaseUrl: string,
+  expectedNumber?: number,
 ): string | null {
-  const match = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*/gu.exec(value);
+  const match = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/([1-9][0-9]*)/u.exec(value);
   if (!match) return null;
   const url = new URL(match[0]);
   const repository = new URL(repositoryBaseUrl);
@@ -70,6 +71,7 @@ export function verifiedGitHubPullRequestUrl(
     && url.pathname.toLowerCase().startsWith(
       `${repository.pathname.toLowerCase()}/pull/`,
     )
+    && (expectedNumber === undefined || Number(match[1]) === expectedNumber)
     ? url.toString()
     : null;
 }

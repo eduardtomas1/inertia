@@ -35,7 +35,13 @@ describe("GitHub pull request URL verification", () => {
     expect(verifiedGitHubPullRequestUrl(
       "Created https://github.com/openai/codex/pull/42\n",
       "https://github.com/openai/codex",
+      42,
     )).toBe("https://github.com/openai/codex/pull/42");
+    expect(verifiedGitHubPullRequestUrl(
+      "Created https://github.com/openai/codex/pull/41\n",
+      "https://github.com/openai/codex",
+      42,
+    )).toBeNull();
     expect(verifiedGitHubPullRequestUrl(
       "https://github.com/attacker/repo/pull/42",
       "https://github.com/openai/codex",

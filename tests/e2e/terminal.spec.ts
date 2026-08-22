@@ -244,7 +244,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
   await expect(panel.getByLabel("Contents of src/components/Button.tsx"))
     .toContainText("export const Button");
   await panel.getByRole("button", {
-    name: "Edit src/components/Button.tsx in Inertia",
+    name: "Edit src/components/Button.tsx",
   }).click();
   const editor = page.getByRole("dialog", { name: "Edit Button.tsx" });
   await expect(editor).toBeVisible();

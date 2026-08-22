@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -21,11 +27,12 @@ const ROOT_ENTRIES: WorkspaceEntry[] = [
 function page(
   directory: string,
   entries: WorkspaceEntry[],
+  truncated = false,
 ): WorkspaceEntriesPage {
   return {
     directory,
     entries,
-    truncated: false,
+    truncated,
   };
 }
 
@@ -73,6 +80,139 @@ describe("FilesPanel root refresh", () => {
       expect(onLoadEntries.mock.calls.filter(
         ([request]) => request.directory === directory,
       )).toHaveLength(1);
+    }
+  });
+
+  it("clears a search that would hide a newly selected external file", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+      query,
+    }: {
+      directory?: string;
+      query?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (query === "readme") return page("", [ROOT_ENTRIES[1]!]);
+      if (directory === "src") {
+        return page(directory, [
+          { path: "src/components", kind: "directory" },
+        ]);
+      }
+      if (directory === "src/components") {
+        return page(directory, [
+          { path: "src/components/Button.tsx", kind: "file" },
+        ]);
+      }
+      return page(directory, ROOT_ENTRIES);
+    });
+    const view = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+    const search = screen.getByRole("searchbox", {
+      name: "Search project files",
+    });
+    fireEvent.change(search, { target: { value: "readme" } });
+    await screen.findByRole("treeitem", { name: "README.md" });
+
+    view.rerender(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    expect(await screen.findByRole("treeitem", { name: "Button.tsx" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(search).toHaveValue("");
+    expect(screen.getByRole("tree", { name: "Workspace files" }))
+      .toBeInTheDocument();
+  });
+
+  it("materializes a selected chain omitted from bounded directory pages", async () => {
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+    }: {
+      directory?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (directory === "src" || directory === "src/components") {
+        return page(directory, [], true);
+      }
+      return page(directory, [{ path: "README.md", kind: "file" }], true);
+    });
+    render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={[{ path: "README.md", kind: "file" }]}
+        entriesTruncated
+        preview={null}
+        selectedPath="src/components/Button.tsx"
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    expect(await screen.findByRole("treeitem", { name: "Button.tsx" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("treeitem", { name: "src" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("treeitem", { name: "components" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("More root items.")).toBeInTheDocument();
+    expect(screen.getByText("More in components."))
+      .toBeInTheDocument();
+  });
+
+  it("re-reveals the selected row when its tree container resizes", () => {
+    let notifyResize: (() => void) | null = null;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        notifyResize = () => callback([], this as unknown as ResizeObserver);
+      }
+
+      observe(target: Element): void {
+        observe(target);
+      }
+
+      disconnect(): void {
+        disconnect();
+      }
+    });
+    const scrollIntoView = vi.spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    try {
+      render(
+        <FilesPanel
+          {...FILES_PROJECT}
+          entries={ROOT_ENTRIES}
+          preview={null}
+          selectedPath="README.md"
+          onSelectFile={vi.fn()}
+          onLoadEntries={vi.fn()}
+        />,
+      );
+      const tree = screen.getByRole("tree", { name: "Workspace files" });
+      expect(observe).toHaveBeenCalledWith(tree);
+      scrollIntoView.mockClear();
+
+      act(() => notifyResize?.());
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+      expect(document.activeElement).toBe(document.body);
+    } finally {
+      scrollIntoView.mockRestore();
+      vi.unstubAllGlobals();
     }
   });
 

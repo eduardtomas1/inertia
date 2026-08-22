@@ -38,6 +38,13 @@ test.beforeAll(async () => {
         java,
         "utf8",
       );
+      await Promise.all(Array.from({ length: 12 }, (_, index) =>
+        writeFile(
+          join(workspaceDirectory, `zz-fixture-${index + 1}.txt`),
+          `Stable fixture ${index + 1}\n`,
+          "utf8",
+        )
+      ));
 
       const databasePath = join(fixtureDirectory, "data", "inertia.sqlite");
       const store = new RuntimeStore(databasePath, workspaceDirectory, {
@@ -213,6 +220,57 @@ test("opens a language-aware project link at its exact validated Java range", as
     path: lightEvidence,
     contentType: "image/png",
   });
+
+  const toolsHandle = page.getByRole("separator", {
+    name: "Resize workspace tools",
+  });
+  await toolsHandle.focus();
+  await toolsHandle.press("Home");
+  await expect(toolsHandle).toHaveAttribute("aria-valuenow", "300");
+  const resizedTree = lightPanel.getByRole("tree", { name: "Workspace files" });
+  const resizedSelection = resizedTree.getByRole("treeitem", {
+    name: "OrderService.java",
+  });
+  await resizedTree.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(async () => {
+    const treeBounds = await resizedTree.boundingBox();
+    const selectedBounds = await resizedSelection.boundingBox();
+    return Boolean(
+      treeBounds
+      && selectedBounds
+      && selectedBounds.y >= treeBounds.y - 1
+      && selectedBounds.y + selectedBounds.height
+        <= treeBounds.y + treeBounds.height + 1,
+    );
+  }).toBe(false);
+  await toolsHandle.press("ArrowLeft");
+  await expect(toolsHandle).toHaveAttribute("aria-valuenow", "312");
+  await expect.poll(async () => {
+    const treeBounds = await resizedTree.boundingBox();
+    const selectedBounds = await resizedSelection.boundingBox();
+    return Boolean(
+      treeBounds
+      && selectedBounds
+      && selectedBounds.y >= treeBounds.y - 1
+      && selectedBounds.y + selectedBounds.height
+        <= treeBounds.y + treeBounds.height + 1,
+    );
+  }).toBe(true);
+  const resizedPanelEvidence = testInfo.outputPath(
+    "language-aware-files-resized-panel-light.png",
+  );
+  await lightPanel.screenshot({
+    animations: "disabled",
+    path: resizedPanelEvidence,
+  });
+  await testInfo.attach("language-aware-files-resized-panel-light", {
+    path: resizedPanelEvidence,
+    contentType: "image/png",
+  });
+  await toolsHandle.press("Enter");
+  await expect(toolsHandle).toHaveAttribute("aria-valuenow", "520");
 
   await app.resizeWindow(760, 760);
   const narrowPanel = page.getByRole("region", { name: "Project files" });

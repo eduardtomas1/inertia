@@ -52,7 +52,7 @@ describe("FilesPanel Markdown preview", () => {
     );
 
     const failure = await screen.findByRole("alert");
-    expect(failure).toHaveTextContent("Markdown preview couldn't load");
+    expect(failure).toHaveTextContent("Markdown preview failed");
     fireEvent.click(screen.getByRole("button", { name: "Source" }));
     expect(onShowSource).toHaveBeenCalledOnce();
 
@@ -189,7 +189,7 @@ describe("FilesPanel Markdown preview", () => {
     );
 
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
-    expect(screen.getByText(/Rendered preview is limited to 100,000 characters/u))
+    expect(screen.getByText(/Limit: 100,000 characters/u))
       .toBeInTheDocument();
     overCharacterLimit.unmount();
 
@@ -205,7 +205,7 @@ describe("FilesPanel Markdown preview", () => {
     );
 
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
-    expect(screen.getByText(/Rendered preview is limited to 2,000 lines/u))
+    expect(screen.getByText(/Limit: 2,000 lines/u))
       .toBeInTheDocument();
     expect(container.querySelectorAll(".file-preview-line")).toHaveLength(2_000);
   });

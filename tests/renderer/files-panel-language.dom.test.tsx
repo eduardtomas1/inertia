@@ -150,7 +150,7 @@ describe("FilesPanel language presentation", () => {
       .toHaveClass("is-referenced");
     expect(container.querySelector('[data-source-line="1"]')).toBeNull();
     expect(screen.getByText(
-      "Lines 899000–900999 of 1048577 shown.",
+      "Lines 899000–900999 / 1048577.",
     )).toBeInTheDocument();
   });
 });
